@@ -7,23 +7,21 @@
 
 **Error**: `TypeError: Relationship() got an unexpected keyword argument 'foreign_keys'`
 
-**Solution**: 
-- Simplified models by removing complex multi-FK relationships
-- Kept `borrower_id` and `last_borrower_id` as simple integer fields
-- For Phase 1.1, we don't need bidirectional relationships
-- Can add back with proper SQLModel syntax later if needed
+**Solution**: Simplified models by removing complex multi-FK relationships. Kept `borrower_id` and `last_borrower_id` as simple integer fields.
 
-**When to apply**: When using SQLModel with multiple FKs to the same table, use simple integer fields first. If relationship is needed, use SQLModel's simpler relationship syntax.
+### 2. SQLModel Session execute() vs exec()
+**Problem**: SQLModel Session uses `execute()` not `exec()`.
 
-### 2. Unicode Encoding in Windows
-**Problem**: Python scripts on Windows with GBK encoding may fail when printing Unicode characters like checkmarks.
+**Error**: `AttributeError: 'Session' object has no attribute 'exec'`
 
-**Solution**: Use ASCII characters in debug output or handle encoding explicitly.
+**Solution**: Use SQLAlchemy-style syntax:
+- `db.execute(statement).scalar_one_or_none()` for single result
+- `db.execute(statement).scalars().all()` for list results
 
-### 3. Dependencies Installation
-**Problem**: Missing `pydantic-settings` module when running application.
+### 3. Server Cache Issues
+**Problem**: Old Python bytecode (.pyc) causing errors to persist after code fixes.
 
-**Solution**: Install all dependencies from requirements.txt or pyproject.toml before running.
+**Solution**: Delete `__pycache__` directories and restart uvicorn server.
 
 ---
 

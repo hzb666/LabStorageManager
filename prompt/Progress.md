@@ -29,3 +29,9 @@
 
 **Last Updated**: 2026-02-12
 **Status**: Phase 1.1 Completed - Backend initialized with WAL mode
+
+**Verified APIs**:
+- `GET /` - App info
+- `GET /health` - Health check
+- `POST /api/users/` - Create user (201 Created)
+- `GET /api/users/` - List users (200 OK)
