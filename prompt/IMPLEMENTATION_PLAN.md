@@ -1,10 +1,10 @@
 # IMPLEMENTATION_PLAN.md
 
-## Phase 1: Infrastructure ✅ COMPLETED
-- [x] 1.1: Init FastAPI + SQLModel + SQLite. **Action**: Configure `sqlite_url` with `?mode=wal`.
-- [x] 1.2: Implement `User` model & Auth (JWT).
-- [x] 1.3: **Image Service**: Create `compress_image(file)` using Pillow (Max 100KB).
-- [x] 1.4: **CAS Utility**: Create `normalize_cas(str)` function.
+## Phase 1: Infrastructure
+- [ ] 1.1: Init FastAPI + SQLModel + SQLite. **Action**: Configure `sqlite_url` with `?mode=wal`.
+- [ ] 1.2: Implement `User` model & Auth (JWT).
+- [ ] 1.3: **Image Service**: Create `compress_image(file)` using Pillow (Max 100KB).
+- [ ] 1.4: **CAS Utility**: Create `normalize_cas(str)` function.
 
 ## Phase 2: Ordering & CAS Check
 - [ ] 2.1: Implement `Order` CRUD API.
@@ -25,16 +25,4 @@
 - [ ] 5.1: Backend: Pandas Excel Import/Export logic.
 - [ ] 5.2: Frontend: Excel Upload button & Data mapping UI.
 
----
 
-## Implementation Notes
-
-### Completed (2026-02-13)
-- FastAPI backend running on http://localhost:8000
-- SQLite database with WAL mode enabled
-- User authentication (JWT) working
-- Models: User, Order, Inventory
-- Services: auth_service, cas_utils, image_service
-- Fixed module import paths (backend.app.*)
-- Fixed JWT subject type (string)
-- Installed dependencies: ecdsa, pyasn1, rsa, python-multipart, bcrypt==3.2.2, cryptography>=3.4,<44

@@ -8,6 +8,7 @@
 2.  **CAS Normalization**: 所有涉及 CAS 号的输入，必须在后端进行标准化清洗（去除空格、大写）。这是系统的防重基石。
 3.  **Image Optimization**: 禁止将图片存入数据库 Blob。必须在后端使用 Pillow 压缩至 <100KB 并存入文件系统。
 4.  **No Mobile Dependency**: 系统设计不依赖扫码枪或手机摄像头。所有流程闭环在 PC/平板 Web 端完成。
+5.  **Git Commit**: 完成重大修改后，必须执行 `git add . && git commit -m "feat: 说明"` 上传代码。
 
 ## Critical Logic
 1.  **一键入库**: 在实现 Order 到 Inventory 的转换时，必须确保是 Copy 数据而不是 Move，保留 Order 记录用于审计。
