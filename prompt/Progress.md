@@ -14,12 +14,12 @@
 - [x] 2.5: **Workflow Adjustment**: Add ARRIVED status + Confirm Arrival API + Notes field.
 
 ## Phase 3: User Dashboard & Interactions
-- [ ] 3.1: API: `get_user_dashboard_data` (my-borrows, pending-stockin).
-- [ ] 3.2: API: `return_item` (Update remaining quantity, BorrowLog).
-- [ ] 3.3: Frontend: Build Dashboard Cards & Return Modal.
+- [x] 3.1: API: `get_user_dashboard_data` (my-borrows, pending-stockin, my-orders).
+- [x] 3.2: API: `return_item` (Update remaining quantity, BorrowLog).
+- [ ] 3.3: Frontend: Build Dashboard Cards & Return Modal (Pending Frontend Phase).
 
 ## Phase 4: Excel Import/Export
-- [ ] 4.1: Backend: Pandas Excel Import/Export logic.
+- [x] 4.1: Backend: Pandas Excel Import/Export logic.
 - [ ] 4.2: Frontend: Excel Upload button & Data mapping UI.
 
 ## Phase 5: Frontend
@@ -37,22 +37,27 @@
 | 2026-02-13 | Phase 1.2 | ✅ | JWT Auth: login, get_current_user, protected endpoints |
 | 2026-02-13 | Phase 2.1-2.4 | ✅ | Order CRUD, Inventory CRUD, CAS Check, Stock-In |
 | 2026-02-13 | Phase 2.5 | ✅ | ARRIVED status, Confirm Arrival API, Notes field |
+| 2026-02-13 | Phase 3 | ✅ | Dashboard APIs: my-orders, my-borrows, pending-stockin, return-item |
+| 2026-02-13 | Phase 4 | ✅ | Excel Import API: template, bulk create inventory |
 
 **Last Updated**: 2026-02-13
-**Status**: Phase 2.5 Completed - Workflow Adjusted
+**Status**: Phase 4 Completed - Excel Import API Implemented (Frontend Pending)
 
 **Verified APIs**:
 - `POST /api/orders/` - Create order
 - `POST /api/orders/{id}/approve` - Approve order
 - `POST /api/orders/{id}/reject` - Reject order
-- `POST /api/orders/{id}/confirm-arrival` - Confirm arrival (NEW)
+- `POST /api/orders/{id}/confirm-arrival` - Confirm arrival
 - `POST /api/orders/{id}/stock-in` - Stock-in to inventory
-- `GET /api/orders/dashboard/arrived-orders` - Get arrived orders (NEW)
+- `GET /api/orders/dashboard/arrived-orders` - Get arrived orders
+- `GET /api/orders/dashboard/my-orders` - Get user's order progress (NEW)
 - `GET /api/inventory/cas/{cas_number}` - CAS inventory check
 - `POST /api/inventory/{id}/borrow` - Borrow item
 - `POST /api/inventory/{id}/return` - Return item
 - `GET /api/inventory/dashboard/my-borrows` - User's borrows
 - `GET /api/inventory/dashboard/pending-stockin` - Items pending stock-in
+- `GET /api/inventory/import/template` - Get Excel import template
+- `POST /api/inventory/import` - Import inventory from Excel (NEW)
 
 **Key Changes (Phase 2.5)**:
 - Order status: Removed `PURCHASED`, Added `ARRIVED` status
@@ -65,19 +70,16 @@
 ## Plans
 
 ### Immediate Next Steps
-1. **Phase 3: User Dashboard & Interactions**
-   - [ ] API: `get_user_dashboard_data` (my-borrows, pending-stockin)
-   - [ ] API: `return_item` (Update remaining quantity, BorrowLog)
-   - [ ] Frontend: Build Dashboard Cards & Return Modal
-
-2. **Phase 4: Excel Import/Export**
-   - [ ] Backend: Pandas Excel Import/Export logic
-   - [ ] Frontend: Excel Upload button & Data mapping UI
-
-3. **Phase 5: Frontend**
+1. **Phase 5: Frontend Initialization**
    - [ ] Init React + Shadcn/UI + TanStack Table
    - [ ] Frontend: Order Form with CAS auto-check
    - [ ] Frontend: Inventory Table with Virtual Scrolling
+
+2. **Phase 4: Excel Import UI**
+   - [ ] Frontend: Excel Upload button & Data mapping UI
+
+3. **Phase 3: Dashboard Frontend**
+   - [ ] Frontend: Build Dashboard Cards & Return Modal
 
 ### Future Enhancements
 - [ ] Batch operations (bulk stock-in, bulk return)
@@ -85,3 +87,4 @@
 - [ ] Audit log and activity tracking
 - [ ] Advanced search and filters
 - [ ] Data export reports
+

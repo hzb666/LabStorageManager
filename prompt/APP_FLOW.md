@@ -47,3 +47,23 @@
 ## 7. 位置管理
 * Nav: "待入库" -> Select item -> Input/Update Location -> Save.
 * Logic: If location is set, clear `temporary_keeper_id`.
+
+## 8. Excel 批量导入
+* Nav: "库存管理" -> Click "批量导入" -> Upload Excel file
+* Expected Columns:
+    * cas_number: CAS号 (required)
+    * name: 名称 (required)
+    * specification: 规格，如 "500ml" (required)
+    * initial_quantity: 初始数量 (required)
+    * alias: 别名 (optional)
+    * location: 存放位置 (optional)
+    * is_hazardous: 是否危险品 (optional, default false)
+    * notes: 备注 (optional)
+* Validation:
+    * CAS format validation (uppercase, no spaces)
+    * Specification parsing (value + unit)
+    * Quantity must be > 0
+* Result:
+    * Success: Items created with auto-generated internal codes
+    * Error: Row-level error messages returned
+    * Frontend: Show progress and error summary

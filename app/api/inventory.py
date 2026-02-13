@@ -5,8 +5,10 @@ Critical Rule #2: CAS Number normalization (data copied from Order)
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlmodel import Session, select, func
+import os
+import tempfile
 
 from app.database import get_db
 from app.models.inventory import (
@@ -509,3 +511,82 @@ def get_borrow_history(
             for log in logs
         ]
     }
+
+
+# ==================== Excel Import APIs ====================
+
+@router.get("/import/template")
+def get_import_template():
+    """
+    Get Excel import template structure.
+    Returns column definitions for frontend.
+    """
+    from app.services.excel_service import generate_import_template
+    return generate_import_template()
+
+
+@router.post("/import")
+def import_inventory(
+    file: UploadFile = File(...),
+    default_location: Optional[str] = None,
+    default_is_hazardous: bool = False,
+    # user_id: int = Depends(get_current_user),
+    user_id: int = 1,  # Temporary for Phase 4
+    db: Session = Depends(get_db)
+):
+    """
+    Import inventory items from Excel file.
+    
+    Expected Excel columns:
+    - cas_number: CAS号 (required)
+    - name: 名称 (required)
+    - alias: 别名 (optional)
+    - specification: 规格，如 "500ml" (required)
+    - initial_quantity: 初始数量 (required)
+    - location: 存放位置 (optional)
+    - is_hazardous: 是否危险品 (optional)
+    - notes: 备注 (optional)
+    """
+    from app.services.excel_service import import_inventory_from_excel
+    
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only Excel files (.xlsx, .xls) are supported"
+        )
+    
+    # Save uploaded file to temp location
+    with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename) as tmp_file:
+        tmp_file.write(file.file.read())
+        tmp_file_path = tmp_file.name
+    
+    try:
+        # Import data
+        result = import_inventory_from_excel(
+            db=db,
+            file_path=tmp_file_path,
+            default_location=default_location,
+            default_is_hazardous=default_is_hazardous,
+            user_id=user_id
+        )
+        
+        return {
+            "message": "Import completed",
+            "success": result["success"],
+            "total_rows": result["total_rows"],
+            "created": result["created"],
+            "errors_count": len(result["errors"]),
+            "errors": result["errors"] if result["errors"] else None
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Import failed: {str(e)}"
+        )
+    finally:
+        # Clean up temp file
+        if os.path.exists(tmp_file_path):
+            os.remove(tmp_file_path)
+

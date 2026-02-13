@@ -314,6 +314,72 @@ def get_arrived_orders(
     }
 
 
+@router.get("/dashboard/my-orders")
+def get_my_orders(
+    # user_id: int = Depends(get_current_user),
+    user_id: int = 1,  # Temporary for Phase 1
+    db: Session = Depends(get_db)
+):
+    """
+    Get current user's order progress.
+    Returns orders with status in pending, approved, arrived.
+    """
+    statement = select(Order).where(
+        Order.applicant_id == user_id,
+        Order.status.in_([OrderStatus.PENDING, OrderStatus.APPROVED, OrderStatus.ARRIVED])
+    ).order_by(Order.created_at.desc())
+    
+    orders = db.exec(statement).all()
+    
+    # Group by status for frontend display
+    pending = []
+    approved = []
+    arrived = []
+    
+    for order in orders:
+        order_data = {
+            "order_id": order.id,
+            "cas_number": order.cas_number,
+            "name": order.name,
+            "specification": order.specification,
+            "quantity": order.quantity,
+            "is_hazardous": order.is_hazardous,
+            "location": order.location,
+            "notes": order.notes,
+            "order_reason": order.order_reason,
+            "created_at": order.created_at,
+            "updated_at": order.updated_at
+        }
+        
+        if order.status == OrderStatus.PENDING:
+            pending.append(order_data)
+        elif order.status == OrderStatus.APPROVED:
+            approved.append(order_data)
+        elif order.status == OrderStatus.ARRIVED:
+            arrived.append(order_data)
+    
+    return {
+        "data": {
+            "pending": {
+                "orders": pending,
+                "count": len(pending),
+                "label": "已申购"
+            },
+            "approved": {
+                "orders": approved,
+                "count": len(approved),
+                "label": "已审批"
+            },
+            "arrived": {
+                "orders": arrived,
+                "count": len(arrived),
+                "label": "已到货待入库"
+            }
+        },
+        "total": len(orders)
+    }
+
+
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_order(
     order_id: int,
