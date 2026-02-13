@@ -36,3 +36,22 @@
 3. Admin 页面布局
 4. 用户表格组件
 5. 创建/编辑弹窗
+
+---
+
+## Phase 2.6: Confirm Arrival Optimization (已完成)
+
+### 优化逻辑
+**POST /api/orders/{id}/confirm-arrival**
+
+| 订单类型 | 订购原因 | 处理方式 |
+|---------|---------|---------|
+| consumable | 任意 | 直接完成 (status = stocked) |
+| reagent | common_public | 直接完成 (status = stocked) |
+| reagent | 其他 | 状态 = ARRIVED，待入库 |
+
+### 实现时间
+- 2026-02-13
+
+### Git Commit
+`a446da3` - feat: 优化确认收货逻辑，consumable和common_public直接完成

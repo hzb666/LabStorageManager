@@ -40,13 +40,14 @@
 | 2026-02-13 | Phase 1.2 | ✅ | JWT Auth: login, get_current_user, protected endpoints |
 | 2026-02-13 | Phase 2.1-2.4 | ✅ | Order CRUD, Inventory CRUD, CAS Check, Stock-In |
 | 2026-02-13 | Phase 2.5 | ✅ | ARRIVED status, Confirm Arrival API, Notes field |
+| 2026-02-13 | Phase 2.6 | ✅ | Confirm Arrival Optimization: consumable/common_public complete directly |
 | 2026-02-13 | Phase 3 | ✅ | Dashboard APIs: my-orders, my-borrows, pending-stockin, return-item |
 | 2026-02-13 | Phase 4 | ✅ | Excel Import API: template, bulk create inventory |
 | 2026-02-13 | Phase 5 | ✅ | All Frontend Pages: Login, Dashboard, Orders, Inventory, Import |
 
 **Last Updated**: 2026-02-13
-**Status**: Phase 5 Completed - All Frontend Pages Implemented
-**Next**: Phase 6 - Admin Management
+**Status**: Phase 6 In Progress - Admin User Management
+**Next**: Phase 6 - Admin User Management
 
 ---
 
