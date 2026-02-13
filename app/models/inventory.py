@@ -22,22 +22,24 @@ class InventoryBase(SQLModel):
     cas_number: str = Field(index=True, max_length=50)
     name: str = Field(max_length=200)
     alias: Optional[str] = Field(None, max_length=200)
-    location: str = Field(max_length=200, default="")  # Free text, e.g., "302冰箱第二层"
+    location: Optional[str] = Field(None, max_length=200)  # Free text, can be None for temporary keeper
     initial_quantity: float = Field(gt=0)
     remaining_quantity: float = Field(default=0.0)
     unit: str = Field(max_length=20, default="ml")  # Case-insensitive storage
     is_hazardous: bool = False
     image_path: Optional[str] = None  # Copied from Order
+    notes: Optional[str] = Field(None, max_length=500)  # User custom notes
 
 
 class Inventory(InventoryBase, table=True):
     """Inventory database model - Individual item tracking"""
     id: Optional[int] = Field(default=None, primary_key=True)
-    # Unique internal code: e.g., "ETH-001", "ETH-002"
+    # Unique internal code: e.g., "64175-250113-01" (CAS-Date-Sequence)
     internal_code: str = Field(unique=True, index=True, max_length=50)
     status: InventoryStatus = InventoryStatus.IN_STOCK
     borrower_id: Optional[int] = Field(default=None, index=True)
     last_borrower_id: Optional[int] = Field(default=None)
+    temporary_keeper_id: Optional[int] = Field(default=None, index=True)  # New field for temporary keeper
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -48,12 +50,14 @@ class InventoryCreate(SQLModel):
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
     alias: Optional[str] = None
-    location: str = Field(max_length=200, default="")
+    location: Optional[str] = None
     initial_quantity: float = Field(gt=0)
     remaining_quantity: float = Field(default=0.0)
     unit: str = Field(max_length=20, default="ml")
     is_hazardous: bool = False
     image_path: Optional[str] = None
+    temporary_keeper_id: Optional[int] = None
+    notes: Optional[str] = None
 
 
 class InventoryUpdate(SQLModel):
@@ -61,6 +65,8 @@ class InventoryUpdate(SQLModel):
     location: Optional[str] = None
     remaining_quantity: Optional[float] = None
     status: Optional[InventoryStatus] = None
+    temporary_keeper_id: Optional[int] = None
+    notes: Optional[str] = None
 
 
 class InventoryBorrowReturn(SQLModel):
@@ -76,13 +82,42 @@ class InventoryResponse(SQLModel):
     cas_number: str
     name: str
     alias: Optional[str]
-    location: str
+    location: Optional[str]
     initial_quantity: float
     remaining_quantity: float
     unit: str
     status: InventoryStatus
     borrower_id: Optional[int]
+    last_borrower_id: Optional[int]
     is_hazardous: bool
     image_path: Optional[str]
+    temporary_keeper_id: Optional[int]
+    notes: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+
+class BorrowLog(SQLModel, table=True):
+    """Borrow Log - Track borrow/return history"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    inventory_id: int = Field(index=True)
+    borrower_id: int = Field(index=True)
+    borrow_time: datetime = Field(default_factory=datetime.utcnow)
+    return_time: Optional[datetime] = None
+    quantity_borrowed: float = Field(gt=0)
+    quantity_returned: Optional[float] = None
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BorrowLogResponse(SQLModel):
+    """DTO for borrow log API responses"""
+    id: int
+    inventory_id: int
+    borrower_id: int
+    borrow_time: datetime
+    return_time: Optional[datetime]
+    quantity_borrowed: float
+    quantity_returned: Optional[float]
+    notes: Optional[str]
+    created_at: datetime

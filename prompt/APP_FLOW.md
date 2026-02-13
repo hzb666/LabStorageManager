@@ -5,17 +5,45 @@
 
 ## 2. 订购流程
 * Nav: "试剂订购" -> Click "新建申请"
-    * -> Form: Name, English Name, CAS (Auto-check), Spec, Qty, Image -> Submit.
+    * -> Form: Name, CAS (Auto-check), Spec, Qty, Order Reason, Target Location, Notes, Image -> Submit.
 * Admin View: "试剂订购" -> Filter "Pending" -> Click "Pass/Reject".
-* Arrival: Finds "Purchased" item in "Personal Page" -> Click "Stock In" (一键入库) -> System generates Inventory items.
+* Arrival: User finds "Approved" item in "Personal Page" -> Click "Confirm Receipt" (确认到货)
+    * -> Frontend checks order_reason:
+        * If "common_public": Auto trigger stock-in (no popup)
+        * If others: Show popup "是否一键入库？" -> User confirms -> Trigger stock-in
+    * -> If consumable: Mark as completed (不入库)
+    * -> If reagent: Status = "arrived" (已到货但未入库)
+    * -> If order_reason != "common_public", trigger stock-in notification.
 
-## 3. 借用流程
+## 3. 一键入库
+* Nav: "待入库" or From notification -> Select order -> Click "Stock In" (一键入库)
+    * -> System generates N Inventory items (N = Qty).
+    * -> If target location is empty, record temporary_keeper = current_user.
+    * -> Update Order status = "stocked"
+
+## 4. 借用流程
 * Nav: "库存查询" -> Search (CAS/Name/Alias) -> Result List.
 * Action: Click "借用"
-    * -> System validation (is available?) -> Status: `Borrowed`, Holder: Current User.
+    * -> System validation: Only "in_stock" items can be borrowed
+    * -> Status: `Borrowed`, borrower_id: Current User
+    * -> Create BorrowLog record (borrow_time, quantity_borrowed)
 
-## 4. 归还流程 (核心交互)
+## 5. 归还流程 (核心交互)
 * **Dashboard**: User sees "My Borrowed Items".
 * Action: Click "归还" on card
-    * -> Modal: Input "Remaining Amount" (e.g. 300) -> Confirm.
-    * -> System: Updates `remaining`, clears `holder`, sets `last_user`.
+    * -> Modal: Input "Used Amount" (e.g., 200) or "Remaining Amount" (e.g., 300)
+    * -> System auto-calculates remaining, checks if consumed
+    * -> If remaining <= 0: Status = `Consumed`
+    * -> If remaining > 0: Status = `in_stock`
+    * -> Update BorrowLog (return_time, quantity_returned)
+    * -> Update Inventory.last_borrower_id = Current User
+    * -> **Low Quantity Warning**: If remaining < 20%, show alert
+
+## 6. 借用历史
+* Nav: Item Detail -> "Borrow History"
+* Display: BorrowLog records showing last 10 borrowers
+* Info: borrow_time, return_time, quantities
+
+## 7. 位置管理
+* Nav: "待入库" -> Select item -> Input/Update Location -> Save.
+* Logic: If location is set, clear `temporary_keeper_id`.

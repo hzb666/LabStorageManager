@@ -20,4 +20,4 @@
 * React, Shadcn/UI, TanStack Table
 * Pillow, Pandas
 
-每次开始编写代码前，先阅读 `IMPLEMENTATION_PLAN.md` 和`Progress.md` 确认当前步骤。在写任何代码之前，在 Planning 模式下无尽地审问我的想法。不要假设任何问题。问问题直到没有假设剩下。每完成一个步骤，提示我更新 `Progress.txt`。每次犯错修复后，把教训写进 `Lessons.md`。
+每次开始编写代码前，先阅读 `IMPLEMENTATION_PLAN.md` 和`Progress.md` 确认当前步骤。在写任何代码之前，在 Planning 模式下无尽地审问我的想法。不要假设任何问题，问问题直到没有疑问剩下，并根据每次讨论更新对应的Prompt的相关md文档。每完成一个步骤，提示我更新 `Progress.txt`，并在文档后添加更新时间线。每次犯错修复后，把教训写进 `Lessons.md`。

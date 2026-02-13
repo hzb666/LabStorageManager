@@ -16,6 +16,8 @@ from app.models.inventory import (
     InventoryResponse,
     InventoryStatus,
     InventoryBorrowReturn,
+    BorrowLog,
+    BorrowLogResponse,
 )
 from app.models.order import Order, OrderStatus
 from app.services.cas_utils import generate_internal_code, normalize_cas
@@ -32,6 +34,53 @@ def get_inventory_by_code(db: Session, code: str) -> Optional[Inventory]:
     """Get inventory item by internal code"""
     statement = select(Inventory).where(Inventory.internal_code == code)
     return db.exec(statement).first()
+
+
+@router.get("/cas/{cas_number}")
+def check_cas_inventory(
+    cas_number: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Check CAS number inventory status.
+    Returns all inventory items with this CAS number.
+    Used for CAS check feature when creating orders.
+    """
+    normalized_cas = normalize_cas(cas_number)
+    
+    # Get all inventory items for this CAS
+    statement = select(Inventory).where(
+        Inventory.cas_number == normalized_cas,
+        Inventory.status != InventoryStatus.CONSUMED
+    ).order_by(Inventory.created_at.desc())
+    
+    items = db.exec(statement).all()
+    
+    # Calculate totals
+    total_remaining = sum(item.remaining_quantity for item in items)
+    borrowed_count = len([item for item in items if item.status == InventoryStatus.BORROWED])
+    in_stock_count = len([item for item in items if item.status == InventoryStatus.IN_STOCK])
+    
+    return {
+        "cas_number": normalized_cas,
+        "exists_in_inventory": len(items) > 0,
+        "total_remaining": total_remaining,
+        "in_stock_count": in_stock_count,
+        "borrowed_count": borrowed_count,
+        "items": [
+            {
+                "id": item.id,
+                "internal_code": item.internal_code,
+                "name": item.name,
+                "location": item.location,
+                "remaining_quantity": item.remaining_quantity,
+                "unit": item.unit,
+                "status": item.status,
+                "borrower_id": item.borrower_id
+            }
+            for item in items
+        ]
+    }
 
 
 @router.get("/cas/{cas_number}/total")
@@ -195,7 +244,10 @@ def borrow_item(
     borrower_id: int = 1,  # Temporary for Phase 1.1
     db: Session = Depends(get_db)
 ):
-    """Borrow an inventory item"""
+    """
+    Borrow an inventory item.
+    Creates BorrowLog record and updates item status.
+    """
     item = get_inventory_by_id(db, inventory_id)
     if not item:
         raise HTTPException(
@@ -209,15 +261,21 @@ def borrow_item(
             detail=f"Cannot borrow item with status: {item.status}"
         )
     
+    # Create BorrowLog record
+    borrow_log = BorrowLog(
+        inventory_id=inventory_id,
+        borrower_id=borrower_id,
+        borrow_time=datetime.utcnow(),
+        quantity_borrowed=item.remaining_quantity,
+        quantity_returned=None,
+        notes=None
+    )
+    db.add(borrow_log)
+    
     # Update item
     item.status = InventoryStatus.BORROWED
     item.borrower_id = borrower_id
-    item.remaining_quantity = borrow_data.remaining_quantity
     item.updated_at = datetime.utcnow()
-    
-    # Check if fully consumed
-    if borrow_data.remaining_quantity <= 0:
-        item.status = InventoryStatus.CONSUMED
     
     db.commit()
     db.refresh(item)
@@ -229,10 +287,15 @@ def borrow_item(
 def return_item(
     inventory_id: int,
     return_data: InventoryBorrowReturn,
-    db: Session = Depends(get_db),
     # returner_id: int = Depends(get_current_user),  # Should use actual user
+    returner_id: int = 1,  # Temporary for Phase 1.1
+    db: Session = Depends(get_db)
 ):
-    """Return a borrowed inventory item"""
+    """
+    Return a borrowed inventory item.
+    Updates BorrowLog record and item status.
+    Returns low quantity warning if remaining < 20%.
+    """
     item = get_inventory_by_id(db, inventory_id)
     if not item:
         raise HTTPException(
@@ -240,15 +303,52 @@ def return_item(
             detail="Inventory item not found"
         )
     
-    # Update item
-    if return_data.unit:
-        item.unit = return_data.unit
+    if item.status != InventoryStatus.BORROWED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Item is not borrowed, current status: {item.status}"
+        )
     
+    # Update BorrowLog record
+    borrow_log_statement = select(BorrowLog).where(
+        BorrowLog.inventory_id == inventory_id,
+        BorrowLog.return_time == None
+    ).order_by(BorrowLog.borrow_time.desc())
+    
+    borrow_log = db.exec(borrow_log_statement).first()
+    
+    if borrow_log:
+        borrow_log.return_time = datetime.utcnow()
+        borrow_log.quantity_returned = return_data.remaining_quantity
+        borrow_log.notes = return_data.unit  # Store unit in notes if provided
+    
+    # Update item
+    previous_quantity = item.remaining_quantity
     item.remaining_quantity = return_data.remaining_quantity
+    item.unit = return_data.unit if return_data.unit else item.unit
     item.last_borrower_id = item.borrower_id
     item.borrower_id = None
-    item.status = InventoryStatus.IN_STOCK if return_data.remaining_quantity > 0 else InventoryStatus.CONSUMED
+    
+    # Check for low quantity warning
+    low_quantity_warning = None
+    if return_data.remaining_quantity > 0:
+        item.status = InventoryStatus.IN_STOCK
+        percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
+        if percentage < 20:
+            low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
+    else:
+        item.status = InventoryStatus.CONSUMED
+    
     item.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(item)
+    
+    result = item.model_dump()
+    if low_quantity_warning:
+        result["warning"] = low_quantity_warning
+    
+    return result
     
     db.commit()
     db.refresh(item)
@@ -298,3 +398,114 @@ def delete_inventory(
     
     db.delete(item)
     db.commit()
+
+
+# ==================== Dashboard APIs ====================
+
+@router.get("/dashboard/my-borrows")
+def get_my_borrows(
+    # user_id: int = Depends(get_current_user),
+    user_id: int = 1,  # Temporary for Phase 1
+    db: Session = Depends(get_db)
+):
+    """
+    Get items borrowed by current user.
+    Returns items where status == borrowed and borrower_id == current user.
+    """
+    statement = select(Inventory).where(
+        Inventory.status == InventoryStatus.BORROWED,
+        Inventory.borrower_id == user_id
+    ).order_by(Inventory.updated_at.desc())
+    
+    items = db.exec(statement).all()
+    
+    return {
+        "data": [
+            {
+                "inventory_id": item.id,
+                "internal_code": item.internal_code,
+                "name": item.name,
+                "cas_number": item.cas_number,
+                "remaining_quantity": item.remaining_quantity,
+                "unit": item.unit,
+                "borrow_time": item.updated_at  # Approximate borrow time
+            }
+            for item in items
+        ],
+        "total": len(items)
+    }
+
+
+@router.get("/dashboard/pending-stockin")
+def get_pending_stockin(
+    # user_id: int = Depends(get_current_user),
+    user_id: int = 1,  # Temporary for Phase 1
+    db: Session = Depends(get_db)
+):
+    """
+    Get items pending stock-in location assignment.
+    Returns items where location IS NULL AND temporary_keeper_id == current user.
+    """
+    statement = select(Inventory).where(
+        Inventory.location == None,
+        Inventory.temporary_keeper_id == user_id
+    ).order_by(Inventory.created_at.desc())
+    
+    items = db.exec(statement).all()
+    
+    return {
+        "data": [
+            {
+                "inventory_id": item.id,
+                "internal_code": item.internal_code,
+                "name": item.name,
+                "cas_number": item.cas_number,
+                "initial_quantity": item.initial_quantity,
+                "unit": item.unit,
+                "stockin_time": item.created_at
+            }
+            for item in items
+        ],
+        "total": len(items)
+    }
+
+
+@router.get("/{inventory_id}/borrow-history")
+def get_borrow_history(
+    inventory_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get borrow history for an inventory item.
+    Returns last 10 borrow records.
+    """
+    # Verify inventory exists
+    item = get_inventory_by_id(db, inventory_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Inventory item not found"
+        )
+    
+    statement = select(BorrowLog).where(
+        BorrowLog.inventory_id == inventory_id
+    ).order_by(BorrowLog.borrow_time.desc()).limit(10)
+    
+    logs = db.exec(statement).all()
+    
+    return {
+        "inventory_id": inventory_id,
+        "internal_code": item.internal_code,
+        "name": item.name,
+        "history": [
+            {
+                "id": log.id,
+                "borrower_id": log.borrower_id,
+                "borrow_time": log.borrow_time,
+                "return_time": log.return_time,
+                "quantity_borrowed": log.quantity_borrowed,
+                "quantity_returned": log.quantity_returned
+            }
+            for log in logs
+        ]
+    }

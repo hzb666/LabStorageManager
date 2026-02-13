@@ -84,4 +84,4 @@ def health_check():
 
 # Import models to ensure tables are created
 # This is needed for SQLModel to register all models
-from app.models import User, Order, Inventory  # noqa: F401
+from app.models import User, Order, Inventory, BorrowLog  # noqa: F401

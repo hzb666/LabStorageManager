@@ -1,7 +1,7 @@
 # Models module - Database models for LIMS
 from .user import User, UserRole
-from .order import Order, OrderType, OrderStatus
-from .inventory import Inventory, InventoryStatus
+from .order import Order, OrderType, OrderStatus, OrderReason
+from .inventory import Inventory, InventoryStatus, BorrowLog, BorrowLogResponse
 
 __all__ = [
     "User",
@@ -9,6 +9,9 @@ __all__ = [
     "Order",
     "OrderType",
     "OrderStatus",
+    "OrderReason",
     "Inventory",
     "InventoryStatus",
+    "BorrowLog",
+    "BorrowLogResponse",
 ]

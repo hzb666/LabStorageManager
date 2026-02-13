@@ -17,11 +17,21 @@ class OrderType(str, Enum):
 
 class OrderStatus(str, Enum):
     """Order status enumeration"""
-    PENDING = "pending"
-    APPROVED = "approved"
-    PURCHASED = "purchased"
-    STOCKED = "stocked"
-    REJECTED = "rejected"
+    PENDING = "pending"       # 已申购
+    APPROVED = "approved"     # 已审批（采购完成）
+    ARRIVED = "arrived"       # 已到货但未入库（新增）
+    STOCKED = "stocked"       # 已入库
+    REJECTED = "rejected"    # 未通过
+
+
+class OrderReason(str, Enum):
+    """Order reason enumeration"""
+    NONE = "none"
+    RUNNING_OUT = "running_out"
+    EMPTY = "empty"
+    COMMON_PUBLIC = "common_public"
+    NOT_FOUND = "not_found"
+    REORDER = "reorder"
 
 
 class OrderBase(SQLModel):
@@ -35,6 +45,9 @@ class OrderBase(SQLModel):
     quantity: int = Field(gt=0)
     is_hazardous: bool = False
     image_path: Optional[str] = None  # Thumbnail path in filesystem
+    order_reason: OrderReason = OrderReason.NONE  # New field
+    location: Optional[str] = Field(None, max_length=200)  # Target location for stock-in
+    notes: Optional[str] = Field(None, max_length=500)  # User custom notes
 
 
 class Order(OrderBase, table=True):
@@ -55,6 +68,9 @@ class OrderCreate(SQLModel):
     specification: str = Field(max_length=100)
     quantity: int = Field(gt=0)
     is_hazardous: bool = False
+    order_reason: OrderReason = OrderReason.NONE
+    location: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class OrderUpdate(SQLModel):
@@ -67,6 +83,9 @@ class OrderUpdate(SQLModel):
     quantity: Optional[int] = None
     is_hazardous: Optional[bool] = None
     status: Optional[OrderStatus] = None
+    order_reason: Optional[OrderReason] = None
+    location: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class OrderResponse(SQLModel):
@@ -82,5 +101,8 @@ class OrderResponse(SQLModel):
     status: OrderStatus
     is_hazardous: bool
     image_path: Optional[str]
+    order_reason: OrderReason
+    location: Optional[str]
+    notes: Optional[str]
     created_at: datetime
     updated_at: datetime

@@ -44,5 +44,32 @@
 
 ---
 
+## Phase 2.5 Lessons Learned
+
+### 6. Order Status Workflow - PURCHASED vs ARRIVED
+**Problem**: Original workflow used `PURCHASED` status meaning "purchased and ready to stock in". This didn't reflect the physical arrival process.
+
+**Decision**: Split the workflow into two steps:
+1. `APPROVED` → `ARRIVED`: Physical arrival confirmation
+2. `ARRIVED` → `STOCKED`: Location assignment and inventory creation
+
+**Benefits**:
+- Clearer audit trail (can track when items physically arrived)
+- Allows for quality check before stocking in
+- Separates purchasing from inventory management
+
+### 7. Database File Locking on Windows
+**Problem**: Cannot delete `lab_inventory.db` while server is running (file locked by SQLite).
+
+**Error**: `PermissionError: [WinError 32] The process cannot access the file`
+
+**Solution**:
+1. Stop server processes: `taskkill /F /IM python.exe`
+2. Wait for process termination: `timeout /t 2`
+3. Delete database files
+4. Restart server
+
+---
+
 **Date**: 2026-02-13
-**Phase**: 1.2 User Auth (JWT)
+**Phase**: 2.5 Workflow Adjustment (ARRIVED status + Notes)
