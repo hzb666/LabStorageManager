@@ -59,3 +59,29 @@
 - Workflow: Approval → Arrival Confirmation → Stock-in
 - Added `notes` field to Order and Inventory models
 - New APIs: Confirm Arrival, Arrived Orders Dashboard
+
+---
+
+## Plans
+
+### Immediate Next Steps
+1. **Phase 3: User Dashboard & Interactions**
+   - [ ] API: `get_user_dashboard_data` (my-borrows, pending-stockin)
+   - [ ] API: `return_item` (Update remaining quantity, BorrowLog)
+   - [ ] Frontend: Build Dashboard Cards & Return Modal
+
+2. **Phase 4: Excel Import/Export**
+   - [ ] Backend: Pandas Excel Import/Export logic
+   - [ ] Frontend: Excel Upload button & Data mapping UI
+
+3. **Phase 5: Frontend**
+   - [ ] Init React + Shadcn/UI + TanStack Table
+   - [ ] Frontend: Order Form with CAS auto-check
+   - [ ] Frontend: Inventory Table with Virtual Scrolling
+
+### Future Enhancements
+- [ ] Batch operations (bulk stock-in, bulk return)
+- [ ] Low stock alerts and notifications
+- [ ] Audit log and activity tracking
+- [ ] Advanced search and filters
+- [ ] Data export reports
