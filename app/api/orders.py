@@ -20,7 +20,7 @@ from app.models.order import (
     OrderReason,
 )
 from app.models.user import User
-from app.models.inventory import Inventory, InventoryStatus
+from app.models.inventory import Inventory, InventoryCreate, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.image_service import process_uploaded_image
 from app.services.spec_utils import parse_specification
