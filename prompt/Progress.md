@@ -3,6 +3,7 @@
 ## Phase 1: Infrastructure
 - [x] 1.1: Init FastAPI + SQLModel + SQLite. **Action**: Configure `sqlite_url` with `?mode=wal`. ✓
 - [x] 1.2: Implement `User` model & Auth (JWT). ✓
+- [x] 1.2b: **Full JWT Authentication**: Replace all hardcoded `user_id=1` with `get_current_user` dependency. ✓
 - [x] 1.3: **Image Service**: Create `compress_image(file)` using Pillow (Max 100KB). ✓
 - [x] 1.4: **CAS Utility**: Create `normalize_cas(str)` function. ✓
 
@@ -28,8 +29,10 @@
 - [ ] 5.3: Frontend: Inventory Table with Virtual Scrolling.
 
 ---
+**Last Updated**: 2025-02-13 13:52 (UTC+8)
 
 ## Timeline
+- 2025-02-13 13:45: Phase 1.2b - Full JWT Authentication enabled (orders.py, inventory.py)
 
 | Date | Phase | Status | Description |
 |------|-------|--------|-------------|

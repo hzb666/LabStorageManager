@@ -14,7 +14,7 @@
 | pending | 已申购 | 已提交，等待审批 |
 | approved | 已审批 | 审批通过 |
 | rejected | 未通过 | 审批未通过 |
-| purchased | 已到货 | 手动确认收货 |
+| arrived | 已到货 | 物理到货，待入库 |
 | stocked | 已入库 | 完成入库 |
 
 ---
@@ -68,7 +68,7 @@ const STATUS_MAPPING: Record<string, string> = {
   pending: '已申购',
   approved: '已审批',
   rejected: '未通过',
-  purchased: '已到货',
+  arrived: '已到货但未入库',
   stocked: '已入库',
   in_stock: '在库',
   borrowed: '已借出',

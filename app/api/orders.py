@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlmodel import Session, select, func
 
 from app.database import get_db
+from app.core.auth import get_current_user, require_admin
 from app.models.order import (
     Order,
     OrderCreate,
@@ -36,8 +37,7 @@ def get_order_by_id(db: Session, order_id: int) -> Optional[Order]:
 @router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 def create_order(
     order: OrderCreate,
-    # Critical: current_user should be checked in production
-    # current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -65,8 +65,7 @@ def create_order(
         is_hazardous=order.is_hazardous,
         order_reason=order.order_reason,
         location=order.location,
-        # applicant_id=current_user.id,  # Uncomment when auth is enabled
-        applicant_id=1,  # Temporary for Phase 1.1
+        applicant_id=current_user.id,
     )
     
     db.add(db_order)
@@ -189,11 +188,10 @@ def update_order(
 @router.post("/{order_id}/approve")
 def approve_order(
     order_id: int,
-    db: Session = Depends(get_db),
-    # Critical: current_user should be checked
-    # current_user: User = Depends(get_current_user)
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
 ):
-    """Approve an order"""
+    """Approve an order (Admin only)"""
     order = get_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -220,10 +218,10 @@ def approve_order(
 def reject_order(
     order_id: int,
     reason: str = "Order rejected",
-    db: Session = Depends(get_db),
-    # Critical: current_user should be checked
+    admin_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
 ):
-    """Reject an order"""
+    """Reject an order (Admin only)"""
     order = get_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -244,18 +242,26 @@ def reject_order(
 def confirm_arrival(
     order_id: int,
     arrival_notes: Optional[str] = None,
-    db: Session = Depends(get_db),
-    # Critical: current_user should be checked
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Confirm order has arrived (but not yet stocked in).
     Changes status from APPROVED to ARRIVED.
+    Only order applicant or admin can confirm.
     """
     order = get_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
+        )
+    
+    # Check if user is the applicant or admin
+    if order.applicant_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the order applicant or admin can confirm arrival"
         )
     
     if order.status != OrderStatus.APPROVED:
@@ -316,8 +322,7 @@ def get_arrived_orders(
 
 @router.get("/dashboard/my-orders")
 def get_my_orders(
-    # user_id: int = Depends(get_current_user),
-    user_id: int = 1,  # Temporary for Phase 1
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -325,7 +330,7 @@ def get_my_orders(
     Returns orders with status in pending, approved, arrived.
     """
     statement = select(Order).where(
-        Order.applicant_id == user_id,
+        Order.applicant_id == current_user.id,
         Order.status.in_([OrderStatus.PENDING, OrderStatus.APPROVED, OrderStatus.ARRIVED])
     ).order_by(Order.created_at.desc())
     
@@ -401,15 +406,15 @@ def delete_order(
 @router.post("/{order_id}/stock-in", response_model=dict)
 def stock_in_order(
     order_id: int,
-    db: Session = Depends(get_db),
-    # Critical: current_user should be checked
-    # current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Stock-in order: Convert Order to Inventory items.
     - Copy data from Order to Inventory (not move,保留Order用于审计)
     - Generate N Inventory items (N = order.quantity)
     - Update order status to STOCKED
+    Only admin or staff can stock in items.
     """
     order = get_order_by_id(db, order_id)
     if not order:
@@ -439,8 +444,7 @@ def stock_in_order(
     internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
     
     # Get current user ID for temporary keeper
-    # current_user.id if auth enabled
-    current_user_id = 1  # Temporary for Phase 1
+    current_user_id = current_user.id
     
     # Determine location and temporary keeper
     location = order.location

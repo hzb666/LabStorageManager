@@ -22,6 +22,8 @@ from app.models.inventory import (
     BorrowLogResponse,
 )
 from app.models.order import Order, OrderStatus
+from app.models.user import User
+from app.core.auth import get_current_user, require_admin
 from app.services.cas_utils import generate_internal_code, normalize_cas
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
@@ -242,8 +244,7 @@ def get_inventory_by_code(internal_code: str, db: Session = Depends(get_db)):
 def borrow_item(
     inventory_id: int,
     borrow_data: InventoryBorrowReturn,
-    # borrower_id: int = Depends(get_current_user),  # Should use actual user
-    borrower_id: int = 1,  # Temporary for Phase 1.1
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -266,7 +267,7 @@ def borrow_item(
     # Create BorrowLog record
     borrow_log = BorrowLog(
         inventory_id=inventory_id,
-        borrower_id=borrower_id,
+        borrower_id=current_user.id,
         borrow_time=datetime.utcnow(),
         quantity_borrowed=item.remaining_quantity,
         quantity_returned=None,
@@ -276,7 +277,7 @@ def borrow_item(
     
     # Update item
     item.status = InventoryStatus.BORROWED
-    item.borrower_id = borrower_id
+    item.borrower_id = current_user.id
     item.updated_at = datetime.utcnow()
     
     db.commit()
@@ -285,12 +286,11 @@ def borrow_item(
     return item
 
 
-@router.post("/{inventory_id}/return", response_model=InventoryResponse)
+@router.post("/{inventory_id}/return", response_model=dict)
 def return_item(
     inventory_id: int,
     return_data: InventoryBorrowReturn,
-    # returner_id: int = Depends(get_current_user),  # Should use actual user
-    returner_id: int = 1,  # Temporary for Phase 1.1
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -309,6 +309,13 @@ def return_item(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Item is not borrowed, current status: {item.status}"
+        )
+    
+    # Verify the current user is the borrower
+    if item.borrower_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not the borrower of this item"
         )
     
     # Update BorrowLog record
@@ -351,11 +358,6 @@ def return_item(
         result["warning"] = low_quantity_warning
     
     return result
-    
-    db.commit()
-    db.refresh(item)
-    
-    return item
 
 
 @router.put("/{inventory_id}", response_model=InventoryResponse)
@@ -406,8 +408,7 @@ def delete_inventory(
 
 @router.get("/dashboard/my-borrows")
 def get_my_borrows(
-    # user_id: int = Depends(get_current_user),
-    user_id: int = 1,  # Temporary for Phase 1
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -416,7 +417,7 @@ def get_my_borrows(
     """
     statement = select(Inventory).where(
         Inventory.status == InventoryStatus.BORROWED,
-        Inventory.borrower_id == user_id
+        Inventory.borrower_id == current_user.id
     ).order_by(Inventory.updated_at.desc())
     
     items = db.exec(statement).all()
@@ -440,8 +441,7 @@ def get_my_borrows(
 
 @router.get("/dashboard/pending-stockin")
 def get_pending_stockin(
-    # user_id: int = Depends(get_current_user),
-    user_id: int = 1,  # Temporary for Phase 1
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -450,7 +450,7 @@ def get_pending_stockin(
     """
     statement = select(Inventory).where(
         Inventory.location == None,
-        Inventory.temporary_keeper_id == user_id
+        Inventory.temporary_keeper_id == current_user.id
     ).order_by(Inventory.created_at.desc())
     
     items = db.exec(statement).all()
@@ -530,12 +530,12 @@ def import_inventory(
     file: UploadFile = File(...),
     default_location: Optional[str] = None,
     default_is_hazardous: bool = False,
-    # user_id: int = Depends(get_current_user),
-    user_id: int = 1,  # Temporary for Phase 4
+    admin_user: User = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
     """
     Import inventory items from Excel file.
+    Only admin can import inventory.
     
     Expected Excel columns:
     - cas_number: CAS号 (required)
