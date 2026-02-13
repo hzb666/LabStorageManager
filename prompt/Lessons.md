@@ -25,5 +25,24 @@
 
 ---
 
-**Date**: 2026-02-12
-**Phase**: 1.1 Backend Initialization
+## Phase 1.2 Lessons Learned
+
+### 4. FastAPI Route Order - /me vs /{user_id}
+**Problem**: FastAPI matched `/{user_id}` before `/me` endpoint, causing "me" to be parsed as user_id integer.
+
+**Error**: `Input should be a valid integer, unable to parse string as an integer`
+
+**Solution**: 
+1. Ensure `/me` endpoint is defined BEFORE `/{user_id}` in the router
+2. Remove duplicate `/me` endpoints
+3. Restart server completely (not just reload) when route order changes
+
+### 5. JWT Token Expiration
+**Problem**: Old JWT tokens from previous server runs become invalid.
+
+**Solution**: Get fresh token after server restart.
+
+---
+
+**Date**: 2026-02-13
+**Phase**: 1.2 User Auth (JWT)

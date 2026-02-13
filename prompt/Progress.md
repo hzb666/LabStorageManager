@@ -2,9 +2,9 @@
 
 ## Phase 1: Infrastructure
 - [x] 1.1: Init FastAPI + SQLModel + SQLite. **Action**: Configure `sqlite_url` with `?mode=wal`. ✓
-- [ ] 1.2: Implement `User` model & Auth (JWT).
-- [ ] 1.3: **Image Service**: Create `compress_image(file)` using Pillow (Max 100KB).
-- [ ] 1.4: **CAS Utility**: Create `normalize_cas(str)` function.
+- [x] 1.2: Implement `User` model & Auth (JWT). ✓
+- [x] 1.3: **Image Service**: Create `compress_image(file)` using Pillow (Max 100KB). ✓
+- [x] 1.4: **CAS Utility**: Create `normalize_cas(str)` function. ✓
 
 ## Phase 2: Ordering & CAS Check
 - [ ] 2.1: Implement `Order` CRUD API.
@@ -27,11 +27,16 @@
 
 ---
 
-**Last Updated**: 2026-02-12
-**Status**: Phase 1.1 Completed - Backend initialized with WAL mode
+**Last Updated**: 2026-02-13
+**Status**: Phase 1.2 Completed - JWT Authentication Implemented
 
 **Verified APIs**:
-- `GET /` - App info
-- `GET /health` - Health check
-- `POST /api/users/` - Create user (201 Created)
-- `GET /api/users/` - List users (200 OK)
+- `POST /api/users/auth/login` - Login, returns JWT token
+- `GET /api/users/me` - Get current user (requires auth)
+- `GET /api/users/` - List users (requires auth)
+- `PUT /api/users/{id}` - Update user (requires auth)
+- `DELETE /api/users/{id}` - Delete user (admin only)
+
+**Key Files**:
+- `app/core/auth.py` - JWT authentication module
+- `app/api/users.py` - Protected user endpoints
