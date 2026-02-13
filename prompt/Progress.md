@@ -54,13 +54,15 @@
 
 ### Phase 6: Admin Management
 - [ ] User Management (CRUD, role assignment)
-- [ ] User Statistics API
-- [ ] Audit/Activity Log
 - [ ] Frontend Admin User Management Page
 
-### Phase 7: Advanced Features
-- [ ] Low stock alerts and notifications
-- [ ] Batch operations
+### Phase 7: Notifications & Alerts
+- [ ] Stock-in notification (when order arrives)
+- [ ] Low stock alerts
+- [ ] Borrow/Return notifications
+
+### Phase 8: Advanced Features
+- [ ] Batch operations (bulk stock-in, bulk return)
 - [ ] Advanced search and filters
 - [ ] Data export reports
 
