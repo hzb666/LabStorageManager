@@ -1,19 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { orderAPI, inventoryAPI } from '@/api/client'
-import { formatDateTime } from '@/lib/utils'
-import { Package, ShoppingCart, ArrowRightLeft, AlertCircle } from 'lucide-react'
+import { formatDateTime, cn } from '@/lib/utils'
+import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2 } from 'lucide-react'
 
-interface MyOrder {
-  id: number
-  name: string
-  cas_number: string
-  status: string
-  created_at: string
-}
-
-interface MyBorrow {
+interface MyBorrowItem {
   inventory_id: number
   internal_code: string
   name: string
@@ -23,7 +16,7 @@ interface MyBorrow {
   borrow_time: string
 }
 
-interface PendingStockin {
+interface PendingStockinItem {
   inventory_id: number
   internal_code: string
   name: string
@@ -33,11 +26,31 @@ interface PendingStockin {
   stockin_time: string
 }
 
+interface MyOrder {
+  id: number
+  name: string
+  cas_number: string
+  status: string
+  created_at: string
+}
+
+interface DashboardResponse<T> {
+  data: T[]
+  total: number
+}
+
 export function Dashboard() {
   const [myOrders, setMyOrders] = useState<MyOrder[]>([])
-  const [myBorrows, setMyBorrows] = useState<MyBorrow[]>([])
-  const [pendingStockin, setPendingStockin] = useState<PendingStockin[]>([])
+  const [myBorrows, setMyBorrows] = useState<MyBorrowItem[]>([])
+  const [pendingStockin, setPendingStockin] = useState<PendingStockinItem[]>([])
   const [loading, setLoading] = useState(true)
+  
+  // Return Modal state
+  const [showReturnModal, setShowReturnModal] = useState(false)
+  const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
+  const [returnQuantity, setReturnQuantity] = useState('')
+  const [returnUnit, setReturnUnit] = useState('')
+  const [returnLoading, setReturnLoading] = useState(false)
 
   useEffect(() => {
     loadDashboardData()
@@ -50,9 +63,11 @@ export function Dashboard() {
         inventoryAPI.getMyBorrows(),
         inventoryAPI.getPendingStockin(),
       ])
-      setMyOrders(ordersRes.data.data || [])
-      setMyBorrows(borrowsRes.data.data || [])
-      setPendingStockin(stockinRes.data.data || [])
+      setMyOrders((ordersRes.data as any).data || [])
+      const borrowsData = borrowsRes.data as DashboardResponse<MyBorrowItem>
+      const stockinData = stockinRes.data as DashboardResponse<PendingStockinItem>
+      setMyBorrows(borrowsData.data || [])
+      setPendingStockin(stockinData.data || [])
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
     } finally {
@@ -60,25 +75,52 @@ export function Dashboard() {
     }
   }
 
-  const handleReturn = async (item: MyBorrow) => {
-    const qty = window.prompt(`请输入 "${item.name}" 的剩余数量 (当前: ${item.remaining_quantity} ${item.unit}):`)
-    if (qty === null) return
-    const quantity = parseFloat(qty)
-    if (isNaN(quantity) || quantity < 0) {
+  const openReturnModal = (item: MyBorrowItem) => {
+    setSelectedBorrow(item)
+    setReturnQuantity(String(item.remaining_quantity))
+    setReturnUnit(item.unit)
+    setShowReturnModal(true)
+  }
+
+  const handleReturn = async () => {
+    if (!selectedBorrow) return
+    const qty = parseFloat(returnQuantity)
+    if (isNaN(qty) || qty < 0) {
       alert('请输入有效的数量')
       return
     }
+    setReturnLoading(true)
     try {
-      await inventoryAPI.return(item.inventory_id, { remaining_quantity: quantity, unit: item.unit })
+      await inventoryAPI.return(selectedBorrow.inventory_id, { remaining_quantity: qty, unit: returnUnit })
+      setShowReturnModal(false)
+      setSelectedBorrow(null)
       loadDashboardData()
       alert('归还成功')
     } catch (error: any) {
       alert(error.response?.data?.detail || '归还失败')
+    } finally {
+      setReturnLoading(false)
+    }
+  }
+
+  const handleStockin = async (item: PendingStockinItem) => {
+    const location = prompt(`请输入 "${item.name}" 的存放位置:`)
+    if (!location) return
+    try {
+      await inventoryAPI.update(item.inventory_id, { location })
+      loadDashboardData()
+      alert('位置分配成功')
+    } catch (error: any) {
+      alert(error.response?.data?.detail || '操作失败')
     }
   }
 
   if (loading) {
-    return <div className="text-center py-8">加载中...</div>
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    )
   }
 
   return (
@@ -134,13 +176,13 @@ export function Dashboard() {
         </CardHeader>
         <CardContent>
           {myOrders.length === 0 ? (
-            <p className="text-muted-foreground">暂无订单</p>
+            <p className="text-muted-foreground text-center py-8">暂无订单</p>
           ) : (
             <div className="space-y-4">
               {myOrders.map((order) => (
                 <div
                   key={order.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
                 >
                   <div>
                     <p className="font-medium">{order.name}</p>
@@ -148,9 +190,10 @@ export function Dashboard() {
                       CAS: {order.cas_number} • {formatDateTime(order.created_at)}
                     </p>
                   </div>
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <span
-                      className={`px-3 py-1 text-sm rounded-full ${
+                      className={cn(
+                        'px-3 py-1 text-sm rounded-full',
                         order.status === 'PENDING'
                           ? 'bg-yellow-100 text-yellow-800'
                           : order.status === 'APPROVED'
@@ -158,7 +201,7 @@ export function Dashboard() {
                           : order.status === 'ARRIVED'
                           ? 'bg-green-100 text-green-800'
                           : 'bg-gray-100 text-gray-800'
-                      }`}
+                      )}
                     >
                       {order.status === 'PENDING'
                         ? '待审批'
@@ -183,13 +226,13 @@ export function Dashboard() {
         </CardHeader>
         <CardContent>
           {myBorrows.length === 0 ? (
-            <p className="text-muted-foreground">暂无借用</p>
+            <p className="text-muted-foreground text-center py-8">暂无借用</p>
           ) : (
             <div className="space-y-4">
               {myBorrows.map((item) => (
                 <div
                   key={item.inventory_id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
                 >
                   <div>
                     <p className="font-medium">{item.name}</p>
@@ -197,7 +240,7 @@ export function Dashboard() {
                       编号: {item.internal_code} • {item.remaining_quantity} {item.unit}
                     </p>
                   </div>
-                  <Button onClick={() => handleReturn(item)}>
+                  <Button onClick={() => openReturnModal(item)}>
                     归还
                   </Button>
                 </div>
@@ -214,13 +257,13 @@ export function Dashboard() {
         </CardHeader>
         <CardContent>
           {pendingStockin.length === 0 ? (
-            <p className="text-muted-foreground">无待入库物品</p>
+            <p className="text-muted-foreground text-center py-8">无待入库物品</p>
           ) : (
             <div className="space-y-4">
               {pendingStockin.map((item) => (
                 <div
                   key={item.inventory_id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
                 >
                   <div>
                     <p className="font-medium">{item.name}</p>
@@ -228,13 +271,94 @@ export function Dashboard() {
                       编号: {item.internal_code} • {item.initial_quantity} {item.unit}
                     </p>
                   </div>
-                  <Button variant="outline">分配位置</Button>
+                  <Button variant="outline" onClick={() => handleStockin(item)}>
+                    分配位置
+                  </Button>
                 </div>
               ))}
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Return Modal */}
+      {showReturnModal && selectedBorrow && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">归还物品</h2>
+              <button
+                onClick={() => setShowReturnModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <p className="font-medium">{selectedBorrow.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  编号: {selectedBorrow.internal_code}
+                </p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  剩余数量 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  type="number"
+                  value={returnQuantity}
+                  onChange={(e) => setReturnQuantity(e.target.value)}
+                  placeholder="输入剩余数量"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">单位</label>
+                <select
+                  value={returnUnit}
+                  onChange={(e) => setReturnUnit(e.target.value)}
+                  className="w-full h-10 px-3 border rounded-md bg-background"
+                >
+                  <option value="ml">毫升 (ml)</option>
+                  <option value="L">升 (L)</option>
+                  <option value="g">克 (g)</option>
+                  <option value="kg">千克 (kg)</option>
+                  <option value="个">个</option>
+                  <option value="瓶">瓶</option>
+                  <option value="盒">盒</option>
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  onClick={handleReturn}
+                  disabled={returnLoading}
+                  className="flex-1"
+                >
+                  {returnLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      处理中...
+                    </>
+                  ) : (
+                    '确认归还'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowReturnModal(false)}
+                  className="flex-1"
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

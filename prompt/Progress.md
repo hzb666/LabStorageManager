@@ -17,16 +17,16 @@
 ## Phase 3: User Dashboard & Interactions
 - [x] 3.1: API: `get_user_dashboard_data` (my-borrows, pending-stockin, my-orders).
 - [x] 3.2: API: `return_item` (Update remaining quantity, BorrowLog).
-- [ ] 3.3: Frontend: Build Dashboard Cards & Return Modal (Pending Frontend Phase).
+- [x] 3.3: Frontend: Build Dashboard Cards & Return Modal (Completed).
 
 ## Phase 4: Excel Import/Export
 - [x] 4.1: Backend: Pandas Excel Import/Export logic.
-- [ ] 4.2: Frontend: Excel Upload button & Data mapping UI.
+- [x] 4.2: Frontend: Excel Upload button & Data mapping UI.
 
 ## Phase 5: Frontend
 - [x] 5.1: Init React + Shadcn/UI + TanStack Table. ✓
-- [ ] 5.2: Frontend: Order Form with CAS auto-check.
-- [ ] 5.3: Frontend: Inventory Table with Virtual Scrolling.
+- [x] 5.2: Frontend: Order Form with CAS auto-check. ✓
+- [x] 5.3: Frontend: Inventory Table with Virtual Scrolling. ✓
 
 ---
 **Last Updated**: 2025-02-13 14:09 (UTC+8)
@@ -34,6 +34,7 @@
 ## Timeline
 - 2025-02-13 13:45: Phase 1.2b - Full JWT Authentication enabled (orders.py, inventory.py)
 - 2025-02-13 14:09: Phase 5.1 - Frontend initialized (React + Vite + TypeScript + Shadcn/UI)
+- 2025-02-13 09:27: Phase 3.3 - Dashboard Return Modal implemented
 
 | Date | Phase | Status | Description |
 |------|-------|--------|-------------|
@@ -83,7 +84,7 @@
    - [ ] Frontend: Excel Upload button & Data mapping UI
 
 3. **Phase 3: Dashboard Frontend**
-   - [ ] Frontend: Build Dashboard Cards & Return Modal
+    - [x] Frontend: Build Dashboard Cards & Return Modal
 
 ### Future Enhancements
 - [ ] Batch operations (bulk stock-in, bulk return)
