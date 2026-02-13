@@ -13,13 +13,11 @@ import tempfile
 from app.database import get_db
 from app.models.inventory import (
     Inventory,
-    InventoryCreate,
     InventoryUpdate,
     InventoryResponse,
     InventoryStatus,
     InventoryBorrowReturn,
     BorrowLog,
-    BorrowLogResponse,
 )
 from app.models.order import Order, OrderStatus
 from app.models.user import User
