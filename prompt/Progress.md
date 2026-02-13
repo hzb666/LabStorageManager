@@ -24,15 +24,16 @@
 - [ ] 4.2: Frontend: Excel Upload button & Data mapping UI.
 
 ## Phase 5: Frontend
-- [ ] 5.1: Init React + Shadcn/UI + TanStack Table.
+- [x] 5.1: Init React + Shadcn/UI + TanStack Table. ✓
 - [ ] 5.2: Frontend: Order Form with CAS auto-check.
 - [ ] 5.3: Frontend: Inventory Table with Virtual Scrolling.
 
 ---
-**Last Updated**: 2025-02-13 13:52 (UTC+8)
+**Last Updated**: 2025-02-13 14:09 (UTC+8)
 
 ## Timeline
 - 2025-02-13 13:45: Phase 1.2b - Full JWT Authentication enabled (orders.py, inventory.py)
+- 2025-02-13 14:09: Phase 5.1 - Frontend initialized (React + Vite + TypeScript + Shadcn/UI)
 
 | Date | Phase | Status | Description |
 |------|-------|--------|-------------|
