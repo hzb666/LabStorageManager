@@ -84,11 +84,10 @@
 * **触发时机**: 用户在个人中心点击"确认到货"
 * **校验**: Order.status == "approved"
 * **处理逻辑**:
-    * 如果 type == "consumable": 状态不变（耗材不入库）
-    * 如果 type == "reagent":
-        * 状态 = "arrived"（已到货但未入库）
-        * 如果 order_reason != "common_public": 触发入库提醒
-* **返回**: 确认成功消息
+    * 如果 type == "consumable": 状态 = "stocked"（直接完成，不入库）
+    * 如果 order_reason == "common_public": 状态 = "stocked"（常用/公用直接完成）
+    * 如果 type == "reagent" 且 order_reason != "common_public": 状态 = "arrived"（待入库）
+* **返回**: 消息提示 + 状态
 
 ### 一键入库 (POST /api/orders/{id}/stock-in)
 **Order -> Inventory 转换规则**：
