@@ -246,8 +246,12 @@ def confirm_arrival(
     db: Session = Depends(get_db)
 ):
     """
-    Confirm order has arrived (but not yet stocked in).
-    Changes status from APPROVED to ARRIVED.
+    Confirm order has arrived.
+    
+    Logic:
+    - consumable: Complete directly (not stocked in)
+    - common_public: Complete directly (not stocked in, no notification)
+    - reagent (other reasons): Status = ARRIVED, needs manual stock-in
     Only order applicant or admin can confirm.
     """
     order = get_order_by_id(db, order_id)
@@ -270,7 +274,20 @@ def confirm_arrival(
             detail=f"Cannot confirm arrival for order with status: {order.status}. Order must be APPROVED first."
         )
     
-    order.status = OrderStatus.ARRIVED
+    # Handle based on order type and reason
+    if order.type.value == "consumable":
+        # Consumables: complete directly
+        order.status = OrderStatus.STOCKED
+        message = "耗材订单已完成"
+    elif order.order_reason.value == "common_public":
+        # Common/public reagents: complete directly, no notification
+        order.status = OrderStatus.STOCKED
+        message = "常用/公用试剂已入库，无需通知"
+    else:
+        # Other reagents: need manual stock-in
+        order.status = OrderStatus.ARRIVED
+        message = "已到货待入库，请及时完成入库操作"
+    
     if arrival_notes:
         order.notes = arrival_notes
     order.updated_at = datetime.utcnow()
@@ -279,7 +296,7 @@ def confirm_arrival(
     db.refresh(order)
     
     return {
-        "message": "Arrival confirmed successfully",
+        "message": message,
         "order_id": order.id,
         "status": order.status,
         "notes": order.notes
