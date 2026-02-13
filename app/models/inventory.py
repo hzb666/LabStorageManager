@@ -121,3 +121,16 @@ class BorrowLogResponse(SQLModel):
     quantity_returned: Optional[float]
     notes: Optional[str]
     created_at: datetime
+
+
+class ManualInventoryCreate(SQLModel):
+    """DTO for manually adding inventory (not from Order)"""
+    cas_number: str = Field(max_length=50)
+    name: str = Field(max_length=200)
+    alias: Optional[str] = None
+    specification: str = Field(max_length=50)  # e.g., "500ml"
+    initial_quantity: float = Field(gt=0)  # Total quantity (will be split into bottles)
+    quantity_bottles: int = Field(default=1, ge=1)  # Number of bottles
+    location: Optional[str] = None
+    is_hazardous: bool = False
+    notes: Optional[str] = None

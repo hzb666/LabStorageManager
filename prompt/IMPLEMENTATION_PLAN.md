@@ -163,9 +163,40 @@
 
 ---
 
-## Phase 6: Admin User Management (待实现)
+## Phase 6: Manual Inventory Add (已完成) ✅
+
+### 6.1 Backend API ✅
+
+| Endpoint | Method | Status | Description |
+|----------|--------|--------|-------------|
+| `/inventory/manual-add` | POST | ✅ | 手动入库（无需订单） |
+
+### 6.2 Frontend Manual Add UI ✅
+
+| 功能 | 文件 | 状态 |
+|------|------|------|
+| 手动入库按钮 | `Inventory.tsx` | ✅ |
+| 入库模态框 | `Inventory.tsx` | ✅ |
+| Dialog 组件 | `dialog.tsx` | ✅ |
+
+---
+
+## Phase 7: Admin User Management (待实现)
 
 ### 6.1 Admin APIs (待实现)
+
+> **优先级**: P1 - 必须先实现才能管理用户
+
+| Endpoint | Method | Status | Description |
+|----------|--------|--------|-------------|
+| `/admin/users` | GET | ⏳ | 用户列表（分页、搜索） |
+| `/admin/users` | POST | ⏳ | 创建用户 |
+| `/admin/users/{id}` | PUT | ⏳ | 编辑用户 |
+| `/admin/users/{id}` | DELETE | ⏳ | 软删除（禁用用户） |
+| `/admin/users/{id}/activate` | POST | ⏳ | 启用用户 |
+| `/admin/users/{id}/role` | PUT | ⏳ | 修改角色 (admin/user) |
+
+### 6.2 Frontend Admin Page (待实现)
 
 | Endpoint | Method | Status | Description |
 |----------|--------|--------|-------------|
@@ -186,12 +217,36 @@
 
 ---
 
-## Phase 7: Notifications (待实现)
+## Phase 7: Notifications & Alerts (待实现)
 
 ### 7.1 Notification Features (待实现)
-- [ ] 入库提醒 (order arrives)
-- [ ] 低库存警告
-- [ ] 借用/归还通知
+> **优先级**: P2 - 增强用户体验
+
+| 功能 | 描述 | 实现方式 |
+|------|------|---------|
+| 入库提醒 | 订单确认到货时通知管理员 | 后端推送/前端轮询 |
+| 低库存警告 | 剩余量 < 20% 时高亮显示 | Dashboard + 库存列表 |
+| 借用/归还通知 | 借用/归还成功提示 | 前端 Alert |
+| CAS 库存预警 | 订购时提示已有库存 | 前端自动查询 |
+
+### 7.2 CAS Warning API (待实现)
+| Endpoint | Method | Status | Description |
+|----------|--------|--------|-------------|
+| `/inventory/cas/{cas}/total` | GET | ✅ | CAS 库存总量 |
+| `/inventory/cas/{cas}/borrowed-by` | GET | ⏳ | CAS 被谁借用 |
+| `/orders/cas-check` | POST | ⏳ | 订购时 CAS 预警 |
+
+---
+
+## Phase 8: Advanced Features (待规划)
+
+| 功能 | 描述 | 状态 |
+|------|------|------|
+| 手动入库 | 未提交订单的试剂手动入库 | ⏳ |
+| 批量操作 | 批量入库、批量归还 | ⏳ |
+| 高级搜索 | 多条件筛选、模糊搜索 | ⏳ |
+| 数据导出 | Excel 报表导出 | ⏳ |
+| 借用历史 | 显示最近 10 个借用人 | ⏳ |
 
 ---
 
@@ -235,6 +290,7 @@
 - `GET /inventory/dashboard/pending-stockin` - 待入库
 - `GET /inventory/import/template` - 导入模板
 - `POST /inventory/import` - 批量导入
+- `POST /inventory/manual-add` - 手动入库 ✅
 
 ---
 

@@ -11,16 +11,19 @@ import type { SortingState, ColumnFiltersState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { inventoryAPI } from '@/api/client'
 import { formatDate, cn } from '@/lib/utils'
-import { 
-  Search, 
-  ArrowUpDown, 
-  Package, 
+import {
+  Search,
+  ArrowUpDown,
+  Package,
   AlertTriangle,
   Loader2,
   Download,
-  Upload
+  Upload,
+  Plus,
+  X
 } from 'lucide-react'
 
 interface InventoryItem {
@@ -46,6 +49,22 @@ export function InventoryPage() {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+
+  // Manual add modal
+  const [showManualAdd, setShowManualAdd] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [formData, setFormData] = useState({
+    cas_number: '',
+    name: '',
+    alias: '',
+    specification: '',
+    initial_quantity: 1,
+    quantity_bottles: 1,
+    location: '',
+    is_hazardous: false,
+    notes: ''
+  })
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     loadInventory()
@@ -117,8 +136,8 @@ export function InventoryPage() {
             </span>
             {percentage < 20 && (
               <div className="w-16 h-1 bg-red-200 rounded mt-1">
-                <div 
-                  className="h-full bg-red-500 rounded" 
+                <div
+                  className="h-full bg-red-500 rounded"
                   style={{ width: `${percentage}%` }}
                 />
               </div>
@@ -162,8 +181,8 @@ export function InventoryPage() {
         const item = info.row.original
         if (item.status === 'in_stock') {
           return (
-            <Button 
-              size="sm" 
+            <Button
+              size="sm"
               onClick={async () => {
                 await inventoryAPI.borrow(item.id)
                 loadInventory()
@@ -194,11 +213,68 @@ export function InventoryPage() {
     },
   })
 
+  // Manual add form handlers
+  const validateManualAddForm = (): boolean => {
+    const errors: Record<string, string> = {}
+    if (!formData.cas_number.trim()) errors.cas_number = 'CAS号不能为空'
+    if (!/^\d{2,7}-\d{2}-\d$/.test(formData.cas_number)) {
+      errors.cas_number = 'CAS号格式无效 (如: 64-17-5)'
+    }
+    if (!formData.name.trim()) errors.name = '名称不能为空'
+    if (!formData.specification.trim()) errors.specification = '规格不能为空'
+    if (formData.initial_quantity < 0.1) errors.initial_quantity = '数量必须大于0'
+    if (formData.quantity_bottles < 1) errors.quantity_bottles = '瓶数必须大于0'
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
+  const handleManualAdd = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!validateManualAddForm()) return
+
+    setSubmitting(true)
+    try {
+      await inventoryAPI.manualAdd({
+        cas_number: formData.cas_number,
+        name: formData.name,
+        alias: formData.alias || undefined,
+        specification: formData.specification,
+        initial_quantity: formData.initial_quantity,
+        quantity_bottles: formData.quantity_bottles,
+        location: formData.location || undefined,
+        is_hazardous: formData.is_hazardous,
+        notes: formData.notes || undefined
+      })
+      setShowManualAdd(false)
+      setFormData({
+        cas_number: '',
+        name: '',
+        alias: '',
+        specification: '',
+        initial_quantity: 1,
+        quantity_bottles: 1,
+        location: '',
+        is_hazardous: false,
+        notes: ''
+      })
+      loadInventory()
+      alert('手动入库成功！')
+    } catch (error: any) {
+      alert(error.response?.data?.detail || '入库失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">库存管理</h1>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowManualAdd(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            手动入库
+          </Button>
           <Button variant="outline" onClick={() => window.location.href = '/import'}>
             <Upload className="w-4 h-4 mr-2" />
             批量导入
@@ -209,6 +285,151 @@ export function InventoryPage() {
           </Button>
         </div>
       </div>
+
+      {/* Manual Add Modal */}
+      <Dialog open={showManualAdd} onOpenChange={setShowManualAdd}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>手动入库</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleManualAdd} className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1">
+                  CAS号 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={formData.cas_number}
+                  onChange={(e) => setFormData({ ...formData, cas_number: e.target.value })}
+                  placeholder="如: 64-17-5"
+                  className={formErrors.cas_number ? 'border-red-500' : ''}
+                />
+                {formErrors.cas_number && (
+                  <p className="text-sm text-red-500 mt-1">{formErrors.cas_number}</p>
+                )}
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1">
+                  试剂名称 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="如: 乙醇 (Ethanol)"
+                  className={formErrors.name ? 'border-red-500' : ''}
+                />
+                {formErrors.name && (
+                  <p className="text-sm text-red-500 mt-1">{formErrors.name}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  规格 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={formData.specification}
+                  onChange={(e) => setFormData({ ...formData, specification: e.target.value })}
+                  placeholder="如: 500ml, 1L"
+                  className={formErrors.specification ? 'border-red-500' : ''}
+                />
+                {formErrors.specification && (
+                  <p className="text-sm text-red-500 mt-1">{formErrors.specification}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">别名</label>
+                <Input
+                  value={formData.alias}
+                  onChange={(e) => setFormData({ ...formData, alias: e.target.value })}
+                  placeholder="如: 酒精"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  每瓶含量 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={formData.initial_quantity}
+                  onChange={(e) => setFormData({ ...formData, initial_quantity: parseFloat(e.target.value) || 0 })}
+                  className={formErrors.initial_quantity ? 'border-red-500' : ''}
+                />
+                {formErrors.initial_quantity && (
+                  <p className="text-sm text-red-500 mt-1">{formErrors.initial_quantity}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  瓶数 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={formData.quantity_bottles}
+                  onChange={(e) => setFormData({ ...formData, quantity_bottles: parseInt(e.target.value) || 1 })}
+                  className={formErrors.quantity_bottles ? 'border-red-500' : ''}
+                />
+                {formErrors.quantity_bottles && (
+                  <p className="text-sm text-red-500 mt-1">{formErrors.quantity_bottles}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">存放位置</label>
+                <Input
+                  value={formData.location}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                  placeholder="如: A-1-1 柜"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-6">
+                <input
+                  type="checkbox"
+                  id="is_hazardous"
+                  checked={formData.is_hazardous}
+                  onChange={(e) => setFormData({ ...formData, is_hazardous: e.target.checked })}
+                  className="w-4 h-4 rounded"
+                />
+                <label htmlFor="is_hazardous" className="text-sm flex items-center gap-1">
+                  <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                  危险品
+                </label>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1">备注</label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  className="w-full h-20 px-3 py-2 border rounded-md bg-background resize-none"
+                  placeholder="其他说明..."
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4 border-t">
+              <Button type="submit" disabled={submitting}>
+                {submitting ? '入库中...' : '确认入库'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowManualAdd(false)}
+              >
+                取消
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <Card>

@@ -78,4 +78,15 @@ export const inventoryAPI = {
     api.post('/inventory/import', file, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+  manualAdd: (data: {
+    cas_number: string
+    name: string
+    alias?: string
+    specification: string
+    initial_quantity: number
+    quantity_bottles: number
+    location?: string
+    is_hazardous: boolean
+    notes?: string
+  }) => api.post('/inventory/manual-add', data),
 }

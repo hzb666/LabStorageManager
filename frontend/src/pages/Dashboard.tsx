@@ -63,11 +63,40 @@ export function Dashboard() {
         inventoryAPI.getMyBorrows(),
         inventoryAPI.getPendingStockin(),
       ])
-      setMyOrders((ordersRes.data as any).data || [])
-      const borrowsData = borrowsRes.data as DashboardResponse<MyBorrowItem>
-      const stockinData = stockinRes.data as DashboardResponse<PendingStockinItem>
-      setMyBorrows(borrowsData.data || [])
-      setPendingStockin(stockinData.data || [])
+
+      // Parse myOrders - backend returns { data: { pending: {orders}, approved: {orders}, arrived: {orders} } }
+      const ordersData = (ordersRes.data as any)?.data
+      if (ordersData && typeof ordersData === 'object') {
+        // Flatten the nested structure into a single array with status
+        const allOrders: MyOrder[] = []
+        if (ordersData.pending?.orders) {
+          ordersData.pending.orders.forEach((o: any) => {
+            allOrders.push({ ...o, status: 'PENDING', id: o.order_id || o.id })
+          })
+        }
+        if (ordersData.approved?.orders) {
+          ordersData.approved.orders.forEach((o: any) => {
+            allOrders.push({ ...o, status: 'APPROVED', id: o.order_id || o.id })
+          })
+        }
+        if (ordersData.arrived?.orders) {
+          ordersData.arrived.orders.forEach((o: any) => {
+            allOrders.push({ ...o, status: 'ARRIVED', id: o.order_id || o.id })
+          })
+        }
+        setMyOrders(allOrders)
+      } else {
+        setMyOrders([])
+      }
+
+      // Parse borrows - backend returns { data: [...], total: ... }
+      const borrowsData = (borrowsRes.data as any)?.data
+      setMyBorrows(Array.isArray(borrowsData) ? borrowsData : [])
+
+      // Parse pending stockin - backend returns { data: [...], total: ... }
+      const stockinData = (stockinRes.data as any)?.data
+      setPendingStockin(Array.isArray(stockinData) ? stockinData : [])
+
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
     } finally {

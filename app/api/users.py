@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.core.auth import (
@@ -27,6 +28,12 @@ from app.models.user import (
 router = APIRouter(prefix="/users", tags=["Users"])
 
 
+class LoginRequest(BaseModel):
+    """Login request body"""
+    username: str
+    password: str
+
+
 def get_user_by_username(db: Session, username: str) -> Optional[User]:
     """Get user by username"""
     statement = select(User).where(User.username == username)
@@ -36,6 +43,51 @@ def get_user_by_username(db: Session, username: str) -> Optional[User]:
 def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
     """Get user by ID"""
     return db.get(User, user_id)
+
+
+@router.post("/login")
+def login(
+    request: LoginRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Login endpoint - returns JWT token
+    
+    Args:
+        username: Username
+        password: Password
+        db: Database session
+    
+    Returns:
+        JWT token and user info
+    """
+    user = get_user_by_username(db, request.username)
+
+    if not user or not verify_password(request.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled"
+        )
+    
+    # Create JWT token
+    access_token = create_access_token(
+        user_id=user.id,
+        username=user.username,
+        role=user.role.value
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": UserResponse.model_validate(user)
+    }
 
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -172,49 +224,3 @@ def delete_user(
     
     db.delete(user)
     db.commit()
-
-
-@router.post("/auth/login")
-def login(
-    username: str,
-    password: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Login endpoint - returns JWT token
-    
-    Args:
-        username: Username
-        password: Password
-        db: Database session
-    
-    Returns:
-        JWT token and user info
-    """
-    user = get_user_by_username(db, username)
-    
-    if not user or not verify_password(password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled"
-        )
-    
-    # Create JWT token
-    access_token = create_access_token(
-        user_id=user.id,
-        username=user.username,
-        role=user.role.value
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": UserResponse.model_validate(user)
-    }

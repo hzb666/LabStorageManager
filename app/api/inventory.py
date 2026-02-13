@@ -20,11 +20,13 @@ from app.models.inventory import (
     InventoryBorrowReturn,
     BorrowLog,
     BorrowLogResponse,
+    ManualInventoryCreate,
 )
 from app.models.order import Order, OrderStatus
 from app.models.user import User
 from app.core.auth import get_current_user, require_admin
 from app.services.cas_utils import generate_internal_code, normalize_cas
+from app.services.spec_utils import parse_specification
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -399,9 +401,77 @@ def delete_inventory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Inventory item not found"
         )
-    
+
     db.delete(item)
     db.commit()
+
+
+@router.post("/manual-add", response_model=dict)
+def manual_add_inventory(
+    item_data: ManualInventoryCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually add inventory items without going through the order process.
+    Useful for adding reagents that were purchased outside the system.
+    Creates N items where N = quantity_bottles.
+    """
+    # Normalize CAS number
+    normalized_cas = normalize_cas(item_data.cas_number)
+
+    # Validate CAS format
+    if not normalized_cas or len(normalized_cas.split("-")) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid CAS format"
+        )
+
+    # Parse specification (e.g., "500ml" -> (500, "ml"))
+    per_bottle_value, unit = parse_specification(item_data.specification)
+
+    # Get next sequence number for this CAS
+    statement = select(Inventory).where(
+        Inventory.cas_number == normalized_cas
+    )
+    existing = db.exec(statement).all()
+    start_sequence = len(existing) + 1
+
+    # Create inventory items (one per bottle)
+    created_items = []
+
+    for i in range(item_data.quantity_bottles):
+        internal_code = generate_internal_code(normalized_cas, start_sequence + i)
+
+        db_inventory = Inventory(
+            internal_code=internal_code,
+            cas_number=normalized_cas,
+            name=item_data.name,
+            alias=item_data.alias,
+            location=item_data.location,
+            initial_quantity=per_bottle_value,
+            remaining_quantity=per_bottle_value,
+            unit=unit,
+            is_hazardous=item_data.is_hazardous,
+            notes=item_data.notes,
+            status=InventoryStatus.IN_STOCK,
+        )
+
+        db.add(db_inventory)
+        created_items.append(db_inventory)
+
+    db.commit()
+
+    # Refresh all created items
+    for item in created_items:
+        db.refresh(item)
+
+    return {
+        "message": "Manual stock-in successful",
+        "items_created": len(created_items),
+        "item_ids": [item.id for item in created_items],
+        "internal_codes": [item.internal_code for item in created_items]
+    }
 
 
 # ==================== Dashboard APIs ====================

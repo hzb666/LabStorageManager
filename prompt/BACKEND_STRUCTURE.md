@@ -135,4 +135,19 @@
 ### POST /api/inventory/import (Excel)
 * Logic: Parse Excel -> Validate CAS format -> Bulk Create Inventory Items.
 
+### POST /api/inventory/manual-add (待实现)
+* **功能**: 手动添加试剂入库（未提交订单的试剂）
+* **输入**: CAS号、名称、规格、数量、位置等
+* **逻辑**: 直接创建 Inventory 记录，不经过 Order
+
+### POST /api/orders/cas-warning (待实现)
+* **功能**: 订购时 CAS 库存预警
+* **输入**: CAS号、数量
+* **逻辑**: 查询库存中该 CAS 号的剩余总量，返回预警信息
+* **返回**: {"total_remaining": 100, "unit": "ml", "borrowed_by": [{"user": "张三", "quantity": 50}, ...]}
+
+### 借用历史 (GET /api/inventory/{id}/borrow-history)
+* **返回**: 最近 10 条 BorrowLog 记录（借用人、时间、数量）
+* **排序**: 按 borrow_time 降序
+
 > **Note**: User Management APIs and Audit Log APIs are documented in `IMPLEMENTATION_PLAN.md`

@@ -153,9 +153,12 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | 1.2 | ✅ | JWT 认证 |
 | 2.1-2.4 | ✅ | Order/Inventory CRUD, CAS Check, Stock-In |
 | 2.5 | ✅ | 工作流调整 (ARRIVED 状态, 确认到货) |
-| 3 | 🔄 | Dashboard APIs |
-| 4 | ⏳ | Excel 导入/导出 |
-| 5 | ⏳ | Frontend 初始化 |
+| 3 | ✅ | Dashboard APIs |
+| 4 | ✅ | Excel 导入/导出 |
+| 5 | ✅ | Frontend 页面 (Login, Dashboard, Orders, Inventory, Import) |
+| 6 | ✅ | 手动入库功能 |
+| 7 | ⏳ | Admin 用户管理 |
+| 8 | ⏳ | 通知系统 |
 
 ## 📄 许可证
 

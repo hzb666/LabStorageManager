@@ -182,7 +182,7 @@ export function OrdersPage() {
           )}
           onClick={() => setActiveTab('list')}
         >
-          我的订单
+          所有订单
         </button>
         <button
           className={cn(
@@ -423,7 +423,7 @@ export function OrdersPage() {
       {activeTab === 'list' && (
         <Card>
           <CardHeader>
-            <CardTitle>我的订单</CardTitle>
+            <CardTitle>所有订单</CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (

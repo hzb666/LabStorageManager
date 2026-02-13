@@ -30,6 +30,11 @@
 - [x] 5.2: Order Form with CAS Auto-check
 - [x] 5.3: Inventory Table with Sorting/Filtering
 
+### Phase 6: Manual Inventory Add
+- [x] 6.1: Backend API: POST /inventory/manual-add
+- [x] 6.2: Frontend UI: Manual Add Modal in Inventory Page
+- [x] 6.3: Dialog Component for Modal
+
 ---
 
 ## Timeline
@@ -44,10 +49,14 @@
 | 2026-02-13 | Phase 3 | ✅ | Dashboard APIs: my-orders, my-borrows, pending-stockin, return-item |
 | 2026-02-13 | Phase 4 | ✅ | Excel Import API: template, bulk create inventory |
 | 2026-02-13 | Phase 5 | ✅ | All Frontend Pages: Login, Dashboard, Orders, Inventory, Import |
+| 2026-02-13 | Bug Fix | ✅ | Login API: LoginRequest Pydantic model for JSON body |
+| 2026-02-13 | Bug Fix | ✅ | Create admin user in database |
+| 2026-02-13 | Bug Fix | ✅ | Dashboard: Flatten nested API response data |
+| 2026-02-14 | Feature | ✅ | Manual Inventory Add: Backend API + Frontend UI |
 
-**Last Updated**: 2026-02-13
-**Status**: Phase 6 In Progress - Admin User Management
-**Next**: Phase 6 - Admin User Management
+**Last Updated**: 2026-02-14
+**Status**: Phase 6 Complete - Manual Inventory Add Working
+**Next**: Phase 7 - Admin User Management
 
 ---
 
