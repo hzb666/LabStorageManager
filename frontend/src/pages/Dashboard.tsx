@@ -60,16 +60,16 @@ export function Dashboard() {
     }
   }
 
-  const handleReturn = async (inventoryId: number) => {
-    const quantity = prompt('请输入剩余数量:')
-    if (quantity === null) return
-    const qty = parseFloat(quantity)
-    if (isNaN(qty) || qty < 0) {
+  const handleReturn = async (item: MyBorrow) => {
+    const qty = window.prompt(`请输入 "${item.name}" 的剩余数量 (当前: ${item.remaining_quantity} ${item.unit}):`)
+    if (qty === null) return
+    const quantity = parseFloat(qty)
+    if (isNaN(quantity) || quantity < 0) {
       alert('请输入有效的数量')
       return
     }
     try {
-      await inventoryAPI.return(inventoryId, { remaining_quantity: qty })
+      await inventoryAPI.return(item.inventory_id, { remaining_quantity: quantity, unit: item.unit })
       loadDashboardData()
       alert('归还成功')
     } catch (error: any) {
@@ -148,21 +148,25 @@ export function Dashboard() {
                       CAS: {order.cas_number} • {formatDateTime(order.created_at)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
                     <span
                       className={`px-3 py-1 text-sm rounded-full ${
                         order.status === 'PENDING'
                           ? 'bg-yellow-100 text-yellow-800'
                           : order.status === 'APPROVED'
                           ? 'bg-blue-100 text-blue-800'
-                          : 'bg-green-100 text-green-800'
+                          : order.status === 'ARRIVED'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-gray-100 text-gray-800'
                       }`}
                     >
                       {order.status === 'PENDING'
                         ? '待审批'
                         : order.status === 'APPROVED'
                         ? '已审批'
-                        : '已到货'}
+                        : order.status === 'ARRIVED'
+                        ? '已到货'
+                        : order.status}
                     </span>
                   </div>
                 </div>
@@ -193,7 +197,7 @@ export function Dashboard() {
                       编号: {item.internal_code} • {item.remaining_quantity} {item.unit}
                     </p>
                   </div>
-                  <Button onClick={() => handleReturn(item.inventory_id)}>
+                  <Button onClick={() => handleReturn(item)}>
                     归还
                   </Button>
                 </div>

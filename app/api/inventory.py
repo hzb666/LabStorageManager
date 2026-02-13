@@ -568,7 +568,7 @@ def import_inventory(
             file_path=tmp_file_path,
             default_location=default_location,
             default_is_hazardous=default_is_hazardous,
-            user_id=user_id
+            user_id=admin_user.id
         )
         
         return {
