@@ -4,10 +4,18 @@
 
 ### 1. User (用户表)
 * `id`: Int, PK
-* `username`: String (Unique)
+* `username`: String (Unique, index)
 * `password_hash`: String
 * `role`: Enum ("admin", "user")
 * `full_name`: String
+* `department`: String (Nullable)
+* `phone`: String (Nullable)
+* `email`: String (Nullable)
+* `is_active`: Boolean (Default True)
+* `last_login`: Datetime (Nullable)
+* `login_count`: Int (Default 0)
+* `created_at`: Datetime
+* `updated_at`: Datetime
 
 ### 2. Order (订购表)
 * `id`: Int, PK
@@ -127,3 +135,65 @@
 
 ### POST /api/inventory/import (Excel)
 * Logic: Parse Excel -> Validate CAS format -> Bulk Create Inventory Items.
+
+---
+
+## User Management APIs (Admin Only)
+
+### GET /api/admin/users
+* List users with pagination & filters.
+* Query Parameters: `page`, `page_size`, `role`, `is_active`, `search`
+* Response: Pagination with user list
+
+### POST /api/admin/users
+* Create new user.
+* Input: `{ username, password, full_name, role, department, phone, email }`
+
+### GET /api/admin/users/{id}
+* Get user details by ID.
+
+### PUT /api/admin/users/{id}
+* Update user information.
+* Input: `{ username, full_name, role, department, phone, email, is_active }`
+
+### DELETE /api/admin/users/{id}
+* Soft delete: Set `is_active = False`.
+
+### POST /api/admin/users/{id}/activate
+* Activate deactivated user: Set `is_active = True`.
+
+### POST /api/admin/users/{id}/reset-password
+* Reset user password (admin only).
+* Input: `{ new_password }`
+
+### PUT /api/admin/users/{id}/role
+* Update user role.
+* Input: `{ role: "admin" | "user" }`
+
+### GET /api/admin/users/stats
+* User statistics.
+* Response: `{ total_users, active_users, inactive_users, admins, regular_users, recent_logins_7d }`
+
+### GET /api/admin/users/{id}/activity
+* Get user activity log.
+
+---
+
+## Audit Log APIs (Admin Only)
+
+### AuditLog Model
+* `id`: int, PK
+* `user_id`: FK -> User
+* `action`: string (e.g., "order_create", "inventory_borrow", "user_login")
+* `resource_type`: string (e.g., "order", "inventory", "user")
+* `resource_id`: int
+* `details`: JSON (Nullable)
+* `ip_address`: string (Nullable)
+* `created_at`: datetime
+
+### GET /api/admin/audit-logs
+* List audit logs with filters.
+* Query Parameters: `user_id`, `action`, `resource_type`, `start_date`, `end_date`, `page`, `page_size`
+
+### GET /api/admin/audit-logs/stats
+* Audit log statistics (action counts by type, daily activity, etc.)

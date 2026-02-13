@@ -75,20 +75,112 @@
 
 ## Plans
 
-### Immediate Next Steps
-1. **Phase 6: Admin Management**
-   - [ ] User Management (CRUD, role assignment)
-   - [ ] System Settings
-   - [ ] Data Backup/Restore
+### Phase 6: Admin Management
 
-2. **Phase 7: Advanced Features**
-   - [ ] Low stock alerts and notifications
-   - [ ] Batch operations (bulk stock-in, bulk return)
-   - [ ] Audit log and activity tracking
+#### 6.1 User Management API Design
 
-### Future Enhancements
+**User Model Extensions (Optional)**:
+- `last_login`: datetime (Nullable)
+- `login_count`: int (Default 0)
+- `department`: string (Nullable)
+- `phone`: string (Nullable)
+- `email`: string (Nullable)
+
+**User Management APIs**:
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/admin/users` | GET | List users with pagination & filters | Admin |
+| `/api/admin/users` | POST | Create new user | Admin |
+| `/api/admin/users/{id}` | GET | Get user details | Admin |
+| `/api/admin/users/{id}` | PUT | Update user | Admin |
+| `/api/admin/users/{id}` | DELETE | Deactivate user (soft delete) | Admin |
+| `/api/admin/users/{id}/activate` | POST | Activate deactivated user | Admin |
+| `/api/admin/users/{id}/reset-password` | POST | Reset user password | Admin |
+| `/api/admin/users/{id}/role` | PUT | Update user role | Admin |
+
+**Query Parameters for GET `/api/admin/users`**:
+- `page`: int (default 1)
+- `page_size`: int (default 20)
+- `role`: string (filter by role)
+- `is_active`: bool (filter by status)
+- `search`: string (search by username/full_name)
+
+#### 6.2 User Statistics API
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/admin/users/stats` | GET | User statistics | Admin |
+| `/api/admin/users/{id}/activity` | GET | User activity log | Admin |
+
+**Stats Response**:
+```json
+{
+  "total_users": 50,
+  "active_users": 45,
+  "inactive_users": 5,
+  "admins": 3,
+  "regular_users": 47,
+  "recent_logins_7d": 30
+}
+```
+
+#### 6.3 Activity/Audit Log API
+
+**AuditLog Model**:
+- `id`: int, PK
+- `user_id`: FK -> User
+- `action`: string (e.g., "order_create", "inventory_borrow", "user_login")
+- `resource_type`: string (e.g., "order", "inventory", "user")
+- `resource_id`: int
+- `details`: JSON (Nullable)
+- `ip_address`: string (Nullable)
+- `created_at`: datetime
+
+**Audit Log APIs**:
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/admin/audit-logs` | GET | List audit logs with filters | Admin |
+| `/api/admin/audit-logs/stats` | GET | Audit log statistics | Admin |
+
+**Query Parameters**:
+- `user_id`: int (filter by user)
+- `action`: string (filter by action type)
+- `resource_type`: string
+- `start_date`: datetime
+- `end_date`: datetime
+- `page`, `page_size`: pagination
+
+#### 6.4 Frontend: Admin User Management Page
+
+**Features**:
+- User list table with sorting/filtering
+- Create user modal
+- Edit user dialog
+- Reset password dialog
+- Toggle user active status
+- Change user role
+- User activity view
+
+**UI Components**:
+- `UsersTable.tsx` - TanStack Table with all columns
+- `CreateUserModal.tsx` - Form to create new user
+- `EditUserDialog.tsx` - Dialog to edit user details
+- `ResetPasswordDialog.tsx` - Dialog to reset user password
+- `UserActivityLog.tsx` - Show user's activity history
+
+### Phase 7: Advanced Features
+
+- [ ] Low stock alerts and notifications
+- [ ] Batch operations (bulk stock-in, bulk return)
 - [ ] Advanced search and filters
 - [ ] Data export reports
+
+### Future Enhancements
 - [ ] Multi-location support
 - [ ] Integration with lab instruments
+- [ ] Mobile app (PWA)
+- [ ] Barcode/QR code scanning
+- [ ] Expiration date tracking
+- [ ] Chemical compatibility check
 
