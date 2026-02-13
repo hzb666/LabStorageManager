@@ -1,5 +1,12 @@
 # Progress.md
 
+## Timeline
+
+| Date | Phase | Status | Description |
+|------|-------|--------|-------------|
+| 2026-02-12 | Phase 1.1 | ✅ | Backend init: FastAPI + SQLModel + SQLite (WAL mode) |
+| 2026-02-13 | Phase 1.2 | ✅ | JWT Auth: login, get_current_user, protected endpoints |
+
 ## Phase 1: Infrastructure
 - [x] 1.1: Init FastAPI + SQLModel + SQLite. **Action**: Configure `sqlite_url` with `?mode=wal`. ✓
 - [x] 1.2: Implement `User` model & Auth (JWT). ✓
