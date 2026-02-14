@@ -276,11 +276,11 @@ export function InventoryPage() {
             手动入库
           </Button>
           <Button variant="outline" onClick={() => window.location.href = '/import'}>
-            <Upload className="w-4 h-4 mr-2" />
+            <Download className="w-4 h-4 mr-2" />
             批量导入
           </Button>
           <Button variant="outline">
-            <Download className="w-4 h-4 mr-2" />
+            <Upload className="w-4 h-4 mr-2" />
             导出
           </Button>
         </div>

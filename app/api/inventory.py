@@ -123,7 +123,7 @@ def stock_in_order(
     order_id: int,
     location: str = "默认位置",
     db: Session = Depends(get_db),
-    # Critical: current_user should be checked
+    current_user: User = Depends(require_admin),
 ):
     """
     Stock-in items from an approved order.
@@ -367,6 +367,7 @@ def update_inventory(
     inventory_id: int,
     update: InventoryUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update inventory information"""
     item = get_inventory_by_id(db, inventory_id)
@@ -393,6 +394,7 @@ def update_inventory(
 def delete_inventory(
     inventory_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     """Delete inventory item (not recommended, prefer status change)"""
     item = get_inventory_by_id(db, inventory_id)

@@ -79,7 +79,7 @@ def create_order(
 async def upload_order_image(
     order_id: int,
     file: UploadFile = File(...),
-    # Critical: current_user should be checked
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -151,7 +151,7 @@ def update_order(
     order_id: int,
     order_update: OrderUpdate,
     db: Session = Depends(get_db),
-    # Critical: current_user should be checked
+    current_user: User = Depends(get_current_user),
 ):
     """Update order information"""
     order = get_order_by_id(db, order_id)
@@ -306,7 +306,7 @@ def confirm_arrival(
 @router.get("/dashboard/arrived-orders")
 def get_arrived_orders(
     db: Session = Depends(get_db),
-    # Critical: current_user should be checked
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get all orders that have arrived but not yet stocked in.
@@ -406,7 +406,7 @@ def get_my_orders(
 def delete_order(
     order_id: int,
     db: Session = Depends(get_db),
-    # Critical: current_user should be checked
+    current_user: User = Depends(get_current_user),
 ):
     """Delete an order"""
     order = get_order_by_id(db, order_id)
