@@ -70,6 +70,7 @@ export const orderAPI = {
   stockIn: (id: number) => api.post(`/orders/${id}/stock-in`),
   getMyOrders: () => api.get('/orders/dashboard/my-orders'),
   getArrivedOrders: () => api.get('/orders/dashboard/arrived-orders'),
+  checkCasWarning: (casNumber: string) => api.post('/orders/cas-warning', null, { params: { cas_number: casNumber } }),
 }
 
 // Inventory APIs

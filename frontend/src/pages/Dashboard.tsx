@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { orderAPI, inventoryAPI } from '@/api/client'
 import { formatDateTime, cn } from '@/lib/utils'
-import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2 } from 'lucide-react'
+import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2, PackagePlus, CheckCircle } from 'lucide-react'
 
 interface MyBorrowItem {
   inventory_id: number
@@ -159,6 +159,28 @@ export function Dashboard() {
     }
   }
 
+  // 处理确认到货（暂不入库）
+  const handleConfirmArrival = async (orderId: number) => {
+    try {
+      await orderAPI.confirmArrival(orderId)
+      loadDashboardData()
+      alert('⚠️ 试剂已到货，请及时完成入库操作！')
+    } catch (error: any) {
+      alert(error.response?.data?.detail || '操作失败')
+    }
+  }
+
+  // 处理一键入库
+  const handleQuickStockIn = async (orderId: number) => {
+    try {
+      await orderAPI.stockIn(orderId)
+      loadDashboardData()
+      alert('入库成功！')
+    } catch (error: any) {
+      alert(error.response?.data?.detail || '入库失败')
+    }
+  }
+
   const openStockinModal = (item: PendingStockinItem) => {
     setSelectedStockin(item)
     setStockinLocation('')
@@ -261,6 +283,26 @@ export function Dashboard() {
                         ? '已到货'
                         : order.status}
                     </span>
+                    {order.status === 'APPROVED' && (
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleConfirmArrival(order.id)}
+                        >
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          已到货
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => handleQuickStockIn(order.id)}
+                        >
+                          <PackagePlus className="w-3 h-3 mr-1" />
+                          一键入库
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

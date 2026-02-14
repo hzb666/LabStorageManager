@@ -11,7 +11,8 @@ import {
   CheckCircle, 
   Loader2,
   Plus,
-  X
+  X,
+  PackagePlus
 } from 'lucide-react'
 
 interface CASInventoryInfo {
@@ -109,6 +110,11 @@ export function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null)
   const [arrivalNotes, setArrivalNotes] = useState('')
   const [arrivalLoading, setArrivalLoading] = useState(false)
+
+  // Stock-in modal state
+  const [showStockInModal, setShowStockInModal] = useState(false)
+  const [stockInLocation, setStockInLocation] = useState('')
+  const [stockInLoading, setStockInLoading] = useState(false)
 
   // CAS check with warning
   useEffect(() => {
@@ -226,6 +232,29 @@ export function OrdersPage() {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
+  // Stock-in modal handlers
+  const openStockInModal = (order: OrderItem) => {
+    setSelectedOrder(order)
+    setStockInLocation(order.location || '')
+    setShowStockInModal(true)
+  }
+
+  const handleStockIn = async () => {
+    if (!selectedOrder) return
+    setStockInLoading(true)
+    try {
+      await orderAPI.stockIn(selectedOrder.id)
+      setShowStockInModal(false)
+      setSelectedOrder(null)
+      loadOrders()
+      alert('入库成功！')
+    } catch (error: any) {
+      alert(error.response?.data?.detail || '入库失败')
+    } finally {
+      setStockInLoading(false)
+    }
+  }
+
   // Arrival modal handlers
   const openArrivalModal = (order: OrderItem) => {
     setSelectedOrder(order)
@@ -245,8 +274,7 @@ export function OrdersPage() {
       // 入库提醒：如果是试剂且非 common_public，显示入库提示
       const message = response.data?.message || ''
       if (message.includes('已到货待入库')) {
-        // TODO: 建议安装 sonner 替换为 toast 通知
-        console.log('试剂已到货，请及时完成入库操作')
+        alert('⚠️ 试剂已到货，请及时完成入库操作！')
       }
     } catch (error: any) {
       alert(error.response?.data?.detail || '确认到货失败')
@@ -619,6 +647,16 @@ export function OrdersPage() {
                           确认到货
                         </Button>
                       )}
+                      {order.status === 'ARRIVED' && (
+                        <Button 
+                          size="sm" 
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => openStockInModal(order)}
+                        >
+                          <PackagePlus className="w-4 h-4 mr-1" />
+                          一键入库
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -678,6 +716,68 @@ export function OrdersPage() {
                 <Button
                   variant="outline"
                   onClick={() => setShowArrivalModal(false)}
+                  className="flex-1"
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stock-In Modal */}
+      {showStockInModal && selectedOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">一键入库</h2>
+              <button
+                onClick={() => setShowStockInModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                <p className="font-medium text-green-800">{selectedOrder.name}</p>
+                <p className="text-sm text-green-600">
+                  CAS: {selectedOrder.cas_number} • {selectedOrder.specification} × {selectedOrder.quantity}
+                </p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">存放位置</label>
+                <Input
+                  value={stockInLocation}
+                  onChange={(e) => setStockInLocation(e.target.value)}
+                  placeholder="如: A-1-1 柜"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  留空则由当前用户暂管，后续可在个人中心补充位置
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  onClick={handleStockIn}
+                  disabled={stockInLoading}
+                  className="flex-1 bg-green-600 hover:bg-green-700"
+                >
+                  {stockInLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      入库中...
+                    </>
+                  ) : (
+                    '确认入库'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowStockInModal(false)}
                   className="flex-1"
                 >
                   取消

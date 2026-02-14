@@ -35,6 +35,9 @@
 - [x] 6.2: Frontend UI: Manual Add Modal in Inventory Page
 - [x] 6.3: Dialog Component for Modal
 
+### Phase 7: Admin User Management
+- [x] User Management (CRUD, role assignment)
+- [x] Frontend Admin User Management Page
 ---
 
 ## Timeline
@@ -56,6 +59,7 @@
 | 2026-02-14 | Code Review | ✅ | 代码审查 - 修复7个问题 (密钥硬编码、SQL注入、prompt()、导出功能等) |
 | 2026-02-14 | Code Review | ✅ | 代码审查第二轮 - 修复3个问题 (Orders.tsx prompt()、枚举比较、导出权限) |
 | 2026-02-14 | Phase 7 | ✅ | 用户管理 - 软删除、启用API、搜索筛选、前端页面 |
+| 2026-02-14 | Phase 8 | ✅ | 通知与提醒 - CAS预警、入库提醒、低库存UI、借用超时标记 |
 
 **Last Updated**: 2026-02-14
 **Status**: Phase 7 用户管理已完成
@@ -65,24 +69,18 @@
 
 ## Plans
 
-### Phase 7: Admin User Management
-- [x] User Management (CRUD, role assignment)
-- [x] Frontend Admin User Management Page
 
 ### Phase 8: Notifications & Alerts
-- [ ] Stock-in notification (when order arrives)
-- [ ] Low stock alerts
-- [ ] Borrow/Return notifications
+- [x] CAS number already has alerts (when submit orders)
+- [x] Stock-in notification (when order arrives)
+- [x] Low stock alerts
+- [x] Borrow/Return notifications
 
-### Phase 8: Advanced Features
+### Phase 9: Advanced Features
 - [ ] Batch operations (bulk stock-in, bulk return)
 - [ ] Advanced search and filters
 - [ ] Data export reports
 
 ### Future Enhancements
 - [ ] Multi-location support
-- [ ] Integration with lab instruments
-- [ ] Mobile app (PWA)
-- [ ] Barcode/QR code scanning
-- [ ] Expiration date tracking
 - [ ] Chemical compatibility check

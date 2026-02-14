@@ -181,60 +181,81 @@
 
 ---
 
-## Phase 7: Admin User Management (待实现)
+## Phase 7: Admin User Management (已完成) ✅
 
-### 6.1 Admin APIs (待实现)
+### 7.1 Admin APIs (已完成) ✅
 
 > **优先级**: P1 - 必须先实现才能管理用户
 
 | Endpoint | Method | Status | Description |
 |----------|--------|--------|-------------|
-| `/admin/users` | GET | ⏳ | 用户列表（分页、搜索） |
-| `/admin/users` | POST | ⏳ | 创建用户 |
-| `/admin/users/{id}` | PUT | ⏳ | 编辑用户 |
-| `/admin/users/{id}` | DELETE | ⏳ | 软删除（禁用用户） |
-| `/admin/users/{id}/activate` | POST | ⏳ | 启用用户 |
-| `/admin/users/{id}/role` | PUT | ⏳ | 修改角色 (admin/user) |
+| `/admin/users` | GET | ✅ | 用户列表（分页、搜索） |
+| `/admin/users` | POST | ✅ | 创建用户 |
+| `/admin/users/{id}` | PUT | ✅ | 编辑用户 |
+| `/admin/users/{id}` | DELETE | ✅ | 软删除（禁用用户） |
+| `/admin/users/{id}/activate` | POST | ✅ | 启用用户 |
+| `/admin/users/{id}/role` | PUT | ✅ | 修改角色 (admin/user) |
 
-### 6.2 Frontend Admin Page (待实现)
-
-| Endpoint | Method | Status | Description |
-|----------|--------|--------|-------------|
-| `/admin/users` | GET | ⏳ | 用户列表（分页） |
-| `/admin/users` | POST | ⏳ | 创建用户 |
-| `/admin/users/{id}` | PUT | ⏳ | 编辑用户 |
-| `/admin/users/{id}` | DELETE | ⏳ | 软删除（禁用） |
-| `/admin/users/{id}/activate` | POST | ⏳ | 启用用户 |
-| `/admin/users/{id}/role` | PUT | ⏳ | 修改角色 |
-
-### 6.2 Frontend Admin Page (待实现)
+### 7.2 Frontend Admin Page (已完成) ✅
 
 | 功能 | 文件 | 状态 |
 |------|------|------|
-| 用户列表 | `AdminUsers.tsx` | ⏳ |
-| 创建用户弹窗 | `CreateUserModal.tsx` | ⏳ |
-| 编辑用户弹窗 | `EditUserDialog.tsx` | ⏳ |
+| 用户列表 | `AdminUsers.tsx` | ✅ |
+| 创建用户弹窗 | `AdminUsers.tsx` (CreateUserModal) | ✅ |
+| 编辑用户弹窗 | `AdminUsers.tsx` (EditUserDialog) | ✅ |
+| 搜索筛选 | `AdminUsers.tsx` | ✅ |
 
 ---
 
-## Phase 7: Notifications & Alerts (待实现)
+## Phase 8: Notifications & Alerts (待实现)
 
-### 7.1 Notification Features (待实现)
-> **优先级**: P2 - 增强用户体验
+### 8.1 CAS 重复订购预警 (待实现)
+> **优先级**: P1 - 防止重复订购
 
-| 功能 | 描述 | 实现方式 |
-|------|------|---------|
-| 入库提醒 | 订单确认到货时通知管理员 | 后端推送/前端轮询 |
-| 低库存警告 | 剩余量 < 20% 时高亮显示 | Dashboard + 库存列表 |
-| 借用/归还通知 | 借用/归还成功提示 | 前端 Alert |
-| CAS 库存预警 | 订购时提示已有库存 | 前端自动查询 |
+| 功能 | 描述 | 状态 |
+|------|------|------|
+| 库存来源 | 库中未用完的(status != consumed) | ⏳ |
+| 订单来源 | 已订购未入库的订单(status IN pending/approved/arrived) | ⏳ |
+| 排除项 | order_reason = "common_public" (常用或公用) 不预警 | ⏳ |
+| 展示方式 | 前端弹窗通知 + 最近一个订购单和对应库存信息 | ⏳ |
+| 触发时机 | Orders.tsx 输入 CAS 后自动查询并展示 | ⏳ |
 
-### 7.2 CAS Warning API (待实现)
 | Endpoint | Method | Status | Description |
 |----------|--------|--------|-------------|
-| `/inventory/cas/{cas}/total` | GET | ✅ | CAS 库存总量 |
-| `/inventory/cas/{cas}/borrowed-by` | GET | ⏳ | CAS 被谁借用 |
-| `/orders/cas-check` | POST | ⏳ | 订购时 CAS 预警 |
+| `/orders/cas-warning` | POST | ✅ | CAS 预警查询（返回详细信息：库存位置/借用人 + 订单详情） |
+
+### 8.2 入库提醒 (待实现)
+> **优先级**: P1 - 确保试剂及时入库
+
+| 功能 | 描述 | 状态 |
+|------|------|------|
+| 触发时机 | 个人中心点击"确认收货"时 | ⏳ |
+| 排除项 | type=consumable 或 order_reason=common_public 不触发 | ⏳ |
+| 展示方式 | 弹窗询问是否立即入库 | ⏳ |
+| 后续操作 | 若选择否，在"已到货列表"可再次触发入库 | ⏳ |
+
+### 8.3 低库存警告 (待实现 - UI展示)
+> **优先级**: P2 - 视觉提醒
+
+| 功能 | 描述 | 状态 |
+|------|------|------|
+| 预警条件 | remaining_quantity < initial_quantity * 20% | ⏳ |
+| 展示方式 | 库存列表用颜色醒目标识（红色） | ⏳ |
+| 通知方式 | 不需要推送，仅 UI 展示 | ⏳ |
+
+### 8.4 借用超时提醒 (待实现)
+> **优先级**: P2 - 借用管理
+
+| 功能 | 描述 | 状态 |
+|------|------|------|
+| 超时条件 | 借用超过 3 天未归还 | ⏳ |
+| 展示位置 | 个人中心显示超时借用列表 | ⏳ |
+| 库存列表 | 显示谁正在借用该试剂 | ⏳ |
+
+| Endpoint | Method | Status | Description |
+|----------|--------|--------|-------------|
+| `/inventory/dashboard/my-borrows` | GET | ✅ | 我的借用列表（含超时标记） |
+| `/inventory/dashboard/overdue-borrows` | GET | ✅ | 超时借用列表（已合并到 my-borrows） |
 
 ---
 

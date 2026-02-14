@@ -556,6 +556,9 @@ def get_my_borrows(
     
     items = db.exec(statement).all()
     
+    # Calculate borrow duration
+    now = datetime.utcnow()
+    
     return {
         "data": [
             {
@@ -565,11 +568,14 @@ def get_my_borrows(
                 "cas_number": item.cas_number,
                 "remaining_quantity": item.remaining_quantity,
                 "unit": item.unit,
-                "borrow_time": item.updated_at  # Approximate borrow time
+                "borrow_time": item.updated_at,
+                "borrow_days": (now - item.updated_at).days if item.updated_at else 0,
+                "is_overdue": ((now - item.updated_at).days > 3) if item.updated_at else False
             }
             for item in items
         ],
-        "total": len(items)
+        "total": len(items),
+        "overdue_count": sum(1 for item in items if item.updated_at and (now - item.updated_at).days > 3)
     }
 
 
