@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./lab_inventory.db?mode=wal"
     
     # JWT Authentication
-    secret_key: str = Field(default=None, description="JWT secret key")
+    secret_key: str = Field(default="", description="JWT secret key")
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30 * 24 * 60  # 30 days
     

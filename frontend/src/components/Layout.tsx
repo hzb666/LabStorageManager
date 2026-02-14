@@ -6,11 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard,
-  ShoppingCart,
   Package,
   FileSpreadsheet,
   LogOut,
-  Menu,
   Users,
   TestTube,
   FlaskConical,
@@ -20,7 +18,6 @@ const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
   { path: '/reagents', label: '试剂订购', icon: TestTube },
   { path: '/consumables', label: '耗材订购', icon: FlaskConical },
-  { path: '/orders', label: '订单管理', icon: ShoppingCart },
   { path: '/inventory', label: '库存管理', icon: Package },
   { path: '/import', label: '导入库存', icon: FileSpreadsheet },
 ]

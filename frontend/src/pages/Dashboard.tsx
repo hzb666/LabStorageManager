@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { orderAPI, inventoryAPI } from '@/api/client'
+import { reagentOrderAPI, inventoryAPI } from '@/api/client'
 import { formatDateTime, cn } from '@/lib/utils'
 import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2, PackagePlus, CheckCircle } from 'lucide-react'
 
@@ -65,7 +65,7 @@ export function Dashboard() {
   const loadDashboardData = async () => {
     try {
       const [ordersRes, borrowsRes, stockinRes] = await Promise.all([
-        orderAPI.getMyOrders(),
+        reagentOrderAPI.getMyOrders(),
         inventoryAPI.getMyBorrows(),
         inventoryAPI.getPendingStockin(),
       ])
@@ -162,7 +162,7 @@ export function Dashboard() {
   // 处理确认到货（暂不入库）
   const handleConfirmArrival = async (orderId: number) => {
     try {
-      await orderAPI.confirmArrival(orderId)
+      await reagentOrderAPI.confirmArrival(orderId)
       loadDashboardData()
       alert('⚠️ 试剂已到货，请及时完成入库操作！')
     } catch (error: any) {
@@ -173,7 +173,7 @@ export function Dashboard() {
   // 处理一键入库
   const handleQuickStockIn = async (orderId: number) => {
     try {
-      await orderAPI.stockIn(orderId)
+      await reagentOrderAPI.stockIn(orderId)
       loadDashboardData()
       alert('入库成功！')
     } catch (error: any) {

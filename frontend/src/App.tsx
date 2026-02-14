@@ -2,7 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { Login } from '@/pages/Login'
 import { Dashboard } from '@/pages/Dashboard'
-import { OrdersPage } from '@/pages/Orders'
 import { InventoryPage } from '@/pages/Inventory'
 import { ImportPage } from '@/pages/Import'
 import { AdminUsersPage } from '@/pages/AdminUsers'
@@ -32,7 +31,6 @@ function App() {
           }
         >
           <Route index element={<Dashboard />} />
-          <Route path="orders" element={<OrdersPage />} />
           <Route path="reagents" element={<ReagentOrdersPage />} />
           <Route path="consumables" element={<ConsumableOrdersPage />} />
           <Route path="inventory" element={<InventoryPage />} />

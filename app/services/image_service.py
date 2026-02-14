@@ -5,7 +5,7 @@ Images are stored in filesystem, database only stores URL/path
 """
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -106,7 +106,7 @@ def process_uploaded_image(file: UploadFile) -> tuple[str, str]:
     thumbnail.thumbnail((200, 200), Image.Resampling.LANCZOS)
     
     # Generate unique filename with UUID
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     unique_id = str(uuid.uuid4())[:8]
     filename = f"{timestamp}_{unique_id}.jpg"
     
@@ -143,7 +143,7 @@ def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:
     # Generate unique filename
     file_ext = Path(file.filename).suffix.lower() if file.filename else ".bin"
     unique_id = str(uuid.uuid4())[:8]
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"{timestamp}_{unique_id}{file_ext}"
     
     # Determine save path

@@ -4,7 +4,7 @@ Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-01")
 Sequence: Auto-increment per CAS number group
 """
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import text
 from sqlmodel import Session
@@ -32,7 +32,7 @@ def generate_internal_code(
         raise ValueError(f"Invalid CAS number format: {cas_number}")
     
     # Get current date in yymmdd format
-    date_str = datetime.utcnow().strftime("%y%m%d")
+    date_str = datetime.now(timezone.utc).strftime("%y%m%d")
     
     # Get the current max sequence for this CAS number
     # Internal codes follow pattern: CAS-Date-Sequence
@@ -44,7 +44,7 @@ def generate_internal_code(
         WHERE internal_code LIKE :pattern
     """)
     
-    result = session.execute(query, {
+    result = session.exec(query, {
         "prefix": prefix,
         "pattern": f"{prefix}%"
     }).scalar()
@@ -86,5 +86,5 @@ def get_next_sequence(
         WHERE cas_number = :cas_number
     """)
     
-    result = session.execute(query, {"cas_number": cas_number}).scalar()
+    result = session.exec(query, {"cas_number": cas_number}).scalar()
     return (result or 0) + 1

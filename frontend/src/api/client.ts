@@ -55,25 +55,7 @@ export const userAdminAPI = {
   updateRole: (id: number, role: string) => api.put(`/users/${id}/role`, null, { params: { role } }),
 }
 
-// Order APIs
-export const orderAPI = {
-  list: (params?: any) => api.get('/orders', { params }),
-  get: (id: number) => api.get(`/orders/${id}`),
-  create: (data: any) => api.post('/orders', data),
-  update: (id: number, data: any) => api.put(`/orders/${id}`, data),
-  delete: (id: number) => api.delete(`/orders/${id}`),
-  approve: (id: number) => api.post(`/orders/${id}/approve`),
-  reject: (id: number, reason: string) => 
-    api.post(`/orders/${id}/reject`, { reason }),
-  confirmArrival: (id: number, notes?: string) =>
-    api.post(`/orders/${id}/confirm-arrival`, { arrival_notes: notes }),
-  stockIn: (id: number) => api.post(`/orders/${id}/stock-in`),
-  getMyOrders: () => api.get('/orders/dashboard/my-orders'),
-  getArrivedOrders: () => api.get('/orders/dashboard/arrived-orders'),
-  checkCasWarning: (casNumber: string) => api.post('/orders/cas-warning', null, { params: { cas_number: casNumber } }),
-}
-
-// Reagent Order APIs (new)
+// Reagent Order APIs
 export const reagentOrderAPI = {
   list: (params?: any) => api.get('/reagent-orders', { params }),
   get: (id: number) => api.get(`/reagent-orders/${id}`),

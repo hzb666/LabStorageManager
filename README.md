@@ -34,22 +34,32 @@ LabStorageManager/
 │   │   └── auth.py             # JWT 认证模块
 │   ├── models/
 │   │   ├── user.py             # 用户模型
-│   │   ├── order.py            # 订购单模型
+│   │   ├── reagent_order.py    # 试剂订单模型
+│   │   ├── consumable_order.py # 耗材订单模型
 │   │   └── inventory.py        # 库存模型 + BorrowLog
 │   ├── api/
 │   │   ├── users.py            # 用户 API
-│   │   ├── orders.py           # 订购单 API
+│   │   ├── reagent_orders.py   # 试剂订单 API
+│   │   ├── consumable_orders.py# 耗材订单 API
 │   │   └── inventory.py        # 库存 API
 │   └── services/
 │       ├── cas_utils.py         # CAS 号标准化
 │       ├── spec_utils.py        # 规格解析
 │       ├── internal_code.py     # 内部编码生成
 │       └── image_service.py     # 图片压缩服务
+├── frontend/
+│   └── src/
+│       ├── pages/
+│       │   ├── ReagentOrders.tsx   # 试剂订购页
+│       │   ├── ConsumableOrders.tsx # 耗材订购页
+│       │   └── ...
+│       └── api/
+│           └── client.ts        # API 客户端
 ├── prompt/                      # 需求文档
 │   ├── PRD.md                   # 产品需求文档
 │   ├── BACKEND_STRUCTURE.md     # 后端架构设计
 │   ├── APP_FLOW.md              # 应用流程
-│   ├── MAPPING_TABLE.md          # 前后端枚举映射
+│   ├── MAPPING_TABLE.md         # 前后端枚举映射
 │   ├── Progress.md              # 开发进度
 │   └── Lessons.md               # 经验教训
 └── static/                      # 图片存储目录

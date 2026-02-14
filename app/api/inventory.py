@@ -22,7 +22,7 @@ from app.models.inventory import (
     BorrowLogResponse,
     ManualInventoryCreate,
 )
-from app.models.order import Order, OrderStatus
+from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.models.user import User
 from app.core.auth import get_current_user, require_admin
 from app.services.cas_utils import generate_internal_code, normalize_cas
@@ -132,20 +132,14 @@ def stock_in_order(
     
     Note: Uses retry logic to handle race conditions on sequence numbers.
     """
-    order = db.get(Order, order_id)
+    order = db.get(ReagentOrder, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
     
-    if order.type != "reagent":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only reagent orders can be stocked in"
-        )
-    
-    if order.status != OrderStatus.APPROVED:
+    if order.status != ReagentOrderStatus.APPROVED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Order must be approved before stocking. Current status: {order.status}"
@@ -185,7 +179,7 @@ def stock_in_order(
                 created_items.append(db_inventory)
             
             # Update order status
-            order.status = OrderStatus.STOCKED
+            order.status = ReagentOrderStatus.STOCKED
             order.updated_at = datetime.utcnow()
             
             db.commit()

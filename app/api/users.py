@@ -37,7 +37,7 @@ class LoginRequest(BaseModel):
 def get_user_by_username(db: Session, username: str) -> Optional[User]:
     """Get user by username"""
     statement = select(User).where(User.username == username)
-    return db.execute(statement).scalar_one_or_none()
+    return db.exec(statement).scalar_one_or_none()
 
 
 def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
@@ -144,7 +144,7 @@ def list_users(
         statement = statement.where(User.is_active == is_active)
     
     statement = statement.offset(skip).limit(limit).order_by(User.created_at.desc())
-    return db.execute(statement).scalars().all()
+    return db.exec(statement).scalars().all()
 
 
 @router.get("/me", response_model=UserResponse)

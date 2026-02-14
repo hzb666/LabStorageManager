@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.database import init_db
-from app.api import users, orders, inventory, reagent_orders, consumable_orders
+from app.api import users, inventory, reagent_orders, consumable_orders
 
 
 @asynccontextmanager
@@ -56,7 +56,6 @@ if STATIC_DIR.exists():
 
 # Include routers
 app.include_router(users.router, prefix="/api")
-app.include_router(orders.router, prefix="/api")
 app.include_router(inventory.router, prefix="/api")
 app.include_router(reagent_orders.router, prefix="/api")
 app.include_router(consumable_orders.router, prefix="/api")
@@ -86,4 +85,4 @@ def health_check():
 
 # Import models to ensure tables are created
 # This is needed for SQLModel to register all models
-from app.models import User, Order, Inventory, BorrowLog, ReagentOrder, ConsumableOrder  # noqa: F401
+from app.models import User, Inventory, BorrowLog, ReagentOrder, ConsumableOrder  # noqa: F401
