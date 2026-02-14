@@ -33,7 +33,7 @@ def generate_internal_code(
     prefix = f"{cas_number}-{date_str}-"
     
     query = text("""
-        SELECT MAX(CAST(SUBSTRING(internal_code FROM LENGTH(:prefix) + 1) AS INTEGER)) 
+        SELECT MAX(CAST(SUBSTR(internal_code, LENGTH(:prefix) + 1) AS INTEGER)) 
         FROM inventory 
         WHERE internal_code LIKE :pattern
     """)
@@ -71,7 +71,7 @@ def get_next_sequence(
     """
     # Query the maximum sequence for this CAS
     query = text("""
-        SELECT MAX(CAST(SUBSTRING(internal_code FROM LENGTH(internal_code) - 1) AS INTEGER))
+        SELECT MAX(CAST(SUBSTR(internal_code, LENGTH(internal_code) - 1) AS INTEGER))
         FROM inventory
         WHERE cas_number = :cas_number
     """)

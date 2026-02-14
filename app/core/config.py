@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./lab_inventory.db?mode=wal"
     
     # JWT Authentication
-    secret_key: str = "your-secret-key-change-in-production"
+    secret_key: str = "dev-secret-key-do-not-use-in-production-12345"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30 * 24 * 60  # 30 days
     
