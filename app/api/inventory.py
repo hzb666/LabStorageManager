@@ -684,10 +684,10 @@ def import_inventory(
     from app.services.excel_service import import_inventory_from_excel
     
     # Validate file type
-    if not file.filename.endswith(('.xlsx', '.xls')):
+    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only Excel files (.xlsx, .xls) are supported"
+            detail="Only Excel (.xlsx, .xls) or CSV files (.csv) are supported"
         )
     
     # Save uploaded file to temp location

@@ -91,18 +91,26 @@ export function ImportPage() {
   const downloadTemplate = () => {
     if (!template) return
     
-    // Create a simple template CSV for download
+    // Create a simple template CSV for download (with UTF-8 BOM for Excel compatibility)
     const headers = template.columns.map(c => c.name).join(',')
     const example = template.columns.map(c => {
       if (c.name === 'cas_number') return '64-17-5'
       if (c.name === 'name') return '乙醇'
+      if (c.name === 'english_name') return 'Ethanol'
+      if (c.name === 'alias') return '酒精'
+      if (c.name === 'category') return '有机溶剂'
+      if (c.name === 'brand') return 'Sigma'
       if (c.name === 'specification') return '500ml'
       if (c.name === 'initial_quantity') return '10'
+      if (c.name === 'is_hazardous') return 'false'
+      if (c.name === 'price') return '150.00'
       return ''
     }).join(',')
     
-    const csv = `${headers}\n${example}`
-    const blob = new Blob([csv], { type: 'text/csv' })
+    // Add UTF-8 BOM for Excel to recognize Chinese characters
+    const BOM = '\uFEFF'
+    const csv = BOM + headers + '\n' + example
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -141,13 +149,15 @@ export function ImportPage() {
               </div>
               <div className="grid gap-2 text-sm">
                 {template.columns.map(col => (
-                  <div key={col.name} className="flex items-center gap-2">
-                    {col.required ? (
-                      <span className="text-red-500">*</span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                    <span className="font-mono w-24">{col.name}</span>
+                  <div key={col.name} className="flex items-start gap-3">
+                    <span className="w-5 flex-shrink-0">
+                      {col.required ? (
+                        <span className="text-red-500">*</span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </span>
+                    <span className="font-mono w-32 flex-shrink-0">{col.name}</span>
                     <span className="text-muted-foreground">{col.description}</span>
                   </div>
                 ))}
@@ -158,12 +168,28 @@ export function ImportPage() {
           {/* File Upload */}
           <div>
             <label className="block text-sm font-medium mb-2">选择文件</label>
-            <Input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleFileChange}
-              className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
-            />
+            <div className="flex items-center gap-4">
+              <Button
+                variant="default"
+                onClick={() => document.getElementById('file-input')?.click()}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                选择 CSV 文件
+              </Button>
+              <input
+                id="file-input"
+                type="file"
+                accept=".csv"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              {file && (
+                <span className="text-sm text-muted-foreground truncate max-w-xs">
+                  {file.name}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Default Values */}

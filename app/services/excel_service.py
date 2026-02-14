@@ -21,9 +21,18 @@ class ExcelImportError(Exception):
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
     """
-    Parse Excel file and return DataFrame.
-    Supports both .xlsx and .xls formats.
+    Parse Excel or CSV file and return DataFrame.
+    Supports .xlsx, .xls, and .csv formats.
     """
+    if file_path.endswith('.csv'):
+        # Try multiple encodings for CSV
+        for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312']:
+            try:
+                return pd.read_csv(file_path, encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+        # Last resort: try with error handling
+        return pd.read_csv(file_path, encoding='utf-8-sig', errors='replace')
     return pd.read_excel(file_path)
 
 
@@ -101,11 +110,15 @@ def import_inventory_from_excel(
     column_mapping = {
         'cas_number': ['cas_number', 'cas', 'cas号'],
         'name': ['name', '名称', '品名'],
+        'english_name': ['english_name', '英文名', 'englishname'],
         'alias': ['alias', '别名'],
+        'category': ['category', '分类', '类别'],
+        'brand': ['brand', '品牌', '厂商', 'manufacturer'],
         'specification': ['specification', '规格', 'spec'],
         'initial_quantity': ['initial_quantity', '初始数量', '数量', 'quantity'],
         'location': ['location', '位置', '存放位置'],
         'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
+        'price': ['price', '单价', '价格', 'price'],
         'notes': ['notes', '备注', 'remark']
     }
     
@@ -140,8 +153,19 @@ def import_inventory_from_excel(
             # Get or use default values
             location = str(row.get('location', '')).strip() if pd.notna(row.get('location')) else default_location
             alias = str(row.get('alias', '')).strip() if pd.notna(row.get('alias')) else None
+            english_name = str(row.get('english_name', '')).strip() if pd.notna(row.get('english_name')) else None
+            category = str(row.get('category', '')).strip() if pd.notna(row.get('category')) else None
+            brand = str(row.get('brand', '')).strip() if pd.notna(row.get('brand')) else None
             is_hazardous = bool(row.get('is_hazardous', default_is_hazardous)) if pd.notna(row.get('is_hazardous')) else default_is_hazardous
             notes = str(row.get('notes', '')).strip() if pd.notna(row.get('notes')) else None
+            
+            # Parse price
+            price = None
+            if pd.notna(row.get('price')):
+                try:
+                    price = float(row.get('price'))
+                except (ValueError, TypeError):
+                    pass
             
             # Generate internal code (1 item per row for direct import)
             internal_codes = generate_internal_code(db, normalized_cas, 1)
@@ -152,13 +176,17 @@ def import_inventory_from_excel(
                 internal_code=internal_code,
                 cas_number=normalized_cas,
                 name=str(row['name']).strip(),
+                english_name=english_name,
                 alias=alias,
+                category=category,
+                brand=brand,
                 location=location,
                 initial_quantity=float(row['initial_quantity']),
                 remaining_quantity=float(row['initial_quantity']),
                 unit=unit,
                 is_hazardous=is_hazardous,
                 status=InventoryStatus.IN_STOCK,
+                price=price,
                 notes=notes,
             )
             
@@ -186,56 +214,76 @@ def generate_import_template() -> dict:
     return {
         "columns": [
             {
-                "field": "cas_number",
+                "name": "cas_number",
                 "label": "CAS号",
                 "required": True,
-                "example": "64-17-5",
-                "validation": "格式: XXXXX-XX-X，去除空格"
+                "description": "格式: XXXXX-XX-X，去除空格，例如 64-17-5"
             },
             {
-                "field": "name",
+                "name": "name",
                 "label": "名称",
                 "required": True,
-                "example": "乙醇"
+                "description": "化学品中文名称，例如 乙醇"
             },
             {
-                "field": "alias",
+                "name": "english_name",
+                "label": "英文名",
+                "required": False,
+                "description": "化学品的英文名称，例如 Ethanol"
+            },
+            {
+                "name": "alias",
                 "label": "别名",
                 "required": False,
-                "example": "酒精, Ethanol"
+                "description": "化学品的别名或俗称，例如 酒精"
             },
             {
-                "field": "specification",
+                "name": "category",
+                "label": "分类",
+                "required": False,
+                "description": "化学品分类，例如 有机溶剂、酸、碱"
+            },
+            {
+                "name": "brand",
+                "label": "品牌/厂商",
+                "required": False,
+                "description": "品牌或生产厂家，例如 Sigma、阿拉丁"
+            },
+            {
+                "name": "specification",
                 "label": "规格",
                 "required": True,
-                "example": "500ml",
-                "validation": "格式: 数值+单位，如 500ml, 1L, 100g"
+                "description": "格式: 数值+单位，如 500ml, 1L, 100g"
             },
             {
-                "field": "initial_quantity",
+                "name": "initial_quantity",
                 "label": "初始数量",
                 "required": True,
-                "example": "500",
-                "validation": "正整数或小数"
+                "description": "正整数或小数，表示总量"
             },
             {
-                "field": "location",
+                "name": "location",
                 "label": "存放位置",
                 "required": False,
-                "example": "302冰箱第二层"
+                "description": "例如 302冰箱第二层、A-1-1 柜"
             },
             {
-                "field": "is_hazardous",
+                "name": "is_hazardous",
                 "label": "是否危险品",
                 "required": False,
-                "example": "false",
-                "validation": "true/false 或 1/0"
+                "description": "true/false 或 1/0，危险品需要特殊存储"
             },
             {
-                "field": "notes",
+                "name": "price",
+                "label": "单价(元)",
+                "required": False,
+                "description": "单价，例如 150.00"
+            },
+            {
+                "name": "notes",
                 "label": "备注",
                 "required": False,
-                "example": "易燃物品"
+                "description": "其他需要记录的信息，例如 易燃物品"
             }
         ]
     }
