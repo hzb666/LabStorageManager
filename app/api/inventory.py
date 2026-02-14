@@ -129,6 +129,8 @@ def stock_in_order(
     Stock-in items from an approved order.
     Critical: Creates N inventory items where N = order.quantity (one item per unit).
     Data is copied from Order, not moved (Critical Logic #1).
+    
+    Note: Uses retry logic to handle race conditions on sequence numbers.
     """
     order = db.get(Order, order_id)
     if not order:
@@ -148,48 +150,58 @@ def stock_in_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Order must be approved before stocking. Current status: {order.status}"
         )
-    
-    # Get next sequence number for this CAS
-    cas_prefix = normalize_cas(order.cas_number).split("-")[0]
-    statement = select(Inventory).where(
-        Inventory.cas_number == order.cas_number
-    )
-    existing = db.exec(statement).all()
-    start_sequence = len(existing) + 1
-    
-    # Create inventory items (one per unit)
-    created_items = []
-    
-    for i in range(order.quantity):
-        internal_code = generate_internal_code(order.cas_number, start_sequence + i)
-        
-        db_inventory = Inventory(
-            internal_code=internal_code,
-            cas_number=order.cas_number,  # Copied from Order (already normalized)
-            name=order.name,
-            alias=order.alias,
-            location=location,
-            initial_quantity=1.0,  # One unit per item
-            remaining_quantity=1.0,
-            unit="瓶",  # Default unit
-            is_hazardous=order.is_hazardous,
-            image_path=order.image_path,  # Copied from Order
-        )
-        
-        db.add(db_inventory)
-        created_items.append(db_inventory)
-    
-    # Update order status
-    order.status = OrderStatus.STOCKED
-    order.updated_at = datetime.utcnow()
-    
-    db.commit()
-    
-    # Refresh all created items
-    for item in created_items:
-        db.refresh(item)
-    
-    return created_items
+
+    # Get next sequence number for this CAS (with retry for race conditions)
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            cas_prefix = normalize_cas(order.cas_number).split("-")[0]
+            statement = select(Inventory).where(
+                Inventory.cas_number == order.cas_number
+            )
+            existing = db.exec(statement).all()
+            start_sequence = len(existing) + 1
+            
+            # Create inventory items (one per unit)
+            created_items = []
+            
+            for i in range(order.quantity):
+                internal_code = generate_internal_code(order.cas_number, start_sequence + i)
+                
+                db_inventory = Inventory(
+                    internal_code=internal_code,
+                    cas_number=order.cas_number,  # Copied from Order (already normalized)
+                    name=order.name,
+                    alias=order.alias,
+                    location=location,
+                    initial_quantity=1.0,  # One unit per item
+                    remaining_quantity=1.0,
+                    unit="瓶",  # Default unit
+                    is_hazardous=order.is_hazardous,
+                    image_path=order.image_path,  # Copied from Order
+                )
+                
+                db.add(db_inventory)
+                created_items.append(db_inventory)
+            
+            # Update order status
+            order.status = OrderStatus.STOCKED
+            order.updated_at = datetime.utcnow()
+            
+            db.commit()
+            
+            # Refresh all created items
+            for item in created_items:
+                db.refresh(item)
+            
+            return created_items
+            
+        except Exception as e:
+            # Check if it's a unique constraint violation (race condition)
+            db.rollback()
+            if attempt < max_retries - 1 and "UNIQUE constraint failed" in str(e):
+                continue  # Retry with new sequence
+            raise
 
 
 @router.get("/", response_model=List[InventoryResponse])
@@ -406,6 +418,56 @@ def delete_inventory(
 
     db.delete(item)
     db.commit()
+
+
+@router.get("/export")
+def export_inventory(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Export inventory items to CSV format.
+    Returns CSV data for download.
+    """
+    statement = select(Inventory).order_by(Inventory.created_at.desc())
+    items = db.exec(statement).all()
+    
+    # Build CSV content
+    import csv
+    import io
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Header
+    writer.writerow([
+        "编号", "CAS号", "名称", "别名", "位置", 
+        "初始数量", "剩余数量", "单位", "状态", "是否危险品", 
+        "入库时间", "备注"
+    ])
+    
+    # Data rows
+    for item in items:
+        writer.writerow([
+            item.internal_code,
+            item.cas_number,
+            item.name,
+            item.alias or "",
+            item.location or "",
+            item.initial_quantity,
+            item.remaining_quantity,
+            item.unit,
+            item.status.value if hasattr(item.status, 'value') else item.status,
+            "是" if item.is_hazardous else "否",
+            item.created_at.strftime("%Y-%m-%d %H:%M:%S") if item.created_at else "",
+            item.notes or ""
+        ])
+    
+    return {
+        "data": output.getvalue(),
+        "filename": f"inventory_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv",
+        "count": len(items)
+    }
 
 
 @router.post("/manual-add", response_model=dict)

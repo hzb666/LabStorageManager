@@ -89,4 +89,5 @@ export const inventoryAPI = {
     is_hazardous: boolean
     notes?: string
   }) => api.post('/inventory/manual-add', data),
+  exportInventory: () => api.get('/inventory/export'),
 }

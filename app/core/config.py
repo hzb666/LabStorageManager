@@ -16,12 +16,13 @@ class Settings(BaseSettings):
     app_name: str = "Lab Storage Manager"
     app_version: str = "0.1.0"
     debug: bool = False
+    env: str = "development"  # development or production
     
     # Database
     database_url: str = "sqlite:///./lab_inventory.db?mode=wal"
     
     # JWT Authentication
-    secret_key: str = "dev-secret-key-do-not-use-in-production-12345"
+    secret_key: str = Field(default=None, description="JWT secret key")
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30 * 24 * 60  # 30 days
     
@@ -43,7 +44,14 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance"""
-    return Settings()
+    settings = Settings()
+    # Validate secret_key in production
+    if not settings.secret_key:
+        if settings.env == "production":
+            raise ValueError("SECRET_KEY must be set in production environment")
+        # Use a default key only in development
+        settings.secret_key = "dev-secret-key-do-not-use-in-production-12345"
+    return settings
 
 
 # Global settings instance

@@ -266,6 +266,26 @@ export function InventoryPage() {
     }
   }
 
+  const handleExport = async () => {
+    try {
+      const response = await inventoryAPI.exportInventory()
+      const { data, filename } = response.data
+      
+      // Create and download CSV file
+      const blob = new Blob([data], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (error: any) {
+      alert(error.response?.data?.detail || '导出失败')
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -279,7 +299,7 @@ export function InventoryPage() {
             <Download className="w-4 h-4 mr-2" />
             批量导入
           </Button>
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExport}>
             <Upload className="w-4 h-4 mr-2" />
             导出
           </Button>

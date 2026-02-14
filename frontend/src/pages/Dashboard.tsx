@@ -52,6 +52,12 @@ export function Dashboard() {
   const [returnUnit, setReturnUnit] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
 
+  // Stockin Modal state
+  const [showStockinModal, setShowStockinModal] = useState(false)
+  const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
+  const [stockinLocation, setStockinLocation] = useState('')
+  const [stockinLoading, setStockinLoading] = useState(false)
+
   useEffect(() => {
     loadDashboardData()
   }, [])
@@ -132,16 +138,31 @@ export function Dashboard() {
     }
   }
 
-  const handleStockin = async (item: PendingStockinItem) => {
-    const location = prompt(`请输入 "${item.name}" 的存放位置:`)
-    if (!location) return
+  const handleStockin = async () => {
+    if (!selectedStockin) return
+    if (!stockinLocation.trim()) {
+      alert('请输入存放位置')
+      return
+    }
+    setStockinLoading(true)
     try {
-      await inventoryAPI.update(item.inventory_id, { location })
+      await inventoryAPI.update(selectedStockin.inventory_id, { location: stockinLocation })
+      setShowStockinModal(false)
+      setSelectedStockin(null)
+      setStockinLocation('')
       loadDashboardData()
       alert('位置分配成功')
     } catch (error: any) {
       alert(error.response?.data?.detail || '操作失败')
+    } finally {
+      setStockinLoading(false)
     }
+  }
+
+  const openStockinModal = (item: PendingStockinItem) => {
+    setSelectedStockin(item)
+    setStockinLocation('')
+    setShowStockinModal(true)
   }
 
   if (loading) {
@@ -300,7 +321,7 @@ export function Dashboard() {
                       编号: {item.internal_code} • {item.initial_quantity} {item.unit}
                     </p>
                   </div>
-                  <Button variant="outline" onClick={() => handleStockin(item)}>
+                  <Button variant="outline" onClick={() => openStockinModal(item)}>
                     分配位置
                   </Button>
                 </div>
@@ -379,6 +400,67 @@ export function Dashboard() {
                 <Button
                   variant="outline"
                   onClick={() => setShowReturnModal(false)}
+                  className="flex-1"
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stockin Location Modal */}
+      {showStockinModal && selectedStockin && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">分配存放位置</h2>
+              <button
+                onClick={() => setShowStockinModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <p className="font-medium">{selectedStockin.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  编号: {selectedStockin.internal_code} • {selectedStockin.initial_quantity} {selectedStockin.unit}
+                </p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  存放位置 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={stockinLocation}
+                  onChange={(e) => setStockinLocation(e.target.value)}
+                  placeholder="如: A-1-1 柜"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  onClick={handleStockin}
+                  disabled={stockinLoading}
+                  className="flex-1"
+                >
+                  {stockinLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      处理中...
+                    </>
+                  ) : (
+                    '确认分配'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowStockinModal(false)}
                   className="flex-1"
                 >
                   取消

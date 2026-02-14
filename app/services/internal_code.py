@@ -3,6 +3,7 @@ Internal Code Generator - Generate unique internal codes for inventory items
 Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-01")
 Sequence: Auto-increment per CAS number group
 """
+import re
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import text
@@ -25,6 +26,11 @@ def generate_internal_code(
     Returns:
         List of internal codes (e.g., ["64175-250113-01", "64175-250113-02"])
     """
+    # Validate CAS number to prevent SQL injection
+    # CAS should only contain digits and hyphens
+    if not re.match(r"^[0-9-]+$", cas_number):
+        raise ValueError(f"Invalid CAS number format: {cas_number}")
+    
     # Get current date in yymmdd format
     date_str = datetime.utcnow().strftime("%y%m%d")
     
@@ -69,6 +75,10 @@ def get_next_sequence(
     Returns:
         Next sequence number (1-indexed)
     """
+    # Validate CAS number to prevent SQL injection
+    if not re.match(r"^[0-9-]+$", cas_number):
+        raise ValueError(f"Invalid CAS number format: {cas_number}")
+    
     # Query the maximum sequence for this CAS
     query = text("""
         SELECT MAX(CAST(SUBSTR(internal_code, LENGTH(internal_code) - 1) AS INTEGER))
