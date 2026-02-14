@@ -10,7 +10,8 @@ import {
   AlertTriangle, 
   CheckCircle, 
   Loader2,
-  Plus 
+  Plus,
+  X
 } from 'lucide-react'
 
 interface CASInventoryInfo {
@@ -32,9 +33,25 @@ interface OrderFormData {
   is_hazardous: boolean
 }
 
+interface OrderItem {
+  id: number
+  order_id?: number
+  name: string
+  cas_number: string
+  specification: string
+  quantity: number
+  type: string
+  order_reason: string
+  status: string
+  is_hazardous: boolean
+  location?: string
+  notes?: string
+  created_at: string
+}
+
 export function OrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
-  const [orders, setOrders] = useState<any[]>([])
+  const [orders, setOrders] = useState<OrderItem[]>([])
   const [loading, setLoading] = useState(true)
   const [casInfo, setCasInfo] = useState<CASInventoryInfo | null>(null)
   const [casLoading, setCasLoading] = useState(false)
@@ -54,6 +71,12 @@ export function OrdersPage() {
     is_hazardous: false,
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
+
+  // Arrival confirmation modal state
+  const [showArrivalModal, setShowArrivalModal] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null)
+  const [arrivalNotes, setArrivalNotes] = useState('')
+  const [arrivalLoading, setArrivalLoading] = useState(false)
 
   // CAS check
   useEffect(() => {
@@ -159,6 +182,28 @@ export function OrdersPage() {
 
   const updateFormField = (field: keyof OrderFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }))
+  }
+
+  // Arrival modal handlers
+  const openArrivalModal = (order: OrderItem) => {
+    setSelectedOrder(order)
+    setArrivalNotes('')
+    setShowArrivalModal(true)
+  }
+
+  const handleConfirmArrival = async () => {
+    if (!selectedOrder) return
+    setArrivalLoading(true)
+    try {
+      await orderAPI.confirmArrival(selectedOrder.id, arrivalNotes || undefined)
+      setShowArrivalModal(false)
+      setSelectedOrder(null)
+      loadOrders()
+    } catch (error: any) {
+      alert(error.response?.data?.detail || '确认到货失败')
+    } finally {
+      setArrivalLoading(false)
+    }
   }
 
   return (
@@ -464,11 +509,7 @@ export function OrdersPage() {
                       {order.status === 'APPROVED' && (
                         <Button 
                           size="sm" 
-                          onClick={async () => {
-                            const notes = window.prompt('确认到货备注 (可选):')
-                            await orderAPI.confirmArrival(order.id, notes || undefined)
-                            loadOrders()
-                          }}
+                          onClick={() => openArrivalModal(order)}
                         >
                           确认到货
                         </Button>
@@ -480,6 +521,66 @@ export function OrdersPage() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* Arrival Confirmation Modal */}
+      {showArrivalModal && selectedOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">确认到货</h2>
+              <button
+                onClick={() => setShowArrivalModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <p className="font-medium">{selectedOrder.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  CAS: {selectedOrder.cas_number} • {selectedOrder.specification} × {selectedOrder.quantity}
+                </p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">备注 (可选)</label>
+                <textarea
+                  value={arrivalNotes}
+                  onChange={(e) => setArrivalNotes(e.target.value)}
+                  className="w-full h-20 px-3 py-2 border rounded-md bg-background resize-none"
+                  placeholder="到货备注..."
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  onClick={handleConfirmArrival}
+                  disabled={arrivalLoading}
+                  className="flex-1"
+                >
+                  {arrivalLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      处理中...
+                    </>
+                  ) : (
+                    '确认到货'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowArrivalModal(false)}
+                  className="flex-1"
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

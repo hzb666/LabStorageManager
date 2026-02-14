@@ -275,11 +275,11 @@ def confirm_arrival(
         )
     
     # Handle based on order type and reason
-    if order.type.value == "consumable":
+    if order.type == OrderType.CONSUMABLE:
         # Consumables: complete directly
         order.status = OrderStatus.STOCKED
         message = "耗材订单已完成"
-    elif order.order_reason.value == "common_public":
+    elif order.order_reason == OrderReason.COMMON_PUBLIC:
         # Common/public reagents: complete directly, no notification
         order.status = OrderStatus.STOCKED
         message = "常用/公用试剂已入库，无需通知"

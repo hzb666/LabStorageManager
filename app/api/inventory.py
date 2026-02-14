@@ -423,7 +423,7 @@ def delete_inventory(
 @router.get("/export")
 def export_inventory(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """
     Export inventory items to CSV format.
