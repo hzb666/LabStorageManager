@@ -73,6 +73,62 @@ export const orderAPI = {
   checkCasWarning: (casNumber: string) => api.post('/orders/cas-warning', null, { params: { cas_number: casNumber } }),
 }
 
+// Reagent Order APIs (new)
+export const reagentOrderAPI = {
+  list: (params?: any) => api.get('/reagent-orders', { params }),
+  get: (id: number) => api.get(`/reagent-orders/${id}`),
+  create: (data: {
+    cas_number: string
+    name: string
+    english_name?: string
+    alias?: string
+    category?: string
+    brand?: string
+    specification: string
+    quantity: number
+    price?: number
+    order_reason: string
+    is_hazardous: boolean
+    notes?: string
+  }) => api.post('/reagent-orders', data),
+  update: (id: number, data: any) => api.put(`/reagent-orders/${id}`, data),
+  delete: (id: number) => api.delete(`/reagent-orders/${id}`),
+  approve: (id: number) => api.post(`/reagent-orders/${id}/approve`),
+  reject: (id: number, reason: string) => 
+    api.post(`/reagent-orders/${id}/reject`, { reason }),
+  confirmArrival: (id: number, notes?: string) =>
+    api.post(`/reagent-orders/${id}/confirm-arrival`, { arrival_notes: notes }),
+  stockIn: (id: number) => api.post(`/reagent-orders/${id}/stock-in`),
+  getMyOrders: () => api.get('/reagent-orders/dashboard/my-orders'),
+  getArrivedOrders: () => api.get('/reagent-orders/dashboard/arrived-orders'),
+}
+
+// Consumable Order APIs (new)
+export const consumableOrderAPI = {
+  list: (params?: any) => api.get('/consumable-orders', { params }),
+  get: (id: number) => api.get(`/consumable-orders/${id}`),
+  create: (data: {
+    name: string
+    english_name?: string
+    alias?: string
+    category?: string
+    brand?: string
+    specification: string
+    quantity: number
+    price?: number
+    order_reason: string
+    is_hazardous: boolean
+    notes?: string
+  }) => api.post('/consumable-orders', data),
+  update: (id: number, data: any) => api.put(`/consumable-orders/${id}`, data),
+  delete: (id: number) => api.delete(`/consumable-orders/${id}`),
+  approve: (id: number) => api.post(`/consumable-orders/${id}/approve`),
+  reject: (id: number, reason: string) => 
+    api.post(`/consumable-orders/${id}/reject`, { reason }),
+  complete: (id: number) => api.post(`/consumable-orders/${id}/complete`),
+  getMyOrders: () => api.get('/consumable-orders/dashboard/my-orders'),
+}
+
 // Inventory APIs
 export const inventoryAPI = {
   list: (params?: any) => api.get('/inventory', { params }),

@@ -38,6 +38,12 @@
 ### Phase 7: Admin User Management
 - [x] User Management (CRUD, role assignment)
 - [x] Frontend Admin User Management Page
+
+### Phase 8: Notifications & Alerts 
+- [x] CAS number already has alerts (when submit orders)
+- [x] Stock-in notification (when order arrives)
+- [x] Low stock alerts
+- [x] Borrow/Return notifications
 ---
 
 ## Timeline
@@ -60,27 +66,23 @@
 | 2026-02-14 | Code Review | ✅ | 代码审查第二轮 - 修复3个问题 (Orders.tsx prompt()、枚举比较、导出权限) |
 | 2026-02-14 | Phase 7 | ✅ | 用户管理 - 软删除、启用API、搜索筛选、前端页面 |
 | 2026-02-14 | Phase 8 | ✅ | 通知与提醒 - CAS预警、入库提醒、低库存UI、借用超时标记 |
+| 2026-02-14 | Phase 9 设计 | ⏳ | 试剂与耗材分离 - 字段设计 (english_name, price, category, brand) |
 
 **Last Updated**: 2026-02-14
-**Status**: Phase 7 用户管理已完成
-**Next**: Phase 8 - Notifications & Alerts
+**Status**: Phase 9 试剂与耗材分离设计中
+**Next**: Phase 9 实施 - 数据库模型重构
 
 ---
 
 ## Plans
 
+### Phase 9: reagent_consumable_split
+- [ ] Order 表拆分为 ReagentOrder + ConsumableOrder
+- [ ] 试剂/耗材分别独立页面
+- [ ] 新增字段: english_name, price, category, brand
 
-### Phase 8: Notifications & Alerts
-- [x] CAS number already has alerts (when submit orders)
-- [x] Stock-in notification (when order arrives)
-- [x] Low stock alerts
-- [x] Borrow/Return notifications
-
-### Phase 9: Advanced Features
+### Future Enhancements
+- [ ] Chemical compatibility check
 - [ ] Batch operations (bulk stock-in, bulk return)
 - [ ] Advanced search and filters
 - [ ] Data export reports
-
-### Future Enhancements
-- [ ] Multi-location support
-- [ ] Chemical compatibility check

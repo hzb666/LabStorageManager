@@ -75,7 +75,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 |--------|----------|
 | pending | 已申购 |
 | approved | 已审批 |
-| arrived | 已到货但未入库 |
+| arrived | 已到货 |
 | stocked | 已入库 |
 | rejected | 未通过 |
 
@@ -158,9 +158,9 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | 4 | ✅ | Excel 导入/导出 |
 | 5 | ✅ | Frontend 页面 (Login, Dashboard, Orders, Inventory, Import) |
 | 6 | ✅ | 手动入库功能 |
-| 7 | ⏳ | Admin 用户管理 |
-| 8 | ⏳ | 通知系统 |
+| 7 | ✅ | Admin 用户管理 |
+| 8 | ✅ | 通知系统 (CAS预警、入库提醒、低库存、超时提醒) |
 
 ## 📄 许可证
 
-MIT License
+Apache License 2.0

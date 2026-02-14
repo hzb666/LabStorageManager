@@ -207,50 +207,50 @@
 
 ---
 
-## Phase 8: Notifications & Alerts (待实现)
+## Phase 8: Notifications & Alerts (已完成) ✅
 
-### 8.1 CAS 重复订购预警 (待实现)
+### 8.1 CAS 重复订购预警 (已完成) ✅
 > **优先级**: P1 - 防止重复订购
 
 | 功能 | 描述 | 状态 |
 |------|------|------|
-| 库存来源 | 库中未用完的(status != consumed) | ⏳ |
-| 订单来源 | 已订购未入库的订单(status IN pending/approved/arrived) | ⏳ |
-| 排除项 | order_reason = "common_public" (常用或公用) 不预警 | ⏳ |
-| 展示方式 | 前端弹窗通知 + 最近一个订购单和对应库存信息 | ⏳ |
-| 触发时机 | Orders.tsx 输入 CAS 后自动查询并展示 | ⏳ |
+| 库存来源 | 库中未用完的(status != consumed) | ✅ |
+| 订单来源 | 已订购未入库的订单(status IN pending/approved/arrived) | ✅ |
+| 排除项 | order_reason = "common_public" (常用或公用) 不预警 | ✅ |
+| 展示方式 | 前端弹窗通知 + 最近一个订购单和对应库存信息 | ✅ |
+| 触发时机 | Orders.tsx 输入 CAS 后自动查询并展示 | ✅ |
 
 | Endpoint | Method | Status | Description |
 |----------|--------|--------|-------------|
 | `/orders/cas-warning` | POST | ✅ | CAS 预警查询（返回详细信息：库存位置/借用人 + 订单详情） |
 
-### 8.2 入库提醒 (待实现)
+### 8.2 入库提醒 (已完成) ✅
 > **优先级**: P1 - 确保试剂及时入库
 
 | 功能 | 描述 | 状态 |
 |------|------|------|
-| 触发时机 | 个人中心点击"确认收货"时 | ⏳ |
-| 排除项 | type=consumable 或 order_reason=common_public 不触发 | ⏳ |
-| 展示方式 | 弹窗询问是否立即入库 | ⏳ |
-| 后续操作 | 若选择否，在"已到货列表"可再次触发入库 | ⏳ |
+| 触发时机 | 个人中心点击"确认收货"时 | ✅ |
+| 排除项 | type=consumable 或 order_reason=common_public 不触发 | ✅ |
+| 展示方式 | alert 提醒 + Dashboard 一键入库按钮 | ✅ |
+| 后续操作 | 若选择否，在"已到货列表"可再次触发入库 | ✅ |
 
-### 8.3 低库存警告 (待实现 - UI展示)
+### 8.3 低库存警告 (已完成) ✅
 > **优先级**: P2 - 视觉提醒
 
 | 功能 | 描述 | 状态 |
 |------|------|------|
-| 预警条件 | remaining_quantity < initial_quantity * 20% | ⏳ |
-| 展示方式 | 库存列表用颜色醒目标识（红色） | ⏳ |
-| 通知方式 | 不需要推送，仅 UI 展示 | ⏳ |
+| 预警条件 | remaining_quantity < initial_quantity * 20% | ✅ |
+| 展示方式 | 库存列表用颜色醒目标识（红色） | ✅ |
+| 通知方式 | 不需要推送，仅 UI 展示 | ✅ |
 
-### 8.4 借用超时提醒 (待实现)
+### 8.4 借用超时提醒 (已完成) ✅
 > **优先级**: P2 - 借用管理
 
 | 功能 | 描述 | 状态 |
 |------|------|------|
-| 超时条件 | 借用超过 3 天未归还 | ⏳ |
-| 展示位置 | 个人中心显示超时借用列表 | ⏳ |
-| 库存列表 | 显示谁正在借用该试剂 | ⏳ |
+| 超时条件 | 借用超过 3 天未归还 | ✅ |
+| 展示位置 | 个人中心显示超时借用列表 | ✅ |
+| 库存列表 | 显示谁正在借用该试剂 | ✅ |
 
 | Endpoint | Method | Status | Description |
 |----------|--------|--------|-------------|
@@ -259,7 +259,35 @@
 
 ---
 
-## Phase 8: Advanced Features (待规划)
+## Phase 9: 试剂与耗材分离 (待实现)
+
+### 9.1 数据库模型重构
+
+> **优先级**: P1 - 核心架构变更
+
+| 变更 | 描述 | 状态 |
+|------|------|------|
+| Order 表拆分 | 拆分为 ReagentOrder + ConsumableOrder 两张表 | ⏳ |
+| ReagentOrder 字段 | cas_number, name, english_name, specification, quantity, price, order_reason, is_hazardous | ⏳ |
+| ConsumableOrder 字段 | name, english_name, specification, quantity, price, order_reason, is_hazardous | ⏳ |
+| Inventory 新增字段 | category, english_name, brand, price | ⏳ |
+
+### 9.2 API 重构
+
+| Endpoint | Method | Status | Description |
+|----------|--------|--------|-------------|
+| `/reagent-orders/` | POST | ⏳ | 试剂订单创建 |
+| `/reagent-orders/` | GET | ⏳ | 试剂订单列表 |
+| `/consumable-orders/` | POST | ⏳ | 耗材订单创建 |
+| `/consumable-orders/` | GET | ⏳ | 耗材订单列表 |
+
+### 9.3 前端页面重构
+
+| 功能 | 文件 | 状态 |
+|------|------|------|
+| 试剂订购页 | `ReagentOrders.tsx` | ⏳ |
+| 耗材订购页 | `ConsumableOrders.tsx` | ⏳ |
+| 导航更新 | `Layout.tsx` | ⏳ |
 
 | 功能 | 描述 | 状态 |
 |------|------|------|

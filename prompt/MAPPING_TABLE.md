@@ -68,7 +68,7 @@ const STATUS_MAPPING: Record<string, string> = {
   pending: '已申购',
   approved: '已审批',
   rejected: '未通过',
-  arrived: '已到货但未入库',
+  arrived: '已到货',
   stocked: '已入库',
   in_stock: '在库',
   borrowed: '已借出',

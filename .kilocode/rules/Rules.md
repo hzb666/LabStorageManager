@@ -22,4 +22,4 @@
 * React, Shadcn/UI, TanStack Table
 * Pillow, Pandas
 
-**重要**：每次开始编写代码前，先阅读 `Progress.md` 确认当前步骤和计划。在写任何代码之前，在 Architect 模式下无尽地审问我的想法。不要假设任何问题，问问题直到没有疑问剩下，并根据每次讨论更新对应的Prompt文件夹的相关md文档。每完成一个步骤，更新 `Progress.md`，并在文档后添加更新时间线和Plans，更新`IMPLEMENTATION_PLAN.md`。每次犯错修复后，把教训写进 `Lessons.md`，之后遇到类似问题先学习教训。
+**重要**：每次开始编写代码前，先阅读 `Progress.md` 确认当前步骤和计划。在写任何代码之前，在 Architect 模式下无尽地审问我的想法。不要假设任何问题，问问题直到没有疑问剩下，并根据每次讨论更新对应的Prompt文件夹的相关md文档。每完成一个步骤，更新`Progress.md`，并在文档后添加更新时间线和Plans，更新`IMPLEMENTATION_PLAN.md`。每次犯错修复后，把教训写进 `Lessons.md`，之后遇到类似问题先学习教训。

@@ -21,7 +21,10 @@ class InventoryBase(SQLModel):
     # Critical: CAS Number copied from Order (already normalized)
     cas_number: str = Field(index=True, max_length=50)
     name: str = Field(max_length=200)
+    english_name: Optional[str] = Field(None, max_length=200)  # English name
     alias: Optional[str] = Field(None, max_length=200)
+    category: Optional[str] = Field(None, max_length=100)  # Category
+    brand: Optional[str] = Field(None, max_length=100)  # Brand
     location: Optional[str] = Field(None, max_length=200)  # Free text, can be None for temporary keeper
     initial_quantity: float = Field(gt=0)
     remaining_quantity: float = Field(default=0.0)
@@ -29,6 +32,7 @@ class InventoryBase(SQLModel):
     is_hazardous: bool = False
     image_path: Optional[str] = None  # Copied from Order
     notes: Optional[str] = Field(None, max_length=500)  # User custom notes
+    price: Optional[float] = Field(None, ge=0)  # Price
 
 
 class Inventory(InventoryBase, table=True):
@@ -49,7 +53,10 @@ class InventoryCreate(SQLModel):
     internal_code: str = Field(max_length=50)
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
+    english_name: Optional[str] = None
     alias: Optional[str] = None
+    category: Optional[str] = None
+    brand: Optional[str] = None
     location: Optional[str] = None
     initial_quantity: float = Field(gt=0)
     remaining_quantity: float = Field(default=0.0)
@@ -58,6 +65,7 @@ class InventoryCreate(SQLModel):
     image_path: Optional[str] = None
     temporary_keeper_id: Optional[int] = None
     notes: Optional[str] = None
+    price: Optional[float] = None
 
 
 class InventoryUpdate(SQLModel):
@@ -67,6 +75,10 @@ class InventoryUpdate(SQLModel):
     status: Optional[InventoryStatus] = None
     temporary_keeper_id: Optional[int] = None
     notes: Optional[str] = None
+    english_name: Optional[str] = None
+    category: Optional[str] = None
+    brand: Optional[str] = None
+    price: Optional[float] = None
 
 
 class InventoryBorrowReturn(SQLModel):
@@ -81,7 +93,10 @@ class InventoryResponse(SQLModel):
     internal_code: str
     cas_number: str
     name: str
+    english_name: Optional[str]
     alias: Optional[str]
+    category: Optional[str]
+    brand: Optional[str]
     location: Optional[str]
     initial_quantity: float
     remaining_quantity: float
@@ -93,6 +108,7 @@ class InventoryResponse(SQLModel):
     image_path: Optional[str]
     temporary_keeper_id: Optional[int]
     notes: Optional[str]
+    price: Optional[float]
     created_at: datetime
     updated_at: datetime
 
@@ -127,10 +143,14 @@ class ManualInventoryCreate(SQLModel):
     """DTO for manually adding inventory (not from Order)"""
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
+    english_name: Optional[str] = None
     alias: Optional[str] = None
     specification: str = Field(max_length=50)  # e.g., "500ml"
     initial_quantity: float = Field(gt=0)  # Total quantity (will be split into bottles)
     quantity_bottles: int = Field(default=1, ge=1)  # Number of bottles
     location: Optional[str] = None
     is_hazardous: bool = False
+    category: Optional[str] = None
+    brand: Optional[str] = None
+    price: Optional[float] = None
     notes: Optional[str] = None

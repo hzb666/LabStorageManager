@@ -12,10 +12,14 @@ import {
   LogOut,
   Menu,
   Users,
+  TestTube,
+  FlaskConical,
 } from 'lucide-react'
 
 const navItems = [
   { path: '/', label: '仪表盘', icon: LayoutDashboard },
+  { path: '/reagents', label: '试剂订购', icon: TestTube },
+  { path: '/consumables', label: '耗材订购', icon: FlaskConical },
   { path: '/orders', label: '订单管理', icon: ShoppingCart },
   { path: '/inventory', label: '库存管理', icon: Package },
   { path: '/import', label: '导入库存', icon: FileSpreadsheet },

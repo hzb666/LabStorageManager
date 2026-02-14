@@ -6,6 +6,8 @@ import { OrdersPage } from '@/pages/Orders'
 import { InventoryPage } from '@/pages/Inventory'
 import { ImportPage } from '@/pages/Import'
 import { AdminUsersPage } from '@/pages/AdminUsers'
+import { ReagentOrdersPage } from '@/pages/ReagentOrders'
+import { ConsumableOrdersPage } from '@/pages/ConsumableOrders'
 import { useAuthStore } from '@/store/useStore'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -31,6 +33,8 @@ function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<OrdersPage />} />
+          <Route path="reagents" element={<ReagentOrdersPage />} />
+          <Route path="consumables" element={<ConsumableOrdersPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="admin/users" element={<AdminUsersPage />} />
