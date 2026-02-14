@@ -111,6 +111,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `POST /api/inventory/{id}/borrow` - 借用
 - `POST /api/inventory/{id}/return` - 归还
 - `GET /api/inventory/cas/{cas_number}` - CAS 号查询
+- `GET /api/inventory/export` - 导出CSV
 
 ### Dashboard
 - `GET /api/inventory/dashboard/my-borrows` - 我的借用
