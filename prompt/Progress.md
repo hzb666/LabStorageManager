@@ -55,20 +55,21 @@
 | 2026-02-14 | Feature | ✅ | Manual Inventory Add: Backend API + Frontend UI |
 | 2026-02-14 | Code Review | ✅ | 代码审查 - 修复7个问题 (密钥硬编码、SQL注入、prompt()、导出功能等) |
 | 2026-02-14 | Code Review | ✅ | 代码审查第二轮 - 修复3个问题 (Orders.tsx prompt()、枚举比较、导出权限) |
+| 2026-02-14 | Phase 7 | ✅ | 用户管理 - 软删除、启用API、搜索筛选、前端页面 |
 
 **Last Updated**: 2026-02-14
-**Status**: 代码审查完成 - 所有问题已修复并提交
-**Next**: Phase 7 - Admin User Management
+**Status**: Phase 7 用户管理已完成
+**Next**: Phase 8 - Notifications & Alerts
 
 ---
 
 ## Plans
 
-### Phase 6: Admin Management
-- [ ] User Management (CRUD, role assignment)
-- [ ] Frontend Admin User Management Page
+### Phase 7: Admin User Management
+- [x] User Management (CRUD, role assignment)
+- [x] Frontend Admin User Management Page
 
-### Phase 7: Notifications & Alerts
+### Phase 8: Notifications & Alerts
 - [ ] Stock-in notification (when order arrives)
 - [ ] Low stock alerts
 - [ ] Borrow/Return notifications
