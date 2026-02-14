@@ -5,6 +5,7 @@ import { Dashboard } from '@/pages/Dashboard'
 import { OrdersPage } from '@/pages/Orders'
 import { InventoryPage } from '@/pages/Inventory'
 import { ImportPage } from '@/pages/Import'
+import { AdminUsersPage } from '@/pages/AdminUsers'
 import { useAuthStore } from '@/store/useStore'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -32,6 +33,7 @@ function App() {
           <Route path="orders" element={<OrdersPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="import" element={<ImportPage />} />
+          <Route path="admin/users" element={<AdminUsersPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

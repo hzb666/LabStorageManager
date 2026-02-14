@@ -42,6 +42,19 @@ export const authAPI = {
   getProfile: () => api.get('/users/me'),
 }
 
+// User Admin APIs
+export const userAdminAPI = {
+  list: (params?: { skip?: number; limit?: number; username?: string; role?: string; is_active?: boolean }) =>
+    api.get('/users', { params }),
+  create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' }) =>
+    api.post('/users', data),
+  update: (id: number, data: { username?: string; full_name?: string; role?: string; is_active?: boolean }) =>
+    api.put(`/users/${id}`, data),
+  delete: (id: number) => api.delete(`/users/${id}`),
+  activate: (id: number) => api.post(`/users/${id}/activate`),
+  updateRole: (id: number, role: string) => api.put(`/users/${id}/role`, null, { params: { role } }),
+}
+
 // Order APIs
 export const orderAPI = {
   list: (params?: any) => api.get('/orders', { params }),
