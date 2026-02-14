@@ -124,7 +124,7 @@ def list_users(
     role: Optional[str] = None,
     is_active: Optional[bool] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """List users with optional filters (admin only)"""
     statement = select(User)
@@ -133,7 +133,13 @@ def list_users(
     if username:
         statement = statement.where(User.username.contains(username))
     if role:
-        statement = statement.where(User.role == UserRole(role))
+        try:
+            statement = statement.where(User.role == UserRole(role))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role: {role}. Must be 'admin' or 'user'"
+            )
     if is_active is not None:
         statement = statement.where(User.is_active == is_active)
     
