@@ -1,75 +1,60 @@
-# Lessons.md
+# Lessons.md - 经验教训记录
 
-## Phase 1.1 Lessons Learned
+## 2026-02-14 审查发现与修复
 
-### 1. SQLModel Relationship foreign_keys Issue
-**Problem**: SQLModel doesn't support `foreign_keys` parameter in `Relationship()` the same way SQLAlchemy does.
+### 问题 1: UI 图标反了
+- **现象**: 导入按钮显示 Upload 图标，导出按钮显示 Download 图标
+- **原因**: 图标选择与语义不符
+- **修复**: 
+  - 导入 (从服务器下载模板) → `<Download>`
+  - 导出 (上传数据到服务器) → `<Upload>`
+- **文件**: `frontend/src/pages/Inventory.tsx`
 
-**Error**: `TypeError: Relationship() got an unexpected keyword argument 'foreign_keys'`
+### 问题 2: Pandas 模块缺失
+- **现象**: `ModuleNotFoundError: No module named 'pandas'`
+- **原因**: 环境中未安装 pandas
+- **影响**: 导入模板功能 (`/api/inventory/import/template`) 500 错误
+- **修复**: `pip install pandas openpyxl`
+- **验证**: `python -c "import pandas; print(pandas.__version__)"` → 3.0.0
 
-**Solution**: Simplified models by removing complex multi-FK relationships. Kept `borrower_id` and `last_borrower_id` as simple integer fields.
+### 问题 3: 安全漏洞 - 缺少权限检查
+- **现象**: 7 个 API 端点缺少 `current_user` 验证
+- **风险**: 任何人可以修改/删除数据，违反 Critical Rule #3
+- **修复**: 添加 `current_user: User = Depends(get_current_user)` 依赖
 
-### 2. SQLModel Session execute() vs exec()
-**Problem**: SQLModel Session uses `execute()` not `exec()`.
-
-**Error**: `AttributeError: 'Session' object has no attribute 'exec'`
-
-**Solution**: Use SQLAlchemy-style syntax:
-- `db.execute(statement).scalar_one_or_none()` for single result
-- `db.execute(statement).scalars().all()` for list results
-
-### 3. Server Cache Issues
-**Problem**: Old Python bytecode (.pyc) causing errors to persist after code fixes.
-
-**Solution**: Delete `__pycache__` directories and restart uvicorn server.
-
----
-
-## Phase 1.2 Lessons Learned
-
-### 4. FastAPI Route Order - /me vs /{user_id}
-**Problem**: FastAPI matched `/{user_id}` before `/me` endpoint, causing "me" to be parsed as user_id integer.
-
-**Error**: `Input should be a valid integer, unable to parse string as an integer`
-
-**Solution**: 
-1. Ensure `/me` endpoint is defined BEFORE `/{user_id}` in the router
-2. Remove duplicate `/me` endpoints
-3. Restart server completely (not just reload) when route order changes
-
-### 5. JWT Token Expiration
-**Problem**: Old JWT tokens from previous server runs become invalid.
-
-**Solution**: Get fresh token after server restart.
+修复的端点:
+| 文件 | 端点 | 权限级别 |
+|------|------|---------|
+| inventory.py | stock-in | require_admin |
+| inventory.py | update_inventory | get_current_user |
+| inventory.py | delete_inventory | require_admin |
+| orders.py | upload_image | get_current_user |
+| orders.py | update_order | get_current_user |
+| orders.py | arrived_orders | get_current_user |
+| orders.py | delete_order | get_current_user |
 
 ---
 
-## Phase 2.5 Lessons Learned
+## 历史教训
 
-### 6. Order Status Workflow - PURCHASED vs ARRIVED
-**Problem**: Original workflow used `PURCHASED` status meaning "purchased and ready to stock in". This didn't reflect the physical arrival process.
+### 2026-02-13 登录 API 修复
+- **问题**: 422/401 错误
+- **根因**: 
+  1. 后端期望 Query 参数，前端发送 JSON Body
+  2. 数据库无用户
+- **修复**: 添加 `LoginRequest` Pydantic 模型 + 创建 admin 用户
 
-**Decision**: Split the workflow into two steps:
-1. `APPROVED` → `ARRIVED`: Physical arrival confirmation
-2. `ARRIVED` → `STOCKED`: Location assignment and inventory creation
-
-**Benefits**:
-- Clearer audit trail (can track when items physically arrived)
-- Allows for quality check before stocking in
-- Separates purchasing from inventory management
-
-### 7. Database File Locking on Windows
-**Problem**: Cannot delete `lab_inventory.db` while server is running (file locked by SQLite).
-
-**Error**: `PermissionError: [WinError 32] The process cannot access the file`
-
-**Solution**:
-1. Stop server processes: `taskkill /F /IM python.exe`
-2. Wait for process termination: `timeout /t 2`
-3. Delete database files
-4. Restart server
+### 2026-02-13 Dashboard 数据解析
+- **问题**: `myOrders.filter is not a function`
+- **根因**: 后端返回嵌套 `{ data: { pending: {...}, approved: {...} } }`，前端期望扁平数组
+- **修复**: 前端展平嵌套数据
 
 ---
 
-**Date**: 2026-02-13
-**Phase**: 2.5 Workflow Adjustment (ARRIVED status + Notes)
+## 最佳实践
+
+1. **依赖检查**: 每次添加新 API 时，确保检查是否需要 `current_user`
+2. **环境同步**: 新增依赖后，确保在运行环境中安装
+3. **图标语义**: 
+   - Download = 从服务器获取（导入模板）
+   - Upload = 发送到服务器（导出数据）
