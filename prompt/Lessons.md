@@ -58,3 +58,14 @@
 3. **图标语义**: 
    - Download = 从服务器获取（导入模板）
    - Upload = 发送到服务器（导出数据）
+
+### 问题 4: SQLite SQL 语法错误
+- **现象**: internal_code 生成失败
+- **原因**: 使用了 SQL 标准 SUBSTRING，SQLite 应使用 SUBSTR
+- **修复**: `SUBSTRING(internal_code FROM LENGTH(:prefix) + 1)` → `SUBSTR(internal_code, LENGTH(:prefix) + 1)`
+- **文件**: `app/services/internal_code.py`
+
+### 问题 5: 安全配置改进
+- **现象**: secret_key 有不安全的默认值
+- **修复**: 更新默认值并添加注释提醒生产环境修改
+- **文件**: `app/core/config.py`
