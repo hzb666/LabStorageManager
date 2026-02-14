@@ -21,6 +21,37 @@ interface CASInventoryInfo {
   borrowed_count: number
 }
 
+// New CAS Warning interface for duplicate order warning
+interface CASWarningInfo {
+  cas_number: string
+  has_warning: boolean
+  inventory: {
+    total_remaining: number
+    items_count: number
+    details: Array<{
+      id: number
+      internal_code: string
+      location: string | null
+      remaining_quantity: number
+      unit: string
+      status: string
+      borrower_id: number | null
+    }>
+  }
+  pending_orders: {
+    total_quantity: number
+    orders_count: number
+    details: Array<{
+      id: number
+      quantity: number
+      status: string
+      order_reason: string
+      applicant_id: number
+      created_at: string
+    }>
+  }
+}
+
 interface OrderFormData {
   name: string
   cas_number: string
@@ -54,6 +85,7 @@ export function OrdersPage() {
   const [orders, setOrders] = useState<OrderItem[]>([])
   const [loading, setLoading] = useState(true)
   const [casInfo, setCasInfo] = useState<CASInventoryInfo | null>(null)
+  const [casWarning, setCasWarning] = useState<CASWarningInfo | null>(null)
   const [casLoading, setCasLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitSuccess, setSubmitSuccess] = useState(false)
@@ -78,22 +110,32 @@ export function OrdersPage() {
   const [arrivalNotes, setArrivalNotes] = useState('')
   const [arrivalLoading, setArrivalLoading] = useState(false)
 
-  // CAS check
+  // CAS check with warning
   useEffect(() => {
     if (formData.cas_number.length >= 5) {
-      const timer = setTimeout(() => checkCASInventory(formData.cas_number), 500)
+      const timer = setTimeout(() => checkCASWarning(formData.cas_number), 500)
       return () => clearTimeout(timer)
     } else {
       setCasInfo(null)
+      setCasWarning(null)
     }
   }, [formData.cas_number])
 
-  const checkCASInventory = async (cas: string) => {
+  const checkCASWarning = async (cas: string) => {
     setCasLoading(true)
     try {
-      const response = await inventoryAPI.checkCAS(cas)
-      setCasInfo(response.data)
+      const response = await orderAPI.checkCasWarning(cas)
+      const warning = response.data
+      setCasWarning(warning)
+      // Also set the simple casInfo for backward compatibility
+      setCasInfo({
+        exists_in_inventory: warning.inventory.items_count > 0,
+        total_remaining: warning.inventory.total_remaining,
+        in_stock_count: warning.inventory.details.filter((i: any) => i.status === 'in_stock').length,
+        borrowed_count: warning.inventory.details.filter((i: any) => i.status === 'borrowed').length
+      })
     } catch {
+      setCasWarning(null)
       setCasInfo(null)
     } finally {
       setCasLoading(false)
@@ -195,10 +237,17 @@ export function OrdersPage() {
     if (!selectedOrder) return
     setArrivalLoading(true)
     try {
-      await orderAPI.confirmArrival(selectedOrder.id, arrivalNotes || undefined)
+      const response = await orderAPI.confirmArrival(selectedOrder.id, arrivalNotes || undefined)
       setShowArrivalModal(false)
       setSelectedOrder(null)
       loadOrders()
+      
+      // 入库提醒：如果是试剂且非 common_public，显示入库提示
+      const message = response.data?.message || ''
+      if (message.includes('已到货待入库')) {
+        // TODO: 建议安装 sonner 替换为 toast 通知
+        console.log('试剂已到货，请及时完成入库操作')
+      }
     } catch (error: any) {
       alert(error.response?.data?.detail || '确认到货失败')
     } finally {
@@ -293,7 +342,63 @@ export function OrdersPage() {
                     <p className="text-sm text-red-500 mt-1">{errors.cas_number}</p>
                   )}
                   
-                  {casInfo && (
+                  {casWarning && casWarning.has_warning && (
+                    <div className="mt-2 p-3 rounded-lg text-sm bg-orange-50 text-orange-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        <AlertTriangle className="w-4 h-4" />
+                        <span className="font-medium">重复订购预警</span>
+                      </div>
+                      
+                      {/* Inventory info */}
+                      {casWarning.inventory.items_count > 0 && (
+                        <div className="mb-2">
+                          <div className="text-xs uppercase text-orange-600 mb-1">库存信息</div>
+                          <div className="pl-2 border-l-2 border-orange-200 text-xs">
+                            <div>剩余总量: {casWarning.inventory.total_remaining}</div>
+                            <div className="mt-1">
+                              {casWarning.inventory.details.slice(0, 3).map((item: any) => (
+                                <div key={item.id} className="text-xs">
+                                  编号: {item.internal_code} | 
+                                  位置: {item.location || '未设置'} | 
+                                  剩余: {item.remaining_quantity} | 
+                                  状态: {item.status === 'borrowed' ? '已借出' : '在库'}
+                                </div>
+                              ))}
+                              {casWarning.inventory.items_count > 3 && (
+                                <div className="text-xs text-orange-500">
+                                  ...还有 {casWarning.inventory.items_count - 3} 条记录
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Pending orders info */}
+                      {casWarning.pending_orders.orders_count > 0 && (
+                        <div>
+                          <div className="text-xs uppercase text-orange-600 mb-1">待入库订单</div>
+                          <div className="pl-2 border-l-2 border-orange-200 text-xs">
+                            <div>待入库总量: {casWarning.pending_orders.total_quantity}</div>
+                            <div className="mt-1">
+                              {casWarning.pending_orders.details.slice(0, 2).map((order: any) => (
+                                <div key={order.id} className="text-xs">
+                                  订单 #{order.id} | 数量: {order.quantity} | 状态: {order.status}
+                                </div>
+                              ))}
+                              {casWarning.pending_orders.orders_count > 2 && (
+                                <div className="text-xs text-orange-500">
+                                  ...还有 {casWarning.pending_orders.orders_count - 2} 个订单
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {casInfo && !casWarning?.has_warning && (
                     <div className={cn(
                       'mt-2 p-3 rounded-lg text-sm',
                       casInfo.exists_in_inventory

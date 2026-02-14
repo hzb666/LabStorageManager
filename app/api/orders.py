@@ -513,3 +513,85 @@ def stock_in_order(
         "temporary_keeper_cleared": temporary_keeper_id is not None
     }
 
+
+@router.post("/cas-warning")
+def check_cas_duplicate_warning(
+    cas_number: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Check for duplicate CAS number warnings.
+    Returns detailed information about existing inventory and pending orders.
+    
+    Inventory source: status != consumed
+    Order source: status IN (pending, approved, arrived), order_reason != common_public
+    """
+    normalized_cas = normalize_cas(cas_number)
+    
+    # 1. Query inventory (excluding consumed items)
+    inventory_statement = select(Inventory).where(
+        Inventory.cas_number == normalized_cas,
+        Inventory.status != InventoryStatus.CONSUMED
+    )
+    inventory_items = db.exec(inventory_statement).all()
+    
+    # Calculate inventory totals
+    total_in_inventory = sum(item.remaining_quantity for item in inventory_items)
+    
+    # 2. Query pending orders (excluding common_public)
+    order_statement = select(Order).where(
+        Order.cas_number == normalized_cas,
+        Order.status.in_([OrderStatus.PENDING, OrderStatus.APPROVED, OrderStatus.ARRIVED]),
+        Order.order_reason != OrderReason.COMMON_PUBLIC
+    ).order_by(Order.created_at.desc())
+    pending_orders = db.exec(order_statement).all()
+    
+    # Calculate pending order totals
+    total_pending = sum(order.quantity for order in pending_orders)
+    
+    # Build inventory details
+    inventory_details = []
+    for item in inventory_items:
+        item_data = {
+            "id": item.id,
+            "internal_code": item.internal_code,
+            "location": item.location,
+            "remaining_quantity": item.remaining_quantity,
+            "unit": item.unit,
+            "status": item.status.value if hasattr(item.status, 'value') else item.status,
+            "borrower_id": item.borrower_id
+        }
+        inventory_details.append(item_data)
+    
+    # Build order details
+    order_details = []
+    for order in pending_orders:
+        order_data = {
+            "id": order.id,
+            "quantity": order.quantity,
+            "status": order.status.value if hasattr(order.status, 'value') else order.status,
+            "order_reason": order.order_reason.value if hasattr(order.order_reason, 'value') else order.order_reason,
+            "applicant_id": order.applicant_id,
+            "created_at": order.created_at.isoformat() if order.created_at else None
+        }
+        order_details.append(order_data)
+    
+    # Determine if warning should be shown
+    has_warning = len(inventory_items) > 0 or len(pending_orders) > 0
+    
+    return {
+        "cas_number": normalized_cas,
+        "has_warning": has_warning,
+        "inventory": {
+            "total_remaining": total_in_inventory,
+            "items_count": len(inventory_items),
+            "details": inventory_details
+        },
+        "pending_orders": {
+            "total_quantity": total_pending,
+            "orders_count": len(pending_orders),
+            "details": order_details
+        }
+    }
+
