@@ -20,7 +20,7 @@ import {
   Package,
   AlertTriangle,
   Loader2,
-  Download,
+  ExternalLink,
   Import,
   Plus,
   X
@@ -300,7 +300,7 @@ export function InventoryPage() {
             批量导入
           </Button>
           <Button variant="outline" onClick={handleExport}>
-            <Download className="w-4 h-4 mr-2" />
+            <ExternalLink className="w-4 h-4 mr-2" />
             导出
           </Button>
         </div>
