@@ -10,7 +10,6 @@ import {
   Loader2,
   CheckCircle,
   XCircle,
-  AlertCircle,
   Download
 } from 'lucide-react'
 
@@ -32,8 +31,6 @@ export function ImportPage() {
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
-  const [defaultLocation, setDefaultLocation] = useState('')
-  const [defaultIsHazardous, setDefaultIsHazardous] = useState(false)
 
   useEffect(() => {
     loadTemplate()
@@ -71,10 +68,6 @@ export function ImportPage() {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      if (defaultLocation) {
-        formData.append('default_location', defaultLocation)
-      }
-      formData.append('default_is_hazardous', String(defaultIsHazardous))
       
       const response = await inventoryAPI.importExcel(formData)
       setResult(response.data)
@@ -189,31 +182,6 @@ export function ImportPage() {
                   {file.name}
                 </span>
               )}
-            </div>
-          </div>
-
-          {/* Default Values */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="block text-sm font-medium mb-1">默认存放位置</label>
-              <Input
-                value={defaultLocation}
-                onChange={(e) => setDefaultLocation(e.target.value)}
-                placeholder="如: A-1-1 柜"
-              />
-            </div>
-            <div className="flex items-center gap-2 pt-6">
-              <input
-                type="checkbox"
-                id="default_is_hazardous"
-                checked={defaultIsHazardous}
-                onChange={(e) => setDefaultIsHazardous(e.target.checked)}
-                className="w-4 h-4 rounded"
-              />
-              <label htmlFor="default_is_hazardous" className="text-sm flex items-center gap-1">
-                <AlertCircle className="w-4 h-4 text-yellow-500" />
-                默认为危险品
-              </label>
             </div>
           </div>
 
