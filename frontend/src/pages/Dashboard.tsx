@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { reagentOrderAPI, inventoryAPI } from '@/api/client'
+import { reagentOrderAPI, inventoryAPI, consumableOrderAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
+import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { formatDateTime, cn } from '@/lib/utils'
 import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2, PackagePlus, CheckCircle } from 'lucide-react'
 
@@ -30,9 +31,10 @@ interface PendingStockinItem {
 interface MyOrder {
   id: number
   name: string
-  cas_number: string
+  cas_number?: string
   status: string
   created_at: string
+  orderType?: 'reagent' | 'consumable'
 }
 
 interface DashboardResponse<T> {
@@ -41,10 +43,19 @@ interface DashboardResponse<T> {
 }
 
 export function Dashboard() {
-  const [myOrders, setMyOrders] = useState<MyOrder[]>([])
+  const [myReagentOrders, setMyReagentOrders] = useState<MyOrder[]>([])
+  const [myConsumableOrders, setMyConsumableOrders] = useState<MyOrder[]>([])
   const [myBorrows, setMyBorrows] = useState<MyBorrowItem[]>([])
   const [pendingStockin, setPendingStockin] = useState<PendingStockinItem[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Pagination states
+  const [reagentPage, setReagentPage] = useState(1)
+  const [reagentPageSize] = useState(5)
+  const [consumablePage, setConsumablePage] = useState(1)
+  const [consumablePageSize] = useState(5)
+  const [borrowPage, setBorrowPage] = useState(1)
+  const [borrowPageSize] = useState(5)
   
   // Return Modal state
   const [showReturnModal, setShowReturnModal] = useState(false)
@@ -65,35 +76,54 @@ export function Dashboard() {
 
   const loadDashboardData = async () => {
     try {
-      const [ordersRes, borrowsRes, stockinRes] = await Promise.all([
+      const [reagentOrdersRes, consumableOrdersRes, borrowsRes, stockinRes] = await Promise.all([
         reagentOrderAPI.getMyOrders(),
+        consumableOrderAPI.getMyOrders(),
         inventoryAPI.getMyBorrows(),
         inventoryAPI.getPendingStockin(),
       ])
 
-      // Parse myOrders - backend returns { data: { pending: {orders}, approved: {orders}, arrived: {orders} } }
-      const ordersData = (ordersRes.data as any)?.data
-      if (ordersData && typeof ordersData === 'object') {
-        // Flatten the nested structure into a single array, keep backend lowercase status
-        const allOrders: MyOrder[] = []
-        if (ordersData.pending?.orders) {
-          ordersData.pending.orders.forEach((o: any) => {
-            allOrders.push({ ...o, status: 'pending', id: o.order_id || o.id })
+      // Parse reagent orders - backend returns { data: { pending: {orders}, approved: {orders}, arrived: {orders} } }
+      const reagentOrdersData = (reagentOrdersRes.data as any)?.data
+      if (reagentOrdersData && typeof reagentOrdersData === 'object') {
+        const allReagentOrders: MyOrder[] = []
+        if (reagentOrdersData.pending?.orders) {
+          reagentOrdersData.pending.orders.forEach((o: any) => {
+            allReagentOrders.push({ ...o, status: 'pending', id: o.order_id || o.id, orderType: 'reagent' })
           })
         }
-        if (ordersData.approved?.orders) {
-          ordersData.approved.orders.forEach((o: any) => {
-            allOrders.push({ ...o, status: 'approved', id: o.order_id || o.id })
+        if (reagentOrdersData.approved?.orders) {
+          reagentOrdersData.approved.orders.forEach((o: any) => {
+            allReagentOrders.push({ ...o, status: 'approved', id: o.order_id || o.id, orderType: 'reagent' })
           })
         }
-        if (ordersData.arrived?.orders) {
-          ordersData.arrived.orders.forEach((o: any) => {
-            allOrders.push({ ...o, status: 'arrived', id: o.order_id || o.id })
+        if (reagentOrdersData.arrived?.orders) {
+          reagentOrdersData.arrived.orders.forEach((o: any) => {
+            allReagentOrders.push({ ...o, status: 'arrived', id: o.order_id || o.id, orderType: 'reagent' })
           })
         }
-        setMyOrders(allOrders)
+        setMyReagentOrders(allReagentOrders)
       } else {
-        setMyOrders([])
+        setMyReagentOrders([])
+      }
+
+      // Parse consumable orders - backend returns { data: { pending: {orders}, approved: {orders} } }
+      const consumableOrdersData = (consumableOrdersRes.data as any)?.data
+      if (consumableOrdersData && typeof consumableOrdersData === 'object') {
+        const allConsumableOrders: MyOrder[] = []
+        if (consumableOrdersData.pending?.orders) {
+          consumableOrdersData.pending.orders.forEach((o: any) => {
+            allConsumableOrders.push({ ...o, status: 'pending', id: o.order_id || o.id, orderType: 'consumable' })
+          })
+        }
+        if (consumableOrdersData.approved?.orders) {
+          consumableOrdersData.approved.orders.forEach((o: any) => {
+            allConsumableOrders.push({ ...o, status: 'approved', id: o.order_id || o.id, orderType: 'consumable' })
+          })
+        }
+        setMyConsumableOrders(allConsumableOrders)
+      } else {
+        setMyConsumableOrders([])
       }
 
       // Parse borrows - backend returns { data: [...], total: ... }
@@ -161,20 +191,29 @@ export function Dashboard() {
   }
 
   // 处理确认到货（暂不入库）
-  const handleConfirmArrival = async (orderId: number) => {
+  const handleConfirmArrival = async (orderId: number, orderType?: string) => {
     try {
-      await reagentOrderAPI.confirmArrival(orderId)
+      if (orderType === 'consumable') {
+        await consumableOrderAPI.confirmArrival(orderId)
+        toast.warning('耗材已到货，请及时完成入库操作！')
+      } else {
+        await reagentOrderAPI.confirmArrival(orderId)
+        toast.warning('试剂已到货，请及时完成入库操作！')
+      }
       loadDashboardData()
-      toast.warning('试剂已到货，请及时完成入库操作！')
     } catch (error: any) {
       toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   // 处理一键入库
-  const handleQuickStockIn = async (orderId: number) => {
+  const handleQuickStockIn = async (orderId: number, orderType?: string) => {
     try {
-      await reagentOrderAPI.stockIn(orderId)
+      if (orderType === 'consumable') {
+        await consumableOrderAPI.stockIn(orderId)
+      } else {
+        await reagentOrderAPI.stockIn(orderId)
+      }
       loadDashboardData()
       toast.success('入库成功！')
     } catch (error: any) {
@@ -201,14 +240,23 @@ export function Dashboard() {
       <h1 className="text-3xl font-bold">仪表盘</h1>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">我的订单</CardTitle>
+            <CardTitle className="text-sm font-medium">试剂订单</CardTitle>
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{myOrders.length}</div>
+            <div className="text-2xl font-bold">{myReagentOrders.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">耗材订单</CardTitle>
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{myConsumableOrders.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -231,28 +279,28 @@ export function Dashboard() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">待处理订单</CardTitle>
+            <CardTitle className="text-sm font-medium">待处理</CardTitle>
             <AlertCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {myOrders.filter((o) => o.status === 'pending').length}
+              {myReagentOrders.filter((o) => o.status === 'pending').length + myConsumableOrders.filter((o) => o.status === 'pending').length}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* My Orders */}
+      {/* My Reagent Orders */}
       <Card>
         <CardHeader>
-          <CardTitle>我的订单进度</CardTitle>
+          <CardTitle>试剂订单</CardTitle>
         </CardHeader>
         <CardContent>
-          {myOrders.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">暂无订单</p>
+          {myReagentOrders.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">暂无试剂订单</p>
           ) : (
             <div className="space-y-4">
-              {myOrders.map((order) => (
+              {myReagentOrders.slice((reagentPage - 1) * reagentPageSize, reagentPage * reagentPageSize).map((order) => (
                 <div
                   key={order.id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
@@ -260,7 +308,7 @@ export function Dashboard() {
                   <div>
                     <p className="font-medium">{order.name}</p>
                     <p className="text-sm text-muted-foreground">
-                      CAS: {order.cas_number} • {formatDateTime(order.created_at)}
+                      CAS: {order.cas_number || '-'} • {formatDateTime(order.created_at)}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -289,7 +337,7 @@ export function Dashboard() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleConfirmArrival(order.id)}
+                          onClick={() => handleConfirmArrival(order.id, 'reagent')}
                         >
                           <CheckCircle className="w-3 h-3 mr-1" />
                           确认到货
@@ -297,7 +345,7 @@ export function Dashboard() {
                         <Button
                           size="sm"
                           className="bg-green-600 hover:bg-green-700"
-                          onClick={() => handleQuickStockIn(order.id)}
+                          onClick={() => handleQuickStockIn(order.id, 'reagent')}
                         >
                           <PackagePlus className="w-3 h-3 mr-1" />
                           一键入库
@@ -308,7 +356,7 @@ export function Dashboard() {
                       <Button
                         size="sm"
                         className="bg-green-600 hover:bg-green-700"
-                        onClick={() => handleQuickStockIn(order.id)}
+                        onClick={() => handleQuickStockIn(order.id, 'reagent')}
                       >
                         <PackagePlus className="w-3 h-3 mr-1" />
                         入库
@@ -317,6 +365,86 @@ export function Dashboard() {
                   </div>
                 </div>
               ))}
+              {Math.ceil(myReagentOrders.length / reagentPageSize) > 1 && (
+                <div className="flex items-center justify-between pt-4">
+                  <PaginationInfo currentPage={reagentPage} pageSize={reagentPageSize} total={myReagentOrders.length} />
+                  <Pagination
+                    currentPage={reagentPage}
+                    totalPages={Math.ceil(myReagentOrders.length / reagentPageSize)}
+                    pageSize={reagentPageSize}
+                    onPageChange={setReagentPage}
+                    onPageSizeChange={() => {}}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* My Consumable Orders */}
+      <Card>
+        <CardHeader>
+          <CardTitle>耗材订单</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {myConsumableOrders.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">暂无耗材订单</p>
+          ) : (
+            <div className="space-y-4">
+              {myConsumableOrders.slice((consumablePage - 1) * consumablePageSize, consumablePage * consumablePageSize).map((order) => (
+                <div
+                  key={order.id}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                >
+                  <div>
+                    <p className="font-medium">{order.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {formatDateTime(order.created_at)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        'px-3 py-1 text-sm rounded-full',
+                        order.status === 'pending'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : order.status === 'approved'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-gray-100 text-gray-800'
+                      )}
+                    >
+                      {order.status === 'pending'
+                        ? '待审批'
+                        : order.status === 'approved'
+                        ? '已审批'
+                        : order.status}
+                    </span>
+                    {order.status === 'approved' && (
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700"
+                        onClick={() => handleQuickStockIn(order.id, 'consumable')}
+                      >
+                        <PackagePlus className="w-3 h-3 mr-1" />
+                        一键入库
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {Math.ceil(myConsumableOrders.length / consumablePageSize) > 1 && (
+                <div className="flex items-center justify-between pt-4">
+                  <PaginationInfo currentPage={consumablePage} pageSize={consumablePageSize} total={myConsumableOrders.length} />
+                  <Pagination
+                    currentPage={consumablePage}
+                    totalPages={Math.ceil(myConsumableOrders.length / consumablePageSize)}
+                    pageSize={consumablePageSize}
+                    onPageChange={setConsumablePage}
+                    onPageSizeChange={() => {}}
+                  />
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -332,7 +460,7 @@ export function Dashboard() {
             <p className="text-muted-foreground text-center py-8">暂无借用</p>
           ) : (
             <div className="space-y-4">
-              {myBorrows.map((item) => (
+              {myBorrows.slice((borrowPage - 1) * borrowPageSize, borrowPage * borrowPageSize).map((item) => (
                 <div
                   key={item.inventory_id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
@@ -348,6 +476,18 @@ export function Dashboard() {
                   </Button>
                 </div>
               ))}
+              {Math.ceil(myBorrows.length / borrowPageSize) > 1 && (
+                <div className="flex items-center justify-between pt-4">
+                  <PaginationInfo currentPage={borrowPage} pageSize={borrowPageSize} total={myBorrows.length} />
+                  <Pagination
+                    currentPage={borrowPage}
+                    totalPages={Math.ceil(myBorrows.length / borrowPageSize)}
+                    pageSize={borrowPageSize}
+                    onPageChange={setBorrowPage}
+                    onPageSizeChange={() => {}}
+                  />
+                </div>
+              )}
             </div>
           )}
         </CardContent>

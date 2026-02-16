@@ -382,27 +382,34 @@ def import_inventory(
 
 # ==================== Generic / ID-based Routes ====================
 
-@router.get("/", response_model=List[InventoryResponse])
+@router.get("/")
 def list_inventory(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     status_filter: Optional[InventoryStatus] = None,
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
     db: Session = Depends(get_db),
 ):
-    """List inventory with optional filters"""
-    statement = select(Inventory)
+    """List inventory with optional filters and pagination"""
+    base = select(Inventory)
 
     if status_filter:
-        statement = statement.where(Inventory.status == status_filter)
+        base = base.where(Inventory.status == status_filter)
     if cas_filter:
-        statement = statement.where(Inventory.cas_number == normalize_cas(cas_filter))
+        base = base.where(Inventory.cas_number == normalize_cas(cas_filter))
     if hazardous_only:
-        statement = statement.where(Inventory.is_hazardous == True)
+        base = base.where(Inventory.is_hazardous == True)
 
-    statement = statement.offset(skip).limit(limit).order_by(Inventory.created_at.desc())
-    return db.exec(statement).all()
+    total = db.exec(select(func.count()).select_from(base.subquery())).one()
+    items = db.exec(base.order_by(Inventory.created_at.desc()).offset(skip).limit(limit)).all()
+
+    return {
+        "data": [InventoryResponse.model_validate(i).model_dump() for i in items],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
 
 
 @router.get("/{inventory_id}", response_model=InventoryResponse)

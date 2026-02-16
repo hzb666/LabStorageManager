@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { consumableOrderAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
+import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { useAuthStore } from '@/store/useStore'
 
 interface ConsumableOrder {
@@ -36,6 +37,9 @@ import {
 export function ConsumableOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
   const [orders, setOrders] = useState<ConsumableOrder[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   const [loading, setLoading] = useState(true)
   
   const currentUser = useAuthStore((state) => state.user)
@@ -59,18 +63,30 @@ export function ConsumableOrdersPage() {
 
   useEffect(() => {
     loadOrders()
-  }, [])
+  }, [page, pageSize])
 
   const loadOrders = async () => {
     try {
       setLoading(true)
-      const response = await consumableOrderAPI.list()
-      setOrders(response.data)
+      const response = await consumableOrderAPI.list({
+        skip: (page - 1) * pageSize,
+        limit: pageSize,
+      })
+      const result = response.data
+      setOrders(result.data || [])
+      setTotal(result.total || 0)
     } catch (error) {
       console.error('Failed to load orders:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const totalPages = Math.ceil(total / pageSize)
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize)
+    setPage(1)
   }
 
   const validateForm = () => {
@@ -356,6 +372,18 @@ export function ConsumableOrdersPage() {
                     </div>
                   </div>
                 ))}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
+                    <Pagination
+                      currentPage={page}
+                      totalPages={totalPages}
+                      pageSize={pageSize}
+                      onPageChange={setPage}
+                      onPageSizeChange={handlePageSizeChange}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 
 from app.database import get_db
 from app.core.auth import get_current_user, require_admin
@@ -124,32 +124,36 @@ async def upload_reagent_order_image(
 @router.get("/")
 def list_reagent_orders(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     status_filter: Optional[ReagentOrderStatus] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List reagent orders with optional filters, includes applicant name"""
-    statement = select(ReagentOrder)
-    
+    """List reagent orders with optional filters, pagination, and applicant name"""
+    base = select(ReagentOrder)
+
     if status_filter:
-        statement = statement.where(ReagentOrder.status == status_filter)
-    
-    statement = statement.offset(skip).limit(limit).order_by(ReagentOrder.created_at.desc())
-    
-    orders = db.exec(statement).all()
-    
+        base = base.where(ReagentOrder.status == status_filter)
+
+    total = db.exec(select(func.count()).select_from(base.subquery())).one()
+    orders = db.exec(base.order_by(ReagentOrder.created_at.desc()).offset(skip).limit(limit)).all()
+
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     users_map: dict[int, str] = {}
     if applicant_ids:
         users = db.exec(select(User).where(User.id.in_(applicant_ids))).all()
         users_map = {u.id: u.full_name or u.username for u in users}
-    
-    return [
-        {**ReagentOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
-        for o in orders
-    ]
+
+    return {
+        "data": [
+            {**ReagentOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
+            for o in orders
+        ],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
 
 
 @router.get("/{order_id}", response_model=ReagentOrderResponse)

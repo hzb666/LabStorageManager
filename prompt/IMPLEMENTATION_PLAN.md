@@ -305,6 +305,25 @@
 | 耗材订购页 | `ConsumableOrders.tsx` | ✅ |
 | 导航更新 | `Layout.tsx` | ✅ |
 
+---
+
+## Phase 10: Error Boundary + Pagination ✅ (2026-02-16)
+
+### 10.1 Error Boundary ✅
+- `ErrorBoundary.tsx`: React class component，fallback UI 含错误提示 + 返回/刷新按钮
+- 包裹 `<BrowserRouter>` 外层于 `App.tsx`
+
+### 10.2 后端分页改造 ✅
+- 三个列表接口统一返回 `{ data: [...], total: N, skip: N, limit: N }`
+- 使用 `select(func.count()).select_from(base.subquery())` 查总数
+- 默认 pageSize=20
+
+### 10.3-10.4 前端分页 ✅
+- 自定义 `Pagination` + `PaginationInfo` 组件 (`pagination.tsx`)
+- `client.ts` 添加 `PaginatedResponse<T>` + `PaginationParams` 类型
+- 库存、试剂订单、耗材订单三个页面均实现服务端分页
+- 状态过滤改为服务端参数（库存页）
+
 ### Future Enhancements
 
 | 功能 | 描述 | 状态 |

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { reagentOrderAPI, inventoryAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
+import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { useAuthStore } from '@/store/useStore'
 
 interface ReagentOrder {
@@ -50,6 +51,9 @@ import {
 export function ReagentOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
   const [orders, setOrders] = useState<ReagentOrder[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [casWarning, setCasWarning] = useState<CASWarningInfo | null>(null)
   const [casLoading, setCasLoading] = useState(false)
@@ -88,8 +92,9 @@ export function ReagentOrdersPage() {
     setCasLoading(true)
     try {
       // Check existing orders
-      const response = await reagentOrderAPI.list({ cas_number: cas })
-      const existingOrders = response.data.filter((o: ReagentOrder) => o.cas_number.replace(/-/g, '') === cas.replace(/-/g, ''))
+      const response = await reagentOrderAPI.list()
+      const allOrders: ReagentOrder[] = response.data.data || []
+      const existingOrders = allOrders.filter((o: ReagentOrder) => o.cas_number.replace(/-/g, '') === cas.replace(/-/g, ''))
       
       // Check inventory
       let inventoryInfo = { total_remaining: 0, items_count: 0 }
@@ -124,18 +129,30 @@ export function ReagentOrdersPage() {
 
   useEffect(() => {
     loadOrders()
-  }, [])
+  }, [page, pageSize])
 
   const loadOrders = async () => {
     try {
       setLoading(true)
-      const response = await reagentOrderAPI.list()
-      setOrders(response.data)
+      const response = await reagentOrderAPI.list({
+        skip: (page - 1) * pageSize,
+        limit: pageSize,
+      })
+      const result = response.data
+      setOrders(result.data || [])
+      setTotal(result.total || 0)
     } catch (error) {
       console.error('Failed to load orders:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const totalPages = Math.ceil(total / pageSize)
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize)
+    setPage(1)
   }
 
   const validateForm = () => {
@@ -462,6 +479,18 @@ export function ReagentOrdersPage() {
                     </div>
                   </div>
                 ))}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-2">
+                    <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
+                    <Pagination
+                      currentPage={page}
+                      totalPages={totalPages}
+                      pageSize={pageSize}
+                      onPageChange={setPage}
+                      onPageSizeChange={handlePageSizeChange}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

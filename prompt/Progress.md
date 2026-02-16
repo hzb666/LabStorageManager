@@ -77,10 +77,11 @@
 | 2026-02-14 | Phase 9 设计 | ✅ | 试剂与耗材分离 - 字段设计 (english_name, price, category, brand) |
 | 2026-02-14 | Phase 9 实施 | ✅ | 试剂与耗材分离 - Order 拆分、独立页面、导航更新 |
 | 2026-02-16 | Code Review Refactor | ✅ | 全面代码审查重构 - 修复 P0/P1/P2 共 14 项问题 |
+| 2026-02-16 | Phase 10 | ✅ | Error Boundary + 全页面服务端分页 (库存/试剂订单/耗材订单) |
 
 **Last Updated**: 2026-02-16
-**Status**: Phase 1-9 全部完成, Code Review Refactor 完成
-**Next**: Future Enhancements
+**Status**: Phase 1-10 全部完成
+**Next**: Future Enhancements (化学兼容性检查、批量操作等)
 
 ---
 
@@ -101,6 +102,12 @@
 - [x] P2: 前端集中映射表 (constants.ts)
 - [x] P2: Token 单一来源 (Zustand persist only)
 - [x] P2: spec_utils 单位规范化映射 (mL/L/μL)
+
+### Phase 10: Error Boundary + Pagination ✅
+- [x] 10.1: React Error Boundary 组件 + fallback UI (错误提示 + 刷新/返回按钮)
+- [x] 10.2: 后端三个列表接口返回 `{data, total, skip, limit}` (pageSize=20)
+- [x] 10.3: 前端库存页服务端分页 + Pagination UI + PaginationInfo
+- [x] 10.4: 前端试剂/耗材订单页服务端分页
 
 ### Future Enhancements
 - [ ] Chemical compatibility check

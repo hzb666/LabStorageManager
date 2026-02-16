@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useNavigate } from 'react-router-dom'
 import { inventoryAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
+import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { formatDate, cn } from '@/lib/utils'
 import {
   Search,
@@ -47,6 +48,9 @@ const columnHelper = createColumnHelper<InventoryItem>()
 export function InventoryPage() {
   const navigate = useNavigate()
   const [data, setData] = useState<InventoryItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
@@ -71,12 +75,21 @@ export function InventoryPage() {
 
   useEffect(() => {
     loadInventory()
-  }, [])
+  }, [page, pageSize, statusFilter])
 
   const loadInventory = async () => {
+    setLoading(true)
     try {
-      const response = await inventoryAPI.list()
-      setData(response.data || [])
+      const params: Record<string, any> = {
+        skip: (page - 1) * pageSize,
+        limit: pageSize,
+      }
+      if (statusFilter !== 'all') params.status_filter = statusFilter
+
+      const response = await inventoryAPI.list(params)
+      const result = response.data
+      setData(result.data || [])
+      setTotal(result.total || 0)
     } catch (error) {
       console.error('Failed to load inventory:', error)
     } finally {
@@ -84,10 +97,17 @@ export function InventoryPage() {
     }
   }
 
-  const filteredData = useMemo(() => {
-    if (statusFilter === 'all') return data
-    return data.filter(item => item.status === statusFilter)
-  }, [data, statusFilter])
+  const totalPages = Math.ceil(total / pageSize)
+
+  const handleStatusFilterChange = (value: string) => {
+    setStatusFilter(value)
+    setPage(1)
+  }
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize)
+    setPage(1)
+  }
 
   const columns = useMemo(() => [
     columnHelper.accessor('internal_code', {
@@ -201,7 +221,7 @@ export function InventoryPage() {
   ], [data])
 
   const table = useReactTable({
-    data: filteredData,
+    data,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -468,7 +488,7 @@ export function InventoryPage() {
             </div>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => handleStatusFilterChange(e.target.value)}
               className="h-10 px-3 pr-8 border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
               style={{
                 backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
@@ -491,7 +511,7 @@ export function InventoryPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Package className="w-5 h-5" />
-            库存列表 ({filteredData.length})
+            库存列表 ({total})
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -499,7 +519,7 @@ export function InventoryPage() {
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
-          ) : filteredData.length === 0 ? (
+          ) : data.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               暂无库存数据
             </div>
@@ -532,6 +552,18 @@ export function InventoryPage() {
                 </tbody>
               </table>
             </div>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-4">
+                <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
+                <Pagination
+                  currentPage={page}
+                  totalPages={totalPages}
+                  pageSize={pageSize}
+                  onPageChange={setPage}
+                  onPageSizeChange={handlePageSizeChange}
+                />
+              </div>
+            )}
           )}
         </CardContent>
       </Card>

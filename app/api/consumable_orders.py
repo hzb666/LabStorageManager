@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 
 from app.database import get_db
 from app.core.auth import get_current_user, require_admin
@@ -101,21 +101,20 @@ async def upload_consumable_order_image(
 @router.get("/")
 def list_consumable_orders(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     status_filter: Optional[ConsumableOrderStatus] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List consumable orders with optional filters, includes applicant name"""
-    statement = select(ConsumableOrder)
-    
+    """List consumable orders with optional filters, pagination, and applicant name"""
+    base = select(ConsumableOrder)
+
     if status_filter:
-        statement = statement.where(ConsumableOrder.status == status_filter)
-    
-    statement = statement.offset(skip).limit(limit).order_by(ConsumableOrder.created_at.desc())
-    
-    orders = db.exec(statement).all()
-    
+        base = base.where(ConsumableOrder.status == status_filter)
+
+    total = db.exec(select(func.count()).select_from(base.subquery())).one()
+    orders = db.exec(base.order_by(ConsumableOrder.created_at.desc()).offset(skip).limit(limit)).all()
+
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     users_map: dict[int, str] = {}
@@ -123,11 +122,16 @@ def list_consumable_orders(
         from app.models.user import User as UserModel
         users = db.exec(select(UserModel).where(UserModel.id.in_(applicant_ids))).all()
         users_map = {u.id: u.full_name or u.username for u in users}
-    
-    return [
-        {**ConsumableOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
-        for o in orders
-    ]
+
+    return {
+        "data": [
+            {**ConsumableOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
+            for o in orders
+        ],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
 
 
 @router.get("/{order_id}", response_model=ConsumableOrderResponse)

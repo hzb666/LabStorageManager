@@ -36,6 +36,19 @@ api.interceptors.response.use(
   }
 )
 
+// Paginated response type
+export interface PaginatedResponse<T> {
+  data: T[]
+  total: number
+  skip: number
+  limit: number
+}
+
+export interface PaginationParams {
+  skip?: number
+  limit?: number
+}
+
 // Auth APIs
 export const authAPI = {
   login: (username: string, password: string) =>
@@ -58,7 +71,8 @@ export const userAdminAPI = {
 
 // Reagent Order APIs
 export const reagentOrderAPI = {
-  list: (params?: any) => api.get('/reagent-orders', { params }),
+  list: (params?: PaginationParams & { status_filter?: string }) =>
+    api.get('/reagent-orders', { params }),
   get: (id: number) => api.get(`/reagent-orders/${id}`),
   create: (data: {
     cas_number: string
@@ -88,7 +102,8 @@ export const reagentOrderAPI = {
 
 // Consumable Order APIs (new)
 export const consumableOrderAPI = {
-  list: (params?: any) => api.get('/consumable-orders', { params }),
+  list: (params?: PaginationParams & { status_filter?: string }) =>
+    api.get('/consumable-orders', { params }),
   get: (id: number) => api.get(`/consumable-orders/${id}`),
   create: (data: {
     name: string
@@ -114,7 +129,8 @@ export const consumableOrderAPI = {
 
 // Inventory APIs
 export const inventoryAPI = {
-  list: (params?: any) => api.get('/inventory', { params }),
+  list: (params?: PaginationParams & { status_filter?: string; cas_filter?: string; hazardous_only?: boolean }) =>
+    api.get('/inventory', { params }),
   get: (id: number) => api.get(`/inventory/${id}`),
   getByCode: (code: string) => api.get(`/inventory/code/${code}`),
   checkCAS: (casNumber: string) => api.get(`/inventory/cas/${casNumber}`),

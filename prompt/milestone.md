@@ -79,6 +79,24 @@
 | `55619a4` | 耗材和试剂订购分离 - 独立订单系统 | feat |
 | `fbf8184` | 修复代码审查问题 | fix |
 
+### Phase 9: 代码质量与重构
+
+| 提交哈希 | 描述 | 类型 |
+|---------|------|------|
+| `be4b3fc` | 文档更新 | docs |
+| `844cd4a` | 代码审查修复 - 修复 P0/P1/P2 问题（14项） | refactor |
+| `69ffc92` | 合并 PR #1 - code quality | merge |
+| `2778ba6` | 更新过期文档，记录全部审查修复 | docs |
+| `ed1b55c` | 修复剩余代码质量问题 | fix |
+| `cc988c1` | 替换全部 alert() 为 toast 通知组件 | refactor |
+| `7fb52e7` | 全量代码审查 - 修复8个问题（安全漏洞、Bug、代码质量） | fix |
+| `1689238` | 代码审查修复 - 文件类型验证、错误字段映射、内存泄漏等 | fix |
+| `09ebecb` | 移除导入页面的默认位置和危险品选项 | refactor |
+| `796f69a` | 美化库存状态筛选下拉框 | style |
+| `8d9a4b2` | 导出图标改为 ExternalLink | refactor |
+| `962f914` | 导入图标从 Upload 改为 Import | refactor |
+| `cc4c84a` | 简化 GIT_STRATEGY.md 文档 | chore |
+
 ### 文档与配置
 
 | 提交哈希 | 描述 | 类型 |
@@ -99,6 +117,7 @@
 | `feature/user-management` | 用户管理 | ✅ 已完成 |
 | `feature/notification` | 通知系统 | ✅ 已完成 |
 | `feature/consumable-reagent-split` | 耗材/试剂分离 | ✅ 已完成 |
+| `feature/code-quality` | 代码质量优化 | ✅ 已完成 |
 
 ---
 
@@ -106,8 +125,10 @@
 
 | 类型 | 数量 |
 |-----|------|
-| feat | ~20+ |
-| fix | ~10+ |
-| docs | ~10+ |
-| refactor | ~5+ |
-| chore | ~2+ |
+| feat | ~25+ |
+| fix | ~15+ |
+| docs | ~15+ |
+| refactor | ~10+ |
+| chore | ~5+ |
+| merge | ~2+ |
+| style | ~1+ |
