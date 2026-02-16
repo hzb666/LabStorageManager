@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { reagentOrderAPI, inventoryAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { formatDateTime, cn } from '@/lib/utils'
 import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2, PackagePlus, CheckCircle } from 'lucide-react'
 
@@ -121,7 +122,7 @@ export function Dashboard() {
     if (!selectedBorrow) return
     const qty = parseFloat(returnQuantity)
     if (isNaN(qty) || qty < 0) {
-      alert('请输入有效的数量')
+      toast.warning('请输入有效的数量')
       return
     }
     setReturnLoading(true)
@@ -130,9 +131,9 @@ export function Dashboard() {
       setShowReturnModal(false)
       setSelectedBorrow(null)
       loadDashboardData()
-      alert('归还成功')
+      toast.success('归还成功')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '归还失败')
+      toast.error(error.response?.data?.detail || '归还失败')
     } finally {
       setReturnLoading(false)
     }
@@ -141,7 +142,7 @@ export function Dashboard() {
   const handleStockin = async () => {
     if (!selectedStockin) return
     if (!stockinLocation.trim()) {
-      alert('请输入存放位置')
+      toast.warning('请输入存放位置')
       return
     }
     setStockinLoading(true)
@@ -151,9 +152,9 @@ export function Dashboard() {
       setSelectedStockin(null)
       setStockinLocation('')
       loadDashboardData()
-      alert('位置分配成功')
+      toast.success('位置分配成功')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     } finally {
       setStockinLoading(false)
     }
@@ -164,9 +165,9 @@ export function Dashboard() {
     try {
       await reagentOrderAPI.confirmArrival(orderId)
       loadDashboardData()
-      alert('⚠️ 试剂已到货，请及时完成入库操作！')
+      toast.warning('试剂已到货，请及时完成入库操作！')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
@@ -175,9 +176,9 @@ export function Dashboard() {
     try {
       await reagentOrderAPI.stockIn(orderId)
       loadDashboardData()
-      alert('入库成功！')
+      toast.success('入库成功！')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '入库失败')
+      toast.error(error.response?.data?.detail || '入库失败')
     }
   }
 

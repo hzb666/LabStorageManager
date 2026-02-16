@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { reagentOrderAPI, inventoryAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 
 interface ReagentOrder {
@@ -171,7 +172,7 @@ export function ReagentOrdersPage() {
         brand: formData.brand || undefined,
         price: formData.price ? parseFloat(formData.price) : undefined,
       })
-      alert('试剂订单创建成功')
+      toast.success('试剂订单创建成功')
       setFormData({
         cas_number: '',
         name: '',
@@ -190,47 +191,47 @@ export function ReagentOrdersPage() {
       setActiveTab('list')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '创建失败')
+      toast.error(error.response?.data?.detail || '创建失败')
     }
   }
 
   const handleApprove = async (id: number) => {
     try {
       await reagentOrderAPI.approve(id)
-      alert('审批通过')
+      toast.success('审批通过')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleReject = async (id: number) => {
     try {
       await reagentOrderAPI.reject(id, '管理员驳回')
-      alert('已驳回')
+      toast.success('已驳回')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleConfirmArrival = async (id: number) => {
     try {
       const result = await reagentOrderAPI.confirmArrival(id)
-      alert(result.data.message || '确认成功')
+      toast.success(result.data.message || '确认成功')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleStockIn = async (id: number) => {
     try {
       const result = await reagentOrderAPI.stockIn(id)
-      alert(`入库成功！创建了 ${result.data.items_created} 个库存条目`)
+      toast.success(`入库成功！创建了 ${result.data.items_created} 个库存条目`)
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '入库失败')
+      toast.error(error.response?.data?.detail || '入库失败')
     }
   }
 

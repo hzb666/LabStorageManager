@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { userAdminAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
 import {
@@ -215,9 +216,9 @@ export function AdminUsersPage() {
       setShowCreateModal(false)
       setCreateData({ username: '', password: '', full_name: '', role: 'user' })
       loadUsers()
-      alert('用户创建成功')
+      toast.success('用户创建成功')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '创建失败')
+      toast.error(error.response?.data?.detail || '创建失败')
     } finally {
       setCreateLoading(false)
     }
@@ -239,9 +240,9 @@ export function AdminUsersPage() {
       setShowEditModal(false)
       setEditUser(null)
       loadUsers()
-      alert('用户更新成功')
+      toast.success('用户更新成功')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '更新失败')
+      toast.error(error.response?.data?.detail || '更新失败')
     } finally {
       setEditLoading(false)
     }
@@ -262,9 +263,9 @@ export function AdminUsersPage() {
       setShowDeleteModal(false)
       setDeleteUser(null)
       loadUsers()
-      alert('用户已禁用')
+      toast.success('用户已禁用')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     } finally {
       setDeleteLoading(false)
     }
@@ -275,9 +276,9 @@ export function AdminUsersPage() {
     try {
       await userAdminAPI.activate(userId)
       loadUsers()
-      alert('用户已启用')
+      toast.success('用户已启用')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 

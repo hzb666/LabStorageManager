@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { consumableOrderAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 
 interface ConsumableOrder {
@@ -100,7 +101,7 @@ export function ConsumableOrdersPage() {
         brand: formData.brand || undefined,
         price: formData.price ? parseFloat(formData.price) : undefined,
       })
-      alert('耗材订单创建成功')
+      toast.success('耗材订单创建成功')
       setFormData({
         name: '',
         english_name: '',
@@ -117,37 +118,37 @@ export function ConsumableOrdersPage() {
       setActiveTab('list')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '创建失败')
+      toast.error(error.response?.data?.detail || '创建失败')
     }
   }
 
   const handleApprove = async (id: number) => {
     try {
       await consumableOrderAPI.approve(id)
-      alert('审批通过')
+      toast.success('审批通过')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleReject = async (id: number) => {
     try {
       await consumableOrderAPI.reject(id, '管理员驳回')
-      alert('已驳回')
+      toast.success('已驳回')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleComplete = async (id: number) => {
     try {
       await consumableOrderAPI.complete(id)
-      alert('耗材订单已完成')
+      toast.success('耗材订单已完成')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 

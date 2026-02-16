@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { inventoryAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { formatDate, cn } from '@/lib/utils'
 import {
   Search,
@@ -258,9 +259,9 @@ export function InventoryPage() {
         notes: ''
       })
       loadInventory()
-      alert('手动入库成功！')
+      toast.success('手动入库成功！')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '入库失败')
+      toast.error(error.response?.data?.detail || '入库失败')
     } finally {
       setSubmitting(false)
     }
@@ -282,7 +283,7 @@ export function InventoryPage() {
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
     } catch (error: any) {
-      alert(error.response?.data?.detail || '导出失败')
+      toast.error(error.response?.data?.detail || '导出失败')
     }
   }
 

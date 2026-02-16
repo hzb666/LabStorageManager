@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { inventoryAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { cn, formatDateTime } from '@/lib/utils'
 import { 
   Upload, 
@@ -51,7 +52,7 @@ export function ImportPage() {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
       if (!selectedFile.name.endsWith('.csv') && !selectedFile.name.endsWith('.xlsx') && !selectedFile.name.endsWith('.xls')) {
-        alert('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
+        toast.warning('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
         return
       }
       setFile(selectedFile)
@@ -72,10 +73,10 @@ export function ImportPage() {
       const response = await inventoryAPI.importExcel(formData)
       setResult(response.data)
       if (response.data.success) {
-        alert(`导入成功！共 ${response.data.created} 条记录`)
+        toast.success(`导入成功！共 ${response.data.created} 条记录`)
       }
     } catch (error: any) {
-      alert(error.response?.data?.detail || '导入失败')
+      toast.error(error.response?.data?.detail || '导入失败')
     } finally {
       setImporting(false)
     }
