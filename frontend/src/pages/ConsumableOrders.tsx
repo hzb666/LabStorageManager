@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { consumableOrderAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 
 interface ConsumableOrder {
@@ -20,34 +21,17 @@ interface ConsumableOrder {
   image_path?: string
   notes?: string
   applicant_id: number
+  applicant_name?: string
   status: string
   created_at: string
   updated_at: string
 }
 
-// Status mapping
-const STATUS_MAPPING: Record<string, string> = {
-  pending: '已申购',
-  approved: '已审批',
-  completed: '已完成',
-  rejected: '未通过',
-}
-
-const STATUS_CLASS_MAPPING: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  approved: 'bg-blue-100 text-blue-800',
-  completed: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-}
-
-const REASON_MAPPING: Record<string, string> = {
-  none: '没有',
-  running_out: '快用完',
-  empty: '用完',
-  common_public: '常用或公用',
-  not_found: '找不到',
-  reorder: '重新下单',
-}
+import {
+  CONSUMABLE_STATUS_MAP as STATUS_MAPPING,
+  CONSUMABLE_STATUS_STYLE as STATUS_CLASS_MAPPING,
+  ORDER_REASON_MAP as REASON_MAPPING,
+} from '@/lib/constants'
 
 export function ConsumableOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
@@ -109,7 +93,7 @@ export function ConsumableOrdersPage() {
         brand: formData.brand || undefined,
         price: formData.price ? parseFloat(formData.price) : undefined,
       })
-      alert('耗材订单创建成功')
+      toast.success('耗材订单创建成功')
       setFormData({
         name: '',
         english_name: '',
@@ -126,37 +110,37 @@ export function ConsumableOrdersPage() {
       setActiveTab('list')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '创建失败')
+      toast.error(error.response?.data?.detail || '创建失败')
     }
   }
 
   const handleApprove = async (id: number) => {
     try {
       await consumableOrderAPI.approve(id)
-      alert('审批通过')
+      toast.success('审批通过')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleReject = async (id: number) => {
     try {
       await consumableOrderAPI.reject(id, '管理员驳回')
-      alert('已驳回')
+      toast.success('已驳回')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleComplete = async (id: number) => {
     try {
       await consumableOrderAPI.complete(id)
-      alert('耗材订单已完成')
+      toast.success('耗材订单已完成')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
@@ -350,7 +334,7 @@ export function ConsumableOrdersPage() {
                           {order.english_name && ` • ${order.english_name}`}
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
-                          申请人: {order.applicant_id} • {new Date(order.created_at).toLocaleDateString()}
+                          申请人: {order.applicant_name || order.applicant_id} • {new Date(order.created_at).toLocaleDateString()}
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-2">

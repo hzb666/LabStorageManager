@@ -8,6 +8,7 @@ import { AdminUsersPage } from '@/pages/AdminUsers'
 import { ReagentOrdersPage } from '@/pages/ReagentOrders'
 import { ConsumableOrdersPage } from '@/pages/ConsumableOrders'
 import { useAuthStore } from '@/store/useStore'
+import { ToastContainer } from '@/components/ui/toast'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -20,6 +21,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <BrowserRouter>
+      <ToastContainer />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route

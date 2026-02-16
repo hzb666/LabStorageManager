@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -12,7 +12,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useNavigate } from 'react-router-dom'
 import { inventoryAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { formatDate, cn } from '@/lib/utils'
 import {
   Search,
@@ -21,7 +23,7 @@ import {
   AlertTriangle,
   Loader2,
   Download,
-  Upload,
+  Import,
   Plus,
   X
 } from 'lucide-react'
@@ -43,6 +45,7 @@ interface InventoryItem {
 const columnHelper = createColumnHelper<InventoryItem>()
 
 export function InventoryPage() {
+  const navigate = useNavigate()
   const [data, setData] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [sorting, setSorting] = useState<SortingState>([])
@@ -258,9 +261,9 @@ export function InventoryPage() {
         notes: ''
       })
       loadInventory()
-      alert('手动入库成功！')
+      toast.success('手动入库成功！')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '入库失败')
+      toast.error(error.response?.data?.detail || '入库失败')
     } finally {
       setSubmitting(false)
     }
@@ -269,20 +272,19 @@ export function InventoryPage() {
   const handleExport = async () => {
     try {
       const response = await inventoryAPI.exportInventory()
-      const { data, filename } = response.data
-      
-      // Create and download CSV file
-      const blob = new Blob([data], { type: 'text/csv;charset=utf-8;' })
+      const csvData = response.data
+
+      const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = filename
+      link.download = `inventory_export_${new Date().toISOString().slice(0, 10)}.csv`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
     } catch (error: any) {
-      alert(error.response?.data?.detail || '导出失败')
+      toast.error(error.response?.data?.detail || '导出失败')
     }
   }
 
@@ -295,12 +297,12 @@ export function InventoryPage() {
             <Plus className="w-4 h-4 mr-2" />
             手动入库
           </Button>
-          <Button variant="outline" onClick={() => window.location.href = '/import'}>
-            <Download className="w-4 h-4 mr-2" />
+          <Button variant="outline" onClick={() => navigate('/import')}>
+            <Import className="w-4 h-4 mr-2" />
             批量导入
           </Button>
           <Button variant="outline" onClick={handleExport}>
-            <Upload className="w-4 h-4 mr-2" />
+            <Download className="w-4 h-4 mr-2" />
             导出
           </Button>
         </div>
@@ -467,7 +469,13 @@ export function InventoryPage() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-10 px-3 border rounded-md bg-background"
+              className="h-10 px-3 pr-8 border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 0.5rem center',
+                backgroundSize: '1rem'
+              }}
             >
               <option value="all">全部状态</option>
               <option value="in_stock">在库</option>

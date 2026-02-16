@@ -48,9 +48,177 @@
   - 添加重试逻辑 (最多5次)
   - 捕获唯一约束冲突异常并自动重试
 
+## 全量代码审查 (2026-02-16)
+
+### 已修复问题
+
+#### 7. 用户创建接口无认证 [SECURITY][FIXED]
+- **文件**: `app/api/users.py`
+- **问题**: `POST /users/` 无 `Depends(require_admin)` 依赖，任何人可创建管理员账号
+- **修复**: 添加 `current_user: User = Depends(require_admin)` 参数
+
+#### 8. 函数名冲突 get_inventory_by_code [BUG][FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: 路由处理函数 `get_inventory_by_code` 与第39行的辅助函数同名，运行时路由处理函数覆盖辅助函数
+- **修复**: 路由处理函数重命名为 `get_inventory_by_internal_code`
+
+#### 9. 遗留 stock_in_order 使用错误的 generate_internal_code [BUG][FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: 遗留的 `/inventory/stock-in/{order_id}` 端点从 `cas_utils` 导入 `generate_internal_code(cas, seq)`，生成 `"64-001"` 格式而非正确的 `"64175-250113-01"` 格式；新版入库已在 `reagent_orders.py` 实现
+- **修复**: 删除遗留端点，`manual_add_inventory` 改用 `internal_code.py` 版本
+
+#### 10. 驳回原因未存储 [BUG][FIXED]
+- **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`
+- **问题**: `reject` 端点接受 `reason` 参数但从未保存到订单记录中
+- **修复**: 将驳回原因保存到 `order.notes` 字段
+
+#### 11. 导出CSV缺少新字段 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: `export_inventory` 导出CSV不包含 `english_name`, `category`, `brand`, `price` 字段
+- **修复**: 添加缺失字段到CSV导出
+
+#### 12. excel_service db.commit() 无错误处理 [FIXED]
+- **文件**: `app/services/excel_service.py`
+- **问题**: `db.commit()` 失败时无回滚逻辑
+- **修复**: 添加 try/except + db.rollback()
+
+#### 13. datetime.utcnow() 已弃用 [FIXED]
+- **文件**: 所有后端API文件 + `auth.py`
+- **问题**: Python 3.12+ 已弃用 `datetime.utcnow()`
+- **修复**: 全部替换为 `datetime.now(timezone.utc)`
+
+#### 14. 未使用的 REASON_MAPPING [FIXED]
+- **文件**: `frontend/src/pages/ReagentOrders.tsx`, `ConsumableOrders.tsx`
+- **问题**: `REASON_MAPPING` 常量已定义但从未使用
+- **修复**: 删除未使用代码
+
+#### 15. 全部 alert() 替换为 toast 通知 [FIXED]
+- **文件**: 全部前端页面 (6 个文件, 42 处调用)
+- **问题**: 使用浏览器原生 `alert()` 阻塞式弹窗，用户体验差
+- **修复**: 
+  - 创建 `toast.tsx` 轻量通知组件（success/error/warning/info）
+  - App.tsx 添加 `ToastContainer` 全局渲染
+  - 所有页面 `alert()` 替换为 `toast.success/error/warning()`
+
+#### 16. 订单列表显示申请人ID而非姓名 [FIXED]
+- **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`, 前端两个订单页
+- **问题**: 订单列表显示 `applicant_id` 数字，用户无法识别申请人
+- **修复**: 
+  - 后端列表 API 关联 User 表返回 `applicant_name` 字段
+  - 前端显示 `applicant_name` 替代 `applicant_id`
+
+#### 17. window.location.href 导致 SPA 整页刷新 [FIXED]
+- **文件**: `frontend/src/pages/Inventory.tsx`
+- **问题**: 使用 `window.location.href = '/import'` 跳转导致整页刷新
+- **修复**: 使用 React Router 的 `useNavigate` hook
+
+#### 18. ExternalLink 图标语义不符 [FIXED]
+- **文件**: `frontend/src/pages/Inventory.tsx`
+- **问题**: 导出按钮使用 `ExternalLink` 图标（表示外链），语义不正确
+- **修复**: 替换为 `Download` 图标
+
+#### 19. spec_utils.py 服务层抛出 HTTPException [FIXED]
+- **文件**: `app/services/spec_utils.py`
+- **问题**: 服务层函数直接抛出 `HTTPException`，违反分层架构原则
+- **修复**: 
+  - 创建 `SpecificationError(ValueError)` 域错误
+  - API 层捕获 `SpecificationError` 转为 `HTTPException`
+
+#### 20. BorrowLog.return_time == None 不规范 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: SQLAlchemy `== None` 比较虽可工作但触发 lint 警告
+- **修复**: 改为 `.is_(None)` 标准写法
+
+#### 21. 过期文档未更新 [FIXED]
+- **文件**: `BACKEND_STRUCTURE.md`, `FRONTEND_GUIDELINES.md`, `APP_FLOW.md`
+- **问题**: 文档仍引用旧 Order 单表、仅支持 .xlsx/.xls、未记录新字段
+- **修复**: 全部重写以反映当前代码状态
+
 ### 后续建议
 
 1. 添加单元测试覆盖核心业务逻辑
 2. 考虑添加API请求速率限制
 3. 添加日志记录关键操作
 4. 定期执行代码审查
+
+---
+
+## 全面代码审查重构 (2026-02-16)
+
+### P0 - 阻断性问题 [FIXED]
+
+#### 7. WAL 模式未正确启用 [FIXED]
+- **文件**: `app/database.py`
+- **问题**: 通过 URL 参数 `?mode=wal` 尝试启用 WAL，但 SQLAlchemy 不支持此方式
+- **修复**: 使用 SQLAlchemy `event.listens_for(engine, "connect")` 执行 `PRAGMA journal_mode=WAL`，同时开启 `PRAGMA foreign_keys=ON`
+
+#### 8. generate_internal_code 双实现冲突 [FIXED]
+- **文件**: `app/services/cas_utils.py`, `app/api/inventory.py`
+- **问题**: `cas_utils.py` 和 `internal_code.py` 各有一个 `generate_internal_code`，inventory.py 导入了错误的版本
+- **修复**: 删除 `cas_utils.py` 中的版本，inventory.py 改为导入 `internal_code.py`
+
+#### 9. 用户注册接口无认证 [FIXED]
+- **文件**: `app/api/users.py`
+- **问题**: `POST /users/` 任何人可创建用户（包括 admin），严重安全漏洞
+- **修复**: 添加 `require_admin` 依赖
+
+#### 10. Dashboard 入库按钮状态逻辑 [FIXED]
+- **文件**: `frontend/src/pages/Dashboard.tsx`
+- **问题**: APPROVED 状态同时显示"确认到货"和"一键入库"，后端 stock-in 需要 ARRIVED 状态
+- **修复**: APPROVED 只显示"确认到货"，ARRIVED 才显示"一键入库"；修复状态大小写
+
+#### 11. reject/confirm-arrival 参数不匹配 [FIXED]
+- **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`
+- **问题**: 后端用 Query 参数接收 reason/arrival_notes，前端发 JSON body
+- **修复**: 改为 Pydantic Body 模型 (RejectRequest, ConfirmArrivalRequest)
+
+### P1 - 重要改进 [FIXED]
+
+#### 12. 旧 stock-in 路由冗余 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: 与 `reagent_orders.py` 重复，且状态检查错误、internal_code 格式错误
+- **修复**: 删除 `POST /inventory/stock-in/{order_id}`
+
+#### 13. 订单列表接口无认证 [FIXED]
+- **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`
+- **问题**: `GET /reagent-orders/` 和 `GET /consumable-orders/` 无需登录即可访问
+- **修复**: 添加 `get_current_user` 依赖
+
+#### 14. 归还数量无上限校验 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: remaining_quantity 可输入超过 initial_quantity
+- **修复**: 添加 `remaining_quantity <= initial_quantity` 校验
+
+#### 15. 路由顺序 + 函数名冲突 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: `/export`, `/dashboard/*`, `/import/*` 路由在 `/{inventory_id}` 之后；`get_inventory_by_code` 辅助函数与路由函数同名
+- **修复**: 重排路由，所有具名路由在 `/{id}` 之前；辅助函数改名 `_get_by_id` / `_find_by_code`
+
+### P2 - 代码质量 [FIXED]
+
+#### 16. CSV 导出返回 JSON [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: 返回 `{"data": csv_string}` 需前端二次解析
+- **修复**: 改为 `StreamingResponse`，添加 UTF-8 BOM，直接下载
+
+#### 17. CORS 硬编码 [FIXED]
+- **文件**: `app/main.py`, `app/core/config.py`
+- **修复**: `cors_origins` 移入 Settings，main.py 统一读取
+
+#### 18. 日志缺失 [FIXED]
+- **文件**: `app/main.py`, `app/database.py`
+- **修复**: 添加 `logging.basicConfig` + 模块级 logger
+
+#### 19. Token 双重存储 [FIXED]
+- **文件**: `frontend/src/store/useStore.ts`, `frontend/src/api/client.ts`
+- **问题**: token 同时存在 localStorage 和 Zustand persist 中
+- **修复**: 统一由 Zustand persist 管理，API interceptor 从 `useAuthStore.getState()` 读取
+
+#### 20. 前端状态映射分散 [FIXED]
+- **文件**: 新增 `frontend/src/lib/constants.ts`
+- **修复**: 集中定义所有状态/原因/角色映射，ReagentOrders.tsx 和 ConsumableOrders.tsx 引用
+
+#### 21. spec_utils 单位大小写 [FIXED]
+- **文件**: `app/services/spec_utils.py`
+- **问题**: `spec.lower()` 后 "1L" 变成 "1l"，返回单位不规范
+- **修复**: 添加 `UNIT_CANONICAL` 映射 (ml→mL, l→L, ul→μL)

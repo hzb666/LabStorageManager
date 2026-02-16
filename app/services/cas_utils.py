@@ -83,29 +83,6 @@ def validate_and_normalize_cas(cas: str) -> tuple[bool, Optional[str], str]:
     return True, None, normalized
 
 
-def generate_internal_code(cas: str, sequence: int) -> str:
-    """
-    Generate internal code for inventory item.
-    
-    Format: CAS-BASE-SEQUENCE (e.g., ETH-001, ETH-002)
-    
-    Args:
-        cas: Normalized CAS number
-        sequence: Sequence number for this CAS
-        
-    Returns:
-        Internal code string
-    """
-    # Extract meaningful prefix from CAS or generate one
-    prefix = cas.split("-")[0] if cas else "UNK"
-    
-    # Ensure uppercase and no spaces
-    prefix = prefix.upper()
-    
-    # Format: PREFIX-XXX (zero-padded to 3 digits)
-    return f"{prefix}-{sequence:03d}"
-
-
 def get_cas_prefix(cas: str) -> str:
     """
     Extract prefix from CAS number for display purposes.

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { inventoryAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { cn, formatDateTime } from '@/lib/utils'
 import { 
   Upload, 
@@ -10,7 +11,6 @@ import {
   Loader2,
   CheckCircle,
   XCircle,
-  AlertCircle,
   Download
 } from 'lucide-react'
 
@@ -23,7 +23,7 @@ interface ImportResult {
   total_rows: number
   created: number
   errors_count: number
-  errors: { row: number; message: string }[] | null
+  errors: { row: number; error: string }[] | null
 }
 
 export function ImportPage() {
@@ -32,8 +32,6 @@ export function ImportPage() {
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
-  const [defaultLocation, setDefaultLocation] = useState('')
-  const [defaultIsHazardous, setDefaultIsHazardous] = useState(false)
 
   useEffect(() => {
     loadTemplate()
@@ -53,8 +51,8 @@ export function ImportPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
-      if (!selectedFile.name.endsWith('.xlsx') && !selectedFile.name.endsWith('.xls')) {
-        alert('请选择 Excel 文件 (.xlsx, .xls)')
+      if (!selectedFile.name.endsWith('.csv') && !selectedFile.name.endsWith('.xlsx') && !selectedFile.name.endsWith('.xls')) {
+        toast.warning('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
         return
       }
       setFile(selectedFile)
@@ -71,18 +69,14 @@ export function ImportPage() {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      if (defaultLocation) {
-        formData.append('default_location', defaultLocation)
-      }
-      formData.append('default_is_hazardous', String(defaultIsHazardous))
       
       const response = await inventoryAPI.importExcel(formData)
       setResult(response.data)
       if (response.data.success) {
-        alert(`导入成功！共 ${response.data.created} 条记录`)
+        toast.success(`导入成功！共 ${response.data.created} 条记录`)
       }
     } catch (error: any) {
-      alert(error.response?.data?.detail || '导入失败')
+      toast.error(error.response?.data?.detail || '导入失败')
     } finally {
       setImporting(false)
     }
@@ -91,23 +85,32 @@ export function ImportPage() {
   const downloadTemplate = () => {
     if (!template) return
     
-    // Create a simple template CSV for download
+    // Create a simple template CSV for download (with UTF-8 BOM for Excel compatibility)
     const headers = template.columns.map(c => c.name).join(',')
     const example = template.columns.map(c => {
       if (c.name === 'cas_number') return '64-17-5'
       if (c.name === 'name') return '乙醇'
+      if (c.name === 'english_name') return 'Ethanol'
+      if (c.name === 'alias') return '酒精'
+      if (c.name === 'category') return '有机溶剂'
+      if (c.name === 'brand') return 'Sigma'
       if (c.name === 'specification') return '500ml'
       if (c.name === 'initial_quantity') return '10'
+      if (c.name === 'is_hazardous') return 'false'
+      if (c.name === 'price') return '150.00'
       return ''
     }).join(',')
     
-    const csv = `${headers}\n${example}`
-    const blob = new Blob([csv], { type: 'text/csv' })
+    // Add UTF-8 BOM for Excel to recognize Chinese characters
+    const BOM = '\uFEFF'
+    const csv = BOM + headers + '\n' + example
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = 'inventory_template.csv'
     a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -141,13 +144,15 @@ export function ImportPage() {
               </div>
               <div className="grid gap-2 text-sm">
                 {template.columns.map(col => (
-                  <div key={col.name} className="flex items-center gap-2">
-                    {col.required ? (
-                      <span className="text-red-500">*</span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                    <span className="font-mono w-24">{col.name}</span>
+                  <div key={col.name} className="flex items-start gap-3">
+                    <span className="w-5 flex-shrink-0">
+                      {col.required ? (
+                        <span className="text-red-500">*</span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </span>
+                    <span className="font-mono w-32 flex-shrink-0">{col.name}</span>
                     <span className="text-muted-foreground">{col.description}</span>
                   </div>
                 ))}
@@ -158,36 +163,27 @@ export function ImportPage() {
           {/* File Upload */}
           <div>
             <label className="block text-sm font-medium mb-2">选择文件</label>
-            <Input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleFileChange}
-              className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
-            />
-          </div>
-
-          {/* Default Values */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="block text-sm font-medium mb-1">默认存放位置</label>
-              <Input
-                value={defaultLocation}
-                onChange={(e) => setDefaultLocation(e.target.value)}
-                placeholder="如: A-1-1 柜"
-              />
-            </div>
-            <div className="flex items-center gap-2 pt-6">
+            <div className="flex items-center gap-4">
+              <Button
+                variant="default"
+                onClick={() => document.getElementById('file-input')?.click()}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                选择 CSV 文件
+              </Button>
               <input
-                type="checkbox"
-                id="default_is_hazardous"
-                checked={defaultIsHazardous}
-                onChange={(e) => setDefaultIsHazardous(e.target.checked)}
-                className="w-4 h-4 rounded"
+                id="file-input"
+                type="file"
+                accept=".csv"
+                onChange={handleFileChange}
+                className="hidden"
               />
-              <label htmlFor="default_is_hazardous" className="text-sm flex items-center gap-1">
-                <AlertCircle className="w-4 h-4 text-yellow-500" />
-                默认为危险品
-              </label>
+              {file && (
+                <span className="text-sm text-muted-foreground truncate max-w-xs">
+                  {file.name}
+                </span>
+              )}
             </div>
           </div>
 
@@ -242,7 +238,7 @@ export function ImportPage() {
                   <div className="max-h-40 overflow-y-auto text-xs space-y-1">
                     {result.errors.slice(0, 20).map((err, i) => (
                       <div key={i} className="text-red-600">
-                        行 {err.row}: {err.message}
+                        行 {err.row}: {err.error}
                       </div>
                     ))}
                     {result.errors.length > 20 && (

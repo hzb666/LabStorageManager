@@ -2,10 +2,11 @@
 Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.database import get_db
@@ -22,10 +23,20 @@ from app.models.user import User
 from app.models.inventory import Inventory, InventoryCreate, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.image_service import process_uploaded_image
-from app.services.spec_utils import parse_specification
+from app.services.spec_utils import parse_specification, SpecificationError
 from app.services.internal_code import generate_internal_code
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
+
+
+class RejectRequest(BaseModel):
+    """Body for reject action"""
+    reason: str = "Order rejected"
+
+
+class ConfirmArrivalRequest(BaseModel):
+    """Body for confirm-arrival action"""
+    arrival_notes: Optional[str] = None
 
 
 def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
@@ -110,14 +121,15 @@ async def upload_reagent_order_image(
         )
 
 
-@router.get("/", response_model=List[ReagentOrderResponse])
+@router.get("/")
 def list_reagent_orders(
     skip: int = 0,
     limit: int = 100,
     status_filter: Optional[ReagentOrderStatus] = None,
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """List reagent orders with optional filters"""
+    """List reagent orders with optional filters, includes applicant name"""
     statement = select(ReagentOrder)
     
     if status_filter:
@@ -125,11 +137,27 @@ def list_reagent_orders(
     
     statement = statement.offset(skip).limit(limit).order_by(ReagentOrder.created_at.desc())
     
-    return db.exec(statement).all()
+    orders = db.exec(statement).all()
+    
+    # Enrich with applicant names
+    applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
+    users_map: dict[int, str] = {}
+    if applicant_ids:
+        users = db.exec(select(User).where(User.id.in_(applicant_ids))).all()
+        users_map = {u.id: u.full_name or u.username for u in users}
+    
+    return [
+        {**ReagentOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
+        for o in orders
+    ]
 
 
 @router.get("/{order_id}", response_model=ReagentOrderResponse)
-def get_reagent_order(order_id: int, db: Session = Depends(get_db)):
+def get_reagent_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Get reagent order by ID"""
     order = get_reagent_order_by_id(db, order_id)
     if not order:
@@ -171,7 +199,7 @@ def update_reagent_order(
     for field, value in update_data.items():
         setattr(order, field, value)
     
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -200,7 +228,7 @@ def approve_reagent_order(
         )
     
     order.status = ReagentOrderStatus.APPROVED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -211,9 +239,9 @@ def approve_reagent_order(
 @router.post("/{order_id}/reject")
 def reject_reagent_order(
     order_id: int,
-    reason: str = "Order rejected",
+    body: RejectRequest = RejectRequest(),
     admin_user: User = Depends(require_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Reject a reagent order (Admin only)"""
     order = get_reagent_order_by_id(db, order_id)
@@ -224,7 +252,9 @@ def reject_reagent_order(
         )
     
     order.status = ReagentOrderStatus.REJECTED
-    order.updated_at = datetime.utcnow()
+    if body.reason:
+        order.notes = f"驳回原因: {body.reason}"
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -235,9 +265,9 @@ def reject_reagent_order(
 @router.post("/{order_id}/confirm-arrival")
 def confirm_reagent_arrival(
     order_id: int,
-    arrival_notes: Optional[str] = None,
+    body: ConfirmArrivalRequest = ConfirmArrivalRequest(),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Confirm reagent order has arrived.
@@ -269,17 +299,15 @@ def confirm_reagent_arrival(
     
     # Handle based on order reason
     if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
-        # Common/public reagents: complete directly, no notification
         order.status = ReagentOrderStatus.STOCKED
         message = "常用/公用试剂已入库，无需通知"
     else:
-        # Other reagents: need manual stock-in
         order.status = ReagentOrderStatus.ARRIVED
         message = "已到货待入库，请及时完成入库操作"
     
-    if arrival_notes:
-        order.notes = arrival_notes
-    order.updated_at = datetime.utcnow()
+    if body.arrival_notes:
+        order.notes = body.arrival_notes
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -446,7 +474,10 @@ def stock_in_reagent_order(
         )
     
     # Parse specification to get value and unit
-    per_bottle_value, unit = parse_specification(order.specification)
+    try:
+        per_bottle_value, unit = parse_specification(order.specification)
+    except SpecificationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     
     # Generate internal codes
     internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
@@ -477,7 +508,7 @@ def stock_in_reagent_order(
     
     # Update order status
     order.status = ReagentOrderStatus.STOCKED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     

@@ -1,7 +1,7 @@
 """
 Lab Storage Manager - Main FastAPI Application
-Phase 1.1: FastAPI + SQLModel + SQLite with WAL Mode
 """
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,22 +13,22 @@ from app.core.config import settings
 from app.database import init_db
 from app.api import users, inventory, reagent_orders, consumable_orders
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler - startup and shutdown events"""
-    # Startup
-    print(f"Starting {settings.app_name} v{settings.app_version}")
-    print(f"Database: WAL Mode Enabled")
-    
-    # Initialize database and create tables
+    logger.info("Starting %s v%s", settings.app_name, settings.app_version)
     init_db()
-    print("Database initialized successfully")
-    
+    logger.info("Database initialized (WAL mode enabled)")
     yield
-    
-    # Shutdown
-    print("Shutting down...")
+    logger.info("Shutting down...")
 
 
 # Create FastAPI application
@@ -42,7 +42,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins if hasattr(settings, 'cors_origins') else ["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

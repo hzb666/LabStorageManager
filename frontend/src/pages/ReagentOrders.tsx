@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { reagentOrderAPI, inventoryAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 
 interface ReagentOrder {
@@ -21,6 +22,7 @@ interface ReagentOrder {
   image_path?: string
   notes?: string
   applicant_id: number
+  applicant_name?: string
   status: string
   created_at: string
   updated_at: string
@@ -39,31 +41,11 @@ interface CASWarningInfo {
   }
 }
 
-// Status mapping
-const STATUS_MAPPING: Record<string, string> = {
-  pending: '已申购',
-  approved: '已审批',
-  arrived: '已到货',
-  stocked: '已入库',
-  rejected: '未通过',
-}
-
-const STATUS_CLASS_MAPPING: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  approved: 'bg-blue-100 text-blue-800',
-  arrived: 'bg-green-100 text-green-800',
-  stocked: 'bg-gray-100 text-gray-800',
-  rejected: 'bg-red-100 text-red-800',
-}
-
-const REASON_MAPPING: Record<string, string> = {
-  none: '没有',
-  running_out: '快用完',
-  empty: '用完',
-  common_public: '常用或公用',
-  not_found: '找不到',
-  reorder: '重新下单',
-}
+import {
+  REAGENT_STATUS_MAP as STATUS_MAPPING,
+  REAGENT_STATUS_STYLE as STATUS_CLASS_MAPPING,
+  ORDER_REASON_MAP as REASON_MAPPING,
+} from '@/lib/constants'
 
 export function ReagentOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
@@ -180,7 +162,7 @@ export function ReagentOrdersPage() {
         brand: formData.brand || undefined,
         price: formData.price ? parseFloat(formData.price) : undefined,
       })
-      alert('试剂订单创建成功')
+      toast.success('试剂订单创建成功')
       setFormData({
         cas_number: '',
         name: '',
@@ -199,47 +181,47 @@ export function ReagentOrdersPage() {
       setActiveTab('list')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '创建失败')
+      toast.error(error.response?.data?.detail || '创建失败')
     }
   }
 
   const handleApprove = async (id: number) => {
     try {
       await reagentOrderAPI.approve(id)
-      alert('审批通过')
+      toast.success('审批通过')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleReject = async (id: number) => {
     try {
       await reagentOrderAPI.reject(id, '管理员驳回')
-      alert('已驳回')
+      toast.success('已驳回')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleConfirmArrival = async (id: number) => {
     try {
       const result = await reagentOrderAPI.confirmArrival(id)
-      alert(result.data.message || '确认成功')
+      toast.success(result.data.message || '确认成功')
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '操作失败')
+      toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
   const handleStockIn = async (id: number) => {
     try {
       const result = await reagentOrderAPI.stockIn(id)
-      alert(`入库成功！创建了 ${result.data.items_created} 个库存条目`)
+      toast.success(`入库成功！创建了 ${result.data.items_created} 个库存条目`)
       loadOrders()
     } catch (error: any) {
-      alert(error.response?.data?.detail || '入库失败')
+      toast.error(error.response?.data?.detail || '入库失败')
     }
   }
 
@@ -455,7 +437,7 @@ export function ReagentOrdersPage() {
                           {order.english_name && ` • ${order.english_name}`}
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
-                          申请人: {order.applicant_id} • {new Date(order.created_at).toLocaleDateString()}
+                          申请人: {order.applicant_name || order.applicant_id} • {new Date(order.created_at).toLocaleDateString()}
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-2">
