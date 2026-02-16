@@ -210,7 +210,7 @@ export function Dashboard() {
   const handleQuickStockIn = async (orderId: number, orderType?: string) => {
     try {
       if (orderType === 'consumable') {
-        await consumableOrderAPI.stockIn(orderId)
+        await consumableOrderAPI.complete(orderId)
       } else {
         await reagentOrderAPI.stockIn(orderId)
       }

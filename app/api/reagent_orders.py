@@ -463,11 +463,13 @@ def stock_in_reagent_order(
             detail="Order not found"
         )
     
-    # Order must be in ARRIVED status
-    if order.status != ReagentOrderStatus.ARRIVED:
+    # Order must be in APPROVED or ARRIVED status
+    # APPROVED: "一键入库" skips the confirm-arrival step
+    # ARRIVED: normal stock-in after confirm-arrival
+    if order.status not in (ReagentOrderStatus.APPROVED, ReagentOrderStatus.ARRIVED):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Order must be in ARRIVED status to stock in, current: {order.status}. Please confirm arrival first."
+            detail=f"Order must be in APPROVED or ARRIVED status to stock in, current: {order.status}."
         )
     
     # Validate quantity

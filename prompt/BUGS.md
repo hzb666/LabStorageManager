@@ -162,10 +162,14 @@
 - **问题**: `POST /users/` 任何人可创建用户（包括 admin），严重安全漏洞
 - **修复**: 添加 `require_admin` 依赖
 
-#### 10. Dashboard 入库按钮状态逻辑 [FIXED]
-- **文件**: `frontend/src/pages/Dashboard.tsx`
-- **问题**: APPROVED 状态同时显示"确认到货"和"一键入库"，后端 stock-in 需要 ARRIVED 状态
-- **修复**: APPROVED 只显示"确认到货"，ARRIVED 才显示"一键入库"；修复状态大小写
+#### 10. Dashboard 入库按钮状态逻辑 [RE-FIXED]
+- **文件**: `frontend/src/pages/Dashboard.tsx`, `app/api/reagent_orders.py`
+- **问题**: APPROVED 状态显示"一键入库"按钮，但后端 `stock_in_reagent_order` 严格要求 ARRIVED 状态，导致点击必定 400 错误；耗材订单调用不存在的 `consumableOrderAPI.stockIn()` 导致运行时错误
+- **初始修复**: 仅在前端移除 approved 状态的"一键入库"按钮（不符合用户需求）
+- **最终修复** (2026-02-16): 
+  - 后端 `stock_in_reagent_order` 接受 `APPROVED` 和 `ARRIVED` 两种状态，"一键入库"跳过确认到货步骤直接入库
+  - 前端耗材订单"一键入库"改为调用 `consumableOrderAPI.complete()` 而非不存在的 `stockIn()`
+  - APPROVED 状态保留"确认到货"和"一键入库"两个按钮，给用户选择权
 
 #### 11. reject/confirm-arrival 参数不匹配 [FIXED]
 - **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`
