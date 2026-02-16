@@ -92,12 +92,47 @@
 - **问题**: `REASON_MAPPING` 常量已定义但从未使用
 - **修复**: 删除未使用代码
 
-### 待改进（非阻塞）
+#### 15. 全部 alert() 替换为 toast 通知 [FIXED]
+- **文件**: 全部前端页面 (6 个文件, 42 处调用)
+- **问题**: 使用浏览器原生 `alert()` 阻塞式弹窗，用户体验差
+- **修复**: 
+  - 创建 `toast.tsx` 轻量通知组件（success/error/warning/info）
+  - App.tsx 添加 `ToastContainer` 全局渲染
+  - 所有页面 `alert()` 替换为 `toast.success/error/warning()`
 
-- 前端 `alert()` 调用应替换为 toast 通知组件
-- 订单列表中 `applicant_id` 显示为数字，应显示用户名（需后端API返回关联用户名）
-- `window.location.href = '/import'` 应改用 React Router 的 `useNavigate`
-- `ExternalLink` 图标语义不符导出操作，建议改为 `Download`
+#### 16. 订单列表显示申请人ID而非姓名 [FIXED]
+- **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`, 前端两个订单页
+- **问题**: 订单列表显示 `applicant_id` 数字，用户无法识别申请人
+- **修复**: 
+  - 后端列表 API 关联 User 表返回 `applicant_name` 字段
+  - 前端显示 `applicant_name` 替代 `applicant_id`
+
+#### 17. window.location.href 导致 SPA 整页刷新 [FIXED]
+- **文件**: `frontend/src/pages/Inventory.tsx`
+- **问题**: 使用 `window.location.href = '/import'` 跳转导致整页刷新
+- **修复**: 使用 React Router 的 `useNavigate` hook
+
+#### 18. ExternalLink 图标语义不符 [FIXED]
+- **文件**: `frontend/src/pages/Inventory.tsx`
+- **问题**: 导出按钮使用 `ExternalLink` 图标（表示外链），语义不正确
+- **修复**: 替换为 `Download` 图标
+
+#### 19. spec_utils.py 服务层抛出 HTTPException [FIXED]
+- **文件**: `app/services/spec_utils.py`
+- **问题**: 服务层函数直接抛出 `HTTPException`，违反分层架构原则
+- **修复**: 
+  - 创建 `SpecificationError(ValueError)` 域错误
+  - API 层捕获 `SpecificationError` 转为 `HTTPException`
+
+#### 20. BorrowLog.return_time == None 不规范 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: SQLAlchemy `== None` 比较虽可工作但触发 lint 警告
+- **修复**: 改为 `.is_(None)` 标准写法
+
+#### 21. 过期文档未更新 [FIXED]
+- **文件**: `BACKEND_STRUCTURE.md`, `FRONTEND_GUIDELINES.md`, `APP_FLOW.md`
+- **问题**: 文档仍引用旧 Order 单表、仅支持 .xlsx/.xls、未记录新字段
+- **修复**: 全部重写以反映当前代码状态
 
 ### 后续建议
 
