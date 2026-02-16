@@ -190,34 +190,36 @@ export function Dashboard() {
     }
   }
 
-  // 处理确认到货（暂不入库）
-  const handleConfirmArrival = async (orderId: number, orderType?: string) => {
+  // 处理试剂确认到货（暂不入库）
+  const handleConfirmArrival = async (orderId: number) => {
     try {
-      if (orderType === 'consumable') {
-        await consumableOrderAPI.confirmArrival(orderId)
-        toast.warning('耗材已到货，请及时完成入库操作！')
-      } else {
-        await reagentOrderAPI.confirmArrival(orderId)
-        toast.warning('试剂已到货，请及时完成入库操作！')
-      }
+      await reagentOrderAPI.confirmArrival(orderId)
+      toast.warning('试剂已到货，请及时完成入库操作！')
       loadDashboardData()
     } catch (error: any) {
       toast.error(error.response?.data?.detail || '操作失败')
     }
   }
 
-  // 处理一键入库
-  const handleQuickStockIn = async (orderId: number, orderType?: string) => {
+  // 处理试剂一键入库
+  const handleQuickStockIn = async (orderId: number) => {
     try {
-      if (orderType === 'consumable') {
-        await consumableOrderAPI.complete(orderId)
-      } else {
-        await reagentOrderAPI.stockIn(orderId)
-      }
+      await reagentOrderAPI.stockIn(orderId)
       loadDashboardData()
       toast.success('入库成功！')
     } catch (error: any) {
       toast.error(error.response?.data?.detail || '入库失败')
+    }
+  }
+
+  // 处理耗材确认收货
+  const handleConfirmReceive = async (orderId: number) => {
+    try {
+      await consumableOrderAPI.complete(orderId)
+      loadDashboardData()
+      toast.success('已确认收货')
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || '确认收货失败')
     }
   }
 
@@ -337,7 +339,7 @@ export function Dashboard() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleConfirmArrival(order.id, 'reagent')}
+                          onClick={() => handleConfirmArrival(order.id)}
                         >
                           <CheckCircle className="w-3 h-3 mr-1" />
                           确认到货
@@ -345,7 +347,7 @@ export function Dashboard() {
                         <Button
                           size="sm"
                           className="bg-green-600 hover:bg-green-700"
-                          onClick={() => handleQuickStockIn(order.id, 'reagent')}
+                          onClick={() => handleQuickStockIn(order.id)}
                         >
                           <PackagePlus className="w-3 h-3 mr-1" />
                           一键入库
@@ -356,7 +358,7 @@ export function Dashboard() {
                       <Button
                         size="sm"
                         className="bg-green-600 hover:bg-green-700"
-                        onClick={() => handleQuickStockIn(order.id, 'reagent')}
+                        onClick={() => handleQuickStockIn(order.id)}
                       >
                         <PackagePlus className="w-3 h-3 mr-1" />
                         入库
@@ -424,10 +426,10 @@ export function Dashboard() {
                       <Button
                         size="sm"
                         className="bg-green-600 hover:bg-green-700"
-                        onClick={() => handleQuickStockIn(order.id, 'consumable')}
+                        onClick={() => handleConfirmReceive(order.id)}
                       >
-                        <PackagePlus className="w-3 h-3 mr-1" />
-                        一键入库
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        确认收货
                       </Button>
                     )}
                   </div>
