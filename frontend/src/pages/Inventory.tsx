@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -12,7 +12,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useNavigate } from 'react-router-dom'
 import { inventoryAPI } from '@/api/client'
+import { toast } from '@/components/ui/toast'
 import { formatDate, cn } from '@/lib/utils'
 import {
   Search,
@@ -20,7 +22,7 @@ import {
   Package,
   AlertTriangle,
   Loader2,
-  ExternalLink,
+  Download,
   Import,
   Plus,
   X
@@ -43,6 +45,7 @@ interface InventoryItem {
 const columnHelper = createColumnHelper<InventoryItem>()
 
 export function InventoryPage() {
+  const navigate = useNavigate()
   const [data, setData] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [sorting, setSorting] = useState<SortingState>([])
@@ -258,9 +261,9 @@ export function InventoryPage() {
         notes: ''
       })
       loadInventory()
-      alert('手动入库成功！')
+      toast.success('手动入库成功！')
     } catch (error: any) {
-      alert(error.response?.data?.detail || '入库失败')
+      toast.error(error.response?.data?.detail || '入库失败')
     } finally {
       setSubmitting(false)
     }
@@ -282,7 +285,7 @@ export function InventoryPage() {
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
     } catch (error: any) {
-      alert(error.response?.data?.detail || '导出失败')
+      toast.error(error.response?.data?.detail || '导出失败')
     }
   }
 
@@ -295,12 +298,12 @@ export function InventoryPage() {
             <Plus className="w-4 h-4 mr-2" />
             手动入库
           </Button>
-          <Button variant="outline" onClick={() => window.location.href = '/import'}>
+          <Button variant="outline" onClick={() => navigate('/import')}>
             <Import className="w-4 h-4 mr-2" />
             批量导入
           </Button>
           <Button variant="outline" onClick={handleExport}>
-            <ExternalLink className="w-4 h-4 mr-2" />
+            <Download className="w-4 h-4 mr-2" />
             导出
           </Button>
         </div>

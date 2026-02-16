@@ -2,7 +2,7 @@
 JWT Authentication Module
 Critical Rule #3: All data modification endpoints must check current_user
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status
@@ -51,8 +51,8 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
         "username": username,
         "role": role,
         "type": "access",
-        "exp": datetime.utcnow() + expires_delta,
-        "iat": datetime.utcnow(),
+        "exp": datetime.now(timezone.utc) + expires_delta,
+        "iat": datetime.now(timezone.utc),
     }
     
     token = jwt.encode(

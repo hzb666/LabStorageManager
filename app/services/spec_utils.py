@@ -4,13 +4,17 @@ Critical: No unit conversion, case-insensitive, reject invalid format
 """
 import re
 from typing import Tuple
-from fastapi import HTTPException, status
 
 
 # Supported units (case-insensitive)
 VALID_UNITS = {
     "ml", "l", "g", "kg", "mg", "个", "瓶", "支", "盒", "包", "套"
 }
+
+
+class SpecificationError(ValueError):
+    """Domain error for invalid specification format"""
+    pass
 
 
 def parse_specification(spec: str) -> Tuple[float, str]:
@@ -23,13 +27,10 @@ def parse_specification(spec: str) -> Tuple[float, str]:
         "100 g" -> (100.0, "g")
     
     Raises:
-        HTTPException: If format is invalid
+        SpecificationError: If format is invalid
     """
     if not spec or not spec.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="规格不能为空"
-        )
+        raise SpecificationError("规格不能为空")
     
     spec = spec.strip().lower()
     
@@ -38,9 +39,8 @@ def parse_specification(spec: str) -> Tuple[float, str]:
     match = re.match(pattern, spec, re.IGNORECASE)
     
     if not match:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"规格格式无效，请输入数字+单位（如：500ml、1L、100g）"
+        raise SpecificationError(
+            f"规格格式无效，请输入数字+单位（如：500ml、1L、100g）"
         )
     
     value = float(match.group(1))
@@ -48,16 +48,12 @@ def parse_specification(spec: str) -> Tuple[float, str]:
     
     # Validate unit
     if unit not in VALID_UNITS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的单位：{unit}，支持的单位：{', '.join(sorted(VALID_UNITS))}"
+        raise SpecificationError(
+            f"不支持的单位：{unit}，支持的单位：{', '.join(sorted(VALID_UNITS))}"
         )
     
     if value <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="规格数值必须大于0"
-        )
+        raise SpecificationError("规格数值必须大于0")
     
     return value, unit
 
@@ -67,5 +63,5 @@ def validate_specification(spec: str) -> bool:
     try:
         parse_specification(spec)
         return True
-    except HTTPException:
+    except SpecificationError:
         return False

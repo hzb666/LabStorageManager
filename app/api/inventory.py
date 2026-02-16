@@ -2,11 +2,13 @@
 Inventory API Routes - Stock Management
 Critical Rule #2: CAS Number normalization (data copied from Order)
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlmodel import Session, select, func
+import csv
+import io
 import os
 import tempfile
 
@@ -22,11 +24,11 @@ from app.models.inventory import (
     BorrowLogResponse,
     ManualInventoryCreate,
 )
-from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.models.user import User
 from app.core.auth import get_current_user, require_admin
-from app.services.cas_utils import generate_internal_code, normalize_cas
-from app.services.spec_utils import parse_specification
+from app.services.cas_utils import normalize_cas
+from app.services.internal_code import generate_internal_code
+from app.services.spec_utils import parse_specification, SpecificationError
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -118,86 +120,6 @@ def get_cas_total_quantity(
     }
 
 
-@router.post("/stock-in/{order_id}", response_model=List[InventoryResponse])
-def stock_in_order(
-    order_id: int,
-    location: str = "默认位置",
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    """
-    Stock-in items from an approved order.
-    Critical: Creates N inventory items where N = order.quantity (one item per unit).
-    Data is copied from Order, not moved (Critical Logic #1).
-    
-    Note: Uses retry logic to handle race conditions on sequence numbers.
-    """
-    order = db.get(ReagentOrder, order_id)
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
-        )
-    
-    if order.status != ReagentOrderStatus.APPROVED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Order must be approved before stocking. Current status: {order.status}"
-        )
-
-    # Get next sequence number for this CAS (with retry for race conditions)
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            cas_prefix = normalize_cas(order.cas_number).split("-")[0]
-            statement = select(Inventory).where(
-                Inventory.cas_number == order.cas_number
-            )
-            existing = db.exec(statement).all()
-            start_sequence = len(existing) + 1
-            
-            # Create inventory items (one per unit)
-            created_items = []
-            
-            for i in range(order.quantity):
-                internal_code = generate_internal_code(order.cas_number, start_sequence + i)
-                
-                db_inventory = Inventory(
-                    internal_code=internal_code,
-                    cas_number=order.cas_number,  # Copied from Order (already normalized)
-                    name=order.name,
-                    alias=order.alias,
-                    location=location,
-                    initial_quantity=1.0,  # One unit per item
-                    remaining_quantity=1.0,
-                    unit="瓶",  # Default unit
-                    is_hazardous=order.is_hazardous,
-                    image_path=order.image_path,  # Copied from Order
-                )
-                
-                db.add(db_inventory)
-                created_items.append(db_inventory)
-            
-            # Update order status
-            order.status = ReagentOrderStatus.STOCKED
-            order.updated_at = datetime.utcnow()
-            
-            db.commit()
-            
-            # Refresh all created items
-            for item in created_items:
-                db.refresh(item)
-            
-            return created_items
-            
-        except Exception as e:
-            # Check if it's a unique constraint violation (race condition)
-            db.rollback()
-            if attempt < max_retries - 1 and "UNIQUE constraint failed" in str(e):
-                continue  # Retry with new sequence
-            raise
-
-
 @router.get("/", response_model=List[InventoryResponse])
 def list_inventory(
     skip: int = 0,
@@ -237,7 +159,7 @@ def get_inventory(inventory_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/code/{internal_code}", response_model=InventoryResponse)
-def get_inventory_by_code(internal_code: str, db: Session = Depends(get_db)):
+def get_inventory_by_internal_code(internal_code: str, db: Session = Depends(get_db)):
     """Get inventory item by internal code"""
     item = get_inventory_by_code(db, internal_code)
     if not item:
@@ -276,7 +198,7 @@ def borrow_item(
     borrow_log = BorrowLog(
         inventory_id=inventory_id,
         borrower_id=current_user.id,
-        borrow_time=datetime.utcnow(),
+        borrow_time=datetime.now(timezone.utc),
         quantity_borrowed=item.remaining_quantity,
         quantity_returned=None,
         notes=None
@@ -286,7 +208,7 @@ def borrow_item(
     # Update item
     item.status = InventoryStatus.BORROWED
     item.borrower_id = current_user.id
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(item)
@@ -329,13 +251,13 @@ def return_item(
     # Update BorrowLog record
     borrow_log_statement = select(BorrowLog).where(
         BorrowLog.inventory_id == inventory_id,
-        BorrowLog.return_time == None
+        BorrowLog.return_time.is_(None)
     ).order_by(BorrowLog.borrow_time.desc())
     
     borrow_log = db.exec(borrow_log_statement).first()
     
     if borrow_log:
-        borrow_log.return_time = datetime.utcnow()
+        borrow_log.return_time = datetime.now(timezone.utc)
         borrow_log.quantity_returned = return_data.remaining_quantity
         borrow_log.notes = return_data.unit  # Store unit in notes if provided
     
@@ -356,7 +278,7 @@ def return_item(
     else:
         item.status = InventoryStatus.CONSUMED
     
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(item)
@@ -388,7 +310,7 @@ def update_inventory(
     for field, value in update_data.items():
         setattr(item, field, value)
     
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(item)
@@ -427,17 +349,14 @@ def export_inventory(
     items = db.exec(statement).all()
     
     # Build CSV content
-    import csv
-    import io
-    
     output = io.StringIO()
     writer = csv.writer(output)
     
     # Header
     writer.writerow([
-        "编号", "CAS号", "名称", "别名", "位置", 
-        "初始数量", "剩余数量", "单位", "状态", "是否危险品", 
-        "入库时间", "备注"
+        "编号", "CAS号", "名称", "英文名", "别名", "分类", "品牌",
+        "位置", "初始数量", "剩余数量", "单位", "状态",
+        "是否危险品", "单价", "入库时间", "备注"
     ])
     
     # Data rows
@@ -446,20 +365,24 @@ def export_inventory(
             item.internal_code,
             item.cas_number,
             item.name,
+            item.english_name or "",
             item.alias or "",
+            item.category or "",
+            item.brand or "",
             item.location or "",
             item.initial_quantity,
             item.remaining_quantity,
             item.unit,
             item.status.value if hasattr(item.status, 'value') else item.status,
             "是" if item.is_hazardous else "否",
+            item.price if item.price is not None else "",
             item.created_at.strftime("%Y-%m-%d %H:%M:%S") if item.created_at else "",
             item.notes or ""
         ])
     
     return {
         "data": output.getvalue(),
-        "filename": f"inventory_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv",
+        "filename": f"inventory_export_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv",
         "count": len(items)
     }
 
@@ -486,21 +409,18 @@ def manual_add_inventory(
         )
 
     # Parse specification (e.g., "500ml" -> (500, "ml"))
-    per_bottle_value, unit = parse_specification(item_data.specification)
+    try:
+        per_bottle_value, unit = parse_specification(item_data.specification)
+    except SpecificationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    # Get next sequence number for this CAS
-    statement = select(Inventory).where(
-        Inventory.cas_number == normalized_cas
-    )
-    existing = db.exec(statement).all()
-    start_sequence = len(existing) + 1
+    # Generate internal codes for all bottles
+    internal_codes = generate_internal_code(db, normalized_cas, item_data.quantity_bottles)
 
     # Create inventory items (one per bottle)
     created_items = []
 
-    for i in range(item_data.quantity_bottles):
-        internal_code = generate_internal_code(normalized_cas, start_sequence + i)
-
+    for internal_code in internal_codes:
         db_inventory = Inventory(
             internal_code=internal_code,
             cas_number=normalized_cas,
@@ -551,7 +471,7 @@ def get_my_borrows(
     items = db.exec(statement).all()
     
     # Calculate borrow duration
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     return {
         "data": [

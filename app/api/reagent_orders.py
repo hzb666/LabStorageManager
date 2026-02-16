@@ -2,7 +2,7 @@
 Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
@@ -22,7 +22,7 @@ from app.models.user import User
 from app.models.inventory import Inventory, InventoryCreate, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.image_service import process_uploaded_image
-from app.services.spec_utils import parse_specification
+from app.services.spec_utils import parse_specification, SpecificationError
 from app.services.internal_code import generate_internal_code
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
@@ -110,14 +110,14 @@ async def upload_reagent_order_image(
         )
 
 
-@router.get("/", response_model=List[ReagentOrderResponse])
+@router.get("/")
 def list_reagent_orders(
     skip: int = 0,
     limit: int = 100,
     status_filter: Optional[ReagentOrderStatus] = None,
     db: Session = Depends(get_db)
 ):
-    """List reagent orders with optional filters"""
+    """List reagent orders with optional filters, includes applicant name"""
     statement = select(ReagentOrder)
     
     if status_filter:
@@ -125,7 +125,19 @@ def list_reagent_orders(
     
     statement = statement.offset(skip).limit(limit).order_by(ReagentOrder.created_at.desc())
     
-    return db.exec(statement).all()
+    orders = db.exec(statement).all()
+    
+    # Enrich with applicant names
+    applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
+    users_map: dict[int, str] = {}
+    if applicant_ids:
+        users = db.exec(select(User).where(User.id.in_(applicant_ids))).all()
+        users_map = {u.id: u.full_name or u.username for u in users}
+    
+    return [
+        {**ReagentOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
+        for o in orders
+    ]
 
 
 @router.get("/{order_id}", response_model=ReagentOrderResponse)
@@ -171,7 +183,7 @@ def update_reagent_order(
     for field, value in update_data.items():
         setattr(order, field, value)
     
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -200,7 +212,7 @@ def approve_reagent_order(
         )
     
     order.status = ReagentOrderStatus.APPROVED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -224,7 +236,8 @@ def reject_reagent_order(
         )
     
     order.status = ReagentOrderStatus.REJECTED
-    order.updated_at = datetime.utcnow()
+    order.notes = f"驳回原因: {reason}" if reason else order.notes
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -279,7 +292,7 @@ def confirm_reagent_arrival(
     
     if arrival_notes:
         order.notes = arrival_notes
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -446,7 +459,10 @@ def stock_in_reagent_order(
         )
     
     # Parse specification to get value and unit
-    per_bottle_value, unit = parse_specification(order.specification)
+    try:
+        per_bottle_value, unit = parse_specification(order.specification)
+    except SpecificationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     
     # Generate internal codes
     internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
@@ -477,7 +493,7 @@ def stock_in_reagent_order(
     
     # Update order status
     order.status = ReagentOrderStatus.STOCKED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     

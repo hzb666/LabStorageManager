@@ -2,7 +2,7 @@
 Consumable Order API Routes - Consumables Purchase Order Management
 Separated from Reagent orders (no stock-in needed)
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
@@ -92,14 +92,14 @@ async def upload_consumable_order_image(
         )
 
 
-@router.get("/", response_model=List[ConsumableOrderResponse])
+@router.get("/")
 def list_consumable_orders(
     skip: int = 0,
     limit: int = 100,
     status_filter: Optional[ConsumableOrderStatus] = None,
     db: Session = Depends(get_db)
 ):
-    """List consumable orders with optional filters"""
+    """List consumable orders with optional filters, includes applicant name"""
     statement = select(ConsumableOrder)
     
     if status_filter:
@@ -107,7 +107,20 @@ def list_consumable_orders(
     
     statement = statement.offset(skip).limit(limit).order_by(ConsumableOrder.created_at.desc())
     
-    return db.exec(statement).all()
+    orders = db.exec(statement).all()
+    
+    # Enrich with applicant names
+    applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
+    users_map: dict[int, str] = {}
+    if applicant_ids:
+        from app.models.user import User as UserModel
+        users = db.exec(select(UserModel).where(UserModel.id.in_(applicant_ids))).all()
+        users_map = {u.id: u.full_name or u.username for u in users}
+    
+    return [
+        {**ConsumableOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
+        for o in orders
+    ]
 
 
 @router.get("/{order_id}", response_model=ConsumableOrderResponse)
@@ -142,7 +155,7 @@ def update_consumable_order(
     for field, value in update_data.items():
         setattr(order, field, value)
     
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -171,7 +184,7 @@ def approve_consumable_order(
         )
     
     order.status = ConsumableOrderStatus.APPROVED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -195,7 +208,8 @@ def reject_consumable_order(
         )
     
     order.status = ConsumableOrderStatus.REJECTED
-    order.updated_at = datetime.utcnow()
+    order.notes = f"驳回原因: {reason}" if reason else order.notes
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -235,7 +249,7 @@ def complete_consumable_order(
     
     # Consumables complete directly (no stock-in)
     order.status = ConsumableOrderStatus.COMPLETED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
