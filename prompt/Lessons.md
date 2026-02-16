@@ -69,3 +69,32 @@
 - **现象**: secret_key 有不安全的默认值
 - **修复**: 更新默认值并添加注释提醒生产环境修改
 - **文件**: `app/core/config.py`
+
+---
+
+## 2026-02-16 全面代码审查重构
+
+### 教训 6: SQLite WAL 模式不能通过 URL 参数设置
+- **错误做法**: `sqlite:///path?mode=wal`
+- **正确做法**: `event.listens_for(engine, "connect")` + `PRAGMA journal_mode=WAL`
+- **原因**: SQLite URL 参数是给 URI filename 用的，不是 PRAGMA；且 SQLAlchemy 层面不支持此写法
+
+### 教训 7: FastAPI 路由顺序至关重要
+- **问题**: `/{inventory_id}` 放在 `/export` 前面会导致 `/export` 永远被当作 ID 匹配
+- **规则**: 所有具名路由（/export, /dashboard/*, /import/*）必须在通配 ID 路由之前注册
+
+### 教训 8: 辅助函数与路由函数不能同名
+- **问题**: `get_inventory_by_code` 既是辅助函数也是路由函数，Python 中后者覆盖前者
+- **规则**: 内部辅助函数用下划线前缀 (`_get_by_id`, `_find_by_code`)
+
+### 教训 9: FastAPI 参数传递一致性
+- **问题**: 后端用 Query 参数 `reason: str = "..."` 接收，前端用 JSON body 发送 → 参数丢失
+- **规则**: 修改操作一律用 Pydantic Body 模型，GET 查询才用 Query 参数
+
+### 教训 10: Token 单一来源原则
+- **问题**: Zustand persist + localStorage.setItem 双重存储，logout 时可能遗漏
+- **规则**: 认证状态由一个 store 管理，其他地方通过 `store.getState()` 读取
+
+### 教训 11: CSV 导出应使用 StreamingResponse
+- **错误做法**: 把 CSV 字符串包在 JSON 里 `{"data": "...csv..."}`，前端需二次解析
+- **正确做法**: `StreamingResponse` + `Content-Disposition: attachment` 让浏览器直接下载

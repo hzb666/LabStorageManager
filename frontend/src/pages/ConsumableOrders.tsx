@@ -27,20 +27,11 @@ interface ConsumableOrder {
   updated_at: string
 }
 
-// Status mapping
-const STATUS_MAPPING: Record<string, string> = {
-  pending: '已申购',
-  approved: '已审批',
-  completed: '已完成',
-  rejected: '未通过',
-}
-
-const STATUS_CLASS_MAPPING: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  approved: 'bg-blue-100 text-blue-800',
-  completed: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-}
+import {
+  CONSUMABLE_STATUS_MAP as STATUS_MAPPING,
+  CONSUMABLE_STATUS_STYLE as STATUS_CLASS_MAPPING,
+  ORDER_REASON_MAP as REASON_MAPPING,
+} from '@/lib/constants'
 
 export function ConsumableOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')

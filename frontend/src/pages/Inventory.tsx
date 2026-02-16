@@ -272,14 +272,13 @@ export function InventoryPage() {
   const handleExport = async () => {
     try {
       const response = await inventoryAPI.exportInventory()
-      const { data, filename } = response.data
-      
-      // Create and download CSV file
-      const blob = new Blob([data], { type: 'text/csv;charset=utf-8;' })
+      const csvData = response.data
+
+      const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = filename
+      link.download = `inventory_export_${new Date().toISOString().slice(0, 10)}.csv`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)

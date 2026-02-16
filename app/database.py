@@ -2,24 +2,36 @@
 Database module - SQLModel Engine Configuration
 Critical Rule #1: SQLite must enable WAL Mode for concurrency
 """
-from sqlmodel import SQLModel, create_engine, Session
-from typing import Generator
+import logging
 import os
+from typing import Generator
+
+from sqlalchemy import event
+from sqlmodel import SQLModel, Session, create_engine
+
+logger = logging.getLogger(__name__)
 
 # Ensure data directory exists
 data_dir = os.path.dirname(os.path.dirname(__file__))
 db_path = os.path.join(data_dir, "lab_inventory.db")
 
-# Critical: Enable WAL Mode for better concurrency
-# WAL (Write-Ahead Logging) allows concurrent reads while writing
-sqlite_url = f"sqlite:///{db_path}?mode=wal"
+sqlite_url = f"sqlite:///{db_path}"
 
-# Create engine with WAL mode
+# Create engine
 engine = create_engine(
     sqlite_url,
-    echo=False,  # Set to True for debugging
-    connect_args={"check_same_thread": False}
+    echo=False,
+    connect_args={"check_same_thread": False},
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    """Critical Rule #1: Enable WAL mode on every new connection."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA foreign_keys=ON;")
+    cursor.close()
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -31,6 +43,7 @@ def get_db() -> Generator[Session, None, None]:
 def init_db() -> None:
     """Initialize database and create all tables"""
     SQLModel.metadata.create_all(engine)
+    logger.info("Database tables created / verified")
 
 
 def reset_db() -> None:

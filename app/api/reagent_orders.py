@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.database import get_db
@@ -26,6 +27,16 @@ from app.services.spec_utils import parse_specification, SpecificationError
 from app.services.internal_code import generate_internal_code
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
+
+
+class RejectRequest(BaseModel):
+    """Body for reject action"""
+    reason: str = "Order rejected"
+
+
+class ConfirmArrivalRequest(BaseModel):
+    """Body for confirm-arrival action"""
+    arrival_notes: Optional[str] = None
 
 
 def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
@@ -115,7 +126,8 @@ def list_reagent_orders(
     skip: int = 0,
     limit: int = 100,
     status_filter: Optional[ReagentOrderStatus] = None,
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """List reagent orders with optional filters, includes applicant name"""
     statement = select(ReagentOrder)
@@ -141,7 +153,11 @@ def list_reagent_orders(
 
 
 @router.get("/{order_id}", response_model=ReagentOrderResponse)
-def get_reagent_order(order_id: int, db: Session = Depends(get_db)):
+def get_reagent_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Get reagent order by ID"""
     order = get_reagent_order_by_id(db, order_id)
     if not order:
@@ -223,9 +239,9 @@ def approve_reagent_order(
 @router.post("/{order_id}/reject")
 def reject_reagent_order(
     order_id: int,
-    reason: str = "Order rejected",
+    body: RejectRequest = RejectRequest(),
     admin_user: User = Depends(require_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Reject a reagent order (Admin only)"""
     order = get_reagent_order_by_id(db, order_id)
@@ -236,7 +252,8 @@ def reject_reagent_order(
         )
     
     order.status = ReagentOrderStatus.REJECTED
-    order.notes = f"驳回原因: {reason}" if reason else order.notes
+    if body.reason:
+        order.notes = f"驳回原因: {body.reason}"
     order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
@@ -248,9 +265,9 @@ def reject_reagent_order(
 @router.post("/{order_id}/confirm-arrival")
 def confirm_reagent_arrival(
     order_id: int,
-    arrival_notes: Optional[str] = None,
+    body: ConfirmArrivalRequest = ConfirmArrivalRequest(),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Confirm reagent order has arrived.
@@ -282,16 +299,14 @@ def confirm_reagent_arrival(
     
     # Handle based on order reason
     if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
-        # Common/public reagents: complete directly, no notification
         order.status = ReagentOrderStatus.STOCKED
         message = "常用/公用试剂已入库，无需通知"
     else:
-        # Other reagents: need manual stock-in
         order.status = ReagentOrderStatus.ARRIVED
         message = "已到货待入库，请及时完成入库操作"
     
-    if arrival_notes:
-        order.notes = arrival_notes
+    if body.arrival_notes:
+        order.notes = body.arrival_notes
     order.updated_at = datetime.now(timezone.utc)
     
     db.commit()

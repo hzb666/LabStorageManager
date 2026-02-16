@@ -6,7 +6,7 @@
 
 ### 1.1 FastAPI + SQLModel + SQLite (WAL Mode) ✅
 - **实现**: `app/database.py`
-- **WAL Mode**: `?mode=wal` 配置
+- **WAL Mode**: 通过 `event.listens_for(engine, "connect")` 执行 `PRAGMA journal_mode=WAL` + `PRAGMA foreign_keys=ON`
 - **Git**: 初始提交
 
 ### 1.2 User Model & JWT Auth ✅
@@ -259,39 +259,56 @@
 
 ---
 
-## Phase 9: 试剂与耗材分离 (待实现)
+## Phase 9: 试剂与耗材分离 (已完成) ✅
 
-### 9.1 数据库模型重构
-
-> **优先级**: P1 - 核心架构变更
+### 9.1 数据库模型重构 ✅
 
 | 变更 | 描述 | 状态 |
 |------|------|------|
-| Order 表拆分 | 拆分为 ReagentOrder + ConsumableOrder 两张表 | ⏳ |
-| ReagentOrder 字段 | cas_number, name, english_name, specification, quantity, price, order_reason, is_hazardous | ⏳ |
-| ConsumableOrder 字段 | name, english_name, specification, quantity, price, order_reason, is_hazardous | ⏳ |
-| Inventory 新增字段 | category, english_name, brand, price | ⏳ |
+| Order 表拆分 | 拆分为 ReagentOrder + ConsumableOrder 两张表 | ✅ |
+| ReagentOrder 字段 | cas_number, name, english_name, specification, quantity, price, order_reason, is_hazardous | ✅ |
+| ConsumableOrder 字段 | name, english_name, specification, quantity, price, order_reason, is_hazardous | ✅ |
+| Inventory 新增字段 | category, english_name, brand, price | ✅ |
 
-### 9.2 API 重构
+### 9.2 API 重构 ✅
 
 | Endpoint | Method | Status | Description |
 |----------|--------|--------|-------------|
-| `/reagent-orders/` | POST | ⏳ | 试剂订单创建 |
-| `/reagent-orders/` | GET | ⏳ | 试剂订单列表 |
-| `/consumable-orders/` | POST | ⏳ | 耗材订单创建 |
-| `/consumable-orders/` | GET | ⏳ | 耗材订单列表 |
+| `/reagent-orders/` | POST | ✅ | 试剂订单创建 |
+| `/reagent-orders/` | GET | ✅ | 试剂订单列表 |
+| `/reagent-orders/{id}` | GET | ✅ | 试剂订单详情 |
+| `/reagent-orders/{id}` | PUT | ✅ | 更新试剂订单 |
+| `/reagent-orders/{id}` | DELETE | ✅ | 删除试剂订单 |
+| `/reagent-orders/{id}/upload-image` | POST | ✅ | 上传图片 |
+| `/reagent-orders/{id}/approve` | POST | ✅ | 审批 (Admin) |
+| `/reagent-orders/{id}/reject` | POST | ✅ | 驳回 (Admin) |
+| `/reagent-orders/{id}/confirm-arrival` | POST | ✅ | 确认到货 |
+| `/reagent-orders/{id}/stock-in` | POST | ✅ | 一键入库 |
+| `/reagent-orders/dashboard/my-orders` | GET | ✅ | 我的试剂订单 |
+| `/reagent-orders/dashboard/arrived-orders` | GET | ✅ | 已到货试剂订单 |
+| `/consumable-orders/` | POST | ✅ | 耗材订单创建 |
+| `/consumable-orders/` | GET | ✅ | 耗材订单列表 |
+| `/consumable-orders/{id}` | GET | ✅ | 耗材订单详情 |
+| `/consumable-orders/{id}` | PUT | ✅ | 更新耗材订单 |
+| `/consumable-orders/{id}` | DELETE | ✅ | 删除耗材订单 |
+| `/consumable-orders/{id}/upload-image` | POST | ✅ | 上传图片 |
+| `/consumable-orders/{id}/approve` | POST | ✅ | 审批 (Admin) |
+| `/consumable-orders/{id}/reject` | POST | ✅ | 驳回 (Admin) |
+| `/consumable-orders/{id}/complete` | POST | ✅ | 确认完成 |
+| `/consumable-orders/dashboard/my-orders` | GET | ✅ | 我的耗材订单 |
 
-### 9.3 前端页面重构
+### 9.3 前端页面重构 ✅
 
 | 功能 | 文件 | 状态 |
 |------|------|------|
-| 试剂订购页 | `ReagentOrders.tsx` | ⏳ |
-| 耗材订购页 | `ConsumableOrders.tsx` | ⏳ |
-| 导航更新 | `Layout.tsx` | ⏳ |
+| 试剂订购页 | `ReagentOrders.tsx` | ✅ |
+| 耗材订购页 | `ConsumableOrders.tsx` | ✅ |
+| 导航更新 | `Layout.tsx` | ✅ |
+
+### Future Enhancements
 
 | 功能 | 描述 | 状态 |
 |------|------|------|
-| 手动入库 | 未提交订单的试剂手动入库 | ⏳ |
 | 批量操作 | 批量入库、批量归还 | ⏳ |
 | 高级搜索 | 多条件筛选、模糊搜索 | ⏳ |
 | 数据导出 | Excel 报表导出 | ⏳ |
@@ -310,19 +327,31 @@
 - `PUT /users/{id}` - 更新用户
 - `DELETE /users/{id}` - 删除用户
 
-### Orders API
-- `POST /orders/` - 创建订单
-- `GET /orders/` - 订单列表
-- `GET /orders/{id}` - 订单详情
-- `PUT /orders/{id}` - 更新订单
-- `DELETE /orders/{id}` - 删除订单
-- `POST /orders/{id}/upload-image` - 上传图片
-- `POST /orders/{id}/approve` - 审批订单
-- `POST /orders/{id}/reject` - 驳回订单
-- `POST /orders/{id}/confirm-arrival` - 确认到货
-- `POST /orders/{id}/stock-in` - 一键入库
-- `GET /orders/dashboard/my-orders` - 我的订单
-- `GET /orders/dashboard/arrived-orders` - 已到货订单
+### Reagent Orders API
+- `POST /reagent-orders/` - 创建试剂订单
+- `GET /reagent-orders/` - 试剂订单列表
+- `GET /reagent-orders/{id}` - 试剂订单详情
+- `PUT /reagent-orders/{id}` - 更新试剂订单
+- `DELETE /reagent-orders/{id}` - 删除试剂订单
+- `POST /reagent-orders/{id}/upload-image` - 上传图片
+- `POST /reagent-orders/{id}/approve` - 审批 (Admin)
+- `POST /reagent-orders/{id}/reject` - 驳回 (Admin)
+- `POST /reagent-orders/{id}/confirm-arrival` - 确认到货
+- `POST /reagent-orders/{id}/stock-in` - 一键入库
+- `GET /reagent-orders/dashboard/my-orders` - 我的试剂订单
+- `GET /reagent-orders/dashboard/arrived-orders` - 已到货试剂订单
+
+### Consumable Orders API
+- `POST /consumable-orders/` - 创建耗材订单
+- `GET /consumable-orders/` - 耗材订单列表
+- `GET /consumable-orders/{id}` - 耗材订单详情
+- `PUT /consumable-orders/{id}` - 更新耗材订单
+- `DELETE /consumable-orders/{id}` - 删除耗材订单
+- `POST /consumable-orders/{id}/upload-image` - 上传图片
+- `POST /consumable-orders/{id}/approve` - 审批 (Admin)
+- `POST /consumable-orders/{id}/reject` - 驳回 (Admin)
+- `POST /consumable-orders/{id}/complete` - 确认完成
+- `GET /consumable-orders/dashboard/my-orders` - 我的耗材订单
 
 ### Inventory API
 - `GET /inventory/` - 库存列表
@@ -339,7 +368,8 @@
 - `GET /inventory/dashboard/pending-stockin` - 待入库
 - `GET /inventory/import/template` - 导入模板
 - `POST /inventory/import` - 批量导入
-- `POST /inventory/manual-add` - 手动入库 ✅
+- `POST /inventory/manual-add` - 手动入库
+- `GET /inventory/export` - 导出 CSV
 
 ---
 

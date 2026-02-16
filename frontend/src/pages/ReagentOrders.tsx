@@ -41,22 +41,11 @@ interface CASWarningInfo {
   }
 }
 
-// Status mapping
-const STATUS_MAPPING: Record<string, string> = {
-  pending: '已申购',
-  approved: '已审批',
-  arrived: '已到货',
-  stocked: '已入库',
-  rejected: '未通过',
-}
-
-const STATUS_CLASS_MAPPING: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  approved: 'bg-blue-100 text-blue-800',
-  arrived: 'bg-green-100 text-green-800',
-  stocked: 'bg-gray-100 text-gray-800',
-  rejected: 'bg-red-100 text-red-800',
-}
+import {
+  REAGENT_STATUS_MAP as STATUS_MAPPING,
+  REAGENT_STATUS_STYLE as STATUS_CLASS_MAPPING,
+  ORDER_REASON_MAP as REASON_MAPPING,
+} from '@/lib/constants'
 
 export function ReagentOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')

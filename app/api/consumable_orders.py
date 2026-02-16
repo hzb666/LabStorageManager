@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.database import get_db
@@ -22,6 +23,11 @@ from app.models.user import User
 from app.services.image_service import process_uploaded_image
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
+
+
+class RejectRequest(BaseModel):
+    """Body for reject action"""
+    reason: str = "Order rejected"
 
 
 def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[ConsumableOrder]:
@@ -97,7 +103,8 @@ def list_consumable_orders(
     skip: int = 0,
     limit: int = 100,
     status_filter: Optional[ConsumableOrderStatus] = None,
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """List consumable orders with optional filters, includes applicant name"""
     statement = select(ConsumableOrder)
@@ -124,7 +131,11 @@ def list_consumable_orders(
 
 
 @router.get("/{order_id}", response_model=ConsumableOrderResponse)
-def get_consumable_order(order_id: int, db: Session = Depends(get_db)):
+def get_consumable_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Get consumable order by ID"""
     order = get_consumable_order_by_id(db, order_id)
     if not order:
@@ -195,9 +206,9 @@ def approve_consumable_order(
 @router.post("/{order_id}/reject")
 def reject_consumable_order(
     order_id: int,
-    reason: str = "Order rejected",
+    body: RejectRequest = RejectRequest(),
     admin_user: User = Depends(require_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Reject a consumable order (Admin only)"""
     order = get_consumable_order_by_id(db, order_id)
@@ -208,7 +219,8 @@ def reject_consumable_order(
         )
     
     order.status = ConsumableOrderStatus.REJECTED
-    order.notes = f"驳回原因: {reason}" if reason else order.notes
+    if body.reason:
+        order.notes = f"驳回原因: {body.reason}"
     order.updated_at = datetime.now(timezone.utc)
     
     db.commit()

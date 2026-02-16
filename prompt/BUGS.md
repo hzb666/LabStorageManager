@@ -140,3 +140,85 @@
 2. 考虑添加API请求速率限制
 3. 添加日志记录关键操作
 4. 定期执行代码审查
+
+---
+
+## 全面代码审查重构 (2026-02-16)
+
+### P0 - 阻断性问题 [FIXED]
+
+#### 7. WAL 模式未正确启用 [FIXED]
+- **文件**: `app/database.py`
+- **问题**: 通过 URL 参数 `?mode=wal` 尝试启用 WAL，但 SQLAlchemy 不支持此方式
+- **修复**: 使用 SQLAlchemy `event.listens_for(engine, "connect")` 执行 `PRAGMA journal_mode=WAL`，同时开启 `PRAGMA foreign_keys=ON`
+
+#### 8. generate_internal_code 双实现冲突 [FIXED]
+- **文件**: `app/services/cas_utils.py`, `app/api/inventory.py`
+- **问题**: `cas_utils.py` 和 `internal_code.py` 各有一个 `generate_internal_code`，inventory.py 导入了错误的版本
+- **修复**: 删除 `cas_utils.py` 中的版本，inventory.py 改为导入 `internal_code.py`
+
+#### 9. 用户注册接口无认证 [FIXED]
+- **文件**: `app/api/users.py`
+- **问题**: `POST /users/` 任何人可创建用户（包括 admin），严重安全漏洞
+- **修复**: 添加 `require_admin` 依赖
+
+#### 10. Dashboard 入库按钮状态逻辑 [FIXED]
+- **文件**: `frontend/src/pages/Dashboard.tsx`
+- **问题**: APPROVED 状态同时显示"确认到货"和"一键入库"，后端 stock-in 需要 ARRIVED 状态
+- **修复**: APPROVED 只显示"确认到货"，ARRIVED 才显示"一键入库"；修复状态大小写
+
+#### 11. reject/confirm-arrival 参数不匹配 [FIXED]
+- **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`
+- **问题**: 后端用 Query 参数接收 reason/arrival_notes，前端发 JSON body
+- **修复**: 改为 Pydantic Body 模型 (RejectRequest, ConfirmArrivalRequest)
+
+### P1 - 重要改进 [FIXED]
+
+#### 12. 旧 stock-in 路由冗余 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: 与 `reagent_orders.py` 重复，且状态检查错误、internal_code 格式错误
+- **修复**: 删除 `POST /inventory/stock-in/{order_id}`
+
+#### 13. 订单列表接口无认证 [FIXED]
+- **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`
+- **问题**: `GET /reagent-orders/` 和 `GET /consumable-orders/` 无需登录即可访问
+- **修复**: 添加 `get_current_user` 依赖
+
+#### 14. 归还数量无上限校验 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: remaining_quantity 可输入超过 initial_quantity
+- **修复**: 添加 `remaining_quantity <= initial_quantity` 校验
+
+#### 15. 路由顺序 + 函数名冲突 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: `/export`, `/dashboard/*`, `/import/*` 路由在 `/{inventory_id}` 之后；`get_inventory_by_code` 辅助函数与路由函数同名
+- **修复**: 重排路由，所有具名路由在 `/{id}` 之前；辅助函数改名 `_get_by_id` / `_find_by_code`
+
+### P2 - 代码质量 [FIXED]
+
+#### 16. CSV 导出返回 JSON [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: 返回 `{"data": csv_string}` 需前端二次解析
+- **修复**: 改为 `StreamingResponse`，添加 UTF-8 BOM，直接下载
+
+#### 17. CORS 硬编码 [FIXED]
+- **文件**: `app/main.py`, `app/core/config.py`
+- **修复**: `cors_origins` 移入 Settings，main.py 统一读取
+
+#### 18. 日志缺失 [FIXED]
+- **文件**: `app/main.py`, `app/database.py`
+- **修复**: 添加 `logging.basicConfig` + 模块级 logger
+
+#### 19. Token 双重存储 [FIXED]
+- **文件**: `frontend/src/store/useStore.ts`, `frontend/src/api/client.ts`
+- **问题**: token 同时存在 localStorage 和 Zustand persist 中
+- **修复**: 统一由 Zustand persist 管理，API interceptor 从 `useAuthStore.getState()` 读取
+
+#### 20. 前端状态映射分散 [FIXED]
+- **文件**: 新增 `frontend/src/lib/constants.ts`
+- **修复**: 集中定义所有状态/原因/角色映射，ReagentOrders.tsx 和 ConsumableOrders.tsx 引用
+
+#### 21. spec_utils 单位大小写 [FIXED]
+- **文件**: `app/services/spec_utils.py`
+- **问题**: `spec.lower()` 后 "1L" 变成 "1l"，返回单位不规范
+- **修复**: 添加 `UNIT_CANONICAL` 映射 (ml→mL, l→L, ul→μL)

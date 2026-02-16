@@ -74,21 +74,21 @@ export function Dashboard() {
       // Parse myOrders - backend returns { data: { pending: {orders}, approved: {orders}, arrived: {orders} } }
       const ordersData = (ordersRes.data as any)?.data
       if (ordersData && typeof ordersData === 'object') {
-        // Flatten the nested structure into a single array with status
+        // Flatten the nested structure into a single array, keep backend lowercase status
         const allOrders: MyOrder[] = []
         if (ordersData.pending?.orders) {
           ordersData.pending.orders.forEach((o: any) => {
-            allOrders.push({ ...o, status: 'PENDING', id: o.order_id || o.id })
+            allOrders.push({ ...o, status: 'pending', id: o.order_id || o.id })
           })
         }
         if (ordersData.approved?.orders) {
           ordersData.approved.orders.forEach((o: any) => {
-            allOrders.push({ ...o, status: 'APPROVED', id: o.order_id || o.id })
+            allOrders.push({ ...o, status: 'approved', id: o.order_id || o.id })
           })
         }
         if (ordersData.arrived?.orders) {
           ordersData.arrived.orders.forEach((o: any) => {
-            allOrders.push({ ...o, status: 'ARRIVED', id: o.order_id || o.id })
+            allOrders.push({ ...o, status: 'arrived', id: o.order_id || o.id })
           })
         }
         setMyOrders(allOrders)
@@ -236,7 +236,7 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {myOrders.filter((o) => o.status === 'PENDING').length}
+              {myOrders.filter((o) => o.status === 'pending').length}
             </div>
           </CardContent>
         </Card>
@@ -267,24 +267,24 @@ export function Dashboard() {
                     <span
                       className={cn(
                         'px-3 py-1 text-sm rounded-full',
-                        order.status === 'PENDING'
+                        order.status === 'pending'
                           ? 'bg-yellow-100 text-yellow-800'
-                          : order.status === 'APPROVED'
+                          : order.status === 'approved'
                           ? 'bg-blue-100 text-blue-800'
-                          : order.status === 'ARRIVED'
+                          : order.status === 'arrived'
                           ? 'bg-green-100 text-green-800'
                           : 'bg-gray-100 text-gray-800'
                       )}
                     >
-                      {order.status === 'PENDING'
+                      {order.status === 'pending'
                         ? '待审批'
-                        : order.status === 'APPROVED'
+                        : order.status === 'approved'
                         ? '已审批'
-                        : order.status === 'ARRIVED'
+                        : order.status === 'arrived'
                         ? '已到货'
                         : order.status}
                     </span>
-                    {order.status === 'APPROVED' && (
+                    {order.status === 'approved' && (
                       <div className="flex gap-1">
                         <Button
                           size="sm"
@@ -292,7 +292,7 @@ export function Dashboard() {
                           onClick={() => handleConfirmArrival(order.id)}
                         >
                           <CheckCircle className="w-3 h-3 mr-1" />
-                          已到货
+                          确认到货
                         </Button>
                         <Button
                           size="sm"
@@ -303,6 +303,16 @@ export function Dashboard() {
                           一键入库
                         </Button>
                       </div>
+                    )}
+                    {order.status === 'arrived' && (
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700"
+                        onClick={() => handleQuickStockIn(order.id)}
+                      >
+                        <PackagePlus className="w-3 h-3 mr-1" />
+                        入库
+                      </Button>
                     )}
                   </div>
                 </div>

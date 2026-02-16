@@ -44,6 +44,14 @@
 - [x] Stock-in notification (when order arrives)
 - [x] Low stock alerts
 - [x] Borrow/Return notifications
+
+### Phase 9: Reagent & Consumable Split
+- [x] Order 表拆分为 ReagentOrder + ConsumableOrder
+- [x] 试剂/耗材分别独立页面 (ReagentOrders.tsx / ConsumableOrders.tsx)
+- [x] 新增字段: english_name, price, category, brand
+- [x] 导航栏更新 (Layout.tsx)
+- [x] Dashboard 适配新订单结构
+
 ---
 
 ## Timeline
@@ -66,20 +74,33 @@
 | 2026-02-14 | Code Review | ✅ | 代码审查第二轮 - 修复3个问题 (Orders.tsx prompt()、枚举比较、导出权限) |
 | 2026-02-14 | Phase 7 | ✅ | 用户管理 - 软删除、启用API、搜索筛选、前端页面 |
 | 2026-02-14 | Phase 8 | ✅ | 通知与提醒 - CAS预警、入库提醒、低库存UI、借用超时标记 |
-| 2026-02-14 | Phase 9 设计 | ⏳ | 试剂与耗材分离 - 字段设计 (english_name, price, category, brand) |
+| 2026-02-14 | Phase 9 设计 | ✅ | 试剂与耗材分离 - 字段设计 (english_name, price, category, brand) |
+| 2026-02-14 | Phase 9 实施 | ✅ | 试剂与耗材分离 - Order 拆分、独立页面、导航更新 |
+| 2026-02-16 | Code Review Refactor | ✅ | 全面代码审查重构 - 修复 P0/P1/P2 共 14 项问题 |
 
-**Last Updated**: 2026-02-14
-**Status**: Phase 9 试剂与耗材分离设计中
-**Next**: Phase 9 实施 - 数据库模型重构
+**Last Updated**: 2026-02-16
+**Status**: Phase 1-9 全部完成, Code Review Refactor 完成
+**Next**: Future Enhancements
 
 ---
 
 ## Plans
 
-### Phase 9: reagent_consumable_split
-- [ ] Order 表拆分为 ReagentOrder + ConsumableOrder
-- [ ] 试剂/耗材分别独立页面
-- [ ] 新增字段: english_name, price, category, brand
+### Code Review Refactor (2026-02-16) ✅
+- [x] P0: WAL 模式通过 PRAGMA 正确启用 + foreign_keys
+- [x] P0: generate_internal_code 双实现冲突清理
+- [x] P0: 用户创建接口加 admin 认证
+- [x] P0: Dashboard 入库按钮状态逻辑修复 (approved→确认到货, arrived→一键入库)
+- [x] P0: reject/confirm-arrival 参数改为 Body 传递
+- [x] P1: 删除旧 stock-in 路由 (inventory.py)
+- [x] P1: 订单列表/详情接口加认证
+- [x] P1: 归还数量上限校验 + borrow API 清理
+- [x] P1: 路由顺序重排 + 函数名冲突修复
+- [x] P2: CSV 导出改 StreamingResponse (UTF-8 BOM)
+- [x] P2: CORS 从 Settings 读取 + logging 配置
+- [x] P2: 前端集中映射表 (constants.ts)
+- [x] P2: Token 单一来源 (Zustand persist only)
+- [x] P2: spec_utils 单位规范化映射 (mL/L/μL)
 
 ### Future Enhancements
 - [ ] Chemical compatibility check

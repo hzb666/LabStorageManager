@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { useAuthStore } from '@/store/useStore'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
@@ -9,10 +10,10 @@ export const api = axios.create({
   },
 })
 
-// Request interceptor to add auth token
+// Request interceptor — read token from Zustand store (single source of truth)
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token')
+    const token = useAuthStore.getState().token
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -28,7 +29,7 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token')
+      useAuthStore.getState().logout()
       window.location.href = '/login'
     }
     return Promise.reject(error)
@@ -117,7 +118,7 @@ export const inventoryAPI = {
   get: (id: number) => api.get(`/inventory/${id}`),
   getByCode: (code: string) => api.get(`/inventory/code/${code}`),
   checkCAS: (casNumber: string) => api.get(`/inventory/cas/${casNumber}`),
-  borrow: (id: number) => api.post(`/inventory/${id}/borrow`, {}),
+  borrow: (id: number) => api.post(`/inventory/${id}/borrow`),
   return: (id: number, data: { remaining_quantity: number; unit?: string }) =>
     api.post(`/inventory/${id}/return`, data),
   update: (id: number, data: any) => api.put(`/inventory/${id}`, data),
@@ -141,5 +142,5 @@ export const inventoryAPI = {
     is_hazardous: boolean
     notes?: string
   }) => api.post('/inventory/manual-add', data),
-  exportInventory: () => api.get('/inventory/export'),
+  exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
 }
