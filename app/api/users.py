@@ -2,7 +2,7 @@
 User API Routes - Authentication and User Management
 Critical Rule #3: All data modification endpoints must check current_user
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -91,8 +91,12 @@ def login(
 
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    """Create a new user (admin only in production)"""
+def create_user(
+    user: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Create a new user (admin only)"""
     # Check if username exists
     existing = get_user_by_username(db, user.username)
     if existing:
@@ -212,7 +216,7 @@ def update_user(
     for field, value in update_data.items():
         setattr(user, field, value)
     
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(user)
@@ -241,7 +245,7 @@ def activate_user(
         )
     
     user.is_active = True
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
     
@@ -271,7 +275,7 @@ def delete_user(
     
     # Soft delete: set is_active to False
     user.is_active = False
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     db.commit()
 
 
@@ -299,7 +303,7 @@ def update_user_role(
             detail=f"Invalid role: {role}. Must be 'admin' or 'user'"
         )
     
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
     

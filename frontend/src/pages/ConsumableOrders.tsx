@@ -40,15 +40,6 @@ const STATUS_CLASS_MAPPING: Record<string, string> = {
   rejected: 'bg-red-100 text-red-800',
 }
 
-const REASON_MAPPING: Record<string, string> = {
-  none: '没有',
-  running_out: '快用完',
-  empty: '用完',
-  common_public: '常用或公用',
-  not_found: '找不到',
-  reorder: '重新下单',
-}
-
 export function ConsumableOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
   const [orders, setOrders] = useState<ConsumableOrder[]>([])

@@ -2,7 +2,7 @@
 Consumable Order API Routes - Consumables Purchase Order Management
 Separated from Reagent orders (no stock-in needed)
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
@@ -142,7 +142,7 @@ def update_consumable_order(
     for field, value in update_data.items():
         setattr(order, field, value)
     
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -171,7 +171,7 @@ def approve_consumable_order(
         )
     
     order.status = ConsumableOrderStatus.APPROVED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -195,7 +195,8 @@ def reject_consumable_order(
         )
     
     order.status = ConsumableOrderStatus.REJECTED
-    order.updated_at = datetime.utcnow()
+    order.notes = f"驳回原因: {reason}" if reason else order.notes
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -235,7 +236,7 @@ def complete_consumable_order(
     
     # Consumables complete directly (no stock-in)
     order.status = ConsumableOrderStatus.COMPLETED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)

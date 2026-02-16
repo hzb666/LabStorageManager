@@ -2,7 +2,7 @@
 Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
@@ -171,7 +171,7 @@ def update_reagent_order(
     for field, value in update_data.items():
         setattr(order, field, value)
     
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -200,7 +200,7 @@ def approve_reagent_order(
         )
     
     order.status = ReagentOrderStatus.APPROVED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -224,7 +224,8 @@ def reject_reagent_order(
         )
     
     order.status = ReagentOrderStatus.REJECTED
-    order.updated_at = datetime.utcnow()
+    order.notes = f"驳回原因: {reason}" if reason else order.notes
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -279,7 +280,7 @@ def confirm_reagent_arrival(
     
     if arrival_notes:
         order.notes = arrival_notes
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -477,7 +478,7 @@ def stock_in_reagent_order(
     
     # Update order status
     order.status = ReagentOrderStatus.STOCKED
-    order.updated_at = datetime.utcnow()
+    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     

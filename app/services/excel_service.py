@@ -200,7 +200,11 @@ def import_inventory_from_excel(
         except Exception as e:
             errors.append({"row": row_num, "error": str(e)})
     
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"Failed to save imported data: {str(e)}")
     
     return {
         "success": len(errors) == 0,
