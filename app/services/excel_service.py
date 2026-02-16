@@ -81,16 +81,20 @@ def import_inventory_from_excel(
     user_id: int = 1
 ) -> dict:
     """
-    Import inventory items from Excel file.
+    Import inventory items from Excel or CSV file.
     
-    Expected Excel columns:
+    Expected columns:
     - cas_number: CAS号 (required)
     - name: 名称 (required)
+    - english_name: 英文名 (optional)
     - alias: 别名 (optional)
+    - category: 分类 (optional)
+    - brand: 品牌/厂商 (optional)
     - specification: 规格，如 "500ml" (required)
     - initial_quantity: 初始数量 (required)
     - location: 存放位置 (optional, uses default if not provided)
     - is_hazardous: 是否危险品 (optional, defaults to False)
+    - price: 单价 (optional)
     - notes: 备注 (optional)
     
     Returns:
@@ -118,7 +122,7 @@ def import_inventory_from_excel(
         'initial_quantity': ['initial_quantity', '初始数量', '数量', 'quantity'],
         'location': ['location', '位置', '存放位置'],
         'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
-        'price': ['price', '单价', '价格', 'price'],
+        'price': ['price', '单价', '价格'],
         'notes': ['notes', '备注', 'remark']
     }
     

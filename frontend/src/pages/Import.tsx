@@ -22,7 +22,7 @@ interface ImportResult {
   total_rows: number
   created: number
   errors_count: number
-  errors: { row: number; message: string }[] | null
+  errors: { row: number; error: string }[] | null
 }
 
 export function ImportPage() {
@@ -50,8 +50,8 @@ export function ImportPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
-      if (!selectedFile.name.endsWith('.xlsx') && !selectedFile.name.endsWith('.xls')) {
-        alert('请选择 Excel 文件 (.xlsx, .xls)')
+      if (!selectedFile.name.endsWith('.csv') && !selectedFile.name.endsWith('.xlsx') && !selectedFile.name.endsWith('.xls')) {
+        alert('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
         return
       }
       setFile(selectedFile)
@@ -109,6 +109,7 @@ export function ImportPage() {
     a.href = url
     a.download = 'inventory_template.csv'
     a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -236,7 +237,7 @@ export function ImportPage() {
                   <div className="max-h-40 overflow-y-auto text-xs space-y-1">
                     {result.errors.slice(0, 20).map((err, i) => (
                       <div key={i} className="text-red-600">
-                        行 {err.row}: {err.message}
+                        行 {err.row}: {err.error}
                       </div>
                     ))}
                     {result.errors.length > 20 && (

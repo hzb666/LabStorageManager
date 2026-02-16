@@ -7,6 +7,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlmodel import Session, select, func
+import csv
+import io
 import os
 import tempfile
 
@@ -427,9 +429,6 @@ def export_inventory(
     items = db.exec(statement).all()
     
     # Build CSV content
-    import csv
-    import io
-    
     output = io.StringIO()
     writer = csv.writer(output)
     
