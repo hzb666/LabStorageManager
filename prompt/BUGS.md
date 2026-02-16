@@ -222,3 +222,9 @@
 - **文件**: `app/services/spec_utils.py`
 - **问题**: `spec.lower()` 后 "1L" 变成 "1l"，返回单位不规范
 - **修复**: 添加 `UNIT_CANONICAL` 映射 (ml→mL, l→L, ul→μL)
+
+#### 22. /dashboard/my-borrows 时区感知与无感知 datetime 相减崩溃 [FIXED]
+- **文件**: `app/api/inventory.py:270-292`
+- **问题**: `now = datetime.now(timezone.utc)` 生成时区感知 datetime，但 `item.updated_at` 经 SQLite 往返后为时区无感知（naive）datetime，`now - item.updated_at` 抛出 `TypeError: can't subtract offset-naive and offset-aware datetimes`，导致整个 `/dashboard/my-borrows` 端点崩溃
+- **根因**: 模型 `default_factory=datetime.utcnow` + SQLAlchemy `DateTime` 不含 `timezone=True` → SQLite 存取后 tz 信息丢失
+- **修复**: `now = datetime.now(timezone.utc).replace(tzinfo=None)`，使 `now` 也为 naive UTC，与数据库返回值一致

@@ -268,7 +268,8 @@ def get_my_borrows(
     ).order_by(Inventory.updated_at.desc())
 
     items = db.exec(statement).all()
-    now = datetime.now(timezone.utc)
+    # Use naive UTC to match SQLite's timezone-naive datetimes
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     return {
         "data": [

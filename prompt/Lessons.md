@@ -124,3 +124,7 @@
 - **问题**: 在 service 层（`spec_utils.py`）直接抛出 `HTTPException` 耦合了 HTTP 框架
 - **正确做法**: service 层抛出领域异常 `SpecificationError(ValueError)`，API 层 catch 后转换为 `HTTPException`
 - **好处**: service 层可被非 HTTP 调用方（如 CLI、测试）复用
+
+### 教训 16: SQLite datetime 往返丢失时区信息
+- **问题**: `datetime.now(timezone.utc)` 创建 aware datetime，但 SQLite + SQLAlchemy `DateTime(timezone=False)` 存取后返回 naive datetime，两者相减抛 TypeError
+- **规则**: 与 SQLite 中读出的 datetime 做算术运算时，必须确保双方 tz-awareness 一致。推荐用 `.replace(tzinfo=None)` 将 aware datetime 转为 naive UTC，或在模型层统一使用 `DateTime(timezone=True)`
