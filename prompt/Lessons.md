@@ -98,3 +98,29 @@
 ### 教训 11: CSV 导出应使用 StreamingResponse
 - **错误做法**: 把 CSV 字符串包在 JSON 里 `{"data": "...csv..."}`，前端需二次解析
 - **正确做法**: `StreamingResponse` + `Content-Disposition: attachment` 让浏览器直接下载
+
+### 教训 12: Git stash + pull 冲突处理流程
+- **场景**: 本地有大量修改，远端也有新提交，直接 pull 会 abort
+- **正确流程**: 
+  1. `git add` 新文件（untracked 文件不能 stash）
+  2. `git stash push -m "描述"`
+  3. `git pull origin branch`
+  4. `git stash pop`（可能产生冲突）
+  5. 手动解决冲突 → `git add` → `git commit`
+  6. `git stash drop` 清理已解决的 stash
+- **注意**: stash pop 冲突后 stash 不会自动删除，需要手动 drop
+
+### 教训 13: PowerShell 不支持 Bash heredoc 语法
+- **问题**: `git commit -m "$(cat <<'EOF'...EOF)"` 在 PowerShell 中完全不工作
+- **解决**: 将 commit message 写入临时文件，用 `git commit -F .git/COMMIT_MSG`
+- **注意**: PowerShell 中 `&&` 也不可用，需用 `;` 分隔命令
+
+### 教训 14: 合并冲突时要取双方最优解
+- **场景**: 远端已将 `datetime.utcnow()` 改为 `datetime.now(timezone.utc)`，本地改了参数传递方式
+- **错误做法**: 简单选择"ours"或"theirs"，丢失一方的改进
+- **正确做法**: 逐个冲突分析，合并两边的改进（如：取远端的 datetime 改进 + 本地的 Body 模型参数）
+
+### 教训 15: SpecificationError 比 HTTPException 更好
+- **问题**: 在 service 层（`spec_utils.py`）直接抛出 `HTTPException` 耦合了 HTTP 框架
+- **正确做法**: service 层抛出领域异常 `SpecificationError(ValueError)`，API 层 catch 后转换为 `HTTPException`
+- **好处**: service 层可被非 HTTP 调用方（如 CLI、测试）复用
