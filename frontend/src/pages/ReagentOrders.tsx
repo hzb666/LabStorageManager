@@ -22,6 +22,7 @@ interface ReagentOrder {
   image_path?: string
   notes?: string
   applicant_id: number
+  applicant_name?: string
   status: string
   created_at: string
   updated_at: string
@@ -447,7 +448,7 @@ export function ReagentOrdersPage() {
                           {order.english_name && ` • ${order.english_name}`}
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
-                          申请人: {order.applicant_id} • {new Date(order.created_at).toLocaleDateString()}
+                          申请人: {order.applicant_name || order.applicant_id} • {new Date(order.created_at).toLocaleDateString()}
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-2">

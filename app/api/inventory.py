@@ -28,7 +28,7 @@ from app.models.user import User
 from app.core.auth import get_current_user, require_admin
 from app.services.cas_utils import normalize_cas
 from app.services.internal_code import generate_internal_code
-from app.services.spec_utils import parse_specification
+from app.services.spec_utils import parse_specification, SpecificationError
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -251,7 +251,7 @@ def return_item(
     # Update BorrowLog record
     borrow_log_statement = select(BorrowLog).where(
         BorrowLog.inventory_id == inventory_id,
-        BorrowLog.return_time == None
+        BorrowLog.return_time.is_(None)
     ).order_by(BorrowLog.borrow_time.desc())
     
     borrow_log = db.exec(borrow_log_statement).first()
@@ -409,7 +409,10 @@ def manual_add_inventory(
         )
 
     # Parse specification (e.g., "500ml" -> (500, "ml"))
-    per_bottle_value, unit = parse_specification(item_data.specification)
+    try:
+        per_bottle_value, unit = parse_specification(item_data.specification)
+    except SpecificationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     # Generate internal codes for all bottles
     internal_codes = generate_internal_code(db, normalized_cas, item_data.quantity_bottles)
