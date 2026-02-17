@@ -136,3 +136,11 @@
 ### 教训 17: SQLite datetime 往返丢失时区信息
 - **问题**: `datetime.now(timezone.utc)` 创建 aware datetime，但 SQLite + SQLAlchemy `DateTime(timezone=False)` 存取后返回 naive datetime，两者相减抛 TypeError
 - **规则**: 与 SQLite 中读出的 datetime 做算术运算时，必须确保双方 tz-awareness 一致。推荐用 `.replace(tzinfo=None)` 将 aware datetime 转为 naive UTC，或在模型层统一使用 `DateTime(timezone=True)`
+
+### 教训 18: PowerShell 下 git commit 中文编码问题
+- **问题**: PowerShell 环境下 `git commit -m "中文"` 会产生乱码
+- **原因**: PowerShell 默认编码不是 UTF-8
+- **解决方法**: 
+  1. 用 Write 工具把中文 commit message 写入 `.git/COMMIT_MSG` 文件
+  2. 执行 `git commit -F .git/COMMIT_MSG` 或 `git commit --amend -F .git/COMMIT_MSG`
+- **注意**: 不要用 heredoc 语法 (`$(cat <<'EOF'...)`)，PowerShell 不支持
