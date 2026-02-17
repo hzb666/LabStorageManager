@@ -125,6 +125,14 @@
 - **正确做法**: service 层抛出领域异常 `SpecificationError(ValueError)`，API 层 catch 后转换为 `HTTPException`
 - **好处**: service 层可被非 HTTP 调用方（如 CLI、测试）复用
 
-### 教训 16: SQLite datetime 往返丢失时区信息
+### 教训 16: 前后端状态校验必须一致
+- **问题**: 前端"一键入库"按钮在 `approved` 状态显示，但后端 `stock_in` 端点只接受 `ARRIVED` 状态，导致前端操作必定失败
+- **延伸**: 耗材订单调用不存在的 `consumableOrderAPI.stockIn()` 方法，运行时直接报错
+- **规则**: 
+  1. 前端展示操作按钮时，必须确保对应后端接口支持该状态
+  2. "一键操作" 类功能应在后端合并多步骤逻辑，而非依赖前端按正确顺序调用
+  3. 前端 API 客户端调用的方法必须在客户端中实际定义
+
+### 教训 17: SQLite datetime 往返丢失时区信息
 - **问题**: `datetime.now(timezone.utc)` 创建 aware datetime，但 SQLite + SQLAlchemy `DateTime(timezone=False)` 存取后返回 naive datetime，两者相减抛 TypeError
 - **规则**: 与 SQLite 中读出的 datetime 做算术运算时，必须确保双方 tz-awareness 一致。推荐用 `.replace(tzinfo=None)` 将 aware datetime 转为 naive UTC，或在模型层统一使用 `DateTime(timezone=True)`

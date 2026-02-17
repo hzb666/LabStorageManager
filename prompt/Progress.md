@@ -78,9 +78,10 @@
 | 2026-02-14 | Phase 9 实施 | ✅ | 试剂与耗材分离 - Order 拆分、独立页面、导航更新 |
 | 2026-02-16 | Code Review Refactor | ✅ | 全面代码审查重构 - 修复 P0/P1/P2 共 14 项问题 |
 | 2026-02-16 | Phase 10 | ✅ | Error Boundary + 全页面服务端分页 (库存/试剂订单/耗材订单) |
+| 2026-02-16 | Bug Fix | ✅ | 一键入库修复: 后端支持 APPROVED 直接入库, 耗材订单修复 API 调用 |
 
 **Last Updated**: 2026-02-16
-**Status**: Phase 1-10 全部完成
+**Status**: Phase 1-10 全部完成，一键入库 Bug 修复
 **Next**: Future Enhancements (化学兼容性检查、批量操作等)
 
 ---
