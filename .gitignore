@@ -10,6 +10,7 @@ __pycache__/
 dist/
 build/
 *.egg
+requirements.txt
 
 # Virtual environments
 venv/
@@ -17,7 +18,9 @@ env/
 .venv/
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 *.sw?
 *.swo
