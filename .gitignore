@@ -22,6 +22,7 @@ env/
 !.vscode/settings.json
 !.vscode/extensions.json
 .idea/
+.cursor/plans/
 *.sw?
 *.swo
 
