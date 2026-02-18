@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
 from app.database import get_db
@@ -23,11 +22,6 @@ from app.models.user import User
 from app.services.image_service import process_uploaded_image
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
-
-
-class RejectRequest(BaseModel):
-    """Body for reject action"""
-    reason: str = "Order rejected"
 
 
 def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[ConsumableOrder]:
@@ -210,11 +204,10 @@ def approve_consumable_order(
 @router.post("/{order_id}/reject")
 def reject_consumable_order(
     order_id: int,
-    body: RejectRequest = RejectRequest(),
     admin_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Reject a consumable order (Admin only)"""
+    """Reject a consumable order (Admin only). Does not modify notes."""
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -223,8 +216,6 @@ def reject_consumable_order(
         )
     
     order.status = ConsumableOrderStatus.REJECTED
-    if body.reason:
-        order.notes = f"驳回原因: {body.reason}"
     order.updated_at = datetime.now(timezone.utc)
     
     db.commit()

@@ -144,3 +144,12 @@
   1. 用 Write 工具把中文 commit message 写入 `.git/COMMIT_MSG` 文件
   2. 执行 `git commit -F .git/COMMIT_MSG` 或 `git commit --amend -F .git/COMMIT_MSG`
 - **注意**: 不要用 heredoc 语法 (`$(cat <<'EOF'...)`)，PowerShell 不支持
+
+### 教训 19: Git Flow 中 main 分支不应过早合并
+- **问题**: 项目尚无稳定版本时，就把 develop 通过 PR 合并到了 main，导致 main 上充满开发中的代码
+- **规则**:
+  1. `main` 分支只在正式发布稳定版本（如 v1.0.0）时才从 `develop` 合并
+  2. 开发阶段所有工作都在 `develop` 和 `feature/*` 分支上进行
+  3. 合并到 `main` 时必须打 tag 标记版本号（`git tag -a v1.0.0 -m "Release v1.0.0"`）
+  4. 不要因为"同步代码"而随意向 main 发 PR
+- **补救**: 已有的代码不做回退，从现在起规范操作，等真正稳定后再合并并打 tag

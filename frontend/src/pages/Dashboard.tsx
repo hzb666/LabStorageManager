@@ -35,6 +35,7 @@ interface MyOrder {
   status: string
   created_at: string
   orderType?: 'reagent' | 'consumable'
+  order_reason?: string
 }
 
 interface DashboardResponse<T> {
@@ -347,6 +348,8 @@ export function Dashboard() {
                         <Button
                           size="sm"
                           className="bg-green-600 hover:bg-green-700"
+                          disabled={order.order_reason === 'common_public'}
+                          title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
                           onClick={() => handleQuickStockIn(order.id)}
                         >
                           <PackagePlus className="w-3 h-3 mr-1" />
@@ -358,6 +361,8 @@ export function Dashboard() {
                       <Button
                         size="sm"
                         className="bg-green-600 hover:bg-green-700"
+                        disabled={order.order_reason === 'common_public'}
+                        title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
                         onClick={() => handleQuickStockIn(order.id)}
                       >
                         <PackagePlus className="w-3 h-3 mr-1" />

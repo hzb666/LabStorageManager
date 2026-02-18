@@ -472,7 +472,14 @@ export function ReagentOrdersPage() {
                             <Button size="sm" onClick={() => handleConfirmArrival(order.id)}>确认到货</Button>
                           )}
                           {order.status === 'arrived' && (
-                            <Button size="sm" onClick={() => handleStockIn(order.id)}>一键入库</Button>
+                            <Button
+                              size="sm"
+                              disabled={order.order_reason === 'common_public'}
+                              title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
+                              onClick={() => handleStockIn(order.id)}
+                            >
+                              一键入库
+                            </Button>
                           )}
                         </div>
                       </div>

@@ -232,3 +232,29 @@
 - **问题**: `now = datetime.now(timezone.utc)` 生成时区感知 datetime，但 `item.updated_at` 经 SQLite 往返后为时区无感知（naive）datetime，`now - item.updated_at` 抛出 `TypeError: can't subtract offset-naive and offset-aware datetimes`，导致整个 `/dashboard/my-borrows` 端点崩溃
 - **根因**: 模型 `default_factory=datetime.utcnow` + SQLAlchemy `DateTime` 不含 `timezone=True` → SQLite 存取后 tz 信息丢失
 - **修复**: `now = datetime.now(timezone.utc).replace(tzinfo=None)`，使 `now` 也为 naive UTC，与数据库返回值一致
+
+## PR Review 遗留问题修复 (2026-02-17)
+
+### 已修复问题
+
+#### 23. pd.read_csv 参数错误 [FIXED]
+- **文件**: `app/services/excel_service.py`
+- **问题**: `pd.read_csv()` 使用 `errors='replace'`，但正确参数名为 `encoding_errors`
+- **修复**: 改为 `encoding_errors='replace'`
+
+#### 24. 驳回操作覆盖 notes 备注 [FIXED]
+- **文件**: `app/api/reagent_orders.py`, `app/api/consumable_orders.py`
+- **问题**: `RejectRequest.reason` 默认值 `"Order rejected"` 导致 `if body.reason:` 永远为 True，驳回时 `order.notes` 被无条件覆盖
+- **修复**: 移除 `RejectRequest` 类和 notes 覆盖逻辑，驳回操作只改状态不动备注
+
+#### 25. APPROVED 一键入库缺少权限检查 [FIXED]
+- **文件**: `app/api/reagent_orders.py`
+- **问题**: `stock_in_reagent_order` 中 APPROVED 状态可直接入库，但未检查操作者是否为申请人或管理员
+- **修复**: 增加与 `confirm_reagent_arrival` 相同的权限校验（申请人本人或 admin）
+
+#### 26. common_public 订单可被错误入库 [FIXED]
+- **文件**: `app/api/reagent_orders.py`, `frontend/src/pages/Dashboard.tsx`, `frontend/src/pages/ReagentOrders.tsx`
+- **问题**: 常用/公用试剂应在确认到货时直接完成，但可通过一键入库绕过，错误创建 Inventory 记录
+- **修复**: 
+  - 后端：`stock_in_reagent_order` 增加 `common_public` 拦截，返回 400
+  - 前端：`common_public` 订单的一键入库按钮置灰（disabled），鼠标悬停显示提示信息

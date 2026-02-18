@@ -79,9 +79,10 @@
 | 2026-02-16 | Code Review Refactor | ✅ | 全面代码审查重构 - 修复 P0/P1/P2 共 14 项问题 |
 | 2026-02-16 | Phase 10 | ✅ | Error Boundary + 全页面服务端分页 (库存/试剂订单/耗材订单) |
 | 2026-02-16 | Bug Fix | ✅ | 一键入库修复: 后端支持 APPROVED 直接入库, 耗材订单修复 API 调用 |
+| 2026-02-17 | PR Review Fix | ✅ | PR Review 遗留 4 项修复: CSV参数、驳回逻辑、入库权限、common_public拦截 |
 
-**Last Updated**: 2026-02-16
-**Status**: Phase 1-10 全部完成，一键入库 Bug 修复
+**Last Updated**: 2026-02-17
+**Status**: Phase 1-10 全部完成，PR Review 遗留问题已修复
 **Next**: Future Enhancements (化学兼容性检查、批量操作等)
 
 ---
@@ -109,6 +110,12 @@
 - [x] 10.2: 后端三个列表接口返回 `{data, total, skip, limit}` (pageSize=20)
 - [x] 10.3: 前端库存页服务端分页 + Pagination UI + PaginationInfo
 - [x] 10.4: 前端试剂/耗材订单页服务端分页
+
+### PR Review Issues Fix (2026-02-17) ✅
+- [x] A: excel_service.py pd.read_csv errors → encoding_errors
+- [x] B: 移除 RejectRequest.reason，驳回不再覆盖 notes
+- [x] C: stock_in_reagent_order APPROVED 状态增加权限检查
+- [x] D: common_public 订单拦截入库 (后端 400 + 前端按钮置灰)
 
 ### Future Enhancements
 - [ ] Chemical compatibility check

@@ -29,11 +29,6 @@ from app.services.internal_code import generate_internal_code
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
 
 
-class RejectRequest(BaseModel):
-    """Body for reject action"""
-    reason: str = "Order rejected"
-
-
 class ConfirmArrivalRequest(BaseModel):
     """Body for confirm-arrival action"""
     arrival_notes: Optional[str] = None
@@ -243,11 +238,10 @@ def approve_reagent_order(
 @router.post("/{order_id}/reject")
 def reject_reagent_order(
     order_id: int,
-    body: RejectRequest = RejectRequest(),
     admin_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Reject a reagent order (Admin only)"""
+    """Reject a reagent order (Admin only). Does not modify notes."""
     order = get_reagent_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -256,8 +250,6 @@ def reject_reagent_order(
         )
     
     order.status = ReagentOrderStatus.REJECTED
-    if body.reason:
-        order.notes = f"驳回原因: {body.reason}"
     order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
@@ -463,6 +455,13 @@ def stock_in_reagent_order(
             detail="Order not found"
         )
     
+    # Block common_public orders from stock-in (they complete via confirm-arrival)
+    if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Common/public reagents do not require stock-in. Use confirm-arrival instead."
+        )
+    
     # Order must be in APPROVED or ARRIVED status
     # APPROVED: "一键入库" skips the confirm-arrival step
     # ARRIVED: normal stock-in after confirm-arrival
@@ -471,6 +470,14 @@ def stock_in_reagent_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Order must be in APPROVED or ARRIVED status to stock in, current: {order.status}."
         )
+    
+    # For APPROVED status, check permission (same as confirm-arrival)
+    if order.status == ReagentOrderStatus.APPROVED:
+        if order.applicant_id != current_user.id and current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the order applicant or admin can stock in"
+            )
     
     # Validate quantity
     if order.quantity is None or order.quantity <= 0:

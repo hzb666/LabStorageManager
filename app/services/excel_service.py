@@ -32,7 +32,7 @@ def parse_excel_file(file_path: str) -> pd.DataFrame:
             except UnicodeDecodeError:
                 continue
         # Last resort: try with error handling
-        return pd.read_csv(file_path, encoding='utf-8-sig', errors='replace')
+        return pd.read_csv(file_path, encoding='utf-8-sig', encoding_errors='replace')
     return pd.read_excel(file_path)
 
 
