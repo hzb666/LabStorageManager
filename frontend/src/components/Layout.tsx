@@ -40,7 +40,7 @@ export function Layout() {
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 w-64 bg-white shadow-lg">
+      <aside className="fixed inset-y-0 left-0 w-56 bg-white shadow-lg">
         <div className="flex h-16 items-center justify-center border-b">
           <h1 className="text-xl font-bold text-gray-800">实验室库存管理</h1>
         </div>
@@ -117,7 +117,7 @@ export function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="ml-64 p-8">
+      <main className="ml-56 p-8">
         <Outlet />
       </main>
     </div>

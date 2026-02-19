@@ -150,10 +150,12 @@ export const inventoryAPI = {
   manualAdd: (data: {
     cas_number: string
     name: string
+    english_name?: string
     alias?: string
     specification: string
-    initial_quantity: number
     quantity_bottles: number
+    brand?: string
+    category?: string
     location?: string
     is_hazardous: boolean
     notes?: string

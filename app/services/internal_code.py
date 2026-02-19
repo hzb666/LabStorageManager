@@ -44,7 +44,7 @@ def generate_internal_code(
         WHERE internal_code LIKE :pattern
     """)
     
-    result = session.exec(query, {
+    result = session.execute(query, {
         "prefix": prefix,
         "pattern": f"{prefix}%"
     }).scalar()
@@ -86,5 +86,5 @@ def get_next_sequence(
         WHERE cas_number = :cas_number
     """)
     
-    result = session.exec(query, {"cas_number": cas_number}).scalar()
+    result = session.execute(query, {"cas_number": cas_number}).scalar()
     return (result or 0) + 1

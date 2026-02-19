@@ -37,7 +37,8 @@ class LoginRequest(BaseModel):
 def get_user_by_username(db: Session, username: str) -> Optional[User]:
     """Get user by username"""
     statement = select(User).where(User.username == username)
-    return db.exec(statement).scalar_one_or_none()
+    result = db.exec(statement).first()
+    return result
 
 
 def get_user_by_id(db: Session, user_id: int) -> Optional[User]:

@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
 
@@ -15,6 +17,21 @@ interface PaginationProps {
 
 export function Pagination({ currentPage, totalPages, pageSize, onPageChange, onPageSizeChange, className }: PaginationProps) {
   const pages = getPageNumbers(currentPage, totalPages)
+  const [jumpPage, setJumpPage] = useState('')
+
+  const handleJump = () => {
+    const page = parseInt(jumpPage, 10)
+    if (!isNaN(page) && page >= 1 && page <= totalPages) {
+      onPageChange(page)
+      setJumpPage('')
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleJump()
+    }
+  }
 
   return (
     <nav className={cn('flex items-center justify-center gap-2', className)}>
@@ -68,6 +85,22 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
+      </div>
+
+      {/* Jump to page */}
+      <div className="flex items-center gap-1 ml-2">
+        <span className="text-sm text-muted-foreground">跳至</span>
+        <Input
+          type="number"
+          min={1}
+          max={totalPages}
+          value={jumpPage}
+          onChange={(e) => setJumpPage(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={String(currentPage)}
+          className="h-8 w-16 text-sm text-center"
+        />
+        <span className="text-sm text-muted-foreground">页</span>
       </div>
     </nav>
   )

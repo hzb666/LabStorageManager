@@ -385,6 +385,7 @@ def list_inventory(
     status_filter: Optional[InventoryStatus] = None,
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """List inventory with optional filters and pagination"""
@@ -396,6 +397,15 @@ def list_inventory(
         base = base.where(Inventory.cas_number == normalize_cas(cas_filter))
     if hazardous_only:
         base = base.where(Inventory.is_hazardous == True)
+    if search:
+        search_pattern = f"%{search}%"
+        base = base.where(
+            (Inventory.name.ilike(search_pattern)) |
+            (Inventory.cas_number.ilike(search_pattern)) |
+            (Inventory.location.ilike(search_pattern)) |
+            (Inventory.brand.ilike(search_pattern)) |
+            (Inventory.category.ilike(search_pattern))
+        )
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
     items = db.exec(base.order_by(Inventory.created_at.desc()).offset(skip).limit(limit)).all()
