@@ -31,7 +31,6 @@ import {
 
 interface InventoryItem {
   id: number
-  internal_code: string
   cas_number: string
   name: string
   location: string | null
@@ -110,10 +109,6 @@ export function InventoryPage() {
   }
 
   const columns = useMemo(() => [
-    columnHelper.accessor('internal_code', {
-      header: '编号',
-      cell: info => <span className="font-mono text-sm">{info.getValue()}</span>,
-    }),
     columnHelper.accessor('cas_number', {
       header: 'CAS号',
       cell: info => info.getValue(),
@@ -480,7 +475,7 @@ export function InventoryPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="搜索 CAS号、名称、编号..."
+                placeholder="搜索 CAS号、名称..."
                 value={globalFilter}
                 onChange={(e) => setGlobalFilter(e.target.value)}
                 className="pl-9"

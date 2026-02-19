@@ -10,7 +10,6 @@ import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2, Package
 
 interface MyBorrowItem {
   inventory_id: number
-  internal_code: string
   name: string
   cas_number: string
   remaining_quantity: number
@@ -20,7 +19,6 @@ interface MyBorrowItem {
 
 interface PendingStockinItem {
   inventory_id: number
-  internal_code: string
   name: string
   cas_number: string
   initial_quantity: number
@@ -475,7 +473,7 @@ export function Dashboard() {
                   <div>
                     <p className="font-medium">{item.name}</p>
                     <p className="text-sm text-muted-foreground">
-                      编号: {item.internal_code} • {item.remaining_quantity} {item.unit}
+                      CAS: {item.cas_number} • {item.remaining_quantity} {item.unit}
                     </p>
                   </div>
                   <Button onClick={() => openReturnModal(item)}>
@@ -518,7 +516,7 @@ export function Dashboard() {
                   <div>
                     <p className="font-medium">{item.name}</p>
                     <p className="text-sm text-muted-foreground">
-                      编号: {item.internal_code} • {item.initial_quantity} {item.unit}
+                      CAS: {item.cas_number} • {item.initial_quantity} {item.unit}
                     </p>
                   </div>
                   <Button variant="outline" onClick={() => openStockinModal(item)}>
@@ -549,7 +547,7 @@ export function Dashboard() {
               <div className="p-4 bg-gray-50 rounded-lg">
                 <p className="font-medium">{selectedBorrow.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  编号: {selectedBorrow.internal_code}
+                  CAS: {selectedBorrow.cas_number}
                 </p>
               </div>
               
@@ -628,7 +626,7 @@ export function Dashboard() {
               <div className="p-4 bg-gray-50 rounded-lg">
                 <p className="font-medium">{selectedStockin.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  编号: {selectedStockin.internal_code} • {selectedStockin.initial_quantity} {selectedStockin.unit}
+                  CAS: {selectedStockin.cas_number} • {selectedStockin.initial_quantity} {selectedStockin.unit}
                 </p>
               </div>
               

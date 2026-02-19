@@ -88,7 +88,6 @@ def check_cas_inventory(
         "items": [
             {
                 "id": item.id,
-                "internal_code": item.internal_code,
                 "name": item.name,
                 "location": item.location,
                 "remaining_quantity": item.remaining_quantity,
@@ -158,14 +157,13 @@ def export_inventory(
     writer = csv.writer(output)
 
     writer.writerow([
-        "编号", "CAS号", "名称", "英文名", "别名", "分类", "品牌",
+        "CAS号", "名称", "英文名", "别名", "分类", "品牌",
         "位置", "初始数量", "剩余数量", "单位", "状态",
         "是否危险品", "单价", "入库时间", "备注",
     ])
 
     for item in items:
         writer.writerow([
-            item.internal_code,
             item.cas_number,
             item.name,
             item.english_name or "",
@@ -250,7 +248,6 @@ def manual_add_inventory(
         "message": "Manual stock-in successful",
         "items_created": len(created_items),
         "item_ids": [item.id for item in created_items],
-        "internal_codes": [item.internal_code for item in created_items],
     }
 
 
@@ -275,7 +272,6 @@ def get_my_borrows(
         "data": [
             {
                 "inventory_id": item.id,
-                "internal_code": item.internal_code,
                 "name": item.name,
                 "cas_number": item.cas_number,
                 "remaining_quantity": item.remaining_quantity,
@@ -311,7 +307,6 @@ def get_pending_stockin(
         "data": [
             {
                 "inventory_id": item.id,
-                "internal_code": item.internal_code,
                 "name": item.name,
                 "cas_number": item.cas_number,
                 "initial_quantity": item.initial_quantity,
@@ -595,7 +590,6 @@ def get_borrow_history(
 
     return {
         "inventory_id": inventory_id,
-        "internal_code": item.internal_code,
         "name": item.name,
         "history": [
             {

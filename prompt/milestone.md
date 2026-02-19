@@ -96,6 +96,8 @@
 | `8d9a4b2` | 导出图标改为 ExternalLink | refactor |
 | `962f914` | 导入图标从 Upload 改为 Import | refactor |
 | `cc4c84a` | 简化 GIT_STRATEGY.md 文档 | chore |
+| `0cb742c` | 移除 internal_code，统一使用 CAS 号作为主要标识符 | refactor |
+| `7c55e14` | 更新 README，移除 internal_code 相关描述 | docs |
 
 ### 文档与配置
 

@@ -80,9 +80,20 @@
 | 2026-02-16 | Phase 10 | ✅ | Error Boundary + 全页面服务端分页 (库存/试剂订单/耗材订单) |
 | 2026-02-16 | Bug Fix | ✅ | 一键入库修复: 后端支持 APPROVED 直接入库, 耗材订单修复 API 调用 |
 | 2026-02-17 | PR Review Fix | ✅ | PR Review 遗留 4 项修复: CSV参数、驳回逻辑、入库权限、common_public拦截 |
+| 2026-02-18 | Frontend UX | ✅ | 隐藏 internal_code 前端展示（Inventory/Dashboard 改为仅展示 CAS） |
 
-**Last Updated**: 2026-02-17
-**Status**: Phase 1-10 全部完成，PR Review 遗留问题已修复
+### Data Import (2026-02-18) ✅
+- [x] 1) 完整性检查: 8599 条原始数据，CAS 异常 18 条，完全重复 19 条
+- [x] 2) 数据清洗: CAS 规范化、去重、单位统一、状态校验
+- [x] 3) 导入数据库: 8580 条成功写入，0 错误
+- [x] 4) 统计报告: `scripts/scrape_processing_report.md`
+- [x] 5) 抽样质检: 30 条样本 `scripts/scrape_qc_samples.json`
+
+**清洗后关键指标**:
+- CAS 异常: 0 | 完全重复: 0 | 有效记录: 8580 | 库存总量: 17179 条
+
+**Last Updated**: 2026-02-18
+**Status**: Phase 1-10 完成，前端已隐藏 internal_code 展示
 **Next**: Future Enhancements (化学兼容性检查、批量操作等)
 
 ---
@@ -116,6 +127,13 @@
 - [x] B: 移除 RejectRequest.reason，驳回不再覆盖 notes
 - [x] C: stock_in_reagent_order APPROVED 状态增加权限检查
 - [x] D: common_public 订单拦截入库 (后端 400 + 前端按钮置灰)
+
+### Frontend 隐藏 internal_code (2026-02-18) ✅
+- [x] Inventory 页面移除“编号”列
+- [x] Dashboard 页面移除“编号”展示（当前借用/待入库/弹窗）
+- [x] 搜索占位文案移除“编号”
+- [x] Inventory/Dashboard 相关接口出参移除 internal_code
+- [x] CAS 查询、手动入库返回、导出 CSV 去除 internal_code 暴露
 
 ### Future Enhancements
 - [ ] Chemical compatibility check

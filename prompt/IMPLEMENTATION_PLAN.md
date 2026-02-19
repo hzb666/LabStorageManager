@@ -324,6 +324,13 @@
 - 库存、试剂订单、耗材订单三个页面均实现服务端分页
 - 状态过滤改为服务端参数（库存页）
 
+### 10.5 前端隐藏 internal_code 展示 ✅ (2026-02-18)
+- `Inventory.tsx` 移除“编号(internal_code)”列与相关搜索文案
+- `Dashboard.tsx` 在“当前借用/待入库/归还弹窗/分配位置弹窗”移除编号展示
+- 保留后端 `internal_code` 字段，仅用于内部数据与接口处理
+- `inventory` 相关对前端接口（列表/仪表盘）移除 `internal_code` 出参
+- CAS 查询返回、手动入库返回、导出 CSV 均移除 `internal_code` 对外暴露
+
 ### Future Enhancements
 
 | 功能 | 描述 | 状态 |

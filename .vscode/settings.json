@@ -2,8 +2,17 @@
   "terminal.integrated.profiles.windows": {
     "PowerShell": {
       "source": "PowerShell",
-      "args": ["-NoExit", "-Command", "chcp 65001 > $null"]
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "PYTHONPATH": "."
+      }
     }
   },
-  "terminal.integrated.defaultProfile.windows": "PowerShell"
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "terminal.integrated.enableVisualBell": true,
+  "terminal.integrated.chroma": false,
+  "terminal.integrated.cursorBlinking": true,
+  "files.encoding": "utf8",
+  "python.analysis.extraPaths": ["."]
 }
