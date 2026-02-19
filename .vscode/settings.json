@@ -13,6 +13,7 @@
   "terminal.integrated.enableVisualBell": true,
   "terminal.integrated.chroma": false,
   "terminal.integrated.cursorBlinking": true,
+  "terminal.integrated.fontEncoding": "utf-8",
   "files.encoding": "utf8",
   "python.analysis.extraPaths": ["."]
 }
