@@ -86,12 +86,15 @@ export function Layout() {
         <div className="px-4 pt-4">
           <Button
             variant="outline"
-            className="w-full flex items-center justify-between"
+            className={cn(
+              "w-full flex items-center justify-between",
+              theme === 'dark' ? "bg-secondary border-input hover:bg-accent hover:text-accent-foreground" : ""
+            )}
             onClick={toggleTheme}
           >
-            <span className="text-sm">主题</span>
+            <span className={cn("text-sm", theme === 'dark' ? "text-secondary-foreground" : "")}>主题</span>
             {theme === 'dark' ? (
-              <Moon className="w-4 h-4" />
+              <Moon className={cn("w-4 h-4", theme === 'dark' ? "text-secondary-foreground" : "")} />
             ) : (
               <Sun className="w-4 h-4" />
             )}
@@ -107,7 +110,7 @@ export function Layout() {
                 to={item.path}
                 onClick={handleNavClick}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3 mb-2 rounded-lg transition-colors",
+                  "flex items-center gap-3 px-4 py-3 mb-2 rounded-lg",
                   isActive
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -136,7 +139,7 @@ export function Layout() {
                     to={item.path}
                     onClick={handleNavClick}
                     className={cn(
-                      "flex items-center gap-3 px-4 py-3 mb-2 rounded-lg transition-colors",
+                      "flex items-center gap-3 px-4 py-3 mb-2 rounded-lg",
                       isActive
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -156,7 +159,7 @@ export function Layout() {
             <span className="text-sm text-muted-foreground">
               {user?.full_name || user?.username}
             </span>
-            <span className="text-xs px-2 py-1 bg-primary/10 text-primary rounded">
+            <span className="text-xs px-2 py-1 bg-primary/10 text-primary rounded whitespace-nowrap">
               {user?.role === 'admin' ? '管理员' : '用户'}
             </span>
           </div>

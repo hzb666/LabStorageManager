@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { reagentOrderAPI, inventoryAPI, consumableOrderAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
@@ -60,8 +61,11 @@ export function Dashboard() {
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
   const [returnQuantity, setReturnQuantity] = useState('')
+  const [usedQuantity, setUsedQuantity] = useState('')
   const [returnUnit, setReturnUnit] = useState('')
+  const [returnMode, setReturnMode] = useState<'remaining' | 'used'>('used')
   const [returnLoading, setReturnLoading] = useState(false)
+  const [returnError, setReturnError] = useState('')
 
   // Stockin Modal state
   const [showStockinModal, setShowStockinModal] = useState(false)
@@ -143,17 +147,42 @@ export function Dashboard() {
   const openReturnModal = (item: MyBorrowItem) => {
     setSelectedBorrow(item)
     setReturnQuantity(String(item.remaining_quantity))
+    setUsedQuantity('')
     setReturnUnit(item.unit)
+    setReturnMode('used')
+    setReturnError('')
     setShowReturnModal(true)
   }
 
   const handleReturn = async () => {
     if (!selectedBorrow) return
-    const qty = parseFloat(returnQuantity)
-    if (isNaN(qty) || qty < 0) {
-      toast.warning('请输入有效的数量')
-      return
+    
+    setReturnError('')
+    let qty: number
+    if (returnMode === 'used') {
+      // Calculate remaining = borrowed - used
+      const used = parseFloat(usedQuantity)
+      if (isNaN(used) || used < 0) {
+        setReturnError('请输入有效的使用量（需大于等于0）')
+        return
+      }
+      if (used > selectedBorrow.remaining_quantity) {
+        setReturnError('使用量不能超过借用时剩余量')
+        return
+      }
+      qty = selectedBorrow.remaining_quantity - used
+    } else {
+      qty = parseFloat(returnQuantity)
+      if (isNaN(qty) || qty < 0) {
+        setReturnError('请输入有效的剩余量（需大于等于0）')
+        return
+      }
+      if (qty > selectedBorrow.remaining_quantity) {
+        setReturnError('剩余量不能超过借用时剩余量')
+        return
+      }
     }
+    
     setReturnLoading(true)
     try {
       await inventoryAPI.return(selectedBorrow.inventory_id, { remaining_quantity: qty, unit: returnUnit })
@@ -530,83 +559,107 @@ export function Dashboard() {
       </Card>
 
       {/* Return Modal */}
-      {showReturnModal && selectedBorrow && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">归还物品</h2>
-              <button
-                onClick={() => setShowReturnModal(false)}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      <Dialog open={showReturnModal} onOpenChange={setShowReturnModal}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>归还物品</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="p-4 bg-muted rounded-lg">
+              <p className="font-medium">{selectedBorrow?.name}</p>
+              <p className="text-sm text-muted-foreground">
+                CAS: {selectedBorrow?.cas_number}
+              </p>
             </div>
             
-            <div className="space-y-4">
-              <div className="p-4 bg-muted rounded-lg">
-                <p className="font-medium">{selectedBorrow.name}</p>
-                <p className="text-sm text-muted-foreground">
-                  CAS: {selectedBorrow.cas_number}
-                </p>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  剩余数量 <span className="text-red-500">*</span>
-                </label>
+            {/* 归还方式切换 */}
+            <div className="flex gap-4 mb-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="returnMode"
+                  checked={returnMode === 'used'}
+                  onChange={() => setReturnMode('used')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">填写使用量</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="returnMode"
+                  checked={returnMode === 'remaining'}
+                  onChange={() => setReturnMode('remaining')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">填写剩余量</span>
+              </label>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                {returnMode === 'remaining' ? '剩余数量' : '使用数量'} 
+                <span className="text-red-500">*</span>
+                {returnMode === 'used' && selectedBorrow && (
+                  <span className="text-muted-foreground font-normal ml-2">
+                    (借用时剩余量: {selectedBorrow.remaining_quantity} {returnUnit})
+                  </span>
+                )}
+              </label>
+              <div className="flex items-center gap-2">
                 <Input
                   type="number"
-                  value={returnQuantity}
-                  onChange={(e) => setReturnQuantity(e.target.value)}
-                  placeholder="输入剩余数量"
+                  value={returnMode === 'remaining' ? returnQuantity : usedQuantity}
+                  onChange={(e) => {
+                    setReturnError('')
+                    if (returnMode === 'remaining') {
+                      setReturnQuantity(e.target.value)
+                    } else {
+                      setUsedQuantity(e.target.value)
+                    }
+                  }}
+                  placeholder={returnMode === 'remaining' ? '输入剩余数量' : '输入使用数量'}
+                  className={cn("flex-1", returnError && "border-red-500")}
                 />
+                <span className="text-muted-foreground text-sm min-w-[40px]">{returnUnit}</span>
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-1">单位</label>
-                <select
-                  value={returnUnit}
-                  onChange={(e) => setReturnUnit(e.target.value)}
-                  className="w-full h-10 px-3 border rounded-md bg-background"
-                >
-                  <option value="ml">毫升 (ml)</option>
-                  <option value="L">升 (L)</option>
-                  <option value="g">克 (g)</option>
-                  <option value="kg">千克 (kg)</option>
-                  <option value="个">个</option>
-                  <option value="瓶">瓶</option>
-                  <option value="盒">盒</option>
-                </select>
-              </div>
+              {returnError && (
+                <p className="text-sm text-red-500 mt-1">{returnError}</p>
+              )}
+              {returnMode === 'used' && usedQuantity && !returnError && selectedBorrow && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  归还后剩余: {Math.max(0, selectedBorrow.remaining_quantity - (parseFloat(usedQuantity) || 0)).toFixed(2)} {returnUnit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {returnUnit})
+                </p>
+              )}
+            </div>
 
-              <div className="flex gap-3 pt-4">
-                <Button
-                  onClick={handleReturn}
-                  disabled={returnLoading}
-                  className="flex-1"
-                >
-                  {returnLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      处理中...
-                    </>
-                  ) : (
-                    '确认归还'
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowReturnModal(false)}
-                  className="flex-1"
-                >
-                  取消
-                </Button>
-              </div>
+            <div className="flex gap-3 pt-4">
+              <Button
+                onClick={handleReturn}
+                disabled={returnLoading}
+                className="flex-1"
+              >
+                {returnLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    处理中...
+                  </>
+                ) : (
+                  '确认归还'
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowReturnModal(false)}
+                className="flex-1"
+              >
+                取消
+              </Button>
             </div>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Stockin Location Modal */}
       {showStockinModal && selectedStockin && (

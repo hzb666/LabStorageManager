@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -19,7 +19,6 @@ import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { formatDate, cn } from '@/lib/utils'
 import {
   Search,
-  ArrowUpDown,
   Package,
   AlertTriangle,
   Loader2,
@@ -48,14 +47,34 @@ interface InventoryItem {
   created_at: string
   notes: string | null
   specification?: string
+  created_by_id?: number | null
+  created_by_name?: string | null
+  borrower_id?: number | null
+  borrower_name?: string | null
+  last_borrower_id?: number | null
+  last_borrower_name?: string | null
 }
 
 const columnHelper = createColumnHelper<InventoryItem>()
 
-// Highlight component for search results
-function HighlightText({ text, highlight }: { text: string; highlight: string }) {
+// Status styles - extracted as constants to avoid recreation
+const STATUS_STYLES: Record<string, string> = {
+  in_stock: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300',
+  borrowed: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+  consumed: 'bg-muted text-muted-foreground',
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  in_stock: '在库',
+  borrowed: '借用',
+  consumed: '用完',
+}
+
+// Highlight component for search results - optimized with memo and regex caching
+const HighlightText = React.memo(function HighlightText({ text, highlight }: { text: string; highlight: string }) {
   if (!highlight || !text) return <>{text}</>
-  const parts = text.split(new RegExp(`(${highlight})`, 'gi'))
+  const regex = React.useMemo(() => new RegExp(`(${highlight})`, 'gi'), [highlight])
+  const parts = text.split(regex)
   return (
     <>
       {parts.map((part, i) =>
@@ -67,7 +86,56 @@ function HighlightText({ text, highlight }: { text: string; highlight: string })
       )}
     </>
   )
-}
+})
+
+// Action buttons component - defined outside to avoid recreation
+const ActionButtons = React.memo(function ActionButtons({ 
+  item, 
+  isConfirming,
+  onEdit,
+  onConfirm 
+}: { 
+  item: InventoryItem
+  isConfirming: boolean
+  onEdit: () => void
+  onConfirm: () => void
+}) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onConfirm()
+  }
+  
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 w-7 p-0"
+        title="编辑"
+        onClick={(e) => {
+          e.stopPropagation()
+          onEdit()
+        }}
+      >
+        <Pencil className="w-3 h-3" />
+      </Button>
+      {item.status === 'in_stock' && (
+        <Button
+          size="sm"
+          className={cn(
+            "h-7 text-xs px-2",
+            isConfirming 
+              ? "bg-red-600 hover:bg-red-700" 
+              : "bg-blue-600 hover:bg-blue-700"
+          )}
+          onClick={handleClick}
+        >
+          {isConfirming ? '确认' : '借用'}
+        </Button>
+      )}
+    </div>
+  )
+})
 
 export function InventoryPage() {
   const navigate = useNavigate()
@@ -86,6 +154,19 @@ export function InventoryPage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
+  // Expanded row state - use object for faster lookups
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
+  // Track which row is in confirm state for borrow
+  const [confirmingRowId, setConfirmingRowId] = useState<number | null>(null)
+
+  // Toggle row expansion
+  const toggleRowExpansion = (id: number) => {
+    setConfirmingRowId(null) // Clear confirm state when clicking rows
+    setExpandedRows(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }))
+  }
   const [editFormData, setEditFormData] = useState({
     name: '',
     english_name: '',
@@ -121,19 +202,42 @@ export function InventoryPage() {
   })
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    loadInventory()
-  }, [page, pageSize, statusFilter, globalFilter])
+  // Debounced search for API calls - separate display filter from API filter
+  const [displayFilter, setDisplayFilter] = useState('')
+  const [apiFilter, setApiFilter] = useState('')
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const loadInventory = async () => {
+  // Update display filter immediately (for highlighting), but API filter only after debounce
+  useEffect(() => {
+    setDisplayFilter(globalFilter)
+    
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      setApiFilter(globalFilter)
+      setPage(1) // Reset to page 1 on search
+    }, 300) // 300ms debounce delay
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+    }
+  }, [globalFilter])
+
+  // Wrap loadInventory with useCallback to fix dependency warning
+  const loadInventory = useCallback(async () => {
     setLoading(true)
+    // Clear expanded rows when loading new data
+    setExpandedRows({})
     try {
       const params: Record<string, any> = {
         skip: (page - 1) * pageSize,
         limit: pageSize,
       }
       if (statusFilter !== 'all') params.status_filter = statusFilter
-      if (globalFilter) params.search = globalFilter
+      if (apiFilter) params.search = apiFilter
 
       const response = await inventoryAPI.list(params)
       const result = response.data
@@ -141,7 +245,7 @@ export function InventoryPage() {
       setTotal(result.total || 0)
       
       // 如果没有搜索条件且状态为全部，更新库存总数
-      if (!globalFilter && statusFilter === 'all') {
+      if (!apiFilter && statusFilter === 'all') {
         setGrandTotal(result.total || 0)
       }
     } catch (error) {
@@ -149,7 +253,11 @@ export function InventoryPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, pageSize, statusFilter, apiFilter])
+
+  useEffect(() => {
+    loadInventory()
+  }, [loadInventory])
 
   const totalPages = Math.ceil(total / pageSize)
 
@@ -161,29 +269,6 @@ export function InventoryPage() {
   const handlePageSizeChange = (newSize: number) => {
     setPageSize(newSize)
     setPage(1)
-  }
-
-  // Handle edit
-  const handleEditClick = (item: InventoryItem) => {
-    setEditingItem(item)
-    setDeleteConfirm(false) // 重置删除确认状态
-    setEditFormData({
-      name: item.name || '',
-      english_name: item.english_name || '',
-      alias: item.alias || '',
-      specification: item.specification || '',
-      category: item.category || '',
-      location: item.location || '',
-      cas_number: item.cas_number || '',
-      remaining_quantity: item.remaining_quantity,
-      initial_quantity: item.initial_quantity,
-      unit: item.unit || 'ml',
-      brand: item.brand || '',
-      status: item.status || '',
-      is_hazardous: item.is_hazardous || false,
-      notes: item.notes || ''
-    })
-    setShowEditModal(true)
   }
 
   const handleEditSave = async () => {
@@ -238,6 +323,31 @@ export function InventoryPage() {
     }
   }
 
+  // Memoized edit handler - defined before columns
+  const handleEditClick = useCallback((item: InventoryItem) => {
+    setConfirmingRowId(null)
+    setEditingItem(item)
+    setDeleteConfirm(false)
+    setEditFormData({
+      name: item.name || '',
+      english_name: item.english_name || '',
+      alias: item.alias || '',
+      specification: item.specification || '',
+      category: item.category || '',
+      location: item.location || '',
+      cas_number: item.cas_number || '',
+      remaining_quantity: item.remaining_quantity,
+      initial_quantity: item.initial_quantity,
+      unit: item.unit || 'ml',
+      brand: item.brand || '',
+      status: item.status || '',
+      is_hazardous: item.is_hazardous || false,
+      notes: item.notes || ''
+    })
+    setShowEditModal(true)
+  }, [])
+
+  // Use displayFilter for highlighting, but only update table after API returns
   const columns = useMemo(() => [
     // CAS号 - 放最前面
     columnHelper.accessor('cas_number', {
@@ -245,7 +355,7 @@ export function InventoryPage() {
       size: 100,
       cell: info => (
         <span className="break-all">
-          <HighlightText text={info.getValue() || ''} highlight={globalFilter} />
+          <HighlightText text={info.getValue() || ''} highlight={displayFilter} />
         </span>
       ),
     }),
@@ -259,7 +369,7 @@ export function InventoryPage() {
             <AlertTriangle className="w-3 h-3 text-yellow-500 flex-shrink-0" />
           )}
           <span>
-            <HighlightText text={info.getValue() || ''} highlight={globalFilter} />
+            <HighlightText text={info.getValue() || ''} highlight={displayFilter} />
           </span>
         </div>
       ),
@@ -270,7 +380,7 @@ export function InventoryPage() {
       size: 60,
       cell: info => (
         <span className="break-all">
-          <HighlightText text={info.getValue() || '-'} highlight={globalFilter} />
+          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} />
         </span>
       ),
     }),
@@ -280,7 +390,7 @@ export function InventoryPage() {
       size: 70,
       cell: info => (
         <span className="break-all">
-          <HighlightText text={info.getValue() || '-'} highlight={globalFilter} />
+          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} />
         </span>
       ),
     }),
@@ -318,15 +428,9 @@ export function InventoryPage() {
       size: 50,
       cell: info => (
         <span className="break-all">
-          <HighlightText text={info.getValue() || '-'} highlight={globalFilter} />
+          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} />
         </span>
       ),
-    }),
-    // 入库时间
-    columnHelper.accessor('created_at', {
-      header: '入库时间',
-      size: 80,
-      cell: info => <span className="break-all">{formatDate(info.getValue())}</span>,
     }),
     // 状态
     columnHelper.accessor('status', {
@@ -334,35 +438,15 @@ export function InventoryPage() {
       size: 60,
       cell: info => {
         const status = info.getValue()
-        const styles: Record<string, string> = {
-          in_stock: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300',
-          borrowed: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-          consumed: 'bg-muted text-muted-foreground',
-        }
-        const labels: Record<string, string> = {
-          in_stock: '在库',
-          borrowed: '借用',
-          consumed: '用完',
-        }
         return (
           <span className={cn(
             'px-2 py-0.5 text-xs rounded-full font-medium whitespace-nowrap',
-            styles[status] || 'bg-muted'
+            STATUS_STYLES[status] || 'bg-muted'
           )}>
-            {labels[status] || status}
+            {STATUS_LABELS[status] || status}
           </span>
         )
       },
-    }),
-    // 备注
-    columnHelper.accessor('notes', {
-      header: '备注',
-      size: 80,
-      cell: info => (
-        <span className="break-all text-muted-foreground" title={info.getValue() || ''}>
-          <HighlightText text={info.getValue() || '-'} highlight={globalFilter} />
-        </span>
-      ),
     }),
     // 操作
     columnHelper.display({
@@ -372,33 +456,32 @@ export function InventoryPage() {
       cell: info => {
         const item = info.row.original
         return (
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 w-7 p-0"
-              title="编辑"
-              onClick={() => handleEditClick(item)}
-            >
-              <Pencil className="w-3 h-3" />
-            </Button>
-            {item.status === 'in_stock' && (
-              <Button
-                size="sm"
-                className="h-7 text-xs px-2 bg-blue-600 hover:bg-blue-700"
-                onClick={async () => {
+          <ActionButtons
+            item={item}
+            isConfirming={confirmingRowId === item.id}
+            onEdit={() => handleEditClick(item)}
+            onConfirm={async () => {
+              if (confirmingRowId === item.id) {
+                // 第二次点击 - 执行借用
+                try {
                   await inventoryAPI.borrow(item.id)
+                  toast.success('借用成功')
+                  setConfirmingRowId(null) // API 成功后再重置状态
                   loadInventory()
-                }}
-              >
-                借用
-              </Button>
-            )}
-          </div>
+                } catch (error: any) {
+                  toast.error(error.response?.data?.detail || '借用失败')
+                  setConfirmingRowId(null) // 失败后也重置状态
+                }
+              } else {
+                // 第一次点击 - 进入确认状态
+                setConfirmingRowId(item.id)
+              }
+            }}
+          />
         )
       },
     }),
-  ], [data, globalFilter])
+  ], [displayFilter, confirmingRowId, handleEditClick, loadInventory])
 
   const table = useReactTable({
     data,
@@ -417,8 +500,8 @@ export function InventoryPage() {
     },
   })
 
-  // Manual add form handlers
-  const validateManualAddForm = (): boolean => {
+  // Memoized validation function
+  const validateManualAddForm = useCallback((): boolean => {
     const errors: Record<string, string> = {}
     if (!formData.cas_number.trim()) errors.cas_number = 'CAS号不能为空'
     if (!/^\d{2,7}-\d{2}-\d$/.test(formData.cas_number)) {
@@ -429,9 +512,9 @@ export function InventoryPage() {
     if (formData.quantity_bottles < 1) errors.quantity_bottles = '瓶数必须大于0'
     setFormErrors(errors)
     return Object.keys(errors).length === 0
-  }
+  }, [formData])
 
-  const handleManualAdd = async (e: React.FormEvent) => {
+  const handleManualAdd = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     if (!validateManualAddForm()) return
 
@@ -498,9 +581,9 @@ export function InventoryPage() {
     } finally {
       setSubmitting(false)
     }
-  }
+  }, [formData, validateManualAddForm, loadInventory])
 
-  const handleExport = async () => {
+  const handleExport = useCallback(async () => {
     try {
       const response = await inventoryAPI.exportInventory()
       const csvData = response.data
@@ -517,7 +600,7 @@ export function InventoryPage() {
     } catch (error: any) {
       toast.error(error.response?.data?.detail || '导出失败')
     }
-  }
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -545,7 +628,7 @@ export function InventoryPage() {
           <DialogHeader>
             <DialogTitle>编辑库存</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-3 gap-3 text-sm">
+          <div className="grid grid-cols-3 gap-3 text-base">
             {/* 第一行：CAS号（占3列） */}
             <div className="col-span-3">
               <label className="block text-xs font-medium mb-1">
@@ -705,7 +788,7 @@ export function InventoryPage() {
             <DialogTitle>手动入库</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleManualAdd} className="space-y-4">
-            <div className="grid grid-cols-3 gap-3 text-sm">
+            <div className="grid grid-cols-3 gap-3 text-base">
               <div className="col-span-3">
                 <label className="block text-xs font-medium mb-1">
                   CAS号 <span className="text-red-500">*</span>
@@ -872,7 +955,7 @@ export function InventoryPage() {
               <Input
                 placeholder="搜索名称、CAS号、位置..."
                 value={globalFilter}
-                onChange={(e) => { setGlobalFilter(e.target.value); setPage(1) }}
+                onChange={(e) => setGlobalFilter(e.target.value)}
                 className="pl-9 pr-8 h-9 text-sm w-full"
               />
               {globalFilter && (
@@ -944,17 +1027,56 @@ export function InventoryPage() {
                     </thead>
                     <tbody>
                       {table.getRowModel().rows.map(row => (
-                        <tr key={row.id} className="border-b border-border hover:bg-muted/50">
-                          {row.getVisibleCells().map(cell => (
-                            <td 
-                              key={cell.id} 
-                              className="p-2 align-middle"
-                              style={{ width: cell.column.getSize(), fontSize: '13px' }}
-                            >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </td>
-                          ))}
-                        </tr>
+                        <React.Fragment key={row.id}>
+                          <tr 
+                            className="border-b border-border hover:bg-muted/50 cursor-pointer"
+                            onClick={() => toggleRowExpansion(row.original.id)}
+                          >
+                            {row.getVisibleCells().map(cell => (
+                              <td 
+                                key={cell.id} 
+                                className="p-2 align-middle"
+                                style={{ width: cell.column.getSize(), fontSize: '13px' }}
+                              >
+                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                              </td>
+                            ))}
+                          </tr>
+                          {expandedRows[row.original.id] && (
+                            <tr key={`${row.id}-expanded`} className="border-b border-border bg-muted/20">
+                              <td colSpan={row.getVisibleCells().length} className="p-2" style={{ fontSize: '13px' }}>
+                                <div className="grid grid-cols-3 gap-x-4 gap-y-1">
+                                  <div>
+                                    <span className="font-medium">英文名称：</span>
+                                    {row.original.english_name || '-'}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">别名：</span>
+                                    {row.original.alias || '-'}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">入库时间：</span>
+                                    {formatDate(row.original.created_at)}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">入库用户：</span>
+                                    {row.original.created_by_name || '-'}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">上次借用：</span>
+                                    {row.original.borrower_name 
+                                      ? `${row.original.borrower_name} (未归还)` 
+                                      : (row.original.last_borrower_name ? `${row.original.last_borrower_name} (已归还)` : '-')}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium">备注：</span>
+                                    {row.original.notes || '-'}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>

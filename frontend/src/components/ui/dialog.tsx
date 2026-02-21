@@ -31,7 +31,7 @@ export function DialogContent({ children, className }: DialogContentProps) {
   return (
     <div
       className={cn(
-        "relative bg-background rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-lg",
+        "relative bg-background rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-lg border border-border",
         className
       )}
     >

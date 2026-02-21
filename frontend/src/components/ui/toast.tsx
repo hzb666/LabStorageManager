@@ -54,11 +54,27 @@ export function ToastContainer() {
     return () => { addToastExternal = null }
   }, [addToast])
 
+  // 使用 ref 追踪已设置定时器的 toast，避免重复创建
+  const timersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  
   useEffect(() => {
-    if (toasts.length === 0) return
-    const latest = toasts[toasts.length - 1]
-    const timer = setTimeout(() => removeToast(latest.id), 3500)
-    return () => clearTimeout(timer)
+    // 清理已不存在的 toast 的定时器
+    Object.keys(timersRef.current).forEach(id => {
+      if (!toasts.find(t => t.id === id)) {
+        clearTimeout(timersRef.current[id])
+        delete timersRef.current[id]
+      }
+    })
+    
+    // 为每个 toast 设置定时器（如果还没有）
+    toasts.forEach(toast => {
+      if (!timersRef.current[toast.id]) {
+        timersRef.current[toast.id] = setTimeout(() => {
+          removeToast(toast.id)
+          delete timersRef.current[toast.id]
+        }, 3500)
+      }
+    })
   }, [toasts, removeToast])
 
   if (toasts.length === 0) return null

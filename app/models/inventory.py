@@ -44,6 +44,7 @@ class Inventory(InventoryBase, table=True):
     borrower_id: Optional[int] = Field(default=None, index=True)
     last_borrower_id: Optional[int] = Field(default=None)
     temporary_keeper_id: Optional[int] = Field(default=None, index=True)  # New field for temporary keeper
+    created_by_id: Optional[int] = Field(default=None, index=True)  # User who created the inventory
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -106,12 +107,17 @@ class InventoryResponse(SQLModel):
     is_hazardous: bool
     image_path: Optional[str]
     temporary_keeper_id: Optional[int]
+    created_by_id: Optional[int]
     notes: Optional[str]
     price: Optional[float]
     created_at: datetime
     updated_at: datetime
     # Computed field: specification (e.g., "500ml")
     specification: Optional[str] = None
+    # Computed fields: user names
+    borrower_name: Optional[str] = None
+    last_borrower_name: Optional[str] = None
+    created_by_name: Optional[str] = None
 
 
 class BorrowLog(SQLModel, table=True):

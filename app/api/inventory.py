@@ -68,6 +68,32 @@ def _add_specification(item_dict: dict) -> dict:
     return item_dict
 
 
+def _add_user_names(db: Session, item_dict: dict) -> dict:
+    """Add user names to inventory response dict"""
+    # Get borrower name
+    if item_dict.get("borrower_id"):
+        borrower = db.get(User, item_dict["borrower_id"])
+        item_dict["borrower_name"] = borrower.full_name or borrower.username if borrower else None
+    else:
+        item_dict["borrower_name"] = None
+    
+    # Get last borrower name
+    if item_dict.get("last_borrower_id"):
+        last_borrower = db.get(User, item_dict["last_borrower_id"])
+        item_dict["last_borrower_name"] = last_borrower.full_name or last_borrower.username if last_borrower else None
+    else:
+        item_dict["last_borrower_name"] = None
+    
+    # Get created by name
+    if item_dict.get("created_by_id"):
+        created_by = db.get(User, item_dict["created_by_id"])
+        item_dict["created_by_name"] = created_by.full_name or created_by.username if created_by else None
+    else:
+        item_dict["created_by_name"] = None
+    
+    return item_dict
+
+
 # ==================== Named Routes (BEFORE /{id}) ====================
 
 # --- CAS Queries ---
@@ -252,6 +278,7 @@ def manual_add_inventory(
             price=item_data.price,
             notes=item_data.notes,
             status=InventoryStatus.IN_STOCK,
+            created_by_id=current_user.id,
         )
         db.add(db_inventory)
         created_items.append(db_inventory)
@@ -428,7 +455,7 @@ def list_inventory(
 
     return {
         "data": [
-            _add_specification(InventoryResponse.model_validate(i).model_dump()) 
+            _add_user_names(db, _add_specification(InventoryResponse.model_validate(i).model_dump()))
             for i in items
         ],
         "total": total,
