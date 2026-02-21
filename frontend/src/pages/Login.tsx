@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { authAPI } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
+import { useTheme } from '@/hooks/useTheme'
+import { Sun, Moon } from 'lucide-react'
 
 const loginSchema = z.object({
   username: z.string().min(1, '用户名不能为空'),
@@ -21,6 +23,7 @@ export function Login() {
   const setAuth = useAuthStore((state) => state.setAuth)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const { theme, toggleTheme } = useTheme()
 
   const {
     register,
@@ -46,7 +49,20 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-background relative">
+      {/* Theme Toggle */}
+      <Button
+        variant="outline"
+        size="icon"
+        className="absolute top-4 right-4"
+        onClick={toggleTheme}
+      >
+        {theme === 'dark' ? (
+          <Sun className="w-4 h-4" />
+        ) : (
+          <Moon className="w-4 h-4" />
+        )}
+      </Button>
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">实验室库存管理系统</CardTitle>
@@ -55,7 +71,7 @@ export function Login() {
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             {error && (
-              <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md">
+              <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-md">
                 {error}
               </div>
             )}

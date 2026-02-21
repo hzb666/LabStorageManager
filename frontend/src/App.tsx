@@ -10,6 +10,7 @@ import { ReagentOrdersPage } from '@/pages/ReagentOrders'
 import { ConsumableOrdersPage } from '@/pages/ConsumableOrders'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/toast'
+import { useTheme } from '@/hooks/useTheme'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -20,6 +21,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  // 初始化主题
+  useTheme()
+
   return (
     <ErrorBoundary>
     <BrowserRouter>

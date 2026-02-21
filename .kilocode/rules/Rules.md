@@ -12,6 +12,7 @@
 5.  **Git Commit**: 完成重大修改后，切换到Review模式在当前对话进行Code Review，给出报告与我进行讨论，讨论后执行 `git add . && git commit -m "feat: 说明"` 上传代码，注意分支和提交信息，并更新`Readme.md`。提交修改后，更新`milestone.md`。
 6.  **Chinese**: 前端使用中文展示（除英文名称等），后端保存用英文方便管理（除中文名称等），因此需要添加映射表
 7.  **Debug**:我会将我自己发现的问题记录在 `BUGS.md`，在debug时请做好相关记录，你进行代码审查时发现的问题也要写入此文档
+8.  **Dark Mode**: 前端开发必须使用语义化颜色（bg-background, bg-card, bg-muted, text-foreground, text-muted-foreground 等），禁止使用硬编码颜色（bg-gray-*, bg-white, text-gray-* 等），确保暗黑模式支持。
 
 ## Critical Logic
 1.  **一键入库**: 在实现 Order 到 Inventory 的转换时，必须确保是 Copy 数据而不是 Move，保留 Order 记录用于审计。

@@ -304,7 +304,7 @@ export function Dashboard() {
               {myReagentOrders.slice((reagentPage - 1) * reagentPageSize, reagentPage * reagentPageSize).map((order) => (
                 <div
                   key={order.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
                 >
                   <div>
                     <p className="font-medium">{order.name}</p>
@@ -321,8 +321,8 @@ export function Dashboard() {
                           : order.status === 'approved'
                           ? 'bg-blue-100 text-blue-800'
                           : order.status === 'arrived'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                          : 'bg-muted text-foreground'
                       )}
                     >
                       {order.status === 'pending'
@@ -400,7 +400,7 @@ export function Dashboard() {
               {myConsumableOrders.slice((consumablePage - 1) * consumablePageSize, consumablePage * consumablePageSize).map((order) => (
                 <div
                   key={order.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
                 >
                   <div>
                     <p className="font-medium">{order.name}</p>
@@ -415,8 +415,8 @@ export function Dashboard() {
                         order.status === 'pending'
                           ? 'bg-yellow-100 text-yellow-800'
                           : order.status === 'approved'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-gray-100 text-gray-800'
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                          : 'bg-muted text-foreground'
                       )}
                     >
                       {order.status === 'pending'
@@ -468,7 +468,7 @@ export function Dashboard() {
               {myBorrows.slice((borrowPage - 1) * borrowPageSize, borrowPage * borrowPageSize).map((item) => (
                 <div
                   key={item.inventory_id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
                 >
                   <div>
                     <p className="font-medium">{item.name}</p>
@@ -511,7 +511,7 @@ export function Dashboard() {
               {pendingStockin.map((item) => (
                 <div
                   key={item.inventory_id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
                 >
                   <div>
                     <p className="font-medium">{item.name}</p>
@@ -532,7 +532,7 @@ export function Dashboard() {
       {/* Return Modal */}
       {showReturnModal && selectedBorrow && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="bg-background rounded-lg p-6 w-full max-w-md">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold">归还物品</h2>
               <button
@@ -544,7 +544,7 @@ export function Dashboard() {
             </div>
             
             <div className="space-y-4">
-              <div className="p-4 bg-gray-50 rounded-lg">
+              <div className="p-4 bg-muted rounded-lg">
                 <p className="font-medium">{selectedBorrow.name}</p>
                 <p className="text-sm text-muted-foreground">
                   CAS: {selectedBorrow.cas_number}
@@ -611,7 +611,7 @@ export function Dashboard() {
       {/* Stockin Location Modal */}
       {showStockinModal && selectedStockin && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="bg-background rounded-lg p-6 w-full max-w-md">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold">分配存放位置</h2>
               <button
@@ -623,7 +623,7 @@ export function Dashboard() {
             </div>
             
             <div className="space-y-4">
-              <div className="p-4 bg-gray-50 rounded-lg">
+              <div className="p-4 bg-muted rounded-lg">
                 <p className="font-medium">{selectedStockin.name}</p>
                 <p className="text-sm text-muted-foreground">
                   CAS: {selectedStockin.cas_number} • {selectedStockin.initial_quantity} {selectedStockin.unit}

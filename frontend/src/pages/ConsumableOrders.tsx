@@ -336,7 +336,7 @@ export function ConsumableOrdersPage() {
             {loading ? (
               <p className="text-center py-4">加载中...</p>
             ) : orders.length === 0 ? (
-              <p className="text-center py-4 text-gray-500">暂无订单</p>
+              <p className="text-center py-4 text-muted-foreground">暂无订单</p>
             ) : (
               <div className="space-y-4">
                 {orders.map((order) => (
@@ -349,7 +349,7 @@ export function ConsumableOrdersPage() {
                           {order.price && ` • ¥${order.price}`}
                           {order.english_name && ` • ${order.english_name}`}
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           申请人: {order.applicant_name || order.applicant_id} • {new Date(order.created_at).toLocaleDateString()}
                         </p>
                       </div>

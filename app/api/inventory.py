@@ -53,6 +53,21 @@ def _find_by_code(db: Session, code: str) -> Optional[Inventory]:
     return db.exec(statement).first()
 
 
+def _add_specification(item_dict: dict) -> dict:
+    """Add computed specification field to inventory response dict"""
+    initial = item_dict.get("initial_quantity", 0)
+    unit = item_dict.get("unit", "")
+    # Format: "500 ml" or "250.5 ml" (no trailing zeros, space between number and unit)
+    if initial == int(initial):
+        # No decimal part, show as integer
+        formatted = f"{int(initial)} {unit}"
+    else:
+        # Has decimal part, keep the decimal without trailing zeros
+        formatted = f"{float(initial)} {unit}"
+    item_dict["specification"] = formatted if initial else None
+    return item_dict
+
+
 # ==================== Named Routes (BEFORE /{id}) ====================
 
 # --- CAS Queries ---
@@ -137,7 +152,8 @@ def get_inventory_by_internal_code(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Inventory item not found",
         )
-    return item
+    response = InventoryResponse.model_validate(item).model_dump()
+    return _add_specification(response)
 
 
 # --- Export ---
@@ -411,7 +427,10 @@ def list_inventory(
     items = db.exec(base.order_by(Inventory.created_at.desc()).offset(skip).limit(limit)).all()
 
     return {
-        "data": [InventoryResponse.model_validate(i).model_dump() for i in items],
+        "data": [
+            _add_specification(InventoryResponse.model_validate(i).model_dump()) 
+            for i in items
+        ],
         "total": total,
         "skip": skip,
         "limit": limit,
@@ -427,7 +446,8 @@ def get_inventory(inventory_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Inventory item not found",
         )
-    return item
+    response = InventoryResponse.model_validate(item).model_dump()
+    return _add_specification(response)
 
 
 @router.put("/{inventory_id}", response_model=InventoryResponse)
@@ -452,7 +472,8 @@ def update_inventory(
     item.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(item)
-    return item
+    response = InventoryResponse.model_validate(item).model_dump()
+    return _add_specification(response)
 
 
 @router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -506,7 +527,8 @@ def borrow_item(
 
     db.commit()
     db.refresh(item)
-    return item
+    response = InventoryResponse.model_validate(item).model_dump()
+    return _add_specification(response)
 
 
 @router.post("/{inventory_id}/return", response_model=dict)

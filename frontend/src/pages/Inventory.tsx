@@ -27,7 +27,8 @@ import {
   Import,
   Plus,
   X,
-  Pencil
+  Pencil,
+  Trash2
 } from 'lucide-react'
 
 interface InventoryItem {
@@ -83,10 +84,13 @@ export function InventoryPage() {
 
   // Edit modal state
   const [showEditModal, setShowEditModal] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [editFormData, setEditFormData] = useState({
     name: '',
     english_name: '',
+    alias: '',
+    specification: '',
     category: '',
     location: '',
     cas_number: '',
@@ -95,6 +99,7 @@ export function InventoryPage() {
     unit: 'ml',
     brand: '',
     status: '',
+    is_hazardous: false,
     notes: ''
   })
 
@@ -161,9 +166,12 @@ export function InventoryPage() {
   // Handle edit
   const handleEditClick = (item: InventoryItem) => {
     setEditingItem(item)
+    setDeleteConfirm(false) // 重置删除确认状态
     setEditFormData({
       name: item.name || '',
       english_name: item.english_name || '',
+      alias: item.alias || '',
+      specification: item.specification || '',
       category: item.category || '',
       location: item.location || '',
       cas_number: item.cas_number || '',
@@ -172,6 +180,7 @@ export function InventoryPage() {
       unit: item.unit || 'ml',
       brand: item.brand || '',
       status: item.status || '',
+      is_hazardous: item.is_hazardous || false,
       notes: item.notes || ''
     })
     setShowEditModal(true)
@@ -199,6 +208,33 @@ export function InventoryPage() {
       toast.success('库存信息已更新')
     } catch (error: any) {
       toast.error(error.response?.data?.detail || '更新失败')
+    }
+  }
+
+  const handleDeleteClick = async () => {
+    if (!editingItem) return
+    
+    if (!deleteConfirm) {
+      // 第一次点击，进入确认状态
+      setDeleteConfirm(true)
+    } else {
+      // 第二次点击，执行删除
+      try {
+        await inventoryAPI.delete(editingItem.id)
+        setShowEditModal(false)
+        setDeleteConfirm(false)
+        loadInventory()
+        toast.success('库存已删除')
+      } catch (error: any) {
+        toast.error(error.response?.data?.detail || '删除失败')
+      }
+    }
+  }
+
+  const handleEditModalClose = (open: boolean) => {
+    setShowEditModal(open)
+    if (!open) {
+      setDeleteConfirm(false)
     }
   }
 
@@ -265,9 +301,9 @@ export function InventoryPage() {
               {remaining}/{initial} {unit}
             </span>
             {percentage < 20 && (
-              <div className="w-14 h-1 bg-red-100 rounded mt-0.5">
+              <div className="w-14 h-1 bg-destructive/20 rounded mt-0.5">
                 <div
-                  className="h-full bg-red-500 rounded"
+                  className="h-full bg-destructive rounded"
                   style={{ width: `${percentage}%` }}
                 />
               </div>
@@ -299,9 +335,9 @@ export function InventoryPage() {
       cell: info => {
         const status = info.getValue()
         const styles: Record<string, string> = {
-          in_stock: 'bg-emerald-100 text-emerald-700',
-          borrowed: 'bg-blue-100 text-blue-700',
-          consumed: 'bg-slate-100 text-slate-600',
+          in_stock: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300',
+          borrowed: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+          consumed: 'bg-muted text-muted-foreground',
         }
         const labels: Record<string, string> = {
           in_stock: '在库',
@@ -311,7 +347,7 @@ export function InventoryPage() {
         return (
           <span className={cn(
             'px-2 py-0.5 text-xs rounded-full font-medium whitespace-nowrap',
-            styles[status] || 'bg-gray-100'
+            styles[status] || 'bg-muted'
           )}>
             {labels[status] || status}
           </span>
@@ -504,79 +540,71 @@ export function InventoryPage() {
       </div>
 
       {/* Edit Modal */}
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+      <Dialog open={showEditModal} onOpenChange={handleEditModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>编辑库存</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-3 gap-3 text-sm">
-            <div>
-              <label className="block text-xs font-medium mb-1">中文名</label>
+            {/* 第一行：CAS号（占3列） */}
+            <div className="col-span-3">
+              <label className="block text-xs font-medium mb-1">
+                CAS号
+              </label>
+              <Input
+                value={editFormData.cas_number}
+                disabled
+                className="h-8 bg-muted"
+              />
+            </div>
+
+            {/* 第二行：名称（占2列）、别名（占1列） */}
+            <div className="col-span-2">
+              <label className="block text-xs font-medium mb-1">
+                名称 <span className="text-red-500">*</span>
+              </label>
               <Input
                 value={editFormData.name}
                 onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
                 className="h-8"
+                placeholder="如: 乙醇"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1">英文名</label>
+              <label className="block text-xs font-medium mb-1">别名</label>
               <Input
-                value={editFormData.english_name}
+                value={editFormData.alias || ''}
+                onChange={(e) => setEditFormData({ ...editFormData, alias: e.target.value })}
+                className="h-8"
+                placeholder="如: 酒精"
+              />
+            </div>
+
+            {/* 第三行：英文名称（占2列）、规格（占1列） */}
+            <div className="col-span-2">
+              <label className="block text-xs font-medium mb-1">英文名称</label>
+              <Input
+                value={editFormData.english_name || ''}
                 onChange={(e) => setEditFormData({ ...editFormData, english_name: e.target.value })}
                 className="h-8"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1">分类</label>
-              <Input
-                value={editFormData.category}
-                onChange={(e) => setEditFormData({ ...editFormData, category: e.target.value })}
-                className="h-8"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1">库存位置</label>
-              <Input
-                value={editFormData.location}
-                onChange={(e) => setEditFormData({ ...editFormData, location: e.target.value })}
-                className="h-8"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1">CAS号</label>
-              <Input
-                value={editFormData.cas_number}
-                onChange={(e) => setEditFormData({ ...editFormData, cas_number: e.target.value })}
-                className="h-8"
+                placeholder="如: Ethanol"
               />
             </div>
             <div>
               <label className="block text-xs font-medium mb-1">规格</label>
-              <div className="flex gap-1">
-                <Input
-                  type="number"
-                  value={editFormData.initial_quantity}
-                  onChange={(e) => setEditFormData({ ...editFormData, initial_quantity: parseFloat(e.target.value) || 0 })}
-                  className="h-8 flex-1"
-                  placeholder="数量"
-                />
-                <select
-                  value={editFormData.unit}
-                  onChange={(e) => setEditFormData({ ...editFormData, unit: e.target.value })}
-                  className="h-8 px-1 border rounded-md bg-background text-xs"
-                >
-                  <option value="ml">ml</option>
-                  <option value="L">L</option>
-                  <option value="g">g</option>
-                  <option value="kg">kg</option>
-                  <option value="个">个</option>
-                  <option value="支">支</option>
-                  <option value="瓶">瓶</option>
-                </select>
-              </div>
+              <Input
+                value={editFormData.specification || ''}
+                onChange={(e) => setEditFormData({ ...editFormData, specification: e.target.value })}
+                className="h-8"
+                placeholder="如: 500ml"
+              />
             </div>
+
+            {/* 第四行：剩余量、分类、品牌 */}
             <div>
-              <label className="block text-xs font-medium mb-1">剩余量</label>
+              <label className="block text-xs font-medium mb-1">
+                剩余量 <span className="text-red-500">*</span>
+              </label>
               <Input
                 type="number"
                 value={editFormData.remaining_quantity}
@@ -585,33 +613,87 @@ export function InventoryPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1">品牌</label>
+              <label className="block text-xs font-medium mb-1">分类</label>
               <Input
-                value={editFormData.brand}
-                onChange={(e) => setEditFormData({ ...editFormData, brand: e.target.value })}
+                value={editFormData.category || ''}
+                onChange={(e) => setEditFormData({ ...editFormData, category: e.target.value })}
                 className="h-8"
+                placeholder="如: 有机试剂"
               />
             </div>
+            <div>
+              <label className="block text-xs font-medium mb-1">品牌</label>
+              <Input
+                value={editFormData.brand || ''}
+                onChange={(e) => setEditFormData({ ...editFormData, brand: e.target.value })}
+                className="h-8"
+                placeholder="如: Sigma"
+              />
+            </div>
+
+            {/* 库存位置 */}
+            <div>
+              <label className="block text-xs font-medium mb-1">库存位置</label>
+              <Input
+                value={editFormData.location || ''}
+                onChange={(e) => setEditFormData({ ...editFormData, location: e.target.value })}
+                className="h-8"
+                placeholder="如: A-1-1 柜"
+              />
+            </div>
+
+            {/* 危险品 */}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="edit_is_hazardous"
+                checked={editFormData.is_hazardous}
+                onChange={(e) => setEditFormData({ ...editFormData, is_hazardous: e.target.checked })}
+                className="w-4 h-4 rounded"
+              />
+              <label htmlFor="edit_is_hazardous" className="text-xs flex items-center gap-1">
+                <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                危险品
+              </label>
+            </div>
+
+            {/* 备注 */}
             <div className="col-span-3">
               <label className="block text-xs font-medium mb-1">备注</label>
               <textarea
-                value={editFormData.notes}
+                value={editFormData.notes || ''}
                 onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
-                className="w-full h-16 px-2 py-1 border rounded-md bg-background text-sm resize-none mb-2"
+                className="w-full h-16 px-2 py-1 border rounded-md bg-background text-sm resize-none"
+                placeholder="其他说明..."
               />
             </div>
           </div>
-          <div className="flex gap-2 pt-3 border-t">
-            <Button onClick={handleEditSave} className="text-sm">
-              保存
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setShowEditModal(false)}
-              className="text-sm"
-            >
-              取消
-            </Button>
+          <div className="flex gap-2 pt-3">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="destructive"
+                onClick={handleDeleteClick}
+                className="text-sm"
+              >
+                <Trash2 className="w-4 h-4 mr-1" />
+                {deleteConfirm ? '确认删除' : '删除'}
+              </Button>
+              {deleteConfirm && (
+                <span className="text-xs text-red-500">再次点击确认删除</span>
+              )}
+            </div>
+            <div className="ml-auto flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowEditModal(false)}
+                className="text-sm"
+              >
+                取消
+              </Button>
+              <Button onClick={handleEditSave} className="text-sm">
+                保存
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -762,18 +844,20 @@ export function InventoryPage() {
               </div>
             </div>
 
-            <div className="flex gap-2 pt-3 border-t">
-              <Button type="submit" disabled={submitting} className="text-sm">
-                {submitting ? '入库中...' : '确认入库'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowManualAdd(false)}
-                className="text-sm"
-              >
-                取消
-              </Button>
+            <div className="flex gap-2 pt-3">
+              <div className="ml-auto flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowManualAdd(false)}
+                  className="text-sm"
+                >
+                  取消
+                </Button>
+                <Button type="submit" disabled={submitting} className="text-sm">
+                  {submitting ? '入库中...' : '确认入库'}
+                </Button>
+              </div>
             </div>
           </form>
         </DialogContent>
@@ -784,7 +868,7 @@ export function InventoryPage() {
         <CardContent className="py-3">
           <div className="flex gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="搜索名称、CAS号、位置..."
                 value={globalFilter}
@@ -794,7 +878,7 @@ export function InventoryPage() {
               {globalFilter && (
                 <button
                   onClick={() => setGlobalFilter('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -843,11 +927,11 @@ export function InventoryPage() {
                 <table className="w-full" style={{ minWidth: '820px', tableLayout: 'fixed' }}>
                     <thead>
                       {table.getHeaderGroups().map(headerGroup => (
-                        <tr key={headerGroup.id} className="border-b bg-slate-50">
+                        <tr key={headerGroup.id} className="border-b bg-muted/30">
                           {headerGroup.headers.map(header => (
                             <th 
                               key={header.id} 
-                              className="h-10 px-2 font-semibold text-slate-600 text-left align-middle"
+                              className="h-10 px-2 font-semibold text-foreground text-left align-middle"
                               style={{ width: header.getSize(), fontSize: '13px' }}
                             >
                               {header.isPlaceholder
@@ -860,7 +944,7 @@ export function InventoryPage() {
                     </thead>
                     <tbody>
                       {table.getRowModel().rows.map(row => (
-                        <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50">
+                        <tr key={row.id} className="border-b border-border hover:bg-muted/50">
                           {row.getVisibleCells().map(cell => (
                             <td 
                               key={cell.id} 

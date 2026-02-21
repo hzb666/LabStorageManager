@@ -110,6 +110,8 @@ class InventoryResponse(SQLModel):
     price: Optional[float]
     created_at: datetime
     updated_at: datetime
+    # Computed field: specification (e.g., "500ml")
+    specification: Optional[str] = None
 
 
 class BorrowLog(SQLModel, table=True):

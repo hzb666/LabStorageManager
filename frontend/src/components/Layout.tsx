@@ -4,6 +4,7 @@ import { useAuthStore } from '@/store/useStore'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { useTheme } from '@/hooks/useTheme'
 import {
   LayoutDashboard,
   Package,
@@ -12,6 +13,8 @@ import {
   Users,
   TestTube,
   FlaskConical,
+  Sun,
+  Moon,
 } from 'lucide-react'
 
 const navItems = [
@@ -26,6 +29,7 @@ export function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
+  const { theme, toggleTheme } = useTheme()
 
   // Admin navigation items
   const adminNavItems = [
@@ -38,11 +42,27 @@ export function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-muted">
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 w-56 bg-white shadow-lg">
+      <aside className="fixed inset-y-0 left-0 w-56 bg-card shadow-lg border-r">
         <div className="flex h-16 items-center justify-center border-b">
-          <h1 className="text-xl font-bold text-gray-800">实验室库存管理</h1>
+          <h1 className="text-xl font-bold text-foreground">实验室库存管理</h1>
+        </div>
+        
+        {/* Theme Toggle */}
+        <div className="px-4 pt-4">
+          <Button
+            variant="outline"
+            className="w-full flex items-center justify-between"
+            onClick={toggleTheme}
+          >
+            <span className="text-sm">主题</span>
+            {theme === 'dark' ? (
+              <Moon className="w-4 h-4" />
+            ) : (
+              <Sun className="w-4 h-4" />
+            )}
+          </Button>
         </div>
         <nav className="mt-6 px-4">
           {navItems.map((item) => {
@@ -55,8 +75,8 @@ export function Layout() {
                 className={cn(
                   "flex items-center gap-3 px-4 py-3 mb-2 rounded-lg transition-colors",
                   isActive
-                    ? "bg-primary text-white"
-                    : "text-gray-600 hover:bg-gray-100"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
                 <Icon className="w-5 h-5" />
@@ -83,8 +103,8 @@ export function Layout() {
                     className={cn(
                       "flex items-center gap-3 px-4 py-3 mb-2 rounded-lg transition-colors",
                       isActive
-                        ? "bg-primary text-white"
-                        : "text-gray-600 hover:bg-gray-100"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
                     <Icon className="w-5 h-5" />
@@ -96,9 +116,9 @@ export function Layout() {
           </>
         )}
         
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t">
+        <div className="absolute bottom-0 left-0 right-0 p-4 border-t bg-card">
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-muted-foreground">
               {user?.full_name || user?.username}
             </span>
             <span className="text-xs px-2 py-1 bg-primary/10 text-primary rounded">
