@@ -924,7 +924,7 @@ export function InventoryPage() {
           ) : (
             <>
               <div className="rounded-md border overflow-x-auto">
-                <table className="w-full" style={{ minWidth: '820px', tableLayout: 'fixed' }}>
+                <table className="w-full min-w-[600px] md:min-w-[820px]" style={{ tableLayout: 'fixed' }}>
                     <thead>
                       {table.getHeaderGroups().map(headerGroup => (
                         <tr key={headerGroup.id} className="border-b bg-muted/30">

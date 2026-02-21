@@ -1,8 +1,7 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/useStore'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import {
@@ -15,6 +14,8 @@ import {
   FlaskConical,
   Sun,
   Moon,
+  Menu,
+  X,
 } from 'lucide-react'
 
 const navItems = [
@@ -30,6 +31,7 @@ export function Layout() {
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
   const { theme, toggleTheme } = useTheme()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Admin navigation items
   const adminNavItems = [
@@ -41,10 +43,41 @@ export function Layout() {
     navigate('/login')
   }
 
+  const handleNavClick = () => {
+    // Close sidebar on mobile after navigation
+    if (window.innerWidth < 768) {
+      setSidebarOpen(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-muted">
+      {/* Mobile menu button */}
+      <Button
+        variant="outline"
+        size="icon"
+        className="fixed top-4 left-4 z-50 md:hidden"
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        aria-label={sidebarOpen ? '关闭菜单' : '打开菜单'}
+      >
+        {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+      </Button>
+
+      {/* Sidebar overlay for mobile */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 w-56 bg-card shadow-lg border-r">
+      <aside className={cn(
+        "fixed inset-y-0 left-0 z-40 w-56 bg-card shadow-lg border-r transition-transform duration-300 ease-in-out",
+        // Mobile: transform based on open state
+        "md:translate-x-0",
+        sidebarOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
         <div className="flex h-16 items-center justify-center border-b">
           <h1 className="text-xl font-bold text-foreground">实验室库存管理</h1>
         </div>
@@ -72,6 +105,7 @@ export function Layout() {
               <Link
                 key={item.path}
                 to={item.path}
+                onClick={handleNavClick}
                 className={cn(
                   "flex items-center gap-3 px-4 py-3 mb-2 rounded-lg transition-colors",
                   isActive
@@ -100,6 +134,7 @@ export function Layout() {
                   <Link
                     key={item.path}
                     to={item.path}
+                    onClick={handleNavClick}
                     className={cn(
                       "flex items-center gap-3 px-4 py-3 mb-2 rounded-lg transition-colors",
                       isActive
@@ -137,7 +172,7 @@ export function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="ml-56 p-8">
+      <main className="md:ml-56 p-4 md:p-8 pt-16 md:pt-8">
         <Outlet />
       </main>
     </div>

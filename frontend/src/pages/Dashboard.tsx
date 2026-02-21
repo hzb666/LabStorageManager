@@ -241,7 +241,7 @@ export function Dashboard() {
       <h1 className="text-3xl font-bold">仪表盘</h1>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-3 sm:gap-4 grid-cols-2 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">试剂订单</CardTitle>
@@ -400,7 +400,7 @@ export function Dashboard() {
               {myConsumableOrders.slice((consumablePage - 1) * consumablePageSize, consumablePage * consumablePageSize).map((order) => (
                 <div
                   key={order.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:bg-muted gap-3"
                 >
                   <div>
                     <p className="font-medium">{order.name}</p>
@@ -408,7 +408,7 @@ export function Dashboard() {
                       {formatDateTime(order.created_at)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
                     <span
                       className={cn(
                         'px-3 py-1 text-sm rounded-full',
@@ -468,7 +468,7 @@ export function Dashboard() {
               {myBorrows.slice((borrowPage - 1) * borrowPageSize, borrowPage * borrowPageSize).map((item) => (
                 <div
                   key={item.inventory_id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:bg-muted gap-3"
                 >
                   <div>
                     <p className="font-medium">{item.name}</p>
@@ -476,7 +476,7 @@ export function Dashboard() {
                       CAS: {item.cas_number} • {item.remaining_quantity} {item.unit}
                     </p>
                   </div>
-                  <Button onClick={() => openReturnModal(item)}>
+                  <Button onClick={() => openReturnModal(item)} className="w-full sm:w-auto">
                     归还
                   </Button>
                 </div>
@@ -511,7 +511,7 @@ export function Dashboard() {
               {pendingStockin.map((item) => (
                 <div
                   key={item.inventory_id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:bg-muted gap-3"
                 >
                   <div>
                     <p className="font-medium">{item.name}</p>
@@ -519,7 +519,7 @@ export function Dashboard() {
                       CAS: {item.cas_number} • {item.initial_quantity} {item.unit}
                     </p>
                   </div>
-                  <Button variant="outline" onClick={() => openStockinModal(item)}>
+                  <Button variant="outline" onClick={() => openStockinModal(item)} className="w-full sm:w-auto">
                     分配位置
                   </Button>
                 </div>
