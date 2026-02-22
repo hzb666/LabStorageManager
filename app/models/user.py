@@ -17,9 +17,9 @@ class UserRole(str, Enum):
 class UserBase(SQLModel):
     """Base user model with common fields"""
     username: str = Field(unique=True, index=True, min_length=3, max_length=50)
-    full_name: Optional[str] = Field(max_length=100)
-    role: UserRole = UserRole.USER
-    is_active: bool = True
+    full_name: Optional[str] = Field(default=None, max_length=100)
+    role: UserRole = Field(default=UserRole.USER)
+    is_active: bool = Field(default=True)
 
 
 class User(UserBase, table=True):

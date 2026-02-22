@@ -7,6 +7,7 @@ name = "lab-storage-manager"
 version = "0.1.0"
 description = "Laboratory Inventory Management System (LIMS)"
 authors = ["Lab Team"]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -17,15 +18,15 @@ uvicorn = {extras = ["standard"], version = "^0.27.0"}
 python-multipart = "^0.0.6"
 
 # Database
-sqlmodel = "^0.0.14"
+sqlmodel = "^0.0.37"
 
 # Auth
 python-jose = {version = "^3.3.0", extras = ["cryptography"]}
-passlib = {version = "^1.7.4", extras = ["bcrypt"]}
+bcrypt = "^3.2.0"
 
 # Utilities
 python-dotenv = "^1.0.0"
-pillow = "^10.0.0"
+pillow = "^11.0.0"
 pandas = "^2.1.0"
 pydantic = "^2.5.0"
 pydantic-settings = "^2.1.0"
