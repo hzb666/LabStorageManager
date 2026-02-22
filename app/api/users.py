@@ -269,7 +269,7 @@ def list_users(
         statement = statement.where(User.is_active == is_active)
     
     statement = statement.offset(skip).limit(limit).order_by(User.created_at.desc())
-    return db.exec(statement).scalars().all()
+    return db.exec(statement).all()
 
 
 @router.get("/me", response_model=UserResponse)
