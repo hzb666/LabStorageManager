@@ -791,7 +791,7 @@ export function InventoryPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">库存管理</h1>
+        <h1 className="text-3xl font-bold title-placeholder">库存管理</h1>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setShowManualAdd(true)}>
             <Plus className="w-4 h-4 mr-2" />
@@ -1250,8 +1250,8 @@ export function InventoryPage() {
                           {headerGroup.headers.map(header => (
                             <th 
                               key={header.id} 
-                              className="h-10 px-2 font-semibold text-foreground text-left align-middle"
-                              style={{ width: header.getSize(), fontSize: '13px' }}
+                              className="h-10 px-2 font-semibold text-foreground text-left align-middle text-sm"
+                              style={{ width: header.getSize() }}
                             >
                               {header.isPlaceholder
                                 ? null
@@ -1271,8 +1271,8 @@ export function InventoryPage() {
                             {row.getVisibleCells().map(cell => (
                               <td 
                                 key={cell.id} 
-                                className="p-2 align-middle"
-                                style={{ width: cell.column.getSize(), fontSize: '13px' }}
+                                className="p-2 align-middle text-sm"
+                                style={{ width: cell.column.getSize() }}
                               >
                                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
                               </td>
@@ -1280,7 +1280,7 @@ export function InventoryPage() {
                           </tr>
                           {expandedRows[row.original.id] && (
                             <tr key={`${row.id}-expanded`} className="border-b border-border bg-muted/20">
-                              <td colSpan={row.getVisibleCells().length} className="p-2" style={{ fontSize: '13px' }}>
+                              <td colSpan={row.getVisibleCells().length} className="p-2 text-sm">
                                 <div className="grid grid-cols-3 gap-x-4 gap-y-1">
                                   <div>
                                     <span className="font-medium">英文名称：</span>

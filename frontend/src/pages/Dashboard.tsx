@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { formatDateTime, cn } from '@/lib/utils'
 import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2, PackagePlus, CheckCircle } from 'lucide-react'
+import { AxiosError } from 'axios'
 
 interface MyBorrowItem {
   inventory_id: number
@@ -37,9 +38,24 @@ interface MyOrder {
   order_reason?: string
 }
 
-interface DashboardResponse<T> {
-  data: T[]
-  total: number
+// Order item from backend (can be order_id or id)
+interface OrderItem {
+  order_id?: number
+  id?: number
+  [key: string]: unknown
+}
+
+// Backend response structures for reagent orders
+interface ReagentOrdersByStatus {
+  pending: { orders: OrderItem[] }
+  approved: { orders: OrderItem[] }
+  arrived: { orders: OrderItem[] }
+}
+
+// Backend response structures for consumable orders
+interface ConsumableOrdersByStatus {
+  pending: { orders: OrderItem[] }
+  approved: { orders: OrderItem[] }
 }
 
 export function Dashboard() {
@@ -87,22 +103,23 @@ export function Dashboard() {
       ])
 
       // Parse reagent orders - backend returns { data: { pending: {orders}, approved: {orders}, arrived: {orders} } }
-      const reagentOrdersData = (reagentOrdersRes.data as any)?.data
-      if (reagentOrdersData && typeof reagentOrdersData === 'object') {
+      const reagentOrdersData = reagentOrdersRes.data as { data?: ReagentOrdersByStatus } | undefined
+      const reagentOrders = reagentOrdersData?.data
+      if (reagentOrders && typeof reagentOrders === 'object') {
         const allReagentOrders: MyOrder[] = []
-        if (reagentOrdersData.pending?.orders) {
-          reagentOrdersData.pending.orders.forEach((o: any) => {
-            allReagentOrders.push({ ...o, status: 'pending', id: o.order_id || o.id, orderType: 'reagent' })
+        if (reagentOrders.pending?.orders) {
+          reagentOrders.pending.orders.forEach((o: OrderItem) => {
+            allReagentOrders.push({ ...o, status: 'pending', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
           })
         }
-        if (reagentOrdersData.approved?.orders) {
-          reagentOrdersData.approved.orders.forEach((o: any) => {
-            allReagentOrders.push({ ...o, status: 'approved', id: o.order_id || o.id, orderType: 'reagent' })
+        if (reagentOrders.approved?.orders) {
+          reagentOrders.approved.orders.forEach((o: OrderItem) => {
+            allReagentOrders.push({ ...o, status: 'approved', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
           })
         }
-        if (reagentOrdersData.arrived?.orders) {
-          reagentOrdersData.arrived.orders.forEach((o: any) => {
-            allReagentOrders.push({ ...o, status: 'arrived', id: o.order_id || o.id, orderType: 'reagent' })
+        if (reagentOrders.arrived?.orders) {
+          reagentOrders.arrived.orders.forEach((o: OrderItem) => {
+            allReagentOrders.push({ ...o, status: 'arrived', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
           })
         }
         setMyReagentOrders(allReagentOrders)
@@ -111,17 +128,18 @@ export function Dashboard() {
       }
 
       // Parse consumable orders - backend returns { data: { pending: {orders}, approved: {orders} } }
-      const consumableOrdersData = (consumableOrdersRes.data as any)?.data
-      if (consumableOrdersData && typeof consumableOrdersData === 'object') {
+      const consumableOrdersData = consumableOrdersRes.data as { data?: ConsumableOrdersByStatus } | undefined
+      const consumableOrders = consumableOrdersData?.data
+      if (consumableOrders && typeof consumableOrders === 'object') {
         const allConsumableOrders: MyOrder[] = []
-        if (consumableOrdersData.pending?.orders) {
-          consumableOrdersData.pending.orders.forEach((o: any) => {
-            allConsumableOrders.push({ ...o, status: 'pending', id: o.order_id || o.id, orderType: 'consumable' })
+        if (consumableOrders.pending?.orders) {
+          consumableOrders.pending.orders.forEach((o: OrderItem) => {
+            allConsumableOrders.push({ ...o, status: 'pending', id: o.order_id || o.id || 0, orderType: 'consumable' } as MyOrder)
           })
         }
-        if (consumableOrdersData.approved?.orders) {
-          consumableOrdersData.approved.orders.forEach((o: any) => {
-            allConsumableOrders.push({ ...o, status: 'approved', id: o.order_id || o.id, orderType: 'consumable' })
+        if (consumableOrders.approved?.orders) {
+          consumableOrders.approved.orders.forEach((o: OrderItem) => {
+            allConsumableOrders.push({ ...o, status: 'approved', id: o.order_id || o.id || 0, orderType: 'consumable' } as MyOrder)
           })
         }
         setMyConsumableOrders(allConsumableOrders)
@@ -130,12 +148,12 @@ export function Dashboard() {
       }
 
       // Parse borrows - backend returns { data: [...], total: ... }
-      const borrowsData = (borrowsRes.data as any)?.data
-      setMyBorrows(Array.isArray(borrowsData) ? borrowsData : [])
+      const borrowsData = borrowsRes.data as { data?: MyBorrowItem[] } | undefined
+      setMyBorrows(Array.isArray(borrowsData?.data) ? borrowsData.data : [])
 
       // Parse pending stockin - backend returns { data: [...], total: ... }
-      const stockinData = (stockinRes.data as any)?.data
-      setPendingStockin(Array.isArray(stockinData) ? stockinData : [])
+      const stockinData = stockinRes.data as { data?: PendingStockinItem[] } | undefined
+      setPendingStockin(Array.isArray(stockinData?.data) ? stockinData.data : [])
 
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
@@ -190,8 +208,9 @@ export function Dashboard() {
       setSelectedBorrow(null)
       loadDashboardData()
       toast.success('归还成功')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '归还失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '归还失败')
     } finally {
       setReturnLoading(false)
     }
@@ -211,8 +230,9 @@ export function Dashboard() {
       setStockinLocation('')
       loadDashboardData()
       toast.success('位置分配成功')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     } finally {
       setStockinLoading(false)
     }
@@ -224,8 +244,9 @@ export function Dashboard() {
       await reagentOrderAPI.confirmArrival(orderId)
       toast.warning('试剂已到货，请及时完成入库操作！')
       loadDashboardData()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
 
@@ -235,8 +256,9 @@ export function Dashboard() {
       await reagentOrderAPI.stockIn(orderId)
       loadDashboardData()
       toast.success('入库成功！')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '入库失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '入库失败')
     }
   }
 
@@ -246,8 +268,9 @@ export function Dashboard() {
       await consumableOrderAPI.complete(orderId)
       loadDashboardData()
       toast.success('已确认收货')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '确认收货失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '确认收货失败')
     }
   }
 
@@ -267,7 +290,9 @@ export function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-bold">仪表盘</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold title-placeholder">仪表盘</h1>
+      </div>
 
       {/* Stats Cards */}
       <div className="grid gap-3 sm:gap-4 grid-cols-2 md:grid-cols-5">

@@ -45,8 +45,8 @@ interface CASWarningInfo {
 import {
   REAGENT_STATUS_MAP as STATUS_MAPPING,
   REAGENT_STATUS_STYLE as STATUS_CLASS_MAPPING,
-  ORDER_REASON_MAP as REASON_MAPPING,
 } from '@/lib/constants'
+import { AxiosError } from 'axios'
 
 export function ReagentOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
@@ -106,7 +106,7 @@ export function ReagentOrdersPage() {
             items_count: invResponse.data.items?.length || 0
           }
         }
-      } catch (e) {
+      } catch {
         // No inventory found, ignore
       }
       
@@ -197,8 +197,9 @@ export function ReagentOrdersPage() {
       setCasWarning(null)
       setActiveTab('list')
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '创建失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '创建失败')
     }
   }
 
@@ -207,8 +208,9 @@ export function ReagentOrdersPage() {
       await reagentOrderAPI.approve(id)
       toast.success('审批通过')
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
 
@@ -217,8 +219,9 @@ export function ReagentOrdersPage() {
       await reagentOrderAPI.reject(id, '管理员驳回')
       toast.success('已驳回')
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
 
@@ -227,8 +230,9 @@ export function ReagentOrdersPage() {
       const result = await reagentOrderAPI.confirmArrival(id)
       toast.success(result.data.message || '确认成功')
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
 
@@ -237,15 +241,16 @@ export function ReagentOrdersPage() {
       const result = await reagentOrderAPI.stockIn(id)
       toast.success(`入库成功！创建了 ${result.data.items_created} 个库存条目`)
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '入库失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '入库失败')
     }
   }
 
   return (
-    <div className="container mx-auto py-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">试剂订购</h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold title-placeholder">试剂订购</h1>
         <div className="space-x-2">
           <Button variant={activeTab === 'list' ? 'default' : 'outline'} onClick={() => setActiveTab('list')}>
             订单列表
@@ -506,7 +511,7 @@ export function ReagentOrdersPage() {
     </div>
   )
 
-  function updateFormField(field: string, value: any) {
+  function updateFormField(field: string, value: string | number | boolean) {
     setFormData(prev => ({ ...prev, [field]: value }))
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }))

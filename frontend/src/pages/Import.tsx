@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { inventoryAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
-import { cn, formatDateTime } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { IMPORT_TEMPLATE_COLUMNS } from '@/lib/constants'
 import { 
   Upload, 
   FileSpreadsheet, 
@@ -13,10 +13,7 @@ import {
   XCircle,
   Download
 } from 'lucide-react'
-
-interface ImportTemplate {
-  columns: { name: string; required: boolean; description: string }[]
-}
+import { AxiosError } from 'axios'
 
 interface ImportResult {
   success: boolean
@@ -28,25 +25,8 @@ interface ImportResult {
 
 export function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
-  const [template, setTemplate] = useState<ImportTemplate | null>(null)
-  const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
-
-  useEffect(() => {
-    loadTemplate()
-  }, [])
-
-  const loadTemplate = async () => {
-    try {
-      const response = await inventoryAPI.getImportTemplate()
-      setTemplate(response.data)
-    } catch (error) {
-      console.error('Failed to load template:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -75,19 +55,18 @@ export function ImportPage() {
       if (response.data.success) {
         toast.success(`导入成功！共 ${response.data.created} 条记录`)
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '导入失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '导入失败')
     } finally {
       setImporting(false)
     }
   }
 
   const downloadTemplate = () => {
-    if (!template) return
-    
     // Create a simple template CSV for download (with UTF-8 BOM for Excel compatibility)
-    const headers = template.columns.map(c => c.name).join(',')
-    const example = template.columns.map(c => {
+    const headers = IMPORT_TEMPLATE_COLUMNS.map(c => c.name).join(',')
+    const example = IMPORT_TEMPLATE_COLUMNS.map(c => {
       if (c.name === 'cas_number') return '64-17-5'
       if (c.name === 'name') return '乙醇'
       if (c.name === 'english_name') return 'Ethanol'
@@ -115,7 +94,9 @@ export function ImportPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">批量导入库存</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold title-placeholder">批量导入库存</h1>
+      </div>
 
       <Card>
         <CardHeader>
@@ -129,36 +110,30 @@ export function ImportPage() {
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Template Info */}
-          {loading ? (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          <div className="p-4 bg-muted rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-medium">模板字段说明</h4>
+              <Button variant="outline" size="sm" onClick={downloadTemplate}>
+                <Download className="w-4 h-4 mr-2" />
+                下载模板
+              </Button>
             </div>
-          ) : template && (
-            <div className="p-4 bg-muted rounded-lg">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-medium">模板字段说明</h4>
-                <Button variant="outline" size="sm" onClick={downloadTemplate}>
-                  <Download className="w-4 h-4 mr-2" />
-                  下载模板
-                </Button>
-              </div>
-              <div className="grid gap-2 text-sm">
-                {template.columns.map(col => (
-                  <div key={col.name} className="flex items-start gap-3">
-                    <span className="w-5 flex-shrink-0">
-                      {col.required ? (
-                        <span className="text-red-500">*</span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </span>
-                    <span className="font-mono w-32 flex-shrink-0">{col.name}</span>
-                    <span className="text-muted-foreground">{col.description}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="grid gap-2 text-sm">
+              {IMPORT_TEMPLATE_COLUMNS.map(col => (
+                <div key={col.name} className="flex items-start gap-3">
+                  <span className="w-5 flex-shrink-0">
+                    {col.required ? (
+                      <span className="text-red-500">*</span>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </span>
+                  <span className="font-mono w-32 flex-shrink-0">{col.name}</span>
+                  <span className="text-muted-foreground">{col.description}</span>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
 
           {/* File Upload */}
           <div>

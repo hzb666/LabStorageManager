@@ -31,8 +31,8 @@ interface ConsumableOrder {
 import {
   CONSUMABLE_STATUS_MAP as STATUS_MAPPING,
   CONSUMABLE_STATUS_STYLE as STATUS_CLASS_MAPPING,
-  ORDER_REASON_MAP as REASON_MAPPING,
 } from '@/lib/constants'
+import { AxiosError } from 'axios'
 
 export function ConsumableOrdersPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
@@ -125,8 +125,9 @@ export function ConsumableOrdersPage() {
       })
       setActiveTab('list')
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '创建失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '创建失败')
     }
   }
 
@@ -135,8 +136,9 @@ export function ConsumableOrdersPage() {
       await consumableOrderAPI.approve(id)
       toast.success('审批通过')
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
 
@@ -145,8 +147,9 @@ export function ConsumableOrdersPage() {
       await consumableOrderAPI.reject(id, '管理员驳回')
       toast.success('已驳回')
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
 
@@ -155,15 +158,16 @@ export function ConsumableOrdersPage() {
       await consumableOrderAPI.complete(id)
       toast.success('耗材订单已完成')
       loadOrders()
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
 
   return (
-    <div className="container mx-auto py-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">耗材订购</h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold title-placeholder">耗材订购</h1>
         <div className="space-x-2">
           <Button variant={activeTab === 'list' ? 'default' : 'outline'} onClick={() => setActiveTab('list')}>
             订单列表
@@ -392,7 +396,7 @@ export function ConsumableOrdersPage() {
     </div>
   )
 
-  function updateFormField(field: string, value: any) {
+  function updateFormField(field: string, value: string | number | boolean) {
     setFormData(prev => ({ ...prev, [field]: value }))
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }))

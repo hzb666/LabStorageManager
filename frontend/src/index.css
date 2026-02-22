@@ -107,3 +107,16 @@
     padding-right: env(safe-area-inset-right);
   }
 }
+
+/* 页面标题占位符，与按钮高度一致 */
+@layer utilities {
+  .title-placeholder {
+    display: flex;
+    align-items: center;
+  }
+  .title-placeholder::after {
+    content: '';
+    display: block;
+    height: 2.5rem; /* h-10 = 40px */
+  }
+}

@@ -7,7 +7,7 @@ import {
   getSortedRowModel,
   getFilteredRowModel,
 } from '@tanstack/react-table'
-import type { SortingState, ColumnFiltersState } from '@tanstack/react-table'
+import type { SortingState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,18 +18,20 @@ import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
 import {
   Search,
-  ArrowUpDown,
   Users,
   Loader2,
   Plus,
-  X,
-  Shield,
-  ShieldOff,
   Trash2,
   Edit,
-  UserCheck,
-  UserX
+  UserCheck
 } from 'lucide-react'
+import { AxiosError } from 'axios'
+import type { PaginationParams } from '@/api/client'
+
+interface UserListParams extends PaginationParams {
+  role?: string
+  is_active?: boolean
+}
 
 interface User {
   id: number
@@ -82,7 +84,7 @@ export function AdminUsersPage() {
 
   const loadUsers = async () => {
     try {
-      const params: any = {}
+      const params: UserListParams = {}
       if (roleFilter !== 'all') params.role = roleFilter
       if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
       
@@ -217,8 +219,9 @@ export function AdminUsersPage() {
       setCreateData({ username: '', password: '', full_name: '', role: 'user' })
       loadUsers()
       toast.success('用户创建成功')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '创建失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '创建失败')
     } finally {
       setCreateLoading(false)
     }
@@ -241,8 +244,9 @@ export function AdminUsersPage() {
       setEditUser(null)
       loadUsers()
       toast.success('用户更新成功')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '更新失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '更新失败')
     } finally {
       setEditLoading(false)
     }
@@ -264,8 +268,9 @@ export function AdminUsersPage() {
       setDeleteUser(null)
       loadUsers()
       toast.success('用户已禁用')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     } finally {
       setDeleteLoading(false)
     }
@@ -277,15 +282,16 @@ export function AdminUsersPage() {
       await userAdminAPI.activate(userId)
       loadUsers()
       toast.success('用户已启用')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '操作失败')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">用户管理</h1>
+        <h1 className="text-3xl font-bold title-placeholder">用户管理</h1>
         <Button onClick={() => setShowCreateModal(true)}>
           <Plus className="w-4 h-4 mr-2" />
           创建用户

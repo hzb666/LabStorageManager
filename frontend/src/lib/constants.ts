@@ -64,6 +64,76 @@ export const USER_ROLE_MAP: Record<string, string> = {
   user: '普通用户',
 }
 
+// === Import Template Columns ===
+export interface ImportColumn {
+  name: string
+  required: boolean
+  description: string
+}
+
+export const IMPORT_TEMPLATE_COLUMNS: ImportColumn[] = [
+  {
+    name: 'cas_number',
+    required: true,
+    description: '格式: XXXXX-XX-X，去除空格，例如 64-17-5',
+  },
+  {
+    name: 'name',
+    required: true,
+    description: '化学品中文名称，例如 乙醇',
+  },
+  {
+    name: 'english_name',
+    required: false,
+    description: '化学品的英文名称，例如 Ethanol',
+  },
+  {
+    name: 'alias',
+    required: false,
+    description: '化学品的别名或俗称，例如 酒精',
+  },
+  {
+    name: 'category',
+    required: false,
+    description: '化学品分类，例如 有机溶剂、酸、碱',
+  },
+  {
+    name: 'brand',
+    required: false,
+    description: '品牌或生产厂家，例如 Sigma、阿拉丁',
+  },
+  {
+    name: 'specification',
+    required: true,
+    description: '格式: 数值+单位，如 500ml, 1L, 100g',
+  },
+  {
+    name: 'initial_quantity',
+    required: true,
+    description: '正整数或小数，表示总量',
+  },
+  {
+    name: 'location',
+    required: false,
+    description: '例如 302冰箱第二层、A-1-1 柜',
+  },
+  {
+    name: 'is_hazardous',
+    required: false,
+    description: 'true/false 或 1/0，危险品需要特殊存储',
+  },
+  {
+    name: 'price',
+    required: false,
+    description: '单价，例如 150.00',
+  },
+  {
+    name: 'notes',
+    required: false,
+    description: '其他需要记录的信息，例如 易燃物品',
+  },
+]
+
 // === Helper to get display text ===
 export function mapStatus(value: string, mapping: Record<string, string>): string {
   return mapping[value] ?? value
