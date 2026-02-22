@@ -16,6 +16,11 @@
   "terminal.integrated.fontEncoding": "utf-8",
   "files.encoding": "utf8",
   "files.autoGuessEncoding": true,
-  "python.analysis.extraPaths": ["."]
-
+  "python.analysis.extraPaths": ["."],
+  "css.validate": true,
+  "css.lint.unknownAtRules": "ignore",
+  "less.validate": true,
+  "less.lint.unknownAtRules": "ignore",
+  "scss.validate": true,
+  "scss.lint.unknownAtRules": "ignore"
 }

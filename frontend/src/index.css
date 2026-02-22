@@ -84,12 +84,14 @@
     /* Improve touch interaction */
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
+    /* Prevent layout shift when scrollbar appears/disappears */
+    scrollbar-gutter: stable;
+    /* Match Layout background to avoid white gap */
+    background-color: hsl(var(--muted));
   }
   body {
-    background-color: hsl(var(--background));
+    background-color: hsl(var(--muted));
     color: hsl(var(--foreground));
-    /* Prevent unwanted scrollbar on mobile */
-    overflow-x: hidden;
   }
   /* Safe area padding for mobile devices */
   .safe-area-top {

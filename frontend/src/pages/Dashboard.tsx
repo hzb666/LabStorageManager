@@ -147,7 +147,7 @@ export function Dashboard() {
   const openReturnModal = (item: MyBorrowItem) => {
     setSelectedBorrow(item)
     setReturnQuantity(String(item.remaining_quantity))
-    setUsedQuantity('')
+    setUsedQuantity('0')
     setReturnUnit(item.unit)
     setReturnMode('used')
     setReturnError('')
@@ -599,7 +599,7 @@ export function Dashboard() {
             
             <div>
               <label className="block text-sm font-medium mb-1">
-                {returnMode === 'remaining' ? '剩余数量' : '使用数量'} 
+                {returnMode === 'remaining' ? '剩余量' : '使用量'} 
                 <span className="text-red-500">*</span>
                 {returnMode === 'used' && selectedBorrow && (
                   <span className="text-muted-foreground font-normal ml-2">
@@ -619,7 +619,7 @@ export function Dashboard() {
                       setUsedQuantity(e.target.value)
                     }
                   }}
-                  placeholder={returnMode === 'remaining' ? '输入剩余数量' : '输入使用数量'}
+                  placeholder={returnMode === 'remaining' ? '输入剩余量' : '输入使用量'}
                   className={cn("flex-1", returnError && "border-red-500")}
                 />
                 <span className="text-muted-foreground text-sm min-w-[40px]">{returnUnit}</span>

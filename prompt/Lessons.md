@@ -153,3 +153,11 @@
   3. 合并到 `main` 时必须打 tag 标记版本号（`git tag -a v1.0.0 -m "Release v1.0.0"`）
   4. 不要因为"同步代码"而随意向 main 发 PR
 - **补救**: 已有的代码不做回退，从现在起规范操作，等真正稳定后再合并并打 tag
+
+### 教训 20: PowerShell 不支持 Unix head 命令
+- **问题**: 执行 `npx tsc --noEmit 2>&1 | head -30` 时报错：`head: The term 'head' is not recognized as a name of a cmdlet, function, script file, or executable program`
+- **原因**: `head` 是 Unix/Linux 命令，PowerShell 默认不支持
+- **解决方案**: 
+  1. 使用 PowerShell 原生命令：`Get-Content file.txt | Select-Object -First 30`
+  2. 或使用 `Select-Object -First 30` 管道
+  3. 或在命令中避免使用 `head`，直接查看完整输出

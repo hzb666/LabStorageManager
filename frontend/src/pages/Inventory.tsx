@@ -5,7 +5,6 @@ import {
   getCoreRowModel,
   useReactTable,
   getSortedRowModel,
-  getFilteredRowModel,
 } from '@tanstack/react-table'
 import type { SortingState, ColumnFiltersState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
@@ -29,6 +28,23 @@ import {
   Pencil,
   Trash2
 } from 'lucide-react'
+
+// 后端验证错误类型
+interface ValidationError {
+  loc?: (string | number)[]
+  msg?: string
+  type?: string
+}
+
+// API 参数类型
+interface InventoryListParams {
+  skip?: number
+  limit?: number
+  search?: string
+  search_field?: string
+  fuzzy?: boolean
+  status_filter?: string
+}
 
 interface InventoryItem {
   id: number
@@ -71,9 +87,34 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 // Highlight component for search results - optimized with memo and regex caching
-const HighlightText = React.memo(function HighlightText({ text, highlight }: { text: string; highlight: string }) {
-  if (!highlight || !text) return <>{text}</>
+// 修复：模糊搜索时也正确高亮匹配的内容
+// 支持HTML特殊空格字符: &nbsp;(\u00A0), &ensp;(\u2002), &emsp;(\u2003), &thinsp;(\u2009), &zwnj;(\u200C), &zwj;(\u200D)
+const HighlightText = React.memo(function HighlightText({ text, highlight, fuzzy }: { text: string; highlight: string; fuzzy?: boolean }) {
+  // 早期返回前先创建正则表达式（避免 React Hook 规则违反）
   const regex = React.useMemo(() => new RegExp(`(${highlight})`, 'gi'), [highlight])
+  
+  if (!highlight || !text) return <>{text}</>
+  
+  // 如果模糊搜索，先检查标准化后是否匹配
+  if (fuzzy) {
+    // 标准化：移除所有空格类字符、连字符、下划线
+    const normalizedHighlight = highlight
+      .replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D]+/g, '')  // 移除所有空格字符
+      .replace(/-/g, '')
+      .replace(/_/g, '')
+    const normalizedText = text
+      .replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D]+/g, '')  // 移除所有空格字符
+      .replace(/-/g, '')
+      .replace(/_/g, '')
+    
+    if (normalizedText.toLowerCase().includes(normalizedHighlight.toLowerCase())) {
+      // 标准化后匹配成功，高亮整个文本
+      return <span className="bg-yellow-200">{text}</span>
+    }
+    return <>{text}</>
+  }
+  
+  // 普通搜索：直接高亮
   const parts = text.split(regex)
   return (
     <>
@@ -89,20 +130,52 @@ const HighlightText = React.memo(function HighlightText({ text, highlight }: { t
 })
 
 // Action buttons component - defined outside to avoid recreation
+// 优化：状态移至组件内部管理，避免父组件重渲染导致的不必要更新
 const ActionButtons = React.memo(function ActionButtons({ 
   item, 
-  isConfirming,
   onEdit,
-  onConfirm 
+  onBorrowSuccess 
 }: { 
   item: InventoryItem
-  isConfirming: boolean
   onEdit: () => void
-  onConfirm: () => void
+  onBorrowSuccess: () => void
 }) {
-  const handleClick = (e: React.MouseEvent) => {
+  // 内部管理确认状态
+  const [isConfirming, setIsConfirming] = useState(false)
+  // 内部管理loading状态
+  const [isLoading, setIsLoading] = useState(false)
+  
+  const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    onConfirm()
+    
+    if (isLoading) return // 防止重复点击
+    
+    if (!isConfirming) {
+      // 第一次点击 - 进入确认状态
+      setIsConfirming(true)
+    } else {
+      // 第二次点击 - 执行借用
+      setIsLoading(true)
+      try {
+        await inventoryAPI.borrow(item.id)
+        toast.success('借用成功')
+        setIsConfirming(false)
+        onBorrowSuccess() // 借用成功后刷新列表
+      } catch (error) {
+        const err = error as { response?: { data?: { detail?: string } } }
+        toast.error(err.response?.data?.detail || '借用失败')
+        setIsConfirming(false)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+  }
+  
+  // 失去焦点时取消确认状态
+  const handleBlur = () => {
+    if (isConfirming && !isLoading) {
+      setIsConfirming(false)
+    }
   }
   
   return (
@@ -114,6 +187,7 @@ const ActionButtons = React.memo(function ActionButtons({
         title="编辑"
         onClick={(e) => {
           e.stopPropagation()
+          setIsConfirming(false) // 点击编辑时取消确认状态
           onEdit()
         }}
       >
@@ -126,11 +200,14 @@ const ActionButtons = React.memo(function ActionButtons({
             "h-7 text-xs px-2",
             isConfirming 
               ? "bg-red-600 hover:bg-red-700" 
-              : "bg-blue-600 hover:bg-blue-700"
+              : "bg-blue-600 hover:bg-blue-700",
+            isLoading && "opacity-50 cursor-wait"
           )}
           onClick={handleClick}
+          onBlur={handleBlur}
+          disabled={isLoading}
         >
-          {isConfirming ? '确认' : '借用'}
+          {isLoading ? '借用中' : (isConfirming ? '确认' : '借用')}
         </Button>
       )}
     </div>
@@ -156,12 +233,9 @@ export function InventoryPage() {
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   // Expanded row state - use object for faster lookups
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
-  // Track which row is in confirm state for borrow
-  const [confirmingRowId, setConfirmingRowId] = useState<number | null>(null)
 
   // Toggle row expansion
   const toggleRowExpansion = (id: number) => {
-    setConfirmingRowId(null) // Clear confirm state when clicking rows
     setExpandedRows(prev => ({
       ...prev,
       [id]: !prev[id]
@@ -184,6 +258,47 @@ export function InventoryPage() {
     notes: ''
   })
 
+  // Optimized edit form handlers using useCallback
+  const handleEditNameChange = useCallback((value: string) => {
+    setEditFormData(prev => ({ ...prev, name: value }))
+  }, [])
+
+  const handleEditEnglishNameChange = useCallback((value: string) => {
+    setEditFormData(prev => ({ ...prev, english_name: value }))
+  }, [])
+
+  const handleEditAliasChange = useCallback((value: string) => {
+    setEditFormData(prev => ({ ...prev, alias: value }))
+  }, [])
+
+  const handleEditSpecificationChange = useCallback((value: string) => {
+    setEditFormData(prev => ({ ...prev, specification: value }))
+  }, [])
+
+  const handleEditCategoryChange = useCallback((value: string) => {
+    setEditFormData(prev => ({ ...prev, category: value }))
+  }, [])
+
+  const handleEditLocationChange = useCallback((value: string) => {
+    setEditFormData(prev => ({ ...prev, location: value }))
+  }, [])
+
+  const handleEditRemainingQuantityChange = useCallback((value: number) => {
+    setEditFormData(prev => ({ ...prev, remaining_quantity: value }))
+  }, [])
+
+  const handleEditBrandChange = useCallback((value: string) => {
+    setEditFormData(prev => ({ ...prev, brand: value }))
+  }, [])
+
+  const handleEditHazardousChange = useCallback((checked: boolean) => {
+    setEditFormData(prev => ({ ...prev, is_hazardous: checked }))
+  }, [])
+
+  const handleEditNotesChange = useCallback((value: string) => {
+    setEditFormData(prev => ({ ...prev, notes: value }))
+  }, [])
+
   // Manual add modal
   const [showManualAdd, setShowManualAdd] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -202,22 +317,57 @@ export function InventoryPage() {
   })
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
+  // 手动入库对话框关闭处理函数 - 关闭时清空表单数据和错误
+  const handleManualAddModalClose = (open: boolean) => {
+    setShowManualAdd(open)
+    if (!open) {
+      // 关闭时清空表单数据和错误
+      setFormErrors({})
+      setFormData({
+        cas_number: '',
+        name: '',
+        english_name: '',
+        alias: '',
+        specification: '',
+        quantity_bottles: 1,
+        brand: '',
+        category: '',
+        location: '',
+        is_hazardous: false,
+        notes: ''
+      })
+    }
+  }
+
   // Debounced search for API calls - separate display filter from API filter
+  // 优化：增加防抖延迟 + 添加请求版本号防止竞态条件
   const [displayFilter, setDisplayFilter] = useState('')
   const [apiFilter, setApiFilter] = useState('')
+  const [searchField, setSearchField] = useState('all') // 搜索字段
+  const [fuzzySearch, setFuzzySearch] = useState(false) // 模糊搜索
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const requestVersionRef = useRef(0) // 请求版本号，用于防止竞态条件
 
   // Update display filter immediately (for highlighting), but API filter only after debounce
   useEffect(() => {
     setDisplayFilter(globalFilter)
     
+    // 清除之前的定时器
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current)
     }
+    
+    // 增加当前请求版本号
+    const currentVersion = ++requestVersionRef.current
+    
+    // 300ms 防抖延迟
     debounceTimerRef.current = setTimeout(() => {
-      setApiFilter(globalFilter)
-      setPage(1) // Reset to page 1 on search
-    }, 300) // 300ms debounce delay
+      // 只有当前版本是最新的才发送请求
+      if (currentVersion === requestVersionRef.current) {
+        setApiFilter(globalFilter)
+        setPage(1) // Reset to page 1 on search
+      }
+    }, 300)
 
     return () => {
       if (debounceTimerRef.current) {
@@ -227,19 +377,36 @@ export function InventoryPage() {
   }, [globalFilter])
 
   // Wrap loadInventory with useCallback to fix dependency warning
+  // 使用请求版本号确保只处理最新请求的响应
   const loadInventory = useCallback(async () => {
-    setLoading(true)
+    const requestVersion = ++requestVersionRef.current
+    
+    // 只在没有数据时显示加载状态，有数据时保持旧数据可见
+    if (data.length === 0) {
+      setLoading(true)
+    }
     // Clear expanded rows when loading new data
     setExpandedRows({})
     try {
-      const params: Record<string, any> = {
+      const params: InventoryListParams = {
         skip: (page - 1) * pageSize,
         limit: pageSize,
       }
       if (statusFilter !== 'all') params.status_filter = statusFilter
-      if (apiFilter) params.search = apiFilter
+      if (apiFilter) {
+        params.search = apiFilter
+        if (searchField !== 'all') params.search_field = searchField
+        if (fuzzySearch) params.fuzzy = true
+      }
 
       const response = await inventoryAPI.list(params)
+      
+      // 检查是否为最新请求，防止旧请求覆盖新数据
+      if (requestVersion !== requestVersionRef.current) {
+        console.log('Request canceled:', requestVersion, 'current:', requestVersionRef.current)
+        return
+      }
+      
       const result = response.data
       setData(result.data || [])
       setTotal(result.total || 0)
@@ -251,9 +418,12 @@ export function InventoryPage() {
     } catch (error) {
       console.error('Failed to load inventory:', error)
     } finally {
-      setLoading(false)
+      // 只有最新请求才更新loading状态
+      if (requestVersion === requestVersionRef.current) {
+        setLoading(false)
+      }
     }
-  }, [page, pageSize, statusFilter, apiFilter])
+  }, [page, pageSize, statusFilter, apiFilter, searchField, fuzzySearch, data.length])
 
   useEffect(() => {
     loadInventory()
@@ -291,8 +461,9 @@ export function InventoryPage() {
       setShowEditModal(false)
       loadInventory()
       toast.success('库存信息已更新')
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '更新失败')
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || '更新失败')
     }
   }
 
@@ -310,8 +481,9 @@ export function InventoryPage() {
         setDeleteConfirm(false)
         loadInventory()
         toast.success('库存已删除')
-      } catch (error: any) {
-        toast.error(error.response?.data?.detail || '删除失败')
+      } catch (error) {
+        const err = error as { response?: { data?: { detail?: string } } }
+        toast.error(err.response?.data?.detail || '删除失败')
       }
     }
   }
@@ -325,7 +497,6 @@ export function InventoryPage() {
 
   // Memoized edit handler - defined before columns
   const handleEditClick = useCallback((item: InventoryItem) => {
-    setConfirmingRowId(null)
     setEditingItem(item)
     setDeleteConfirm(false)
     setEditFormData({
@@ -355,7 +526,7 @@ export function InventoryPage() {
       size: 100,
       cell: info => (
         <span className="break-all">
-          <HighlightText text={info.getValue() || ''} highlight={displayFilter} />
+          <HighlightText text={info.getValue() || ''} highlight={displayFilter} fuzzy={fuzzySearch} />
         </span>
       ),
     }),
@@ -369,7 +540,7 @@ export function InventoryPage() {
             <AlertTriangle className="w-3 h-3 text-yellow-500 flex-shrink-0" />
           )}
           <span>
-            <HighlightText text={info.getValue() || ''} highlight={displayFilter} />
+            <HighlightText text={info.getValue() || ''} highlight={displayFilter} fuzzy={fuzzySearch} />
           </span>
         </div>
       ),
@@ -380,7 +551,7 @@ export function InventoryPage() {
       size: 60,
       cell: info => (
         <span className="break-all">
-          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} />
+          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} fuzzy={fuzzySearch} />
         </span>
       ),
     }),
@@ -390,7 +561,7 @@ export function InventoryPage() {
       size: 70,
       cell: info => (
         <span className="break-all">
-          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} />
+          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} fuzzy={fuzzySearch} />
         </span>
       ),
     }),
@@ -428,7 +599,7 @@ export function InventoryPage() {
       size: 50,
       cell: info => (
         <span className="break-all">
-          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} />
+          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} fuzzy={fuzzySearch} />
         </span>
       ),
     }),
@@ -458,30 +629,13 @@ export function InventoryPage() {
         return (
           <ActionButtons
             item={item}
-            isConfirming={confirmingRowId === item.id}
             onEdit={() => handleEditClick(item)}
-            onConfirm={async () => {
-              if (confirmingRowId === item.id) {
-                // 第二次点击 - 执行借用
-                try {
-                  await inventoryAPI.borrow(item.id)
-                  toast.success('借用成功')
-                  setConfirmingRowId(null) // API 成功后再重置状态
-                  loadInventory()
-                } catch (error: any) {
-                  toast.error(error.response?.data?.detail || '借用失败')
-                  setConfirmingRowId(null) // 失败后也重置状态
-                }
-              } else {
-                // 第一次点击 - 进入确认状态
-                setConfirmingRowId(item.id)
-              }
-            }}
+            onBorrowSuccess={() => loadInventory()}
           />
         )
       },
     }),
-  ], [displayFilter, confirmingRowId, handleEditClick, loadInventory])
+  ], [displayFilter, fuzzySearch, handleEditClick, loadInventory])
 
   const table = useReactTable({
     data,
@@ -489,14 +643,12 @@ export function InventoryPage() {
     columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
+    // 移除 getFilteredRowModel - 搜索在服务器端完成，不需要客户端过滤
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
-    onGlobalFilterChange: setGlobalFilter,
     state: {
       sorting,
       columnFilters,
-      globalFilter,
     },
   })
 
@@ -508,11 +660,57 @@ export function InventoryPage() {
       errors.cas_number = 'CAS号格式无效 (如: 64-17-5)'
     }
     if (!formData.name.trim()) errors.name = '名称不能为空'
+    if (!formData.location.trim()) errors.location = '位置不能为空'
     if (!formData.specification.trim()) errors.specification = '规格不能为空'
     if (formData.quantity_bottles < 1) errors.quantity_bottles = '瓶数必须大于0'
     setFormErrors(errors)
     return Object.keys(errors).length === 0
   }, [formData])
+
+  // Optimized form field handlers using useCallback
+  const handleCasNumberChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, cas_number: value }))
+  }, [])
+
+  const handleNameChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, name: value }))
+  }, [])
+
+  const handleEnglishNameChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, english_name: value }))
+  }, [])
+
+  const handleAliasChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, alias: value }))
+  }, [])
+
+  const handleSpecificationChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, specification: value }))
+  }, [])
+
+  const handleQuantityBottlesChange = useCallback((value: number) => {
+    setFormData(prev => ({ ...prev, quantity_bottles: value }))
+  }, [])
+
+  const handleBrandChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, brand: value }))
+  }, [])
+
+  const handleCategoryChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, category: value }))
+  }, [])
+
+  const handleLocationChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, location: value }))
+  }, [])
+
+  const handleHazardousChange = useCallback((checked: boolean) => {
+    setFormData(prev => ({ ...prev, is_hazardous: checked }))
+  }, [])
+
+  const handleNotesChange = useCallback((value: string) => {
+    setFormData(prev => ({ ...prev, notes: value }))
+  }, [])
 
   const handleManualAdd = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -533,33 +731,20 @@ export function InventoryPage() {
         is_hazardous: formData.is_hazardous,
         notes: formData.notes || undefined
       })
-      setShowManualAdd(false)
-      setFormData({
-        cas_number: '',
-        name: '',
-        english_name: '',
-        alias: '',
-        specification: '',
-        quantity_bottles: 1,
-        brand: '',
-        category: '',
-        location: '',
-        is_hazardous: false,
-        notes: ''
-      })
+      handleManualAddModalClose(false)
       loadInventory()
       toast.success('手动入库成功！')
-    } catch (error: any) {
-      // 处理后端返回的验证错误，显示在对应输入框下方
-      const errorDetail = error.response?.data?.detail
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
+      const errorDetail = err.response?.data?.detail
       if (errorDetail) {
         // 如果是数组格式的错误信息（FastAPI 默认格式）
         if (Array.isArray(errorDetail)) {
           const newErrors: Record<string, string> = {}
-          errorDetail.forEach((err: any) => {
+          errorDetail.forEach((err: ValidationError) => {
             if (err.loc && err.loc[1]) {
               const field = err.loc[1] as string
-              newErrors[field] = err.msg
+              newErrors[field] = err.msg || '验证错误'
             }
           })
           if (Object.keys(newErrors).length > 0) {
@@ -577,7 +762,7 @@ export function InventoryPage() {
         }
       }
       // 如果无法解析，显示 toast
-      toast.error(error.response?.data?.detail || '入库失败')
+      toast.error(String(err.response?.data?.detail) || '入库失败')
     } finally {
       setSubmitting(false)
     }
@@ -597,8 +782,9 @@ export function InventoryPage() {
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || '导出失败')
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || '导出失败')
     }
   }, [])
 
@@ -628,10 +814,21 @@ export function InventoryPage() {
           <DialogHeader>
             <DialogTitle>编辑库存</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-3 gap-3 text-base">
-            {/* 第一行：CAS号（占3列） */}
-            <div className="col-span-3">
-              <label className="block text-xs font-medium mb-1">
+          <div className="grid grid-cols-3 gap-3 text-lg">
+            {/* 第一行：名称（占2列）、CAS号（1列） */}
+            <div className="col-span-2">
+              <label className="block text-sm font-medium mb-1">
+                名称 <span className="text-red-500">*</span>
+              </label>
+              <Input
+                value={editFormData.name}
+                onChange={(e) => handleEditNameChange(e.target.value)}
+                className="h-8"
+                placeholder="如: 乙醇"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
                 CAS号
               </label>
               <Input
@@ -641,100 +838,87 @@ export function InventoryPage() {
               />
             </div>
 
-            {/* 第二行：名称（占2列）、别名（占1列） */}
+            {/* 第二行：英文名称（占2列）、别名（1列） */}
             <div className="col-span-2">
-              <label className="block text-xs font-medium mb-1">
-                名称 <span className="text-red-500">*</span>
-              </label>
-              <Input
-                value={editFormData.name}
-                onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-                className="h-8"
-                placeholder="如: 乙醇"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1">别名</label>
-              <Input
-                value={editFormData.alias || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, alias: e.target.value })}
-                className="h-8"
-                placeholder="如: 酒精"
-              />
-            </div>
-
-            {/* 第三行：英文名称（占2列）、规格（占1列） */}
-            <div className="col-span-2">
-              <label className="block text-xs font-medium mb-1">英文名称</label>
+              <label className="block text-sm font-medium mb-1">英文名称</label>
               <Input
                 value={editFormData.english_name || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, english_name: e.target.value })}
+                onChange={(e) => handleEditEnglishNameChange(e.target.value)}
                 className="h-8"
                 placeholder="如: Ethanol"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1">规格</label>
+              <label className="block text-sm font-medium mb-1">别名</label>
               <Input
-                value={editFormData.specification || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, specification: e.target.value })}
+                value={editFormData.alias || ''}
+                onChange={(e) => handleEditAliasChange(e.target.value)}
                 className="h-8"
-                placeholder="如: 500ml"
+                placeholder="如: 酒精"
               />
             </div>
 
-            {/* 第四行：剩余量、分类、品牌 */}
+            {/* 第三行：位置（1列）、剩余量（1列）、规格（1列） */}
             <div>
-              <label className="block text-xs font-medium mb-1">
+              <label className="block text-sm font-medium mb-1">库存位置</label>
+              <Input
+                value={editFormData.location || ''}
+                onChange={(e) => handleEditLocationChange(e.target.value)}
+                className="h-8"
+                placeholder="如: A-1-1 柜"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
                 剩余量 <span className="text-red-500">*</span>
               </label>
               <Input
                 type="number"
                 value={editFormData.remaining_quantity}
-                onChange={(e) => setEditFormData({ ...editFormData, remaining_quantity: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => handleEditRemainingQuantityChange(parseFloat(e.target.value) || 0)}
                 className="h-8"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1">分类</label>
+              <label className="block text-sm font-medium mb-1">
+                规格 <span className="text-red-500">*</span>
+              </label>
               <Input
-                value={editFormData.category || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, category: e.target.value })}
+                value={editFormData.specification || ''}
+                onChange={(e) => handleEditSpecificationChange(e.target.value)}
                 className="h-8"
-                placeholder="如: 有机试剂"
+                placeholder="如: 500ml"
               />
             </div>
+
+            {/* 第四行：品牌、分类、危险品 */}
             <div>
-              <label className="block text-xs font-medium mb-1">品牌</label>
+              <label className="block text-sm font-medium mb-1">品牌</label>
               <Input
                 value={editFormData.brand || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, brand: e.target.value })}
+                onChange={(e) => handleEditBrandChange(e.target.value)}
                 className="h-8"
                 placeholder="如: Sigma"
               />
             </div>
-
-            {/* 库存位置 */}
             <div>
-              <label className="block text-xs font-medium mb-1">库存位置</label>
+              <label className="block text-sm font-medium mb-1">分类</label>
               <Input
-                value={editFormData.location || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, location: e.target.value })}
+                value={editFormData.category || ''}
+                onChange={(e) => handleEditCategoryChange(e.target.value)}
                 className="h-8"
-                placeholder="如: A-1-1 柜"
+                placeholder="如: 有机试剂"
               />
             </div>
-
-            {/* 危险品 */}
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
                 id="edit_is_hazardous"
                 checked={editFormData.is_hazardous}
-                onChange={(e) => setEditFormData({ ...editFormData, is_hazardous: e.target.checked })}
+                onChange={(e) => handleEditHazardousChange(e.target.checked)}
                 className="w-4 h-4 rounded"
               />
-              <label htmlFor="edit_is_hazardous" className="text-xs flex items-center gap-1">
+              <label htmlFor="edit_is_hazardous" className="text-sm flex items-center gap-1">
                 <AlertTriangle className="w-4 h-4 text-yellow-500" />
                 危险品
               </label>
@@ -742,11 +926,11 @@ export function InventoryPage() {
 
             {/* 备注 */}
             <div className="col-span-3">
-              <label className="block text-xs font-medium mb-1">备注</label>
+              <label className="block text-sm font-medium mb-1">备注</label>
               <textarea
                 value={editFormData.notes || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
-                className="w-full h-16 px-2 py-1 border rounded-md bg-background text-sm resize-none"
+                onChange={(e) => handleEditNotesChange(e.target.value)}
+                className="w-full h-16 px-3 py-2 border border-input rounded-md bg-background text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 placeholder="其他说明..."
               />
             </div>
@@ -782,35 +966,21 @@ export function InventoryPage() {
       </Dialog>
 
       {/* Manual Add Modal */}
-      <Dialog open={showManualAdd} onOpenChange={setShowManualAdd}>
+      <Dialog open={showManualAdd} onOpenChange={handleManualAddModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>手动入库</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleManualAdd} className="space-y-4">
-            <div className="grid grid-cols-3 gap-3 text-base">
-              <div className="col-span-3">
-                <label className="block text-xs font-medium mb-1">
-                  CAS号 <span className="text-red-500">*</span>
-                </label>
-                <Input
-                  value={formData.cas_number}
-                  onChange={(e) => setFormData({ ...formData, cas_number: e.target.value })}
-                  placeholder="如: 64-17-5"
-                  className={cn("h-8", formErrors.cas_number && 'border-red-500')}
-                />
-                {formErrors.cas_number && (
-                  <p className="text-xs text-red-500 mt-1">{formErrors.cas_number}</p>
-                )}
-              </div>
-
+          <form onSubmit={handleManualAdd}>
+            <div className="grid grid-cols-3 gap-3 text-lg">
+              {/* 第一行：试剂名称（占2列）、CAS号（1列） */}
               <div className="col-span-2">
-                <label className="block text-xs font-medium mb-1">
+                <label className="block text-sm font-medium mb-1">
                   试剂名称 <span className="text-red-500">*</span>
                 </label>
                 <Input
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) => handleNameChange(e.target.value)}
                   placeholder="如: 乙醇"
                   className={cn("h-8", formErrors.name && 'border-red-500')}
                 />
@@ -820,24 +990,61 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium mb-1">
+                <label className="block text-sm font-medium mb-1">
+                  CAS号 <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={formData.cas_number}
+                  onChange={(e) => handleCasNumberChange(e.target.value)}
+                  placeholder="如: 64-17-5"
+                  className={cn("h-8", formErrors.cas_number && 'border-red-500')}
+                />
+                {formErrors.cas_number && (
+                  <p className="text-xs text-red-500 mt-1">{formErrors.cas_number}</p>
+                )}
+              </div>
+
+              {/* 第二行：英文名称（占2列）、别名（1列） */}
+              <div className="col-span-2">
+                <label className="block text-sm font-medium mb-1">
                   英文名称
                 </label>
                 <Input
                   value={formData.english_name || ''}
-                  onChange={(e) => setFormData({ ...formData, english_name: e.target.value })}
+                  onChange={(e) => handleEnglishNameChange(e.target.value)}
                   placeholder="如: Ethanol"
                   className="h-8"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium mb-1">
+                <label className="block text-sm font-medium mb-1">别名</label>
+                <Input
+                  value={formData.alias}
+                  onChange={(e) => handleAliasChange(e.target.value)}
+                  placeholder="如: 酒精"
+                  className="h-8"
+                />
+              </div>
+
+              {/* 第三行：位置（1列）、规格（1列）、瓶数（1列） */}
+              <div>
+                <label className="block text-sm font-medium mb-1">存放位置</label>
+                <Input
+                  value={formData.location}
+                  onChange={(e) => handleLocationChange(e.target.value)}
+                  placeholder="如: A-1-1 柜"
+                  className="h-8"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
                   规格 <span className="text-red-500">*</span>
                 </label>
                 <Input
                   value={formData.specification}
-                  onChange={(e) => setFormData({ ...formData, specification: e.target.value })}
+                  onChange={(e) => handleSpecificationChange(e.target.value)}
                   placeholder="如: 500ml, 1L"
                   className={cn("h-8", formErrors.specification && 'border-red-500')}
                 />
@@ -847,24 +1054,14 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium mb-1">别名</label>
-                <Input
-                  value={formData.alias}
-                  onChange={(e) => setFormData({ ...formData, alias: e.target.value })}
-                  placeholder="如: 酒精"
-                  className="h-8"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1">
+                <label className="block text-sm font-medium mb-1">
                   瓶数 <span className="text-red-500">*</span>
                 </label>
                 <Input
                   type="number"
                   min="1"
                   value={formData.quantity_bottles}
-                  onChange={(e) => setFormData({ ...formData, quantity_bottles: parseInt(e.target.value) || 1 })}
+                  onChange={(e) => handleQuantityBottlesChange(parseInt(e.target.value) || 1)}
                   className={cn("h-8", formErrors.quantity_bottles && 'border-red-500')}
                 />
                 {formErrors.quantity_bottles && (
@@ -872,32 +1069,23 @@ export function InventoryPage() {
                 )}
               </div>
 
+              {/* 第四行：品牌、分类、危险品选择 */}
               <div>
-                <label className="block text-xs font-medium mb-1">品牌</label>
+                <label className="block text-sm font-medium mb-1">品牌</label>
                 <Input
                   value={formData.brand}
-                  onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                  onChange={(e) => handleBrandChange(e.target.value)}
                   placeholder="如: Sigma"
                   className="h-8"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium mb-1">分类</label>
+                <label className="block text-sm font-medium mb-1">分类</label>
                 <Input
                   value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
                   placeholder="如: 有机试剂"
-                  className="h-8"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1">存放位置</label>
-                <Input
-                  value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  placeholder="如: A-1-1 柜"
                   className="h-8"
                 />
               </div>
@@ -907,21 +1095,22 @@ export function InventoryPage() {
                   type="checkbox"
                   id="is_hazardous"
                   checked={formData.is_hazardous}
-                  onChange={(e) => setFormData({ ...formData, is_hazardous: e.target.checked })}
+                  onChange={(e) => handleHazardousChange(e.target.checked)}
                   className="w-4 h-4 rounded"
                 />
-                <label htmlFor="is_hazardous" className="text-xs flex items-center gap-1">
+                <label htmlFor="is_hazardous" className="text-sm flex items-center gap-1">
                   <AlertTriangle className="w-4 h-4 text-yellow-500" />
                   危险品
                 </label>
               </div>
 
+              {/* 备注保持不变 */}
               <div className="col-span-3">
-                <label className="block text-xs font-medium mb-1">备注</label>
+                <label className="block text-sm font-medium mb-1">备注</label>
                 <textarea
                   value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full h-16 px-2 py-1 border rounded-md bg-background text-sm resize-none"
+                  onChange={(e) => handleNotesChange(e.target.value)}
+                  className="w-full h-16 px-3 py-2 border border-input rounded-md bg-background text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   placeholder="其他说明..."
                 />
               </div>
@@ -932,7 +1121,7 @@ export function InventoryPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setShowManualAdd(false)}
+                  onClick={() => handleManualAddModalClose(false)}
                   className="text-sm"
                 >
                   取消
@@ -949,8 +1138,8 @@ export function InventoryPage() {
       {/* Filters */}
       <Card>
         <CardContent className="py-3">
-          <div className="flex gap-3">
-            <div className="relative flex-1">
+          <div className="flex gap-3 items-center flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="搜索名称、CAS号、位置..."
@@ -967,6 +1156,44 @@ export function InventoryPage() {
                 </button>
               )}
             </div>
+            {/* 模糊搜索开关 - 只有在有搜索词时才触发重新加载 */}
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={fuzzySearch}
+                onChange={(e) => {
+                  setFuzzySearch(e.target.checked)
+                  // 只有在有搜索词时才重置页码并重新加载
+                  if (apiFilter) {
+                    setPage(1)
+                  }
+                }}
+                className="w-4 h-4 rounded"
+              />
+              <span className="text-muted-foreground whitespace-nowrap">模糊搜索</span>
+            </label>
+            {/* 搜索字段选择器 */}
+            <select
+              value={searchField}
+              onChange={(e) => {
+                setSearchField(e.target.value)
+                setPage(1)
+              }}
+              className="h-9 px-2 pr-6 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-slate-400 focus:outline-none focus:ring-1 focus:ring-ring"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 0.3rem center',
+                backgroundSize: '1rem'
+              }}
+            >
+              <option value="all">全部</option>
+              <option value="name">名称</option>
+              <option value="cas_number">CAS号</option>
+              <option value="location">位置</option>
+              <option value="brand">品牌</option>
+              <option value="category">分类</option>
+            </select>
             <select
               value={statusFilter}
               onChange={(e) => handleStatusFilterChange(e.target.value)}
@@ -996,7 +1223,16 @@ export function InventoryPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {/* 有数据时在角落显示加载指示器，保持数据可见 */}
+          {loading && data.length > 0 && (
+            <div className="flex justify-end mb-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>加载中...</span>
+              </div>
+            </div>
+          )}
+          {loading && data.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>

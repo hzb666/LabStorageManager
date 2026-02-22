@@ -138,5 +138,12 @@
 ### Future Enhancements
 - [ ] Chemical compatibility check
 - [ ] Batch operations (bulk stock-in, bulk return)
-- [ ] Advanced search and filters
+- [x] Advanced search and filters (2026-02-21)
 - [ ] Data export reports
+
+### Search Performance Optimization (2026-02-21) ✅
+- [x] 前端优化：防抖延迟 300ms → 500ms，减少请求频率
+- [x] 前端优化：添加请求版本号防止竞态条件（先发后至请求被忽略）
+- [x] 后端优化：搜索结果缓存（60秒有效期，最多100条缓存）
+- [x] 高级搜索：精确搜索（指定字段：名称/CAS号/位置/品牌/分类/全部）
+- [x] 高级搜索：模糊搜索（忽略空格和连字符，如搜索 "64 17 5" 匹配 "64-17-5"）
