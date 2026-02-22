@@ -11,6 +11,7 @@ dist/
 build/
 *.egg
 requirements.txt
+.mypy_cache/
 
 # Virtual environments
 venv/
@@ -22,7 +23,7 @@ env/
 !.vscode/settings.json
 !.vscode/extensions.json
 .idea/
-.cursor/plans/
+.cursor/
 *.sw?
 *.swo
 
