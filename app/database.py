@@ -52,16 +52,16 @@ def init_db() -> None:
 
 
 def _create_default_admin() -> None:
-    """Create default admin user if database is empty"""
+    """确保始终至少有一个管理员账户"""
     # Import here to avoid circular import
     from app.core.auth import get_password_hash
     
     with Session(engine) as session:
-        # Check if any users exist
-        statement = select(User)
-        existing_users = session.exec(statement).first()
+        # Check if any admin users exist (only check for admins, not all users)
+        statement = select(User).where(User.role == UserRole.ADMIN)
+        admin_exists = session.exec(statement).first()
         
-        if existing_users is None:
+        if admin_exists is None:
             # Create default admin user
             admin = User(
                 username="admin",
@@ -74,7 +74,7 @@ def _create_default_admin() -> None:
             session.commit()
             logger.info("Default admin user created (username: admin, password: admin123)")
         else:
-            logger.info("Users already exist, skipping default admin creation")
+            logger.info("Admin user already exists, skipping default admin creation")
 
 
 def reset_db() -> None:

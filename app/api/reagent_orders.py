@@ -3,7 +3,7 @@ Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from pydantic import BaseModel
@@ -20,7 +20,7 @@ from app.models.reagent_order import (
     ReagentOrderReason,
 )
 from app.models.user import User
-from app.models.inventory import Inventory, InventoryCreate, InventoryStatus
+from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.image_service import process_uploaded_image
 from app.services.spec_utils import parse_specification, SpecificationError

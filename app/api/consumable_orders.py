@@ -3,7 +3,7 @@ Consumable Order API Routes - Consumables Purchase Order Management
 Separated from Reagent orders (no stock-in needed)
 """
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlmodel import Session, select, func
@@ -16,7 +16,6 @@ from app.models.consumable_order import (
     ConsumableOrderUpdate,
     ConsumableOrderResponse,
     ConsumableOrderStatus,
-    ConsumableOrderReason,
 )
 from app.models.user import User
 from app.services.image_service import process_uploaded_image
