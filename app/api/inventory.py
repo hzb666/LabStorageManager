@@ -11,8 +11,7 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
-from typing import List, Optional
-
+from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func
@@ -20,13 +19,11 @@ from sqlmodel import Session, select, func
 from app.database import get_db
 from app.models.inventory import (
     Inventory,
-    InventoryCreate,
     InventoryUpdate,
     InventoryResponse,
     InventoryStatus,
     InventoryBorrowReturn,
     BorrowLog,
-    BorrowLogResponse,
     ManualInventoryCreate,
 )
 from app.models.user import User
@@ -39,8 +36,91 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
+# ==================== Search Cache ====================
+# 简单内存缓存，用于减少重复搜索查询
+SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
+CACHE_TTL_SECONDS = 60  # 缓存有效期60秒
+
+
+def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
+    """从缓存获取结果"""
+    if cache_key in SEARCH_CACHE:
+        cached_result, cached_time = SEARCH_CACHE[cache_key]
+        if (datetime.now() - cached_time).total_seconds() < CACHE_TTL_SECONDS:
+            return cached_result
+        else:
+            # 缓存过期，删除
+            del SEARCH_CACHE[cache_key]
+    return None
+
+
+def _set_cached_result(cache_key: str, result: Dict[str, Any]) -> None:
+    """设置缓存结果"""
+    SEARCH_CACHE[cache_key] = (result, datetime.now())
+    # 简单清理：只保留最近100个缓存项
+    if len(SEARCH_CACHE) > 100:
+        # 删除最旧的10个
+        oldest_keys = sorted(SEARCH_CACHE.keys(), key=lambda k: SEARCH_CACHE[k][1])[:10]
+        for key in oldest_keys:
+            del SEARCH_CACHE[key]
+
+
+def _clear_list_cache() -> None:
+    """清除所有列表缓存（当库存数据发生变化时调用）"""
+    # 清除所有以 "list:" 开头的缓存键
+    keys_to_delete = [key for key in SEARCH_CACHE.keys() if key.startswith("list:")]
+    for key in keys_to_delete:
+        del SEARCH_CACHE[key]
+    logger.info(f"Cleared {len(keys_to_delete)} list cache entries")
+
 
 # ==================== Helper Functions ====================
+
+# HTML特殊空格字符映射 - 用于模糊搜索标准化
+SPECIAL_SPACE_CHARS = {
+    '\u00A0': '',  # NBSP (non-breaking space)
+    '\u2002': '',  # EN SPACE
+    '\u2003': '',  # EM SPACE
+    '\u2009': '',  # THIN SPACE
+    '\u200C': '',  # ZWNJ (zero-width non-joiner)
+    '\u200D': '',  # ZWJ (zero-width joiner)
+}
+
+
+def normalize_search_term(search_term: str) -> str:
+    """
+    标准化搜索词：移除所有特殊空格字符和常见分隔符
+    用于模糊搜索匹配
+    """
+    if not search_term:
+        return search_term
+    
+    normalized = search_term
+    # 移除HTML特殊空格字符
+    for char, replacement in SPECIAL_SPACE_CHARS.items():
+        normalized = normalized.replace(char, replacement)
+    # 移除常见分隔符
+    normalized = normalized.replace(" ", "").replace("-", "").replace("_", "")
+    
+    return normalized
+
+
+def _normalize_field_sql(field, sql_func):
+    """
+    构建标准化字段的SQL表达式
+    移除所有特殊空格字符和常见分隔符后进行匹配
+    """
+    # 依次移除：连字符、常见空格、特殊空格字符、下划线
+    normalized = sql_func.replace(field, '-', '')
+    normalized = sql_func.replace(normalized, ' ', '')
+    normalized = sql_func.replace(normalized, '\u00A0', '')  # NBSP
+    normalized = sql_func.replace(normalized, '\u2002', '')  # EN SPACE
+    normalized = sql_func.replace(normalized, '\u2003', '')  # EM SPACE
+    normalized = sql_func.replace(normalized, '\u2009', '')  # THIN SPACE
+    normalized = sql_func.replace(normalized, '\u200C', '')  # ZWNJ
+    normalized = sql_func.replace(normalized, '\u200D', '')  # ZWJ
+    normalized = sql_func.replace(normalized, '_', '')
+    return normalized
 
 def _get_by_id(db: Session, inventory_id: int) -> Optional[Inventory]:
     """Get inventory item by ID"""
@@ -429,9 +509,25 @@ def list_inventory(
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
     search: Optional[str] = None,
+    search_field: Optional[str] = None,  # 精确搜索指定字段
+    fuzzy: bool = False,                  # 模糊搜索（忽略空格和连字符）
     db: Session = Depends(get_db),
 ):
     """List inventory with optional filters and pagination"""
+    # 生成缓存key（包含所有搜索参数）
+    cache_key = f"list:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}"
+    
+    # 尝试从缓存获取（仅当是第一页时）
+    if skip == 0:
+        cached = _get_cached_result(cache_key)
+        if cached is not None:
+            # 返回缓存结果，但更新分页参数
+            return {
+                **cached,
+                "skip": skip,
+                "limit": limit,
+            }
+    
     base = select(Inventory)
 
     if status_filter:
@@ -441,19 +537,72 @@ def list_inventory(
     if hazardous_only:
         base = base.where(Inventory.is_hazardous == True)
     if search:
-        search_pattern = f"%{search}%"
-        base = base.where(
-            (Inventory.name.ilike(search_pattern)) |
-            (Inventory.cas_number.ilike(search_pattern)) |
-            (Inventory.location.ilike(search_pattern)) |
-            (Inventory.brand.ilike(search_pattern)) |
-            (Inventory.category.ilike(search_pattern))
-        )
+        # 模糊搜索：移除空格和连字符后进行标准化匹配
+        if fuzzy:
+            # 使用Python函数标准化搜索词（移除特殊空格字符和常见分隔符）
+            search_normalized = normalize_search_term(search.strip())
+            
+            # 使用 SQL REPLACE 函数对数据库字段进行标准化后再匹配
+            # 这样可以匹配 "64-17-5"、"64 17 5"、"64 17 5" 等格式
+            from sqlmodel import func as sql_func
+            
+            # 定义标准化字段的辅助函数
+            def norm_field(field):
+                f = sql_func.replace(field, '-', '')
+                f = sql_func.replace(f, ' ', '')
+                f = sql_func.replace(f, '\u00A0', '')  # NBSP
+                f = sql_func.replace(f, '\u2002', '')  # EN SPACE
+                f = sql_func.replace(f, '\u2003', '')  # EM SPACE
+                f = sql_func.replace(f, '\u2009', '')  # THIN SPACE
+                f = sql_func.replace(f, '\u200C', '')  # ZWNJ
+                f = sql_func.replace(f, '\u200D', '')  # ZWJ
+                f = sql_func.replace(f, '_', '')
+                return f
+            
+            base = base.where(
+                (norm_field(Inventory.cas_number).ilike(f"%{search_normalized}%")) |
+                (norm_field(Inventory.name).ilike(f"%{search_normalized}%")) |
+                (norm_field(Inventory.location).ilike(f"%{search_normalized}%")) |
+                (norm_field(Inventory.brand).ilike(f"%{search_normalized}%")) |
+                (norm_field(Inventory.category).ilike(f"%{search_normalized}%"))
+            )
+        else:
+            search_pattern = f"%{search}%"
+            
+            # 精确搜索指定字段
+            if search_field and search_field != 'all':
+                field_map = {
+                    'name': Inventory.name,
+                    'cas_number': Inventory.cas_number,
+                    'location': Inventory.location,
+                    'brand': Inventory.brand,
+                    'category': Inventory.category,
+                }
+                if search_field in field_map:
+                    base = base.where(field_map[search_field].ilike(search_pattern))
+                else:
+                    # 未知字段，回退到搜索所有字段
+                    base = base.where(
+                        (Inventory.name.ilike(search_pattern)) |
+                        (Inventory.cas_number.ilike(search_pattern)) |
+                        (Inventory.location.ilike(search_pattern)) |
+                        (Inventory.brand.ilike(search_pattern)) |
+                        (Inventory.category.ilike(search_pattern))
+                    )
+            else:
+                # 默认：搜索所有字段
+                base = base.where(
+                    (Inventory.name.ilike(search_pattern)) |
+                    (Inventory.cas_number.ilike(search_pattern)) |
+                    (Inventory.location.ilike(search_pattern)) |
+                    (Inventory.brand.ilike(search_pattern)) |
+                    (Inventory.category.ilike(search_pattern))
+                )
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
     items = db.exec(base.order_by(Inventory.created_at.desc()).offset(skip).limit(limit)).all()
 
-    return {
+    result = {
         "data": [
             _add_user_names(db, _add_specification(InventoryResponse.model_validate(i).model_dump()))
             for i in items
@@ -462,6 +611,17 @@ def list_inventory(
         "skip": skip,
         "limit": limit,
     }
+    
+    # 缓存第一页结果
+    if skip == 0:
+        # 缓存时不包含分页参数
+        cache_data = {
+            "data": result["data"],
+            "total": result["total"],
+        }
+        _set_cached_result(cache_key, cache_data)
+    
+    return result
 
 
 @router.get("/{inventory_id}", response_model=InventoryResponse)
@@ -554,6 +714,10 @@ def borrow_item(
 
     db.commit()
     db.refresh(item)
+    
+    # 清除列表缓存，确保借用人后立即查询到最新数据
+    _clear_list_cache()
+    
     response = InventoryResponse.model_validate(item).model_dump()
     return _add_specification(response)
 
@@ -620,7 +784,10 @@ def return_item(
     item.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(item)
-
+    
+    # 清除列表缓存，确保归还后立即查询到最新数据
+    _clear_list_cache()
+    
     result = item.model_dump()
     if low_quantity_warning:
         result["warning"] = low_quantity_warning
