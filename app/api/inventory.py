@@ -26,7 +26,7 @@ from app.models.inventory import (
     BorrowLog,
     ManualInventoryCreate,
 )
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.core.auth import get_current_user, require_admin
 from app.services.cas_utils import normalize_cas
 from app.services.internal_code import generate_internal_code
@@ -182,6 +182,7 @@ def _add_user_names(db: Session, item_dict: dict) -> dict:
 def check_cas_inventory(
     cas_number: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Check CAS number inventory status.
@@ -225,6 +226,7 @@ def check_cas_inventory(
 def get_cas_total_quantity(
     cas_number: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get total remaining quantity for a CAS number."""
     normalized_cas = normalize_cas(cas_number)
@@ -250,6 +252,7 @@ def get_cas_total_quantity(
 def get_inventory_by_internal_code(
     internal_code: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get inventory item by internal code"""
     item = _find_by_code(db, internal_code)
@@ -420,7 +423,7 @@ def get_pending_stockin(
 ):
     """Get items pending location assignment (temporary keeper = current user)."""
     statement = select(Inventory).where(
-        Inventory.location == None,
+        Inventory.location is None,
         Inventory.temporary_keeper_id == current_user.id,
     ).order_by(Inventory.created_at.desc())
 
@@ -535,7 +538,7 @@ def list_inventory(
     if cas_filter:
         base = base.where(Inventory.cas_number == normalize_cas(cas_filter))
     if hazardous_only:
-        base = base.where(Inventory.is_hazardous == True)
+        base = base.where(Inventory.is_hazardous is True)
     if search:
         # 模糊搜索：移除空格和连字符后进行标准化匹配
         if fuzzy:
@@ -743,7 +746,7 @@ def return_item(
             detail=f"Item is not borrowed, current status: {item.status}",
         )
 
-    if item.borrower_id != current_user.id and current_user.role != "admin":
+    if item.borrower_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not the borrower of this item",
@@ -798,6 +801,7 @@ def return_item(
 def get_borrow_history(
     inventory_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get borrow history for an inventory item (last 10 records)."""
     item = _get_by_id(db, inventory_id)

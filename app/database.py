@@ -7,7 +7,9 @@ import os
 from typing import Generator
 
 from sqlalchemy import event
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import SQLModel, Session, create_engine, select
+
+from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,35 @@ def init_db() -> None:
     """Initialize database and create all tables"""
     SQLModel.metadata.create_all(engine)
     logger.info("Database tables created / verified")
+    
+    # Create default admin user if no users exist
+    _create_default_admin()
+
+
+def _create_default_admin() -> None:
+    """Create default admin user if database is empty"""
+    # Import here to avoid circular import
+    from app.core.auth import get_password_hash
+    
+    with Session(engine) as session:
+        # Check if any users exist
+        statement = select(User)
+        existing_users = session.exec(statement).first()
+        
+        if existing_users is None:
+            # Create default admin user
+            admin = User(
+                username="admin",
+                password_hash=get_password_hash("admin123"),
+                full_name="系统管理员",
+                role=UserRole.ADMIN,
+                is_active=True
+            )
+            session.add(admin)
+            session.commit()
+            logger.info("Default admin user created (username: admin, password: admin123)")
+        else:
+            logger.info("Users already exist, skipping default admin creation")
 
 
 def reset_db() -> None:

@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from pydantic import ConfigDict
 from sqlmodel import Field, SQLModel
 
 
@@ -48,6 +49,8 @@ class UserUpdate(SQLModel):
 
 class UserResponse(SQLModel):
     """DTO for user API responses (excludes sensitive data)"""
+    model_config = ConfigDict(from_attributes=True, json_encoders={datetime: lambda v: v.isoformat()})
+    
     id: int
     username: str
     full_name: Optional[str]

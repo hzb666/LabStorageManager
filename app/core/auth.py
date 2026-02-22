@@ -3,10 +3,9 @@ JWT Authentication Module
 Critical Rule #3: All data modification endpoints must check current_user
 """
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPBearer
 from jose import JWTError, jwt
 import bcrypt
 from sqlmodel import Session
@@ -99,16 +98,16 @@ def decode_token(token: str) -> dict:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
     db: Session = Depends(get_db)
 ) -> User:
     """
-    Dependency to get current authenticated user from JWT token
+    Dependency to get current authenticated user from JWT token (supports Cookie or Bearer)
     
     Critical Rule #3: All data modification endpoints must check current_user
     
     Args:
-        credentials: HTTP Bearer credentials
+        request: HTTP request
         db: Database session
     
     Returns:
@@ -123,9 +122,25 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     
+    # 尝试从 Cookie 或 Authorization header 获取 token
+    token = None
+    
+    # 1. 优先从 Cookie 获取
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        token = cookie_token
+    else:
+        # 2. 从 Authorization header 获取 (Bearer token)
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]  # 去掉 "Bearer " 前缀
+    
+    if not token:
+        raise credentials_exception
+    
     try:
         # Decode token
-        payload = decode_token(credentials.credentials)
+        payload = decode_token(token)
         user_id: str = payload.get("sub")
         
         if user_id is None:

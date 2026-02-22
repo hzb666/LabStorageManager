@@ -1,11 +1,10 @@
 """
 Configuration settings for Lab Storage Manager
 """
-import logging
-import os
+import secrets
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -26,7 +25,7 @@ class Settings(BaseSettings):
     # JWT Authentication
     secret_key: str = Field(default="", description="JWT secret key")
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30 * 24 * 60  # 30 days
+    access_token_expire_minutes: int = 7 * 24 * 60  # 7 days
     
     # CORS
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
@@ -54,8 +53,8 @@ def get_settings() -> Settings:
     if not settings.secret_key:
         if settings.env == "production":
             raise ValueError("SECRET_KEY must be set in production environment")
-        # Use a default key only in development
-        settings.secret_key = "dev-secret-key-do-not-use-in-production-12345"
+        # Use a secure random key in development
+        settings.secret_key = secrets.token_urlsafe(32)
     return settings
 
 

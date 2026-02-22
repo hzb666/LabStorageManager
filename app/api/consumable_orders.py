@@ -242,7 +242,8 @@ def complete_consumable_order(
         )
     
     # Check if user is the applicant or admin
-    if order.applicant_id != current_user.id and current_user.role != "admin":
+    from app.models.user import UserRole
+    if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the order applicant or admin can complete this order"
@@ -337,7 +338,8 @@ def delete_consumable_order(
         )
     
     # Check if user is the applicant or admin
-    if order.applicant_id != current_user.id and current_user.role != "admin":
+    from app.models.user import UserRole
+    if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the order applicant or admin can delete this order"

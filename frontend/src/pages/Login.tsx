@@ -38,11 +38,13 @@ export function Login() {
     setError('')
     try {
       const response = await authAPI.login(data.username, data.password)
-      const { access_token, user } = response.data
-      setAuth(user, access_token)
+      // Token 现在通过 httpOnly Cookie 设置，不需要手动存储
+      const { user } = response.data
+      setAuth(user)
       navigate('/')
-    } catch (err: any) {
-      setError(err.response?.data?.detail || '登录失败，请检查用户名和密码')
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } }
+      setError(error.response?.data?.detail || '登录失败，请检查用户名和密码')
     } finally {
       setLoading(false)
     }

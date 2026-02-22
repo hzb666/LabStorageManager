@@ -20,6 +20,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const user = useAuthStore((state) => state.user)
+  if (user?.role !== 'admin') {
+    return <Navigate to="/" replace />
+  }
+  return <>{children}</>
+}
+
 function App() {
   // 初始化主题
   useTheme()
@@ -43,7 +51,11 @@ function App() {
           <Route path="consumables" element={<ConsumableOrdersPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="import" element={<ImportPage />} />
-          <Route path="admin/users" element={<AdminUsersPage />} />
+          <Route path="admin/users" element={
+            <AdminRoute>
+              <AdminUsersPage />
+            </AdminRoute>
+          } />
         </Route>
       </Routes>
     </BrowserRouter>

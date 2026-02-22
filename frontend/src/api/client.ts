@@ -8,15 +8,14 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // 允许发送 Cookie
+  withCredentials: true,
 })
 
-// Request interceptor — read token from Zustand store (single source of truth)
+// Request interceptor — 不再从 localStorage 读取 token，改为使用 Cookie
 api.interceptors.request.use(
   (config) => {
-    const token = useAuthStore.getState().token
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
+    // Token 现在通过 httpOnly Cookie 自动发送，不需要手动设置
     return config
   },
   (error) => {
@@ -53,6 +52,7 @@ export interface PaginationParams {
 export const authAPI = {
   login: (username: string, password: string) =>
     api.post('/users/login', { username, password }),
+  logout: () => api.post('/users/logout'),
   getProfile: () => api.get('/users/me'),
 }
 
@@ -88,7 +88,7 @@ export const reagentOrderAPI = {
     is_hazardous: boolean
     notes?: string
   }) => api.post('/reagent-orders', data),
-  update: (id: number, data: any) => api.put(`/reagent-orders/${id}`, data),
+  update: (id: number, data: Record<string, unknown>) => api.put(`/reagent-orders/${id}`, data),
   delete: (id: number) => api.delete(`/reagent-orders/${id}`),
   approve: (id: number) => api.post(`/reagent-orders/${id}/approve`),
   reject: (id: number, reason: string) => 
@@ -118,7 +118,7 @@ export const consumableOrderAPI = {
     is_hazardous: boolean
     notes?: string
   }) => api.post('/consumable-orders', data),
-  update: (id: number, data: any) => api.put(`/consumable-orders/${id}`, data),
+  update: (id: number, data: Record<string, unknown>) => api.put(`/consumable-orders/${id}`, data),
   delete: (id: number) => api.delete(`/consumable-orders/${id}`),
   approve: (id: number) => api.post(`/consumable-orders/${id}/approve`),
   reject: (id: number, reason: string) => 
@@ -137,7 +137,7 @@ export const inventoryAPI = {
   borrow: (id: number) => api.post(`/inventory/${id}/borrow`),
   return: (id: number, data: { remaining_quantity: number; unit?: string }) =>
     api.post(`/inventory/${id}/return`, data),
-  update: (id: number, data: any) => api.put(`/inventory/${id}`, data),
+  update: (id: number, data: Record<string, unknown>) => api.put(`/inventory/${id}`, data),
   delete: (id: number) => api.delete(`/inventory/${id}`),
   getMyBorrows: () => api.get('/inventory/dashboard/my-borrows'),
   getPendingStockin: () => api.get('/inventory/dashboard/pending-stockin'),
