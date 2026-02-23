@@ -123,7 +123,6 @@ def import_inventory_from_excel(
         'initial_quantity': ['initial_quantity', '初始数量', '数量', 'quantity'],
         'location': ['location', '位置', '存放位置'],
         'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
-        'price': ['price', '单价', '价格'],
         'notes': ['notes', '备注', 'remark'],
         'created_at': ['created_at', '入库时间', '创建时间', 'stock_in_date'],
     }
@@ -192,14 +191,6 @@ def import_inventory_from_excel(
                     # Invalid date format - skip using custom date, use default
                     pass
             
-            # Parse price
-            price = None
-            if pd.notna(row.get('price')):
-                try:
-                    price = float(row.get('price'))
-                except (ValueError, TypeError):
-                    pass
-            
             # Generate internal code (1 item per row for direct import)
             internal_codes = generate_internal_code(db, normalized_cas, 1)
             internal_code = internal_codes[0]
@@ -219,7 +210,6 @@ def import_inventory_from_excel(
                 unit=unit,
                 is_hazardous=is_hazardous,
                 status=InventoryStatus.IN_STOCK,
-                price=price,
                 notes=notes,
                 created_at=created_at,
             )
@@ -310,12 +300,6 @@ def generate_import_template() -> dict:
                 "label": "是否危险品",
                 "required": False,
                 "description": "true/false 或 1/0，危险品需要特殊存储"
-            },
-            {
-                "name": "price",
-                "label": "单价(元)",
-                "required": False,
-                "description": "单价，例如 150.00"
             },
             {
                 "name": "notes",

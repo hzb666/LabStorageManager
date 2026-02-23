@@ -123,11 +123,6 @@ export const IMPORT_TEMPLATE_COLUMNS: ImportColumn[] = [
     description: 'true/false 或 1/0，危险品需要特殊存储',
   },
   {
-    name: 'price',
-    required: false,
-    description: '单价，例如 150.00',
-  },
-  {
     name: 'notes',
     required: false,
     description: '其他需要记录的信息，例如 易燃物品',

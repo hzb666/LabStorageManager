@@ -515,7 +515,6 @@ def stock_in_reagent_order(
             is_hazardous=order.is_hazardous,
             image_path=order.image_path,
             status=InventoryStatus.IN_STOCK,
-            price=order.price,
             notes=order.notes,
         )
         db.add(inv)

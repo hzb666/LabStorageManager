@@ -76,7 +76,6 @@ export function ImportPage() {
       if (c.name === 'specification') return '500ml'
       if (c.name === 'initial_quantity') return '10'
       if (c.name === 'is_hazardous') return 'false'
-      if (c.name === 'price') return '150.00'
       return ''
     }).join(',')
     

@@ -32,7 +32,6 @@ class InventoryBase(SQLModel):
     is_hazardous: bool = False
     image_path: Optional[str] = None  # Copied from Order
     notes: Optional[str] = Field(None, max_length=500)  # User custom notes
-    price: Optional[float] = Field(None, ge=0)  # Price
 
 
 class Inventory(InventoryBase, table=True):
@@ -66,7 +65,6 @@ class InventoryCreate(SQLModel):
     image_path: Optional[str] = None
     temporary_keeper_id: Optional[int] = None
     notes: Optional[str] = None
-    price: Optional[float] = None
 
 
 class InventoryUpdate(SQLModel):
@@ -79,7 +77,6 @@ class InventoryUpdate(SQLModel):
     english_name: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
-    price: Optional[float] = None
 
 
 class InventoryBorrowReturn(SQLModel):
@@ -109,7 +106,6 @@ class InventoryResponse(SQLModel):
     temporary_keeper_id: Optional[int]
     created_by_id: Optional[int]
     notes: Optional[str]
-    price: Optional[float]
     created_at: datetime
     updated_at: datetime
     # Computed field: specification (e.g., "500ml")
@@ -159,5 +155,4 @@ class ManualInventoryCreate(SQLModel):
     is_hazardous: bool = False
     category: Optional[str] = None
     brand: Optional[str] = None
-    price: Optional[float] = None
     notes: Optional[str] = None

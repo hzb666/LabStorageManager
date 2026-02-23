@@ -284,7 +284,7 @@ def export_inventory(
     writer.writerow([
         "CAS号", "名称", "英文名", "别名", "分类", "品牌",
         "位置", "初始数量", "剩余数量", "单位", "状态",
-        "是否危险品", "单价", "入库时间", "备注",
+        "是否危险品", "入库时间", "备注",
     ])
 
     for item in items:
@@ -301,7 +301,6 @@ def export_inventory(
             item.unit,
             item.status.value if hasattr(item.status, "value") else item.status,
             "是" if item.is_hazardous else "否",
-            item.price if item.price is not None else "",
             item.created_at.strftime("%Y-%m-%d %H:%M:%S") if item.created_at else "",
             item.notes or "",
         ])
@@ -358,7 +357,6 @@ def manual_add_inventory(
             remaining_quantity=per_bottle_value,
             unit=unit,
             is_hazardous=item_data.is_hazardous,
-            price=item_data.price,
             notes=item_data.notes,
             status=InventoryStatus.IN_STOCK,
             created_by_id=current_user.id,
