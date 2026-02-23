@@ -2,6 +2,7 @@
 Excel Import Service - Parse Excel files for inventory bulk import
 """
 import pandas as pd
+from datetime import datetime, date, timedelta
 from typing import List, Tuple, Optional
 from sqlalchemy.orm import Session
 
@@ -123,7 +124,8 @@ def import_inventory_from_excel(
         'location': ['location', '位置', '存放位置'],
         'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
         'price': ['price', '单价', '价格'],
-        'notes': ['notes', '备注', 'remark']
+        'notes': ['notes', '备注', 'remark'],
+        'created_at': ['created_at', '入库时间', '创建时间', 'stock_in_date'],
     }
     
     # Normalize columns
@@ -163,6 +165,33 @@ def import_inventory_from_excel(
             is_hazardous = bool(row.get('is_hazardous', default_is_hazardous)) if pd.notna(row.get('is_hazardous')) else default_is_hazardous
             notes = str(row.get('notes', '')).strip() if pd.notna(row.get('notes')) else None
             
+            # Parse created_at (custom stock-in date)
+            created_at = None
+            if pd.notna(row.get('created_at')):
+                date_value = row.get('created_at')
+                try:
+                    # Handle multiple date formats:
+                    # - String: "2024-01-15", "2024/01/15", "240115", "240101"
+                    # - Numeric: Excel date serial (5 digits like 45292), YYYYMMDD (8 digits), YYMMDD (6 digits)
+                    date_str = str(date_value).strip()
+                    
+                    # Try parsing as numeric
+                    if date_str.isdigit():
+                        if len(date_str) == 5:  # Excel date serial (e.g., 45292 = 2024-01-15)
+                            excel_epoch = date(1899, 12, 30)  # Excel epoch
+                            date_str = str(excel_epoch + timedelta(days=int(date_str)))
+                        elif len(date_str) == 8:  # YYYYMMDD
+                            date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                        elif len(date_str) == 6:  # YYMMDD
+                            # Assume 2000s for years 00-99
+                            date_str = f"20{date_str[:2]}-{date_str[2:4]}-{date_str[4:6]}"
+                    
+                    # Convert pandas Timestamp to Python datetime
+                    created_at = pd.to_datetime(date_str).to_pydatetime()
+                except (ValueError, TypeError):
+                    # Invalid date format - skip using custom date, use default
+                    pass
+            
             # Parse price
             price = None
             if pd.notna(row.get('price')):
@@ -192,6 +221,7 @@ def import_inventory_from_excel(
                 status=InventoryStatus.IN_STOCK,
                 price=price,
                 notes=notes,
+                created_at=created_at,
             )
             
             db.add(inventory)
@@ -292,6 +322,12 @@ def generate_import_template() -> dict:
                 "label": "备注",
                 "required": False,
                 "description": "其他需要记录的信息，例如 易燃物品"
+            },
+            {
+                "name": "created_at",
+                "label": "入库日期",
+                "required": False,
+                "description": "支持格式: YYYY-MM-DD、YYYY/MM/DD、YYMMDD、YYYYMMDD、Excel序列号(如 45292)。留空则使用导入时间"
             }
         ]
     }

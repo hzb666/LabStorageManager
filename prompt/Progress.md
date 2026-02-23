@@ -81,6 +81,7 @@
 | 2026-02-16 | Bug Fix | ✅ | 一键入库修复: 后端支持 APPROVED 直接入库, 耗材订单修复 API 调用 |
 | 2026-02-17 | PR Review Fix | ✅ | PR Review 遗留 4 项修复: CSV参数、驳回逻辑、入库权限、common_public拦截 |
 | 2026-02-18 | Frontend UX | ✅ | 隐藏 internal_code 前端展示（Inventory/Dashboard 改为仅展示 CAS） |
+| 2026-02-23 | Feature | ✅ | 导入模板支持自定义 created_at 字段（入库日期） |
 
 ### Data Import (2026-02-18) ✅
 - [x] 1) 完整性检查: 8599 条原始数据，CAS 异常 18 条，完全重复 19 条
@@ -92,9 +93,9 @@
 **清洗后关键指标**:
 - CAS 异常: 0 | 完全重复: 0 | 有效记录: 8580 | 库存总量: 17179 条
 
-**Last Updated**: 2026-02-18
-**Status**: Phase 1-10 完成，前端已隐藏 internal_code 展示
-**Next**: Future Enhancements (化学兼容性检查、批量操作等)
+**Last Updated**: 2026-02-23
+**Status**: 导入模板支持自定义入库日期 (created_at) 字段
+**Next**: 提交代码并测试验证
 
 ---
 
