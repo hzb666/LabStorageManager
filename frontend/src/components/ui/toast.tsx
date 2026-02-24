@@ -85,7 +85,7 @@ export function ToastContainer() {
         <div
           key={t.id}
           className={cn(
-            'flex items-start gap-3 px-4 py-3 rounded-lg border shadow-lg animate-in slide-in-from-right-full fade-in duration-300',
+            'flex items-start gap-3 px-4 py-3 rounded-lg border shadow-lg animate-in slide-in-from-right-full fade-in duration-300 transition-none',
             styles[t.type]
           )}
         >

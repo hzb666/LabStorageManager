@@ -11,6 +11,8 @@ import type { SortingState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { userAdminAPI } from '@/api/client'
@@ -167,7 +169,7 @@ export function AdminUsersPage() {
         return (
           <div className="flex items-center gap-1">
             <Button
-              variant="outline"
+              variant="morden"
               size="sm"
               className="h-8 w-8 p-0"
               title="编辑"
@@ -181,7 +183,7 @@ export function AdminUsersPage() {
             </Button>
             {!user.is_active && !isSelf && (
               <Button
-                variant="outline"
+                variant="morden"
                 size="sm"
                 className="h-8 w-8 p-0 text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-950"
                 title="激活"
@@ -195,7 +197,7 @@ export function AdminUsersPage() {
             )}
             {user.is_active && !isSelf && (
               <Button
-                variant="outline"
+                variant="morden"
                 size="sm"
                 className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                 title="禁用"
@@ -332,73 +334,59 @@ export function AdminUsersPage() {
       {/* 标题和按钮 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">用户管理</h1>
-        <Button onClick={() => setDialogState('create')}>
+        <Button onClick={() => setDialogState('create')} size="lg">
           <UserPlus className="w-4 h-4 mr-1.5" />
           创建用户
         </Button>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="py-4">
-          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="搜索用户名、姓名..."
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="pl-9 pr-8 h-9 text-sm w-full"
-              />
-              {globalFilter && (
-                <button
-                  onClick={() => setGlobalFilter('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            <select
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              className="h-9 px-3 pr-8 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
-              style={{
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 0.5rem center',
-                backgroundSize: '1rem'
-              }}
+      {/* Search & Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <div className="relative flex-1 min-w-50">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="搜索用户名、姓名..."
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            className="pl-9 pr-8 h-10 text-base w-full"
+          />
+          {globalFilter && (
+            <button
+              onClick={() => setGlobalFilter('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
-              <option value="all">全部角色</option>
-              <option value="admin">管理员</option>
-              <option value="user">用户</option>
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-9 px-3 pr-8 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
-              style={{
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 0.5rem center',
-                backgroundSize: '1rem'
-              }}
-            >
-              <option value="all">全部状态</option>
-              <option value="active">已启用</option>
-              <option value="inactive">已禁用</option>
-            </select>
-          </div>
-        </CardContent>
-      </Card>
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value)}>
+          <SelectTrigger className="w-[120px] h-9">
+            <SelectValue placeholder="全部角色" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部角色</SelectItem>
+            <SelectItem value="admin">管理员</SelectItem>
+            <SelectItem value="user">用户</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
+          <SelectTrigger className="w-[120px] h-9">
+            <SelectValue placeholder="全部状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="active">已启用</SelectItem>
+            <SelectItem value="inactive">已禁用</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {/* Users Table */}
       <Card>
-        <CardHeader className="py-4">
+        <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Users className="w-5 h-5" />
-            用户列表 <span className="text-muted-foreground font-normal">({data.length})</span>
+            用户列表 <span className="text-muted-foreground font-normal">(&thinsp;{data.length}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -420,11 +408,11 @@ export function AdminUsersPage() {
               暂无用户数据
             </div>
           ) : (
-            <div className="rounded-md border overflow-auto">
+            <div className="px-6 rounded-md overflow-auto">
               <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                 <thead>
                   {table.getHeaderGroups().map(headerGroup => (
-                    <tr key={headerGroup.id} className="border-b bg-muted/30">
+                    <tr key={headerGroup.id} className="border-b-2 border-border">
                       {headerGroup.headers.map(header => (
                         <th 
                           key={header.id} 
@@ -441,7 +429,7 @@ export function AdminUsersPage() {
                 </thead>
                 <tbody>
                   {table.getRowModel().rows.map(row => (
-                    <tr key={row.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                    <tr key={row.id} className="border-b border-border hover:bg-muted/30 transition-none">
                       {row.getVisibleCells().map(cell => (
                         <td 
                           key={cell.id} 
@@ -468,7 +456,7 @@ export function AdminUsersPage() {
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div>
-              <Label htmlFor="create_username" className="mb-1.5 block">
+              <Label htmlFor="create_username" className={LABEL_STYLES.base}>
                 用户名 <span className="text-destructive">*</span>
               </Label>
               <Input
@@ -476,14 +464,14 @@ export function AdminUsersPage() {
                 value={createData.username}
                 onChange={(e) => setCreateData({ ...createData, username: e.target.value })}
                 placeholder="请输入用户名"
-                className={cn("h-9", createErrors.username && 'border-destructive')}
+                className={cn(INPUT_STYLES.lg, createErrors.username && 'border-destructive')}
               />
               {createErrors.username && (
                 <p className="text-xs text-destructive mt-1">{createErrors.username}</p>
               )}
             </div>
             <div>
-              <Label htmlFor="create_password" className="mb-1.5 block">
+              <Label htmlFor="create_password" className={LABEL_STYLES.base}>
                 密码 <span className="text-destructive">*</span>
               </Label>
               <Input
@@ -492,45 +480,42 @@ export function AdminUsersPage() {
                 value={createData.password}
                 onChange={(e) => setCreateData({ ...createData, password: e.target.value })}
                 placeholder="请输入密码"
-                className={cn("h-9", createErrors.password && 'border-destructive')}
+                className={cn(INPUT_STYLES.lg, createErrors.password && 'border-destructive')}
               />
               {createErrors.password && (
                 <p className="text-xs text-destructive mt-1">{createErrors.password}</p>
               )}
             </div>
             <div>
-              <Label htmlFor="create_fullname" className="mb-1.5 block">姓名</Label>
+              <Label htmlFor="create_fullname" className={LABEL_STYLES.base}>姓名</Label>
               <Input
                 id="create_fullname"
                 value={createData.full_name}
                 onChange={(e) => setCreateData({ ...createData, full_name: e.target.value })}
                 placeholder="请输入姓名"
-                className="h-9"
+                className={INPUT_STYLES.lg}
               />
             </div>
             <div>
-              <Label htmlFor="create_role" className="mb-1.5 block">角色</Label>
-              <select
-                id="create_role"
+              <Label htmlFor="create_role" className={LABEL_STYLES.base}>角色</Label>
+              <Select
                 value={createData.role}
-                onChange={(e) => setCreateData({ ...createData, role: e.target.value as 'admin' | 'user' })}
-                className="w-full h-9 px-3 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 0.5rem center',
-                  backgroundSize: '1rem'
-                }}
+                onValueChange={(value) => setCreateData({ ...createData, role: value as 'admin' | 'user' })}
               >
-                <option value="user">用户</option>
-                <option value="admin">管理员</option>
-              </select>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="选择角色" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">用户</SelectItem>
+                  <SelectItem value="admin">管理员</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex gap-2 pt-3 border-t">
-              <Button onClick={handleCreate} disabled={createLoading} size="sm">
+              <Button onClick={handleCreate} disabled={createLoading} size="lg">
                 {createLoading ? '创建中...' : '创建'}
               </Button>
-              <Button variant="outline" onClick={() => handleCreateModalClose(false)} size="sm">
+              <Button variant="morden" onClick={() => handleCreateModalClose(false)} size="lg" className="text-base">
                 取消
               </Button>
             </div>
@@ -546,47 +531,44 @@ export function AdminUsersPage() {
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div>
-              <Label htmlFor="edit_username" className="mb-1.5 block">用户名</Label>
+              <Label htmlFor="edit_username" className={LABEL_STYLES.base}>用户名</Label>
               <Input
                 id="edit_username"
                 value={editUser?.username || ''} 
                 disabled 
-                className="h-9 bg-muted"
+                className={cn(INPUT_STYLES.lg, "bg-muted")}
               />
             </div>
             <div>
-              <Label htmlFor="edit_fullname" className="mb-1.5 block">姓名</Label>
+              <Label htmlFor="edit_fullname" className={LABEL_STYLES.base}>姓名</Label>
               <Input
                 id="edit_fullname"
                 value={editData.full_name}
                 onChange={(e) => setEditData({ ...editData, full_name: e.target.value })}
                 placeholder="请输入姓名"
-                className="h-9"
+                className={INPUT_STYLES.lg}
               />
             </div>
             <div>
-              <Label htmlFor="edit_role" className="mb-1.5 block">角色</Label>
-              <select
-                id="edit_role"
+              <Label htmlFor="edit_role" className={LABEL_STYLES.base}>角色</Label>
+              <Select
                 value={editData.role}
-                onChange={(e) => setEditData({ ...editData, role: e.target.value as 'admin' | 'user' })}
-                className="w-full h-9 px-3 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 0.5rem center',
-                  backgroundSize: '1rem'
-                }}
+                onValueChange={(value) => setEditData({ ...editData, role: value as 'admin' | 'user' })}
               >
-                <option value="user">用户</option>
-                <option value="admin">管理员</option>
-              </select>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="选择角色" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">用户</SelectItem>
+                  <SelectItem value="admin">管理员</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex gap-2 pt-3 border-t">
-              <Button onClick={handleEdit} disabled={editLoading} size="sm">
+              <Button onClick={handleEdit} disabled={editLoading} size="lg">
                 {editLoading ? '保存中...' : '保存'}
               </Button>
-              <Button variant="outline" onClick={() => setDialogState(null)} size="sm">
+              <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base">
                 取消
               </Button>
             </div>
@@ -605,10 +587,10 @@ export function AdminUsersPage() {
             <p className="text-sm text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="sm">
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg">
               {deleteLoading ? '处理中...' : '确认禁用'}
             </Button>
-            <Button variant="outline" onClick={() => setDialogState(null)} size="sm">
+            <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base">
               取消
             </Button>
           </div>

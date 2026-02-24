@@ -113,8 +113,10 @@ export function ImportPage() {
       if (c.name === 'category') return '有机溶剂'
       if (c.name === 'brand') return 'Sigma'
       if (c.name === 'specification') return '500ml'
-      if (c.name === 'initial_quantity') return '10'
+      if (c.name === 'remaining_quantity') return ''  // optional
+      if (c.name === 'location') return '2-6-6-1'
       if (c.name === 'is_hazardous') return 'false'
+      if (c.name === 'notes') return ''
       return ''
     }).join(',')
     
@@ -140,7 +142,7 @@ export function ImportPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">批量导入库存</h1>
+        <h1 className="text-3xl font-bold tracking-tight card-title-placeholder">批量导入库存</h1>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -151,31 +153,28 @@ export function ImportPage() {
               <FileSpreadsheet className="w-5 h-5" />
               导入数据
             </CardTitle>
-            <CardDescription>
-              上传 Excel/CSV 文件批量导入库存记录
-            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Template Download */}
-            <div className="p-4 rounded-lg bg-muted/50 border">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-                <h4 className="font-medium">模板字段说明</h4>
-                <Button variant="outline" size="sm" onClick={downloadTemplate}>
+            <div className="rounded-lg my-4">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="font-medium">模板字段说明（标 <span className="text-destructive">*</span> 为必填项）</h4>
+                <Button variant="morden" size="lg" onClick={downloadTemplate}>
                   <Download className="w-4 h-4 mr-2" />
                   下载模板
                 </Button>
               </div>
-              <div className="grid gap-2 text-sm">
+              <div className="space-y-3 text-sm">
                 {IMPORT_TEMPLATE_COLUMNS.map(col => (
                   <div key={col.name} className="flex items-start gap-3">
-                    <span className="w-5 flex-shrink-0">
+                    <span className="w-3 flex-shrink-0">
                       {col.required ? (
                         <span className="text-destructive">*</span>
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}
                     </span>
-                    <span className="font-mono w-28 flex-shrink-0 text-xs">{col.name}</span>
+                    <span className="w-28 flex-shrink-0 text-xs mr-10">{col.name}</span>
                     <span className="text-muted-foreground text-xs">{col.description}</span>
                   </div>
                 ))}
@@ -184,10 +183,10 @@ export function ImportPage() {
 
             {/* Drag & Drop Upload Area */}
             <div>
-              <label className="block text-sm font-medium mb-2">上传文件</label>
+              <label className="block text-base font-medium mb-2 mt-10">上传文件</label>
               <div
                 className={cn(
-                  "relative border-2 border-dashed rounded-lg p-6 transition-colors cursor-pointer",
+                  "relative border-2 border-dashed rounded-lg p-6 transition-none cursor-pointer",
                   "hover:border-primary hover:bg-muted/30",
                   isDragging ? "border-primary bg-primary/5" : "border-border",
                   file ? "border-primary/50 bg-primary/5" : ""
@@ -259,7 +258,6 @@ export function ImportPage() {
                 </>
               ) : (
                 <>
-                  <Upload className="w-4 h-4 mr-2" />
                   开始导入
                 </>
               )}
@@ -281,7 +279,7 @@ export function ImportPage() {
               导入结果
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="mt-4">
             {!result ? (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                 <FileSpreadsheet className="w-12 h-12 mb-3 opacity-50" />

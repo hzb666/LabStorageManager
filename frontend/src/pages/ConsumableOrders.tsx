@@ -9,7 +9,10 @@ import {
 import type { SortingState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { consumableOrderAPI } from '@/api/client'
@@ -22,7 +25,6 @@ import {
   ShoppingCart,
   Plus,
   Loader2,
-  Check,
   X,
   AlertTriangle,
   Package,
@@ -349,10 +351,31 @@ export function ConsumableOrdersPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">耗材订购</h1>
-        <Button onClick={() => setShowCreateDialog(true)}>
+        <Button onClick={() => setShowCreateDialog(true)} size="lg">
           <Plus className="w-4 h-4 mr-1.5" />
           创建订单
         </Button>
+      </div>
+
+      {/* Search */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="搜索耗材名称..."
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            className="pl-9 pr-8 h-10 text-base w-full"
+          />
+          {globalFilter && (
+            <button
+              onClick={() => setGlobalFilter('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Create Order Dialog */}
@@ -368,7 +391,7 @@ export function ConsumableOrdersPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* 中文名称 */}
               <div className="col-span-1 sm:col-span-2">
-                <Label htmlFor="create_name" className="mb-1.5 block">
+                <Label htmlFor="create_name" className={LABEL_STYLES.base}>
                   中文名称 <span className="text-destructive">*</span>
                 </Label>
                 <Input
@@ -376,7 +399,7 @@ export function ConsumableOrdersPage() {
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="如: 一次性手套"
-                  className={cn("h-9", formErrors.name && 'border-destructive')}
+                  className={cn(INPUT_STYLES.lg, formErrors.name && 'border-destructive')}
                 />
                 {formErrors.name && (
                   <p className="text-xs text-destructive mt-1">{formErrors.name}</p>
@@ -385,55 +408,55 @@ export function ConsumableOrdersPage() {
 
               {/* 英文名称 */}
               <div>
-                <Label htmlFor="create_english_name" className="mb-1.5 block">英文名称</Label>
+                <Label htmlFor="create_english_name" className={LABEL_STYLES.base}>英文名称</Label>
                 <Input
                   id="create_english_name"
                   value={formData.english_name}
                   onChange={(e) => setFormData(prev => ({ ...prev, english_name: e.target.value }))}
                   placeholder="如: Disposable Gloves"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
               {/* 别名 */}
               <div>
-                <Label htmlFor="create_alias" className="mb-1.5 block">别名</Label>
+                <Label htmlFor="create_alias" className={LABEL_STYLES.base}>别名</Label>
                 <Input
                   id="create_alias"
                   value={formData.alias}
                   onChange={(e) => setFormData(prev => ({ ...prev, alias: e.target.value }))}
                   placeholder="如: 手套"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
               {/* 分类 */}
               <div>
-                <Label htmlFor="create_category" className="mb-1.5 block">分类</Label>
+                <Label htmlFor="create_category" className={LABEL_STYLES.base}>分类</Label>
                 <Input
                   id="create_category"
                   value={formData.category}
                   onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
                   placeholder="如: 手套、试管"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
               {/* 品牌 */}
               <div>
-                <Label htmlFor="create_brand" className="mb-1.5 block">品牌</Label>
+                <Label htmlFor="create_brand" className={LABEL_STYLES.base}>品牌</Label>
                 <Input
                   id="create_brand"
                   value={formData.brand}
                   onChange={(e) => setFormData(prev => ({ ...prev, brand: e.target.value }))}
                   placeholder="如: 3M、Corning"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
               {/* 规格 */}
               <div>
-                <Label htmlFor="create_specification" className="mb-1.5 block">
+                <Label htmlFor="create_specification" className={LABEL_STYLES.base}>
                   规格 <span className="text-destructive">*</span>
                 </Label>
                 <Input
@@ -441,7 +464,7 @@ export function ConsumableOrdersPage() {
                   value={formData.specification}
                   onChange={(e) => setFormData(prev => ({ ...prev, specification: e.target.value }))}
                   placeholder="如: 100只/盒"
-                  className={cn("h-9", formErrors.specification && 'border-destructive')}
+                  className={cn(INPUT_STYLES.lg, formErrors.specification && 'border-destructive')}
                 />
                 {formErrors.specification && (
                   <p className="text-xs text-destructive mt-1">{formErrors.specification}</p>
@@ -450,7 +473,7 @@ export function ConsumableOrdersPage() {
 
               {/* 数量 */}
               <div>
-                <Label htmlFor="create_quantity" className="mb-1.5 block">
+                <Label htmlFor="create_quantity" className={LABEL_STYLES.base}>
                   数量 <span className="text-destructive">*</span>
                 </Label>
                 <Input
@@ -459,7 +482,7 @@ export function ConsumableOrdersPage() {
                   min="1"
                   value={formData.quantity}
                   onChange={(e) => setFormData(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
-                  className={cn("h-9", formErrors.quantity && 'border-destructive')}
+                  className={cn(INPUT_STYLES.lg, formErrors.quantity && 'border-destructive')}
                 />
                 {formErrors.quantity && (
                   <p className="text-xs text-destructive mt-1">{formErrors.quantity}</p>
@@ -468,7 +491,7 @@ export function ConsumableOrdersPage() {
 
               {/* 价格 */}
               <div>
-                <Label htmlFor="create_price" className="mb-1.5 block">价格 (元)</Label>
+                <Label htmlFor="create_price" className={LABEL_STYLES.base}>价格 (元)</Label>
                 <Input
                   id="create_price"
                   type="number"
@@ -477,42 +500,37 @@ export function ConsumableOrdersPage() {
                   value={formData.price}
                   onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
                   placeholder="如: 25.00"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
               {/* 订购原因 */}
               <div>
-                <Label htmlFor="create_order_reason" className="mb-1.5 block">订购原因</Label>
-                <select
-                  id="create_order_reason"
+                <Label htmlFor="create_order_reason" className={LABEL_STYLES.base}>订购原因</Label>
+                <Select
                   value={formData.order_reason}
-                  onChange={(e) => setFormData(prev => ({ ...prev, order_reason: e.target.value }))}
-                  className="h-9 w-full px-3 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right 0.5rem center',
-                    backgroundSize: '1rem'
-                  }}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, order_reason: value }))}
                 >
-                  <option value="none">没有</option>
-                  <option value="running_out">快用完</option>
-                  <option value="empty">用完</option>
-                  <option value="common_public">常用或公用</option>
-                  <option value="not_found">找不到</option>
-                  <option value="reorder">重新下单</option>
-                </select>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="选择订购原因" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">没有</SelectItem>
+                    <SelectItem value="running_out">快用完</SelectItem>
+                    <SelectItem value="empty">用完</SelectItem>
+                    <SelectItem value="common_public">常用或公用</SelectItem>
+                    <SelectItem value="not_found">找不到</SelectItem>
+                    <SelectItem value="reorder">重新下单</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* 危险品 */}
               <div className="flex items-center gap-2 h-9">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="create_is_hazardous"
                   checked={formData.is_hazardous}
-                  onChange={(e) => setFormData(prev => ({ ...prev, is_hazardous: e.target.checked }))}
-                  className="w-4 h-4 rounded"
+                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, is_hazardous: checked === true }))}
                 />
                 <Label htmlFor="create_is_hazardous" className="flex items-center gap-1 cursor-pointer mb-0">
                   <AlertTriangle className="w-4 h-4 text-yellow-500" />
@@ -522,12 +540,12 @@ export function ConsumableOrdersPage() {
 
               {/* 备注 */}
               <div className="col-span-1 sm:col-span-3">
-                <Label htmlFor="create_notes" className="mb-1.5 block">备注</Label>
-                <textarea
+                <Label htmlFor="create_notes" className={LABEL_STYLES.base}>备注</Label>
+                <Input
                   id="create_notes"
                   value={formData.notes}
                   onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                  className="w-full h-20 px-3 py-2 border border-input rounded-md bg-background text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  className={cn("w-full", INPUT_STYLES.lg)}
                   placeholder="其他说明..."
                 />
               </div>
@@ -537,23 +555,21 @@ export function ConsumableOrdersPage() {
               <div className="ml-auto flex gap-2">
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
+                  variant="morden"
+                  size="lg"
+                  className="text-base"
                   onClick={() => handleCloseDialog(false)}
                 >
                   取消
                 </Button>
-                <Button type="submit" disabled={submitting} size="sm">
+                <Button type="submit" disabled={submitting} size="lg">
                   {submitting ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
                       提交中...
                     </>
                   ) : (
-                    <>
-                      <Check className="w-4 h-4 mr-1.5" />
-                      提交订单
-                    </>
+                    '提交订单'
                   )}
                 </Button>
               </div>
@@ -562,37 +578,12 @@ export function ConsumableOrdersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="py-4">
-          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="搜索耗材名称..."
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="pl-9 pr-8 h-9 text-sm w-full"
-              />
-              {globalFilter && (
-                <button
-                  onClick={() => setGlobalFilter('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Table */}
       <Card>
-        <CardHeader className="py-4">
+        <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Package className="w-5 h-5" />
-            耗材订单列表 <span className="text-muted-foreground font-normal">({total})</span>
+            耗材订单列表 <span className="text-muted-foreground font-normal">(&thinsp;{total}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -606,11 +597,11 @@ export function ConsumableOrdersPage() {
             </div>
           ) : (
             <>
-              <div className="rounded-md border overflow-auto">
+              <div className="px-6 rounded-md overflow-auto">
                 <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                   <thead>
                     {table.getHeaderGroups().map(headerGroup => (
-                      <tr key={headerGroup.id} className="border-b bg-muted/30">
+                      <tr key={headerGroup.id} className="border-b-2 border-border">
                         {headerGroup.headers.map(header => (
                           <th 
                             key={header.id} 
@@ -629,7 +620,7 @@ export function ConsumableOrdersPage() {
                     {table.getRowModel().rows.map(row => (
                       <tr 
                         key={row.id} 
-                        className="border-b border-border hover:bg-muted/50 cursor-pointer transition-colors"
+                        className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none"
                       >
                         {row.getVisibleCells().map(cell => (
                           <td 
@@ -646,7 +637,7 @@ export function ConsumableOrdersPage() {
                 </table>
               </div>
               {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-4 px-4 pb-4">
+                <div className="px-6 flex items-center justify-between pt-4">
                   <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
                   <Pagination
                     currentPage={page}

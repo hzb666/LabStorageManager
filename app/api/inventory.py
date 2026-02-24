@@ -515,8 +515,8 @@ def list_inventory(
     db: Session = Depends(get_db),
 ):
     """List inventory with optional filters and pagination"""
-    # 生成缓存key（包含所有搜索参数）
-    cache_key = f"list:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}"
+    # 生成缓存key（包含所有搜索参数，包括分页）
+    cache_key = f"list:{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}"
     
     # 尝试从缓存获取（仅当是第一页时）
     if skip == 0:

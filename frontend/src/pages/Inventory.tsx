@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -9,7 +9,10 @@ import {
 import type { SortingState, ColumnFiltersState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
+import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useNavigate } from 'react-router-dom'
@@ -24,7 +27,6 @@ import {
   AlertTriangle,
   Loader2,
   ArrowUpFromLine,
-  Import,
   Plus,
   X,
   Pencil,
@@ -183,7 +185,7 @@ const ActionButtons = React.memo(function ActionButtons({
   return (
     <div className="flex items-center gap-1">
       <Button
-        variant="outline"
+        variant="morden"
         size="sm"
         className="h-8 w-8 p-0"
         title="编辑"
@@ -639,7 +641,7 @@ export function InventoryPage() {
         )
       },
     }),
-  ], [displayFilter, fuzzySearch, handleEditClick, loadInventory])
+  ], [displayFilter, handleEditClick, loadInventory])
 
   const table = useReactTable({
     data,
@@ -797,18 +799,88 @@ export function InventoryPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">库存管理</h1>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => setDialogState('add')}>
+          <Button onClick={() => setDialogState('add')} size="lg">
             <Plus className="w-4 h-4 mr-1.5" />
             手动入库
           </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate('/import')}>
-            <Import className="w-4 h-4 mr-1.5" />
-            批量导入
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExport}>
+          <Button variant="morden" size="lg" onClick={handleExport}>
             <ArrowUpFromLine className="w-4 h-4 mr-1.5" />
             导出
           </Button>
+        </div>
+      </div>
+
+      {/* Search & Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <div className="relative flex-1 min-w-50">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="搜索名称、CAS号、位置..."
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            className="pl-9 pr-8 text-base w-full inline-flex leading-none"
+          />
+          {globalFilter && (
+            <button
+              onClick={() => setGlobalFilter('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        {/* 搜索字段选择器和状态过滤器与模糊搜索开关横向排列 */}
+        <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">
+          {/* 模糊搜索开关 */}
+          <label className="flex items-center gap-2 text-sm cursor-pointer whitespace-nowrap">
+            <Checkbox
+              checked={fuzzySearch}
+              onCheckedChange={(checked: boolean | string) => {
+                // 使用 startTransition 标记非紧急更新，避免阻塞 UI
+                startTransition(() => {
+                  setFuzzySearch(checked === true)
+                  if (apiFilter) {
+                    setPage(1)
+                  }
+                })
+              }}
+            />
+            <span className="text-base">模糊搜索</span>
+          </label>
+          {/* 搜索字段选择器 */}
+          <Select
+            value={searchField}
+            onValueChange={(value) => {
+              setSearchField(value)
+              setPage(1)
+            }}
+          >
+            <SelectTrigger className="w-30">
+              <SelectValue placeholder="全部" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部</SelectItem>
+              <SelectItem value="name">名称</SelectItem>
+              <SelectItem value="cas_number">CAS号</SelectItem>
+              <SelectItem value="location">位置</SelectItem>
+              <SelectItem value="brand">品牌</SelectItem>
+              <SelectItem value="category">分类</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(value) => handleStatusFilterChange(value)}
+          >
+            <SelectTrigger className="w-30">
+              <SelectValue placeholder="全部状态" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部状态</SelectItem>
+              <SelectItem value="in_stock">在库</SelectItem>
+              <SelectItem value="borrowed">借出</SelectItem>
+              <SelectItem value="consumed">已用完</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -816,69 +888,69 @@ export function InventoryPage() {
       <Dialog open={dialogState === 'edit'} onOpenChange={handleEditModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-xl">编辑库存</DialogTitle>
+            <DialogTitle className="text-2xl pb-4">编辑库存</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* 第一行：名称（占2列）、CAS号（1列） */}
             <div className="col-span-1 sm:col-span-2">
-              <Label htmlFor="edit_name" className="mb-1.5 block">
+              <Label htmlFor="edit_name" className={LABEL_STYLES.base}>
                 名称 <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="edit_name"
                 value={editFormData.name}
                 onChange={(e) => handleEditNameChange(e.target.value)}
-                className="h-9"
+                className={INPUT_STYLES.lg}
                 placeholder="如: 乙醇"
               />
             </div>
             <div>
-              <Label htmlFor="edit_cas" className="mb-1.5 block">
+              <Label htmlFor="edit_cas" className={LABEL_STYLES.base}>
                 CAS号
               </Label>
               <Input
                 id="edit_cas"
                 value={editFormData.cas_number}
                 disabled
-                className="h-9 bg-muted"
+                className={cn(INPUT_STYLES.lg, "bg-muted")}
               />
             </div>
 
             {/* 第二行：英文名称（占2列）、别名（1列） */}
             <div className="col-span-1 sm:col-span-2">
-              <Label htmlFor="edit_english_name" className="mb-1.5 block">英文名称</Label>
+              <Label htmlFor="edit_english_name" className={LABEL_STYLES.base}>英文名称</Label>
               <Input
                 id="edit_english_name"
                 value={editFormData.english_name || ''}
                 onChange={(e) => handleEditEnglishNameChange(e.target.value)}
-                className="h-9"
+                className={INPUT_STYLES.lg}
                 placeholder="如: Ethanol"
               />
             </div>
             <div>
-              <Label htmlFor="edit_alias" className="mb-1.5 block">别名</Label>
+              <Label htmlFor="edit_alias" className={LABEL_STYLES.base}>别名</Label>
               <Input
                 id="edit_alias"
                 value={editFormData.alias || ''}
                 onChange={(e) => handleEditAliasChange(e.target.value)}
-                className="h-9"
+                className={INPUT_STYLES.lg}
                 placeholder="如: 酒精"
               />
             </div>
 
             {/* 第三行：位置（1列）、剩余量（1列）、规格（1列） */}
             <div>
-              <Label htmlFor="edit_location" className="mb-1.5 block">库存位置</Label>
+              <Label htmlFor="edit_location" className={LABEL_STYLES.base}>库存位置</Label>
               <Input
                 id="edit_location"
                 value={editFormData.location || ''}
                 onChange={(e) => handleEditLocationChange(e.target.value)}
-                className="h-9"
+                className={INPUT_STYLES.lg}
                 placeholder="如: A-1-1 柜"
               />
             </div>
             <div>
-              <Label htmlFor="edit_remaining" className="mb-1.5 block">
+              <Label htmlFor="edit_remaining" className={LABEL_STYLES.base}>
                 剩余量 <span className="text-destructive">*</span>
               </Label>
               <Input
@@ -886,52 +958,50 @@ export function InventoryPage() {
                 type="number"
                 value={editFormData.remaining_quantity}
                 onChange={(e) => handleEditRemainingQuantityChange(parseFloat(e.target.value) || 0)}
-                className="h-9"
+                className={INPUT_STYLES.lg}
               />
             </div>
             <div>
-              <Label htmlFor="edit_spec" className="mb-1.5 block">
+              <Label htmlFor="edit_spec" className={LABEL_STYLES.base}>
                 规格 <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="edit_spec"
                 value={editFormData.specification || ''}
                 onChange={(e) => handleEditSpecificationChange(e.target.value)}
-                className="h-9"
+                className={INPUT_STYLES.lg}
                 placeholder="如: 500ml"
               />
             </div>
 
             {/* 第四行：品牌、分类、危险品 */}
             <div>
-              <Label htmlFor="edit_brand" className="mb-1.5 block">品牌</Label>
+              <Label htmlFor="edit_brand" className={LABEL_STYLES.base}>品牌</Label>
               <Input
                 id="edit_brand"
                 value={editFormData.brand || ''}
                 onChange={(e) => handleEditBrandChange(e.target.value)}
-                className="h-9"
+                className={INPUT_STYLES.lg}
                 placeholder="如: Sigma"
               />
             </div>
             <div>
-              <Label htmlFor="edit_category" className="mb-1.5 block">分类</Label>
+              <Label htmlFor="edit_category" className={LABEL_STYLES.base}>分类</Label>
               <Input
                 id="edit_category"
                 value={editFormData.category || ''}
                 onChange={(e) => handleEditCategoryChange(e.target.value)}
-                className="h-9"
+                className={INPUT_STYLES.lg}
                 placeholder="如: 有机试剂"
               />
             </div>
-            <div className="flex items-center gap-2 h-9">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-2">
+              <Checkbox
                 id="edit_is_hazardous"
                 checked={editFormData.is_hazardous}
-                onChange={(e) => handleEditHazardousChange(e.target.checked)}
-                className="w-4 h-4 rounded"
+                onCheckedChange={(checked) => handleEditHazardousChange(checked === true)}
               />
-              <Label htmlFor="edit_is_hazardous" className="flex items-center gap-1 cursor-pointer mb-0">
+              <Label htmlFor="edit_is_hazardous" className="flex items-center gap-1 cursor-pointer mb-0 text-base">
                 <AlertTriangle className="w-4 h-4 text-yellow-500" />
                 危险品
               </Label>
@@ -939,23 +1009,19 @@ export function InventoryPage() {
 
             {/* 备注 */}
             <div className="col-span-1 sm:col-span-3">
-              <Label htmlFor="edit_notes" className="mb-1.5 block">备注</Label>
-              <textarea
+              <Label htmlFor="edit_notes" className={LABEL_STYLES.base}>备注</Label>
+              <Input
                 id="edit_notes"
                 value={editFormData.notes || ''}
                 onChange={(e) => handleEditNotesChange(e.target.value)}
-                className="w-full h-20 px-3 py-2 border border-input rounded-md bg-background text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className={cn("w-full", INPUT_STYLES.lg)}
                 placeholder="其他说明..."
               />
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3 mt-4 pt-3 border-t">
+          <div className="flex flex-col sm:flex-row gap-3 mt-4 pt-3">
             <div className="flex items-center gap-2">
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleDeleteClick}
-              >
+              <Button variant="destructive" size="lg" onClick={handleDeleteClick}>
                 <Trash2 className="w-4 h-4 mr-1.5" />
                 {deleteConfirm ? '确认删除' : '删除'}
               </Button>
@@ -964,14 +1030,10 @@ export function InventoryPage() {
               )}
             </div>
             <div className="ml-auto flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDialogState(null)}
-              >
+              <Button variant="morden" size="lg" onClick={() => setDialogState(null)}>
                 取消
               </Button>
-              <Button size="sm" onClick={handleEditSave}>
+              <Button onClick={handleEditSave} size="lg">
                 保存
               </Button>
             </div>
@@ -983,13 +1045,13 @@ export function InventoryPage() {
       <Dialog open={dialogState === 'add'} onOpenChange={handleManualAddModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-xl">手动入库</DialogTitle>
+            <DialogTitle className="text-2xl pb-4">手动入库</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleManualAdd}>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* 第一行：试剂名称（占2列）、CAS号（1列） */}
               <div className="col-span-1 sm:col-span-2">
-                <Label htmlFor="add_name" className="mb-1.5 block">
+                <Label htmlFor="add_name" className={LABEL_STYLES.base}>
                   试剂名称 <span className="text-destructive">*</span>
                 </Label>
                 <Input
@@ -997,7 +1059,7 @@ export function InventoryPage() {
                   value={formData.name}
                   onChange={(e) => handleNameChange(e.target.value)}
                   placeholder="如: 乙醇"
-                  className={cn("h-9", formErrors.name && 'border-destructive')}
+                  className={cn(INPUT_STYLES.lg, formErrors.name && 'border-destructive')}
                 />
                 {formErrors.name && (
                   <p className="text-xs text-destructive mt-1">{formErrors.name}</p>
@@ -1005,7 +1067,7 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <Label htmlFor="add_cas" className="mb-1.5 block">
+                <Label htmlFor="add_cas" className={LABEL_STYLES.base}>
                   CAS号 <span className="text-destructive">*</span>
                 </Label>
                 <Input
@@ -1013,7 +1075,7 @@ export function InventoryPage() {
                   value={formData.cas_number}
                   onChange={(e) => handleCasNumberChange(e.target.value)}
                   placeholder="如: 64-17-5"
-                  className={cn("h-9", formErrors.cas_number && 'border-destructive')}
+                  className={cn(INPUT_STYLES.lg, formErrors.cas_number && 'border-destructive')}
                 />
                 {formErrors.cas_number && (
                   <p className="text-xs text-destructive mt-1">{formErrors.cas_number}</p>
@@ -1022,7 +1084,7 @@ export function InventoryPage() {
 
               {/* 第二行：英文名称（占2列）、别名（1列） */}
               <div className="col-span-1 sm:col-span-2">
-                <Label htmlFor="add_english_name" className="mb-1.5 block">
+                <Label htmlFor="add_english_name" className={LABEL_STYLES.base}>
                   英文名称
                 </Label>
                 <Input
@@ -1030,35 +1092,35 @@ export function InventoryPage() {
                   value={formData.english_name || ''}
                   onChange={(e) => handleEnglishNameChange(e.target.value)}
                   placeholder="如: Ethanol"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
               <div>
-                <Label htmlFor="add_alias" className="mb-1.5 block">别名</Label>
+                <Label htmlFor="add_alias" className={LABEL_STYLES.base}>别名</Label>
                 <Input
                   id="add_alias"
                   value={formData.alias}
                   onChange={(e) => handleAliasChange(e.target.value)}
                   placeholder="如: 酒精"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
               {/* 第三行：位置（1列）、规格（1列）、瓶数（1列） */}
               <div>
-                <Label htmlFor="add_location" className="mb-1.5 block">存放位置</Label>
+                <Label htmlFor="add_location" className={LABEL_STYLES.base}>存放位置</Label>
                 <Input
                   id="add_location"
                   value={formData.location}
                   onChange={(e) => handleLocationChange(e.target.value)}
                   placeholder="如: A-1-1 柜"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
               <div>
-                <Label htmlFor="add_spec" className="mb-1.5 block">
+                <Label htmlFor="add_spec" className={LABEL_STYLES.base}>
                   规格 <span className="text-destructive">*</span>
                 </Label>
                 <Input
@@ -1066,7 +1128,7 @@ export function InventoryPage() {
                   value={formData.specification}
                   onChange={(e) => handleSpecificationChange(e.target.value)}
                   placeholder="如: 500ml, 1L"
-                  className={cn("h-9", formErrors.specification && 'border-destructive')}
+                  className={cn(INPUT_STYLES.lg, formErrors.specification && 'border-destructive')}
                 />
                 {formErrors.specification && (
                   <p className="text-xs text-destructive mt-1">{formErrors.specification}</p>
@@ -1074,7 +1136,7 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <Label htmlFor="add_quantity" className="mb-1.5 block">
+                <Label htmlFor="add_quantity" className={LABEL_STYLES.base}>
                   瓶数 <span className="text-destructive">*</span>
                 </Label>
                 <Input
@@ -1083,7 +1145,7 @@ export function InventoryPage() {
                   min="1"
                   value={formData.quantity_bottles}
                   onChange={(e) => handleQuantityBottlesChange(parseInt(e.target.value) || 1)}
-                  className={cn("h-9", formErrors.quantity_bottles && 'border-destructive')}
+                  className={cn(INPUT_STYLES.lg, formErrors.quantity_bottles && 'border-destructive')}
                 />
                 {formErrors.quantity_bottles && (
                   <p className="text-xs text-destructive mt-1">{formErrors.quantity_bottles}</p>
@@ -1092,36 +1154,34 @@ export function InventoryPage() {
 
               {/* 第四行：品牌、分类、危险品选择 */}
               <div>
-                <Label htmlFor="add_brand" className="mb-1.5 block">品牌</Label>
+                <Label htmlFor="add_brand" className={LABEL_STYLES.base}>品牌</Label>
                 <Input
                   id="add_brand"
                   value={formData.brand}
                   onChange={(e) => handleBrandChange(e.target.value)}
                   placeholder="如: Sigma"
-                  className="h-9"
+                  className="{INPUT_STYLES.lg} text-base"
                 />
               </div>
 
               <div>
-                <Label htmlFor="add_category" className="mb-1.5 block">分类</Label>
+                <Label htmlFor="add_category" className={LABEL_STYLES.base}>分类</Label>
                 <Input
                   id="add_category"
                   value={formData.category}
                   onChange={(e) => handleCategoryChange(e.target.value)}
                   placeholder="如: 有机试剂"
-                  className="h-9"
+                  className={INPUT_STYLES.lg}
                 />
               </div>
 
-              <div className="flex items-center gap-2 h-9">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2">
+                <Checkbox
                   id="is_hazardous"
                   checked={formData.is_hazardous}
-                  onChange={(e) => handleHazardousChange(e.target.checked)}
-                  className="w-4 h-4 rounded"
+                  onCheckedChange={(checked) => handleHazardousChange(checked === true)}
                 />
-                <Label htmlFor="is_hazardous" className="flex items-center gap-1 cursor-pointer mb-0">
+                <Label htmlFor="is_hazardous" className="flex items-center gap-1 cursor-pointer mb-0 text-base">
                   <AlertTriangle className="w-4 h-4 text-yellow-500" />
                   危险品
                 </Label>
@@ -1129,28 +1189,28 @@ export function InventoryPage() {
 
               {/* 备注保持不变 */}
               <div className="col-span-1 sm:col-span-3">
-                <Label htmlFor="add_notes" className="mb-1.5 block">备注</Label>
-                <textarea
+                <Label htmlFor="add_notes" className={LABEL_STYLES.base}>备注</Label>
+                <Input
                   id="add_notes"
                   value={formData.notes}
                   onChange={(e) => handleNotesChange(e.target.value)}
-                  className="w-full h-20 px-3 py-2 border border-input rounded-md bg-background text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  className={cn("w-full", INPUT_STYLES.lg)}
                   placeholder="其他说明..."
                 />
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3 border-t">
+            <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3">
               <div className="ml-auto flex gap-2">
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
+                  variant="morden"
+                  size="lg"
                   onClick={() => handleManualAddModalClose(false)}
                 >
                   取消
                 </Button>
-                <Button type="submit" disabled={submitting} size="sm">
+                <Button type="submit" size="lg" disabled={submitting}>
                   {submitting ? '入库中...' : '确认入库'}
                 </Button>
               </div>
@@ -1159,91 +1219,12 @@ export function InventoryPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="py-4">
-          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="搜索名称、CAS号、位置..."
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="pl-9 pr-8 h-9 text-sm w-full"
-              />
-              {globalFilter && (
-                <button
-                  onClick={() => setGlobalFilter('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            {/* 模糊搜索开关 - 只有在有搜索词时才触发重新加载 */}
-            <label className="flex items-center gap-2 text-sm cursor-pointer whitespace-nowrap">
-              <input
-                type="checkbox"
-                checked={fuzzySearch}
-                onChange={(e) => {
-                  setFuzzySearch(e.target.checked)
-                  // 只有在有搜索词时才重置页码并重新加载
-                  if (apiFilter) {
-                    setPage(1)
-                  }
-                }}
-                className="w-4 h-4 rounded"
-              />
-              <span className="text-muted-foreground">模糊搜索</span>
-            </label>
-            {/* 搜索字段选择器 */}
-            <select
-              value={searchField}
-              onChange={(e) => {
-                setSearchField(e.target.value)
-                setPage(1)
-              }}
-              className="h-9 px-3 pr-8 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
-              style={{
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 0.5rem center',
-                backgroundSize: '1rem'
-              }}
-            >
-              <option value="all">全部</option>
-              <option value="name">名称</option>
-              <option value="cas_number">CAS号</option>
-              <option value="location">位置</option>
-              <option value="brand">品牌</option>
-              <option value="category">分类</option>
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => handleStatusFilterChange(e.target.value)}
-              className="h-9 px-3 pr-8 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
-              style={{
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 0.5rem center',
-                backgroundSize: '1rem'
-              }}
-            >
-              <option value="all">全部状态</option>
-              <option value="in_stock">在库</option>
-              <option value="borrowed">借出</option>
-              <option value="consumed">已用完</option>
-            </select>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Table */}
       <Card className="overflow-hidden">
-        <CardHeader className="py-4">
+        <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Package className="w-5 h-5" />
-            库存列表 <span className="text-muted-foreground font-normal">({globalFilter ? `${total}/${grandTotal}` : `${grandTotal}`})</span>
+            库存列表 <span className="text-muted-foreground font-normal">(&thinsp;{globalFilter ? `${total}/${grandTotal}` : `${grandTotal}`}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -1266,11 +1247,11 @@ export function InventoryPage() {
             </div>
           ) : (
             <>
-              <div className="rounded-md border overflow-auto">
+              <div className="px-6 rounded-md overflow-auto">
                 <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                     <thead>
                       {table.getHeaderGroups().map(headerGroup => (
-                        <tr key={headerGroup.id} className="border-b bg-muted/30">
+                        <tr key={headerGroup.id} className="border-b-2 border-border">
                           {headerGroup.headers.map(header => (
                             <th 
                               key={header.id} 
@@ -1289,7 +1270,7 @@ export function InventoryPage() {
                       {table.getRowModel().rows.map(row => (
                         <React.Fragment key={row.id}>
                           <tr 
-                            className="border-b border-border hover:bg-muted/50 cursor-pointer transition-colors"
+                            className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none"
                             onClick={() => toggleRowExpansion(row.original.id)}
                           >
                             {row.getVisibleCells().map(cell => (
@@ -1342,7 +1323,7 @@ export function InventoryPage() {
                   </table>
               </div>
               {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-4">
+                <div className="px-6 flex items-center justify-between pt-4">
                   <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
                   <Pagination
                     currentPage={page}

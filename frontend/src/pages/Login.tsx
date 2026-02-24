@@ -8,6 +8,7 @@ import { authAPI } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { LABEL_STYLES } from '@/lib/constants'
 import { Label } from '@/components/ui/label'
 import {
   Card,
@@ -63,7 +64,7 @@ export function Login() {
           <CardTitle className="text-2xl font-bold">实验室库存管理系统</CardTitle>
           <CardDescription>请登录您的账户</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             {error && (
               <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-md">
@@ -71,7 +72,7 @@ export function Login() {
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="username">用户名</Label>
+              <Label htmlFor="username" className={LABEL_STYLES.base}>用户名</Label>
               <Input
                 id="username"
                 {...register('username')}
@@ -83,7 +84,7 @@ export function Login() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">密码</Label>
+              <Label htmlFor="password" className={LABEL_STYLES.base}>密码</Label>
               <Input
                 id="password"
                 type="password"
@@ -95,7 +96,7 @@ export function Login() {
                 <p className="text-sm text-destructive">{String(errors.password.message)}</p>
               )}
             </div>
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full" size="lg" disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

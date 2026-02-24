@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { reagentOrderAPI, inventoryAPI, consumableOrderAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
@@ -357,11 +358,11 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">仪表盘</h1>
+        <h1 className="text-3xl font-bold tracking-tight card-title-placeholder">仪表盘</h1>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           title="试剂订单"
           icon={ShoppingCart}
@@ -394,251 +395,262 @@ export function Dashboard() {
         />
       </div>
 
-      {/* My Reagent Orders */}
-      <Card>
-        <CardHeader>
-          <CardTitle>试剂订单</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loadingReagentOrders ? (
-            <SkeletonList lines={3} />
-          ) : myReagentOrders.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">暂无试剂订单</p>
-          ) : (
-            <div className="space-y-4">
-              {myReagentOrders.slice((reagentPage - 1) * reagentPageSize, reagentPage * reagentPageSize).map((order) => (
-                <div
-                  key={order.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
-                >
-                  <div>
-                    <p className="font-medium">{order.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      CAS: {order.cas_number || '-'} • {formatDateTime(order.created_at)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        'px-3 py-1 text-sm rounded-full',
-                        order.status === 'pending'
-                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                          : order.status === 'approved'
-                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                          : order.status === 'arrived'
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                          : 'bg-muted text-foreground'
-                      )}
+      {/* Tabs for 4 tables */}
+      <Tabs defaultValue="reagents">
+        <TabsList className="mb-1">
+          <TabsTrigger value="reagents" className="w-25">试剂订单</TabsTrigger>
+          <TabsTrigger value="consumables" className="w-25">耗材订单</TabsTrigger>
+          <TabsTrigger value="borrows" className="w-25">当前借用</TabsTrigger>
+          <TabsTrigger value="stockin" className="w-25">待入库</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="reagents">
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle>试剂订单</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingReagentOrders ? (
+                <SkeletonList lines={3} />
+              ) : myReagentOrders.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">暂无试剂订单</p>
+              ) : (
+                <div className="space-y-4">
+                  {myReagentOrders.slice((reagentPage - 1) * reagentPageSize, reagentPage * reagentPageSize).map((order) => (
+                    <div
+                      key={order.id}
+                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted"
                     >
-                      {order.status === 'pending'
-                        ? '待审批'
-                        : order.status === 'approved'
-                        ? '已审批'
-                        : order.status === 'arrived'
-                        ? '已到货'
-                        : order.status}
-                    </span>
-                    {order.status === 'approved' && (
-                      <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleConfirmArrival(order.id)}
-                        >
-                          <CheckCircle className="w-3 h-3 mr-1" />
-                          确认到货
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="bg-green-600 hover:bg-green-700"
-                          disabled={order.order_reason === 'common_public'}
-                          title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
-                          onClick={() => handleQuickStockIn(order.id)}
-                        >
-                          <PackagePlus className="w-3 h-3 mr-1" />
-                          一键入库
-                        </Button>
+                      <div>
+                        <p className="font-medium">{order.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          CAS: {order.cas_number || '-'} • {formatDateTime(order.created_at)}
+                        </p>
                       </div>
-                    )}
-                    {order.status === 'arrived' && (
-                      <Button
-                        size="sm"
-                        className="bg-green-600 hover:bg-green-700"
-                        disabled={order.order_reason === 'common_public'}
-                        title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
-                        onClick={() => handleQuickStockIn(order.id)}
-                      >
-                        <PackagePlus className="w-3 h-3 mr-1" />
-                        入库
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {Math.ceil(myReagentOrders.length / reagentPageSize) > 1 && (
-                <div className="flex items-center justify-between pt-4">
-                  <PaginationInfo currentPage={reagentPage} pageSize={reagentPageSize} total={myReagentOrders.length} />
-                  <Pagination
-                    currentPage={reagentPage}
-                    totalPages={Math.ceil(myReagentOrders.length / reagentPageSize)}
-                    pageSize={reagentPageSize}
-                    onPageChange={setReagentPage}
-                    onPageSizeChange={() => {}}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* My Consumable Orders */}
-      <Card>
-        <CardHeader>
-          <CardTitle>耗材订单</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loadingConsumableOrders ? (
-            <SkeletonList lines={3} />
-          ) : myConsumableOrders.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">暂无耗材订单</p>
-          ) : (
-            <div className="space-y-4">
-              {myConsumableOrders.slice((consumablePage - 1) * consumablePageSize, consumablePage * consumablePageSize).map((order) => (
-                <div
-                  key={order.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:bg-muted gap-3"
-                >
-                  <div>
-                    <p className="font-medium">{order.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {formatDateTime(order.created_at)}
-                    </p>
-                  </div>
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                    <span
-                      className={cn(
-                        'px-3 py-1 text-sm rounded-full',
-                        order.status === 'pending'
-                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                          : order.status === 'approved'
-                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                          : 'bg-muted text-foreground'
-                      )}
-                    >
-                      {order.status === 'pending'
-                        ? '待审批'
-                        : order.status === 'approved'
-                        ? '已审批'
-                        : order.status}
-                    </span>
-                    {order.status === 'approved' && (
-                      <Button
-                        size="sm"
-                        className="bg-green-600 hover:bg-green-700"
-                        onClick={() => handleConfirmReceive(order.id)}
-                      >
-                        <CheckCircle className="w-3 h-3 mr-1" />
-                        确认收货
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {Math.ceil(myConsumableOrders.length / consumablePageSize) > 1 && (
-                <div className="flex items-center justify-between pt-4">
-                  <PaginationInfo currentPage={consumablePage} pageSize={consumablePageSize} total={myConsumableOrders.length} />
-                  <Pagination
-                    currentPage={consumablePage}
-                    totalPages={Math.ceil(myConsumableOrders.length / consumablePageSize)}
-                    pageSize={consumablePageSize}
-                    onPageChange={setConsumablePage}
-                    onPageSizeChange={() => {}}
-                  />
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            'px-3 py-1 text-sm rounded-full',
+                            order.status === 'pending'
+                              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                              : order.status === 'approved'
+                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                              : order.status === 'arrived'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                              : 'bg-muted text-foreground'
+                          )}
+                        >
+                          {order.status === 'pending'
+                            ? '待审批'
+                            : order.status === 'approved'
+                            ? '已审批'
+                            : order.status === 'arrived'
+                            ? '已到货'
+                            : order.status}
+                        </span>
+                        {order.status === 'approved' && (
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleConfirmArrival(order.id)}
+                            >
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              确认到货
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700"
+                              disabled={order.order_reason === 'common_public'}
+                              title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
+                              onClick={() => handleQuickStockIn(order.id)}
+                            >
+                              <PackagePlus className="w-3 h-3 mr-1" />
+                              一键入库
+                            </Button>
+                          </div>
+                        )}
+                        {order.status === 'arrived' && (
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                            disabled={order.order_reason === 'common_public'}
+                            title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
+                            onClick={() => handleQuickStockIn(order.id)}
+                          >
+                            <PackagePlus className="w-3 h-3 mr-1" />
+                            入库
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {Math.ceil(myReagentOrders.length / reagentPageSize) > 1 && (
+                    <div className="flex items-center justify-between pt-4">
+                      <PaginationInfo currentPage={reagentPage} pageSize={reagentPageSize} total={myReagentOrders.length} />
+                      <Pagination
+                        currentPage={reagentPage}
+                        totalPages={Math.ceil(myReagentOrders.length / reagentPageSize)}
+                        pageSize={reagentPageSize}
+                        onPageChange={setReagentPage}
+                        onPageSizeChange={() => {}}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* My Borrows */}
-      <Card>
-        <CardHeader>
-          <CardTitle>当前借用</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loadingBorrows ? (
-            <SkeletonList lines={3} />
-          ) : myBorrows.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">暂无借用</p>
-          ) : (
-            <div className="space-y-4">
-              {myBorrows.slice((borrowPage - 1) * borrowPageSize, borrowPage * borrowPageSize).map((item) => (
-                <div
-                  key={item.inventory_id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:bg-muted gap-3"
-                >
-                  <div>
-                    <p className="font-medium">{item.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      CAS: {item.cas_number} • {item.remaining_quantity} {item.unit}
-                    </p>
+        <TabsContent value="consumables">
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle>耗材订单</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loadingConsumableOrders ? (
+                <SkeletonList lines={3} />
+              ) : myConsumableOrders.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">暂无耗材订单</p>
+              ) : (
+                <>
+                  <div className="px-6 rounded-md overflow-auto">
+                    <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
+                      <thead>
+                        <tr className="border-b-2 border-border">
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">名称</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">状态</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">时间</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {myConsumableOrders.slice((consumablePage - 1) * consumablePageSize, consumablePage * consumablePageSize).map((order) => (
+                          <tr key={order.id} className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none">
+                            <td className="p-3 align-middle text-sm">{order.name}</td>
+                            <td className="p-3 align-middle text-sm">
+                              <span className={cn('px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap', order.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : order.status === 'approved' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-muted text-foreground')}>
+                                {order.status === 'pending' ? '待审批' : order.status === 'approved' ? '已审批' : order.status}
+                              </span>
+                            </td>
+                            <td className="p-3 align-middle text-sm">{formatDateTime(order.created_at)}</td>
+                            <td className="p-3 align-middle text-sm">
+                              {order.status === 'approved' && (
+                                <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleConfirmReceive(order.id)}>
+                                  <CheckCircle className="w-3 h-3 mr-1" />确认收货
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <Button onClick={() => openReturnModal(item)} className="w-full sm:w-auto">
-                    归还
-                  </Button>
-                </div>
-              ))}
-              {Math.ceil(myBorrows.length / borrowPageSize) > 1 && (
-                <div className="flex items-center justify-between pt-4">
-                  <PaginationInfo currentPage={borrowPage} pageSize={borrowPageSize} total={myBorrows.length} />
-                  <Pagination
-                    currentPage={borrowPage}
-                    totalPages={Math.ceil(myBorrows.length / borrowPageSize)}
-                    pageSize={borrowPageSize}
-                    onPageChange={setBorrowPage}
-                    onPageSizeChange={() => {}}
-                  />
+                  {Math.ceil(myConsumableOrders.length / consumablePageSize) > 1 && (
+                    <div className="px-6 flex items-center justify-between pt-4 pb-4">
+                      <PaginationInfo currentPage={consumablePage} pageSize={consumablePageSize} total={myConsumableOrders.length} />
+                      <Pagination currentPage={consumablePage} totalPages={Math.ceil(myConsumableOrders.length / consumablePageSize)} pageSize={consumablePageSize} onPageChange={setConsumablePage} onPageSizeChange={() => {}} />
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="borrows">
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle>当前借用</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loadingBorrows ? (
+                <SkeletonList lines={3} />
+              ) : myBorrows.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">暂无借用</p>
+              ) : (
+                <>
+                  <div className="px-6 rounded-md overflow-auto">
+                    <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
+                      <thead>
+                        <tr className="border-b-2 border-border">
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">名称</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">CAS号</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">剩余量</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">借用时间</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {myBorrows.slice((borrowPage - 1) * borrowPageSize, borrowPage * borrowPageSize).map((item) => (
+                          <tr key={item.inventory_id} className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none">
+                            <td className="p-3 align-middle text-sm">{item.name}</td>
+                            <td className="p-3 align-middle text-sm">{item.cas_number}</td>
+                            <td className="p-3 align-middle text-sm">{item.remaining_quantity} {item.unit}</td>
+                            <td className="p-3 align-middle text-sm">{formatDateTime(item.borrow_time)}</td>
+                            <td className="p-3 align-middle text-sm">
+                              <Button onClick={() => openReturnModal(item)} size="sm">归还</Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {Math.ceil(myBorrows.length / borrowPageSize) > 1 && (
+                    <div className="px-6 flex items-center justify-between pt-4 pb-4">
+                      <PaginationInfo currentPage={borrowPage} pageSize={borrowPageSize} total={myBorrows.length} />
+                      <Pagination currentPage={borrowPage} totalPages={Math.ceil(myBorrows.length / borrowPageSize)} pageSize={borrowPageSize} onPageChange={setBorrowPage} onPageSizeChange={() => {}} />
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="stockin">
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle>待入库位置分配</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {loadingStockin ? (
+                <SkeletonList lines={3} />
+              ) : pendingStockin.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">无待入库物品</p>
+              ) : (
+                <div className="px-6 rounded-md overflow-auto">
+                  <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
+                    <thead>
+                      <tr className="border-b-2 border-border">
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">名称</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">CAS号</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">数量</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">入库时间</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingStockin.map((item) => (
+                        <tr key={item.inventory_id} className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none">
+                          <td className="p-3 align-middle text-sm">{item.name}</td>
+                          <td className="p-3 align-middle text-sm font-mono">{item.cas_number}</td>
+                          <td className="p-3 align-middle text-sm">{item.initial_quantity} {item.unit}</td>
+                          <td className="p-3 align-middle text-sm">{formatDateTime(item.stockin_time)}</td>
+                          <td className="p-3 align-middle text-sm">
+                            <Button variant="outline" onClick={() => openStockinModal(item)} size="sm">分配位置</Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pending Stockin */}
-      <Card>
-        <CardHeader>
-          <CardTitle>待入库位置分配</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loadingStockin ? (
-            <SkeletonList lines={3} />
-          ) : pendingStockin.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">无待入库物品</p>
-          ) : (
-            <div className="space-y-4">
-              {pendingStockin.map((item) => (
-                <div
-                  key={item.inventory_id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border rounded-lg hover:bg-muted gap-3"
-                >
-                  <div>
-                    <p className="font-medium">{item.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      CAS: {item.cas_number} • {item.initial_quantity} {item.unit}
-                    </p>
-                  </div>
-                  <Button variant="outline" onClick={() => openStockinModal(item)} className="w-full sm:w-auto">
-                    分配位置
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Return Modal */}
       <Dialog open={showReturnModal} onOpenChange={setShowReturnModal}>
@@ -720,6 +732,7 @@ export function Dashboard() {
                 onClick={handleReturn}
                 disabled={returnLoading}
                 className="flex-1"
+                size="lg"
               >
                 {returnLoading ? (
                   <>
@@ -734,6 +747,7 @@ export function Dashboard() {
                 variant="outline"
                 onClick={() => setShowReturnModal(false)}
                 className="flex-1"
+                size="lg"
               >
                 取消
               </Button>
@@ -780,6 +794,7 @@ export function Dashboard() {
                   onClick={handleStockin}
                   disabled={stockinLoading}
                   className="flex-1"
+                  size="lg"
                 >
                   {stockinLoading ? (
                     <>
@@ -794,6 +809,7 @@ export function Dashboard() {
                   variant="outline"
                   onClick={() => setShowStockinModal(false)}
                   className="flex-1"
+                  size="lg"
                 >
                   取消
                 </Button>
