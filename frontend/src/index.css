@@ -3,6 +3,9 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* 思源黑体用于中文，Arial 用于英文 */
+  --font-noto-sans-sc: 'Noto Sans SC', 'Noto Sans SC', sans-serif;
+  --font-arial: 'Arial', 'Helvetica', sans-serif;
   --font-inter: 'Inter', 'sans-serif';
   --font-manrope: 'Manrope', 'sans-serif';
 
@@ -98,6 +101,8 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+    /* 全局字体设置：思源黑体用于中文，Arial 用于英文 */
+    font-family: 'Noto Sans SC', 'Arial', 'Helvetica', sans-serif;
   }
 }
 
