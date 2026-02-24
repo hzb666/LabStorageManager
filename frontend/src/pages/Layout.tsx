@@ -3,7 +3,6 @@ import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuthStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import {
   LayoutDashboard,
   Package,
@@ -18,6 +17,7 @@ import {
   Sun,
 } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 const navItems = [
   { title: '仪表盘', href: '/', icon: LayoutDashboard },
@@ -32,7 +32,8 @@ export function Layout() {
   const location = useLocation()
   const { user, logout } = useAuthStore()
   const { theme, toggleTheme } = useTheme()
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const isMobile = useIsMobile()
+  const [sidebarOpen, setSidebarOpen] = useState(!isMobile)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const filteredNavItems = navItems.filter(

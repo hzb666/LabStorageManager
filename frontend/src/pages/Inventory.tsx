@@ -17,6 +17,7 @@ import { inventoryAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { formatDate, cn } from '@/lib/utils'
+import useDialogState from '@/hooks/use-dialog-state'
 import {
   Search,
   Package,
@@ -228,8 +229,10 @@ export function InventoryPage() {
   const [globalFilter, setGlobalFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
+  // Dialog state - 使用 useDialogState 管理 edit/add 对话框
+  const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
+
   // Edit modal state
-  const [showEditModal, setShowEditModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   // Expanded row state - use object for faster lookups
@@ -242,6 +245,7 @@ export function InventoryPage() {
       [id]: !prev[id]
     }))
   }
+
   const [editFormData, setEditFormData] = useState({
     name: '',
     english_name: '',
@@ -301,7 +305,6 @@ export function InventoryPage() {
   }, [])
 
   // Manual add modal
-  const [showManualAdd, setShowManualAdd] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     cas_number: '',
@@ -320,7 +323,7 @@ export function InventoryPage() {
 
   // 手动入库对话框关闭处理函数 - 关闭时清空表单数据和错误
   const handleManualAddModalClose = (open: boolean) => {
-    setShowManualAdd(open)
+    setDialogState(open ? 'add' : null)
     if (!open) {
       // 关闭时清空表单数据和错误
       setFormErrors({})
@@ -459,7 +462,7 @@ export function InventoryPage() {
         status: status,
         notes: editFormData.notes || undefined
       })
-      setShowEditModal(false)
+      setDialogState(null)
       loadInventory()
       toast.success('库存信息已更新')
     } catch (error) {
@@ -478,7 +481,7 @@ export function InventoryPage() {
       // 第二次点击，执行删除
       try {
         await inventoryAPI.delete(editingItem.id)
-        setShowEditModal(false)
+        setDialogState(null)
         setDeleteConfirm(false)
         loadInventory()
         toast.success('库存已删除')
@@ -490,7 +493,7 @@ export function InventoryPage() {
   }
 
   const handleEditModalClose = (open: boolean) => {
-    setShowEditModal(open)
+    setDialogState(open ? 'edit' : null)
     if (!open) {
       setDeleteConfirm(false)
     }
@@ -516,7 +519,7 @@ export function InventoryPage() {
       is_hazardous: item.is_hazardous || false,
       notes: item.notes || ''
     })
-    setShowEditModal(true)
+    setDialogState('edit')
   }, [])
 
   // Use displayFilter for highlighting, but only update table after API returns
@@ -794,7 +797,7 @@ export function InventoryPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">库存管理</h1>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowManualAdd(true)}>
+          <Button variant="outline" size="sm" onClick={() => setDialogState('add')}>
             <Plus className="w-4 h-4 mr-1.5" />
             手动入库
           </Button>
@@ -810,7 +813,7 @@ export function InventoryPage() {
       </div>
 
       {/* Edit Modal */}
-      <Dialog open={showEditModal} onOpenChange={handleEditModalClose}>
+      <Dialog open={dialogState === 'edit'} onOpenChange={handleEditModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl">编辑库存</DialogTitle>
@@ -964,7 +967,7 @@ export function InventoryPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setShowEditModal(false)}
+                onClick={() => setDialogState(null)}
               >
                 取消
               </Button>
@@ -977,7 +980,7 @@ export function InventoryPage() {
       </Dialog>
 
       {/* Manual Add Modal */}
-      <Dialog open={showManualAdd} onOpenChange={handleManualAddModalClose}>
+      <Dialog open={dialogState === 'add'} onOpenChange={handleManualAddModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl">手动入库</DialogTitle>

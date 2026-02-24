@@ -17,6 +17,7 @@ import { userAdminAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
+import useDialogState from '@/hooks/use-dialog-state'
 import {
   Search,
   Users,
@@ -67,8 +68,10 @@ export function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
+  // Dialog state - 使用 useDialogState 管理 create/edit/delete 对话框
+  const [dialogState, setDialogState] = useDialogState<"create" | "edit" | "delete">()
+
   // Create user modal
-  const [showCreateModal, setShowCreateModal] = useState(false)
   const [createData, setCreateData] = useState({
     username: '',
     password: '',
@@ -79,7 +82,6 @@ export function AdminUsersPage() {
   const [createLoading, setCreateLoading] = useState(false)
 
   // Edit user modal
-  const [showEditModal, setShowEditModal] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [editData, setEditData] = useState({
     full_name: '',
@@ -88,7 +90,6 @@ export function AdminUsersPage() {
   const [editLoading, setEditLoading] = useState(false)
 
   // Delete confirmation
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
 
@@ -244,7 +245,7 @@ export function AdminUsersPage() {
     setCreateLoading(true)
     try {
       await userAdminAPI.create(createData)
-      setShowCreateModal(false)
+      setDialogState(null)
       setCreateData({ username: '', password: '', full_name: '', role: 'user' })
       loadUsers()
       toast.success('用户创建成功')
@@ -260,7 +261,7 @@ export function AdminUsersPage() {
   const openEditModal = (user: User) => {
     setEditUser(user)
     setEditData({ full_name: user.full_name || '', role: user.role })
-    setShowEditModal(true)
+    setDialogState('edit')
   }
 
   const handleEdit = async () => {
@@ -269,7 +270,7 @@ export function AdminUsersPage() {
     setEditLoading(true)
     try {
       await userAdminAPI.update(editUser.id, editData)
-      setShowEditModal(false)
+      setDialogState(null)
       setEditUser(null)
       loadUsers()
       toast.success('用户更新成功')
@@ -284,7 +285,7 @@ export function AdminUsersPage() {
   // Delete/Deactivate handlers
   const openDeleteModal = (user: User) => {
     setDeleteUser(user)
-    setShowDeleteModal(true)
+    setDialogState('delete')
   }
 
   const handleDelete = async () => {
@@ -293,7 +294,7 @@ export function AdminUsersPage() {
     setDeleteLoading(true)
     try {
       await userAdminAPI.delete(deleteUser.id)
-      setShowDeleteModal(false)
+      setDialogState(null)
       setDeleteUser(null)
       loadUsers()
       toast.success('用户已禁用')
@@ -319,7 +320,7 @@ export function AdminUsersPage() {
 
   // 关闭创建弹窗时清空表单
   const handleCreateModalClose = (open: boolean) => {
-    setShowCreateModal(open)
+    setDialogState(open ? 'create' : null)
     if (!open) {
       setCreateData({ username: '', password: '', full_name: '', role: 'user' })
       setCreateErrors({})
@@ -331,7 +332,7 @@ export function AdminUsersPage() {
       {/* 标题和按钮 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">用户管理</h1>
-        <Button onClick={() => setShowCreateModal(true)}>
+        <Button onClick={() => setDialogState('create')}>
           <UserPlus className="w-4 h-4 mr-1.5" />
           创建用户
         </Button>
@@ -460,7 +461,7 @@ export function AdminUsersPage() {
       </Card>
 
       {/* Create User Modal */}
-      <Dialog open={showCreateModal} onOpenChange={handleCreateModalClose}>
+      <Dialog open={dialogState === 'create'} onOpenChange={handleCreateModalClose}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl">创建用户</DialogTitle>
@@ -538,7 +539,7 @@ export function AdminUsersPage() {
       </Dialog>
 
       {/* Edit User Modal */}
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+      <Dialog open={dialogState === 'edit'} onOpenChange={(open) => setDialogState(open ? 'edit' : null)}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl">编辑用户</DialogTitle>
@@ -585,7 +586,7 @@ export function AdminUsersPage() {
               <Button onClick={handleEdit} disabled={editLoading} size="sm">
                 {editLoading ? '保存中...' : '保存'}
               </Button>
-              <Button variant="outline" onClick={() => setShowEditModal(false)} size="sm">
+              <Button variant="outline" onClick={() => setDialogState(null)} size="sm">
                 取消
               </Button>
             </div>
@@ -594,7 +595,7 @@ export function AdminUsersPage() {
       </Dialog>
 
       {/* Delete Confirmation Modal */}
-      <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+      <Dialog open={dialogState === 'delete'} onOpenChange={(open) => setDialogState(open ? 'delete' : null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>确认禁用用户</DialogTitle>
@@ -607,7 +608,7 @@ export function AdminUsersPage() {
             <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="sm">
               {deleteLoading ? '处理中...' : '确认禁用'}
             </Button>
-            <Button variant="outline" onClick={() => setShowDeleteModal(false)} size="sm">
+            <Button variant="outline" onClick={() => setDialogState(null)} size="sm">
               取消
             </Button>
           </div>
