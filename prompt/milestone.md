@@ -98,6 +98,7 @@
 | `cc4c84a` | 简化 GIT_STRATEGY.md 文档 | chore |
 | `0cb742c` | 移除 internal_code，统一使用 CAS 号作为主要标识符 | refactor |
 | `7c55e14` | 更新 README，移除 internal_code 相关描述 | docs |
+| `15d1c79` | **前端UI重新设计 - 新增组件并重构页面** | feat |
 
 ### 文档与配置
 
