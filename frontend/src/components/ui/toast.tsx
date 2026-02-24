@@ -24,17 +24,17 @@ toast.warning = (message: string) => toast(message, 'warning')
 toast.info = (message: string) => toast(message, 'info')
 
 const icons: Record<ToastType, React.ReactNode> = {
-  success: <CheckCircle className="w-5 h-5 text-green-600" />,
-  error: <XCircle className="w-5 h-5 text-red-600" />,
-  warning: <AlertTriangle className="w-5 h-5 text-yellow-600" />,
-  info: <Info className="w-5 h-5 text-blue-600" />,
+  success: <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />,
+  error: <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />,
+  warning: <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />,
+  info: <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />,
 }
 
 const styles: Record<ToastType, string> = {
-  success: 'border-green-200 bg-green-50 text-green-800',
-  error: 'border-red-200 bg-red-50 text-red-800',
-  warning: 'border-yellow-200 bg-yellow-50 text-yellow-800',
-  info: 'border-blue-200 bg-blue-50 text-blue-800',
+  success: 'border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/50 dark:text-green-200',
+  error: 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/50 dark:text-red-200',
+  warning: 'border-yellow-200 bg-yellow-50 text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-200',
+  info: 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-900/50 dark:text-blue-200',
 }
 
 export function ToastContainer() {

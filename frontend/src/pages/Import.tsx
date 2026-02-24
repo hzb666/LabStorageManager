@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { inventoryAPI } from '@/api/client'
@@ -11,7 +11,10 @@ import {
   Loader2,
   CheckCircle,
   XCircle,
-  Download
+  Download,
+  File,
+  FileText,
+  X
 } from 'lucide-react'
 import { AxiosError } from 'axios'
 
@@ -27,16 +30,52 @@ export function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const validateFile = useCallback((selectedFile: File): boolean => {
+    const validExtensions = ['.csv', '.xlsx', '.xls']
+    const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase()
+    if (!validExtensions.includes(extension)) {
+      toast.warning('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
+      return false
+    }
+    return true
+  }, [])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
-    if (selectedFile) {
-      if (!selectedFile.name.endsWith('.csv') && !selectedFile.name.endsWith('.xlsx') && !selectedFile.name.endsWith('.xls')) {
-        toast.warning('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
-        return
-      }
+    if (selectedFile && validateFile(selectedFile)) {
       setFile(selectedFile)
       setResult(null)
+    }
+  }
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const droppedFile = e.dataTransfer.files?.[0]
+    if (droppedFile && validateFile(droppedFile)) {
+      setFile(droppedFile)
+      setResult(null)
+    }
+  }, [validateFile])
+
+  const handleClearFile = () => {
+    setFile(null)
+    setResult(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
     }
   }
 
@@ -63,7 +102,7 @@ export function ImportPage() {
     }
   }
 
-  const downloadTemplate = () => {
+  const downloadTemplate = useCallback(() => {
     // Create a simple template CSV for download (with UTF-8 BOM for Excel compatibility)
     const headers = IMPORT_TEMPLATE_COLUMNS.map(c => c.name).join(',')
     const example = IMPORT_TEMPLATE_COLUMNS.map(c => {
@@ -89,144 +128,248 @@ export function ImportPage() {
     a.download = 'inventory_template.csv'
     a.click()
     URL.revokeObjectURL(url)
+  }, [])
+
+  // Get file icon based on extension
+  const getFileIcon = (fileName: string) => {
+    const ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase()
+    if (ext === '.csv') return <FileText className="w-8 h-8 text-green-500" />
+    return <File className="w-8 h-8 text-blue-500" />
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold title-placeholder">批量导入库存</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h1 className="text-3xl font-bold tracking-tight">批量导入库存</h1>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5" />
-            Excel 导入
-          </CardTitle>
-          <CardDescription>
-            上传 Excel 文件批量导入库存记录
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Template Info */}
-          <div className="p-4 bg-muted rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="font-medium">模板字段说明</h4>
-              <Button variant="outline" size="sm" onClick={downloadTemplate}>
-                <Download className="w-4 h-4 mr-2" />
-                下载模板
-              </Button>
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Left Column: Template Info & Upload */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="w-5 h-5" />
+              导入数据
+            </CardTitle>
+            <CardDescription>
+              上传 Excel/CSV 文件批量导入库存记录
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Template Download */}
+            <div className="p-4 rounded-lg bg-muted/50 border">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                <h4 className="font-medium">模板字段说明</h4>
+                <Button variant="outline" size="sm" onClick={downloadTemplate}>
+                  <Download className="w-4 h-4 mr-2" />
+                  下载模板
+                </Button>
+              </div>
+              <div className="grid gap-2 text-sm">
+                {IMPORT_TEMPLATE_COLUMNS.map(col => (
+                  <div key={col.name} className="flex items-start gap-3">
+                    <span className="w-5 flex-shrink-0">
+                      {col.required ? (
+                        <span className="text-destructive">*</span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </span>
+                    <span className="font-mono w-28 flex-shrink-0 text-xs">{col.name}</span>
+                    <span className="text-muted-foreground text-xs">{col.description}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="grid gap-2 text-sm">
-              {IMPORT_TEMPLATE_COLUMNS.map(col => (
-                <div key={col.name} className="flex items-start gap-3">
-                  <span className="w-5 flex-shrink-0">
-                    {col.required ? (
-                      <span className="text-red-500">*</span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </span>
-                  <span className="font-mono w-32 flex-shrink-0">{col.name}</span>
-                  <span className="text-muted-foreground">{col.description}</span>
-                </div>
-              ))}
-            </div>
-          </div>
 
-          {/* File Upload */}
-          <div>
-            <label className="block text-sm font-medium mb-2">选择文件</label>
-            <div className="flex items-center gap-4">
-              <Button
-                variant="default"
-                onClick={() => document.getElementById('file-input')?.click()}
-                className="bg-blue-600 hover:bg-blue-700"
+            {/* Drag & Drop Upload Area */}
+            <div>
+              <label className="block text-sm font-medium mb-2">上传文件</label>
+              <div
+                className={cn(
+                  "relative border-2 border-dashed rounded-lg p-6 transition-colors cursor-pointer",
+                  "hover:border-primary hover:bg-muted/30",
+                  isDragging ? "border-primary bg-primary/5" : "border-border",
+                  file ? "border-primary/50 bg-primary/5" : ""
+                )}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
               >
-                <Upload className="w-4 h-4 mr-2" />
-                选择 CSV 文件
-              </Button>
-              <input
-                id="file-input"
-                type="file"
-                accept=".csv"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-              {file && (
-                <span className="text-sm text-muted-foreground truncate max-w-xs">
-                  {file.name}
-                </span>
-              )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <div className="flex flex-col items-center justify-center gap-3 text-center">
+                  {file ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        {getFileIcon(file.name)}
+                        <span className="font-medium text-sm truncate max-w-[200px]">{file.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          {(file.size / 1024).toFixed(1)} KB
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-muted-foreground hover:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleClearFile()
+                          }}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-10 h-10 text-muted-foreground" />
+                      <div>
+                        <p className="text-sm font-medium">
+                          点击或拖拽文件到此处上传
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          支持 .csv, .xlsx, .xls 格式
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
 
-          {/* Import Button */}
-          <Button 
-            onClick={handleImport} 
-            disabled={!file || importing}
-            className="w-full"
-          >
-            {importing ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                导入中...
-              </>
+            {/* Import Button */}
+            <Button 
+              onClick={handleImport} 
+              disabled={!file || importing}
+              className="w-full"
+              size="lg"
+            >
+              {importing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  导入中...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 mr-2" />
+                  开始导入
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Right Column: Result Display */}
+        <Card className="lg:row-span-1">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              {result?.success ? (
+                <CheckCircle className="w-5 h-5 text-green-500" />
+              ) : result && !result.success ? (
+                <XCircle className="w-5 h-5 text-destructive" />
+              ) : (
+                <FileSpreadsheet className="w-5 h-5" />
+              )}
+              导入结果
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!result ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <FileSpreadsheet className="w-12 h-12 mb-3 opacity-50" />
+                <p className="text-sm">上传文件并导入后查看结果</p>
+              </div>
             ) : (
-              <>
-                <Upload className="w-4 h-4 mr-2" />
-                开始导入
-              </>
-            )}
-          </Button>
-
-          {/* Result */}
-          {result && (
-            <div className={cn(
-              'p-4 rounded-lg',
-              result.success ? 'bg-green-50' : 'bg-red-50'
-            )}>
-              <div className="flex items-center gap-2 mb-3">
-                {result.success ? (
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                ) : (
-                  <XCircle className="w-5 h-5 text-red-600" />
-                )}
-                <span className={cn(
-                  'font-medium',
-                  result.success ? 'text-green-700' : 'text-red-700'
+              <div className="space-y-4">
+                {/* Summary Stats */}
+                <div className={cn(
+                  "p-4 rounded-lg border",
+                  result.success ? "bg-green-500/10 border-green-500/20" : "bg-destructive/10 border-destructive/20"
                 )}>
-                  {result.success ? '导入完成' : '导入失败'}
-                </span>
-              </div>
-              <div className="grid gap-1 text-sm">
-                <div>总行数: {result.total_rows}</div>
-                <div>成功创建: {result.created}</div>
-                {result.errors_count > 0 && (
-                  <div className="text-red-600">错误数: {result.errors_count}</div>
-                )}
-              </div>
-              {result.errors && result.errors.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-red-200">
-                  <div className="text-sm font-medium text-red-700 mb-2">错误详情:</div>
-                  <div className="max-h-40 overflow-y-auto text-xs space-y-1">
-                    {result.errors.slice(0, 20).map((err, i) => (
-                      <div key={i} className="text-red-600">
-                        行 {err.row}: {err.error}
-                      </div>
-                    ))}
-                    {result.errors.length > 20 && (
-                      <div className="text-red-600">
-                        ... 还有 {result.errors.length - 20} 条错误
-                      </div>
+                  <div className="flex items-center gap-2 mb-3">
+                    {result.success ? (
+                      <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+                    ) : (
+                      <XCircle className="w-5 h-5 text-destructive" />
                     )}
+                    <span className={cn(
+                      "font-semibold",
+                      result.success ? "text-green-700 dark:text-green-300" : "text-destructive"
+                    )}>
+                      {result.success ? '导入成功' : '导入失败'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <div className="text-2xl font-bold">{result.total_rows}</div>
+                      <div className="text-xs text-muted-foreground">总行数</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">{result.created}</div>
+                      <div className="text-xs text-muted-foreground">成功创建</div>
+                    </div>
+                    <div>
+                      <div className={cn(
+                        "text-2xl font-bold",
+                        result.errors_count > 0 ? "text-destructive" : "text-muted-foreground"
+                      )}>
+                        {result.errors_count}
+                      </div>
+                      <div className="text-xs text-muted-foreground">错误数</div>
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+
+                {/* Error Details */}
+                {result.errors && result.errors.length > 0 && (
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-destructive/10 px-4 py-2 border-b">
+                      <h4 className="font-medium text-sm text-destructive">错误详情</h4>
+                    </div>
+                    <div className="max-h-[300px] overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-2 text-left font-medium text-xs text-muted-foreground w-16">行号</th>
+                            <th className="px-4 py-2 text-left font-medium text-xs text-muted-foreground">错误信息</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {result.errors.slice(0, 50).map((err, i) => (
+                            <tr key={i} className="border-t border-border">
+                              <td className="px-4 py-2 font-mono text-xs">{err.row}</td>
+                              <td className="px-4 py-2 text-destructive text-xs">{err.error}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {result.errors.length > 50 && (
+                        <div className="px-4 py-2 text-center text-xs text-muted-foreground border-t bg-muted/30">
+                          ... 还有 {result.errors.length - 50} 条错误
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {result.success && result.errors_count === 0 && (
+                  <div className="text-center py-4 text-sm text-muted-foreground">
+                    所有数据已成功导入到库存系统
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, Suspense } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,24 +38,77 @@ interface MyOrder {
   order_reason?: string
 }
 
-// Order item from backend (can be order_id or id)
 interface OrderItem {
   order_id?: number
   id?: number
   [key: string]: unknown
 }
 
-// Backend response structures for reagent orders
 interface ReagentOrdersByStatus {
   pending: { orders: OrderItem[] }
   approved: { orders: OrderItem[] }
   arrived: { orders: OrderItem[] }
 }
 
-// Backend response structures for consumable orders
 interface ConsumableOrdersByStatus {
   pending: { orders: OrderItem[] }
   approved: { orders: OrderItem[] }
+}
+
+// 骨架屏组件
+function SkeletonCard({ className }: { className?: string }) {
+  return (
+    <div className={cn("animate-pulse", className)}>
+      <div className="h-8 bg-muted rounded w-12"></div>
+    </div>
+  )
+}
+
+function SkeletonList({ lines = 3 }: { lines?: number }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className="animate-pulse flex items-center justify-between p-4 border rounded-lg">
+          <div className="flex-1">
+            <div className="h-4 bg-muted rounded w-1/3 mb-2"></div>
+            <div className="h-3 bg-muted rounded w-1/2"></div>
+          </div>
+          <div className="h-8 bg-muted rounded w-20"></div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// 统计卡片组件
+function StatCard({
+  title,
+  icon: Icon,
+  value,
+  loading
+}: {
+  title: string
+  icon: React.ElementType
+  value?: number
+  loading?: boolean
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Icon className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        <div className="h-8 transition-opacity duration-200">
+          {loading ? (
+            <SkeletonCard />
+          ) : (
+            <div className="text-2xl font-bold">{value ?? 0}</div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
 export function Dashboard() {
@@ -63,9 +116,12 @@ export function Dashboard() {
   const [myConsumableOrders, setMyConsumableOrders] = useState<MyOrder[]>([])
   const [myBorrows, setMyBorrows] = useState<MyBorrowItem[]>([])
   const [pendingStockin, setPendingStockin] = useState<PendingStockinItem[]>([])
-  const [loading, setLoading] = useState(true)
+  
+  const [loadingReagentOrders, setLoadingReagentOrders] = useState(true)
+  const [loadingConsumableOrders, setLoadingConsumableOrders] = useState(true)
+  const [loadingBorrows, setLoadingBorrows] = useState(true)
+  const [loadingStockin, setLoadingStockin] = useState(true)
 
-  // Pagination states
   const [reagentPage, setReagentPage] = useState(1)
   const [reagentPageSize] = useState(5)
   const [consumablePage, setConsumablePage] = useState(1)
@@ -73,7 +129,6 @@ export function Dashboard() {
   const [borrowPage, setBorrowPage] = useState(1)
   const [borrowPageSize] = useState(5)
   
-  // Return Modal state
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
   const [returnQuantity, setReturnQuantity] = useState('')
@@ -83,7 +138,6 @@ export function Dashboard() {
   const [returnLoading, setReturnLoading] = useState(false)
   const [returnError, setReturnError] = useState('')
 
-  // Stockin Modal state
   const [showStockinModal, setShowStockinModal] = useState(false)
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
   const [stockinLocation, setStockinLocation] = useState('')
@@ -94,72 +148,101 @@ export function Dashboard() {
   }, [])
 
   const loadDashboardData = async () => {
-    try {
-      const [reagentOrdersRes, consumableOrdersRes, borrowsRes, stockinRes] = await Promise.all([
-        reagentOrderAPI.getMyOrders(),
-        consumableOrderAPI.getMyOrders(),
-        inventoryAPI.getMyBorrows(),
-        inventoryAPI.getPendingStockin(),
-      ])
-
-      // Parse reagent orders - backend returns { data: { pending: {orders}, approved: {orders}, arrived: {orders} } }
-      const reagentOrdersData = reagentOrdersRes.data as { data?: ReagentOrdersByStatus } | undefined
-      const reagentOrders = reagentOrdersData?.data
-      if (reagentOrders && typeof reagentOrders === 'object') {
-        const allReagentOrders: MyOrder[] = []
-        if (reagentOrders.pending?.orders) {
-          reagentOrders.pending.orders.forEach((o: OrderItem) => {
-            allReagentOrders.push({ ...o, status: 'pending', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
-          })
+    const loadReagentOrders = async () => {
+      try {
+        const res = await reagentOrderAPI.getMyOrders()
+        const reagentOrdersData = res.data as { data?: ReagentOrdersByStatus } | undefined
+        const reagentOrders = reagentOrdersData?.data
+        if (reagentOrders && typeof reagentOrders === 'object') {
+          const allReagentOrders: MyOrder[] = []
+          if (reagentOrders.pending?.orders) {
+            reagentOrders.pending.orders.forEach((o: OrderItem) => {
+              allReagentOrders.push({ ...o, status: 'pending', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
+            })
+          }
+          if (reagentOrders.approved?.orders) {
+            reagentOrders.approved.orders.forEach((o: OrderItem) => {
+              allReagentOrders.push({ ...o, status: 'approved', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
+            })
+          }
+          if (reagentOrders.arrived?.orders) {
+            reagentOrders.arrived.orders.forEach((o: OrderItem) => {
+              allReagentOrders.push({ ...o, status: 'arrived', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
+            })
+          }
+          setMyReagentOrders(allReagentOrders)
+        } else {
+          setMyReagentOrders([])
         }
-        if (reagentOrders.approved?.orders) {
-          reagentOrders.approved.orders.forEach((o: OrderItem) => {
-            allReagentOrders.push({ ...o, status: 'approved', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
-          })
-        }
-        if (reagentOrders.arrived?.orders) {
-          reagentOrders.arrived.orders.forEach((o: OrderItem) => {
-            allReagentOrders.push({ ...o, status: 'arrived', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
-          })
-        }
-        setMyReagentOrders(allReagentOrders)
-      } else {
+      } catch (error) {
+        console.error('Failed to load reagent orders:', error)
         setMyReagentOrders([])
+      } finally {
+        setLoadingReagentOrders(false)
       }
-
-      // Parse consumable orders - backend returns { data: { pending: {orders}, approved: {orders} } }
-      const consumableOrdersData = consumableOrdersRes.data as { data?: ConsumableOrdersByStatus } | undefined
-      const consumableOrders = consumableOrdersData?.data
-      if (consumableOrders && typeof consumableOrders === 'object') {
-        const allConsumableOrders: MyOrder[] = []
-        if (consumableOrders.pending?.orders) {
-          consumableOrders.pending.orders.forEach((o: OrderItem) => {
-            allConsumableOrders.push({ ...o, status: 'pending', id: o.order_id || o.id || 0, orderType: 'consumable' } as MyOrder)
-          })
-        }
-        if (consumableOrders.approved?.orders) {
-          consumableOrders.approved.orders.forEach((o: OrderItem) => {
-            allConsumableOrders.push({ ...o, status: 'approved', id: o.order_id || o.id || 0, orderType: 'consumable' } as MyOrder)
-          })
-        }
-        setMyConsumableOrders(allConsumableOrders)
-      } else {
-        setMyConsumableOrders([])
-      }
-
-      // Parse borrows - backend returns { data: [...], total: ... }
-      const borrowsData = borrowsRes.data as { data?: MyBorrowItem[] } | undefined
-      setMyBorrows(Array.isArray(borrowsData?.data) ? borrowsData.data : [])
-
-      // Parse pending stockin - backend returns { data: [...], total: ... }
-      const stockinData = stockinRes.data as { data?: PendingStockinItem[] } | undefined
-      setPendingStockin(Array.isArray(stockinData?.data) ? stockinData.data : [])
-
-    } catch (error) {
-      console.error('Failed to load dashboard data:', error)
-    } finally {
-      setLoading(false)
     }
+
+    const loadConsumableOrders = async () => {
+      try {
+        const res = await consumableOrderAPI.getMyOrders()
+        const consumableOrdersData = res.data as { data?: ConsumableOrdersByStatus } | undefined
+        const consumableOrders = consumableOrdersData?.data
+        if (consumableOrders && typeof consumableOrders === 'object') {
+          const allConsumableOrders: MyOrder[] = []
+          if (consumableOrders.pending?.orders) {
+            consumableOrders.pending.orders.forEach((o: OrderItem) => {
+              allConsumableOrders.push({ ...o, status: 'pending', id: o.order_id || o.id || 0, orderType: 'consumable' } as MyOrder)
+            })
+          }
+          if (consumableOrders.approved?.orders) {
+            consumableOrders.approved.orders.forEach((o: OrderItem) => {
+              allConsumableOrders.push({ ...o, status: 'approved', id: o.order_id || o.id || 0, orderType: 'consumable' } as MyOrder)
+            })
+          }
+          setMyConsumableOrders(allConsumableOrders)
+        } else {
+          setMyConsumableOrders([])
+        }
+      } catch (error) {
+        console.error('Failed to load consumable orders:', error)
+        setMyConsumableOrders([])
+      } finally {
+        setLoadingConsumableOrders(false)
+      }
+    }
+
+    const loadBorrows = async () => {
+      try {
+        const res = await inventoryAPI.getMyBorrows()
+        const borrowsData = res.data as { data?: MyBorrowItem[] } | undefined
+        setMyBorrows(Array.isArray(borrowsData?.data) ? borrowsData.data : [])
+      } catch (error) {
+        console.error('Failed to load borrows:', error)
+        setMyBorrows([])
+      } finally {
+        setLoadingBorrows(false)
+      }
+    }
+
+    const loadStockin = async () => {
+      try {
+        const res = await inventoryAPI.getPendingStockin()
+        const stockinData = res.data as { data?: PendingStockinItem[] } | undefined
+        setPendingStockin(Array.isArray(stockinData?.data) ? stockinData.data : [])
+      } catch (error) {
+        console.error('Failed to load stockin:', error)
+        setPendingStockin([])
+      } finally {
+        setLoadingStockin(false)
+      }
+    }
+
+    await Promise.all([
+      loadReagentOrders(),
+      loadConsumableOrders(),
+      loadBorrows(),
+      loadStockin()
+    ])
   }
 
   const openReturnModal = (item: MyBorrowItem) => {
@@ -178,7 +261,6 @@ export function Dashboard() {
     setReturnError('')
     let qty: number
     if (returnMode === 'used') {
-      // Calculate remaining = borrowed - used
       const used = parseFloat(usedQuantity)
       if (isNaN(used) || used < 0) {
         setReturnError('请输入有效的使用量（需大于等于0）')
@@ -238,7 +320,6 @@ export function Dashboard() {
     }
   }
 
-  // 处理试剂确认到货（暂不入库）
   const handleConfirmArrival = async (orderId: number) => {
     try {
       await reagentOrderAPI.confirmArrival(orderId)
@@ -250,7 +331,6 @@ export function Dashboard() {
     }
   }
 
-  // 处理试剂一键入库
   const handleQuickStockIn = async (orderId: number) => {
     try {
       await reagentOrderAPI.stockIn(orderId)
@@ -262,7 +342,6 @@ export function Dashboard() {
     }
   }
 
-  // 处理耗材确认收货
   const handleConfirmReceive = async (orderId: number) => {
     try {
       await consumableOrderAPI.complete(orderId)
@@ -280,69 +359,47 @@ export function Dashboard() {
     setShowStockinModal(true)
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
+  const pendingCount = myReagentOrders.filter((o) => o.status === 'pending').length + 
+                       myConsumableOrders.filter((o) => o.status === 'pending').length
 
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold title-placeholder">仪表盘</h1>
+        <h1 className="text-3xl font-bold tracking-tight">仪表盘</h1>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-3 sm:gap-4 grid-cols-2 md:grid-cols-5">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">试剂订单</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{myReagentOrders.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">耗材订单</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{myConsumableOrders.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">当前借用</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{myBorrows.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">待入库</CardTitle>
-            <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{pendingStockin.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">待处理</CardTitle>
-            <AlertCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {myReagentOrders.filter((o) => o.status === 'pending').length + myConsumableOrders.filter((o) => o.status === 'pending').length}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard
+          title="试剂订单"
+          icon={ShoppingCart}
+          value={myReagentOrders.length}
+          loading={loadingReagentOrders}
+        />
+        <StatCard
+          title="耗材订单"
+          icon={ShoppingCart}
+          value={myConsumableOrders.length}
+          loading={loadingConsumableOrders}
+        />
+        <StatCard
+          title="当前借用"
+          icon={Package}
+          value={myBorrows.length}
+          loading={loadingBorrows}
+        />
+        <StatCard
+          title="待入库"
+          icon={ArrowRightLeft}
+          value={pendingStockin.length}
+          loading={loadingStockin}
+        />
+        <StatCard
+          title="待处理"
+          icon={AlertCircle}
+          value={pendingCount}
+          loading={loadingReagentOrders || loadingConsumableOrders}
+        />
       </div>
 
       {/* My Reagent Orders */}
@@ -351,7 +408,9 @@ export function Dashboard() {
           <CardTitle>试剂订单</CardTitle>
         </CardHeader>
         <CardContent>
-          {myReagentOrders.length === 0 ? (
+          {loadingReagentOrders ? (
+            <SkeletonList lines={3} />
+          ) : myReagentOrders.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">暂无试剂订单</p>
           ) : (
             <div className="space-y-4">
@@ -371,9 +430,9 @@ export function Dashboard() {
                       className={cn(
                         'px-3 py-1 text-sm rounded-full',
                         order.status === 'pending'
-                          ? 'bg-yellow-100 text-yellow-800'
+                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
                           : order.status === 'approved'
-                          ? 'bg-blue-100 text-blue-800'
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
                           : order.status === 'arrived'
                           ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                           : 'bg-muted text-foreground'
@@ -447,7 +506,9 @@ export function Dashboard() {
           <CardTitle>耗材订单</CardTitle>
         </CardHeader>
         <CardContent>
-          {myConsumableOrders.length === 0 ? (
+          {loadingConsumableOrders ? (
+            <SkeletonList lines={3} />
+          ) : myConsumableOrders.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">暂无耗材订单</p>
           ) : (
             <div className="space-y-4">
@@ -467,7 +528,7 @@ export function Dashboard() {
                       className={cn(
                         'px-3 py-1 text-sm rounded-full',
                         order.status === 'pending'
-                          ? 'bg-yellow-100 text-yellow-800'
+                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
                           : order.status === 'approved'
                           ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
                           : 'bg-muted text-foreground'
@@ -515,7 +576,9 @@ export function Dashboard() {
           <CardTitle>当前借用</CardTitle>
         </CardHeader>
         <CardContent>
-          {myBorrows.length === 0 ? (
+          {loadingBorrows ? (
+            <SkeletonList lines={3} />
+          ) : myBorrows.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">暂无借用</p>
           ) : (
             <div className="space-y-4">
@@ -558,7 +621,9 @@ export function Dashboard() {
           <CardTitle>待入库位置分配</CardTitle>
         </CardHeader>
         <CardContent>
-          {pendingStockin.length === 0 ? (
+          {loadingStockin ? (
+            <SkeletonList lines={3} />
+          ) : pendingStockin.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">无待入库物品</p>
           ) : (
             <div className="space-y-4">
@@ -598,7 +663,6 @@ export function Dashboard() {
               </p>
             </div>
             
-            {/* 归还方式切换 */}
             <div className="flex gap-4 mb-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -625,7 +689,7 @@ export function Dashboard() {
             <div>
               <label className="block text-sm font-medium mb-1">
                 {returnMode === 'remaining' ? '剩余量' : '使用量'} 
-                <span className="text-red-500">*</span>
+                <span className="text-destructive">*</span>
                 {returnMode === 'used' && selectedBorrow && (
                   <span className="text-muted-foreground font-normal ml-2">
                     (借用时剩余量: {selectedBorrow.remaining_quantity} {returnUnit})
@@ -645,12 +709,12 @@ export function Dashboard() {
                     }
                   }}
                   placeholder={returnMode === 'remaining' ? '输入剩余量' : '输入使用量'}
-                  className={cn("flex-1", returnError && "border-red-500")}
+                  className={cn("flex-1", returnError && "border-destructive")}
                 />
                 <span className="text-muted-foreground text-sm min-w-[40px]">{returnUnit}</span>
               </div>
               {returnError && (
-                <p className="text-sm text-red-500 mt-1">{returnError}</p>
+                <p className="text-sm text-destructive mt-1">{returnError}</p>
               )}
               {returnMode === 'used' && usedQuantity && !returnError && selectedBorrow && (
                 <p className="text-sm text-muted-foreground mt-1">
@@ -710,7 +774,7 @@ export function Dashboard() {
               
               <div>
                 <label className="block text-sm font-medium mb-1">
-                  存放位置 <span className="text-red-500">*</span>
+                  存放位置 <span className="text-destructive">*</span>
                 </label>
                 <Input
                   value={stockinLocation}

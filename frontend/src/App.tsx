@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Layout } from '@/components/Layout'
-import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
 import { Dashboard } from '@/pages/Dashboard'
 import { InventoryPage } from '@/pages/Inventory'
@@ -33,7 +32,6 @@ function App() {
   useTheme()
 
   return (
-    <ErrorBoundary>
     <BrowserRouter>
       <ToastContainer />
       <Routes>
@@ -51,15 +49,17 @@ function App() {
           <Route path="consumables" element={<ConsumableOrdersPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="import" element={<ImportPage />} />
-          <Route path="admin/users" element={
-            <AdminRoute>
-              <AdminUsersPage />
-            </AdminRoute>
-          } />
+          <Route
+            path="admin/users"
+            element={
+              <AdminRoute>
+                <AdminUsersPage />
+              </AdminRoute>
+            }
+          />
         </Route>
       </Routes>
     </BrowserRouter>
-    </ErrorBoundary>
   )
 }
 

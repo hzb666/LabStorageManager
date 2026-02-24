@@ -1,11 +1,33 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+  getSortedRowModel,
+} from '@tanstack/react-table'
+import type { SortingState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { consumableOrderAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { useAuthStore } from '@/store/useStore'
+import { cn } from '@/lib/utils'
+import { AxiosError } from 'axios'
+import {
+  ShoppingCart,
+  Plus,
+  Loader2,
+  Check,
+  X,
+  AlertTriangle,
+  Package,
+  Search
+} from 'lucide-react'
 
 interface ConsumableOrder {
   id: number
@@ -28,19 +50,36 @@ interface ConsumableOrder {
   updated_at: string
 }
 
-import {
-  CONSUMABLE_STATUS_MAP as STATUS_MAPPING,
-  CONSUMABLE_STATUS_STYLE as STATUS_CLASS_MAPPING,
-} from '@/lib/constants'
-import { AxiosError } from 'axios'
+// 订单状态映射
+const STATUS_MAPPING: Record<string, string> = {
+  pending: '待审批',
+  approved: '已审批',
+  completed: '已完成',
+  rejected: '已驳回'
+}
+
+// 状态样式 - 使用语义化颜色，支持暗黑模式
+const STATUS_STYLES: Record<string, string> = {
+  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+  approved: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+  completed: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+  rejected: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+}
+
+const columnHelper = createColumnHelper<ConsumableOrder>()
 
 export function ConsumableOrdersPage() {
-  const [activeTab, setActiveTab] = useState<'list' | 'create'>('list')
   const [orders, setOrders] = useState<ConsumableOrder[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [loading, setLoading] = useState(true)
+  const [sorting, setSorting] = useState<SortingState>([])
+  const [globalFilter, setGlobalFilter] = useState('')
+  
+  // Dialog state
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === 'admin'
@@ -59,19 +98,17 @@ export function ConsumableOrdersPage() {
     notes: '',
   })
 
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    loadOrders()
-  }, [page, pageSize])
-
-  const loadOrders = async () => {
+  // Load orders
+  const loadOrders = useCallback(async () => {
+    setLoading(true)
     try {
-      setLoading(true)
-      const response = await consumableOrderAPI.list({
+      const params = {
         skip: (page - 1) * pageSize,
         limit: pageSize,
-      })
+      }
+      const response = await consumableOrderAPI.list(params)
       const result = response.data
       setOrders(result.data || [])
       setTotal(result.total || 0)
@@ -80,7 +117,11 @@ export function ConsumableOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, pageSize])
+
+  useEffect(() => {
+    loadOrders()
+  }, [loadOrders])
 
   const totalPages = Math.ceil(total / pageSize)
 
@@ -94,14 +135,15 @@ export function ConsumableOrdersPage() {
     if (!formData.name.trim()) newErrors.name = '名称不能为空'
     if (!formData.specification.trim()) newErrors.specification = '规格不能为空'
     if (formData.quantity <= 0) newErrors.quantity = '数量必须大于0'
-    setErrors(newErrors)
+    setFormErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!validateForm()) return
 
+    setSubmitting(true)
     try {
       await consumableOrderAPI.create({
         ...formData,
@@ -110,24 +152,38 @@ export function ConsumableOrdersPage() {
         price: formData.price ? parseFloat(formData.price) : undefined,
       })
       toast.success('耗材订单创建成功')
-      setFormData({
-        name: '',
-        english_name: '',
-        alias: '',
-        category: '',
-        brand: '',
-        specification: '',
-        quantity: 1,
-        price: '',
-        order_reason: 'none',
-        is_hazardous: false,
-        notes: '',
-      })
-      setActiveTab('list')
+      setShowCreateDialog(false)
+      resetForm()
       loadOrders()
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
       toast.error(axiosError.response?.data?.detail || '创建失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      english_name: '',
+      alias: '',
+      category: '',
+      brand: '',
+      specification: '',
+      quantity: 1,
+      price: '',
+      order_reason: 'none',
+      is_hazardous: false,
+      notes: '',
+    })
+    setFormErrors({})
+  }
+
+  const handleCloseDialog = (open: boolean) => {
+    setShowCreateDialog(open)
+    if (!open) {
+      resetForm()
     }
   }
 
@@ -164,242 +220,447 @@ export function ConsumableOrdersPage() {
     }
   }
 
+  // Table columns
+  const columns = useMemo(() => [
+    // 名称
+    columnHelper.accessor('name', {
+      header: '名称',
+      size: 160,
+      cell: info => (
+        <div className="flex items-center gap-1.5">
+          {info.row.original.is_hazardous && (
+            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
+          )}
+          <span className="font-medium">{info.getValue()}</span>
+        </div>
+      ),
+    }),
+    // 英文名称
+    columnHelper.accessor('english_name', {
+      header: '英文名称',
+      size: 120,
+      cell: info => info.getValue() || '-',
+    }),
+    // 规格
+    columnHelper.accessor('specification', {
+      header: '规格',
+      size: 80,
+      cell: info => <span className="break-all">{info.getValue()}</span>,
+    }),
+    // 数量
+    columnHelper.accessor('quantity', {
+      header: '数量',
+      size: 60,
+      cell: info => <span>×{info.getValue()}</span>,
+    }),
+    // 价格
+    columnHelper.accessor('price', {
+      header: '价格',
+      size: 80,
+      cell: info => info.getValue() ? `¥${info.getValue()}` : '-',
+    }),
+    // 品牌
+    columnHelper.accessor('brand', {
+      header: '品牌',
+      size: 80,
+      cell: info => info.getValue() || '-',
+    }),
+    // 申请人
+    columnHelper.accessor('applicant_name', {
+      header: '申请人',
+      size: 80,
+      cell: info => info.getValue() || '-',
+    }),
+    // 状态
+    columnHelper.accessor('status', {
+      header: '状态',
+      size: 80,
+      cell: info => {
+        const status = info.getValue()
+        return (
+          <span className={cn(
+            'px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap',
+            STATUS_STYLES[status] || 'bg-muted'
+          )}>
+            {STATUS_MAPPING[status] || status}
+          </span>
+        )
+      },
+    }),
+    // 操作
+    columnHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 160,
+      cell: info => {
+        const order = info.row.original
+        return (
+          <div className="flex items-center gap-1 flex-wrap">
+            {isAdmin && order.status === 'pending' && (
+              <>
+                <Button 
+                  size="sm" 
+                  variant="default"
+                  className="h-7 text-xs px-2"
+                  onClick={() => handleApprove(order.id)}
+                >
+                  审批
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="destructive"
+                  className="h-7 text-xs px-2"
+                  onClick={() => handleReject(order.id)}
+                >
+                  驳回
+                </Button>
+              </>
+            )}
+            {order.status === 'approved' && (
+              <Button 
+                size="sm" 
+                variant="secondary"
+                className="h-7 text-xs px-2"
+                onClick={() => handleComplete(order.id)}
+              >
+                确认完成
+              </Button>
+            )}
+          </div>
+        )
+      },
+    }),
+  ], [isAdmin])
+
+  const table = useReactTable({
+    data: orders,
+    columns,
+    columnResizeMode: 'onChange',
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
+    state: {
+      sorting,
+    },
+  })
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold title-placeholder">耗材订购</h1>
-        <div className="space-x-2">
-          <Button variant={activeTab === 'list' ? 'default' : 'outline'} onClick={() => setActiveTab('list')}>
-            订单列表
-          </Button>
-          <Button variant={activeTab === 'create' ? 'default' : 'outline'} onClick={() => setActiveTab('create')}>
-            创建订单
-          </Button>
-        </div>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h1 className="text-3xl font-bold tracking-tight">耗材订购</h1>
+        <Button onClick={() => setShowCreateDialog(true)}>
+          <Plus className="w-4 h-4 mr-1.5" />
+          创建订单
+        </Button>
       </div>
 
-      {activeTab === 'create' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>创建耗材订单</CardTitle>
-            <CardDescription>
-              填写以下信息申请订购耗材。耗材不需要入库。
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* Name */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">
-                    中文名称 <span className="text-red-500">*</span>
-                  </label>
-                  <Input
-                    value={formData.name}
-                    onChange={(e) => updateFormField('name', e.target.value)}
-                    placeholder="如: 一次性手套"
-                    className={errors.name ? 'border-red-500' : ''}
-                  />
-                  {errors.name && <p className="text-sm text-red-500 mt-1">{errors.name}</p>}
-                </div>
-
-                {/* English Name */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">英文名称</label>
-                  <Input
-                    value={formData.english_name}
-                    onChange={(e) => updateFormField('english_name', e.target.value)}
-                    placeholder="如: Disposable Gloves"
-                  />
-                </div>
-
-                {/* Alias */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">别名</label>
-                  <Input
-                    value={formData.alias}
-                    onChange={(e) => updateFormField('alias', e.target.value)}
-                    placeholder="如: 手套"
-                  />
-                </div>
-
-                {/* Category */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">分类</label>
-                  <Input
-                    value={formData.category}
-                    onChange={(e) => updateFormField('category', e.target.value)}
-                    placeholder="如: 手套、试管、移液器"
-                  />
-                </div>
-
-                {/* Brand */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">品牌</label>
-                  <Input
-                    value={formData.brand}
-                    onChange={(e) => updateFormField('brand', e.target.value)}
-                    placeholder="如: 3M、Corning"
-                  />
-                </div>
-
-                {/* Specification */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">
-                    规格 <span className="text-red-500">*</span>
-                  </label>
-                  <Input
-                    value={formData.specification}
-                    onChange={(e) => updateFormField('specification', e.target.value)}
-                    placeholder="如: 100只/盒"
-                    className={errors.specification ? 'border-red-500' : ''}
-                  />
-                  {errors.specification && <p className="text-sm text-red-500 mt-1">{errors.specification}</p>}
-                </div>
-
-                {/* Quantity */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">
-                    数量 <span className="text-red-500">*</span>
-                  </label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={formData.quantity}
-                    onChange={(e) => updateFormField('quantity', parseInt(e.target.value))}
-                    className={errors.quantity ? 'border-red-500' : ''}
-                  />
-                  {errors.quantity && <p className="text-sm text-red-500 mt-1">{errors.quantity}</p>}
-                </div>
-
-                {/* Price */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">价格 (元)</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.price}
-                    onChange={(e) => updateFormField('price', e.target.value)}
-                    placeholder="如: 25.00"
-                  />
-                </div>
-
-                {/* Order Reason */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">订购原因</label>
-                  <select
-                    value={formData.order_reason}
-                    onChange={(e) => updateFormField('order_reason', e.target.value)}
-                    className="w-full border rounded px-3 py-2"
-                  >
-                    <option value="none">没有</option>
-                    <option value="running_out">快用完</option>
-                    <option value="empty">用完</option>
-                    <option value="common_public">常用或公用</option>
-                    <option value="not_found">找不到</option>
-                    <option value="reorder">重新下单</option>
-                  </select>
-                </div>
-
-                {/* Is Hazardous */}
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="is_hazardous"
-                    checked={formData.is_hazardous}
-                    onChange={(e) => updateFormField('is_hazardous', e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <label htmlFor="is_hazardous" className="text-sm font-medium">危险品</label>
-                </div>
-
-                {/* Notes */}
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-1">备注</label>
-                  <Input
-                    value={formData.notes}
-                    onChange={(e) => updateFormField('notes', e.target.value)}
-                    placeholder="其他说明..."
-                  />
-                </div>
-              </div>
-
-              <Button type="submit">提交订单</Button>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
-      {activeTab === 'list' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>耗材订单列表</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <p className="text-center py-4">加载中...</p>
-            ) : orders.length === 0 ? (
-              <p className="text-center py-4 text-muted-foreground">暂无订单</p>
-            ) : (
-              <div className="space-y-4">
-                {orders.map((order) => (
-                  <div key={order.id} className="border rounded-lg p-4">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-semibold">{order.name}</h3>
-                        <p className="text-sm text-muted-foreground">
-                          {order.specification} × {order.quantity}
-                          {order.price && ` • ¥${order.price}`}
-                          {order.english_name && ` • ${order.english_name}`}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          申请人: {order.applicant_name || order.applicant_id} • {new Date(order.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <span className={`px-2 py-1 rounded text-xs ${STATUS_CLASS_MAPPING[order.status]}`}>
-                          {STATUS_MAPPING[order.status]}
-                        </span>
-                        <div className="flex gap-1">
-                          {isAdmin && order.status === 'pending' && (
-                            <>
-                              <Button size="sm" onClick={() => handleApprove(order.id)}>审批</Button>
-                              <Button size="sm" variant="destructive" onClick={() => handleReject(order.id)}>驳回</Button>
-                            </>
-                          )}
-                          {order.status === 'approved' && (
-                            <Button size="sm" onClick={() => handleComplete(order.id)}>确认完成</Button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between pt-2">
-                    <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
-                    <Pagination
-                      currentPage={page}
-                      totalPages={totalPages}
-                      pageSize={pageSize}
-                      onPageChange={setPage}
-                      onPageSizeChange={handlePageSizeChange}
-                    />
-                  </div>
+      {/* Create Order Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={handleCloseDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5" />
+              创建耗材订单
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateOrder}>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* 中文名称 */}
+              <div className="col-span-1 sm:col-span-2">
+                <Label htmlFor="create_name" className="mb-1.5 block">
+                  中文名称 <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="create_name"
+                  value={formData.name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="如: 一次性手套"
+                  className={cn("h-9", formErrors.name && 'border-destructive')}
+                />
+                {formErrors.name && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.name}</p>
                 )}
               </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+
+              {/* 英文名称 */}
+              <div>
+                <Label htmlFor="create_english_name" className="mb-1.5 block">英文名称</Label>
+                <Input
+                  id="create_english_name"
+                  value={formData.english_name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, english_name: e.target.value }))}
+                  placeholder="如: Disposable Gloves"
+                  className="h-9"
+                />
+              </div>
+
+              {/* 别名 */}
+              <div>
+                <Label htmlFor="create_alias" className="mb-1.5 block">别名</Label>
+                <Input
+                  id="create_alias"
+                  value={formData.alias}
+                  onChange={(e) => setFormData(prev => ({ ...prev, alias: e.target.value }))}
+                  placeholder="如: 手套"
+                  className="h-9"
+                />
+              </div>
+
+              {/* 分类 */}
+              <div>
+                <Label htmlFor="create_category" className="mb-1.5 block">分类</Label>
+                <Input
+                  id="create_category"
+                  value={formData.category}
+                  onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+                  placeholder="如: 手套、试管"
+                  className="h-9"
+                />
+              </div>
+
+              {/* 品牌 */}
+              <div>
+                <Label htmlFor="create_brand" className="mb-1.5 block">品牌</Label>
+                <Input
+                  id="create_brand"
+                  value={formData.brand}
+                  onChange={(e) => setFormData(prev => ({ ...prev, brand: e.target.value }))}
+                  placeholder="如: 3M、Corning"
+                  className="h-9"
+                />
+              </div>
+
+              {/* 规格 */}
+              <div>
+                <Label htmlFor="create_specification" className="mb-1.5 block">
+                  规格 <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="create_specification"
+                  value={formData.specification}
+                  onChange={(e) => setFormData(prev => ({ ...prev, specification: e.target.value }))}
+                  placeholder="如: 100只/盒"
+                  className={cn("h-9", formErrors.specification && 'border-destructive')}
+                />
+                {formErrors.specification && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.specification}</p>
+                )}
+              </div>
+
+              {/* 数量 */}
+              <div>
+                <Label htmlFor="create_quantity" className="mb-1.5 block">
+                  数量 <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="create_quantity"
+                  type="number"
+                  min="1"
+                  value={formData.quantity}
+                  onChange={(e) => setFormData(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                  className={cn("h-9", formErrors.quantity && 'border-destructive')}
+                />
+                {formErrors.quantity && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.quantity}</p>
+                )}
+              </div>
+
+              {/* 价格 */}
+              <div>
+                <Label htmlFor="create_price" className="mb-1.5 block">价格 (元)</Label>
+                <Input
+                  id="create_price"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.price}
+                  onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
+                  placeholder="如: 25.00"
+                  className="h-9"
+                />
+              </div>
+
+              {/* 订购原因 */}
+              <div>
+                <Label htmlFor="create_order_reason" className="mb-1.5 block">订购原因</Label>
+                <select
+                  id="create_order_reason"
+                  value={formData.order_reason}
+                  onChange={(e) => setFormData(prev => ({ ...prev, order_reason: e.target.value }))}
+                  className="h-9 w-full px-3 text-sm border rounded-md bg-background appearance-none cursor-pointer hover:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
+                  style={{
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 0.5rem center',
+                    backgroundSize: '1rem'
+                  }}
+                >
+                  <option value="none">没有</option>
+                  <option value="running_out">快用完</option>
+                  <option value="empty">用完</option>
+                  <option value="common_public">常用或公用</option>
+                  <option value="not_found">找不到</option>
+                  <option value="reorder">重新下单</option>
+                </select>
+              </div>
+
+              {/* 危险品 */}
+              <div className="flex items-center gap-2 h-9">
+                <input
+                  type="checkbox"
+                  id="create_is_hazardous"
+                  checked={formData.is_hazardous}
+                  onChange={(e) => setFormData(prev => ({ ...prev, is_hazardous: e.target.checked }))}
+                  className="w-4 h-4 rounded"
+                />
+                <Label htmlFor="create_is_hazardous" className="flex items-center gap-1 cursor-pointer mb-0">
+                  <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                  危险品
+                </Label>
+              </div>
+
+              {/* 备注 */}
+              <div className="col-span-1 sm:col-span-3">
+                <Label htmlFor="create_notes" className="mb-1.5 block">备注</Label>
+                <textarea
+                  id="create_notes"
+                  value={formData.notes}
+                  onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                  className="w-full h-20 px-3 py-2 border border-input rounded-md bg-background text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  placeholder="其他说明..."
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3 border-t">
+              <div className="ml-auto flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCloseDialog(false)}
+                >
+                  取消
+                </Button>
+                <Button type="submit" disabled={submitting} size="sm">
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                      提交中...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 mr-1.5" />
+                      提交订单
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="py-4">
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索耗材名称..."
+                value={globalFilter}
+                onChange={(e) => setGlobalFilter(e.target.value)}
+                className="pl-9 pr-8 h-9 text-sm w-full"
+              />
+              {globalFilter && (
+                <button
+                  onClick={() => setGlobalFilter('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Table */}
+      <Card>
+        <CardHeader className="py-4">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Package className="w-5 h-5" />
+            耗材订单列表 <span className="text-muted-foreground font-normal">({total})</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {loading && orders.length === 0 ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : orders.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              暂无订单
+            </div>
+          ) : (
+            <>
+              <div className="rounded-md border overflow-x-auto">
+                <table className="w-full min-w-[800px] md:min-w-[900px]" style={{ tableLayout: 'fixed' }}>
+                  <thead>
+                    {table.getHeaderGroups().map(headerGroup => (
+                      <tr key={headerGroup.id} className="border-b bg-muted/30">
+                        {headerGroup.headers.map(header => (
+                          <th 
+                            key={header.id} 
+                            className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm"
+                            style={{ width: header.getSize() }}
+                          >
+                            {header.isPlaceholder
+                              ? null
+                              : flexRender(header.column.columnDef.header, header.getContext())}
+                          </th>
+                        ))}
+                      </tr>
+                    ))}
+                  </thead>
+                  <tbody>
+                    {table.getRowModel().rows.map(row => (
+                      <tr 
+                        key={row.id} 
+                        className="border-b border-border hover:bg-muted/50 cursor-pointer transition-colors"
+                      >
+                        {row.getVisibleCells().map(cell => (
+                          <td 
+                            key={cell.id} 
+                            className="p-3 align-middle text-sm"
+                            style={{ width: cell.column.getSize() }}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between pt-4 px-4 pb-4">
+                  <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
+                  <Pagination
+                    currentPage={page}
+                    totalPages={totalPages}
+                    pageSize={pageSize}
+                    onPageChange={setPage}
+                    onPageSizeChange={handlePageSizeChange}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
-
-  function updateFormField(field: string, value: string | number | boolean) {
-    setFormData(prev => ({ ...prev, [field]: value }))
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: '' }))
-    }
-  }
 }
