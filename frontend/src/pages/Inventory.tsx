@@ -1239,7 +1239,7 @@ export function InventoryPage() {
       </Card>
 
       {/* Table */}
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader className="py-4">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Package className="w-5 h-5" />
@@ -1266,8 +1266,8 @@ export function InventoryPage() {
             </div>
           ) : (
             <>
-              <div className="rounded-md border overflow-x-auto">
-                <table className="w-full min-w-[600px] md:min-w-[820px]" style={{ tableLayout: 'fixed' }}>
+              <div className="rounded-md border overflow-auto">
+                <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                     <thead>
                       {table.getHeaderGroups().map(headerGroup => (
                         <tr key={headerGroup.id} className="border-b bg-muted/30">

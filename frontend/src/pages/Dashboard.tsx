@@ -55,12 +55,10 @@ interface ConsumableOrdersByStatus {
   approved: { orders: OrderItem[] }
 }
 
-// 骨架屏组件
+// 骨架屏组件 - 空白占位
 function SkeletonCard({ className }: { className?: string }) {
   return (
-    <div className={cn("animate-pulse", className)}>
-      <div className="h-8 bg-muted rounded w-12"></div>
-    </div>
+    <div className={cn("h-8", className)} />
   )
 }
 
@@ -68,13 +66,7 @@ function SkeletonList({ lines = 3 }: { lines?: number }) {
   return (
     <div className="space-y-3">
       {Array.from({ length: lines }).map((_, i) => (
-        <div key={i} className="animate-pulse flex items-center justify-between p-4 border rounded-lg">
-          <div className="flex-1">
-            <div className="h-4 bg-muted rounded w-1/3 mb-2"></div>
-            <div className="h-3 bg-muted rounded w-1/2"></div>
-          </div>
-          <div className="h-8 bg-muted rounded w-20"></div>
-        </div>
+        <div key={i} className="h-16" />
       ))}
     </div>
   )
@@ -95,7 +87,7 @@ function StatCard({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <CardTitle className="text-base font-medium">{title}</CardTitle>
         <Icon className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent>
@@ -363,8 +355,8 @@ export function Dashboard() {
                        myConsumableOrders.filter((o) => o.status === 'pending').length
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">仪表盘</h1>
       </div>
 

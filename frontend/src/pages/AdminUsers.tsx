@@ -420,8 +420,8 @@ export function AdminUsersPage() {
               暂无用户数据
             </div>
           ) : (
-            <div className="rounded-md border overflow-x-auto">
-              <table className="w-full min-w-[500px]" style={{ tableLayout: 'fixed' }}>
+            <div className="rounded-md border overflow-auto">
+              <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                 <thead>
                   {table.getHeaderGroups().map(headerGroup => (
                     <tr key={headerGroup.id} className="border-b bg-muted/30">
