@@ -58,7 +58,7 @@
   --ring: oklch(0.704 0.04 256.788);
   
   --sidebar: var(--background);
-  --sidebar-foreground: var(--foreground);
+  --sidebar-foreground: oklch(0.129 0.042 264.695);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: var(--accent);
