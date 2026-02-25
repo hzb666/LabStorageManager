@@ -475,7 +475,8 @@ def stock_in_reagent_order(
     
     # For APPROVED status, check permission (same as confirm-arrival)
     if order.status == ReagentOrderStatus.APPROVED:
-        if order.applicant_id != current_user.id and current_user.role != "admin":
+        from app.models.user import UserRole
+        if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the order applicant or admin can stock in"

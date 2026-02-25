@@ -60,11 +60,20 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
         "iat": datetime.now(timezone.utc),
     }
     
-    token = jwt.encode(
-        payload,
-        settings.secret_key,
-        algorithm=settings.algorithm
-    )
+    # Use RS256 with private key, or HS256 with secret_key as fallback
+    if settings.algorithm == "RS256":
+        token = jwt.encode(
+            payload,
+            settings.get_private_key(),
+            algorithm=settings.algorithm
+        )
+    else:
+        # HS256 fallback
+        token = jwt.encode(
+            payload,
+            settings.secret_key,
+            algorithm=settings.algorithm
+        )
     
     return token
 
@@ -83,11 +92,20 @@ def decode_token(token: str) -> dict:
         HTTPException: If token is invalid or expired
     """
     try:
-        payload = jwt.decode(
-            token,
-            settings.secret_key,
-            algorithms=[settings.algorithm]
-        )
+        # Use RS256 with public key, or HS256 with secret_key as fallback
+        if settings.algorithm == "RS256":
+            payload = jwt.decode(
+                token,
+                settings.get_public_key(),
+                algorithms=[settings.algorithm]
+            )
+        else:
+            # HS256 fallback
+            payload = jwt.decode(
+                token,
+                settings.secret_key,
+                algorithms=[settings.algorithm]
+            )
         return payload
     except JWTError as e:
         raise HTTPException(

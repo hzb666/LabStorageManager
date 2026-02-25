@@ -9,10 +9,8 @@ import {
 import type { SortingState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { consumableOrderAPI } from '@/api/client'
@@ -20,13 +18,13 @@ import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { useAuthStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
+import { validateRequired, validateSpecification, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
 import { AxiosError } from 'axios'
 import {
   ShoppingCart,
   Plus,
   Loader2,
   X,
-  AlertTriangle,
   Package,
   Search
 } from 'lucide-react'
@@ -41,8 +39,6 @@ interface ConsumableOrder {
   specification: string
   quantity: number
   price?: number
-  order_reason: string
-  is_hazardous: boolean
   image_path?: string
   notes?: string
   applicant_id: number
@@ -95,8 +91,6 @@ export function ConsumableOrdersPage() {
     specification: '',
     quantity: 1,
     price: '',
-    order_reason: 'none',
-    is_hazardous: false,
     notes: '',
   })
 
@@ -134,9 +128,41 @@ export function ConsumableOrdersPage() {
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
-    if (!formData.name.trim()) newErrors.name = '名称不能为空'
-    if (!formData.specification.trim()) newErrors.specification = '规格不能为空'
-    if (formData.quantity <= 0) newErrors.quantity = '数量必须大于0'
+    
+    // 名称验证：必填
+    const nameValidation = validateRequired(formData.name, '名称')
+    if (!nameValidation.isValid) {
+      newErrors.name = nameValidation.error || '名称不能为空'
+    }
+    
+    // 规格验证：必填 + 格式
+    const specValidation = validateRequired(formData.specification, '规格')
+    if (!specValidation.isValid) {
+      newErrors.specification = specValidation.error || '规格不能为空'
+    } else {
+      const specFormatValidation = validateSpecification(formData.specification)
+      if (!specFormatValidation.isValid) {
+        newErrors.specification = specFormatValidation.error || '规格格式无效'
+      }
+    }
+    
+    // 数量验证：正数
+    const quantityValidation = validatePositiveNumber(formData.quantity, '数量')
+    if (!quantityValidation.isValid) {
+      newErrors.quantity = quantityValidation.error || '数量必须大于0'
+    }
+    
+    // 价格验证：必填 + 非负数
+    const priceValue = formData.price ? parseFloat(formData.price) : NaN
+    if (!formData.price || isNaN(priceValue)) {
+      newErrors.price = '价格不能为空'
+    } else {
+      const priceValidation = validateNonNegativeNumber(priceValue, '价格')
+      if (!priceValidation.isValid) {
+        newErrors.price = priceValidation.error || '价格不能为负数'
+      }
+    }
+    
     setFormErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
@@ -175,8 +201,6 @@ export function ConsumableOrdersPage() {
       specification: '',
       quantity: 1,
       price: '',
-      order_reason: 'none',
-      is_hazardous: false,
       notes: '',
     })
     setFormErrors({})
@@ -227,14 +251,9 @@ export function ConsumableOrdersPage() {
     // 名称
     columnHelper.accessor('name', {
       header: '名称',
-      size: 160,
+      size: 180,
       cell: info => (
-        <div className="flex items-center gap-1.5">
-          {info.row.original.is_hazardous && (
-            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
-          )}
-          <span className="font-medium">{info.getValue()}</span>
-        </div>
+        <span className="font-medium">{info.getValue()}</span>
       ),
     }),
     // 英文名称
@@ -350,7 +369,7 @@ export function ConsumableOrdersPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">耗材订购</h1>
+        <h1 className="text-3xl font-bold text-primary">耗材订购</h1>
         <Button onClick={() => setShowCreateDialog(true)} size="lg">
           <Plus className="w-4 h-4 mr-1.5" />
           创建订单
@@ -359,7 +378,7 @@ export function ConsumableOrdersPage() {
 
       {/* Search */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-        <div className="relative flex-1 min-w-[200px]">
+        <div className="relative flex-1 min-w-50">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="搜索耗材名称..."
@@ -382,8 +401,7 @@ export function ConsumableOrdersPage() {
       <Dialog open={showCreateDialog} onOpenChange={handleCloseDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-xl flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5" />
+            <DialogTitle className="text-2xl flex items-center gap-2 mb-6">
               创建耗材订单
             </DialogTitle>
           </DialogHeader>
@@ -491,7 +509,9 @@ export function ConsumableOrdersPage() {
 
               {/* 价格 */}
               <div>
-                <Label htmlFor="create_price" className={LABEL_STYLES.base}>价格 (元)</Label>
+                <Label htmlFor="create_price" className={LABEL_STYLES.base}>
+                  价格 (元) <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="create_price"
                   type="number"
@@ -500,42 +520,11 @@ export function ConsumableOrdersPage() {
                   value={formData.price}
                   onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
                   placeholder="如: 25.00"
-                  className={INPUT_STYLES.lg}
+                  className={cn(INPUT_STYLES.lg, formErrors.price && 'border-destructive')}
                 />
-              </div>
-
-              {/* 订购原因 */}
-              <div>
-                <Label htmlFor="create_order_reason" className={LABEL_STYLES.base}>订购原因</Label>
-                <Select
-                  value={formData.order_reason}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, order_reason: value }))}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="选择订购原因" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">没有</SelectItem>
-                    <SelectItem value="running_out">快用完</SelectItem>
-                    <SelectItem value="empty">用完</SelectItem>
-                    <SelectItem value="common_public">常用或公用</SelectItem>
-                    <SelectItem value="not_found">找不到</SelectItem>
-                    <SelectItem value="reorder">重新下单</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* 危险品 */}
-              <div className="flex items-center gap-2 h-9">
-                <Checkbox
-                  id="create_is_hazardous"
-                  checked={formData.is_hazardous}
-                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, is_hazardous: checked === true }))}
-                />
-                <Label htmlFor="create_is_hazardous" className="flex items-center gap-1 cursor-pointer mb-0">
-                  <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                  危险品
-                </Label>
+                {formErrors.price && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.price}</p>
+                )}
               </div>
 
               {/* 备注 */}

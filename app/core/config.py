@@ -1,13 +1,17 @@
 """
 Configuration settings for Lab Storage Manager
 """
+import logging
 import secrets
 from functools import lru_cache
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -23,9 +27,13 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./lab_inventory.db"
     
     # JWT Authentication
-    secret_key: str = Field(default="", description="JWT secret key")
-    algorithm: str = "HS256"
+    secret_key: str = Field(default="", description="JWT secret key (for HS256 fallback)")
+    algorithm: str = "RS256"  # Changed from HS256 to RS256 for better security
     access_token_expire_minutes: int = 7 * 24 * 60  # 7 days
+    
+    # RSA Keys for RS256
+    private_key_path: str = Field(default=".keys/private.pem", description="JWT private key path")
+    public_key_path: str = Field(default=".keys/public.pem", description="JWT public key path")
     
     # CORS
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
@@ -37,24 +45,128 @@ class Settings(BaseSettings):
     max_image_height: int = 800
     max_image_size_kb: int = 100  # Critical Rule #3: <100KB
     
+    # Default Admin
+    default_admin_username: str = Field(default="admin", description="Default admin username")
+    default_admin_password: str = Field(default="", description="Default admin password (set in production)")
+    default_admin_full_name: str = Field(default="系统管理员", description="Default admin full name")
+    
     # CAS Configuration
     cas_pattern: str = r"^\d{2,7}-\d{2}-\d$"
     
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+    
+    @field_validator("algorithm")
+    @classmethod
+    def validate_algorithm(cls, v: str) -> str:
+        """Validate JWT algorithm"""
+        if v not in ["HS256", "RS256"]:
+            raise ValueError("JWT algorithm must be HS256 or RS256")
+        return v
+    
+    def get_private_key(self) -> str:
+        """Load or generate RSA private key"""
+        key_path = Path(self.private_key_path)
+        if key_path.exists():
+            return key_path.read_text(encoding="utf-8")
+        
+        # Only generate temporary key in explicit development mode
+        if self._is_explicit_development():
+            logger.warning("No RSA private key found, generating temporary key for development")
+            return self._generate_rsa_key_pair()
+        
+        raise ValueError(
+            f"RSA private key not found at {self.private_key_path}. "
+            "Please generate keys using: openssl genrsa -out .keys/private.pem 2048"
+        )
+    
+    def _is_explicit_development(self) -> bool:
+        """Check if environment is explicitly set to development"""
+        return self.env.lower() in ("development", "dev")
+    
+    def get_public_key(self) -> str:
+        """Load or generate RSA public key"""
+        key_path = Path(self.public_key_path)
+        if key_path.exists():
+            return key_path.read_text(encoding="utf-8")
+        
+        # Derive from private key only in explicit development mode
+        if self._is_explicit_development():
+            private_key = self.get_private_key()
+            return self._derive_public_key(private_key)
+        
+        raise ValueError(
+            f"RSA public key not found at {self.public_key_path}. "
+            "Please generate keys using: openssl rsa -in .keys/private.pem -pubout -out .keys/public.pem"
+        )
+    
+    def _generate_rsa_key_pair(self) -> str:
+        """Generate RSA key pair and return private key"""
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048
+        )
+        
+        # Save private key
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        
+        # Save public key
+        public_key = private_key.public_key()
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        # Ensure directory exists
+        key_dir = Path(self.private_key_path).parent
+        key_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Write keys
+        Path(self.private_key_path).write_bytes(private_pem)
+        Path(self.public_key_path).write_bytes(public_pem)
+        
+        logger.info(f"Generated RSA key pair at {key_dir}")
+        
+        return private_pem.decode("utf-8")
+    
+    def _derive_public_key(self, private_key_pem: str) -> str:
+        """Derive public key from private key"""
+        from cryptography.hazmat.primitives import serialization
+        
+        private_key = serialization.load_pem_private_key(
+            private_key_pem.encode("utf-8"),
+            password=None
+        )
+        
+        public_key = private_key.public_key()
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        return public_pem.decode("utf-8")
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance"""
     settings = Settings()
-    # Validate secret_key in production
+    
+    # Validate secret_key in production (needed for HS256 fallback)
     if not settings.secret_key:
-        if settings.env == "production":
-            raise ValueError("SECRET_KEY must be set in production environment")
+        if settings.env == "production" and settings.algorithm == "HS256":
+            raise ValueError("SECRET_KEY must be set in production when using HS256")
         # Use a secure random key in development
         settings.secret_key = secrets.token_urlsafe(32)
+    
     return settings
 
 

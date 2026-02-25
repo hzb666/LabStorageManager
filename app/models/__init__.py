@@ -12,7 +12,6 @@ from .reagent_order import (
 from .consumable_order import (
     ConsumableOrder,
     ConsumableOrderStatus,
-    ConsumableOrderReason,
     ConsumableOrderCreate,
     ConsumableOrderUpdate,
     ConsumableOrderResponse,
@@ -37,7 +36,6 @@ __all__ = [
     # Consumable Order
     "ConsumableOrder",
     "ConsumableOrderStatus",
-    "ConsumableOrderReason",
     "ConsumableOrderCreate",
     "ConsumableOrderUpdate",
     "ConsumableOrderResponse",

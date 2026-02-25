@@ -6,11 +6,16 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, ForeignKey, SQLModel, Relationship
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class InventoryStatus(str, Enum):
     """Inventory status enumeration"""
+    NOT_IN_STOCK = "not_in_stock"
     IN_STOCK = "in_stock"
     BORROWED = "borrowed"
     CONSUMED = "consumed"
@@ -40,10 +45,29 @@ class Inventory(InventoryBase, table=True):
     # Unique internal code: e.g., "64175-250113-01" (CAS-Date-Sequence)
     internal_code: str = Field(unique=True, index=True, max_length=50)
     status: InventoryStatus = InventoryStatus.IN_STOCK
-    borrower_id: Optional[int] = Field(default=None, index=True)
-    last_borrower_id: Optional[int] = Field(default=None)
-    temporary_keeper_id: Optional[int] = Field(default=None, index=True)  # New field for temporary keeper
-    created_by_id: Optional[int] = Field(default=None, index=True)  # User who created the inventory
+    borrower_id: Optional[int] = Field(
+        default=None,
+        index=True,
+        foreign_key="user.id",
+        ondelete="SET NULL"
+    )
+    last_borrower_id: Optional[int] = Field(
+        default=None,
+        foreign_key="user.id",
+        ondelete="SET NULL"
+    )
+    temporary_keeper_id: Optional[int] = Field(
+        default=None,
+        index=True,
+        foreign_key="user.id",
+        ondelete="SET NULL"
+    )
+    created_by_id: Optional[int] = Field(
+        default=None,
+        index=True,
+        foreign_key="user.id",
+        ondelete="SET NULL"
+    )
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -119,8 +143,16 @@ class InventoryResponse(SQLModel):
 class BorrowLog(SQLModel, table=True):
     """Borrow Log - Track borrow/return history"""
     id: Optional[int] = Field(default=None, primary_key=True)
-    inventory_id: int = Field(index=True)
-    borrower_id: int = Field(index=True)
+    inventory_id: int = Field(
+        index=True,
+        foreign_key="inventory.id",
+        ondelete="CASCADE"
+    )
+    borrower_id: int = Field(
+        index=True,
+        foreign_key="user.id",
+        ondelete="CASCADE"
+    )
     borrow_time: datetime = Field(default_factory=datetime.utcnow)
     return_time: Optional[datetime] = None
     quantity_borrowed: float = Field(gt=0)

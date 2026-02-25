@@ -15,11 +15,11 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { useNavigate } from 'react-router-dom'
 import { inventoryAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { formatDate, cn } from '@/lib/utils'
+import { validateCASNumber, validateRequired, validateSpecification, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
 import useDialogState from '@/hooks/use-dialog-state'
 import {
   Search,
@@ -201,7 +201,7 @@ const ActionButtons = React.memo(function ActionButtons({
         <Button
           size="sm"
           className={cn(
-            "h-8.5 text-sm/4 px-3",
+            "h-8.5 text-sm/4 px-3 border-0",
             isConfirming 
               ? "bg-destructive hover:bg-destructive/90" 
               : "bg-primary hover:bg-primary/90",
@@ -219,7 +219,6 @@ const ActionButtons = React.memo(function ActionButtons({
 })
 
 export function InventoryPage() {
-  const navigate = useNavigate()
   const [data, setData] = useState<InventoryItem[]>([])
   const [total, setTotal] = useState(0)
   const [grandTotal, setGrandTotal] = useState(0) // 库存总数（不搜索时的总数）
@@ -264,6 +263,7 @@ export function InventoryPage() {
     is_hazardous: false,
     notes: ''
   })
+  const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({})
 
   // Optimized edit form handlers using useCallback
   const handleEditNameChange = useCallback((value: string) => {
@@ -447,8 +447,46 @@ export function InventoryPage() {
     setPage(1)
   }
 
+  // 编辑表单验证函数 - 使用 inputValidation.ts
+  const validateEditForm = useCallback((): boolean => {
+    const errors: Record<string, string> = {}
+    
+    // 名称验证：必填
+    const nameValidation = validateRequired(editFormData.name, '名称')
+    if (!nameValidation.isValid) {
+      errors.name = nameValidation.error || '名称不能为空'
+    }
+    
+    // 规格验证：必填 + 格式
+    const specValidation = validateRequired(editFormData.specification, '规格')
+    if (!specValidation.isValid) {
+      errors.specification = specValidation.error || '规格不能为空'
+    } else {
+      const specFormatValidation = validateSpecification(editFormData.specification)
+      if (!specFormatValidation.isValid) {
+        errors.specification = specFormatValidation.error || '规格格式无效'
+      }
+    }
+    
+    // 剩余量验证：非负数
+    const remainingValidation = validateNonNegativeNumber(editFormData.remaining_quantity, '剩余量')
+    if (!remainingValidation.isValid) {
+      errors.remaining_quantity = remainingValidation.error || '剩余量不能为负数'
+    } else if (editFormData.remaining_quantity > editFormData.initial_quantity) {
+      // 额外检查：不能超过初始量
+      errors.remaining_quantity = '剩余量不能超过初始量'
+    }
+    
+    setEditFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }, [editFormData])
+
   const handleEditSave = async () => {
     if (!editingItem) return
+    
+    // 使用验证函数验证表单
+    if (!validateEditForm()) return
+    
     try {
       // 如果剩余量为0，自动设置状态为用完
       const status = editFormData.remaining_quantity === 0 ? 'consumed' : 
@@ -465,6 +503,7 @@ export function InventoryPage() {
         notes: editFormData.notes || undefined
       })
       setDialogState(null)
+      setEditFormErrors({})
       loadInventory()
       toast.success('库存信息已更新')
     } catch (error) {
@@ -498,6 +537,7 @@ export function InventoryPage() {
     setDialogState(open ? 'edit' : null)
     if (!open) {
       setDeleteConfirm(false)
+      setEditFormErrors({})
     }
   }
 
@@ -505,6 +545,7 @@ export function InventoryPage() {
   const handleEditClick = useCallback((item: InventoryItem) => {
     setEditingItem(item)
     setDeleteConfirm(false)
+    setEditFormErrors({})
     setEditFormData({
       name: item.name || '',
       english_name: item.english_name || '',
@@ -543,7 +584,7 @@ export function InventoryPage() {
       cell: info => (
         <div className="flex items-center gap-1.5 break-all">
           {info.row.original.is_hazardous && (
-            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
+            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
           )}
           <span>
             <HighlightText text={info.getValue() || ''} highlight={displayFilter} fuzzy={fuzzySearch} />
@@ -658,17 +699,41 @@ export function InventoryPage() {
     },
   })
 
-  // Memoized validation function
+  // 手动入库表单验证函数 - 使用 inputValidation.ts
   const validateManualAddForm = useCallback((): boolean => {
     const errors: Record<string, string> = {}
-    if (!formData.cas_number.trim()) errors.cas_number = 'CAS号不能为空'
-    if (!/^\d{2,7}-\d{2}-\d$/.test(formData.cas_number)) {
-      errors.cas_number = 'CAS号格式无效 (如: 64-17-5)'
+    
+    // CAS号验证：必填 + 格式 + 校验码
+    const casValidation = validateCASNumber(formData.cas_number)
+    if (!casValidation.isValid) {
+      errors.cas_number = casValidation.error || 'CAS号格式无效'
     }
-    if (!formData.name.trim()) errors.name = '名称不能为空'
-    if (!formData.location.trim()) errors.location = '位置不能为空'
-    if (!formData.specification.trim()) errors.specification = '规格不能为空'
-    if (formData.quantity_bottles < 1) errors.quantity_bottles = '瓶数必须大于0'
+    
+    // 名称验证：必填
+    const nameValidation = validateRequired(formData.name, '试剂名称')
+    if (!nameValidation.isValid) {
+      errors.name = nameValidation.error || '试剂名称不能为空'
+    }
+    
+    // 规格验证：必填 + 格式
+    const specValidation = validateRequired(formData.specification, '规格')
+    if (!specValidation.isValid) {
+      errors.specification = specValidation.error || '规格不能为空'
+    } else {
+      const specFormatValidation = validateSpecification(formData.specification)
+      if (!specFormatValidation.isValid) {
+        errors.specification = specFormatValidation.error || '规格格式无效'
+      }
+    }
+    
+    // 瓶数验证：正数
+    const quantityValidation = validatePositiveNumber(formData.quantity_bottles, '瓶数')
+    if (!quantityValidation.isValid) {
+      errors.quantity_bottles = quantityValidation.error || '瓶数必须大于0'
+    }
+    
+    // 注意：location 已改为非必填
+    
     setFormErrors(errors)
     return Object.keys(errors).length === 0
   }, [formData])
@@ -797,7 +862,7 @@ export function InventoryPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">库存管理</h1>
+        <h1 className="text-3xl font-bold text-primary">库存管理</h1>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => setDialogState('add')} size="lg">
             <Plus className="w-4 h-4 mr-1.5" />
@@ -855,7 +920,7 @@ export function InventoryPage() {
               setPage(1)
             }}
           >
-            <SelectTrigger className="w-30">
+            <SelectTrigger className="w-30 min-h-10">
               <SelectValue placeholder="全部" />
             </SelectTrigger>
             <SelectContent>
@@ -871,7 +936,7 @@ export function InventoryPage() {
             value={statusFilter}
             onValueChange={(value) => handleStatusFilterChange(value)}
           >
-            <SelectTrigger className="w-30">
+            <SelectTrigger className="w-30 min-h-10">
               <SelectValue placeholder="全部状态" />
             </SelectTrigger>
             <SelectContent>
@@ -900,18 +965,21 @@ export function InventoryPage() {
                 id="edit_name"
                 value={editFormData.name}
                 onChange={(e) => handleEditNameChange(e.target.value)}
-                className={INPUT_STYLES.lg}
+                className={cn(INPUT_STYLES.lg, editFormErrors.name && 'border-destructive')}
                 placeholder="如: 乙醇"
               />
+              {editFormErrors.name && (
+                <p className="text-xs text-destructive mt-1">{editFormErrors.name}</p>
+              )}
             </div>
             <div>
               <Label htmlFor="edit_cas" className={LABEL_STYLES.base}>
-                CAS号
+                CAS号（不可编辑）
               </Label>
               <Input
                 id="edit_cas"
                 value={editFormData.cas_number}
-                disabled
+                readOnly
                 className={cn(INPUT_STYLES.lg, "bg-muted")}
               />
             </div>
@@ -958,8 +1026,11 @@ export function InventoryPage() {
                 type="number"
                 value={editFormData.remaining_quantity}
                 onChange={(e) => handleEditRemainingQuantityChange(parseFloat(e.target.value) || 0)}
-                className={INPUT_STYLES.lg}
+                className={cn(INPUT_STYLES.lg, editFormErrors.remaining_quantity && 'border-destructive')}
               />
+              {editFormErrors.remaining_quantity && (
+                <p className="text-xs text-destructive mt-1">{editFormErrors.remaining_quantity}</p>
+              )}
             </div>
             <div>
               <Label htmlFor="edit_spec" className={LABEL_STYLES.base}>
@@ -969,9 +1040,12 @@ export function InventoryPage() {
                 id="edit_spec"
                 value={editFormData.specification || ''}
                 onChange={(e) => handleEditSpecificationChange(e.target.value)}
-                className={INPUT_STYLES.lg}
+                className={cn(INPUT_STYLES.lg, editFormErrors.specification && 'border-destructive')}
                 placeholder="如: 500ml"
               />
+              {editFormErrors.specification && (
+                <p className="text-xs text-destructive mt-1">{editFormErrors.specification}</p>
+              )}
             </div>
 
             {/* 第四行：品牌、分类、危险品 */}
@@ -1045,7 +1119,7 @@ export function InventoryPage() {
       <Dialog open={dialogState === 'add'} onOpenChange={handleManualAddModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl pb-4">手动入库</DialogTitle>
+            <DialogTitle className="text-2xl flex items-center gap-2 mb-6">手动入库</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleManualAdd}>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1270,7 +1344,7 @@ export function InventoryPage() {
                       {table.getRowModel().rows.map(row => (
                         <React.Fragment key={row.id}>
                           <tr 
-                            className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none"
+                            className="border-b border-border hover:bg-muted/30 cursor-pointer transition-all"
                             onClick={() => toggleRowExpansion(row.original.id)}
                           >
                             {row.getVisibleCells().map(cell => (

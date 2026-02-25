@@ -1,4 +1,29 @@
-import React from 'react'
+import React, { useEffect } from 'react'
+import { CircleAlert } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+
+// 初始化主题的组件 - 确保错误页面有正确的主题
+function ThemeInitializer() {
+  useEffect(() => {
+    // 读取保存的主题设置
+    const savedTheme = localStorage.getItem('theme') || 'light'
+    const root = document.documentElement
+    if (savedTheme === 'dark') {
+      root.classList.add('dark')
+      root.style.colorScheme = 'dark'
+    } else {
+      root.classList.remove('dark')
+      root.style.colorScheme = 'light'
+    }
+  }, [])
+  return null
+}
 
 interface Props {
   children: React.ReactNode
@@ -34,33 +59,45 @@ export class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-background p-4">
-          <div className="w-full max-w-md rounded-lg border bg-card p-8 text-center shadow-sm">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900">
-              <svg className="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h2 className="mb-2 text-lg font-semibold">页面出现错误</h2>
-            <p className="mb-6 text-sm text-muted-foreground">
-              {this.state.error?.message || '发生了未知错误，请刷新页面重试。'}
-            </p>
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={this.handleReset}
-                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
-              >
-                返回
-              </button>
-              <button
-                onClick={this.handleReload}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                刷新页面
-              </button>
-            </div>
+        <>
+          <ThemeInitializer />
+          <div className="flex min-h-svh w-full items-center justify-center px-4">
+            <div className="absolute inset-0 -z-10 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] dark:[mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
+            
+            <Card className="w-full max-w-sm">
+              <CardHeader className="space-y-4 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+                    <CircleAlert className="size-5 text-destructive" />
+                  </div>
+                  <div className="text-left">
+                    <CardTitle className="text-xl font-bold">页面出现错误</CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-md mb-6">
+                  {this.state.error?.message || '发生了未知错误，请刷新页面重试。'}
+                </div>
+                <div className="flex gap-3">
+                  <Button
+                    variant="morden"
+                    onClick={this.handleReset}
+                    className="flex-1"
+                  >
+                    返回
+                  </Button>
+                  <Button
+                    onClick={this.handleReload}
+                    className="flex-1"
+                  >
+                    刷新页面
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </div>
+        </>
       )
     }
 

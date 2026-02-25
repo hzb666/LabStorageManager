@@ -12,7 +12,6 @@ import {
   FlaskConical,
   LogOut,
   Menu,
-  X,
   Moon,
   Sun,
   PanelLeftClose,
@@ -89,7 +88,7 @@ export function Layout() {
               'h-20 pt-12 pb-12'
             )}
           >
-            <h1 className="text-2xl font-bold text-center px-2 whitespace-nowrap">实验室库存管理</h1>
+            <h1 className="text-2xl font-bold text-center px-2 whitespace-nowrap text-primary">实验室库存管理</h1>
           </div>
 
           {/* 导航区域 */}
@@ -186,7 +185,7 @@ export function Layout() {
                 </div>
                 <div 
                   className={cn(
-                    "flex-1 min-w-0 transition-opacity duration-200 overflow-hidden",
+                    "flex-1 min-w-0 overflow-hidden",
                     sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
                   )}
                 >
@@ -219,7 +218,7 @@ export function Layout() {
                   )}
                   title={sidebarCollapsed ? "退出登录" : undefined}
                 >
-                  <LogOut className="h-4 w-4 flex-shrink-0" />
+                  <LogOut className="h-4 w-4 shrink-0" />
                   {!sidebarCollapsed && (
                     <span className="ml-2 whitespace-nowrap">
                       退出登录
@@ -231,7 +230,7 @@ export function Layout() {
                   size="icon"
                   onClick={toggleTheme}
                   className={cn(
-                    "h-9 flex-shrink-0 hover:bg-muted hover:text-foreground border-0 shadow-none text-sidebar-foreground",
+                    "h-9 shrink-0 hover:bg-muted hover:text-foreground border-0 shadow-none text-sidebar-foreground",
                     sidebarCollapsed 
                       ? "w-10" 
                       : ""
@@ -260,13 +259,13 @@ export function Layout() {
       >
           <aside 
           className={cn(
-            "fixed inset-y-0 left-0 w-64 bg-sidebar border-r transition-transform duration-200 flex flex-col",
+            "fixed inset-y-0 left-0 w-64 border-r border-border bg-sidebar transition-transform duration-200 flex flex-col",
             mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
           )}
           onClick={(e) => e.stopPropagation()}
         >
             <div className="flex flex-col items-center justify-center pt-8 pb-4">
-              <h1 className="text-xl font-bold">实验室库存管理</h1>
+              <h1 className="text-xl font-bold text-primary">实验室库存管理</h1>
             </div>
             <nav className="flex-1 space-y-4 p-4 overflow-y-auto">
               {/* 功能组 */}
@@ -362,7 +361,11 @@ export function Layout() {
         <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pl-3 md:pr-3 lg:pl-3 lg:pr-4">
           <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
             {/* Top Header - sticky + 顶部圆角 */}
-            <header className="sticky top-0 z-30 flex h-16 items-center gap-4 px-4 bg-page-card border-b border-border rounded-tl-lg rounded-tr-lg">
+            <header 
+              className="sticky top-0 z-40 flex h-16 items-center gap-4 px-4 bg-page-card border-b border-border rounded-tl-lg rounded-tr-lg"
+              data-sticky-header="true"
+              id="page-header"
+            >
               {/* Sidebar Toggle Button - Desktop */}
               {showDesktopSidebar && (
                 <Button
@@ -373,26 +376,24 @@ export function Layout() {
                   title={sidebarCollapsed ? "展开侧边栏 (Ctrl+B)" : "折叠侧边栏 (Ctrl+B)"}
                 >
                   {sidebarCollapsed ? (
-                    <PanelLeftOpen className="h-5 w-5" />
+                    <PanelLeftOpen className="size-5" />
                   ) : (
-                    <PanelLeftClose className="h-5 w-5" />
+                    <PanelLeftClose className="size-5" />
                   )}
                 </Button>
               )}
               
-              {/* Mobile Menu Button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 md:hidden"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              >
-                {mobileMenuOpen ? (
-                  <X className="h-5 w-5" />
-                ) : (
-                  <Menu className="h-5 w-5" />
-                )}
-              </Button>
+              {/* Mobile Menu Button - 关闭菜单时显示，打开菜单时隐藏 */}
+              {!mobileMenuOpen && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 md:hidden"
+                  onClick={() => setMobileMenuOpen(true)}
+                >
+                  <Menu className="size-5" />
+                </Button>
+              )}
               
               <div className="flex-1" />
               
@@ -404,9 +405,9 @@ export function Layout() {
                 className="h-10 w-10 md:hidden text-foreground transition-none"
               >
                 {theme === 'dark' ? (
-                  <Sun className="h-5 w-5" />
+                  <Sun className="size-5" />
                 ) : (
-                  <Moon className="h-5 w-5" />
+                  <Moon className="size-5" />
                 )}
               </Button>
             </header>

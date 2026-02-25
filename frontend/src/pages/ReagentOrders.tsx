@@ -20,6 +20,7 @@ import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { useAuthStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
+import { validateCASNumber, validateRequired, validateSpecification, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
 import { AxiosError } from 'axios'
 import {
   ShoppingCart,
@@ -191,13 +192,70 @@ export function ReagentOrdersPage() {
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
-    if (!formData.name.trim()) newErrors.name = '名称不能为空'
-    if (!formData.cas_number.trim()) newErrors.cas_number = 'CAS号不能为空'
-    if (!/^\d{2,7}-\d{2}-\d$/.test(formData.cas_number)) {
-      newErrors.cas_number = 'CAS号格式无效 (如: 64-17-5)'
+    
+    // CAS号验证：必填 + 格式 + 校验码
+    const casValidation = validateCASNumber(formData.cas_number)
+    if (!casValidation.isValid) {
+      newErrors.cas_number = casValidation.error || 'CAS号格式无效'
     }
-    if (!formData.specification.trim()) newErrors.specification = '规格不能为空'
-    if (formData.quantity <= 0) newErrors.quantity = '数量必须大于0'
+    
+    // 名称验证：必填
+    const nameValidation = validateRequired(formData.name, '名称')
+    if (!nameValidation.isValid) {
+      newErrors.name = nameValidation.error || '名称不能为空'
+    }
+    
+    // 英文名称验证：必填
+    const englishNameValidation = validateRequired(formData.english_name, '英文名称')
+    if (!englishNameValidation.isValid) {
+      newErrors.english_name = englishNameValidation.error || '英文名称不能为空'
+    }
+    
+    // 级别/规格验证：必填
+    const categoryValidation = validateRequired(formData.category, '级别/规格')
+    if (!categoryValidation.isValid) {
+      newErrors.category = categoryValidation.error || '级别/规格不能为空'
+    }
+    
+    // 品牌验证：必填
+    const brandValidation = validateRequired(formData.brand, '品牌')
+    if (!brandValidation.isValid) {
+      newErrors.brand = brandValidation.error || '品牌不能为空'
+    }
+    
+    // 规格验证：必填 + 格式
+    const specValidation = validateRequired(formData.specification, '规格')
+    if (!specValidation.isValid) {
+      newErrors.specification = specValidation.error || '规格不能为空'
+    } else {
+      const specFormatValidation = validateSpecification(formData.specification)
+      if (!specFormatValidation.isValid) {
+        newErrors.specification = specFormatValidation.error || '规格格式无效'
+      }
+    }
+    
+    // 数量验证：正数
+    const quantityValidation = validatePositiveNumber(formData.quantity, '数量')
+    if (!quantityValidation.isValid) {
+      newErrors.quantity = quantityValidation.error || '数量必须大于0'
+    }
+    
+    // 价格验证：必填 + 非负数
+    const priceValue = formData.price ? parseFloat(formData.price) : NaN
+    if (!formData.price || isNaN(priceValue)) {
+      newErrors.price = '价格不能为空'
+    } else {
+      const priceValidation = validateNonNegativeNumber(priceValue, '价格')
+      if (!priceValidation.isValid) {
+        newErrors.price = priceValidation.error || '价格不能为负数'
+      }
+    }
+    
+    // 订购原因验证：必填
+    if (!formData.order_reason || formData.order_reason === 'none') {
+      newErrors.order_reason = '请选择订购原因'
+    }
+    
     setFormErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
@@ -313,7 +371,7 @@ export function ReagentOrdersPage() {
       cell: info => (
         <div className="flex items-center gap-1.5">
           {info.row.original.is_hazardous && (
-            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
+            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
           )}
           <span className="font-medium">{info.getValue()}</span>
         </div>
@@ -432,7 +490,7 @@ export function ReagentOrdersPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">试剂订购</h1>
+        <h1 className="text-3xl font-bold text-primary">试剂订购</h1>
         <Button onClick={() => setShowCreateDialog(true)} size="lg">
           <Plus className="w-4 h-4 mr-1.5" />
           创建订单
@@ -464,8 +522,7 @@ export function ReagentOrdersPage() {
       <Dialog open={showCreateDialog} onOpenChange={handleCloseDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-xl flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5" />
+            <DialogTitle className="text-2xl flex items-center gap-2 mb-6">
               创建试剂订单
             </DialogTitle>
           </DialogHeader>
@@ -521,14 +578,19 @@ export function ReagentOrdersPage() {
 
               {/* 英文名称 */}
               <div>
-                <Label htmlFor="create_english_name" className={LABEL_STYLES.base}>英文名称</Label>
+                <Label htmlFor="create_english_name" className={LABEL_STYLES.base}>
+                  英文名称 <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="create_english_name"
                   value={formData.english_name}
                   onChange={(e) => setFormData(prev => ({ ...prev, english_name: e.target.value }))}
                   placeholder="如: Ethanol"
-                  className={INPUT_STYLES.lg}
+                  className={cn(INPUT_STYLES.lg, formErrors.english_name && 'border-destructive')}
                 />
+                {formErrors.english_name && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.english_name}</p>
+                )}
               </div>
 
               {/* 别名 */}
@@ -545,26 +607,36 @@ export function ReagentOrdersPage() {
 
               {/* 级别/规格 */}
               <div>
-                <Label htmlFor="create_category" className={LABEL_STYLES.base}>级别/规格</Label>
+                <Label htmlFor="create_category" className={LABEL_STYLES.base}>
+                  级别/规格 <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="create_category"
                   value={formData.category}
                   onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
                   placeholder="如: 分析纯"
-                  className={INPUT_STYLES.lg}
+                  className={cn(INPUT_STYLES.lg, formErrors.category && 'border-destructive')}
                 />
+                {formErrors.category && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.category}</p>
+                )}
               </div>
 
               {/* 品牌 */}
               <div>
-                <Label htmlFor="create_brand" className={LABEL_STYLES.base}>品牌</Label>
+                <Label htmlFor="create_brand" className={LABEL_STYLES.base}>
+                  品牌 <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="create_brand"
                   value={formData.brand}
                   onChange={(e) => setFormData(prev => ({ ...prev, brand: e.target.value }))}
                   placeholder="如: Sigma"
-                  className={INPUT_STYLES.lg}
+                  className={cn(INPUT_STYLES.lg, formErrors.brand && 'border-destructive')}
                 />
+                {formErrors.brand && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.brand}</p>
+                )}
               </div>
 
               {/* 规格 */}
@@ -604,7 +676,9 @@ export function ReagentOrdersPage() {
 
               {/* 价格 */}
               <div>
-                <Label htmlFor="create_price" className={LABEL_STYLES.base}>价格 (元)</Label>
+                <Label htmlFor="create_price" className={LABEL_STYLES.base}>
+                  价格 (元) <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="create_price"
                   type="number"
@@ -613,18 +687,23 @@ export function ReagentOrdersPage() {
                   value={formData.price}
                   onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
                   placeholder="如: 150.00"
-                  className={INPUT_STYLES.lg}
+                  className={cn(INPUT_STYLES.lg, formErrors.price && 'border-destructive')}
                 />
+                {formErrors.price && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.price}</p>
+                )}
               </div>
 
               {/* 订购原因 */}
               <div>
-                <Label htmlFor="create_order_reason" className={LABEL_STYLES.base}>订购原因</Label>
+                <Label htmlFor="create_order_reason" className={LABEL_STYLES.base}>
+                  订购原因 <span className="text-destructive">*</span>
+                </Label>
                 <Select
                   value={formData.order_reason}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, order_reason: value }))}
                 >
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger className={cn("h-9", formErrors.order_reason && 'border-destructive')}>
                     <SelectValue placeholder="选择订购原因" />
                   </SelectTrigger>
                   <SelectContent>
@@ -636,6 +715,9 @@ export function ReagentOrdersPage() {
                     <SelectItem value="reorder">重新下单</SelectItem>
                   </SelectContent>
                 </Select>
+                {formErrors.order_reason && (
+                  <p className="text-xs text-destructive mt-1">{formErrors.order_reason}</p>
+                )}
               </div>
 
               {/* 危险品 */}
@@ -735,7 +817,7 @@ export function ReagentOrdersPage() {
                     {table.getRowModel().rows.map(row => (
                       <tr 
                         key={row.id} 
-                        className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none"
+                        className="border-b border-border hover:bg-muted/30 cursor-pointer transition-all"
                       >
                         {row.getVisibleCells().map(cell => (
                           <td 

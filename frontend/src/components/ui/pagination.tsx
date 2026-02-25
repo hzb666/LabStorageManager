@@ -49,7 +49,7 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
           value={String(pageSize)}
           onValueChange={(value) => onPageSizeChange(Number(value))}
         >
-          <SelectTrigger className="h-8 w-auto text-sm gap-2">
+          <SelectTrigger className="h-9 w-auto text-base gap-2">
             <SelectValue placeholder="选择每页条数" />
           </SelectTrigger>
           <SelectContent>
@@ -64,15 +64,14 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
         <div className="flex items-center gap-2">
           <Button
             variant="morden"
-            size="sm"
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage <= 1}
-            className="h-8 w-8 p-0"
+            className="h-9 w-9 p-0"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="size-5" />
           </Button>
 
-          <span className="text-sm text-muted-foreground whitespace-nowrap">
+          <span className="text-base text-muted-foreground whitespace-nowrap">
             {currentPage} / {totalPages}
           </span>
 
@@ -81,9 +80,9 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
             size="sm"
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage >= totalPages}
-            className="h-8 w-8 p-0"
+            className="h-9 w-9 p-0"
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="size-5" />
           </Button>
 
           <div className="flex items-center gap-1 ml-1">
@@ -95,9 +94,9 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
               onChange={(e) => setJumpPage(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={String(currentPage)}
-              className="h-8 w-14 text-sm text-center"
+              className="h-9 w-14 text-base text-center"
             />
-            <span className="text-sm text-muted-foreground">页</span>
+            <span className="text-base text-muted-foreground">页</span>
           </div>
         </div>
       </nav>
@@ -108,14 +107,14 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
   const pages = getPageNumbers(currentPage, totalPages)
 
   return (
-    <nav className={cn('flex items-center justify-end gap-2', className)}>
-      {/* 每页条数和页码按钮 - 居中 */}
+    <nav className={cn('flex flex-wrap items-center justify-end gap-2', className)}>
+      {/* 每页条数和页码按钮 - 居右 */}
       <div className="flex items-center gap-1">
         <Select
           value={String(pageSize)}
           onValueChange={(value) => onPageSizeChange(Number(value))}
         >
-          <SelectTrigger className="h-8 w-auto text-sm gap-2">
+          <SelectTrigger className="h-8 w-auto gap-2">
             <SelectValue placeholder="选择每页条数" />
           </SelectTrigger>
           <SelectContent>
@@ -132,23 +131,22 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
           size="sm"
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage <= 1}
-          className="h-8 w-8 p-0"
+          className="h-9 w-9 p-0"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className="size-5" />
         </Button>
 
         {pages.map((page, i) =>
           page === '...' ? (
-            <span key={`ellipsis-${i}`} className="flex h-8 w-8 items-center justify-center">
+            <span key={`ellipsis-${i}`} className="flex h-9 w-9 items-center justify-center">
               <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
             </span>
           ) : (
             <Button
               key={page}
               variant={page === currentPage ? 'default' : 'morden'}
-              size="sm"
               onClick={() => onPageChange(page as number)}
-              className="h-8 w-8 p-0"
+              className="h-9 w-9 p-0"
             >
               {page}
             </Button>
@@ -157,18 +155,17 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
 
         <Button
           variant="morden"
-          size="sm"
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage >= totalPages}
-          className="h-8 w-8 p-0"
+          className="h-9 w-9 p-0"
         >
-          <ChevronRight className="h-4 w-4" />
+          <ChevronRight className="size-5" />
         </Button>
       </div>
 
       {/* 跳转页 - 右侧 */}
-      <div className="flex items-center gap-1 ml-2">
-        <span className="text-sm text-muted-foreground">跳至</span>
+      <div className="flex items-center gap-1">
+        <span className="text-base text-muted-foreground">跳至</span>
         <Input
           type="number"
           min={1}
@@ -177,9 +174,9 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
           onChange={(e) => setJumpPage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={String(currentPage)}
-          className="h-8 w-16 text-sm text-center"
+          className="h-9 w-16 text-base text-center"
         />
-        <span className="text-sm text-muted-foreground">页</span>
+        <span className="text-base text-muted-foreground">页</span>
       </div>
     </nav>
   )
@@ -215,7 +212,7 @@ interface PaginationInfoProps {
   className?: string
 }
 
-export function PaginationInfo({ currentPage, pageSize, total, onPageSizeChange, className }: PaginationInfoProps) {
+export function PaginationInfo({ currentPage, pageSize, total, className }: PaginationInfoProps) {
   const isMobile = useIsMobile()
   
   // 移动端不显示
@@ -227,7 +224,7 @@ export function PaginationInfo({ currentPage, pageSize, total, onPageSizeChange,
   const to = Math.min(currentPage * pageSize, total)
 
   return (
-    <div className={cn('flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap', className)}>
+    <div className={cn('flex items-center gap-2 text-base text-muted-foreground', className)}>
       <span>
         显示 {from}-{to} 条，共 {total} 条
       </span>

@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, ForeignKey, SQLModel
 
 
 class ReagentOrderStatus(str, Enum):
@@ -61,7 +61,11 @@ class ReagentOrderBase(SQLModel):
 class ReagentOrder(ReagentOrderBase, table=True):
     """Reagent Order database model"""
     id: Optional[int] = Field(default=None, primary_key=True)
-    applicant_id: Optional[int] = Field(default=None)
+    applicant_id: Optional[int] = Field(
+        default=None,
+        foreign_key="user.id",
+        ondelete="SET NULL"
+    )
     status: ReagentOrderStatus = ReagentOrderStatus.PENDING
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

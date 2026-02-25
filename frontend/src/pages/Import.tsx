@@ -142,7 +142,7 @@ export function ImportPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight card-title-placeholder">批量导入库存</h1>
+        <h1 className="text-3xl font-bold text-primary card-title-placeholder">批量导入库存</h1>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -186,7 +186,7 @@ export function ImportPage() {
               <label className="block text-base font-medium mb-2 mt-10">上传文件</label>
               <div
                 className={cn(
-                  "relative border-2 border-dashed rounded-lg p-6 transition-none cursor-pointer",
+                  "relative border-2 border-dashed rounded-lg p-6 transition-all duration-200 cursor-pointer",
                   "hover:border-primary hover:bg-muted/30",
                   isDragging ? "border-primary bg-primary/5" : "border-border",
                   file ? "border-primary/50 bg-primary/5" : ""
@@ -208,7 +208,7 @@ export function ImportPage() {
                     <>
                       <div className="flex items-center gap-2">
                         {getFileIcon(file.name)}
-                        <span className="font-medium text-sm truncate max-w-[200px]">{file.name}</span>
+                        <span className="font-medium text-sm truncate max-w-50">{file.name}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">
@@ -229,7 +229,7 @@ export function ImportPage() {
                     </>
                   ) : (
                     <>
-                      <Upload className="w-10 h-10 text-muted-foreground" />
+                      <Upload className="w-10 h-10 text-muted-foreground"/>
                       <div>
                         <p className="text-sm font-medium">
                           点击或拖拽文件到此处上传
@@ -332,7 +332,7 @@ export function ImportPage() {
                     <div className="bg-destructive/10 px-4 py-2 border-b">
                       <h4 className="font-medium text-sm text-destructive">错误详情</h4>
                     </div>
-                    <div className="max-h-[300px] overflow-y-auto">
+                    <div className="max-h-75 overflow-y-auto">
                       <table className="w-full text-sm">
                         <thead className="bg-muted/50 sticky top-0">
                           <tr>

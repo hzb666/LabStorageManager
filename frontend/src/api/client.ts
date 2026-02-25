@@ -27,7 +27,9 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // 排除登录接口的 401 错误，避免页面刷新导致登录页错误信息丢失
+    const isLoginRequest = error.config?.url?.includes('/users/login')
+    if (error.response?.status === 401 && !isLoginRequest) {
       useAuthStore.getState().logout()
       window.location.href = '/login'
     }
@@ -118,8 +120,6 @@ export const consumableOrderAPI = {
     specification: string
     quantity: number
     price?: number
-    order_reason: string
-    is_hazardous: boolean
     notes?: string
   }) => api.post('/consumable-orders', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/consumable-orders/${id}`, data),

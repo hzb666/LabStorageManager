@@ -1,187 +1,174 @@
-# 数据库表字段说明
+# 数据库表结构文档
 
-## 1. User (用户表)
+> 更新时间：2026-02-25
 
-| 字段名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| id | int | 否 | 主键，自增 |
-| username | str | 是 | 用户名（登录账号），唯一，索引，3-20字符，只能字母+数字组合，首字符必须是字母，禁止保留字（admin、root等），不区分大小写 |
-| full_name | str | 否 | 姓名，最大100字符 |
-| role | enum | 是 | 角色：admin/user，默认USER |
-| is_active | bool | 是 | 是否激活，默认True |
-| password_hash | str | 是 | 密码哈希（不返回给前端） |
-| created_at | datetime | 是 | 创建时间，默认当前时间 |
-| updated_at | datetime | 是 | 更新时间，默认当前时间 |
+## 概述
+
+本系统使用 SQLite 数据库，采用 SQLModel ORM。包含以下表：
+- `user` - 用户表
+- `inventory` - 库存表
+- `borrowlog` - 借用记录表
+- `reagentorder` - 试剂订购表
+- `consumableorder` - 耗材订购表
 
 ---
 
-## 2. Inventory (库存表)
+## 表详细结构
 
-### 数据库字段
+### 1. user (用户表)
 
-| 字段名 | 类型 | 必填 | 说明 |
+| 字段名 | 类型 | 可空 | 说明 |
 |--------|------|------|------|
-| id | int | 否 | 主键，自增 |
-| internal_code | str | 是 | 内部编码，唯一，索引，格式：CAS号-日期-序号，如 64175-250113-01 |
-| cas_number | str | 是 | CAS号，有索引，最大50字符 |
-| name | str | 是 | 名称，最大200字符 |
-| english_name | str | 否 | 英文名，最大200字符 |
-| alias | str | 否 | 别名，最大200字符 |
-| category | str | 否 | 分类，最大100字符 |
-| brand | str | 否 | 品牌，最大100字符 |
-| location | str | 否 | 位置，最大200字符 |
-| initial_quantity | float | 是 | 初始数量，必须>0 |
-| remaining_quantity | float | 是 | 剩余数量，默认0.0 |
-| unit | str | 是 | 单位，默认ml，最大20字符 |
-| is_hazardous | bool | 是 | 是否危险品，默认False |
-| image_path | str | 否 | 图片路径（存储在/static/thumbnails/） |
-| notes | str | 否 | 备注，最大500字符 |
-| price | float | 否 | 价格，必须>=0 |
-| status | enum | 是 | 状态：in_stock/borrowed/consumed，默认IN_STOCK |
-| borrower_id | str | 否 | 当前借用人用户名，有索引 |
-| last_borrower_id | str | 否 | 上一个借用人用户名 |
-| temporary_keeper_id | str | 否 | 临时保管人用户名，有索引 |
-| created_by_id | str | 否 | 创建人用户名，有索引 |
-| created_at | datetime | 是 | 创建时间，默认当前时间 |
-| updated_at | datetime | 是 | 更新时间，默认当前时间 |
+| username | VARCHAR(50) | NOT NULL | 用户名（唯一） |
+| full_name | VARCHAR(100) | NULL | 全名 |
+| role | VARCHAR(5) | NOT NULL | 角色：admin/user |
+| is_active | BOOLEAN | NOT NULL | 是否激活 |
+| id | INTEGER | NOT NULL | 主键 |
+| password_hash | VARCHAR | NOT NULL | 密码哈希 |
+| created_at | DATETIME | NOT NULL | 创建时间 |
+| updated_at | DATETIME | NOT NULL | 更新时间 |
 
-### API响应额外字段
-
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| borrower_name | str | 借用人姓名 |
-| last_borrower_name | str | 上一个借用人姓名 |
-| created_by_name | str | 创建人姓名 |
+**索引**：
+- `ix_user_username` (UNIQUE) on username
 
 ---
 
-## 3. BorrowLog (借用记录表)
+### 2. inventory (库存表)
 
-### 数据库字段
-
-| 字段名 | 类型 | 必填 | 说明 |
+| 字段名 | 类型 | 可空 | 说明 |
 |--------|------|------|------|
-| id | int | 否 | 主键，自增 |
-| inventory_id | int | 是 | 库存ID，有索引 |
-| borrower_id | str | 是 | 借用人用户名，有索引 |
-| borrow_time | datetime | 是 | 借用时间，默认当前时间 |
-| return_time | datetime | 否 | 归还时间 |
-| quantity_borrowed | float | 是 | 借用数量，必须>0 |
-| quantity_returned | float | 否 | 归还数量 |
-| notes | str | 否 | 备注 |
-| created_at | datetime | 是 | 创建时间，默认当前时间 |
+| cas_number | VARCHAR(50) | NOT NULL | CAS号 |
+| name | VARCHAR(200) | NOT NULL | 中文名称 |
+| english_name | VARCHAR(200) | NULL | 英文名称 |
+| alias | VARCHAR(200) | NULL | 别名 |
+| category | VARCHAR(100) | NULL | 分类 |
+| brand | VARCHAR(100) | NULL | 品牌 |
+| location | VARCHAR(200) | NULL | 存放位置 |
+| initial_quantity | FLOAT | NOT NULL | 初始数量 |
+| remaining_quantity | FLOAT | NOT NULL | 剩余数量 |
+| unit | VARCHAR(20) | NOT NULL | 单位 |
+| is_hazardous | BOOLEAN | NOT NULL | 是否危险品 |
+| image_path | VARCHAR | NULL | 图片路径 |
+| notes | VARCHAR(500) | NULL | 备注 |
+| id | INTEGER | NOT NULL | 主键 |
+| internal_code | VARCHAR(50) | NOT NULL | 内部编码（唯一） |
+| status | VARCHAR(8) | NOT NULL | 状态 |
+| borrower_id | INTEGER | NULL | 当前借用人ID |
+| last_borrower_id | INTEGER | NULL | 上次借用人ID |
+| temporary_keeper_id | INTEGER | NULL | 临时保管人ID |
+| created_by_id | INTEGER | NULL | 创建人ID |
+| created_at | DATETIME | NOT NULL | 创建时间 |
+| updated_at | DATETIME | NOT NULL | 更新时间 |
 
-### API响应额外字段
-
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| borrower_name | str | 借用人姓名 |
+**索引**：
+- `ix_inventory_internal_code` (UNIQUE) on internal_code
+- `ix_inventory_cas_number` on cas_number
+- `ix_inventory_borrower_id` on borrower_id
+- `ix_inventory_temporary_keeper_id` on temporary_keeper_id
+- `ix_inventory_created_by_id` on created_by_id
 
 ---
 
-## 4. ReagentOrder (试剂订单表)
+### 3. borrowlog (借用记录表)
 
-### 数据库字段
-
-| 字段名 | 类型 | 必填 | 说明 |
+| 字段名 | 类型 | 可空 | 说明 |
 |--------|------|------|------|
-| id | int | 否 | 主键，自增 |
-| cas_number | str | 是 | CAS号，有索引，最大50字符 |
-| name | str | 是 | 名称（中文），最大200字符 |
-| english_name | str | 否 | 英文名，最大200字符 |
-| alias | str | 否 | 别名，最大200字符 |
-| category | str | 否 | 分类（如分析纯、实验级），最大100字符 |
-| brand | str | 否 | 品牌（如Sigma、国药），最大100字符 |
-| specification | str | 是 | 规格（如500ml），最大100字符 |
-| quantity | int | 是 | 申购数量，必须>0 |
-| price | float | 否 | 价格，必须>=0 |
-| order_reason | enum | 是 | 申购原因，默认NONE |
-| is_hazardous | bool | 是 | 是否危险品，默认False |
-| image_path | str | 否 | 图片路径 |
-| notes | str | 否 | 备注，最大500字符 |
-| applicant_id | str | 否 | 申请人用户名 |
-| status | enum | 是 | 状态：pending/approved/arrived/stocked/rejected，默认PENDING |
-| created_at | datetime | 是 | 创建时间，默认当前时间 |
-| updated_at | datetime | 是 | 更新时间，默认当前时间 |
+| id | INTEGER | NOT NULL | 主键 |
+| inventory_id | INTEGER | NOT NULL | 库存ID |
+| borrower_id | INTEGER | NOT NULL | 借用人ID |
+| borrow_time | DATETIME | NOT NULL | 借出时间 |
+| return_time | DATETIME | NULL | 归还时间 |
+| quantity_borrowed | FLOAT | NOT NULL | 借出数量 |
+| quantity_returned | FLOAT | NULL | 归还数量 |
+| notes | VARCHAR | NULL | 备注 |
+| created_at | DATETIME | NOT NULL | 创建时间 |
 
-### API响应额外字段
-
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| applicant_name | str | 申请人姓名 |
+**索引**：
+- `ix_borrowlog_inventory_id` on inventory_id
+- `ix_borrowlog_borrower_id` on borrower_id
 
 ---
 
-## 5. ConsumableOrder (耗材订单表)
+### 4. reagentorder (试剂订购表)
 
-### 数据库字段
-
-| 字段名 | 类型 | 必填 | 说明 |
+| 字段名 | 类型 | 可空 | 说明 |
 |--------|------|------|------|
-| id | int | 否 | 主键，自增 |
-| name | str | 是 | 名称（中文），最大200字符 |
-| english_name | str | 否 | 英文名，最大200字符 |
-| alias | str | 否 | 别名，最大200字符 |
-| category | str | 否 | 分类（如手套、试管），最大100字符 |
-| brand | str | 否 | 品牌（如3M、Corning），最大100字符 |
-| specification | str | 是 | 规格（如500ml），最大100字符 |
-| quantity | int | 是 | 申购数量，必须>0 |
-| price | float | 否 | 价格，必须>=0 |
-| order_reason | enum | 是 | 申购原因，默认NONE |
-| is_hazardous | bool | 是 | 是否危险品，默认False |
-| image_path | str | 否 | 图片路径 |
-| notes | str | 否 | 备注，最大500字符 |
-| applicant_id | str | 否 | 申请人用户名 |
-| status | enum | 是 | 状态：pending/approved/rejected/completed，默认PENDING |
-| created_at | datetime | 是 | 创建时间，默认当前时间 |
-| updated_at | datetime | 是 | 更新时间，默认当前时间 |
+| cas_number | VARCHAR(50) | NOT NULL | CAS号 |
+| name | VARCHAR(200) | NOT NULL | 中文名称 |
+| english_name | VARCHAR(200) | NULL | 英文名称 |
+| alias | VARCHAR(200) | NULL | 别名 |
+| category | VARCHAR(100) | NULL | 分类 |
+| brand | VARCHAR(100) | NULL | 品牌 |
+| specification | VARCHAR(100) | NOT NULL | 规格 |
+| quantity | INTEGER | NOT NULL | 订购数量 |
+| price | FLOAT | NULL | 价格 |
+| order_reason | VARCHAR(13) | NOT NULL | 订购原因 |
+| is_hazardous | BOOLEAN | NOT NULL | 是否危险品 |
+| image_path | VARCHAR | NULL | 图片路径 |
+| notes | VARCHAR(500) | NULL | 备注 |
+| id | INTEGER | NOT NULL | 主键 |
+| applicant_id | INTEGER | NULL | 申请人ID |
+| status | VARCHAR(8) | NOT NULL | 状态 |
+| created_at | DATETIME | NOT NULL | 创建时间 |
+| updated_at | DATETIME | NOT NULL | 更新时间 |
 
-### API响应额外字段
-
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| applicant_name | str | 申请人姓名 |
+**索引**：
+- `ix_reagentorder_cas_number` on cas_number
 
 ---
 
-## 枚举类型说明
+### 5. consumableorder (耗材订购表)
 
-### UserRole
-| 值 | 说明 |
-|-----|------|
-| admin | 管理员 |
-| user | 普通用户 |
+| 字段名 | 类型 | 可空 | 说明 |
+|--------|------|------|------|
+| name | VARCHAR(200) | NOT NULL | 中文名称 |
+| english_name | VARCHAR(200) | NULL | 英文名称 |
+| alias | VARCHAR(200) | NULL | 别名 |
+| category | VARCHAR(100) | NULL | 分类 |
+| brand | VARCHAR(100) | NULL | 品牌 |
+| specification | VARCHAR(100) | NOT NULL | 规格 |
+| quantity | INTEGER | NOT NULL | 订购数量 |
+| price | FLOAT | NULL | 价格 |
+| image_path | VARCHAR | NULL | 图片路径 |
+| notes | VARCHAR(500) | NULL | 备注 |
+| id | INTEGER | NOT NULL | 主键 |
+| applicant_id | INTEGER | NULL | 申请人ID |
+| status | VARCHAR(9) | NOT NULL | 状态 |
+| created_at | DATETIME | NOT NULL | 创建时间 |
+| updated_at | DATETIME | NOT NULL | 更新时间 |
 
-### InventoryStatus
-| 值 | 说明 |
-|-----|------|
-| in_stock | 在库 |
-| borrowed | 已借出 |
-| consumed | 已用完 |
+---
 
-### ReagentOrderStatus
-| 值 | 说明 |
-|-----|------|
-| pending | 已申购（待审批） |
-| approved | 已审批（采购完成） |
-| arrived | 已到货（待入库） |
-| stocked | 已入库 |
-| rejected | 未通过 |
+## 状态枚举
 
-### ConsumableOrderStatus
-| 值 | 说明 |
-|-----|------|
-| pending | 已申购（待审批） |
-| approved | 已审批（采购完成） |
-| rejected | 未通过 |
-| completed | 已完成（耗材不需要入库） |
+### inventory.status
+- `not_in_stock` - 不在库存
+- `in_stock` - 库存
+- `borrowed` - 已借出
+- `consumed` - 已消耗
 
-### ReagentOrderReason / ConsumableOrderReason
-| 值 | 说明 |
-|-----|------|
-| none | 无 |
-| running_out | 即将用完 |
-| empty | 已用完 |
-| common_public | 公共常用 |
-| not_found | 找不到 |
-| reorder | 重新订购 |
+### reagentorder.status / consumableorder.status
+- `pending` - 待审批
+- `approved` - 已审批
+- `rejected` - 已驳回
+- `completed` - 已完成
+
+### user.role
+- `admin` - 管理员
+- `user` - 普通用户
+
+### reagentorder.order_reason
+- `none` - 没有
+- `running_out` - 快用完
+- `empty` - 用完
+- `common_public` - 常用或公用
+- `not_found` - 找不到
+- `reorder` - 重新下单
+
+---
+
+## 数据库配置
+
+- **数据库文件**: `lab_inventory.db`
+- **模式**: SQLite with WAL Mode
+- **ORM**: SQLModel

@@ -20,7 +20,7 @@
 | 前端 | React + Shadcn/UI + TanStack Table |
 | 图片处理 | Pillow (<100KB 压缩) |
 | 数据处理 | Pandas (Excel 导入/导出) |
-| 认证 | JWT |
+| 认证 | JWT (RS256) |
 
 ## 📁 项目结构
 
@@ -159,7 +159,7 @@ CAS 号是试剂的唯一标识符，系统通过 CAS 号进行：
 | Phase | Status | Description |
 |-------|--------|-------------|
 | 1.1 | ✅ | 后端初始化 (FastAPI + SQLModel + WAL) |
-| 1.2 | ✅ | JWT 认证 |
+| 1.2 | ✅ | JWT 认证 (RS256) |
 | 2.1-2.4 | ✅ | Order/Inventory CRUD, CAS Check, Stock-In |
 | 2.5 | ✅ | 工作流调整 (ARRIVED 状态, 确认到货) |
 | 3 | ✅ | Dashboard APIs |
@@ -168,6 +168,8 @@ CAS 号是试剂的唯一标识符，系统通过 CAS 号进行：
 | 6 | ✅ | 手动入库功能 |
 | 7 | ✅ | Admin 用户管理 |
 | 8 | ✅ | 通知系统 (CAS预警、入库提醒、低库存、超时提醒) |
+| 9 | ✅ | 数据库 Schema 优化 (外键改为 user.id) |
+| 10 | ✅ | UI 改进 (侧边栏折叠、主题切换、密码可见性) |
 
 ## 📄 许可证
 

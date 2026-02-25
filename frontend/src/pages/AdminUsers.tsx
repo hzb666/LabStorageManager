@@ -20,6 +20,7 @@ import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
 import useDialogState from '@/hooks/use-dialog-state'
+import { validateRequired } from '@/lib/inputValidation'
 import {
   Search,
   Users,
@@ -233,10 +234,29 @@ export function AdminUsersPage() {
   // Create user handlers
   const validateCreateForm = useCallback((): boolean => {
     const errors: Record<string, string> = {}
-    if (!createData.username.trim()) errors.username = '用户名不能为空'
-    if (createData.username.length < 3) errors.username = '用户名至少3个字符'
-    if (!createData.password) errors.password = '密码不能为空'
-    if (createData.password.length < 6) errors.password = '密码至少6个字符'
+    
+    // 用户名验证：必填 + 格式
+    const usernameValidation = validateRequired(createData.username, '用户名')
+    if (!usernameValidation.isValid) {
+      errors.username = usernameValidation.error || '用户名不能为空'
+    } else if (createData.username.length < 3) {
+      errors.username = '用户名至少3个字符'
+    }
+    
+    // 密码验证：必填 + 长度
+    const passwordValidation = validateRequired(createData.password, '密码')
+    if (!passwordValidation.isValid) {
+      errors.password = passwordValidation.error || '密码不能为空'
+    } else if (createData.password.length < 6) {
+      errors.password = '密码至少6个字符'
+    }
+    
+    // 姓名验证：必填（新增）
+    const fullnameValidation = validateRequired(createData.full_name, '姓名')
+    if (!fullnameValidation.isValid) {
+      errors.full_name = fullnameValidation.error || '姓名不能为空'
+    }
+    
     setCreateErrors(errors)
     return Object.keys(errors).length === 0
   }, [createData])
@@ -333,7 +353,7 @@ export function AdminUsersPage() {
     <div className="space-y-6">
       {/* 标题和按钮 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">用户管理</h1>
+        <h1 className="text-3xl font-bold text-primary">用户管理</h1>
         <Button onClick={() => setDialogState('create')} size="lg">
           <UserPlus className="w-4 h-4 mr-1.5" />
           创建用户
@@ -360,7 +380,7 @@ export function AdminUsersPage() {
           )}
         </div>
         <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value)}>
-          <SelectTrigger className="w-[120px] h-9">
+          <SelectTrigger className="w-30 min-h-10">
             <SelectValue placeholder="全部角色" />
           </SelectTrigger>
           <SelectContent>
@@ -370,7 +390,7 @@ export function AdminUsersPage() {
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
-          <SelectTrigger className="w-[120px] h-9">
+          <SelectTrigger className="w-30 min-h-10">
             <SelectValue placeholder="全部状态" />
           </SelectTrigger>
           <SelectContent>
@@ -487,14 +507,19 @@ export function AdminUsersPage() {
               )}
             </div>
             <div>
-              <Label htmlFor="create_fullname" className={LABEL_STYLES.base}>姓名</Label>
+              <Label htmlFor="create_fullname" className={LABEL_STYLES.base}>
+                姓名 <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="create_fullname"
                 value={createData.full_name}
                 onChange={(e) => setCreateData({ ...createData, full_name: e.target.value })}
                 placeholder="请输入姓名"
-                className={INPUT_STYLES.lg}
+                className={cn(INPUT_STYLES.lg, createErrors.full_name && 'border-destructive')}
               />
+              {createErrors.full_name && (
+                <p className="text-xs text-destructive mt-1">{createErrors.full_name}</p>
+              )}
             </div>
             <div>
               <Label htmlFor="create_role" className={LABEL_STYLES.base}>角色</Label>
@@ -502,7 +527,7 @@ export function AdminUsersPage() {
                 value={createData.role}
                 onValueChange={(value) => setCreateData({ ...createData, role: value as 'admin' | 'user' })}
               >
-                <SelectTrigger className="h-9">
+                <SelectTrigger className="min-h-10">
                   <SelectValue placeholder="选择角色" />
                 </SelectTrigger>
                 <SelectContent>
@@ -555,7 +580,7 @@ export function AdminUsersPage() {
                 value={editData.role}
                 onValueChange={(value) => setEditData({ ...editData, role: value as 'admin' | 'user' })}
               >
-                <SelectTrigger className="h-9">
+                <SelectTrigger className="min-h-10">
                   <SelectValue placeholder="选择角色" />
                 </SelectTrigger>
                 <SelectContent>

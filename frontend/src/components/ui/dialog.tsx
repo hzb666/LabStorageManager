@@ -1,5 +1,4 @@
 import * as React from "react"
-import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface DialogProps {
@@ -9,6 +8,17 @@ interface DialogProps {
 }
 
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
+  // 锁定 body 滚动
+  React.useEffect(() => {
+    if (open) {
+      const originalStyle = window.getComputedStyle(document.body).overflow
+      document.body.style.overflow = 'hidden'
+      return () => {
+        document.body.style.overflow = originalStyle
+      }
+    }
+  }, [open])
+
   if (!open) return null
 
   return (
@@ -31,7 +41,7 @@ export function DialogContent({ children, className }: DialogContentProps) {
   return (
     <div
       className={cn(
-        "relative bg-popover rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-lg border border-border text-popover-foreground dark:bg-[#0a0a0a]",
+        "w-[90%] md:w-auto md:min-w-md relative bg-card rounded-lg p-6 max-h-[90vh] overflow-y-auto shadow-lg border border-border text-popover-foreground",
         className
       )}
     >

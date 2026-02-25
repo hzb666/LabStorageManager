@@ -7,9 +7,12 @@ import { ImportPage } from '@/pages/Import'
 import { AdminUsersPage } from '@/pages/AdminUsers'
 import { ReagentOrdersPage } from '@/pages/ReagentOrders'
 import { ConsumableOrdersPage } from '@/pages/ConsumableOrders'
+import { TestErrorPage } from '@/pages/TestError'
+import { NotFoundPage } from '@/pages/NotFound'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/toast'
 import { useTheme } from '@/hooks/useTheme'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -27,7 +30,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-function App() {
+function AppContent() {
   // 初始化主题
   useTheme()
 
@@ -36,6 +39,8 @@ function App() {
       <ToastContainer />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/test-error" element={<TestErrorPage />} />
+        <Route path="*" element={<NotFoundPage />} />
         <Route
           path="/"
           element={
@@ -60,6 +65,14 @@ function App() {
         </Route>
       </Routes>
     </BrowserRouter>
+  )
+}
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   )
 }
 

@@ -131,9 +131,8 @@
     touch-action: manipulation;
     scrollbar-gutter: stable;
     background-color: var(--sidebar-bg);
-    /* 固定视口宽度，防止 select 下拉时页面布局抖动 */
-    width: 100vw;
-    overflow-x: hidden;
+    /* 移除 overflow-x: hidden，可能导致 sticky 定位问题 */
+    width: 100%;
   }
   body {
     background-color: hsl(var(--background));

@@ -55,6 +55,22 @@ def _create_default_admin() -> None:
     """确保始终至少有一个管理员账户"""
     # Import here to avoid circular import
     from app.core.auth import get_password_hash
+    from app.core.config import get_settings
+    
+    settings = get_settings()
+    
+    # Get config or use defaults
+    default_username = settings.default_admin_username
+    default_password = settings.default_admin_password
+    default_full_name = settings.default_admin_full_name
+    
+    # Production: require password to be set
+    if not default_password:
+        if settings.env == "production":
+            raise ValueError("DEFAULT_ADMIN_PASSWORD must be set in production environment")
+        # Development: use default password with warning
+        default_password = "admin123"
+        logger.warning("Using default password 'admin123' in development mode. Set DEFAULT_ADMIN_PASSWORD in .env for production.")
     
     with Session(engine) as session:
         # Check if any admin users exist (only check for admins, not all users)
@@ -64,15 +80,15 @@ def _create_default_admin() -> None:
         if admin_exists is None:
             # Create default admin user
             admin = User(
-                username="admin",
-                password_hash=get_password_hash("admin123"),
-                full_name="系统管理员",
+                username=default_username,
+                password_hash=get_password_hash(default_password),
+                full_name=default_full_name,
                 role=UserRole.ADMIN,
                 is_active=True
             )
             session.add(admin)
             session.commit()
-            logger.info("Default admin user created (username: admin, password: admin123)")
+            logger.info(f"Default admin user created (username: {default_username})")
         else:
             logger.info("Admin user already exists, skipping default admin creation")
 

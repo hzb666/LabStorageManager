@@ -40,7 +40,12 @@ logs/
 
 # OS
 .DS_Store
-Thumbs.db
+
+# JWT
+Thumbs.db RSA Keys (never commit these!)
+.keys/
+private.pem
+public.pem
 
 # Frontend (already in frontend/.gitignore but keeping for root)
 node_modules/
