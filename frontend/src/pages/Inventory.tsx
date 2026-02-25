@@ -1160,7 +1160,7 @@ export function InventoryPage() {
                   value={formData.brand}
                   onChange={(e) => handleBrandChange(e.target.value)}
                   placeholder="如: Sigma"
-                  className="{INPUT_STYLES.lg} text-base"
+                  className={cn(INPUT_STYLES.lg, "text-base")}
                 />
               </div>
 
