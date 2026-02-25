@@ -18,15 +18,14 @@ import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { useAuthStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
-import { validateRequired, validateSpecification, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
+import { validateRequired, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
 import { AxiosError } from 'axios'
 import {
-  ShoppingCart,
   Plus,
   Loader2,
   X,
-  Package,
-  Search
+  Search,
+  ShoppingCart
 } from 'lucide-react'
 
 interface ConsumableOrder {
@@ -135,15 +134,10 @@ export function ConsumableOrdersPage() {
       newErrors.name = nameValidation.error || '名称不能为空'
     }
     
-    // 规格验证：必填 + 格式
+    // 规格验证：必填
     const specValidation = validateRequired(formData.specification, '规格')
     if (!specValidation.isValid) {
       newErrors.specification = specValidation.error || '规格不能为空'
-    } else {
-      const specFormatValidation = validateSpecification(formData.specification)
-      if (!specFormatValidation.isValid) {
-        newErrors.specification = specFormatValidation.error || '规格格式无效'
-      }
     }
     
     // 数量验证：正数
@@ -401,7 +395,7 @@ export function ConsumableOrdersPage() {
       <Dialog open={showCreateDialog} onOpenChange={handleCloseDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl flex items-center gap-2 mb-6">
+            <DialogTitle>
               创建耗材订单
             </DialogTitle>
           </DialogHeader>
@@ -540,7 +534,7 @@ export function ConsumableOrdersPage() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3">
+            <div className="flex flex-col sm:flex-row gap-2 mt-6">
               <div className="ml-auto flex gap-2">
                 <Button
                   type="button"
@@ -571,7 +565,7 @@ export function ConsumableOrdersPage() {
       <Card>
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg">
-            <Package className="w-5 h-5" />
+            <ShoppingCart className="w-5 h-5" />
             耗材订单列表 <span className="text-muted-foreground font-normal">(&thinsp;{total}&thinsp;)</span>
           </CardTitle>
         </CardHeader>

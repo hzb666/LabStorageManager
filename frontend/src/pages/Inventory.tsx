@@ -1093,7 +1093,7 @@ export function InventoryPage() {
               />
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3 mt-4 pt-3">
+          <div className="flex flex-col sm:flex-row gap-3 mt-6">
             <div className="flex items-center gap-2">
               <Button variant="destructive" size="lg" onClick={handleDeleteClick}>
                 <Trash2 className="w-4 h-4 mr-1.5" />
@@ -1119,7 +1119,7 @@ export function InventoryPage() {
       <Dialog open={dialogState === 'add'} onOpenChange={handleManualAddModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl flex items-center gap-2 mb-6">手动入库</DialogTitle>
+            <DialogTitle>手动入库</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleManualAdd}>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1274,7 +1274,7 @@ export function InventoryPage() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3">
+            <div className="flex flex-col sm:flex-row gap-2 mt-6">
               <div className="ml-auto flex gap-2">
                 <Button
                   type="button"
@@ -1302,7 +1302,7 @@ export function InventoryPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {/* 有数据时在角落显示加载指示器，保持数据可见 */}
+          {/* 有数据时在角落显示加载指示器 */}
           {loading && data.length > 0 && (
             <div className="flex justify-end mb-2">
               <div className="flex items-center gap-2 text-base text-muted-foreground">

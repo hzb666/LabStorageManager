@@ -681,7 +681,7 @@ export function Dashboard() {
       <Dialog open={showReturnModal} onOpenChange={setShowReturnModal}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-2xl flex items-center gap-2 mb-8">归还物品</DialogTitle>
+            <DialogTitle>归还物品</DialogTitle>
           </DialogHeader>
           
           <div className="space-y-6">
@@ -695,7 +695,7 @@ export function Dashboard() {
             <RadioGroup
               value={returnMode}
               onValueChange={(value) => setReturnMode(value as 'used' | 'remaining')}
-              className="flex flex-row gap-4 mb-4"
+              className="flex flex-row gap-4"
             >
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="used" id="returnMode-used" />
@@ -744,7 +744,15 @@ export function Dashboard() {
               )}
             </div>
 
-            <div className="flex gap-3 pt-4">
+            <div className="flex gap-3">
+              <Button
+                variant="morden"
+                onClick={() => setShowReturnModal(false)}
+                className="flex-1"
+                size="lg"
+              >
+                取消
+              </Button>
               <Button
                 onClick={handleReturn}
                 disabled={returnLoading}
@@ -759,14 +767,6 @@ export function Dashboard() {
                 ) : (
                   '确认归还'
                 )}
-              </Button>
-              <Button
-                variant="morden"
-                onClick={() => setShowReturnModal(false)}
-                className="flex-1"
-                size="lg"
-              >
-                取消
               </Button>
             </div>
           </div>
@@ -807,7 +807,7 @@ export function Dashboard() {
                 />
               </div>
 
-              <div className="flex gap-3 pt-4">
+              <div className="flex gap-3 pt-1">
                 <Button
                   onClick={handleStockin}
                   disabled={stockinLoading}

@@ -23,13 +23,12 @@ import { cn } from '@/lib/utils'
 import { validateCASNumber, validateRequired, validateSpecification, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
 import { AxiosError } from 'axios'
 import {
-  ShoppingCart,
   Plus,
   Loader2,
   X,
   AlertTriangle,
-  Package,
-  Search
+  Search,
+  FlaskConical
 } from 'lucide-react'
 
 interface ReagentOrder {
@@ -522,7 +521,7 @@ export function ReagentOrdersPage() {
       <Dialog open={showCreateDialog} onOpenChange={handleCloseDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl flex items-center gap-2 mb-6">
+            <DialogTitle>
               创建试剂订单
             </DialogTitle>
           </DialogHeader>
@@ -746,7 +745,7 @@ export function ReagentOrdersPage() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3">
+            <div className="flex flex-col sm:flex-row gap-2 mt-6">
               <div className="ml-auto flex gap-2">
                 <Button
                   type="button"
@@ -779,7 +778,7 @@ export function ReagentOrdersPage() {
       <Card>
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg">
-            <Package className="w-5 h-5" />
+            <FlaskConical className="w-5 h-5" />
             试剂订单列表 <span className="text-muted-foreground font-normal">(&thinsp;{total}&thinsp;)</span>
           </CardTitle>
         </CardHeader>

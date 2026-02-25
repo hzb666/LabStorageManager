@@ -219,3 +219,23 @@
 .page-card-shadow-dark {
   box-shadow: -1px 0 10px rgba(0, 0, 0, 0.3), 0 0 3px rgba(0, 0, 0, 0.2);
 }
+
+/* Toast 淡出动画 */
+@keyframes fade-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.animate-out {
+  animation: fade-out 300ms ease-in-out forwards;
+}
+
+.fade-out {
+  opacity: 0;
+}
