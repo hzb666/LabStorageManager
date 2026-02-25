@@ -519,23 +519,23 @@ export function Dashboard() {
                     <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                       <thead>
                         <tr className="border-b-2 border-border">
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">名称</th>
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">状态</th>
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">时间</th>
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">操作</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">名称</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">状态</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">时间</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">操作</th>
                         </tr>
                       </thead>
                       <tbody>
                         {myConsumableOrders.slice((consumablePage - 1) * consumablePageSize, consumablePage * consumablePageSize).map((order) => (
                           <tr key={order.id} className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none">
-                            <td className="p-3 align-middle text-sm">{order.name}</td>
-                            <td className="p-3 align-middle text-sm">
+                            <td className="p-3 align-middle text-base">{order.name}</td>
+                            <td className="p-3 align-middle text-base">
                               <span className={cn('px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap', order.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : order.status === 'approved' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-muted text-foreground')}>
                                 {order.status === 'pending' ? '待审批' : order.status === 'approved' ? '已审批' : order.status}
                               </span>
                             </td>
-                            <td className="p-3 align-middle text-sm">{formatDateTime(order.created_at)}</td>
-                            <td className="p-3 align-middle text-sm">
+                            <td className="p-3 align-middle text-base">{formatDateTime(order.created_at)}</td>
+                            <td className="p-3 align-middle text-base">
                               {order.status === 'approved' && (
                                 <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleConfirmReceive(order.id)}>
                                   <CheckCircle className="w-3 h-3 mr-1" />确认收货
@@ -575,21 +575,21 @@ export function Dashboard() {
                     <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                       <thead>
                         <tr className="border-b-2 border-border">
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">名称</th>
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">CAS号</th>
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">剩余量</th>
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">借用时间</th>
-                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">操作</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">名称</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">CAS号</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">剩余量</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">借用时间</th>
+                          <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">操作</th>
                         </tr>
                       </thead>
                       <tbody>
                         {myBorrows.slice((borrowPage - 1) * borrowPageSize, borrowPage * borrowPageSize).map((item) => (
-                          <tr key={item.inventory_id} className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none">
-                            <td className="p-3 align-middle text-sm">{item.name}</td>
-                            <td className="p-3 align-middle text-sm">{item.cas_number}</td>
-                            <td className="p-3 align-middle text-sm">{item.remaining_quantity} {item.unit}</td>
-                            <td className="p-3 align-middle text-sm">{formatDateTime(item.borrow_time)}</td>
-                            <td className="p-3 align-middle text-sm">
+                          <tr key={item.inventory_id} className="border-b border-border hover:bg-muted/30 transition-none">
+                            <td className="p-3 align-middle text-base">{item.name}</td>
+                            <td className="p-3 align-middle text-base">{item.cas_number}</td>
+                            <td className="p-3 align-middle text-base">{item.remaining_quantity} {item.unit}</td>
+                            <td className="p-3 align-middle text-base">{formatDateTime(item.borrow_time)}</td>
+                            <td className="p-3 align-middle text-base">
                               <Button onClick={() => openReturnModal(item)} size="sm">归还</Button>
                             </td>
                           </tr>
@@ -624,21 +624,21 @@ export function Dashboard() {
                   <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                     <thead>
                       <tr className="border-b-2 border-border">
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">名称</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">CAS号</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">数量</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">入库时间</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm">操作</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">名称</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">CAS号</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">数量</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">入库时间</th>
+                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">操作</th>
                       </tr>
                     </thead>
                     <tbody>
                       {pendingStockin.map((item) => (
                         <tr key={item.inventory_id} className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none">
-                          <td className="p-3 align-middle text-sm">{item.name}</td>
-                          <td className="p-3 align-middle text-sm font-mono">{item.cas_number}</td>
-                          <td className="p-3 align-middle text-sm">{item.initial_quantity} {item.unit}</td>
-                          <td className="p-3 align-middle text-sm">{formatDateTime(item.stockin_time)}</td>
-                          <td className="p-3 align-middle text-sm">
+                          <td className="p-3 align-middle text-base">{item.name}</td>
+                          <td className="p-3 align-middle text-base">{item.cas_number}</td>
+                          <td className="p-3 align-middle text-base">{item.initial_quantity} {item.unit}</td>
+                          <td className="p-3 align-middle text-base">{formatDateTime(item.stockin_time)}</td>
+                          <td className="p-3 align-middle text-base">
                             <Button variant="outline" onClick={() => openStockinModal(item)} size="sm">分配位置</Button>
                           </td>
                         </tr>

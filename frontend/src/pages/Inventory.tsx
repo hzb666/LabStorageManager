@@ -832,7 +832,7 @@ export function InventoryPage() {
         {/* 搜索字段选择器和状态过滤器与模糊搜索开关横向排列 */}
         <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">
           {/* 模糊搜索开关 */}
-          <label className="flex items-center gap-2 text-sm cursor-pointer whitespace-nowrap">
+          <label className="flex items-center gap-2 text-base cursor-pointer whitespace-nowrap">
             <Checkbox
               checked={fuzzySearch}
               onCheckedChange={(checked: boolean | string) => {
@@ -845,7 +845,7 @@ export function InventoryPage() {
                 })
               }}
             />
-            <span className="text-base">模糊搜索</span>
+            <span className="text-base pr-2">模糊搜索</span>
           </label>
           {/* 搜索字段选择器 */}
           <Select
@@ -1231,7 +1231,7 @@ export function InventoryPage() {
           {/* 有数据时在角落显示加载指示器，保持数据可见 */}
           {loading && data.length > 0 && (
             <div className="flex justify-end mb-2">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-base text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 <span>加载中...</span>
               </div>
@@ -1255,7 +1255,7 @@ export function InventoryPage() {
                           {headerGroup.headers.map(header => (
                             <th 
                               key={header.id} 
-                              className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm"
+                              className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
                               style={{ width: header.getSize() }}
                             >
                               {header.isPlaceholder
@@ -1276,7 +1276,7 @@ export function InventoryPage() {
                             {row.getVisibleCells().map(cell => (
                               <td 
                                 key={cell.id} 
-                                className="p-3 align-middle text-sm"
+                                className="p-3 align-middle text-base"
                                 style={{ width: cell.column.getSize() }}
                               >
                                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1285,7 +1285,7 @@ export function InventoryPage() {
                           </tr>
                           {expandedRows[row.original.id] && (
                             <tr key={`${row.id}-expanded`} className="border-b border-border bg-muted/20">
-                              <td colSpan={row.getVisibleCells().length} className="p-3 text-sm">
+                              <td colSpan={row.getVisibleCells().length} className="p-3 text-base">
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
                                   <div>
                                     <span className="font-medium">英文名称：</span>

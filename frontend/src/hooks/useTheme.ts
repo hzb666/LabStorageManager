@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
 type Theme = 'light' | 'dark'
 
@@ -28,9 +28,21 @@ export function useTheme() {
     localStorage.setItem('theme', theme)
   }, [theme])
 
-  const toggleTheme = () => {
+  const toggleTheme = useCallback(() => {
+    // 暗黑模式切换时禁用所有过渡
+    const style = document.createElement('style')
+    style.textContent = '*,*::before,*::after{transition:none !important}'
+    document.head.appendChild(style)
+    
     setTheme(prev => prev === 'light' ? 'dark' : 'light')
-  }
+    
+    // 强制重绘后移除禁用样式
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.head.removeChild(style)
+      })
+    })
+  }, [])
 
   return { theme, setTheme, toggleTheme }
 }

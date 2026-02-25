@@ -1,6 +1,37 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, type StorageValue, type PersistStorage } from 'zustand/middleware'
 import { authAPI } from '@/api/client'
+
+// 自定义存储，带有过期时间支持 (3天)
+const createExpireStorage = <T>(expiresInDays: number): PersistStorage<T> => ({
+  getItem: (name: string): StorageValue<T> | null => {
+    const value = localStorage.getItem(name)
+    if (!value) return null
+    
+    try {
+      const parsed = JSON.parse(value) as StorageValue<T> & { expiresAt?: number }
+      if (parsed.expiresAt) {
+        const now = Date.now()
+        if (now > parsed.expiresAt) {
+          localStorage.removeItem(name)
+          return null
+        }
+      }
+      return parsed
+    } catch {
+      // 如果解析失败，返回null让zustand处理
+      return null
+    }
+  },
+  setItem: (name: string, value: StorageValue<T>): void => {
+    const expiresAt = Date.now() + expiresInDays * 24 * 60 * 60 * 1000
+    const valueWithExpiry = { ...value, expiresAt }
+    localStorage.setItem(name, JSON.stringify(valueWithExpiry))
+  },
+  removeItem: (name: string): void => {
+    localStorage.removeItem(name)
+  },
+})
 
 interface User {
   id: number
@@ -43,13 +74,21 @@ export const useAuthStore = create<AuthState>()(
 )
 
 interface UIState {
-  sidebarOpen: boolean
+  sidebarCollapsed: boolean
   toggleSidebar: () => void
-  setSidebarOpen: (open: boolean) => void
+  setSidebarCollapsed: (collapsed: boolean) => void
 }
 
-export const useUIStore = create<UIState>((set) => ({
-  sidebarOpen: true,
-  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-  setSidebarOpen: (open) => set({ sidebarOpen: open }),
-}))
+export const useUIStore = create<UIState>()(
+  persist(
+    (set) => ({
+      sidebarCollapsed: false,
+      toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+    }),
+    {
+      name: 'sidebar-storage',
+      storage: createExpireStorage(3), // 3天过期
+    }
+  )
+)

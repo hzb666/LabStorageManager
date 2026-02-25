@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation, Outlet } from 'react-router-dom'
-import { useAuthStore } from '@/store/useStore'
+import { useAuthStore, useUIStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,6 +15,8 @@ import {
   X,
   Moon,
   Sun,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -31,14 +33,27 @@ const navItems = [
 export function Layout() {
   const location = useLocation()
   const { user, logout } = useAuthStore()
+  const { sidebarCollapsed, toggleSidebar } = useUIStore()
   const { theme, toggleTheme } = useTheme()
   const isMobile = useIsMobile()
-  const [sidebarOpen, setSidebarOpen] = useState(!isMobile)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const filteredNavItems = navItems.filter(
     (item) => !item.adminOnly || user?.role === 'admin'
   )
+
+  // 键盘快捷键支持 Ctrl+B / Cmd+B
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+      e.preventDefault()
+      toggleSidebar()
+    }
+  }, [toggleSidebar])
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleKeyDown])
 
   // 移动端侧边栏打开时禁止背景滚动
   useEffect(() => {
@@ -52,110 +67,188 @@ export function Layout() {
     }
   }, [mobileMenuOpen])
 
+  // 桌面端始终显示侧边栏（不隐藏）
+  const showDesktopSidebar = !isMobile
+
   return (
     <div className="flex min-h-screen w-full bg-sidebar">
       {/* Desktop Sidebar */}
-      <aside
-        className={cn(
-          'fixed inset-y-0 left-0 z-50 w-64 transform bg-sidebar transition-transform duration-200 max-md:hidden flex flex-col',
-          !sidebarOpen && '-translate-x-full'
-        )}
-      >
-        <div className="flex flex-col items-center justify-center pt-8 pb-4">
-          <h1 className="text-2xl font-bold">实验室库存管理</h1>
-        </div>
-        <nav className="flex-1 space-y-4 p-4 overflow-y-auto">
-          {/* 功能组 */}
-          <div>
-            <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">功能</p>
-              <div className="space-y-1">
-              {filteredNavItems.filter(item => item.group === '功能').map((item) => {
-                const isActive = location.pathname === item.href
-                const Icon = item.icon
-                return (
-                  <Link
-                    key={item.href}
-                    to={item.href}
-                    className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-none',
-                      isActive
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-sidebar text-sidebar-foreground hover:bg-muted hover:text-foreground'
-                    )}
-                  >
-                    <Icon className="h-5 w-5" />
-                    {item.title}
-                  </Link>
-                )
-              })}
-            </div>
+      {showDesktopSidebar && (
+        <aside
+          className={cn(
+            'fixed inset-y-0 left-0 z-50 bg-sidebar flex flex-col transition-[width] duration-300 ease-in-out',
+            sidebarCollapsed ? 'w-16' : 'w-64'
+          )}
+        >
+          {/* 标题区域 - 折叠时保持高度，只隐藏文字 */}
+          <div 
+            className={cn(
+              'flex flex-col items-center justify-center transition-opacity duration-200 overflow-hidden',
+              sidebarCollapsed ? 'opacity-0' : 'opacity-100',
+              // 始终保持固定高度，确保展开和折叠时导航图标位置不变
+              'h-20 pt-12 pb-12'
+            )}
+          >
+            <h1 className="text-2xl font-bold text-center px-2 whitespace-nowrap">实验室库存管理</h1>
           </div>
-          {/* 管理组 */}
-            <div>
-            <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">管理</p>
-            <div className="space-y-1">
-              {filteredNavItems.filter(item => item.group === '管理').map((item) => {
-                const isActive = location.pathname === item.href
-                const Icon = item.icon
-                return (
-                  <Link
-                    key={item.href}
-                    to={item.href}
-                    className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-none',
-                      isActive
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-sidebar text-sidebar-foreground hover:bg-muted hover:text-foreground'
-                    )}
-                  >
-                    <Icon className="h-5 w-5" />
-                    {item.title}
-                  </Link>
-                )
-              })}
-            </div>
-          </div>
-        </nav>
-        <div className="mt-auto p-4">
-          <div className="pt-2">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                {user?.username?.charAt(0).toUpperCase() || 'U'}
+
+          {/* 导航区域 */}
+          <nav className={cn(
+            "flex-1 overflow-y-auto px-2",
+            sidebarCollapsed ? "px-3" : "px-3"
+          )}>
+            {/* 功能组 */}
+            <div className="mb-4">
+              {!sidebarCollapsed && (
+                <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">功能</p>
+              )}
+                <div className="space-y-1">
+                  {filteredNavItems.filter(item => item.group === '功能').map((item) => {
+                    const isActive = location.pathname === item.href
+                    const Icon = item.icon
+                    return (
+                      <Link
+                        key={item.href}
+                        to={item.href}
+                        className={cn(
+                          'flex items-center rounded-lg py-2 font-medium min-w-0 overflow-hidden',
+                          sidebarCollapsed 
+                            ? 'justify-center px-2' 
+                            : 'gap-3 px-3',
+                          isActive
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-sidebar-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                        title={sidebarCollapsed ? item.title : undefined}
+                      >
+                        <Icon className={cn("h-5 w-5 flex-shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
+                        <span 
+                          className={cn(
+                            "whitespace-nowrap overflow-hidden min-w-0",
+                            sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
+                          )}
+                        >
+                          {item.title}
+                        </span>
+                      </Link>
+                    )
+                  })}
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">
-                  {user?.full_name || user?.username}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {user?.role === 'admin' ? '管理员' : '用户'}
-                </p>
+
+            {/* 管理组 */}
+            <div className="pt-2">
+              {!sidebarCollapsed && (
+                <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">管理</p>
+              )}
+                <div className="space-y-1">
+                  {filteredNavItems.filter(item => item.group === '管理').map((item) => {
+                    const isActive = location.pathname === item.href
+                    const Icon = item.icon
+                    return (
+                      <Link
+                        key={item.href}
+                        to={item.href}
+                        className={cn(
+                          'flex items-center rounded-lg py-2 font-medium min-w-0 overflow-hidden',
+                          sidebarCollapsed 
+                            ? 'justify-center px-2' 
+                            : 'gap-3 px-3',
+                          isActive
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-sidebar-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                        title={sidebarCollapsed ? item.title : undefined}
+                      >
+                        <Icon className={cn("h-5 w-5 flex-shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
+                        <span 
+                          className={cn(
+                            "whitespace-nowrap overflow-hidden min-w-0",
+                            sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
+                          )}
+                        >
+                          {item.title}
+                        </span>
+                      </Link>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <Button
-                variant="outline"
-                className="flex-1 justify-start text-foreground hover:bg-muted hover:text-foreground border-0 shadow-none"
-                onClick={() => logout()}
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                退出登录
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={toggleTheme}
-                className="h-9 w-9 flex-shrink-0 hover:bg-muted hover:text-foreground border-0 shadow-none text-foreground transition-none"
-              >
-                {theme === 'dark' ? (
-                  <Sun className="h-4 w-4" />
-                ) : (
-                  <Moon className="h-4 w-4" />
+            </nav>
+
+          {/* 用户区域 - 保持固定 padding */}
+          <div className="mt-auto p-3">
+            <div className="pt-2">
+              {/* 头像 */}
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground flex-shrink-0">
+                  {user?.username?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                <div 
+                  className={cn(
+                    "flex-1 min-w-0 transition-opacity duration-200 overflow-hidden",
+                    sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
+                  )}
+                >
+                  <p className="text-sm font-medium truncate text-sidebar-foreground whitespace-nowrap">
+                    {user?.full_name || user?.username}
+                  </p>
+                  <p className="text-xs text-sidebar-foreground/70 whitespace-nowrap">
+                    {user?.role === 'admin' ? '管理员' : '用户'}
+                  </p>
+                </div>
+              </div>
+
+              {/* 按钮区域 */}
+              <div 
+                className={cn(
+                  "flex gap-2",
+                  sidebarCollapsed 
+                    ? "flex-col items-center" 
+                    : "items-center justify-between"
                 )}
-              </Button>
+              >
+                <Button
+                  variant="outline"
+                  onClick={() => logout()}
+                  className={cn(
+                    "text-sidebar-foreground hover:bg-muted hover:text-foreground border-0 shadow-none min-w-0 overflow-hidden flex",
+                    sidebarCollapsed 
+                      ? "w-10 h-10 p-0 justify-center" 
+                      : "flex-1 justify-start px-3"
+                  )}
+                  title={sidebarCollapsed ? "退出登录" : undefined}
+                >
+                  <LogOut className="h-4 w-4 flex-shrink-0" />
+                  {!sidebarCollapsed && (
+                    <span className="ml-2 whitespace-nowrap">
+                      退出登录
+                    </span>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={toggleTheme}
+                  className={cn(
+                    "h-9 flex-shrink-0 hover:bg-muted hover:text-foreground border-0 shadow-none text-sidebar-foreground",
+                    sidebarCollapsed 
+                      ? "w-10" 
+                      : ""
+                  )}
+                  title={sidebarCollapsed ? (theme === 'dark' ? '切换亮色' : '切换暗黑') : undefined}
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="h-4 w-4" />
+                  ) : (
+                    <Moon className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      )}
 
       {/* Mobile Menu */}
       <div 
@@ -259,12 +352,34 @@ export function Layout() {
         </div>
 
       {/* Main Content */}
-      <div className="flex-1 md:pl-64 flex flex-col min-h-screen min-w-0 w-full">
+      <div 
+        className={cn(
+          "flex-1 flex flex-col min-h-screen min-w-0 w-full transition-[margin-left] duration-300 ease-in-out",
+          showDesktopSidebar ? (sidebarCollapsed ? "md:ml-16" : "md:ml-64") : ""
+        )}
+      >
         {/* Page Content */}
-        <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pr-3 lg:pr-4">
+        <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pl-3 md:pr-3 lg:pl-3 lg:pr-4">
           <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
             {/* Top Header - sticky + 顶部圆角 */}
             <header className="sticky top-0 z-30 flex h-16 items-center gap-4 px-4 bg-page-card border-b border-border rounded-tl-lg rounded-tr-lg">
+              {/* Sidebar Toggle Button - Desktop */}
+              {showDesktopSidebar && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 hidden md:flex"
+                  onClick={toggleSidebar}
+                  title={sidebarCollapsed ? "展开侧边栏 (Ctrl+B)" : "折叠侧边栏 (Ctrl+B)"}
+                >
+                  {sidebarCollapsed ? (
+                    <PanelLeftOpen className="h-5 w-5" />
+                  ) : (
+                    <PanelLeftClose className="h-5 w-5" />
+                  )}
+                </Button>
+              )}
+              
               {/* Mobile Menu Button */}
               <Button
                 variant="ghost"
@@ -278,8 +393,10 @@ export function Layout() {
                   <Menu className="h-5 w-5" />
                 )}
               </Button>
+              
               <div className="flex-1" />
-              {/* Mobile Theme Toggle */}
+              
+              {/* Mobile Theme Toggle Only */}
               <Button
                 variant="ghost"
                 size="icon"
