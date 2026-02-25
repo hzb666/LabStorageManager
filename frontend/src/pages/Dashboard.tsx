@@ -8,6 +8,7 @@ import { reagentOrderAPI, inventoryAPI, consumableOrderAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
 import { formatDateTime, cn } from '@/lib/utils'
+import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
 import { Package, ShoppingCart, ArrowRightLeft, AlertCircle, X, Loader2, PackagePlus, CheckCircle } from 'lucide-react'
 import { AxiosError } from 'axios'
 
@@ -124,8 +125,8 @@ export function Dashboard() {
   
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
-  const [returnQuantity, setReturnQuantity] = useState('')
-  const [usedQuantity, setUsedQuantity] = useState('')
+  const [returnQuantity, setReturnQuantity] = useState('0')
+  const [usedQuantity, setUsedQuantity] = useState('0')
   const [returnUnit, setReturnUnit] = useState('')
   const [returnMode, setReturnMode] = useState<'remaining' | 'used'>('used')
   const [returnLoading, setReturnLoading] = useState(false)
@@ -355,6 +356,30 @@ export function Dashboard() {
   const pendingCount = myReagentOrders.filter((o) => o.status === 'pending').length + 
                        myConsumableOrders.filter((o) => o.status === 'pending').length
 
+  // Tab 缓存 - 3天过期
+  const [activeTab, setActiveTab] = useState<string>('reagents')
+
+  // 加载缓存的 tab
+  useEffect(() => {
+    const cached = localStorage.getItem('dashboard_active_tab')
+    if (cached) {
+      const { value, timestamp } = JSON.parse(cached)
+      const now = Date.now()
+      const threeDays = 3 * 24 * 60 * 60 * 1000
+      if (now - timestamp < threeDays) {
+        setActiveTab(value)
+      } else {
+        localStorage.removeItem('dashboard_active_tab')
+      }
+    }
+  }, [])
+
+  // 保存 tab 到缓存
+  const handleTabChange = (value: string) => {
+    setActiveTab(value)
+    localStorage.setItem('dashboard_active_tab', JSON.stringify({ value, timestamp: Date.now() }))
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -396,7 +421,7 @@ export function Dashboard() {
       </div>
 
       {/* Tabs for 4 tables */}
-      <Tabs defaultValue="reagents">
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList className="mb-1">
           <TabsTrigger value="reagents" className="w-25">试剂订单</TabsTrigger>
           <TabsTrigger value="consumables" className="w-25">耗材订单</TabsTrigger>
@@ -530,7 +555,7 @@ export function Dashboard() {
                           <tr key={order.id} className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none">
                             <td className="p-3 align-middle text-base">{order.name}</td>
                             <td className="p-3 align-middle text-base">
-                              <span className={cn('px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap', order.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : order.status === 'approved' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-muted text-foreground')}>
+                              <span className={cn('px-2.5 py-1 text-sm rounded-full font-medium whitespace-nowrap', order.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : order.status === 'approved' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-muted text-foreground')}>
                                 {order.status === 'pending' ? '待审批' : order.status === 'approved' ? '已审批' : order.status}
                               </span>
                             </td>
@@ -590,7 +615,7 @@ export function Dashboard() {
                             <td className="p-3 align-middle text-base">{item.remaining_quantity} {item.unit}</td>
                             <td className="p-3 align-middle text-base">{formatDateTime(item.borrow_time)}</td>
                             <td className="p-3 align-middle text-base">
-                              <Button onClick={() => openReturnModal(item)} className="text-sm h-8 leading-none">归还</Button>
+                              <Button onClick={() => openReturnModal(item)} size="sm" className="h-8.5 text-sm/4 px-3">归还</Button>
                             </td>
                           </tr>
                         ))}
@@ -656,7 +681,7 @@ export function Dashboard() {
       <Dialog open={showReturnModal} onOpenChange={setShowReturnModal}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>归还物品</DialogTitle>
+            <DialogTitle className="text-xl flex items-center gap-2">归还物品</DialogTitle>
           </DialogHeader>
           
           <div className="space-y-4">
@@ -691,14 +716,9 @@ export function Dashboard() {
             </div>
             
             <div>
-              <label className="block text-sm font-medium mb-1">
+              <label className={LABEL_STYLES.base}>
                 {returnMode === 'remaining' ? '剩余量' : '使用量'} 
                 <span className="text-destructive">*</span>
-                {returnMode === 'used' && selectedBorrow && (
-                  <span className="text-muted-foreground font-normal ml-2">
-                    (借用时剩余量: {selectedBorrow.remaining_quantity} {returnUnit})
-                  </span>
-                )}
               </label>
               <div className="flex items-center gap-2">
                 <Input
@@ -713,7 +733,7 @@ export function Dashboard() {
                     }
                   }}
                   placeholder={returnMode === 'remaining' ? '输入剩余量' : '输入使用量'}
-                  className={cn("flex-1", returnError && "border-destructive")}
+                  className={cn(INPUT_STYLES.base, "flex-1", returnError && "border-destructive")}
                 />
                 <span className="text-muted-foreground text-sm min-w-[40px]">{returnUnit}</span>
               </div>
@@ -723,6 +743,11 @@ export function Dashboard() {
               {returnMode === 'used' && usedQuantity && !returnError && selectedBorrow && (
                 <p className="text-sm text-muted-foreground mt-1">
                   归还后剩余: {Math.max(0, selectedBorrow.remaining_quantity - (parseFloat(usedQuantity) || 0)).toFixed(2)} {returnUnit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {returnUnit})
+                </p>
+              )}
+              {returnMode === 'remaining' && returnQuantity && !returnError && selectedBorrow && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  归还后剩余: {(parseFloat(returnQuantity) || 0).toFixed(2)} {returnUnit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {returnUnit})
                 </p>
               )}
             </div>
@@ -744,7 +769,7 @@ export function Dashboard() {
                 )}
               </Button>
               <Button
-                variant="outline"
+                variant="morden"
                 onClick={() => setShowReturnModal(false)}
                 className="flex-1"
                 size="lg"
@@ -779,13 +804,14 @@ export function Dashboard() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label className={LABEL_STYLES.base}>
                   存放位置 <span className="text-destructive">*</span>
                 </label>
                 <Input
                   value={stockinLocation}
                   onChange={(e) => setStockinLocation(e.target.value)}
                   placeholder="如: A-1-1 柜"
+                  className={INPUT_STYLES.base}
                 />
               </div>
 
