@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { userAdminAPI } from '@/api/client'
+import { userAdminAPI, authAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
@@ -68,21 +68,30 @@ export function AdminUsersPage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [editData, setEditData] = useState({
+    username: '',
     full_name: '',
     role: 'user' as 'admin' | 'user'
   })
+  const [editPassword, setEditPassword] = useState('')
   const [editLoading, setEditLoading] = useState(false)
+
+  // Change password modal for user's own password
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false)
+  const [changePasswordData, setChangePasswordData] = useState({
+    old_password: '',
+    new_password: '',
+    confirm_password: ''
+  })
+  const [changePasswordErrors, setChangePasswordErrors] = useState<Record<string, string>>({})
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false)
 
   // Delete confirmation
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
 
-  useEffect(() => {
-    loadUsers()
-  }, [])
-
-  const loadUsers = async () => {
+  // Load users function (defined before useEffect)
+  const loadUsers = useCallback(async () => {
     try {
       const params: UserListParams = {}
       if (roleFilter !== 'all') params.role = roleFilter
@@ -95,12 +104,14 @@ export function AdminUsersPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [roleFilter, statusFilter])
 
-  // Reload when filters change
+  // Load users on mount
   useEffect(() => {
     loadUsers()
-  }, [roleFilter, statusFilter])
+  }, [loadUsers])
+
+  // Reload when filters change - removed duplicate useEffect, handled by loadUsers dependency
 
   const columns = useMemo(() => [
     columnHelper.accessor('username', {
@@ -154,7 +165,6 @@ export function AdminUsersPage() {
               size="sm"
               variant="outline"
               onClick={() => openEditModal(user)}
-              disabled={isSelf}
             >
               <Edit className="w-3 h-3" />
             </Button>
@@ -230,8 +240,40 @@ export function AdminUsersPage() {
   // Edit user handlers
   const openEditModal = (user: User) => {
     setEditUser(user)
-    setEditData({ full_name: user.full_name || '', role: user.role })
+    setEditData({ username: user.username, full_name: user.full_name || '', role: user.role })
+    setEditPassword('')
     setShowEditModal(true)
+  }
+
+  // Check if editing own profile
+  const isEditingSelf = editUser?.id === currentUser?.id
+
+  // Handle change own password
+  const validateChangePasswordForm = (): boolean => {
+    const errors: Record<string, string> = {}
+    if (!changePasswordData.old_password) errors.old_password = '请输入原密码'
+    if (!changePasswordData.new_password) errors.new_password = '请输入新密码'
+    if (changePasswordData.new_password.length < 6) errors.new_password = '新密码至少6个字符'
+    if (changePasswordData.new_password !== changePasswordData.confirm_password) errors.confirm_password = '两次输入的密码不一致'
+    setChangePasswordErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
+  const handleChangePassword = async () => {
+    if (!validateChangePasswordForm()) return
+
+    setChangePasswordLoading(true)
+    try {
+      await authAPI.changePassword(changePasswordData.old_password, changePasswordData.new_password)
+      setShowChangePasswordModal(false)
+      setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
+      toast.success('密码修改成功')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '密码修改失败')
+    } finally {
+      setChangePasswordLoading(false)
+    }
   }
 
   const handleEdit = async () => {
@@ -239,6 +281,20 @@ export function AdminUsersPage() {
 
     setEditLoading(true)
     try {
+      // Handle password change if provided
+      if (editPassword) {
+        if (isEditingSelf) {
+          // 用户修改自己的密码 - 需要原密码验证，打开专门的修改密码弹窗
+          setShowChangePasswordModal(true)
+          setEditLoading(false)
+          return
+        } else {
+          // 管理员重置他人密码 - 无需原密码验证
+          await userAdminAPI.resetPassword(editUser.id, editPassword)
+        }
+      }
+      
+      // Update user info
       await userAdminAPI.update(editUser.id, editData)
       setShowEditModal(false)
       setEditUser(null)
@@ -384,7 +440,13 @@ export function AdminUsersPage() {
       </Card>
 
       {/* Create User Modal */}
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+      <Dialog open={showCreateModal} onOpenChange={(open) => {
+        if (!open) {
+          setCreateData({ username: '', password: '', full_name: '', role: 'user' })
+          setCreateErrors({})
+        }
+        setShowCreateModal(open)
+      }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>创建用户</DialogTitle>
@@ -451,7 +513,12 @@ export function AdminUsersPage() {
       </Dialog>
 
       {/* Edit User Modal */}
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+      <Dialog open={showEditModal} onOpenChange={(open) => {
+        if (!open) {
+          setEditPassword('')
+        }
+        setShowEditModal(open)
+      }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>编辑用户</DialogTitle>
@@ -459,7 +526,15 @@ export function AdminUsersPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1">用户名</label>
-              <Input value={editUser?.username || ''} disabled className="bg-muted" />
+              <Input 
+                value={editData.username}
+                onChange={(e) => setEditData({ ...editData, username: e.target.value })}
+                placeholder="请输入用户名"
+                disabled={!isEditingSelf && currentUser?.role !== 'admin'}
+              />
+              {!isEditingSelf && currentUser?.role !== 'admin' && (
+                <p className="text-xs text-muted-foreground mt-1">只有管理员可以修改他人用户名</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">姓名</label>
@@ -474,12 +549,36 @@ export function AdminUsersPage() {
               <select
                 value={editData.role}
                 onChange={(e) => setEditData({ ...editData, role: e.target.value as 'admin' | 'user' })}
-                className="w-full h-10 px-3 border rounded-md bg-background"
+                disabled={isEditingSelf}
+                className="w-full h-10 px-3 border rounded-md bg-background disabled:opacity-50"
               >
                 <option value="user">用户</option>
                 <option value="admin">管理员</option>
               </select>
+              {isEditingSelf && (
+                <p className="text-xs text-muted-foreground mt-1">无法修改自己的角色</p>
+              )}
             </div>
+            
+            {/* Password field - for admin reset only, user changes password via dedicated modal */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                {isEditingSelf ? '新密码' : '重置密码'}
+              </label>
+              <Input
+                type="password"
+                value={editPassword}
+                onChange={(e) => setEditPassword(e.target.value)}
+                placeholder={isEditingSelf ? '点击保存后打开修改密码页面' : '留空则不修改密码'}
+                disabled={isEditingSelf}
+              />
+              {isEditingSelf && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  修改自己密码需要输入原密码，请点击"保存"后在新页面操作
+                </p>
+              )}
+            </div>
+            
             <div className="flex gap-3 pt-4 border-t">
               <Button onClick={handleEdit} disabled={editLoading}>
                 {editLoading ? '保存中...' : '保存'}
@@ -509,6 +608,70 @@ export function AdminUsersPage() {
             <Button variant="outline" onClick={() => setShowDeleteModal(false)}>
               取消
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Change Password Modal */}
+      <Dialog open={showChangePasswordModal} onOpenChange={setShowChangePasswordModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>修改密码</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                原密码 <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="password"
+                value={changePasswordData.old_password}
+                onChange={(e) => setChangePasswordData({ ...changePasswordData, old_password: e.target.value })}
+                placeholder="请输入原密码"
+                className={changePasswordErrors.old_password ? 'border-red-500' : ''}
+              />
+              {changePasswordErrors.old_password && (
+                <p className="text-sm text-red-500 mt-1">{changePasswordErrors.old_password}</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                新密码 <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="password"
+                value={changePasswordData.new_password}
+                onChange={(e) => setChangePasswordData({ ...changePasswordData, new_password: e.target.value })}
+                placeholder="请输入新密码"
+                className={changePasswordErrors.new_password ? 'border-red-500' : ''}
+              />
+              {changePasswordErrors.new_password && (
+                <p className="text-sm text-red-500 mt-1">{changePasswordErrors.new_password}</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                确认新密码 <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="password"
+                value={changePasswordData.confirm_password}
+                onChange={(e) => setChangePasswordData({ ...changePasswordData, confirm_password: e.target.value })}
+                placeholder="请再次输入新密码"
+                className={changePasswordErrors.confirm_password ? 'border-red-500' : ''}
+              />
+              {changePasswordErrors.confirm_password && (
+                <p className="text-sm text-red-500 mt-1">{changePasswordErrors.confirm_password}</p>
+              )}
+            </div>
+            <div className="flex gap-3 pt-4 border-t">
+              <Button onClick={handleChangePassword} disabled={changePasswordLoading}>
+                {changePasswordLoading ? '处理中...' : '确认修改'}
+              </Button>
+              <Button variant="outline" onClick={() => setShowChangePasswordModal(false)}>
+                取消
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -54,6 +54,8 @@ export const authAPI = {
     api.post('/users/login', { username, password }),
   logout: () => api.post('/users/logout'),
   getProfile: () => api.get('/users/me'),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    api.post('/users/change-password', { old_password: oldPassword, new_password: newPassword }),
 }
 
 // User Admin APIs
@@ -67,6 +69,8 @@ export const userAdminAPI = {
   delete: (id: number) => api.delete(`/users/${id}`),
   activate: (id: number) => api.post(`/users/${id}/activate`),
   updateRole: (id: number, role: string) => api.put(`/users/${id}/role`, null, { params: { role } }),
+  resetPassword: (id: number, newPassword: string) => 
+    api.post(`/users/${id}/reset-password`, { new_password: newPassword }),
 }
 
 // Reagent Order APIs

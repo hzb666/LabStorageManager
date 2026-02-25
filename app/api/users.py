@@ -110,6 +110,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    """Change password request body"""
+    old_password: str
+    new_password: str
+
+
 def get_user_by_username(db: Session, username: str) -> Optional[User]:
     """Get user by username"""
     statement = select(User).where(User.username == username)
@@ -209,6 +215,28 @@ def logout():
     )
     
     return response
+
+
+@router.post("/change-password")
+def change_password(
+    password_request: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Change password for current user"""
+    # Verify old password
+    if not verify_password(password_request.old_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="原密码错误"
+        )
+    
+    # Update password
+    current_user.password_hash = get_password_hash(password_request.new_password)
+    current_user.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    
+    return {"message": "密码修改成功"}
 
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -323,12 +351,15 @@ def update_user(
     if "role" in update_data and current_user.role != UserRole.ADMIN:
         del update_data["role"]
     
-    # Handle username change (admin only)
+    # Handle username change (user can change their own username, admin can change any)
     if "username" in update_data and update_data["username"]:
-        if current_user.role != UserRole.ADMIN:
+        # Only allow username change if:
+        # 1. User is changing their own username, OR
+        # 2. User is admin
+        if current_user.id != user_id and current_user.role != UserRole.ADMIN:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only admin can change username"
+                detail="Cannot change other users' username"
             )
         
         existing = get_user_by_username(db, update_data["username"])
@@ -433,3 +464,38 @@ def update_user_role(
     db.refresh(user)
     
     return user
+
+
+class ResetPasswordRequest(BaseModel):
+    """Reset password request body (admin only)"""
+    new_password: str
+
+
+@router.post("/{user_id}/reset-password")
+def reset_user_password(
+    user_id: int,
+    password_request: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Reset user password (admin only - no need old password)"""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Validate password
+    if len(password_request.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters"
+        )
+    
+    # Update password
+    user.password_hash = get_password_hash(password_request.new_password)
+    user.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    
+    return {"message": "密码重置成功"}
