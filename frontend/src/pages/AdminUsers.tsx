@@ -120,7 +120,7 @@ export function AdminUsersPage() {
     columnHelper.accessor('username', {
       header: '用户名',
       size: 120,
-      cell: info => <span className="font-medium">{info.getValue()}</span>,
+      cell: info => <span>{info.getValue()}</span>,
     }),
     columnHelper.accessor('full_name', {
       header: '姓名',
@@ -132,7 +132,7 @@ export function AdminUsersPage() {
       size: 80,
       cell: info => (
         <span className={cn(
-          'px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap',
+          'px-2.5 py-2 text-xs rounded-lg font-medium whitespace-nowrap',
           ROLE_STYLES[info.getValue()] || 'bg-muted'
         )}>
           {info.getValue() === 'admin' ? '管理员' : '用户'}
@@ -144,7 +144,7 @@ export function AdminUsersPage() {
       size: 80,
       cell: info => (
         <span className={cn(
-          'px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap',
+          'px-2.5 py-2 text-xs rounded-lg font-medium whitespace-nowrap',
           info.getValue() 
             ? STATUS_STYLES.active 
             : STATUS_STYLES.inactive

@@ -551,7 +551,7 @@ export function ConsumableOrdersPage() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3 border-t">
+            <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-3">
               <div className="ml-auto flex gap-2">
                 <Button
                   type="button"

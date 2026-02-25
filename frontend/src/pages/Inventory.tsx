@@ -201,7 +201,7 @@ const ActionButtons = React.memo(function ActionButtons({
         <Button
           size="sm"
           className={cn(
-            "h-8 text-xs px-3 font-medium",
+            "h-8.5 text-sm/4 px-3",
             isConfirming 
               ? "bg-destructive hover:bg-destructive/90" 
               : "bg-primary hover:bg-primary/90",
@@ -617,7 +617,7 @@ export function InventoryPage() {
         const status = info.getValue()
         return (
           <span className={cn(
-            'px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap',
+            'px-2.5 py-2 text-xs rounded-lg font-medium whitespace-nowrap',
             STATUS_STYLES[status] || 'bg-muted'
           )}>
             {STATUS_LABELS[status] || status}
