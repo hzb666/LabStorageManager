@@ -258,3 +258,13 @@
 - **修复**: 
   - 后端：`stock_in_reagent_order` 增加 `common_public` 拦截，返回 400
   - 前端：`common_public` 订单的一键入库按钮置灰（disabled），鼠标悬停显示提示信息
+
+#### 27. 切换每页条数后数据不变化 [FIXED]
+- **文件**: `app/api/inventory.py`
+- **问题**: 后端列表 API 使用缓存机制，但缓存 key 没有包含 `limit` 参数，导致切换每页条数时返回了缓存的旧数据
+- **复现步骤**: 
+  1. 页面初始显示 20 条/页（假设 API 缓存了 20 条数据）
+  2. 切换到 50 条/页
+  3. API 使用相同的缓存 key（不含 limit），返回缓存的 20 条数据
+- **根因**: 缓存 key 为 `f"list:{search}:{status_filter}:..."`，缺少 `skip` 和 `limit` 参数
+- **修复**: 缓存 key 改为 `f"list:{skip}:{limit}:{search}:{status_filter}:..."`

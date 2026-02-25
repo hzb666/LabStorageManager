@@ -10,23 +10,40 @@ import {
 import type { SortingState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { userAdminAPI, authAPI } from '@/api/client'
+import { userAdminAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
+import useDialogState from '@/hooks/use-dialog-state'
 import {
   Search,
   Users,
   Loader2,
-  Plus,
   Trash2,
   Edit,
-  UserCheck
+  UserCheck,
+  X,
+  UserPlus
 } from 'lucide-react'
 import { AxiosError } from 'axios'
 import type { PaginationParams } from '@/api/client'
+
+// 用户状态样式
+const STATUS_STYLES: Record<string, string> = {
+  active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+  inactive: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+}
+
+// 角色样式
+const ROLE_STYLES: Record<string, string> = {
+  admin: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+  user: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+}
 
 interface UserListParams extends PaginationParams {
   role?: string
@@ -53,8 +70,10 @@ export function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
+  // Dialog state - 使用 useDialogState 管理 create/edit/delete 对话框
+  const [dialogState, setDialogState] = useDialogState<"create" | "edit" | "delete">()
+
   // Create user modal
-  const [showCreateModal, setShowCreateModal] = useState(false)
   const [createData, setCreateData] = useState({
     username: '',
     password: '',
@@ -65,32 +84,18 @@ export function AdminUsersPage() {
   const [createLoading, setCreateLoading] = useState(false)
 
   // Edit user modal
-  const [showEditModal, setShowEditModal] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [editData, setEditData] = useState({
-    username: '',
     full_name: '',
     role: 'user' as 'admin' | 'user'
   })
-  const [editPassword, setEditPassword] = useState('')
   const [editLoading, setEditLoading] = useState(false)
 
-  // Change password modal for user's own password
-  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false)
-  const [changePasswordData, setChangePasswordData] = useState({
-    old_password: '',
-    new_password: '',
-    confirm_password: ''
-  })
-  const [changePasswordErrors, setChangePasswordErrors] = useState<Record<string, string>>({})
-  const [changePasswordLoading, setChangePasswordLoading] = useState(false)
-
   // Delete confirmation
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
 
-  // Load users function (defined before useEffect)
+  // 使用 useCallback 优化 loadUsers 函数
   const loadUsers = useCallback(async () => {
     try {
       const params: UserListParams = {}
@@ -106,30 +111,29 @@ export function AdminUsersPage() {
     }
   }, [roleFilter, statusFilter])
 
-  // Load users on mount
   useEffect(() => {
     loadUsers()
   }, [loadUsers])
 
-  // Reload when filters change - removed duplicate useEffect, handled by loadUsers dependency
-
+  // 表格列定义
   const columns = useMemo(() => [
     columnHelper.accessor('username', {
       header: '用户名',
-      cell: info => <span className="font-medium">{info.getValue()}</span>,
+      size: 120,
+      cell: info => <span>{info.getValue()}</span>,
     }),
     columnHelper.accessor('full_name', {
       header: '姓名',
+      size: 120,
       cell: info => info.getValue() || '-',
     }),
     columnHelper.accessor('role', {
       header: '角色',
+      size: 80,
       cell: info => (
         <span className={cn(
-          'px-2 py-1 text-xs rounded-full',
-          info.getValue() === 'admin' 
-            ? 'bg-purple-100 text-purple-800' 
-            : 'bg-blue-100 text-blue-800'
+          'px-2.5 py-2 text-xs rounded-lg font-medium whitespace-nowrap',
+          ROLE_STYLES[info.getValue()] || 'bg-muted'
         )}>
           {info.getValue() === 'admin' ? '管理员' : '用户'}
         </span>
@@ -137,12 +141,13 @@ export function AdminUsersPage() {
     }),
     columnHelper.accessor('is_active', {
       header: '状态',
+      size: 80,
       cell: info => (
         <span className={cn(
-          'px-2 py-1 text-xs rounded-full',
+          'px-2.5 py-2 text-xs rounded-lg font-medium whitespace-nowrap',
           info.getValue() 
-            ? 'bg-green-100 text-green-800' 
-            : 'bg-red-100 text-red-800'
+            ? STATUS_STYLES.active 
+            : STATUS_STYLES.inactive
         )}>
           {info.getValue() ? '启用' : '禁用'}
         </span>
@@ -150,42 +155,58 @@ export function AdminUsersPage() {
     }),
     columnHelper.accessor('created_at', {
       header: '创建时间',
+      size: 150,
       cell: info => formatDate(info.getValue()),
     }),
     columnHelper.display({
       id: 'actions',
       header: '操作',
+      size: 120,
       cell: info => {
         const user = info.row.original
         const isSelf = user.id === currentUser?.id
         
         return (
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
             <Button
+              variant="morden"
               size="sm"
-              variant="outline"
-              onClick={() => openEditModal(user)}
+              className="h-8 w-8 p-0"
+              title="编辑"
+              onClick={(e) => {
+                e.stopPropagation()
+                openEditModal(user)
+              }}
+              disabled={isSelf}
             >
-              <Edit className="w-3 h-3" />
+              <Edit className="w-3.5 h-3.5" />
             </Button>
             {!user.is_active && !isSelf && (
               <Button
+                variant="morden"
                 size="sm"
-                variant="outline"
-                onClick={() => handleActivate(user.id)}
-                className="text-green-600"
+                className="h-8 w-8 p-0 text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-950"
+                title="激活"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleActivate(user.id)
+                }}
               >
-                <UserCheck className="w-3 h-3" />
+                <UserCheck className="w-3.5 h-3.5" />
               </Button>
             )}
             {user.is_active && !isSelf && (
               <Button
+                variant="morden"
                 size="sm"
-                variant="outline"
-                onClick={() => openDeleteModal(user)}
-                className="text-red-600"
+                className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                title="禁用"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openDeleteModal(user)
+                }}
               >
-                <Trash2 className="w-3 h-3" />
+                <Trash2 className="w-3.5 h-3.5" />
               </Button>
             )}
           </div>
@@ -197,6 +218,7 @@ export function AdminUsersPage() {
   const table = useReactTable({
     data,
     columns,
+    columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -209,7 +231,7 @@ export function AdminUsersPage() {
   })
 
   // Create user handlers
-  const validateCreateForm = (): boolean => {
+  const validateCreateForm = useCallback((): boolean => {
     const errors: Record<string, string> = {}
     if (!createData.username.trim()) errors.username = '用户名不能为空'
     if (createData.username.length < 3) errors.username = '用户名至少3个字符'
@@ -217,7 +239,7 @@ export function AdminUsersPage() {
     if (createData.password.length < 6) errors.password = '密码至少6个字符'
     setCreateErrors(errors)
     return Object.keys(errors).length === 0
-  }
+  }, [createData])
 
   const handleCreate = async () => {
     if (!validateCreateForm()) return
@@ -225,7 +247,7 @@ export function AdminUsersPage() {
     setCreateLoading(true)
     try {
       await userAdminAPI.create(createData)
-      setShowCreateModal(false)
+      setDialogState(null)
       setCreateData({ username: '', password: '', full_name: '', role: 'user' })
       loadUsers()
       toast.success('用户创建成功')
@@ -240,40 +262,8 @@ export function AdminUsersPage() {
   // Edit user handlers
   const openEditModal = (user: User) => {
     setEditUser(user)
-    setEditData({ username: user.username, full_name: user.full_name || '', role: user.role })
-    setEditPassword('')
-    setShowEditModal(true)
-  }
-
-  // Check if editing own profile
-  const isEditingSelf = editUser?.id === currentUser?.id
-
-  // Handle change own password
-  const validateChangePasswordForm = (): boolean => {
-    const errors: Record<string, string> = {}
-    if (!changePasswordData.old_password) errors.old_password = '请输入原密码'
-    if (!changePasswordData.new_password) errors.new_password = '请输入新密码'
-    if (changePasswordData.new_password.length < 6) errors.new_password = '新密码至少6个字符'
-    if (changePasswordData.new_password !== changePasswordData.confirm_password) errors.confirm_password = '两次输入的密码不一致'
-    setChangePasswordErrors(errors)
-    return Object.keys(errors).length === 0
-  }
-
-  const handleChangePassword = async () => {
-    if (!validateChangePasswordForm()) return
-
-    setChangePasswordLoading(true)
-    try {
-      await authAPI.changePassword(changePasswordData.old_password, changePasswordData.new_password)
-      setShowChangePasswordModal(false)
-      setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
-      toast.success('密码修改成功')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '密码修改失败')
-    } finally {
-      setChangePasswordLoading(false)
-    }
+    setEditData({ full_name: user.full_name || '', role: user.role })
+    setDialogState('edit')
   }
 
   const handleEdit = async () => {
@@ -281,22 +271,8 @@ export function AdminUsersPage() {
 
     setEditLoading(true)
     try {
-      // Handle password change if provided
-      if (editPassword) {
-        if (isEditingSelf) {
-          // 用户修改自己的密码 - 需要原密码验证，打开专门的修改密码弹窗
-          setShowChangePasswordModal(true)
-          setEditLoading(false)
-          return
-        } else {
-          // 管理员重置他人密码 - 无需原密码验证
-          await userAdminAPI.resetPassword(editUser.id, editPassword)
-        }
-      }
-      
-      // Update user info
       await userAdminAPI.update(editUser.id, editData)
-      setShowEditModal(false)
+      setDialogState(null)
       setEditUser(null)
       loadUsers()
       toast.success('用户更新成功')
@@ -311,7 +287,7 @@ export function AdminUsersPage() {
   // Delete/Deactivate handlers
   const openDeleteModal = (user: User) => {
     setDeleteUser(user)
-    setShowDeleteModal(true)
+    setDialogState('delete')
   }
 
   const handleDelete = async () => {
@@ -320,7 +296,7 @@ export function AdminUsersPage() {
     setDeleteLoading(true)
     try {
       await userAdminAPI.delete(deleteUser.id)
-      setShowDeleteModal(false)
+      setDialogState(null)
       setDeleteUser(null)
       loadUsers()
       toast.success('用户已禁用')
@@ -344,61 +320,86 @@ export function AdminUsersPage() {
     }
   }
 
+  // 关闭创建弹窗时清空表单
+  const handleCreateModalClose = (open: boolean) => {
+    setDialogState(open ? 'create' : null)
+    if (!open) {
+      setCreateData({ username: '', password: '', full_name: '', role: 'user' })
+      setCreateErrors({})
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold title-placeholder">用户管理</h1>
-        <Button onClick={() => setShowCreateModal(true)}>
-          <Plus className="w-4 h-4 mr-2" />
+      {/* 标题和按钮 */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h1 className="text-3xl font-bold tracking-tight">用户管理</h1>
+        <Button onClick={() => setDialogState('create')} size="lg">
+          <UserPlus className="w-4 h-4 mr-1.5" />
           创建用户
         </Button>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="搜索用户名、姓名..."
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <select
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              className="h-10 px-3 border rounded-md bg-background"
+      {/* Search & Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <div className="relative flex-1 min-w-50">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="搜索用户名、姓名..."
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            className="pl-9 pr-8 h-10 text-base w-full"
+          />
+          {globalFilter && (
+            <button
+              onClick={() => setGlobalFilter('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
-              <option value="all">全部角色</option>
-              <option value="admin">管理员</option>
-              <option value="user">用户</option>
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-10 px-3 border rounded-md bg-background"
-            >
-              <option value="all">全部状态</option>
-              <option value="active">已启用</option>
-              <option value="inactive">已禁用</option>
-            </select>
-          </div>
-        </CardContent>
-      </Card>
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value)}>
+          <SelectTrigger className="w-[120px] h-9">
+            <SelectValue placeholder="全部角色" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部角色</SelectItem>
+            <SelectItem value="admin">管理员</SelectItem>
+            <SelectItem value="user">用户</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
+          <SelectTrigger className="w-[120px] h-9">
+            <SelectValue placeholder="全部状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="active">已启用</SelectItem>
+            <SelectItem value="inactive">已禁用</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {/* Users Table */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center gap-2 text-lg">
             <Users className="w-5 h-5" />
-            用户列表 ({data.length})
+            用户列表 <span className="text-muted-foreground font-normal">(&thinsp;{data.length}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          {loading ? (
+        <CardContent className="p-0">
+          {/* 有数据时在角落显示加载指示器 */}
+          {loading && data.length > 0 && (
+            <div className="flex justify-end mb-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>加载中...</span>
+              </div>
+            </div>
+          )}
+          {loading && data.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
@@ -407,13 +408,17 @@ export function AdminUsersPage() {
               暂无用户数据
             </div>
           ) : (
-            <div className="rounded-md border">
-              <table className="w-full">
+            <div className="px-6 rounded-md overflow-auto">
+              <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                 <thead>
                   {table.getHeaderGroups().map(headerGroup => (
-                    <tr key={headerGroup.id} className="border-b bg-muted/50">
+                    <tr key={headerGroup.id} className="border-b-2 border-border">
                       {headerGroup.headers.map(header => (
-                        <th key={header.id} className="h-10 px-4 text-left align-middle font-medium">
+                        <th 
+                          key={header.id} 
+                          className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm"
+                          style={{ width: header.getSize() }}
+                        >
                           {header.isPlaceholder
                             ? null
                             : flexRender(header.column.columnDef.header, header.getContext())}
@@ -424,9 +429,13 @@ export function AdminUsersPage() {
                 </thead>
                 <tbody>
                   {table.getRowModel().rows.map(row => (
-                    <tr key={row.id} className="border-b hover:bg-muted/50">
+                    <tr key={row.id} className="border-b border-border hover:bg-muted/30 transition-none">
                       {row.getVisibleCells().map(cell => (
-                        <td key={cell.id} className="p-4 align-middle">
+                        <td 
+                          key={cell.id} 
+                          className="p-3 align-middle text-sm"
+                          style={{ width: cell.column.getSize() }}
+                        >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
                       ))}
@@ -440,71 +449,73 @@ export function AdminUsersPage() {
       </Card>
 
       {/* Create User Modal */}
-      <Dialog open={showCreateModal} onOpenChange={(open) => {
-        if (!open) {
-          setCreateData({ username: '', password: '', full_name: '', role: 'user' })
-          setCreateErrors({})
-        }
-        setShowCreateModal(open)
-      }}>
-        <DialogContent className="max-w-lg">
+      <Dialog open={dialogState === 'create'} onOpenChange={handleCreateModalClose}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>创建用户</DialogTitle>
+            <DialogTitle className="text-xl">创建用户</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="grid gap-4 py-2">
             <div>
-              <label className="block text-sm font-medium mb-1">
-                用户名 <span className="text-red-500">*</span>
-              </label>
+              <Label htmlFor="create_username" className={LABEL_STYLES.base}>
+                用户名 <span className="text-destructive">*</span>
+              </Label>
               <Input
+                id="create_username"
                 value={createData.username}
                 onChange={(e) => setCreateData({ ...createData, username: e.target.value })}
                 placeholder="请输入用户名"
-                className={createErrors.username ? 'border-red-500' : ''}
+                className={cn(INPUT_STYLES.lg, createErrors.username && 'border-destructive')}
               />
               {createErrors.username && (
-                <p className="text-sm text-red-500 mt-1">{createErrors.username}</p>
+                <p className="text-xs text-destructive mt-1">{createErrors.username}</p>
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">
-                密码 <span className="text-red-500">*</span>
-              </label>
+              <Label htmlFor="create_password" className={LABEL_STYLES.base}>
+                密码 <span className="text-destructive">*</span>
+              </Label>
               <Input
+                id="create_password"
                 type="password"
                 value={createData.password}
                 onChange={(e) => setCreateData({ ...createData, password: e.target.value })}
                 placeholder="请输入密码"
-                className={createErrors.password ? 'border-red-500' : ''}
+                className={cn(INPUT_STYLES.lg, createErrors.password && 'border-destructive')}
               />
               {createErrors.password && (
-                <p className="text-sm text-red-500 mt-1">{createErrors.password}</p>
+                <p className="text-xs text-destructive mt-1">{createErrors.password}</p>
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">姓名</label>
+              <Label htmlFor="create_fullname" className={LABEL_STYLES.base}>姓名</Label>
               <Input
+                id="create_fullname"
                 value={createData.full_name}
                 onChange={(e) => setCreateData({ ...createData, full_name: e.target.value })}
                 placeholder="请输入姓名"
+                className={INPUT_STYLES.lg}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">角色</label>
-              <select
+              <Label htmlFor="create_role" className={LABEL_STYLES.base}>角色</Label>
+              <Select
                 value={createData.role}
-                onChange={(e) => setCreateData({ ...createData, role: e.target.value as 'admin' | 'user' })}
-                className="w-full h-10 px-3 border rounded-md bg-background"
+                onValueChange={(value) => setCreateData({ ...createData, role: value as 'admin' | 'user' })}
               >
-                <option value="user">用户</option>
-                <option value="admin">管理员</option>
-              </select>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="选择角色" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">用户</SelectItem>
+                  <SelectItem value="admin">管理员</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div className="flex gap-3 pt-4 border-t">
-              <Button onClick={handleCreate} disabled={createLoading}>
+            <div className="flex gap-2 pt-3 border-t">
+              <Button onClick={handleCreate} disabled={createLoading} size="lg">
                 {createLoading ? '创建中...' : '创建'}
               </Button>
-              <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+              <Button variant="morden" onClick={() => handleCreateModalClose(false)} size="lg" className="text-base">
                 取消
               </Button>
             </div>
@@ -513,77 +524,51 @@ export function AdminUsersPage() {
       </Dialog>
 
       {/* Edit User Modal */}
-      <Dialog open={showEditModal} onOpenChange={(open) => {
-        if (!open) {
-          setEditPassword('')
-        }
-        setShowEditModal(open)
-      }}>
-        <DialogContent className="max-w-lg">
+      <Dialog open={dialogState === 'edit'} onOpenChange={(open) => setDialogState(open ? 'edit' : null)}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>编辑用户</DialogTitle>
+            <DialogTitle className="text-xl">编辑用户</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="grid gap-4 py-2">
             <div>
-              <label className="block text-sm font-medium mb-1">用户名</label>
-              <Input 
-                value={editData.username}
-                onChange={(e) => setEditData({ ...editData, username: e.target.value })}
-                placeholder="请输入用户名"
-                disabled={!isEditingSelf && currentUser?.role !== 'admin'}
+              <Label htmlFor="edit_username" className={LABEL_STYLES.base}>用户名</Label>
+              <Input
+                id="edit_username"
+                value={editUser?.username || ''} 
+                disabled 
+                className={cn(INPUT_STYLES.lg, "bg-muted")}
               />
-              {!isEditingSelf && currentUser?.role !== 'admin' && (
-                <p className="text-xs text-muted-foreground mt-1">只有管理员可以修改他人用户名</p>
-              )}
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">姓名</label>
+              <Label htmlFor="edit_fullname" className={LABEL_STYLES.base}>姓名</Label>
               <Input
+                id="edit_fullname"
                 value={editData.full_name}
                 onChange={(e) => setEditData({ ...editData, full_name: e.target.value })}
                 placeholder="请输入姓名"
+                className={INPUT_STYLES.lg}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">角色</label>
-              <select
+              <Label htmlFor="edit_role" className={LABEL_STYLES.base}>角色</Label>
+              <Select
                 value={editData.role}
-                onChange={(e) => setEditData({ ...editData, role: e.target.value as 'admin' | 'user' })}
-                disabled={isEditingSelf}
-                className="w-full h-10 px-3 border rounded-md bg-background disabled:opacity-50"
+                onValueChange={(value) => setEditData({ ...editData, role: value as 'admin' | 'user' })}
               >
-                <option value="user">用户</option>
-                <option value="admin">管理员</option>
-              </select>
-              {isEditingSelf && (
-                <p className="text-xs text-muted-foreground mt-1">无法修改自己的角色</p>
-              )}
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="选择角色" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">用户</SelectItem>
+                  <SelectItem value="admin">管理员</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            
-            {/* Password field - for admin reset only, user changes password via dedicated modal */}
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                {isEditingSelf ? '新密码' : '重置密码'}
-              </label>
-              <Input
-                type="password"
-                value={editPassword}
-                onChange={(e) => setEditPassword(e.target.value)}
-                placeholder={isEditingSelf ? '点击保存后打开修改密码页面' : '留空则不修改密码'}
-                disabled={isEditingSelf}
-              />
-              {isEditingSelf && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  修改自己密码需要输入原密码，请点击"保存"后在新页面操作
-                </p>
-              )}
-            </div>
-            
-            <div className="flex gap-3 pt-4 border-t">
-              <Button onClick={handleEdit} disabled={editLoading}>
+            <div className="flex gap-2 pt-3 border-t">
+              <Button onClick={handleEdit} disabled={editLoading} size="lg">
                 {editLoading ? '保存中...' : '保存'}
               </Button>
-              <Button variant="outline" onClick={() => setShowEditModal(false)}>
+              <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base">
                 取消
               </Button>
             </div>
@@ -592,7 +577,7 @@ export function AdminUsersPage() {
       </Dialog>
 
       {/* Delete Confirmation Modal */}
-      <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+      <Dialog open={dialogState === 'delete'} onOpenChange={(open) => setDialogState(open ? 'delete' : null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>确认禁用用户</DialogTitle>
@@ -601,77 +586,13 @@ export function AdminUsersPage() {
             <p>确定要禁用用户 <strong>{deleteUser?.username}</strong> 吗？</p>
             <p className="text-sm text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
           </div>
-          <div className="flex gap-3">
-            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading}>
+          <div className="flex gap-2">
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg">
               {deleteLoading ? '处理中...' : '确认禁用'}
             </Button>
-            <Button variant="outline" onClick={() => setShowDeleteModal(false)}>
+            <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base">
               取消
             </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Change Password Modal */}
-      <Dialog open={showChangePasswordModal} onOpenChange={setShowChangePasswordModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>修改密码</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                原密码 <span className="text-red-500">*</span>
-              </label>
-              <Input
-                type="password"
-                value={changePasswordData.old_password}
-                onChange={(e) => setChangePasswordData({ ...changePasswordData, old_password: e.target.value })}
-                placeholder="请输入原密码"
-                className={changePasswordErrors.old_password ? 'border-red-500' : ''}
-              />
-              {changePasswordErrors.old_password && (
-                <p className="text-sm text-red-500 mt-1">{changePasswordErrors.old_password}</p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                新密码 <span className="text-red-500">*</span>
-              </label>
-              <Input
-                type="password"
-                value={changePasswordData.new_password}
-                onChange={(e) => setChangePasswordData({ ...changePasswordData, new_password: e.target.value })}
-                placeholder="请输入新密码"
-                className={changePasswordErrors.new_password ? 'border-red-500' : ''}
-              />
-              {changePasswordErrors.new_password && (
-                <p className="text-sm text-red-500 mt-1">{changePasswordErrors.new_password}</p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                确认新密码 <span className="text-red-500">*</span>
-              </label>
-              <Input
-                type="password"
-                value={changePasswordData.confirm_password}
-                onChange={(e) => setChangePasswordData({ ...changePasswordData, confirm_password: e.target.value })}
-                placeholder="请再次输入新密码"
-                className={changePasswordErrors.confirm_password ? 'border-red-500' : ''}
-              />
-              {changePasswordErrors.confirm_password && (
-                <p className="text-sm text-red-500 mt-1">{changePasswordErrors.confirm_password}</p>
-              )}
-            </div>
-            <div className="flex gap-3 pt-4 border-t">
-              <Button onClick={handleChangePassword} disabled={changePasswordLoading}>
-                {changePasswordLoading ? '处理中...' : '确认修改'}
-              </Button>
-              <Button variant="outline" onClick={() => setShowChangePasswordModal(false)}>
-                取消
-              </Button>
-            </div>
           </div>
         </DialogContent>
       </Dialog>

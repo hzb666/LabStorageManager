@@ -10,6 +10,7 @@ from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
 from app.services.internal_code import generate_internal_code
+from datetime import datetime, timezone
 
 
 class ExcelImportError(Exception):
@@ -18,6 +19,67 @@ class ExcelImportError(Exception):
         self.row = row
         self.message = message
         super().__init__(f"Row {row}: {message}")
+
+
+def _generate_internal_code_with_tracking(
+    db: Session,
+    cas_number: str,
+    sequence_tracker: dict[tuple[str, str], int],
+    created_at: Optional[datetime] = None
+) -> str:
+    """
+    Generate internal code with transaction-level tracking to handle batch imports.
+    
+    This function solves the problem where multiple rows with the same CAS number
+    in a single import transaction would get the same internal_code, causing
+    UNIQUE constraint violations.
+    
+    Args:
+        db: Database session
+        cas_number: Normalized CAS number
+        sequence_tracker: Dictionary tracking next sequence number for each (cas_number, date) pair
+        created_at: Optional custom created_at datetime (for backdated imports)
+    
+    Returns:
+        Internal code string (e.g., "10203-08-4-260224-01")
+    """
+    from sqlalchemy import text
+    
+    # Determine date string - use created_at if provided, otherwise use current date
+    if created_at:
+        date_str = created_at.strftime("%y%m%d")
+    else:
+        date_str = datetime.now(timezone.utc).strftime("%y%m%d")
+    
+    tracker_key = (cas_number, date_str)
+    
+    # Check if we already have a sequence tracked for this CAS+date in this transaction
+    if tracker_key in sequence_tracker:
+        # Use the tracked sequence and increment AFTER
+        seq = sequence_tracker[tracker_key]
+        sequence_tracker[tracker_key] = seq + 1
+    else:
+        # First time seeing this CAS+date combination in this transaction
+        # Query database for existing max sequence
+        prefix = f"{cas_number}-{date_str}-"
+        query = text("""
+            SELECT MAX(CAST(SUBSTR(internal_code, LENGTH(:prefix) + 1) AS INTEGER)) 
+            FROM inventory 
+            WHERE internal_code LIKE :pattern
+        """)
+        
+        result = db.execute(query, {
+            "prefix": prefix,
+            "pattern": f"{prefix}%"
+        }).scalar()
+        
+        # Start from max existing + 1, or 1 if none exist
+        seq = (result or 0) + 1
+        # Store next sequence for subsequent calls
+        sequence_tracker[tracker_key] = seq + 1
+    
+    # Generate the internal code
+    return f"{cas_number}-{date_str}-{str(seq).zfill(2)}"
 
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
@@ -43,7 +105,7 @@ def validate_row_data(row: dict, row_num: int) -> Tuple[bool, Optional[str]]:
     Returns (is_valid, error_message).
     """
     # Required fields
-    required_fields = ['cas_number', 'name', 'specification', 'initial_quantity']
+    required_fields = ['cas_number', 'name', 'specification']
     
     for field in required_fields:
         if field not in row or pd.isna(row[field]) or str(row[field]).strip() == '':
@@ -57,19 +119,11 @@ def validate_row_data(row: dict, row_num: int) -> Tuple[bool, Optional[str]]:
     if not is_valid:
         return False, f"Invalid CAS format: {error}"
     
-    # Validate quantity
-    try:
-        quantity = float(row['initial_quantity'])
-        if quantity <= 0:
-            return False, "initial_quantity must be greater than 0"
-    except (ValueError, TypeError):
-        return False, "invalid initial_quantity"
-    
-    # Validate specification
+    # Validate specification (will parse to get quantity and unit)
     try:
         spec_value, unit = parse_specification(str(row['specification']))
-    except ValueError:
-        return False, f"Invalid specification format: {row['specification']}"
+    except ValueError as e:
+        return False, f"Invalid specification format: {str(e)}"
     
     return True, None
 
@@ -105,6 +159,9 @@ def import_inventory_from_excel(
     - created: Number of items created
     - errors: List of row errors
     """
+    # Track sequence numbers within the transaction for same CAS numbers
+    # Key: (cas_number, date_str), Value: next sequence number
+    sequence_tracker: dict[tuple[str, str], int] = {}
     # Parse Excel file
     try:
         df = parse_excel_file(file_path)
@@ -120,7 +177,7 @@ def import_inventory_from_excel(
         'category': ['category', '分类', '类别'],
         'brand': ['brand', '品牌', '厂商', 'manufacturer'],
         'specification': ['specification', '规格', 'spec'],
-        'initial_quantity': ['initial_quantity', '初始数量', '数量', 'quantity'],
+        'remaining_quantity': ['remaining_quantity', '剩余数量', '剩余量'],
         'location': ['location', '位置', '存放位置'],
         'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
         'notes': ['notes', '备注', 'remark'],
@@ -152,8 +209,20 @@ def import_inventory_from_excel(
             # Normalize CAS
             normalized_cas = normalize_cas(str(row['cas_number']))
             
-            # Parse specification
+            # Parse specification to get value and unit
+            # specification like "500ml" -> initial_quantity=500, unit="mL"
             spec_value, unit = parse_specification(str(row['specification']))
+            
+            # Get initial_quantity: use spec_value as default
+            initial_quantity = spec_value
+            
+            # Get remaining_quantity: use row value if provided, otherwise default to initial_quantity
+            remaining_qty = initial_quantity
+            if pd.notna(row.get('remaining_quantity')):
+                try:
+                    remaining_qty = float(row.get('remaining_quantity'))
+                except (ValueError, TypeError):
+                    remaining_qty = initial_quantity
             
             # Get or use default values
             location = str(row.get('location', '')).strip() if pd.notna(row.get('location')) else default_location
@@ -192,8 +261,10 @@ def import_inventory_from_excel(
                     pass
             
             # Generate internal code (1 item per row for direct import)
-            internal_codes = generate_internal_code(db, normalized_cas, 1)
-            internal_code = internal_codes[0]
+            # Use transaction-level sequence tracking to handle same CAS in batch import
+            internal_code = _generate_internal_code_with_tracking(
+                db, normalized_cas, sequence_tracker, created_at
+            )
             
             # Create inventory item
             inventory = Inventory(
@@ -205,8 +276,8 @@ def import_inventory_from_excel(
                 category=category,
                 brand=brand,
                 location=location,
-                initial_quantity=float(row['initial_quantity']),
-                remaining_quantity=float(row['initial_quantity']),
+                initial_quantity=initial_quantity,
+                remaining_quantity=remaining_qty,
                 unit=unit,
                 is_hazardous=is_hazardous,
                 status=InventoryStatus.IN_STOCK,
@@ -281,13 +352,13 @@ def generate_import_template() -> dict:
                 "name": "specification",
                 "label": "规格",
                 "required": True,
-                "description": "格式: 数值+单位，如 500ml, 1L, 100g"
+                "description": "格式: 数值+单位，如 500ml, 1L, 100g，系统会自动解析出数量和单位"
             },
             {
-                "name": "initial_quantity",
-                "label": "初始数量",
-                "required": True,
-                "description": "正整数或小数，表示总量"
+                "name": "remaining_quantity",
+                "label": "剩余数量",
+                "required": False,
+                "description": "剩余数量（可选），不填则默认等于规格中的数量"
             },
             {
                 "name": "location",

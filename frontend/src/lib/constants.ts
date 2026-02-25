@@ -3,6 +3,19 @@
  * Backend stores English values; frontend maps to Chinese.
  */
 
+// === UI Component Styles ===
+export const LABEL_STYLES = {
+  base: "text-base mb-1.5 block",
+  sm: "text-sm mb-1.5 block",
+  lg: "text-lg mb-3 block",
+} as const
+
+export const INPUT_STYLES = {
+  base: "h-9 inline-flex leading-none",
+  sm: "h-8 inline-flex leading-none",
+  lg: "h-10 text-base inline-flex leading-none",
+} as const
+
 // === Order Status (Reagent) ===
 export const REAGENT_STATUS_MAP: Record<string, string> = {
   pending: '已申购',
@@ -26,6 +39,7 @@ export const CONSUMABLE_STATUS_MAP: Record<string, string> = {
   approved: '已审批',
   completed: '已完成',
   rejected: '未通过',
+  cannot_find: '没有（找不到）',
 }
 
 export const CONSUMABLE_STATUS_STYLE: Record<string, string> = {
@@ -105,12 +119,12 @@ export const IMPORT_TEMPLATE_COLUMNS: ImportColumn[] = [
   {
     name: 'specification',
     required: true,
-    description: '格式: 数值+单位，如 500ml, 1L, 100g',
+    description: '格式: 数值+单位，如 500ml, 1L, 100g，系统会自动解析出数量和单位',
   },
   {
-    name: 'initial_quantity',
-    required: true,
-    description: '正整数或小数，表示总量',
+    name: 'remaining_quantity',
+    required: false,
+    description: '剩余数量（可选），不填则默认等于规格中的数量',
   },
   {
     name: 'location',
