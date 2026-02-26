@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/ui/Button'
 import {
   LayoutDashboard,
   Package,
@@ -18,7 +18,7 @@ import {
   FolderInput,
 } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { useIsMobile } from '@/hooks/useMobile'
 
 const navItems = [
   { title: '仪表盘', href: '/', icon: LayoutDashboard, group: '功能' },

@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils'
+﻿import { cn } from '@/lib/utils'
 
 // 库存状态类型
 export type InventoryStatus = 'in_stock' | 'borrowed' | 'consumed'

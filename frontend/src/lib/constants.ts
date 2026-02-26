@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Centralized mapping tables for status/reason/role display
  * Backend stores English values; frontend maps to Chinese.
  */

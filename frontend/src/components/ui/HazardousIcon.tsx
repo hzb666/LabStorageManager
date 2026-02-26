@@ -1,4 +1,4 @@
-import { AlertTriangle } from 'lucide-react'
+﻿import { AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface HazardousIconProps {

@@ -1,7 +1,7 @@
-import React from 'react'
+﻿import React from 'react'
 import { flexRender } from '@tanstack/react-table'
 import type { Header } from '@tanstack/react-table'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { useIsMobile } from '@/hooks/useMobile'
 
 interface ResizableHeaderProps<T> {
   header: Header<T, unknown>

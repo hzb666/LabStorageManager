@@ -1,14 +1,14 @@
-import { useEffect } from 'react'
+﻿import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { CircleQuestionMark } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/ui/Button'
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card'
+} from '@/components/ui/Card'
 
 // 初始化主题的组件 - 确保页面有正确的主题
 function ThemeInitializer() {

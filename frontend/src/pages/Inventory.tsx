@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
+﻿import React, { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -7,20 +7,20 @@ import {
   getSortedRowModel,
 } from '@tanstack/react-table'
 import type { SortingState, ColumnFiltersState } from '@tanstack/react-table'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/Label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { inventoryAPI } from '@/api/client'
-import { toast } from '@/components/ui/toast'
-import { Pagination, PaginationInfo } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/Toast'
+import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { formatDate, cn } from '@/lib/utils'
 import { validateCASNumber, validateRequired, validateSpecification, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
-import useDialogState from '@/hooks/use-dialog-state'
+import useDialogState from '@/hooks/useDialogState'
 import {
   Search,
   Package,
