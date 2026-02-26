@@ -1,10 +1,17 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from '@tanstack/react-table'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
+import { ResizableHeader } from '@/components/ui/ResizableHeader'
 import { reagentOrderAPI, inventoryAPI, consumableOrderAPI } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/pagination'
@@ -58,6 +65,17 @@ interface ConsumableOrdersByStatus {
   approved: { orders: OrderItem[] }
 }
 
+// 状态样式映射
+const CONSUMABLE_STATUS_STYLES: Record<string, string> = {
+  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+  approved: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+}
+
+// columnHelper 定义
+const consumableOrderHelper = createColumnHelper<MyOrder>()
+const borrowHelper = createColumnHelper<MyBorrowItem>()
+const stockinHelper = createColumnHelper<PendingStockinItem>()
+
 // 骨架屏组件 - 空白占位
 function SkeletonCard({ className }: { className?: string }) {
   return (
@@ -96,7 +114,7 @@ function StatCard({
       className={cn(
         "transition-all cursor-pointer",
         onClick && "hover:bg-accent",
-        isActive && "border bg-muted/40"
+        isActive && "border bg-accent/50 dark:border-primary"
       )}
       onClick={onClick}
     >
@@ -122,7 +140,7 @@ export function Dashboard() {
   const [myConsumableOrders, setMyConsumableOrders] = useState<MyOrder[]>([])
   const [myBorrows, setMyBorrows] = useState<MyBorrowItem[]>([])
   const [pendingStockin, setPendingStockin] = useState<PendingStockinItem[]>([])
-  
+
   const [loadingReagentOrders, setLoadingReagentOrders] = useState(true)
   const [loadingConsumableOrders, setLoadingConsumableOrders] = useState(true)
   const [loadingBorrows, setLoadingBorrows] = useState(true)
@@ -134,7 +152,7 @@ export function Dashboard() {
   const [consumablePageSize] = useState(5)
   const [borrowPage, setBorrowPage] = useState(1)
   const [borrowPageSize] = useState(5)
-  
+
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
   const [returnQuantity, setReturnQuantity] = useState('0')
@@ -148,6 +166,165 @@ export function Dashboard() {
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
   const [stockinLocation, setStockinLocation] = useState('')
   const [stockinLoading, setStockinLoading] = useState(false)
+
+  // 耗材订单表格列定义
+  const consumableColumns = useMemo(() => [
+    consumableOrderHelper.accessor('name', {
+      header: '名称',
+      size: 180,
+      cell: info => <span className="font-medium">{info.getValue()}</span>,
+    }),
+    consumableOrderHelper.accessor('status', {
+      header: '状态',
+      size: 100,
+      cell: info => {
+        const status = info.getValue()
+        return (
+          <span className={cn(
+            'px-2.5 py-1 text-sm rounded-full font-medium whitespace-nowrap',
+            CONSUMABLE_STATUS_STYLES[status] || 'bg-muted'
+          )}>
+            {status === 'pending' ? '待审批' : status === 'approved' ? '已审批' : status}
+          </span>
+        )
+      },
+    }),
+    consumableOrderHelper.accessor('created_at', {
+      header: '时间',
+      size: 150,
+      cell: info => formatDateTime(info.getValue()),
+    }),
+    consumableOrderHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 120,
+      cell: info => {
+        const order = info.row.original
+        return (
+          order.status === 'approved' && (
+            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleConfirmReceive(order.id)}>
+              <CheckCircle className="w-3 h-3 mr-1" />确认收货
+            </Button>
+          )
+        )
+      },
+    }),
+  ], [])
+
+  // 借用记录表格列定义
+  const borrowColumns = useMemo(() => [
+    borrowHelper.accessor('name', {
+      header: '名称',
+      size: 150,
+      cell: info => <span className="font-medium">{info.getValue()}</span>,
+    }),
+    borrowHelper.accessor('cas_number', {
+      header: 'CAS号',
+      size: 100,
+      cell: info => info.getValue(),
+    }),
+    borrowHelper.accessor('remaining_quantity', {
+      header: '剩余量',
+      size: 100,
+      cell: info => `${info.getValue()} ${info.row.original.unit}`,
+    }),
+    borrowHelper.accessor('borrow_time', {
+      header: '借用时间',
+      size: 150,
+      cell: info => formatDateTime(info.getValue()),
+    }),
+    borrowHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 80,
+      cell: info => {
+        const item = info.row.original
+        return (
+          <Button onClick={() => openReturnModal(item)} size="sm" className="h-8 text-sm/4 px-3 bg-primary hover:bg-primary/80 border-0">
+            归还
+          </Button>
+        )
+      },
+    }),
+  ], [])
+
+  // 入库记录表格列定义
+  const stockinColumns = useMemo(() => [
+    stockinHelper.accessor('name', {
+      header: '名称',
+      size: 150,
+      cell: info => <span className="font-medium">{info.getValue()}</span>,
+    }),
+    stockinHelper.accessor('cas_number', {
+      header: 'CAS号',
+      size: 100,
+      cell: info => info.getValue(),
+    }),
+    stockinHelper.accessor('initial_quantity', {
+      header: '数量',
+      size: 100,
+      cell: info => `${info.getValue()} ${info.row.original.unit}`,
+    }),
+    stockinHelper.accessor('stockin_time', {
+      header: '入库时间',
+      size: 150,
+      cell: info => formatDateTime(info.getValue()),
+    }),
+    stockinHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 100,
+      cell: info => {
+        const item = info.row.original
+        return (
+          <Button variant="outline" onClick={() => openStockinModal(item)} size="sm">
+            分配位置
+          </Button>
+        )
+      },
+    }),
+  ], [])
+
+  // ✅ 缓存耗材表格数据 - 使用 useMemo 稳定数组引用，避免无限重渲染
+  const consumableData = useMemo(() => {
+    return myConsumableOrders.slice(
+      (consumablePage - 1) * consumablePageSize,
+      consumablePage * consumablePageSize
+    )
+  }, [myConsumableOrders, consumablePage, consumablePageSize])
+
+  // ✅ 缓存借用表格数据
+  const borrowData = useMemo(() => {
+    return myBorrows.slice(
+      (borrowPage - 1) * borrowPageSize,
+      borrowPage * borrowPageSize
+    )
+  }, [myBorrows, borrowPage, borrowPageSize])
+
+  // ✅ 缓存待入库表格数据
+  const stockinData = useMemo(() => pendingStockin, [pendingStockin])
+
+  // 创建表格实例 - 传入稳定的数据引用
+  const consumableTable = useReactTable({
+    data: consumableData,
+    columns: consumableColumns,
+    columnResizeMode: 'onChange',
+    getCoreRowModel: getCoreRowModel(),
+  })
+
+  const borrowTable = useReactTable({
+    data: borrowData,
+    columns: borrowColumns,
+    columnResizeMode: 'onChange',
+    getCoreRowModel: getCoreRowModel(),
+  })
+
+  const stockinTable = useReactTable({
+    data: stockinData,
+    columns: stockinColumns,
+    columnResizeMode: 'onChange',
+    getCoreRowModel: getCoreRowModel(),
+  })
 
   useEffect(() => {
     loadDashboardData()
@@ -263,7 +440,7 @@ export function Dashboard() {
 
   const handleReturn = async () => {
     if (!selectedBorrow) return
-    
+
     setReturnError('')
     let qty: number
     if (returnMode === 'used') {
@@ -288,7 +465,7 @@ export function Dashboard() {
         return
       }
     }
-    
+
     setReturnLoading(true)
     try {
       await inventoryAPI.return(selectedBorrow.inventory_id, { remaining_quantity: qty, unit: returnUnit })
@@ -460,19 +637,19 @@ export function Dashboard() {
                           order.status === 'pending'
                             ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
                             : order.status === 'approved'
-                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                            : order.status === 'arrived'
-                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                            : 'bg-muted text-foreground'
+                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                              : order.status === 'arrived'
+                                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                                : 'bg-muted text-foreground'
                         )}
                       >
                         {order.status === 'pending'
                           ? '待审批'
                           : order.status === 'approved'
-                          ? '已审批'
-                          : order.status === 'arrived'
-                          ? '已到货'
-                          : order.status}
+                            ? '已审批'
+                            : order.status === 'arrived'
+                              ? '已到货'
+                              : order.status}
                       </span>
                       {order.status === 'approved' && (
                         <div className="flex gap-1">
@@ -519,7 +696,7 @@ export function Dashboard() {
                       totalPages={Math.ceil(myReagentOrders.length / reagentPageSize)}
                       pageSize={reagentPageSize}
                       onPageChange={setReagentPage}
-                      onPageSizeChange={() => {}}
+                      onPageSizeChange={() => { }}
                     />
                   </div>
                 )}
@@ -544,30 +721,26 @@ export function Dashboard() {
                 <div className="px-6 rounded-md overflow-auto">
                   <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                     <thead>
-                      <tr className="border-b-2 border-border">
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">名称</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">状态</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">时间</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">操作</th>
-                      </tr>
+                      {consumableTable.getHeaderGroups().map(headerGroup => (
+                        <tr key={headerGroup.id} className="border-b-2 border-border">
+                          {headerGroup.headers.map(header => (
+                            <ResizableHeader key={header.id} header={header} />
+                          ))}
+                        </tr>
+                      ))}
                     </thead>
                     <tbody>
-                      {myConsumableOrders.slice((consumablePage - 1) * consumablePageSize, consumablePage * consumablePageSize).map((order) => (
-                        <tr key={order.id} className="border-b border-border hover:bg-muted/30 transition-all">
-                          <td className="p-3 align-middle text-base">{order.name}</td>
-                          <td className="p-3 align-middle text-base">
-                            <span className={cn('px-2.5 py-1 text-sm rounded-full font-medium whitespace-nowrap', order.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : order.status === 'approved' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-muted text-foreground')}>
-                              {order.status === 'pending' ? '待审批' : order.status === 'approved' ? '已审批' : order.status}
-                            </span>
-                          </td>
-                          <td className="p-3 align-middle text-base">{formatDateTime(order.created_at)}</td>
-                          <td className="p-3 align-middle text-base">
-                            {order.status === 'approved' && (
-                              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleConfirmReceive(order.id)}>
-                                <CheckCircle className="w-3 h-3 mr-1" />确认收货
-                              </Button>
-                            )}
-                          </td>
+                      {consumableTable.getRowModel().rows.map(row => (
+                        <tr key={row.id} className="border-b border-border hover:bg-muted/30 transition-all">
+                          {row.getVisibleCells().map(cell => (
+                            <td
+                              key={cell.id}
+                              className="p-3 align-middle text-base"
+                              style={{ width: cell.column.getSize() }}
+                            >
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
+                          ))}
                         </tr>
                       ))}
                     </tbody>
@@ -576,7 +749,7 @@ export function Dashboard() {
                 {Math.ceil(myConsumableOrders.length / consumablePageSize) > 1 && (
                   <div className="px-6 flex items-center justify-between pt-4 pb-4">
                     <PaginationInfo currentPage={consumablePage} pageSize={consumablePageSize} total={myConsumableOrders.length} />
-                    <Pagination currentPage={consumablePage} totalPages={Math.ceil(myConsumableOrders.length / consumablePageSize)} pageSize={consumablePageSize} onPageChange={setConsumablePage} onPageSizeChange={() => {}} />
+                    <Pagination currentPage={consumablePage} totalPages={Math.ceil(myConsumableOrders.length / consumablePageSize)} pageSize={consumablePageSize} onPageChange={setConsumablePage} onPageSizeChange={() => { }} />
                   </div>
                 )}
               </>
@@ -600,24 +773,26 @@ export function Dashboard() {
                 <div className="px-6 rounded-md overflow-auto">
                   <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                     <thead>
-                      <tr className="border-b-2 border-border">
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">名称</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">CAS号</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">剩余量</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">借用时间</th>
-                        <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">操作</th>
-                      </tr>
+                      {borrowTable.getHeaderGroups().map(headerGroup => (
+                        <tr key={headerGroup.id} className="border-b-2 border-border">
+                          {headerGroup.headers.map(header => (
+                            <ResizableHeader key={header.id} header={header} />
+                          ))}
+                        </tr>
+                      ))}
                     </thead>
                     <tbody>
-                      {myBorrows.slice((borrowPage - 1) * borrowPageSize, borrowPage * borrowPageSize).map((item) => (
-                        <tr key={item.inventory_id} className="border-b border-border hover:bg-muted/30 transition-all">
-                          <td className="p-3 align-middle text-base">{item.name}</td>
-                          <td className="p-3 align-middle text-base">{item.cas_number}</td>
-                          <td className="p-3 align-middle text-base">{item.remaining_quantity} {item.unit}</td>
-                          <td className="p-3 align-middle text-base">{formatDateTime(item.borrow_time)}</td>
-                          <td className="p-3 align-middle text-base">
-                            <Button onClick={() => openReturnModal(item)} size="sm" className="h-8 text-sm/4 px-3 bg-primary hover:bg-primary/80 border-0">归还</Button>
-                          </td>
+                      {borrowTable.getRowModel().rows.map(row => (
+                        <tr key={row.id} className="border-b border-border hover:bg-muted/30 transition-all">
+                          {row.getVisibleCells().map(cell => (
+                            <td
+                              key={cell.id}
+                              className="p-3 align-middle text-base"
+                              style={{ width: cell.column.getSize() }}
+                            >
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
+                          ))}
                         </tr>
                       ))}
                     </tbody>
@@ -626,7 +801,7 @@ export function Dashboard() {
                 {Math.ceil(myBorrows.length / borrowPageSize) > 1 && (
                   <div className="px-6 flex items-center justify-between pt-4 pb-4">
                     <PaginationInfo currentPage={borrowPage} pageSize={borrowPageSize} total={myBorrows.length} />
-                    <Pagination currentPage={borrowPage} totalPages={Math.ceil(myBorrows.length / borrowPageSize)} pageSize={borrowPageSize} onPageChange={setBorrowPage} onPageSizeChange={() => {}} />
+                    <Pagination currentPage={borrowPage} totalPages={Math.ceil(myBorrows.length / borrowPageSize)} pageSize={borrowPageSize} onPageChange={setBorrowPage} onPageSizeChange={() => { }} />
                   </div>
                 )}
               </>
@@ -649,24 +824,26 @@ export function Dashboard() {
               <div className="px-6 rounded-md overflow-auto">
                 <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
                   <thead>
-                    <tr className="border-b-2 border-border">
-                      <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">名称</th>
-                      <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">CAS号</th>
-                      <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">数量</th>
-                      <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">入库时间</th>
-                      <th className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base">操作</th>
-                    </tr>
+                    {stockinTable.getHeaderGroups().map(headerGroup => (
+                      <tr key={headerGroup.id} className="border-b-2 border-border">
+                        {headerGroup.headers.map(header => (
+                          <ResizableHeader key={header.id} header={header} />
+                        ))}
+                      </tr>
+                    ))}
                   </thead>
                   <tbody>
-                    {pendingStockin.map((item) => (
-                      <tr key={item.inventory_id} className="border-b border-border hover:bg-muted/30 transition-all">
-                        <td className="p-3 align-middle text-base">{item.name}</td>
-                        <td className="p-3 align-middle text-base">{item.cas_number}</td>
-                        <td className="p-3 align-middle text-base">{item.initial_quantity} {item.unit}</td>
-                        <td className="p-3 align-middle text-base">{formatDateTime(item.stockin_time)}</td>
-                        <td className="p-3 align-middle text-base">
-                          <Button variant="outline" onClick={() => openStockinModal(item)} size="sm">分配位置</Button>
-                        </td>
+                    {stockinTable.getRowModel().rows.map(row => (
+                      <tr key={row.id} className="border-b border-border hover:bg-muted/30 transition-all">
+                        {row.getVisibleCells().map(cell => (
+                          <td
+                            key={cell.id}
+                            className="p-3 align-middle text-base"
+                            style={{ width: cell.column.getSize() }}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
@@ -683,7 +860,7 @@ export function Dashboard() {
           <DialogHeader>
             <DialogTitle>归还物品</DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-6">
             <div>
               <p className="font-medium">{selectedBorrow?.name}</p>
@@ -691,7 +868,7 @@ export function Dashboard() {
                 CAS: {selectedBorrow?.cas_number}
               </p>
             </div>
-            
+
             <RadioGroup
               value={returnMode}
               onValueChange={(value) => setReturnMode(value as 'used' | 'remaining')}
@@ -706,10 +883,10 @@ export function Dashboard() {
                 <Label htmlFor="returnMode-remaining" className="cursor-pointer text-base">填写剩余量</Label>
               </div>
             </RadioGroup>
-            
+
             <div>
               <label className={LABEL_STYLES.base}>
-                {returnMode === 'remaining' ? '剩余量' : '使用量'} 
+                {returnMode === 'remaining' ? '剩余量' : '使用量'}
                 <span className="text-destructive"> *</span>
               </label>
               <div className="flex items-center gap-2">
@@ -786,7 +963,7 @@ export function Dashboard() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="space-y-4">
               <div className="p-4 bg-muted rounded-lg">
                 <p className="font-medium">{selectedStockin.name}</p>
@@ -794,7 +971,7 @@ export function Dashboard() {
                   CAS: {selectedStockin.cas_number} • {selectedStockin.initial_quantity} {selectedStockin.unit}
                 </p>
               </div>
-              
+
               <div>
                 <label className={LABEL_STYLES.base}>
                   存放位置 <span className="text-destructive"> *</span>

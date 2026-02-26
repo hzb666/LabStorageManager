@@ -259,7 +259,32 @@
   - 后端：`stock_in_reagent_order` 增加 `common_public` 拦截，返回 400
   - 前端：`common_public` 订单的一键入库按钮置灰（disabled），鼠标悬停显示提示信息
 
-#### 27. 切换每页条数后数据不变化 [FIXED]
+#### 28. Dashboard TanStack Table 点击后路由失效 [FIXED]
+- **文件**: `frontend/src/pages/Dashboard.tsx`
+- **问题**: 将表格从原生 `<table>` 改为 TanStack Table 后，点击表格或操作表头时路由全部失效，URL变化但不加载页面
+- **根因**: 
+  - `useReactTable` 的 `data` 属性直接使用 `.slice()` 方法
+  - `.slice()` 每次渲染都返回新的数组引用
+  - TanStack Table 检测到 data 引用变化后强制重新计算，触发无限重渲染循环
+  - 浏览器主线程被卡死，React 无力接管路由渲染
+- **诊断现象**: "网址会变化但页面不加载" 是无限循环导致主线程阻塞的典型症状
+- **修复**: 
+  - 使用 `useMemo` 包裹分页数据，确保数组引用稳定
+  - 将稳定后的 data 传入 `useReactTable`
+  ```typescript
+  const consumableData = useMemo(() => {
+    return myConsumableOrders.slice(
+      (consumablePage - 1) * consumablePageSize,
+      consumablePage * consumablePageSize
+    )
+  }, [myConsumableOrders, consumablePage, consumablePageSize])
+  
+  const consumableTable = useReactTable({
+    data: consumableData, // 使用稳定引用
+    ...
+  })
+  ```
+- **教训**: 使用 TanStack Table 时，所有传入的 data 必须是稳定引用（使用 useMemo），避免直接使用 `.slice()`/`.filter()`/`.map()` 等返回新数组的方法
 - **文件**: `app/api/inventory.py`
 - **问题**: 后端列表 API 使用缓存机制，但缓存 key 没有包含 `limit` 参数，导致切换每页条数时返回了缓存的旧数据
 - **复现步骤**: 
