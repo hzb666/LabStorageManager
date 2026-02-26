@@ -73,7 +73,7 @@
 | alias | string | 否 | 别名 |
 | category | string | 否 | 分类（如：有机溶剂） |
 | brand | string | 否 | 品牌（如：Sigma） |
-| location | string | 否 | 存放位置 |
+| storage_location | string | 否 | 存放位置 |
 | initial_quantity | float | 是 | 初始数量 |
 | remaining_quantity | float | 是 | 剩余数量 |
 | unit | string | 是 | 单位（ml/L/g/kg/个/支/瓶） |
@@ -181,7 +181,7 @@
 | specification | string | 是 | 规格（如：500ml） |
 | initial_quantity | float | 否 | 初始数量 |
 | quantity_bottles | int | 是 | 瓶数 |
-| location | string | 否 | 存放位置 |
+| storage_location | string | 否 | 存放位置 |
 | is_hazardous | bool | 是 | 是否危险品 |
 | category | string | 否 | 分类 |
 | brand | string | 否 | 品牌 |

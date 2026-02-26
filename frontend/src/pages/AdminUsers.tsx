@@ -574,11 +574,11 @@ export function AdminUsersPage() {
               >
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="user" id="create_role_user" />
-                  <Label htmlFor="create_role_user" className="cursor-pointer">用户</Label>
+                  <Label htmlFor="create_role_user" className="text-base cursor-pointer">用户</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="admin" id="create_role_admin" />
-                  <Label htmlFor="create_role_admin" className="cursor-pointer">管理员</Label>
+                  <Label htmlFor="create_role_admin" className="text-base cursor-pointer">管理员</Label>
                 </div>
               </RadioGroup>
             </div>
@@ -628,11 +628,11 @@ export function AdminUsersPage() {
               >
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="user" id="edit_role_user" />
-                  <Label htmlFor="edit_role_user" className="cursor-pointer">用户</Label>
+                  <Label htmlFor="edit_role_user" className="text-base cursor-pointer">用户</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="admin" id="edit_role_admin" />
-                  <Label htmlFor="edit_role_admin" className="cursor-pointer">管理员</Label>
+                  <Label htmlFor="edit_role_admin" className="text-base cursor-pointer">管理员</Label>
                 </div>
               </RadioGroup>
             </div>

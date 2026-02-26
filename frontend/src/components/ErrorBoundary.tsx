@@ -84,12 +84,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
                     variant="morden"
                     onClick={this.handleReset}
                     className="flex-1"
+                    size="lg"
                   >
                     返回
                   </Button>
                   <Button
                     onClick={this.handleReload}
                     className="flex-1"
+                    size="lg"
                   >
                     刷新页面
                   </Button>

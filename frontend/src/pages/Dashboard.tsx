@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/Input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import { Label } from '@/components/ui/Label'
-import { ResizableHeader } from '@/components/ui/ResizableHeader'
 import { reagentOrderAPI, inventoryAPI, consumableOrderAPI } from '@/api/client'
 import { toast } from '@/components/ui/Toast'
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
@@ -308,21 +307,18 @@ export function Dashboard() {
   const consumableTable = useReactTable({
     data: consumableData,
     columns: consumableColumns,
-    columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
   })
 
   const borrowTable = useReactTable({
     data: borrowData,
     columns: borrowColumns,
-    columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
   })
 
   const stockinTable = useReactTable({
     data: stockinData,
     columns: stockinColumns,
-    columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
   })
 
@@ -489,7 +485,7 @@ export function Dashboard() {
     }
     setStockinLoading(true)
     try {
-      await inventoryAPI.update(selectedStockin.inventory_id, { location: stockinLocation })
+      await inventoryAPI.update(selectedStockin.inventory_id, { storage_location: stockinLocation })
       setShowStockinModal(false)
       setSelectedStockin(null)
       setStockinLocation('')
@@ -724,7 +720,14 @@ export function Dashboard() {
                       {consumableTable.getHeaderGroups().map(headerGroup => (
                         <tr key={headerGroup.id} className="border-b-2 border-border">
                           {headerGroup.headers.map(header => (
-                            <ResizableHeader key={header.id} header={header} />
+                            <th
+                              key={header.id}
+                              className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                            >
+                              {header.isPlaceholder
+                                ? null
+                                : flexRender(header.column.columnDef.header, header.getContext())}
+                            </th>
                           ))}
                         </tr>
                       ))}
@@ -776,7 +779,14 @@ export function Dashboard() {
                       {borrowTable.getHeaderGroups().map(headerGroup => (
                         <tr key={headerGroup.id} className="border-b-2 border-border">
                           {headerGroup.headers.map(header => (
-                            <ResizableHeader key={header.id} header={header} />
+                            <th
+                              key={header.id}
+                              className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                            >
+                              {header.isPlaceholder
+                                ? null
+                                : flexRender(header.column.columnDef.header, header.getContext())}
+                            </th>
                           ))}
                         </tr>
                       ))}
@@ -827,7 +837,14 @@ export function Dashboard() {
                     {stockinTable.getHeaderGroups().map(headerGroup => (
                       <tr key={headerGroup.id} className="border-b-2 border-border">
                         {headerGroup.headers.map(header => (
-                          <ResizableHeader key={header.id} header={header} />
+                          <th
+                            key={header.id}
+                            className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                          >
+                            {header.isPlaceholder
+                              ? null
+                              : flexRender(header.column.columnDef.header, header.getContext())}
+                          </th>
                         ))}
                       </tr>
                     ))}
@@ -861,7 +878,7 @@ export function Dashboard() {
             <DialogTitle>归还物品</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-6">
+          <div className="space-y-4">
             <div>
               <p className="font-medium">{selectedBorrow?.name}</p>
               <p className="text-sm text-muted-foreground">
@@ -921,7 +938,7 @@ export function Dashboard() {
               )}
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-3 mt-8">
               <Button
                 variant="morden"
                 onClick={() => setShowReturnModal(false)}
@@ -984,7 +1001,7 @@ export function Dashboard() {
                 />
               </div>
 
-              <div className="flex gap-3 pt-1">
+              <div className="flex gap-3 t-1">
                 <Button
                   onClick={handleStockin}
                   disabled={stockinLoading}

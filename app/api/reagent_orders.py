@@ -509,7 +509,7 @@ def stock_in_reagent_order(
             alias=order.alias,
             category=order.category,
             brand=order.brand,
-            location=None,  # No location in new design
+            storage_location=None,  # No storage_location in new design
             initial_quantity=per_bottle_value,
             remaining_quantity=per_bottle_value,
             unit=unit,

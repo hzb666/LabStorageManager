@@ -160,7 +160,7 @@ export const inventoryAPI = {
     quantity_bottles: number
     brand?: string
     category?: string
-    location?: string
+    storage_location?: string
     is_hazardous: boolean
     notes?: string
   }) => api.post('/inventory/manual-add', data),

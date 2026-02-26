@@ -127,7 +127,7 @@ export const IMPORT_TEMPLATE_COLUMNS: ImportColumn[] = [
     description: '剩余数量（可选），不填则默认等于规格中的数量',
   },
   {
-    name: 'location',
+    name: 'storage_location',
     required: false,
     description: '例如 302冰箱第二层、A-1-1 柜',
   },

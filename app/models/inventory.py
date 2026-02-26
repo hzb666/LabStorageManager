@@ -25,12 +25,12 @@ class InventoryBase(SQLModel):
     """Base inventory model with common fields"""
     # Critical: CAS Number copied from Order (already normalized)
     cas_number: str = Field(index=True, max_length=50)
-    name: str = Field(max_length=200)
+    name: str = Field(index=True, max_length=200)  # 排序/搜索常用
     english_name: Optional[str] = Field(None, max_length=200)  # English name
     alias: Optional[str] = Field(None, max_length=200)
-    category: Optional[str] = Field(None, max_length=100)  # Category
-    brand: Optional[str] = Field(None, max_length=100)  # Brand
-    location: Optional[str] = Field(None, max_length=200)  # Free text, can be None for temporary keeper
+    category: Optional[str] = Field(index=True, max_length=100)  # 排序/搜索常用
+    brand: Optional[str] = Field(index=True, max_length=100)  # 排序/搜索常用
+    storage_location: Optional[str] = Field(index=True, max_length=200)  # 排序/搜索常用
     initial_quantity: float = Field(gt=0)
     remaining_quantity: float = Field(default=0.0)
     unit: str = Field(max_length=20, default="ml")  # Case-insensitive storage
@@ -44,7 +44,7 @@ class Inventory(InventoryBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     # Unique internal code: e.g., "64175-250113-01" (CAS-Date-Sequence)
     internal_code: str = Field(unique=True, index=True, max_length=50)
-    status: InventoryStatus = InventoryStatus.IN_STOCK
+    status: InventoryStatus = Field(index=True, default=InventoryStatus.IN_STOCK)  # 排序/筛选常用
     borrower_id: Optional[int] = Field(
         default=None,
         index=True,
@@ -68,7 +68,7 @@ class Inventory(InventoryBase, table=True):
         foreign_key="user.id",
         ondelete="SET NULL"
     )
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)  # 排序常用
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -81,7 +81,7 @@ class InventoryCreate(SQLModel):
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
-    location: Optional[str] = None
+    storage_location: Optional[str] = None
     initial_quantity: float = Field(gt=0)
     remaining_quantity: float = Field(default=0.0)
     unit: str = Field(max_length=20, default="ml")
@@ -93,7 +93,7 @@ class InventoryCreate(SQLModel):
 
 class InventoryUpdate(SQLModel):
     """DTO for updating inventory"""
-    location: Optional[str] = None
+    storage_location: Optional[str] = None
     remaining_quantity: Optional[float] = None
     status: Optional[InventoryStatus] = None
     temporary_keeper_id: Optional[int] = None
@@ -118,7 +118,7 @@ class InventoryResponse(SQLModel):
     alias: Optional[str]
     category: Optional[str]
     brand: Optional[str]
-    location: Optional[str]
+    storage_location: Optional[str]
     initial_quantity: float
     remaining_quantity: float
     unit: str
@@ -183,7 +183,7 @@ class ManualInventoryCreate(SQLModel):
     specification: str = Field(max_length=50)  # e.g., "500ml"
     initial_quantity: Optional[float] = None  # Optional - derived from specification
     quantity_bottles: int = Field(default=1, ge=1)  # Number of bottles
-    location: Optional[str] = None
+    storage_location: Optional[str] = None
     is_hazardous: bool = False
     category: Optional[str] = None
     brand: Optional[str] = None

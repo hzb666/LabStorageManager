@@ -52,10 +52,11 @@ export function NotFoundPage() {
                 variant="morden"
                 onClick={() => window.history.back()}
                 className="flex-1"
+                size="lg"
               >
                 返回
               </Button>
-              <Button asChild className="flex-1">
+              <Button asChild className="flex-1" size="lg">
                 <Link to="/">
                   首页
                 </Link>

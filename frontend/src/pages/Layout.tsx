@@ -79,294 +79,282 @@ export function Layout() {
             sidebarCollapsed ? 'w-16' : 'w-64'
           )}
         >
-          {/* 标题区域 - 折叠时保持高度，只隐藏文字 */}
-          <div 
-            className={cn(
-              'flex flex-col items-center justify-center transition-opacity duration-200 overflow-hidden',
-              sidebarCollapsed ? 'opacity-0' : 'opacity-100',
-              // 始终保持固定高度，确保展开和折叠时导航图标位置不变
-              'h-20 pt-12 pb-12'
-            )}
-          >
-            <h1 className="text-2xl font-bold text-center px-2 whitespace-nowrap text-primary">实验室库存管理</h1>
+          {/* 标题区域 */}
+          <div className="flex items-center justify-center h-20 pt-12 pb-12 overflow-hidden whitespace-nowrap">
+            <h1 className={cn(
+              "text-2xl font-bold text-primary transition-opacity duration-300",
+              // 【核心修改】：废除 max-w 动画。强制赋予元素与展开侧边栏相同的最终宽度(w-64)，
+              // 这样文字的“中心锚点”从一开始就是死死钉在最终位置上的，绝不会横向跳动。
+              "w-64 text-center",
+              sidebarCollapsed ? 'opacity-0' : 'opacity-100'
+            )}>
+              实验室库存管理
+            </h1>
           </div>
 
           {/* 导航区域 */}
-          <nav className={cn(
-            "flex-1 overflow-y-auto px-2",
-            sidebarCollapsed ? "px-3" : "px-3"
-          )}>
+          <nav className="flex-1 overflow-y-auto pl-4 pr-1 custom-scrollbar ">
             {/* 功能组 */}
-            <div className="mb-4">
-              {!sidebarCollapsed && (
-                <p className="px-3 mb-2 text-sm font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">功能</p>
-              )}
-                <div className="space-y-1">
-                  {filteredNavItems.filter(item => item.group === '功能').map((item) => {
-                    const isActive = location.pathname === item.href
-                    const Icon = item.icon
-                    return (
-                      <Link
-                        key={item.href}
-                        to={item.href}
-                        className={cn(
-                          'flex items-center rounded-lg py-2 font-medium min-w-0 overflow-hidden',
-                          sidebarCollapsed 
-                            ? 'justify-center px-2' 
-                            : 'gap-3 px-3',
-                          isActive
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-sidebar-foreground hover:bg-muted'
-                        )}
-                        title={sidebarCollapsed ? item.title : undefined}
-                      >
-                        <Icon className={cn("h-5 w-5 flex-shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
-                        <span 
-                          className={cn(
-                            "whitespace-nowrap overflow-hidden min-w-0",
-                            sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
-                          )}
-                        >
-                          {item.title}
-                        </span>
-                      </Link>
-                    )
-                  })}
-                </div>
+            <div className="mb-2">
+              <div className=
+                "px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-all duration-300 opacity-100 max-h-10 mt-4 mb-3"
+              >
+                功能
               </div>
+              <div className="space-y-1">
+                {filteredNavItems.filter(item => item.group === '功能').map((item) => {
+                  const isActive = location.pathname === item.href
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      className={cn(
+                        'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden transition-colors',
+                        isActive
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-sidebar-foreground hover:bg-muted'
+                      )}
+                      title={sidebarCollapsed ? item.title : undefined}
+                    >
+                      <Icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? '' : 'text-sidebar-foreground')} />
+                      <span
+                        className={cn(
+                          "whitespace-nowrap overflow-hidden transition-all duration-300",
+                          // 核心动画：依靠宽度和边距平滑过渡，不会换行
+                          sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
+                        )}
+                      >
+                        {item.title}
+                      </span>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
 
             {/* 管理组 */}
-            <div className="pt-2">
-              {!sidebarCollapsed && (
-                <p className="px-3 mb-2 text-sm font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">管理</p>
-              )}
-                <div className="space-y-1">
-                  {filteredNavItems.filter(item => item.group === '管理').map((item) => {
-                    const isActive = location.pathname === item.href
-                    const Icon = item.icon
-                    return (
-                      <Link
-                        key={item.href}
-                        to={item.href}
+            <div>
+              <div className=
+                "px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-all duration-300 opacity-100 max-h-10 mt-6 mb-3"
+              >
+                管理
+              </div>
+              <div className="space-y-1">
+                {filteredNavItems.filter(item => item.group === '管理').map((item) => {
+                  const isActive = location.pathname === item.href
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      className={cn(
+                        'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden transition-colors',
+                        isActive
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-sidebar-foreground hover:bg-muted'
+                      )}
+                      title={sidebarCollapsed ? item.title : undefined}
+                    >
+                      <Icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? '' : 'text-sidebar-foreground')} />
+                      <span
                         className={cn(
-                          'flex items-center rounded-lg py-2 font-medium min-w-0 overflow-hidden',
-                          sidebarCollapsed 
-                            ? 'justify-center px-2' 
-                            : 'gap-3 px-3',
-                          isActive
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-sidebar-foreground hover:bg-muted'
+                          "whitespace-nowrap overflow-hidden transition-all duration-300",
+                          sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
                         )}
-                        title={sidebarCollapsed ? item.title : undefined}
                       >
-                        <Icon className={cn("h-5 w-5 flex-shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
-                        <span 
-                          className={cn(
-                            "whitespace-nowrap overflow-hidden min-w-0",
-                            sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
-                          )}
-                        >
-                          {item.title}
-                        </span>
-                      </Link>
-                    )
-                  })}
-                </div>
+                        {item.title}
+                      </span>
+                    </Link>
+                  )
+                })}
               </div>
-            </nav>
+            </div>
+          </nav>
 
-          {/* 用户区域 - 保持固定 padding */}
-          <div className="mt-auto p-3">
-            <div className="pt-2">
-              {/* 头像 */}
-              <div className={cn("flex items-center gap-3 mb-3", sidebarCollapsed ? "" : "ml-1")}>
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground flex-shrink-0">
-                  {user?.username?.charAt(0).toUpperCase() || 'U'}
-                </div>
-                <div 
-                  className={cn(
-                    "flex-1 min-w-0 overflow-hidden",
-                    sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
-                  )}
-                >
-                  <p className="text-base font-medium truncate text-sidebar-foreground whitespace-nowrap">
-                    {user?.full_name || user?.username}
-                  </p>
-                  <p className="text-sm text-sidebar-foreground/70 whitespace-nowrap">
-                    {user?.role === 'admin' ? '管理员' : '用户'}
-                  </p>
-                </div>
+          {/* 用户与设置区域 */}
+          <div className="pl-4 py-4 pr-1">
+            {/* 头像信息 */}
+            <div className="flex items-center overflow-hidden">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground mx-auto md:mx-0">
+                {user?.username?.charAt(0).toUpperCase() || 'U'}
               </div>
-
-              {/* 按钮区域 */}
-              <div 
+              <div
                 className={cn(
-                  "flex gap-2",
-                  sidebarCollapsed 
-                    ? "flex-col items-center" 
-                    : "items-center justify-between"
+                  "flex-1 overflow-hidden transition-all duration-300",
+                  sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[150px] ml-3'
                 )}
               >
-                <Button
-                  variant="ghost"
-                  onClick={() => logout()}
-                  className={cn(
-                    "h-10 text-sidebar-foreground text-base hover:bg-muted min-w-0 overflow-hidden flex",
-                    sidebarCollapsed 
-                      ? "w-10 h-10 p-0 justify-center" 
-                      : "flex-1 justify-start px-3"
-                  )}
-                  title={sidebarCollapsed ? "退出登录" : undefined}
-                >
-                  <LogOut className="size-5 shrink-0" />
-                  {!sidebarCollapsed && (
-                    <span className="ml-2 whitespace-nowrap">
-                      退出登录
-                    </span>
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleTheme}
-                  className={cn(
-                    "size-10 shrink-0 hover:bg-muted shadow-none text-sidebar-foreground",
-                    sidebarCollapsed 
-                      ? "w-10" 
-                      : ""
-                  )}
-                  title={sidebarCollapsed ? (theme === 'dark' ? '切换亮色' : '切换暗黑') : undefined}
-                >
-                  {theme === 'dark' ? (
-                    <Sun className="size-5" />
-                  ) : (
-                    <Moon className="size-5" />
-                  )}
-                </Button>
+                <p className="text-base truncate text-sidebar-foreground">
+                  {user?.full_name || user?.username}
+                </p>
+                <p className="text-sm text-sidebar-foreground/70 truncate">
+                  {user?.role === 'admin' ? '管理员' : '用户'}
+                </p>
               </div>
+            </div>
+
+            {/* 统一化的垂直功能按钮区：完美解决乱跳和遮挡 */}
+            <div className="flex flex-col gap-1 overflow-hidden pt-4">
+              <Button
+                variant="ghost"
+                onClick={toggleTheme}
+                className="justify-start text-base p-2 h-10 w-full hover:bg-muted text-sidebar-foreground transition-colors"
+                title={sidebarCollapsed ? (theme === 'dark' ? '切换亮色' : '切换暗黑') : undefined}
+              >
+                {theme === 'dark' ? <Sun className="size-5 shrink-0" /> : <Moon className="size-5 shrink-0" />}
+                <span className={cn(
+                  "whitespace-nowrap overflow-hidden transition-all duration-300",
+                  sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
+                )}>
+                  {theme === 'dark' ? '切换亮色模式' : '切换暗黑模式'}
+                </span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={() => logout()}
+                className="justify-start p-2 h-10 w-full text-base hover:bg-muted text-sidebar-foreground transition-colors"
+                title={sidebarCollapsed ? "退出登录" : undefined}
+              >
+                <LogOut className="size-5 shrink-0" />
+                <span className={cn(
+                  "whitespace-nowrap overflow-hidden transition-all duration-300",
+                  sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
+                )}>
+                  退出登录
+                </span>
+              </Button>
             </div>
           </div>
         </aside>
       )}
 
-      {/* Mobile Menu */}
-      <div 
+      {/* Mobile Menu (移动端保持基本不变，仅同步了间距标准) */}
+      <div
         className={cn(
           "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm md:hidden transition-opacity duration-200",
           mobileMenuOpen ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
         onClick={() => setMobileMenuOpen(false)}
       >
-          <aside 
+        <aside
           className={cn(
             "fixed inset-y-0 left-0 w-64 border-r border-border bg-sidebar transition-transform duration-200 flex flex-col",
             mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
           )}
           onClick={(e) => e.stopPropagation()}
         >
-            <div className="flex flex-col items-center justify-center pt-8 pb-4">
-              <h1 className="text-xl font-bold text-primary">实验室库存管理</h1>
-            </div>
-            <nav className="flex-1 space-y-4 p-4 overflow-y-auto">
-              {/* 功能组 */}
-              <div>
-                <p className="px-3 mb-2 text-sm font-medium text-muted-foreground uppercase tracking-wider">功能</p>
-                <div className="space-y-1">
-                  {filteredNavItems.filter(item => item.group === '功能').map((item) => {
-                    const isActive = location.pathname === item.href
-                    const Icon = item.icon
-                    return (
-                      <Link
-                        key={item.href}
-                        to={item.href}
-                        onClick={() => setMobileMenuOpen(false)}
-                        className={cn(
-                          'flex items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-none',
-                          isActive
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-sidebar text-sidebar-foreground hover:bg-muted hover:text-foreground'
-                        )}
-                      >
-                        <Icon className="h-5 w-5" />
-                        {item.title}
-                      </Link>
-                    )
-                  })}
-                </div>
-              </div>
-              {/* 管理组 */}
-              <div>
-                <p className="px-3 mb-2 text-sm font-medium text-muted-foreground uppercase tracking-wider">管理</p>
-                <div className="space-y-1">
-                  {filteredNavItems.filter(item => item.group === '管理').map((item) => {
-                    const isActive = location.pathname === item.href
-                    const Icon = item.icon
-                    return (
-                      <Link
-                        key={item.href}
-                        to={item.href}
-                        onClick={() => setMobileMenuOpen(false)}
-                        className={cn(
-                          'flex items-center gap-3 rounded-lg px-3 py-2 text-base font-medium transition-none',
-                          isActive
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-sidebar text-sidebar-foreground hover:bg-muted hover:text-foreground'
-                        )}
-                      >
-                        <Icon className="h-5 w-5" />
-                        {item.title}
-                      </Link>
-                    )
-                  })}
-                </div>
-              </div>
-            </nav>
-            {/* Mobile User Info */}
-            <div className="mt-auto p-4">
-              <div className="pt-2">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                    {user?.username?.charAt(0).toUpperCase() || 'U'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-base font-medium truncate text-sidebar-foreground">
-                      {user?.full_name || user?.username}
-                    </p>
-                    <p className="text-sm text-sidebar-foreground/70">
-                      {user?.role === 'admin' ? '管理员' : '用户'}
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  className="w-full text-base h-10 justify-start text-sidebar-foreground hover:bg-muted"
-                  onClick={() => logout()}
-                >
-                  <LogOut className="mr-2 size-5" />
-                  退出登录
-                </Button>
+          <div className="flex flex-col items-center justify-center pt-8 pb-4">
+            <h1 className="text-xl font-bold text-primary px-2">实验室库存管理</h1>
+          </div>
+
+          <nav className="flex-1 space-y-4 p-4 overflow-y-auto">
+            <div>
+              <p className="px-2 mb-2 text-sm text-muted-foreground uppercase tracking-wider">功能</p>
+              <div className="space-y-1">
+                {filteredNavItems.filter(item => item.group === '功能').map((item) => {
+                  const isActive = location.pathname === item.href
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={cn(
+                        'flex items-center rounded-lg pl-3 py-2 text-base transition-colors',
+                        isActive
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-sidebar text-sidebar-foreground hover:bg-muted hover:text-foreground'
+                      )}
+                    >
+                      <Icon className="h-5 w-5 shrink-0 mr-3" />
+                      {item.title}
+                    </Link>
+                  )
+                })}
               </div>
             </div>
-          </aside>
-        </div>
+
+            <div>
+              <p className="px-2 mb-2 text-sm text-muted-foreground uppercase tracking-wider">管理</p>
+              <div className="space-y-1">
+                {filteredNavItems.filter(item => item.group === '管理').map((item) => {
+                  const isActive = location.pathname === item.href
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={cn(
+                        'flex items-center rounded-lg pl-3 py-2 text-base transition-colors',
+                        isActive
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-sidebar text-sidebar-foreground hover:bg-muted hover:text-foreground'
+                      )}
+                    >
+                      <Icon className="h-5 w-5 shrink-0 mr-3" />
+                      {item.title}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          </nav>
+
+          <div className="mt-auto p-4 border-t border-border/50">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                {user?.username?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-base truncate text-sidebar-foreground">
+                  {user?.full_name || user?.username}
+                </p>
+                <p className="text-sm text-sidebar-foreground/70 truncate">
+                  {user?.role === 'admin' ? '管理员' : '用户'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Button
+                variant="ghost"
+                onClick={toggleTheme}
+                className="w-full text-base h-10 justify-start p-2 text-sidebar-foreground hover:bg-muted"
+              >
+                {theme === 'dark' ? <Sun className="mr-3 size-5 shrink-0" /> : <Moon className="mr-3 size-5 shrink-0" />}
+                {theme === 'dark' ? '切换亮色模式' : '切换暗黑模式'}
+              </Button>
+
+              <Button
+                variant="ghost"
+                className="w-full text-base h-10 justify-start p-2 text-sidebar-foreground hover:bg-muted"
+                onClick={() => logout()}
+              >
+                <LogOut className="mr-3 size-5 shrink-0" />
+                退出登录
+              </Button>
+            </div>
+          </div>
+        </aside>
+      </div>
 
       {/* Main Content */}
-      <div 
+      <div
         className={cn(
           "flex-1 flex flex-col min-h-screen min-w-0 w-full transition-[margin-left] duration-300 ease-in-out",
           showDesktopSidebar ? (sidebarCollapsed ? "md:ml-16" : "md:ml-64") : ""
         )}
       >
-        {/* Page Content */}
         <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pl-3 md:pr-3 lg:pl-3 lg:pr-4">
           <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
-            {/* Top Header - sticky + 顶部圆角 */}
-            <header 
+            <header
               className="sticky top-0 z-40 flex h-16 items-center gap-4 px-4 bg-page-card border-b border-border rounded-tl-lg rounded-tr-lg"
               data-sticky-header="true"
               id="page-header"
             >
-              {/* Sidebar Toggle Button - Desktop */}
               {showDesktopSidebar && (
                 <Button
                   variant="ghost"
@@ -382,8 +370,7 @@ export function Layout() {
                   )}
                 </Button>
               )}
-              
-              {/* Mobile Menu Button - 关闭菜单时显示，打开菜单时隐藏 */}
+
               {!mobileMenuOpen && (
                 <Button
                   variant="ghost"
@@ -394,25 +381,19 @@ export function Layout() {
                   <Menu className="size-5" />
                 </Button>
               )}
-              
+
               <div className="flex-1" />
-              
-              {/* Mobile Theme Toggle Only */}
+
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={toggleTheme}
                 className="h-10 w-10 md:hidden text-foreground transition-none"
               >
-                {theme === 'dark' ? (
-                  <Sun className="size-5" />
-                ) : (
-                  <Moon className="size-5" />
-                )}
+                {theme === 'dark' ? <Sun className="size-5" /> : <Moon className="size-5" />}
               </Button>
             </header>
-            
-            {/* Page Content */}
+
             <div className="p-6">
               <Outlet />
             </div>

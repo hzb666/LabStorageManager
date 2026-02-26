@@ -1,12 +1,11 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
 import {
   createColumnHelper,
-  flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   useReactTable,
-  getSortedRowModel,
 } from '@tanstack/react-table'
-import type { SortingState, ColumnFiltersState } from '@tanstack/react-table'
+import type { SortingState, ColumnSizingState } from '@tanstack/react-table'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Checkbox } from '@/components/ui/Checkbox'
@@ -17,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { inventoryAPI } from '@/api/client'
 import { toast } from '@/components/ui/Toast'
-import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
+import { DataTable } from '@/components/ui/DataTable'
 import { formatDate, cn } from '@/lib/utils'
 import { validateCASNumber, validateRequired, validateSpecification, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
 import useDialogState from '@/hooks/useDialogState'
@@ -27,6 +26,9 @@ import {
   AlertTriangle,
   Loader2,
   ArrowUpFromLine,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
   Plus,
   X,
   Pencil,
@@ -35,6 +37,7 @@ import {
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
+import { useIsMobile } from '@/hooks/useMobile'
 
 // 后端验证错误类型
 interface ValidationError {
@@ -51,6 +54,8 @@ interface InventoryListParams {
   search_field?: string
   fuzzy?: boolean
   status_filter?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
 }
 
 interface InventoryItem {
@@ -61,7 +66,7 @@ interface InventoryItem {
   alias: string | null
   category: string | null
   brand: string | null
-  location: string | null
+  storage_location: string | null
   initial_quantity: number
   remaining_quantity: number
   unit: string
@@ -216,13 +221,21 @@ export function InventoryPage() {
   const [data, setData] = useState<InventoryItem[]>([])
   const [total, setTotal] = useState(0)
   const [grandTotal, setGrandTotal] = useState(0) // 库存总数（不搜索时的总数）
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [sorting, setSorting] = useState<SortingState>([])
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
+    try {
+      const saved = localStorage.getItem('inventory-table-col-sizes')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
   const [globalFilter, setGlobalFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  // 表格容器高度 - 使用 CSS calc 计算
+  // 公式: 100vh - 112px (页眉+表头+间距) - 16px (页面 padding-bottom)
+  const tableHeight = "calc(100vh - 112px - 16px)"
 
   // Dialog state - 使用 useDialogState 管理 edit/add 对话框
   const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
@@ -230,16 +243,6 @@ export function InventoryPage() {
   // Edit modal state
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
-  // Expanded row state - use object for faster lookups
-  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
-
-  // Toggle row expansion
-  const toggleRowExpansion = (id: number) => {
-    setExpandedRows(prev => ({
-      ...prev,
-      [id]: !prev[id]
-    }))
-  }
 
   const [editFormData, setEditFormData] = useState({
     name: '',
@@ -247,7 +250,7 @@ export function InventoryPage() {
     alias: '',
     specification: '',
     category: '',
-    location: '',
+    storage_location: '',
     cas_number: '',
     remaining_quantity: 0,
     initial_quantity: 0,
@@ -281,7 +284,7 @@ export function InventoryPage() {
   }, [])
 
   const handleEditLocationChange = useCallback((value: string) => {
-    setEditFormData(prev => ({ ...prev, location: value }))
+    setEditFormData(prev => ({ ...prev, storage_location: value }))
   }, [])
 
   const handleEditRemainingQuantityChange = useCallback((value: number) => {
@@ -311,7 +314,7 @@ export function InventoryPage() {
     quantity_bottles: 1,
     brand: '',
     category: '',
-    location: '',
+    storage_location: '',
     is_hazardous: false,
     notes: ''
   })
@@ -332,12 +335,15 @@ export function InventoryPage() {
         quantity_bottles: 1,
         brand: '',
         category: '',
-        location: '',
+        storage_location: '',
         is_hazardous: false,
         notes: ''
       })
     }
   }
+
+  // 收起所有展开的行的辅助函数
+  const collapseAllRowsRef = useRef<() => void>(() => {})
 
   // Debounced search for API calls - separate display filter from API filter
   // 优化：增加防抖延迟 + 添加请求版本号防止竞态条件
@@ -347,6 +353,7 @@ export function InventoryPage() {
   const [fuzzySearch, setFuzzySearch] = useState(false) // 模糊搜索
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestVersionRef = useRef(0) // 请求版本号，用于防止竞态条件
+  const sortingRef = useRef<SortingState>([]) // 跟踪排序状态，避免被覆盖
 
   // Update display filter immediately (for highlighting), but API filter only after debounce
   useEffect(() => {
@@ -365,7 +372,6 @@ export function InventoryPage() {
       // 只有当前版本是最新的才发送请求
       if (currentVersion === requestVersionRef.current) {
         setApiFilter(globalFilter)
-        setPage(1) // Reset to page 1 on search
       }
     }, 300)
 
@@ -380,17 +386,15 @@ export function InventoryPage() {
   // 使用请求版本号确保只处理最新请求的响应
   const loadInventory = useCallback(async () => {
     const requestVersion = ++requestVersionRef.current
+    console.log('[LOAD] loadInventory called, sorting:', JSON.stringify(sorting))
 
     // 只在没有数据时显示加载状态，有数据时保持旧数据可见
     if (data.length === 0) {
       setLoading(true)
     }
-    // Clear expanded rows when loading new data
-    setExpandedRows({})
     try {
       const params: InventoryListParams = {
-        skip: (page - 1) * pageSize,
-        limit: pageSize,
+        // 不使用分页，获取全部数据
       }
       if (statusFilter !== 'all') params.status_filter = statusFilter
       if (apiFilter) {
@@ -398,18 +402,26 @@ export function InventoryPage() {
         if (searchField !== 'all') params.search_field = searchField
         if (fuzzySearch) params.fuzzy = true
       }
+      // 添加排序参数
+      if (sorting.length > 0) {
+        params.sort_by = sorting[0].id
+        params.sort_order = sorting[0].desc ? 'desc' : 'asc'
+        console.log('[SORT DEBUG] Frontend sending:', params.sort_by, params.sort_order, 'full sorting state:', JSON.stringify(sorting))
+      }
 
       const response = await inventoryAPI.list(params)
 
       // 检查是否为最新请求，防止旧请求覆盖新数据
       if (requestVersion !== requestVersionRef.current) {
-        console.log('Request canceled:', requestVersion, 'current:', requestVersionRef.current)
         return
       }
 
       const result = response.data
       setData(result.data || [])
       setTotal(result.total || 0)
+
+      // 同步排序状态到 ref
+      sortingRef.current = sorting
 
       // 如果没有搜索条件且状态为全部，更新库存总数
       if (!apiFilter && statusFilter === 'all') {
@@ -423,22 +435,25 @@ export function InventoryPage() {
         setLoading(false)
       }
     }
-  }, [page, pageSize, statusFilter, apiFilter, searchField, fuzzySearch, data.length])
+  }, [statusFilter, apiFilter, searchField, fuzzySearch, sorting])
 
   useEffect(() => {
     loadInventory()
   }, [loadInventory])
 
-  const totalPages = Math.ceil(total / pageSize)
+  // 列宽持久化到 localStorage
+  useEffect(() => {
+    localStorage.setItem('inventory-table-col-sizes', JSON.stringify(columnSizing))
+  }, [columnSizing])
+
+  // 删除分页相关计算
+  // const totalPages = Math.ceil(total / pageSize)
 
   const handleStatusFilterChange = (value: string) => {
+    // 筛选时收起所有展开的行
+    collapseAllRowsRef.current()
     setStatusFilter(value)
-    setPage(1)
-  }
-
-  const handlePageSizeChange = (newSize: number) => {
-    setPageSize(newSize)
-    setPage(1)
+    // 删除分页重置
   }
 
   // 编辑表单验证函数 - 使用 inputValidation.ts
@@ -490,7 +505,7 @@ export function InventoryPage() {
         name: editFormData.name || undefined,
         english_name: editFormData.english_name || undefined,
         category: editFormData.category || undefined,
-        location: editFormData.location || undefined,
+        storage_location: editFormData.storage_location || undefined,
         remaining_quantity: editFormData.remaining_quantity,
         brand: editFormData.brand || undefined,
         status: status,
@@ -546,7 +561,7 @@ export function InventoryPage() {
       alias: item.alias || '',
       specification: item.specification || '',
       category: item.category || '',
-      location: item.location || '',
+      storage_location: item.storage_location || '',
       cas_number: item.cas_number || '',
       remaining_quantity: item.remaining_quantity,
       initial_quantity: item.initial_quantity,
@@ -558,13 +573,15 @@ export function InventoryPage() {
     })
     setDialogState('edit')
   }, [])
-
+  const isMobile = useIsMobile()
   // Use displayFilter for highlighting, but only update table after API returns
   const columns = useMemo(() => [
     // CAS号 - 放最前面
     columnHelper.accessor('cas_number', {
       header: 'CAS号',
-      size: 100,
+      size: isMobile ? 100 : 150,
+      minSize: 100,
+      maxSize: 200,
       cell: info => (
         <span className="break-all">
           <HighlightText text={info.getValue() || ''} highlight={displayFilter} fuzzy={fuzzySearch} />
@@ -574,7 +591,9 @@ export function InventoryPage() {
     // 名称（之前是中文名）
     columnHelper.accessor('name', {
       header: '名称',
-      size: 160,
+      size: isMobile ? 150 : 300,
+      minSize: 150,
+      maxSize: 400,
       cell: info => (
         <div className="flex items-center gap-1.5 break-all">
           <HazardousIcon isHazardous={info.row.original.is_hazardous} />
@@ -587,7 +606,9 @@ export function InventoryPage() {
     // 分类
     columnHelper.accessor('category', {
       header: '分类',
-      size: 60,
+      size: 120,
+      minSize: 100,
+      maxSize: 150,
       cell: info => (
         <span className="break-all">
           <HighlightText text={info.getValue() || '-'} highlight={displayFilter} fuzzy={fuzzySearch} />
@@ -595,9 +616,24 @@ export function InventoryPage() {
       ),
     }),
     // 库存位置
-    columnHelper.accessor('location', {
+    columnHelper.accessor('storage_location', {
+      id: 'storage_location',
       header: '位置',
-      size: 70,
+      size: 120,
+      minSize: 100,
+      maxSize: 150,
+      cell: info => (
+        <span className="break-all">
+          <HighlightText text={info.row.original.storage_location || '-'} highlight={displayFilter} fuzzy={fuzzySearch} />
+        </span>
+      ),
+    }),
+    // 品牌
+    columnHelper.accessor('brand', {
+      header: '品牌',
+      size: 120,
+      minSize: 100,
+      maxSize: 150,
       cell: info => (
         <span className="break-all">
           <HighlightText text={info.getValue() || '-'} highlight={displayFilter} fuzzy={fuzzySearch} />
@@ -606,8 +642,10 @@ export function InventoryPage() {
     }),
     // 剩余量/规格（合并显示）
     columnHelper.accessor('remaining_quantity', {
-      header: '剩余量/规格',
-      size: 120,
+      id: 'remaining_percent', // 后端支持按百分比排序
+      header: '剩余/规格',
+      size: 140,
+      minSize: 100,
       cell: info => {
         const remaining = info.getValue()
         const initial = info.row.original.initial_quantity
@@ -621,20 +659,12 @@ export function InventoryPage() {
         )
       },
     }),
-    // 品牌
-    columnHelper.accessor('brand', {
-      header: '品牌',
-      size: 50,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText text={info.getValue() || '-'} highlight={displayFilter} fuzzy={fuzzySearch} />
-        </span>
-      ),
-    }),
+
     // 状态
     columnHelper.accessor('status', {
       header: '状态',
-      size: 70,
+      size: 100,
+      minSize: 100,
       cell: info => {
         const status = info.getValue()
         return <StatusBadge status={status} />
@@ -644,7 +674,8 @@ export function InventoryPage() {
     columnHelper.display({
       id: 'actions',
       header: '操作',
-      size: 100,
+      size: 120,
+      minSize: 100,
       cell: info => {
         const item = info.row.original
         return (
@@ -661,17 +692,63 @@ export function InventoryPage() {
   const table = useReactTable({
     data,
     columns,
-    columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    // 移除 getFilteredRowModel - 搜索在服务器端完成，不需要客户端过滤
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
+    getExpandedRowModel: getExpandedRowModel(),
+    getRowCanExpand: () => true,
+    // 禁用客户端排序 - 完全由服务端控制
+    getSortedRowModel: undefined,
+    // 列宽拖拽配置
+    columnResizeMode: 'onChange',
+    enableColumnResizing: true,
+    onColumnSizingChange: setColumnSizing,
+    // 服务端排序配置
+    manualSorting: true,
+    onSortingChange: (updater) => {
+      // 点击排序时收起所有展开的行
+      collapseAllRowsRef.current()
+
+      // 使用 useRef 来跟踪上一次的排序状态
+      const currentSorting = sortingRef.current
+
+      setSorting(prev => {
+        let newSorting = typeof updater === 'function' ? updater(prev) : updater
+
+        // 如果 incoming 是空数组（取消排序），检查当前是否正在排序这个列
+        if (newSorting.length === 0 && currentSorting.length > 0) {
+          const lastSort = currentSorting[0]
+          // 如果当前是升序，点击应该变为降序
+          if (!lastSort.desc) {
+            newSorting = [{ id: lastSort.id, desc: true }]
+          }
+          // 如果当前是降序，才允许取消
+        }
+
+        const prevStr = JSON.stringify(prev)
+        const newStr = JSON.stringify(newSorting)
+        if (prevStr !== newStr) {
+          console.log('[SORT DEBUG] onSortingChange:', newStr, '| prev:', prevStr)
+        }
+
+        // 更新 ref
+        sortingRef.current = newSorting
+        return newSorting
+      })
+      // sorting 变化时会自动触发 useEffect 调用 loadInventory
+    },
     state: {
       sorting,
-      columnFilters,
+      columnSizing,
     },
   })
+
+  // 设置 collapseAllRowsRef 的实现
+  collapseAllRowsRef.current = () => {
+    table.getRowModel().rows.forEach(row => {
+      if (row.getIsExpanded()) {
+        row.toggleExpanded(false)
+      }
+    })
+  }
 
   // 手动入库表单验证函数 - 使用 inputValidation.ts
   const validateManualAddForm = useCallback((): boolean => {
@@ -706,7 +783,7 @@ export function InventoryPage() {
       errors.quantity_bottles = quantityValidation.error || '瓶数必须大于0'
     }
 
-    // 注意：location 已改为非必填
+    // 注意：storage_location 已改为非必填
 
     setFormErrors(errors)
     return Object.keys(errors).length === 0
@@ -746,7 +823,7 @@ export function InventoryPage() {
   }, [])
 
   const handleLocationChange = useCallback((value: string) => {
-    setFormData(prev => ({ ...prev, location: value }))
+    setFormData(prev => ({ ...prev, storage_location: value }))
   }, [])
 
   const handleHazardousChange = useCallback((checked: boolean) => {
@@ -772,7 +849,7 @@ export function InventoryPage() {
         quantity_bottles: formData.quantity_bottles,
         brand: formData.brand || undefined,
         category: formData.category || undefined,
-        location: formData.location || undefined,
+        storage_location: formData.storage_location || undefined,
         is_hazardous: formData.is_hazardous,
         notes: formData.notes || undefined
       })
@@ -856,7 +933,11 @@ export function InventoryPage() {
           <Input
             placeholder="搜索名称、CAS号、位置..."
             value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
+            onChange={(e) => {
+              // 搜索时收起所有展开的行
+              collapseAllRowsRef.current()
+              setGlobalFilter(e.target.value)
+            }}
             className="pl-9 pr-8 text-base w-full inline-flex leading-none"
           />
           {globalFilter && (
@@ -878,9 +959,6 @@ export function InventoryPage() {
                 // 使用 startTransition 标记非紧急更新，避免阻塞 UI
                 startTransition(() => {
                   setFuzzySearch(checked === true)
-                  if (apiFilter) {
-                    setPage(1)
-                  }
                 })
               }}
             />
@@ -891,7 +969,6 @@ export function InventoryPage() {
             value={searchField}
             onValueChange={(value) => {
               setSearchField(value)
-              setPage(1)
             }}
           >
             <SelectTrigger className="w-30 min-h-10">
@@ -901,7 +978,7 @@ export function InventoryPage() {
               <SelectItem value="all">全部</SelectItem>
               <SelectItem value="name">名称</SelectItem>
               <SelectItem value="cas_number">CAS号</SelectItem>
-              <SelectItem value="location">位置</SelectItem>
+              <SelectItem value="storage_location">位置</SelectItem>
               <SelectItem value="brand">品牌</SelectItem>
               <SelectItem value="category">分类</SelectItem>
             </SelectContent>
@@ -983,10 +1060,10 @@ export function InventoryPage() {
 
             {/* 第三行：位置（1列）、剩余量（1列）、规格（1列） */}
             <div>
-              <Label htmlFor="edit_location" className={LABEL_STYLES.base}>库存位置</Label>
+              <Label htmlFor="edit_storage_location" className={LABEL_STYLES.base}>库存位置</Label>
               <Input
-                id="edit_location"
-                value={editFormData.location || ''}
+                id="edit_storage_location"
+                value={editFormData.storage_location || ''}
                 onChange={(e) => handleEditLocationChange(e.target.value)}
                 className={INPUT_STYLES.lg}
                 placeholder="如: A-1-1 柜"
@@ -1068,7 +1145,7 @@ export function InventoryPage() {
               />
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3 mt-6">
+          <div className="flex flex-col sm:flex-row gap-3 mt-10">
             <div className="flex items-center gap-2">
               <Button variant="destructive" size="lg" onClick={handleDeleteClick}>
                 <Trash2 className="w-4 h-4 mr-1.5" />
@@ -1158,10 +1235,10 @@ export function InventoryPage() {
 
               {/* 第三行：位置（1列）、规格（1列）、瓶数（1列） */}
               <div>
-                <Label htmlFor="add_location" className={LABEL_STYLES.base}>存放位置</Label>
+                <Label htmlFor="add_storage_location" className={LABEL_STYLES.base}>存放位置</Label>
                 <Input
-                  id="add_location"
-                  value={formData.location}
+                  id="add_storage_location"
+                  value={formData.storage_location}
                   onChange={(e) => handleLocationChange(e.target.value)}
                   placeholder="如: A-1-1 柜"
                   className={INPUT_STYLES.lg}
@@ -1249,7 +1326,7 @@ export function InventoryPage() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2 mt-6">
+            <div className="flex flex-col sm:flex-row gap-2 mt-10">
               <div className="ml-auto flex gap-2">
                 <Button
                   type="button"
@@ -1270,7 +1347,7 @@ export function InventoryPage() {
 
       {/* Table */}
       <Card className="overflow-hidden">
-        <CardHeader className="pb-4">
+        <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Package className="w-5 h-5" />
             库存列表 <span className="text-muted-foreground font-normal">(&thinsp;{globalFilter ? `${total}/${grandTotal}` : `${grandTotal}`}&thinsp;)</span>
@@ -1296,93 +1373,42 @@ export function InventoryPage() {
             </div>
           ) : (
             <>
-              <div className="px-6 rounded-md overflow-auto">
-                <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                  <thead>
-                    {table.getHeaderGroups().map(headerGroup => (
-                      <tr key={headerGroup.id} className="border-b-2 border-border">
-                        {headerGroup.headers.map(header => (
-                          <th
-                            key={header.id}
-                            className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
-                            style={{ width: header.getSize() }}
-                          >
-                            {header.isPlaceholder
-                              ? null
-                              : flexRender(header.column.columnDef.header, header.getContext())}
-                          </th>
-                        ))}
-                      </tr>
-                    ))}
-                  </thead>
-                  <tbody>
-                    {table.getRowModel().rows.map(row => (
-                      <React.Fragment key={row.id}>
-                        <tr
-                          className="border-b border-border hover:bg-muted/30 cursor-pointer transition-all"
-                          onClick={() => toggleRowExpansion(row.original.id)}
-                        >
-                          {row.getVisibleCells().map(cell => (
-                            <td
-                              key={cell.id}
-                              className="p-3 align-middle text-base"
-                              style={{ width: cell.column.getSize() }}
-                            >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </td>
-                          ))}
-                        </tr>
-                        {expandedRows[row.original.id] && (
-                          <tr key={`${row.id}-expanded`} className="border-b border-border bg-muted/20 table-row-expand-enter">
-                            <td colSpan={row.getVisibleCells().length} className="p-3 text-base overflow-hidden">
-                              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
-                                <div>
-                                  <span className="font-medium">英文名称：</span>
-                                  {row.original.english_name || '-'}
-                                </div>
-                                <div>
-                                  <span className="font-medium">别名：</span>
-                                  {row.original.alias || '-'}
-                                </div>
-                                <div>
-                                  <span className="font-medium">入库时间：</span>
-                                  {formatDate(row.original.created_at)}
-                                </div>
-                                <div>
-                                  <span className="font-medium">入库用户：</span>
-                                  {row.original.created_by_name || '-'}
-                                </div>
-                                <div>
-                                  <span className="font-medium">上次借用：</span>
-                                  {row.original.borrower_name
-                                    ? `${row.original.borrower_name} (未归还)`
-                                    : (row.original.last_borrower_name ? `${row.original.last_borrower_name} (已归还)` : '-')}
-                                </div>
-                                <div>
-                                  <span className="font-medium">备注：</span>
-                                  {row.original.notes || '-'}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="px-6">
+                <DataTable
+                  table={table}
+                  renderExpandedRow={(item) => (
+                    <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
+                      <div>
+                        <span className="font-medium">英文名称：</span>
+                        {item.english_name || '-'}
+                      </div>
+                      <div>
+                        <span className="font-medium">别名：</span>
+                        {item.alias || '-'}
+                      </div>
+                      <div>
+                        <span className="font-medium">入库时间：</span>
+                        {formatDate(item.created_at)}
+                      </div>
+                      <div>
+                        <span className="font-medium">入库用户：</span>
+                        {item.created_by_name || '-'}
+                      </div>
+                      <div>
+                        <span className="font-medium">上次借用：</span>
+                        {item.borrower_name
+                          ? `${item.borrower_name} (未归还)`
+                          : (item.last_borrower_name ? `${item.last_borrower_name} (已归还)` : '-')}
+                      </div>
+                      <div>
+                        <span className="font-medium">备注：</span>
+                        {item.notes || '-'}
+                      </div>
+                    </div>
+                  )}
+                  scrollHeight={tableHeight}
+                />
               </div>
-              {totalPages > 1 && (
-                <div className="px-6 flex items-center justify-between pt-4">
-                  <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
-                  <Pagination
-                    currentPage={page}
-                    totalPages={totalPages}
-                    pageSize={pageSize}
-                    onPageChange={setPage}
-                    onPageSizeChange={handlePageSizeChange}
-                  />
-                </div>
-              )}
             </>
           )}
         </CardContent>

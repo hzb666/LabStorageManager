@@ -7,6 +7,7 @@ the path parameter capturing strings like "export", "dashboard", etc.
 """
 import csv
 import io
+from pypinyin import lazy_pinyin
 import logging
 import os
 import tempfile
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, case
 
 from app.database import get_db
 from app.models.inventory import (
@@ -34,6 +35,18 @@ from app.services.internal_code import generate_internal_code
 from app.services.spec_utils import parse_specification, SpecificationError
 
 logger = logging.getLogger(__name__)
+
+
+def _to_pinyin_sort_key(text: str) -> str:
+    """
+    将文本转换为拼音排序键
+    用于中文按拼音排序，将中文转换为对应的拼音字母序列
+    """
+    if not text:
+        return ''
+    # 使用 lazpinyin 获取拼音首字母，风格为普通风格（不带声调）
+    pinyin_list = lazy_pinyin(text, style=0)  # Style 0 = NORMAL
+    return ''.join(pinyin_list)
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -284,7 +297,7 @@ def check_cas_inventory(
             {
                 "id": item.id,
                 "name": item.name,
-                "location": item.location,
+                "storage_location": item.storage_location,
                 "remaining_quantity": item.remaining_quantity,
                 "unit": item.unit,
                 "status": item.status,
@@ -368,7 +381,7 @@ def export_inventory(
             item.alias or "",
             item.category or "",
             item.brand or "",
-            item.location or "",
+            item.storage_location or "",
             item.initial_quantity,
             item.remaining_quantity,
             item.unit,
@@ -425,7 +438,7 @@ def manual_add_inventory(
             alias=item_data.alias,
             category=item_data.category,
             brand=item_data.brand,
-            location=item_data.location,
+            storage_location=item_data.storage_location,
             initial_quantity=per_bottle_value,
             remaining_quantity=per_bottle_value,
             unit=unit,
@@ -492,9 +505,9 @@ def get_pending_stockin(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get items pending location assignment (temporary keeper = current user)."""
+    """Get items pending storage_location assignment (temporary keeper = current user)."""
     statement = select(Inventory).where(
-        Inventory.location is None,
+        Inventory.storage_location is None,
         Inventory.temporary_keeper_id == current_user.id,
     ).order_by(Inventory.created_at.desc())
 
@@ -528,7 +541,7 @@ def get_import_template():
 @router.post("/import")
 def import_inventory(
     file: UploadFile = File(...),
-    default_location: Optional[str] = None,
+    default_storage_location: Optional[str] = None,
     default_is_hazardous: bool = False,
     admin_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -547,7 +560,7 @@ def import_inventory(
         result = import_inventory_from_excel(
             db=db,
             file_path=tmp_file_path,
-            default_location=default_location,
+            default_storage_location=default_storage_location,
             default_is_hazardous=default_is_hazardous,
             user_id=admin_user.id,
         )
@@ -575,21 +588,23 @@ def import_inventory(
 @router.get("/")
 def list_inventory(
     skip: int = 0,
-    limit: int = 50,
+    limit: int = 0,  # 0 表示不分页，返回全部数据
     status_filter: Optional[InventoryStatus] = None,
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
     search: Optional[str] = None,
     search_field: Optional[str] = None,  # 精确搜索指定字段
     fuzzy: bool = False,                  # 模糊搜索（忽略空格和连字符）
+    sort_by: Optional[str] = None,       # 排序字段
+    sort_order: Optional[str] = 'desc',   # 排序方向：asc 或 desc
     db: Session = Depends(get_db),
 ):
     """List inventory with optional filters and pagination"""
-    # 生成缓存key（包含所有搜索参数，包括分页）
-    cache_key = f"list:{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}"
+    # 生成缓存key（包含所有搜索参数，包括分页和排序）
+    cache_key = f"list:{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
     
-    # 尝试从缓存获取（仅当是第一页时）
-    if skip == 0:
+    # 尝试从缓存获取（仅当是不分页查询或第一页时）
+    if limit == 0 or skip == 0:
         cached = _get_cached_result(cache_key)
         if cached is not None:
             # 返回缓存结果，但更新分页参数
@@ -633,7 +648,7 @@ def list_inventory(
             base = base.where(
                 (norm_field(Inventory.cas_number).ilike(f"%{search_normalized}%")) |
                 (norm_field(Inventory.name).ilike(f"%{search_normalized}%")) |
-                (norm_field(Inventory.location).ilike(f"%{search_normalized}%")) |
+                (norm_field(Inventory.storage_location).ilike(f"%{search_normalized}%")) |
                 (norm_field(Inventory.brand).ilike(f"%{search_normalized}%")) |
                 (norm_field(Inventory.category).ilike(f"%{search_normalized}%"))
             )
@@ -645,7 +660,7 @@ def list_inventory(
                 field_map = {
                     'name': Inventory.name,
                     'cas_number': Inventory.cas_number,
-                    'location': Inventory.location,
+                    'storage_location': Inventory.storage_location,
                     'brand': Inventory.brand,
                     'category': Inventory.category,
                 }
@@ -656,7 +671,7 @@ def list_inventory(
                     base = base.where(
                         (Inventory.name.ilike(search_pattern)) |
                         (Inventory.cas_number.ilike(search_pattern)) |
-                        (Inventory.location.ilike(search_pattern)) |
+                        (Inventory.storage_location.ilike(search_pattern)) |
                         (Inventory.brand.ilike(search_pattern)) |
                         (Inventory.category.ilike(search_pattern))
                     )
@@ -665,13 +680,77 @@ def list_inventory(
                 base = base.where(
                     (Inventory.name.ilike(search_pattern)) |
                     (Inventory.cas_number.ilike(search_pattern)) |
-                    (Inventory.location.ilike(search_pattern)) |
+                    (Inventory.storage_location.ilike(search_pattern)) |
                     (Inventory.brand.ilike(search_pattern)) |
                     (Inventory.category.ilike(search_pattern))
                 )
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
-    items = db.exec(base.order_by(Inventory.created_at.desc()).offset(skip).limit(limit)).all()
+    
+    # 构建排序表达式
+    # 支持的排序字段映射
+    # 使用 CASE 表达式处理 initial_quantity 为 0 的情况，避免除零错误
+    from sqlmodel import case as sql_case
+    
+    # 计算剩余百分比（处理除零情况）
+    remaining_percent_expr = sql_case(
+        (Inventory.initial_quantity > 0, Inventory.remaining_quantity * 1.0 / Inventory.initial_quantity),
+        else_=0
+    )
+    
+    sort_field_map = {
+        'cas_number': Inventory.cas_number,
+        'name': Inventory.name,
+        'category': Inventory.category,
+        'storage_location': Inventory.storage_location,
+        'brand': Inventory.brand,
+        'remaining_quantity': Inventory.remaining_quantity,
+        'remaining_percent': remaining_percent_expr,
+        'initial_quantity': Inventory.initial_quantity,
+        'status': Inventory.status,
+        'created_at': Inventory.created_at,
+        'updated_at': Inventory.updated_at,
+    }
+    
+    # 确定排序字段和方向
+    order_column = sort_field_map.get(sort_by, Inventory.created_at)
+    order_direction = sort_order.lower() if sort_order else 'desc'
+    
+    # 中文拼音排序字段列表
+    pinyin_sort_fields = {'name', 'category', 'brand', 'alias'}
+    
+    # 判断是否需要使用拼音排序
+    use_pinyin_sort = sort_by in pinyin_sort_fields
+    
+    logger.info(f"[SORT DEBUG] sort_by={sort_by}, sort_order={sort_order}, order_column={order_column}, order_direction={order_direction}, use_pinyin_sort={use_pinyin_sort}")
+    
+    if use_pinyin_sort:
+        # 中文拼音排序：先按拼音键排序
+        pinyin_key_field = f"{sort_by}_pinyin"
+        logger.info(f"[PINYIN SORT] Using pinyin sorting for field: {sort_by}")
+    
+    if order_direction == 'asc':
+        order_expr = order_column.asc()
+    else:
+        order_expr = order_column.desc()
+    
+    # 如果 limit 为 0，不使用分页，返回全部数据
+    # 如果需要拼音排序，先获取全部数据再在 Python 中排序
+    if limit == 0 or use_pinyin_sort:
+        items = db.exec(base.order_by(order_expr)).all()
+        if use_pinyin_sort:
+            # Python 端拼音排序
+            logger.info(f"[PINYIN SORT] Performing Python-side pinyin sorting for field: {sort_by}")
+            reverse = order_direction == 'desc'
+            # 使用 pypinyin 转换键进行排序
+            items = sorted(items, key=lambda x: _to_pinyin_sort_key(getattr(x, sort_by) or ''), reverse=reverse)
+            # 如果有 limit，应用分页
+            if limit > 0:
+                items = items[skip:skip + limit]
+    elif limit > 0:
+        items = db.exec(base.order_by(order_expr).offset(skip).limit(limit)).all()
+    else:
+        items = db.exec(base.order_by(order_expr)).all()
 
     result = {
         "data": [
@@ -683,8 +762,8 @@ def list_inventory(
         "limit": limit,
     }
     
-    # 缓存第一页结果
-    if skip == 0:
+    # 缓存查询结果（不分页或第一页时缓存）
+    if limit == 0 or skip == 0:
         # 缓存时不包含分页参数
         cache_data = {
             "data": result["data"],

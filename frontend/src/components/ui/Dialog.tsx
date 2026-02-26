@@ -51,7 +51,7 @@ export function DialogContent({ children, className }: DialogContentProps) {
 }
 
 export function DialogHeader({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("mb-4", className)}>{children}</div>
+  return <div className={cn(className)}>{children}</div>
 }
 
 export function DialogTitle({ children, className }: { children: React.ReactNode; className?: string }) {

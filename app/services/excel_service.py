@@ -13,6 +13,43 @@ from app.services.internal_code import generate_internal_code
 from datetime import datetime, timezone
 
 
+def _parse_boolean(value, default: bool = False) -> bool:
+    """
+    Parse boolean value from various input types.
+    Handles: true/false, TRUE/FALSE, 0/1, True/False, empty strings, None, NaN
+    
+    Args:
+        value: The value to parse
+        default: Default value if parsing fails or value is empty/null
+    
+    Returns:
+        Boolean value
+    """
+    # Handle empty/null values (including NaN from pandas)
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return default
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped == '':
+            return default
+        # Parse string boolean representations
+        lower = stripped.lower()
+        if lower in ('false', '0', 'no', 'n'):
+            return False
+        if lower in ('true', '1', 'yes', 'y'):
+            return True
+        # Unknown string - return default
+        return default
+    # Handle numeric types (but not NaN which is handled above)
+    if isinstance(value, (int, float)):
+        return bool(value)
+    # Handle boolean type
+    if isinstance(value, bool):
+        return value
+    # Fallback
+    return default
+
+
 class ExcelImportError(Exception):
     """Custom exception for Excel import errors"""
     def __init__(self, row: int, message: str):
@@ -137,7 +174,7 @@ def validate_row_data(row: dict, row_num: int) -> Tuple[bool, Optional[str]]:
 def import_inventory_from_excel(
     db: Session,
     file_path: str,
-    default_location: Optional[str] = None,
+    default_storage_location: Optional[str] = None,
     default_is_hazardous: bool = False,
     user_id: int = 1
 ) -> dict:
@@ -153,7 +190,7 @@ def import_inventory_from_excel(
     - brand: 品牌/厂商 (optional)
     - specification: 规格，如 "500ml" (required)
     - initial_quantity: 初始数量 (required)
-    - location: 存放位置 (optional, uses default if not provided)
+    - storage_location: 存放位置 (optional, uses default if not provided)
     - is_hazardous: 是否危险品 (optional, defaults to False)
     - price: 单价 (optional)
     - notes: 备注 (optional)
@@ -184,7 +221,7 @@ def import_inventory_from_excel(
         'brand': ['brand', '品牌', '厂商', 'manufacturer'],
         'specification': ['specification', '规格', 'spec'],
         'remaining_quantity': ['remaining_quantity', '剩余数量', '剩余量'],
-        'location': ['location', '位置', '存放位置'],
+        'storage_location': ['storage_location', 'location', '位置', '存放位置'],
         'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
         'notes': ['notes', '备注', 'remark'],
         'created_at': ['created_at', '入库时间', '创建时间', 'stock_in_date'],
@@ -231,12 +268,12 @@ def import_inventory_from_excel(
                     remaining_qty = initial_quantity
             
             # Get or use default values
-            location = str(row.get('location', '')).strip() if pd.notna(row.get('location')) else default_location
+            storage_location = str(row.get('storage_location', '')).strip() if pd.notna(row.get('storage_location')) else default_storage_location
             alias = str(row.get('alias', '')).strip() if pd.notna(row.get('alias')) else None
             english_name = str(row.get('english_name', '')).strip() if pd.notna(row.get('english_name')) else None
             category = str(row.get('category', '')).strip() if pd.notna(row.get('category')) else None
             brand = str(row.get('brand', '')).strip() if pd.notna(row.get('brand')) else None
-            is_hazardous = bool(row.get('is_hazardous', default_is_hazardous)) if pd.notna(row.get('is_hazardous')) else default_is_hazardous
+            is_hazardous = _parse_boolean(row.get('is_hazardous'), default_is_hazardous)
             notes = str(row.get('notes', '')).strip() if pd.notna(row.get('notes')) else None
             
             # Parse created_at (custom stock-in date)
@@ -281,7 +318,7 @@ def import_inventory_from_excel(
                 alias=alias,
                 category=category,
                 brand=brand,
-                location=location,
+                storage_location=storage_location,
                 initial_quantity=initial_quantity,
                 remaining_quantity=remaining_qty,
                 unit=unit,
@@ -367,7 +404,7 @@ def generate_import_template() -> dict:
                 "description": "剩余数量（可选），不填则默认等于规格中的数量"
             },
             {
-                "name": "location",
+                "name": "storage_location",
                 "label": "存放位置",
                 "required": False,
                 "description": "例如 302冰箱第二层、A-1-1 柜"

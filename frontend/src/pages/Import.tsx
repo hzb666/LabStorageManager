@@ -114,8 +114,8 @@ export function ImportPage() {
       if (c.name === 'brand') return 'Sigma'
       if (c.name === 'specification') return '500ml'
       if (c.name === 'remaining_quantity') return ''  // optional
-      if (c.name === 'location') return '2-6-6-1'
-      if (c.name === 'is_hazardous') return 'false'
+      if (c.name === 'storage_location') return '2-6-6-1'
+      if (c.name === 'is_hazardous') return ''  // 空白让用户选择填写 true/false/0/1
       if (c.name === 'notes') return ''
       return ''
     }).join(',')
