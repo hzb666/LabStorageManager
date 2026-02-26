@@ -408,7 +408,7 @@ export function ReagentOrdersPage() {
         const status = info.getValue()
         return (
           <span className={cn(
-            'px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap',
+            'px-2.5 py-1 text-sm rounded-full font-medium whitespace-nowrap',
             STATUS_STYLES[status] || 'bg-muted'
           )}>
             {STATUS_MAPPING[status] || status}
@@ -430,7 +430,7 @@ export function ReagentOrdersPage() {
                 <Button 
                   size="sm" 
                   variant="default"
-                  className="h-7 text-xs px-2"
+                  className="h-7 text-sm px-2"
                   onClick={() => handleApprove(order.id)}
                 >
                   审批
@@ -438,7 +438,7 @@ export function ReagentOrdersPage() {
                 <Button 
                   size="sm" 
                   variant="destructive"
-                  className="h-7 text-xs px-2"
+                  className="h-7 text-sm px-2"
                   onClick={() => handleReject(order.id)}
                 >
                   驳回
@@ -449,7 +449,7 @@ export function ReagentOrdersPage() {
               <Button 
                 size="sm" 
                 variant="secondary"
-                className="h-7 text-xs px-2"
+                className="h-7 text-sm px-2"
                 onClick={() => handleConfirmArrival(order.id)}
               >
                 确认到货
@@ -459,7 +459,7 @@ export function ReagentOrdersPage() {
               <Button 
                 size="sm" 
                 variant="outline"
-                className="h-7 text-xs px-2"
+                className="h-7 text-sm px-2"
                 disabled={order.order_reason === 'common_public'}
                 title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库' : undefined}
                 onClick={() => handleStockIn(order.id)}
@@ -540,7 +540,7 @@ export function ReagentOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.cas_number && 'border-destructive')}
                 />
                 {formErrors.cas_number && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.cas_number}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.cas_number}</p>
                 )}
                 {casWarning && casWarning.has_warning && (
                   <p className="text-sm text-orange-500 mt-1 flex items-center gap-1">
@@ -551,7 +551,7 @@ export function ReagentOrdersPage() {
                   </p>
                 )}
                 {casLoading && (
-                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     检查中...
                   </p>
@@ -571,7 +571,7 @@ export function ReagentOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.name && 'border-destructive')}
                 />
                 {formErrors.name && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.name}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.name}</p>
                 )}
               </div>
 
@@ -588,7 +588,7 @@ export function ReagentOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.english_name && 'border-destructive')}
                 />
                 {formErrors.english_name && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.english_name}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.english_name}</p>
                 )}
               </div>
 
@@ -617,7 +617,7 @@ export function ReagentOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.category && 'border-destructive')}
                 />
                 {formErrors.category && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.category}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.category}</p>
                 )}
               </div>
 
@@ -634,7 +634,7 @@ export function ReagentOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.brand && 'border-destructive')}
                 />
                 {formErrors.brand && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.brand}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.brand}</p>
                 )}
               </div>
 
@@ -651,7 +651,7 @@ export function ReagentOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.specification && 'border-destructive')}
                 />
                 {formErrors.specification && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.specification}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.specification}</p>
                 )}
               </div>
 
@@ -669,7 +669,7 @@ export function ReagentOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.quantity && 'border-destructive')}
                 />
                 {formErrors.quantity && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.quantity}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.quantity}</p>
                 )}
               </div>
 
@@ -689,7 +689,7 @@ export function ReagentOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.price && 'border-destructive')}
                 />
                 {formErrors.price && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.price}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.price}</p>
                 )}
               </div>
 
@@ -715,7 +715,7 @@ export function ReagentOrdersPage() {
                   </SelectContent>
                 </Select>
                 {formErrors.order_reason && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.order_reason}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.order_reason}</p>
                 )}
               </div>
 

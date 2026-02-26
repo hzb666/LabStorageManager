@@ -32,6 +32,9 @@ import {
   Pencil,
   Trash2
 } from 'lucide-react'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { HazardousIcon } from '@/components/ui/HazardousIcon'
+import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 
 // 后端验证错误类型
 interface ValidationError {
@@ -77,18 +80,9 @@ interface InventoryItem {
 
 const columnHelper = createColumnHelper<InventoryItem>()
 
-// Status styles - extracted as constants to avoid recreation
-const STATUS_STYLES: Record<string, string> = {
-  in_stock: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-  borrowed: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-  consumed: 'bg-muted text-muted-foreground',
-}
+// Status styles - 使用 StatusBadge 组件
 
-const STATUS_LABELS: Record<string, string> = {
-  in_stock: '在库',
-  borrowed: '借用',
-  consumed: '用完',
-}
+// 状态标签映射 - 使用 StatusBadge 组件中的 STATUS_LABELS
 
 // Highlight component for search results - optimized with memo and regex caching
 // 修复：模糊搜索时也正确高亮匹配的内容
@@ -96,9 +90,9 @@ const STATUS_LABELS: Record<string, string> = {
 const HighlightText = React.memo(function HighlightText({ text, highlight, fuzzy }: { text: string; highlight: string; fuzzy?: boolean }) {
   // 早期返回前先创建正则表达式（避免 React Hook 规则违反）
   const regex = React.useMemo(() => new RegExp(`(${highlight})`, 'gi'), [highlight])
-  
+
   if (!highlight || !text) return <>{text}</>
-  
+
   // 如果模糊搜索，先检查标准化后是否匹配
   if (fuzzy) {
     // 标准化：移除所有空格类字符、连字符、下划线
@@ -110,14 +104,14 @@ const HighlightText = React.memo(function HighlightText({ text, highlight, fuzzy
       .replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D]+/g, '')  // 移除所有空格字符
       .replace(/-/g, '')
       .replace(/_/g, '')
-    
+
     if (normalizedText.toLowerCase().includes(normalizedHighlight.toLowerCase())) {
       // 标准化后匹配成功，高亮整个文本
       return <span className="bg-yellow-200 dark:bg-yellow-800/50">{text}</span>
     }
     return <>{text}</>
   }
-  
+
   // 普通搜索：直接高亮
   const parts = text.split(regex)
   return (
@@ -135,11 +129,11 @@ const HighlightText = React.memo(function HighlightText({ text, highlight, fuzzy
 
 // Action buttons component - defined outside to avoid recreation
 // 优化：状态移至组件内部管理，避免父组件重渲染导致的不必要更新
-const ActionButtons = React.memo(function ActionButtons({ 
-  item, 
+const ActionButtons = React.memo(function ActionButtons({
+  item,
   onEdit,
-  onBorrowSuccess 
-}: { 
+  onBorrowSuccess
+}: {
   item: InventoryItem
   onEdit: () => void
   onBorrowSuccess: () => void
@@ -148,12 +142,12 @@ const ActionButtons = React.memo(function ActionButtons({
   const [isConfirming, setIsConfirming] = useState(false)
   // 内部管理loading状态
   const [isLoading, setIsLoading] = useState(false)
-  
+
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    
+
     if (isLoading) return // 防止重复点击
-    
+
     if (!isConfirming) {
       // 第一次点击 - 进入确认状态
       setIsConfirming(true)
@@ -174,14 +168,14 @@ const ActionButtons = React.memo(function ActionButtons({
       }
     }
   }
-  
+
   // 失去焦点时取消确认状态
   const handleBlur = () => {
     if (isConfirming && !isLoading) {
       setIsConfirming(false)
     }
   }
-  
+
   return (
     <div className="flex items-center gap-1">
       <Button
@@ -202,8 +196,8 @@ const ActionButtons = React.memo(function ActionButtons({
           size="sm"
           className={cn(
             "h-8 text-sm/4 px-3",
-            isConfirming 
-              ? "bg-destructive text-destructive-foreground hover:bg-destructive/70 dark:hover:bg-destructive/80" 
+            isConfirming
+              ? "bg-destructive text-destructive-foreground hover:bg-destructive/70 dark:hover:bg-destructive/80"
               : "bg-primary hover:bg-primary/80 border-0",
             isLoading && "opacity-50 cursor-wait"
           )}
@@ -357,15 +351,15 @@ export function InventoryPage() {
   // Update display filter immediately (for highlighting), but API filter only after debounce
   useEffect(() => {
     setDisplayFilter(globalFilter)
-    
+
     // 清除之前的定时器
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current)
     }
-    
+
     // 增加当前请求版本号
     const currentVersion = ++requestVersionRef.current
-    
+
     // 300ms 防抖延迟
     debounceTimerRef.current = setTimeout(() => {
       // 只有当前版本是最新的才发送请求
@@ -386,7 +380,7 @@ export function InventoryPage() {
   // 使用请求版本号确保只处理最新请求的响应
   const loadInventory = useCallback(async () => {
     const requestVersion = ++requestVersionRef.current
-    
+
     // 只在没有数据时显示加载状态，有数据时保持旧数据可见
     if (data.length === 0) {
       setLoading(true)
@@ -406,17 +400,17 @@ export function InventoryPage() {
       }
 
       const response = await inventoryAPI.list(params)
-      
+
       // 检查是否为最新请求，防止旧请求覆盖新数据
       if (requestVersion !== requestVersionRef.current) {
         console.log('Request canceled:', requestVersion, 'current:', requestVersionRef.current)
         return
       }
-      
+
       const result = response.data
       setData(result.data || [])
       setTotal(result.total || 0)
-      
+
       // 如果没有搜索条件且状态为全部，更新库存总数
       if (!apiFilter && statusFilter === 'all') {
         setGrandTotal(result.total || 0)
@@ -450,13 +444,13 @@ export function InventoryPage() {
   // 编辑表单验证函数 - 使用 inputValidation.ts
   const validateEditForm = useCallback((): boolean => {
     const errors: Record<string, string> = {}
-    
+
     // 名称验证：必填
     const nameValidation = validateRequired(editFormData.name, '名称')
     if (!nameValidation.isValid) {
       errors.name = nameValidation.error || '名称不能为空'
     }
-    
+
     // 规格验证：必填 + 格式
     const specValidation = validateRequired(editFormData.specification, '规格')
     if (!specValidation.isValid) {
@@ -467,7 +461,7 @@ export function InventoryPage() {
         errors.specification = specFormatValidation.error || '规格格式无效'
       }
     }
-    
+
     // 剩余量验证：非负数
     const remainingValidation = validateNonNegativeNumber(editFormData.remaining_quantity, '剩余量')
     if (!remainingValidation.isValid) {
@@ -476,22 +470,22 @@ export function InventoryPage() {
       // 额外检查：不能超过初始量
       errors.remaining_quantity = '剩余量不能超过初始量'
     }
-    
+
     setEditFormErrors(errors)
     return Object.keys(errors).length === 0
   }, [editFormData])
 
   const handleEditSave = async () => {
     if (!editingItem) return
-    
+
     // 使用验证函数验证表单
     if (!validateEditForm()) return
-    
+
     try {
       // 如果剩余量为0，自动设置状态为用完
-      const status = editFormData.remaining_quantity === 0 ? 'consumed' : 
-                     (editFormData.remaining_quantity < editFormData.initial_quantity ? 'in_stock' : 'in_stock')
-      
+      const status = editFormData.remaining_quantity === 0 ? 'consumed' :
+        (editFormData.remaining_quantity < editFormData.initial_quantity ? 'in_stock' : 'in_stock')
+
       await inventoryAPI.update(editingItem.id, {
         name: editFormData.name || undefined,
         english_name: editFormData.english_name || undefined,
@@ -514,7 +508,7 @@ export function InventoryPage() {
 
   const handleDeleteClick = async () => {
     if (!editingItem) return
-    
+
     if (!deleteConfirm) {
       // 第一次点击，进入确认状态
       setDeleteConfirm(true)
@@ -583,9 +577,7 @@ export function InventoryPage() {
       size: 160,
       cell: info => (
         <div className="flex items-center gap-1.5 break-all">
-          {info.row.original.is_hazardous && (
-            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
-          )}
+          <HazardousIcon isHazardous={info.row.original.is_hazardous} />
           <span>
             <HighlightText text={info.getValue() || ''} highlight={displayFilter} fuzzy={fuzzySearch} />
           </span>
@@ -620,23 +612,12 @@ export function InventoryPage() {
         const remaining = info.getValue()
         const initial = info.row.original.initial_quantity
         const unit = info.row.original.unit
-        const percentage = initial > 0 ? (remaining / initial) * 100 : 0
         return (
-          <div className="break-all">
-            <span className={cn(
-              percentage < 20 && 'text-destructive font-medium'
-            )}>
-              {remaining}/{initial} {unit}
-            </span>
-            {percentage < 20 && (
-              <div className="w-16 h-1.5 bg-destructive/20 rounded mt-1">
-                <div
-                  className="h-full bg-destructive rounded transition-all"
-                  style={{ width: `${percentage}%` }}
-                />
-              </div>
-            )}
-          </div>
+          <QuantityIndicator
+            remaining={remaining}
+            initial={initial}
+            unit={unit}
+          />
         )
       },
     }),
@@ -656,14 +637,7 @@ export function InventoryPage() {
       size: 70,
       cell: info => {
         const status = info.getValue()
-        return (
-          <span className={cn(
-            'px-2.5 py-2 text-xs rounded-lg font-medium whitespace-nowrap',
-            STATUS_STYLES[status] || 'bg-muted'
-          )}>
-            {STATUS_LABELS[status] || status}
-          </span>
-        )
+        return <StatusBadge status={status} />
       },
     }),
     // 操作
@@ -702,19 +676,19 @@ export function InventoryPage() {
   // 手动入库表单验证函数 - 使用 inputValidation.ts
   const validateManualAddForm = useCallback((): boolean => {
     const errors: Record<string, string> = {}
-    
+
     // CAS号验证：必填 + 格式 + 校验码
     const casValidation = validateCASNumber(formData.cas_number)
     if (!casValidation.isValid) {
       errors.cas_number = casValidation.error || 'CAS号格式无效'
     }
-    
+
     // 名称验证：必填
     const nameValidation = validateRequired(formData.name, '试剂名称')
     if (!nameValidation.isValid) {
       errors.name = nameValidation.error || '试剂名称不能为空'
     }
-    
+
     // 规格验证：必填 + 格式
     const specValidation = validateRequired(formData.specification, '规格')
     if (!specValidation.isValid) {
@@ -725,15 +699,15 @@ export function InventoryPage() {
         errors.specification = specFormatValidation.error || '规格格式无效'
       }
     }
-    
+
     // 瓶数验证：正数
     const quantityValidation = validatePositiveNumber(formData.quantity_bottles, '瓶数')
     if (!quantityValidation.isValid) {
       errors.quantity_bottles = quantityValidation.error || '瓶数必须大于0'
     }
-    
+
     // 注意：location 已改为非必填
-    
+
     setFormErrors(errors)
     return Object.keys(errors).length === 0
   }, [formData])
@@ -969,7 +943,7 @@ export function InventoryPage() {
                 placeholder="如: 乙醇"
               />
               {editFormErrors.name && (
-                <p className="text-xs text-destructive mt-1">{editFormErrors.name}</p>
+                <p className="text-sm text-destructive mt-1">{editFormErrors.name}</p>
               )}
             </div>
             {/* 不可编辑输入框样式 */}
@@ -1030,7 +1004,7 @@ export function InventoryPage() {
                 className={cn(INPUT_STYLES.lg, editFormErrors.remaining_quantity && 'border-destructive')}
               />
               {editFormErrors.remaining_quantity && (
-                <p className="text-xs text-destructive mt-1">{editFormErrors.remaining_quantity}</p>
+                <p className="text-sm text-destructive mt-1">{editFormErrors.remaining_quantity}</p>
               )}
             </div>
             <div>
@@ -1045,7 +1019,7 @@ export function InventoryPage() {
                 placeholder="如: 500ml"
               />
               {editFormErrors.specification && (
-                <p className="text-xs text-destructive mt-1">{editFormErrors.specification}</p>
+                <p className="text-sm text-destructive mt-1">{editFormErrors.specification}</p>
               )}
             </div>
 
@@ -1101,7 +1075,7 @@ export function InventoryPage() {
                 {deleteConfirm ? '确认删除' : '删除'}
               </Button>
               {deleteConfirm && (
-                <span className="text-xs text-destructive">再次点击确认删除</span>
+                <span className="text-sm text-destructive">再次点击确认删除</span>
               )}
             </div>
             <div className="ml-auto flex gap-2">
@@ -1137,7 +1111,7 @@ export function InventoryPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.name && 'border-destructive')}
                 />
                 {formErrors.name && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.name}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.name}</p>
                 )}
               </div>
 
@@ -1153,7 +1127,7 @@ export function InventoryPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.cas_number && 'border-destructive')}
                 />
                 {formErrors.cas_number && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.cas_number}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.cas_number}</p>
                 )}
               </div>
 
@@ -1206,7 +1180,7 @@ export function InventoryPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.specification && 'border-destructive')}
                 />
                 {formErrors.specification && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.specification}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.specification}</p>
                 )}
               </div>
 
@@ -1223,7 +1197,7 @@ export function InventoryPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.quantity_bottles && 'border-destructive')}
                 />
                 {formErrors.quantity_bottles && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.quantity_bottles}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.quantity_bottles}</p>
                 )}
               </div>
 
@@ -1324,78 +1298,78 @@ export function InventoryPage() {
             <>
               <div className="px-6 rounded-md overflow-auto">
                 <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                    <thead>
-                      {table.getHeaderGroups().map(headerGroup => (
-                        <tr key={headerGroup.id} className="border-b-2 border-border">
-                          {headerGroup.headers.map(header => (
-                            <th 
-                              key={header.id} 
-                              className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
-                              style={{ width: header.getSize() }}
+                  <thead>
+                    {table.getHeaderGroups().map(headerGroup => (
+                      <tr key={headerGroup.id} className="border-b-2 border-border">
+                        {headerGroup.headers.map(header => (
+                          <th
+                            key={header.id}
+                            className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                            style={{ width: header.getSize() }}
+                          >
+                            {header.isPlaceholder
+                              ? null
+                              : flexRender(header.column.columnDef.header, header.getContext())}
+                          </th>
+                        ))}
+                      </tr>
+                    ))}
+                  </thead>
+                  <tbody>
+                    {table.getRowModel().rows.map(row => (
+                      <React.Fragment key={row.id}>
+                        <tr
+                          className="border-b border-border hover:bg-muted/30 cursor-pointer transition-all"
+                          onClick={() => toggleRowExpansion(row.original.id)}
+                        >
+                          {row.getVisibleCells().map(cell => (
+                            <td
+                              key={cell.id}
+                              className="p-3 align-middle text-base"
+                              style={{ width: cell.column.getSize() }}
                             >
-                              {header.isPlaceholder
-                                ? null
-                                : flexRender(header.column.columnDef.header, header.getContext())}
-                            </th>
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
                           ))}
                         </tr>
-                      ))}
-                    </thead>
-                    <tbody>
-                      {table.getRowModel().rows.map(row => (
-                        <React.Fragment key={row.id}>
-                          <tr 
-                            className="border-b border-border hover:bg-muted/30 cursor-pointer transition-all"
-                            onClick={() => toggleRowExpansion(row.original.id)}
-                          >
-                            {row.getVisibleCells().map(cell => (
-                              <td 
-                                key={cell.id} 
-                                className="p-3 align-middle text-base"
-                                style={{ width: cell.column.getSize() }}
-                              >
-                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                              </td>
-                            ))}
-                          </tr>
-                          {expandedRows[row.original.id] && (
-                            <tr key={`${row.id}-expanded`} className="border-b border-border bg-muted/20 table-row-expand-enter">
-                              <td colSpan={row.getVisibleCells().length} className="p-3 text-base overflow-hidden">
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
-                                  <div>
-                                    <span className="font-medium">英文名称：</span>
-                                    {row.original.english_name || '-'}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">别名：</span>
-                                    {row.original.alias || '-'}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">入库时间：</span>
-                                    {formatDate(row.original.created_at)}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">入库用户：</span>
-                                    {row.original.created_by_name || '-'}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">上次借用：</span>
-                                    {row.original.borrower_name 
-                                      ? `${row.original.borrower_name} (未归还)` 
-                                      : (row.original.last_borrower_name ? `${row.original.last_borrower_name} (已归还)` : '-')}
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">备注：</span>
-                                    {row.original.notes || '-'}
-                                  </div>
+                        {expandedRows[row.original.id] && (
+                          <tr key={`${row.id}-expanded`} className="border-b border-border bg-muted/20 table-row-expand-enter">
+                            <td colSpan={row.getVisibleCells().length} className="p-3 text-base overflow-hidden">
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
+                                <div>
+                                  <span className="font-medium">英文名称：</span>
+                                  {row.original.english_name || '-'}
                                 </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      ))}
-                    </tbody>
-                  </table>
+                                <div>
+                                  <span className="font-medium">别名：</span>
+                                  {row.original.alias || '-'}
+                                </div>
+                                <div>
+                                  <span className="font-medium">入库时间：</span>
+                                  {formatDate(row.original.created_at)}
+                                </div>
+                                <div>
+                                  <span className="font-medium">入库用户：</span>
+                                  {row.original.created_by_name || '-'}
+                                </div>
+                                <div>
+                                  <span className="font-medium">上次借用：</span>
+                                  {row.original.borrower_name
+                                    ? `${row.original.borrower_name} (未归还)`
+                                    : (row.original.last_borrower_name ? `${row.original.last_borrower_name} (已归还)` : '-')}
+                                </div>
+                                <div>
+                                  <span className="font-medium">备注：</span>
+                                  {row.original.notes || '-'}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
               </div>
               {totalPages > 1 && (
                 <div className="px-6 flex items-center justify-between pt-4">

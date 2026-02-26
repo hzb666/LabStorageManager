@@ -99,7 +99,7 @@ export function Layout() {
             {/* 功能组 */}
             <div className="mb-4">
               {!sidebarCollapsed && (
-                <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">功能</p>
+                <p className="px-3 mb-2 text-sm font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">功能</p>
               )}
                 <div className="space-y-1">
                   {filteredNavItems.filter(item => item.group === '功能').map((item) => {
@@ -138,7 +138,7 @@ export function Layout() {
             {/* 管理组 */}
             <div className="pt-2">
               {!sidebarCollapsed && (
-                <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">管理</p>
+                <p className="px-3 mb-2 text-sm font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">管理</p>
               )}
                 <div className="space-y-1">
                   {filteredNavItems.filter(item => item.group === '管理').map((item) => {
@@ -270,7 +270,7 @@ export function Layout() {
             <nav className="flex-1 space-y-4 p-4 overflow-y-auto">
               {/* 功能组 */}
               <div>
-                <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">功能</p>
+                <p className="px-3 mb-2 text-sm font-medium text-muted-foreground uppercase tracking-wider">功能</p>
                 <div className="space-y-1">
                   {filteredNavItems.filter(item => item.group === '功能').map((item) => {
                     const isActive = location.pathname === item.href
@@ -296,7 +296,7 @@ export function Layout() {
               </div>
               {/* 管理组 */}
               <div>
-                <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">管理</p>
+                <p className="px-3 mb-2 text-sm font-medium text-muted-foreground uppercase tracking-wider">管理</p>
                 <div className="space-y-1">
                   {filteredNavItems.filter(item => item.group === '管理').map((item) => {
                     const isActive = location.pathname === item.href

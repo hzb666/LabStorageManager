@@ -174,8 +174,8 @@ export function ImportPage() {
                         <span className="text-muted-foreground">-</span>
                       )}
                     </span>
-                    <span className="w-28 flex-shrink-0 text-xs mr-10">{col.name}</span>
-                    <span className="text-muted-foreground text-xs">{col.description}</span>
+                    <span className="w-28 flex-shrink-0 text-sm mr-10">{col.name}</span>
+                    <span className="text-muted-foreground text-sm">{col.description}</span>
                   </div>
                 ))}
               </div>
@@ -211,7 +211,7 @@ export function ImportPage() {
                         <span className="font-medium text-sm truncate max-w-50">{file.name}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-sm text-muted-foreground">
                           {(file.size / 1024).toFixed(1)} KB
                         </span>
                         <Button
@@ -234,7 +234,7 @@ export function ImportPage() {
                         <p className="text-sm font-medium">
                           点击或拖拽文件到此处上传
                         </p>
-                        <p className="text-xs text-muted-foreground mt-1">
+                        <p className="text-sm text-muted-foreground mt-1">
                           支持 .csv, .xlsx, .xls 格式
                         </p>
                       </div>
@@ -308,11 +308,11 @@ export function ImportPage() {
                   <div className="grid grid-cols-3 gap-4 text-center">
                     <div>
                       <div className="text-2xl font-bold">{result.total_rows}</div>
-                      <div className="text-xs text-muted-foreground">总行数</div>
+                      <div className="text-sm text-muted-foreground">总行数</div>
                     </div>
                     <div>
                       <div className="text-2xl font-bold text-green-600 dark:text-green-400">{result.created}</div>
-                      <div className="text-xs text-muted-foreground">成功创建</div>
+                      <div className="text-sm text-muted-foreground">成功创建</div>
                     </div>
                     <div>
                       <div className={cn(
@@ -321,7 +321,7 @@ export function ImportPage() {
                       )}>
                         {result.errors_count}
                       </div>
-                      <div className="text-xs text-muted-foreground">错误数</div>
+                      <div className="text-sm text-muted-foreground">错误数</div>
                     </div>
                   </div>
                 </div>
@@ -336,21 +336,21 @@ export function ImportPage() {
                       <table className="w-full text-sm">
                         <thead className="bg-muted/50 sticky top-0">
                           <tr>
-                            <th className="px-4 py-2 text-left font-medium text-xs text-muted-foreground w-16">行号</th>
-                            <th className="px-4 py-2 text-left font-medium text-xs text-muted-foreground">错误信息</th>
+                            <th className="px-4 py-2 text-left font-medium text-sm text-muted-foreground w-16">行号</th>
+                            <th className="px-4 py-2 text-left font-medium text-sm text-muted-foreground">错误信息</th>
                           </tr>
                         </thead>
                         <tbody>
                           {result.errors.slice(0, 50).map((err, i) => (
                             <tr key={i} className="border-t border-border">
-                              <td className="px-4 py-2 font-mono text-xs">{err.row}</td>
-                              <td className="px-4 py-2 text-destructive text-xs">{err.error}</td>
+                              <td className="px-4 py-2 font-mono text-sm">{err.row}</td>
+                              <td className="px-4 py-2 text-destructive text-sm">{err.error}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                       {result.errors.length > 50 && (
-                        <div className="px-4 py-2 text-center text-xs text-muted-foreground border-t bg-muted/30">
+                        <div className="px-4 py-2 text-center text-sm text-muted-foreground border-t bg-muted/30">
                           ... 还有 {result.errors.length - 50} 条错误
                         </div>
                       )}

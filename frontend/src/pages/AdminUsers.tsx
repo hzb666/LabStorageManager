@@ -35,18 +35,11 @@ import {
 } from 'lucide-react'
 import { AxiosError } from 'axios'
 import type { PaginationParams } from '@/api/client'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 
-// 用户状态样式
-const STATUS_STYLES: Record<string, string> = {
-  active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-  inactive: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-}
+// 用户状态样式 - 使用 StatusBadge 组件
 
-// 角色样式
-const ROLE_STYLES: Record<string, string> = {
-  admin: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
-  user: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-}
+// 角色样式 - 使用 StatusBadge 组件
 
 interface UserListParams extends PaginationParams {
   role?: string
@@ -144,27 +137,16 @@ export function AdminUsersPage() {
       header: '角色',
       size: 80,
       cell: info => (
-        <span className={cn(
-          'px-2.5 py-2 text-xs rounded-lg font-medium whitespace-nowrap',
-          ROLE_STYLES[info.getValue()] || 'bg-muted'
-        )}>
-          {info.getValue() === 'admin' ? '管理员' : '用户'}
-        </span>
+        <StatusBadge status={info.getValue()} />
       ),
     }),
     columnHelper.accessor('is_active', {
       header: '状态',
       size: 80,
-      cell: info => (
-        <span className={cn(
-          'px-2.5 py-2 text-xs rounded-lg font-medium whitespace-nowrap',
-          info.getValue() 
-            ? STATUS_STYLES.active 
-            : STATUS_STYLES.inactive
-        )}>
-          {info.getValue() ? '启用' : '禁用'}
-        </span>
-      ),
+      cell: info => {
+        const isActive = info.getValue()
+        return <StatusBadge status={isActive ? 'active' : 'inactive'} />
+      },
     }),
     columnHelper.accessor('created_at', {
       header: '创建时间',
@@ -549,7 +531,7 @@ export function AdminUsersPage() {
                 className={cn(INPUT_STYLES.lg, createErrors.username && 'border-destructive')}
               />
               {createErrors.username && (
-                <p className="text-xs text-destructive mt-1">{createErrors.username}</p>
+                <p className="text-sm text-destructive mt-1">{createErrors.username}</p>
               )}
             </div>
             <div>
@@ -565,7 +547,7 @@ export function AdminUsersPage() {
                 className={cn(INPUT_STYLES.lg, createErrors.password && 'border-destructive')}
               />
               {createErrors.password && (
-                <p className="text-xs text-destructive mt-1">{createErrors.password}</p>
+                <p className="text-sm text-destructive mt-1">{createErrors.password}</p>
               )}
             </div>
             <div>
@@ -580,7 +562,7 @@ export function AdminUsersPage() {
                 className={cn(INPUT_STYLES.lg, createErrors.full_name && 'border-destructive')}
               />
               {createErrors.full_name && (
-                <p className="text-xs text-destructive mt-1">{createErrors.full_name}</p>
+                <p className="text-sm text-destructive mt-1">{createErrors.full_name}</p>
               )}
             </div>
             <div>
@@ -718,7 +700,7 @@ export function AdminUsersPage() {
                 className={cn(INPUT_STYLES.lg, changePasswordErrors.old_password && 'border-destructive')}
               />
               {changePasswordErrors.old_password && (
-                <p className="text-xs text-destructive mt-1">{changePasswordErrors.old_password}</p>
+                <p className="text-sm text-destructive mt-1">{changePasswordErrors.old_password}</p>
               )}
             </div>
             <div>
@@ -734,7 +716,7 @@ export function AdminUsersPage() {
                 className={cn(INPUT_STYLES.lg, changePasswordErrors.new_password && 'border-destructive')}
               />
               {changePasswordErrors.new_password && (
-                <p className="text-xs text-destructive mt-1">{changePasswordErrors.new_password}</p>
+                <p className="text-sm text-destructive mt-1">{changePasswordErrors.new_password}</p>
               )}
             </div>
             <div>
@@ -750,7 +732,7 @@ export function AdminUsersPage() {
                 className={cn(INPUT_STYLES.lg, changePasswordErrors.confirm_password && 'border-destructive')}
               />
               {changePasswordErrors.confirm_password && (
-                <p className="text-xs text-destructive mt-1">{changePasswordErrors.confirm_password}</p>
+                <p className="text-sm text-destructive mt-1">{changePasswordErrors.confirm_password}</p>
               )}
             </div>
             <div className="flex gap-2 pt-3 border-t">

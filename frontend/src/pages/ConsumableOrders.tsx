@@ -294,7 +294,7 @@ export function ConsumableOrdersPage() {
         const status = info.getValue()
         return (
           <span className={cn(
-            'px-2.5 py-1 text-xs rounded-full font-medium whitespace-nowrap',
+            'px-2.5 py-1 text-sm rounded-full font-medium whitespace-nowrap',
             STATUS_STYLES[status] || 'bg-muted'
           )}>
             {STATUS_MAPPING[status] || status}
@@ -316,7 +316,7 @@ export function ConsumableOrdersPage() {
                 <Button 
                   size="sm" 
                   variant="default"
-                  className="h-7 text-xs px-2"
+                  className="h-7 text-sm px-2"
                   onClick={() => handleApprove(order.id)}
                 >
                   审批
@@ -324,7 +324,7 @@ export function ConsumableOrdersPage() {
                 <Button 
                   size="sm" 
                   variant="destructive"
-                  className="h-7 text-xs px-2"
+                  className="h-7 text-sm px-2"
                   onClick={() => handleReject(order.id)}
                 >
                   驳回
@@ -335,7 +335,7 @@ export function ConsumableOrdersPage() {
               <Button 
                 size="sm" 
                 variant="secondary"
-                className="h-7 text-xs px-2"
+                className="h-7 text-sm px-2"
                 onClick={() => handleComplete(order.id)}
               >
                 确认完成
@@ -414,7 +414,7 @@ export function ConsumableOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.name && 'border-destructive')}
                 />
                 {formErrors.name && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.name}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.name}</p>
                 )}
               </div>
 
@@ -479,7 +479,7 @@ export function ConsumableOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.specification && 'border-destructive')}
                 />
                 {formErrors.specification && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.specification}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.specification}</p>
                 )}
               </div>
 
@@ -497,7 +497,7 @@ export function ConsumableOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.quantity && 'border-destructive')}
                 />
                 {formErrors.quantity && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.quantity}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.quantity}</p>
                 )}
               </div>
 
@@ -517,7 +517,7 @@ export function ConsumableOrdersPage() {
                   className={cn(INPUT_STYLES.lg, formErrors.price && 'border-destructive')}
                 />
                 {formErrors.price && (
-                  <p className="text-xs text-destructive mt-1">{formErrors.price}</p>
+                  <p className="text-sm text-destructive mt-1">{formErrors.price}</p>
                 )}
               </div>
 
