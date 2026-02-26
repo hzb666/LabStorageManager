@@ -43,7 +43,7 @@ def _generate_internal_code_with_tracking(
     Returns:
         Internal code string (e.g., "10203-08-4-260224-01")
     """
-    from sqlalchemy import text
+    from sqlmodel import select
     
     # Determine date string - use created_at if provided, otherwise use current date
     if created_at:
@@ -60,21 +60,27 @@ def _generate_internal_code_with_tracking(
         sequence_tracker[tracker_key] = seq + 1
     else:
         # First time seeing this CAS+date combination in this transaction
-        # Query database for existing max sequence
+        # Query database for existing max sequence using ORM
         prefix = f"{cas_number}-{date_str}-"
-        query = text("""
-            SELECT MAX(CAST(SUBSTR(internal_code, LENGTH(:prefix) + 1) AS INTEGER)) 
-            FROM inventory 
-            WHERE internal_code LIKE :pattern
-        """)
         
-        result = db.execute(query, {
-            "prefix": prefix,
-            "pattern": f"{prefix}%"
-        }).scalar()
+        statement = select(Inventory).where(
+            Inventory.internal_code.like(f"{prefix}%")
+        )
+        results = db.exec(statement).all()
         
         # Start from max existing + 1, or 1 if none exist
-        seq = (result or 0) + 1
+        max_seq = 0
+        prefix_len = len(prefix)
+        for item in results:
+            code_part = item.internal_code[prefix_len:]
+            try:
+                seq_num = int(code_part)
+                if seq_num > max_seq:
+                    max_seq = seq_num
+            except ValueError:
+                continue
+        
+        seq = max_seq + 1
         # Store next sequence for subsequent calls
         sequence_tracker[tracker_key] = seq + 1
     

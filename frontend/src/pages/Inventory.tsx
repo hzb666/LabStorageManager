@@ -201,10 +201,10 @@ const ActionButtons = React.memo(function ActionButtons({
         <Button
           size="sm"
           className={cn(
-            "h-8.5 text-sm/4 px-3 border-0",
+            "h-8.5 text-sm/4 px-3 transition-none",
             isConfirming 
-              ? "bg-destructive hover:bg-destructive/90" 
-              : "bg-primary hover:bg-primary/90",
+              ? "bg-destructive hover:bg-destructive/90 border border-destructive" 
+              : "bg-primary hover:bg-primary/90 border border-primary",
             isLoading && "opacity-50 cursor-wait"
           )}
           onClick={handleClick}
@@ -972,6 +972,7 @@ export function InventoryPage() {
                 <p className="text-xs text-destructive mt-1">{editFormErrors.name}</p>
               )}
             </div>
+            {/* 不可编辑输入框样式 */}
             <div>
               <Label htmlFor="edit_cas" className={LABEL_STYLES.base}>
                 CAS号（不可编辑）
@@ -980,7 +981,7 @@ export function InventoryPage() {
                 id="edit_cas"
                 value={editFormData.cas_number}
                 readOnly
-                className={cn(INPUT_STYLES.lg, "bg-muted")}
+                className={cn(INPUT_STYLES.lg, "bg-accent dark:bg-input/50 border-0 dark:border-0")}
               />
             </div>
 
@@ -1358,8 +1359,8 @@ export function InventoryPage() {
                             ))}
                           </tr>
                           {expandedRows[row.original.id] && (
-                            <tr key={`${row.id}-expanded`} className="border-b border-border bg-muted/20">
-                              <td colSpan={row.getVisibleCells().length} className="p-3 text-base">
+                            <tr key={`${row.id}-expanded`} className="border-b border-border bg-muted/20 table-row-expand-enter">
+                              <td colSpan={row.getVisibleCells().length} className="p-3 text-base overflow-hidden">
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
                                   <div>
                                     <span className="font-medium">英文名称：</span>

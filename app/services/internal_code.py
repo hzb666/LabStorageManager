@@ -6,8 +6,44 @@ Sequence: Auto-increment per CAS number group
 import re
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import text
-from sqlmodel import Session
+from sqlmodel import Session, select, func
+
+from app.models.inventory import Inventory
+
+
+def _get_max_sequence_for_prefix(session: Session, prefix: str) -> int:
+    """
+    Get the maximum sequence number for a given prefix using ORM query.
+    
+    Args:
+        session: Database session
+        prefix: Internal code prefix (e.g., "64175-250113-")
+    
+    Returns:
+        Maximum sequence number found, or 0 if none exist
+    """
+    # Query items with the given prefix using ORM
+    statement = select(Inventory).where(
+        Inventory.internal_code.like(f"{prefix}%")
+    )
+    results = session.exec(statement).all()
+    
+    if not results:
+        return 0
+    
+    # Extract sequence numbers from internal codes
+    max_seq = 0
+    prefix_len = len(prefix)
+    for item in results:
+        code_part = item.internal_code[prefix_len:]
+        try:
+            seq = int(code_part)
+            if seq > max_seq:
+                max_seq = seq
+        except ValueError:
+            continue
+    
+    return max_seq
 
 
 def generate_internal_code(
@@ -38,19 +74,11 @@ def generate_internal_code(
     # Internal codes follow pattern: CAS-Date-Sequence
     prefix = f"{cas_number}-{date_str}-"
     
-    query = text("""
-        SELECT MAX(CAST(SUBSTR(internal_code, LENGTH(:prefix) + 1) AS INTEGER)) 
-        FROM inventory 
-        WHERE internal_code LIKE :pattern
-    """)
-    
-    result = session.execute(query, {
-        "prefix": prefix,
-        "pattern": f"{prefix}%"
-    }).scalar()
+    # Use ORM query instead of raw SQL
+    max_seq = _get_max_sequence_for_prefix(session, prefix)
     
     # Start sequence from result + 1 (or 1 if no existing)
-    start_seq = (result or 0) + 1
+    start_seq = max_seq + 1
     
     # Generate codes
     codes = []
@@ -79,12 +107,22 @@ def get_next_sequence(
     if not re.match(r"^[0-9-]+$", cas_number):
         raise ValueError(f"Invalid CAS number format: {cas_number}")
     
-    # Query the maximum sequence for this CAS
-    query = text("""
-        SELECT MAX(CAST(SUBSTR(internal_code, LENGTH(internal_code) - 1) AS INTEGER))
-        FROM inventory
-        WHERE cas_number = :cas_number
-    """)
+    # Query items with this CAS number using ORM
+    statement = select(Inventory).where(Inventory.cas_number == cas_number)
+    results = session.exec(statement).all()
     
-    result = session.execute(query, {"cas_number": cas_number}).scalar()
-    return (result or 0) + 1
+    if not results:
+        return 1
+    
+    # Extract and find maximum sequence number
+    max_seq = 0
+    for item in results:
+        # Parse the sequence from internal_code (last 2 digits)
+        try:
+            seq = int(item.internal_code[-2:])
+            if seq > max_seq:
+                max_seq = seq
+        except ValueError:
+            continue
+    
+    return max_seq + 1

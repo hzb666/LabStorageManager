@@ -11,6 +11,7 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -35,6 +36,78 @@ from app.services.spec_utils import parse_specification, SpecificationError
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
+
+# ==================== File Upload Security ====================
+# 允许的文件扩展名
+ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
+
+# 允许的 MIME 类型
+ALLOWED_MIME_TYPES = {
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+}
+
+# 文件魔数（文件头签名）
+FILE_MAGIC_BYTES = {
+    ".xlsx": b"PK\x03\x04",  # ZIP-based (Office Open XML)
+    ".xls": b"\xd0\xcf\x11\xe0",  # OLE2 compound document
+    ".csv": b"",  # CSV is text, no magic bytes needed
+}
+
+# 最大文件大小 (10MB)
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+def validate_uploaded_file(file: UploadFile) -> None:
+    """
+    验证上传的文件类型和内容
+    包括：文件扩展名、MIME类型、文件魔数、文件大小
+    """
+    # 1. 检查文件扩展名
+    ext = Path(file.filename).suffix.lower() if file.filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Only .xlsx, .xls, .csv are allowed"
+        )
+
+    # 2. 检查文件大小
+    file.file.seek(0, 2)  # Seek to end
+    file_size = file.file.tell()
+    file.file.seek(0)  # Reset to start
+
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size exceeds 10MB limit"
+        )
+
+    if file_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is empty"
+        )
+
+    # 3. 检查文件魔数
+    header = file.file.read(8)
+    file.file.seek(0)  # Reset to start
+
+    if ext == ".xlsx":
+        # XLSX is ZIP-based, check for PK\x03\x04
+        if not header.startswith(b"PK\x03\x04"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid XLSX file format"
+            )
+    elif ext == ".xls":
+        # XLS is OLE2 compound document
+        if not header.startswith(b"\xd0\xcf\x11\xe0"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid XLS file format"
+            )
+    # CSV doesn't need magic bytes check (it's plain text)
 
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
@@ -463,11 +536,8 @@ def import_inventory(
     """Import inventory items from Excel file (admin only)."""
     from app.services.excel_service import import_inventory_from_excel
 
-    if not file.filename.endswith((".xlsx", ".xls", ".csv")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only Excel (.xlsx, .xls) or CSV files (.csv) are supported",
-        )
+    # 验证上传文件（扩展名、MIME类型、文件魔数、大小）
+    validate_uploaded_file(file)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename) as tmp_file:
         tmp_file.write(file.file.read())
