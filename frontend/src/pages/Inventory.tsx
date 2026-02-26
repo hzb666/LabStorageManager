@@ -201,10 +201,10 @@ const ActionButtons = React.memo(function ActionButtons({
         <Button
           size="sm"
           className={cn(
-            "h-8.5 text-sm/4 px-3 transition-none",
+            "h-8 text-sm/4 px-3",
             isConfirming 
-              ? "bg-destructive hover:bg-destructive/90 border border-destructive" 
-              : "bg-primary hover:bg-primary/90 border border-primary",
+              ? "bg-destructive text-destructive-foreground hover:bg-destructive/70 dark:hover:bg-destructive/80" 
+              : "bg-primary hover:bg-primary/80 border-0",
             isLoading && "opacity-50 cursor-wait"
           )}
           onClick={handleClick}
@@ -1416,3 +1416,4 @@ export function InventoryPage() {
     </div>
   )
 }
+

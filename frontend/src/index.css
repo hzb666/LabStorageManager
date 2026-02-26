@@ -240,25 +240,6 @@
   opacity: 0;
 }
 
-/* 表格行展开高度渐变动画 */
-@keyframes row-expand {
-  from {
-    max-height: 0;
-  }
-  to {
-    max-height: 300px;
-  }
-}
-
-@keyframes row-collapse {
-  from {
-    max-height: 300px;
-  }
-  to {
-    max-height: 0;
-  }
-}
-
 .table-row-expand-enter {
   animation: row-expand 0.25s ease-out forwards;
 }

@@ -116,7 +116,7 @@ export function Layout() {
                             : 'gap-3 px-3',
                           isActive
                             ? 'bg-primary text-primary-foreground'
-                            : 'text-sidebar-foreground hover:bg-muted hover:text-foreground'
+                            : 'text-sidebar-foreground hover:bg-muted'
                         )}
                         title={sidebarCollapsed ? item.title : undefined}
                       >
@@ -155,7 +155,7 @@ export function Layout() {
                             : 'gap-3 px-3',
                           isActive
                             ? 'bg-primary text-primary-foreground'
-                            : 'text-sidebar-foreground hover:bg-muted hover:text-foreground'
+                            : 'text-sidebar-foreground hover:bg-muted'
                         )}
                         title={sidebarCollapsed ? item.title : undefined}
                       >
@@ -179,7 +179,7 @@ export function Layout() {
           <div className="mt-auto p-3">
             <div className="pt-2">
               {/* 头像 */}
-              <div className="flex items-center gap-3 mb-3">
+              <div className={cn("flex items-center gap-3 mb-3", sidebarCollapsed ? "" : "ml-1")}>
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground flex-shrink-0">
                   {user?.username?.charAt(0).toUpperCase() || 'U'}
                 </div>
@@ -189,10 +189,10 @@ export function Layout() {
                     sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
                   )}
                 >
-                  <p className="text-sm font-medium truncate text-sidebar-foreground whitespace-nowrap">
+                  <p className="text-base font-medium truncate text-sidebar-foreground whitespace-nowrap">
                     {user?.full_name || user?.username}
                   </p>
-                  <p className="text-xs text-sidebar-foreground/70 whitespace-nowrap">
+                  <p className="text-sm text-sidebar-foreground/70 whitespace-nowrap">
                     {user?.role === 'admin' ? '管理员' : '用户'}
                   </p>
                 </div>
@@ -208,17 +208,17 @@ export function Layout() {
                 )}
               >
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   onClick={() => logout()}
                   className={cn(
-                    "text-sidebar-foreground hover:bg-muted hover:text-foreground border-0 shadow-none min-w-0 overflow-hidden flex",
+                    "h-10 text-sidebar-foreground text-base hover:bg-muted min-w-0 overflow-hidden flex",
                     sidebarCollapsed 
                       ? "w-10 h-10 p-0 justify-center" 
                       : "flex-1 justify-start px-3"
                   )}
                   title={sidebarCollapsed ? "退出登录" : undefined}
                 >
-                  <LogOut className="h-4 w-4 shrink-0" />
+                  <LogOut className="size-5 shrink-0" />
                   {!sidebarCollapsed && (
                     <span className="ml-2 whitespace-nowrap">
                       退出登录
@@ -226,11 +226,11 @@ export function Layout() {
                   )}
                 </Button>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon"
                   onClick={toggleTheme}
                   className={cn(
-                    "h-9 shrink-0 hover:bg-muted hover:text-foreground border-0 shadow-none text-sidebar-foreground",
+                    "size-10 shrink-0 hover:bg-muted shadow-none text-sidebar-foreground",
                     sidebarCollapsed 
                       ? "w-10" 
                       : ""
@@ -238,9 +238,9 @@ export function Layout() {
                   title={sidebarCollapsed ? (theme === 'dark' ? '切换亮色' : '切换暗黑') : undefined}
                 >
                   {theme === 'dark' ? (
-                    <Sun className="h-4 w-4" />
+                    <Sun className="size-5" />
                   ) : (
-                    <Moon className="h-4 w-4" />
+                    <Moon className="size-5" />
                   )}
                 </Button>
               </div>
@@ -329,20 +329,20 @@ export function Layout() {
                     {user?.username?.charAt(0).toUpperCase() || 'U'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate text-sidebar-foreground">
+                    <p className="text-base font-medium truncate text-sidebar-foreground">
                       {user?.full_name || user?.username}
                     </p>
-                    <p className="text-xs text-sidebar-foreground/70">
+                    <p className="text-sm text-sidebar-foreground/70">
                       {user?.role === 'admin' ? '管理员' : '用户'}
                     </p>
                   </div>
                 </div>
                 <Button
                   variant="ghost"
-                  className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-foreground/10"
+                  className="w-full text-base h-10 justify-start text-sidebar-foreground hover:bg-muted"
                   onClick={() => logout()}
                 >
-                  <LogOut className="mr-2 h-4 w-4" />
+                  <LogOut className="mr-2 size-5" />
                   退出登录
                 </Button>
               </div>

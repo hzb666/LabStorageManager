@@ -616,7 +616,7 @@ export function Dashboard() {
                           <td className="p-3 align-middle text-base">{item.remaining_quantity} {item.unit}</td>
                           <td className="p-3 align-middle text-base">{formatDateTime(item.borrow_time)}</td>
                           <td className="p-3 align-middle text-base">
-                            <Button onClick={() => openReturnModal(item)} size="sm" className="h-8.5 text-sm/4 px-3">归还</Button>
+                            <Button onClick={() => openReturnModal(item)} size="sm" className="h-8 text-sm/4 px-3 bg-primary hover:bg-primary/80 border-0">归还</Button>
                           </td>
                         </tr>
                       ))}
