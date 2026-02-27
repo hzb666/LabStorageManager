@@ -26,13 +26,12 @@ import {
   AlertTriangle,
   Loader2,
   ArrowUpFromLine,
-  ArrowUp,
-  ArrowDown,
-  ArrowUpDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Plus,
   X,
   Pencil,
-  Trash2
+  Trash2,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
@@ -233,6 +232,23 @@ export function InventoryPage() {
   })
   const [globalFilter, setGlobalFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  // 展开/收起状态管理 - 提升到父组件
+  const [isAllExpanded, setIsAllExpanded] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('inventory-table-expand-all')
+      return saved === 'expanded'
+    } catch {
+      return false
+    }
+  })
+  // 展开/收起状态持久化到 localStorage
+  useEffect(() => {
+    localStorage.setItem('inventory-table-expand-all', isAllExpanded ? 'expanded' : 'collapsed')
+  }, [isAllExpanded])
+  // 展开/收起切换函数
+  const toggleExpandAll = useCallback(() => {
+    setIsAllExpanded(prev => !prev)
+  }, [])
   // 表格容器高度 - 使用 CSS calc 计算
   // 公式: 100vh - 112px (页眉+表头+间距) - 16px (页面 padding-bottom)
   const tableHeight = "calc(100vh - 112px - 16px)"
@@ -342,7 +358,7 @@ export function InventoryPage() {
     }
   }
 
-  // 收起所有展开的行的辅助函数
+  // 收起所有展开的行的辅助函数 - 如果是展开全部状态则不收起
   const collapseAllRowsRef = useRef<() => void>(() => {})
 
   // Debounced search for API calls - separate display filter from API filter
@@ -741,8 +757,11 @@ export function InventoryPage() {
     },
   })
 
-  // 设置 collapseAllRowsRef 的实现
+  // 设置 collapseAllRowsRef 的实现 - 如果是展开全部状态则不收起
   collapseAllRowsRef.current = () => {
+    // 如果当前是展开全部状态，不收起
+    if (isAllExpanded) return
+    
     table.getRowModel().rows.forEach(row => {
       if (row.getIsExpanded()) {
         row.toggleExpanded(false)
@@ -1351,6 +1370,24 @@ export function InventoryPage() {
           <CardTitle className="flex items-center gap-2 text-lg">
             <Package className="w-5 h-5" />
             库存列表 <span className="text-muted-foreground font-normal">(&thinsp;{globalFilter ? `${total}/${grandTotal}` : `${grandTotal}`}&thinsp;)</span>
+            <Button
+              variant="morden"
+              size="lg"
+              onClick={toggleExpandAll}
+              className="ml-auto flex font-normal"
+            >
+              {isAllExpanded ? (
+                <>
+                  <ChevronsDownUp className="size-4 mr-1.5" />
+                  收起全部
+                </>
+              ) : (
+                <>
+                  <ChevronsUpDown className="size-4 mr-1.5" />
+                  展开全部
+                </>
+              )}
+            </Button>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -1377,7 +1414,7 @@ export function InventoryPage() {
                 <DataTable
                   table={table}
                   renderExpandedRow={(item) => (
-                    <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2">
+                    <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 border-b-1 border-border ">
                       <div>
                         <span className="font-medium">英文名称：</span>
                         {item.english_name || '-'}
@@ -1407,6 +1444,11 @@ export function InventoryPage() {
                     </div>
                   )}
                   scrollHeight={tableHeight}
+                  enableExpandAll={true}
+                  expandAllStorageKey="inventory-table-expand-all"
+                  noteField="notes"
+                  isAllExpanded={isAllExpanded}
+                  onToggleExpandAll={toggleExpandAll}
                 />
               </div>
             </>

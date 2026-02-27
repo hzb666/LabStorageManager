@@ -12,6 +12,17 @@ interface DataTableProps<TData> {
   renderExpandedRow?: (row: TData) => React.ReactNode
   estimatedRowHeight?: number
   scrollHeight?: number | string
+  enableExpandAll?: boolean
+  expandAllStorageKey?: string
+  isAllExpanded?: boolean
+  onToggleExpandAll?: () => void
+  noteField?: string
+  renderExpandAllControls?: (props: {
+    isExpanded: boolean
+    toggle: () => void
+    expandAll: () => void
+    collapseAll: () => void
+  }) => React.ReactNode
 }
 
 // --- 单行组件：全动态测算与 Headless 布局 ---
@@ -21,15 +32,19 @@ function HeadlessVirtualRow<TData>({
   measureRef,
   renderExpandedRow,
   getProportionalStyles,
+  noteField,
 }: {
   row: Row<TData>
   virtualRow: { index: number; start: number }
   measureRef: (el: HTMLDivElement | null) => void
   renderExpandedRow?: (row: TData) => React.ReactNode
   getProportionalStyles: (column: Column<TData, unknown>) => React.CSSProperties
+  noteField?: string
 }) {
   const isExpanded = row.getIsExpanded()
   const original = row.original as TData
+  
+  const hasNote = noteField ? Boolean((original as Record<string, unknown>)?.[noteField]) : false
 
   return (
     <div
@@ -39,18 +54,35 @@ function HeadlessVirtualRow<TData>({
       style={{ transform: `translateY(${virtualRow.start}px)` }}
     >
       <div
-        className="flex w-full border-b border-border cursor-pointer transition-colors items-center hover:bg-accent dark:hover:bg-input"
+        className={cn(
+          "flex w-full cursor-pointer transition-colors items-center hover:bg-accent dark:hover:bg-input border-b",
+          isExpanded ? "border-transparent" : "border-border"
+        )}
         onClick={row.getToggleExpandedHandler()}
       >
-        {row.getVisibleCells().map((cell: Cell<TData, unknown>) => (
-          <div
-            key={cell.id}
-            className="p-3 text-base break-all"
-            style={getProportionalStyles(cell.column)}
-          >
-            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-          </div>
-        ))}
+        {row.getVisibleCells().map((cell: Cell<TData, unknown>, index: number) => {
+          
+          const isFirstCol = index === 0;
+          const showAccentLine = isFirstCol && hasNote && !isExpanded;
+
+          return (
+            <div
+              key={cell.id}
+              className={cn(
+                "p-3 text-base break-all flex items-center relative transition-colors",
+                // 修复1：第一列始终保留真实的边框占位，永远不挤压文字
+                isFirstCol && "border-l-4 border-transparent"
+              )}
+              style={getProportionalStyles(cell.column)}
+            >
+              {/* 修复1：在透明边框的位置上，盖一个可以任意调整高度的绝对定位条 */}
+              {showAccentLine && (
+                <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-[75%] bg-slate-300 dark:bg-slate-500 rounded-r-[2px]" />
+              )}
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </div>
+          )
+        })}
       </div>
 
       <AnimatePresence>
@@ -76,6 +108,11 @@ export function DataTable<TData>({
   renderExpandedRow,
   estimatedRowHeight = 53,
   scrollHeight = 600,
+  enableExpandAll = false,
+  expandAllStorageKey,
+  isAllExpanded: externalIsAllExpanded,
+  onToggleExpandAll,
+  noteField,
 }: DataTableProps<TData>) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
@@ -83,16 +120,45 @@ export function DataTable<TData>({
 
   const [resizingColId, setResizingColId] = useState<string | null>(null)
   
-  // 核心修复 1：记录垂直滚动条的宽度
+  const isControlled = externalIsAllExpanded !== undefined && onToggleExpandAll !== undefined
+  const [internalIsAllExpanded] = useState<boolean>(() => {
+    if (!enableExpandAll || !expandAllStorageKey) return false
+    try {
+      const saved = localStorage.getItem(expandAllStorageKey)
+      return saved === 'expanded'
+    } catch {
+      return false
+    }
+  })
+  
+  const isAllExpanded = isControlled ? externalIsAllExpanded : internalIsAllExpanded
+
+  useEffect(() => {
+    if (enableExpandAll && expandAllStorageKey) {
+      localStorage.setItem(expandAllStorageKey, isAllExpanded ? 'expanded' : 'collapsed')
+    }
+  }, [isAllExpanded, enableExpandAll, expandAllStorageKey])
+
+  useEffect(() => {
+    if (!enableExpandAll) return
+    
+    const rows = table.getRowModel().rows
+    rows.forEach(row => {
+      if (isAllExpanded && !row.getIsExpanded()) {
+        row.toggleExpanded(true)
+      } else if (!isAllExpanded && row.getIsExpanded()) {
+        row.toggleExpanded(false)
+      }
+    })
+  }, [isAllExpanded, enableExpandAll, table])
+  
   const [scrollbarWidth, setScrollbarWidth] = useState(0)
 
-  // 动态测量并同步滚动条宽度（兼容不同设备和系统）
   useEffect(() => {
     const el = bodyScrollRef.current
     if (!el) return
 
     const updateScrollbar = () => {
-      // offsetWidth 包含滚动条，clientWidth 不包含，两者的差值就是滚动条精准宽度
       const width = el.offsetWidth - el.clientWidth
       setScrollbarWidth((prev) => (prev === width ? prev : width))
     }
@@ -111,7 +177,6 @@ export function DataTable<TData>({
   const totalWeight = visibleColumns.reduce((sum, col) => sum + col.getSize(), 0)
   const minTableWidth = visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
 
-  // 样式计算器
   const getProportionalStyles = useCallback((column: Column<TData, unknown>): React.CSSProperties => {
     const size = column.getSize()
     if (size === 0) return { display: 'none' }
@@ -123,11 +188,11 @@ export function DataTable<TData>({
       flex: `0 0 ${widthPercent}%`,
       width: `${widthPercent}%`,
       minWidth: `${minSize}px`,
-      boxSizing: 'border-box', // 确保 padding 不会撑爆容器
+      boxSizing: 'border-box',
     }
   }, [totalWeight])
 
-  // 核心修复 2 & 3：完全自定义相邻列拉伸算法，解决光标偏移问题
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleCustomResize = useCallback((e: React.MouseEvent | React.TouchEvent, header: any) => {
     e.preventDefault()
     e.stopPropagation()
@@ -136,7 +201,6 @@ export function DataTable<TData>({
     const leftCol = visibleColumns[currentIndex]
     const rightCol = visibleColumns[currentIndex + 1]
 
-    // 如果没有相邻的右侧列，不可拖拽
     if (!leftCol || !rightCol) return
 
     const startX = e.type === 'touchstart' ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX
@@ -148,7 +212,6 @@ export function DataTable<TData>({
     const rightMin = rightCol.columnDef.minSize ?? 50
     const rightMax = rightCol.columnDef.maxSize ?? 9999
 
-    // 使用 bodyScrollRef.clientWidth (已经扣除了滚动条宽度)，换算极其精准的像素比例
     const tablePxWidth = Math.max(bodyScrollRef.current?.clientWidth || 0, minTableWidth)
     const pixelPerWeight = tablePxWidth / totalWeight
 
@@ -160,13 +223,11 @@ export function DataTable<TData>({
         : (moveEvent as MouseEvent).clientX
 
       const deltaX = currentX - startX
-      // 物理位移转为比例权重位移
       const deltaWeight = deltaX / pixelPerWeight
 
       let newLeft = startLeftSize + deltaWeight
       let newRight = startRightSize - deltaWeight
 
-      // 强校验物理边界，左右此消彼长，总和绝对不变
       if (newLeft < leftMin) {
         newLeft = leftMin
         newRight = startRightSize + (startLeftSize - leftMin)
@@ -212,76 +273,85 @@ export function DataTable<TData>({
     getScrollElement: () => bodyScrollRef.current,
   })
 
+
   return (
     <div
       ref={scrollContainerRef}
-      className="w-full bg-card rounded-md flex flex-col overflow-y-auto"
+      className="w-full bg-card rounded-md flex flex-col overflow-hidden"
       style={{ height: typeof scrollHeight === 'number' ? `${scrollHeight}px` : scrollHeight }}
     >
       {/* 表头区 */}
       <div 
-        className="z-30 w-full border-b-2 border-border rounded-t-md"
-        // 关键一步：把表体滚动条吃掉的像素，以 padding 的形式补偿给表头，强行对齐！
-        style={{ paddingRight: `${scrollbarWidth}px` }}
+        className="z-30 w-full rounded-t-md bg-card"
+        style={{ paddingRight: `${scrollbarWidth}px` }} // 让出滚动条位置
       >
-        <div ref={headerScrollRef} className="w-full overflow-hidden">
-          <div 
-            className="flex w-full"
-            style={{ minWidth: `${minTableWidth}px` }} 
-          >
-            {table.getHeaderGroups().map((headerGroup) => (
-              <React.Fragment key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
-                  const canSort = header.column.getCanSort()
-                  const isSorted = header.column.getIsSorted()
-                  const isResizing = resizingColId === header.column.id
+        {/* 修复2：把 border-b-2 移到内部的 div 上，这样边框到 padding 处就会截止，不会盖住滚动条 */}
+        <div className="w-full border-b-2 border-border">
+          <div ref={headerScrollRef} className="w-full overflow-hidden">
+            <div 
+              className="flex w-full"
+              style={{ minWidth: `${minTableWidth}px` }} 
+            >
+              {table.getHeaderGroups().map((headerGroup) => (
+                <React.Fragment key={headerGroup.id}>
+                  {headerGroup.headers.map((header, index) => {
+                    const canSort = header.column.getCanSort()
+                    const isSorted = header.column.getIsSorted()
+                    const isResizing = resizingColId === header.column.id
 
-                  return (
-                    <div
-                      key={header.id}
-                      className="relative p-3 mt-3 font-semibold text-foreground flex items-center group select-none hover:bg-accent dark:hover:bg-input transition-colors rounded-t-md"
-                      style={getProportionalStyles(header.column)}
-                    >
+                    return (
                       <div
-                        className={cn("flex items-center gap-1.5 w-full", canSort && "cursor-pointer")}
-                        onClick={header.column.getToggleSortingHandler()}
+                        key={header.id}
+                        className={cn(
+                          "relative p-3 mt-3 font-semibold text-foreground flex items-center group select-none hover:bg-accent dark:hover:bg-input transition-colors rounded-t-md",
+                          index === 0 && "border-l-4 border-transparent"
+                        )}
+                        style={getProportionalStyles(header.column)}
                       >
-                        <span className="truncate">
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </span>
-                        {canSort && (
-                          <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center text-muted-foreground">
-                            {isSorted === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : 
-                             isSorted === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : 
-                             <ArrowUpDown className="w-3.5 h-3.5 opacity-0 group-hover:opacity-50 transition-opacity" />}
+                        <div
+                          className={cn("flex items-center gap-1.5 w-full", canSort && "cursor-pointer")}
+                          onClick={header.column.getToggleSortingHandler()}
+                        >
+                          <span className="truncate">
+                            {header.isPlaceholder
+                              ? null
+                              : flexRender(header.column.columnDef.header, header.getContext())}
                           </span>
+                          {canSort && (
+                            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center text-muted-foreground">
+                              {isSorted === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : 
+                               isSorted === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : 
+                               <ArrowUpDown className="w-3.5 h-3.5 opacity-0 group-hover:opacity-50 transition-opacity" />}
+                            </span>
+                          )}
+                        </div>
+
+                        {(() => {
+                          const canResize = header.column.getCanResize() && header.index !== headerGroup.headers.length - 1
+                          return canResize && !isMobile
+                        })() && (
+                          <div
+                            onMouseDown={(e) => handleCustomResize(e, header)}
+                            onTouchStart={(e) => handleCustomResize(e, header)}
+                            onDoubleClick={() => table.resetColumnSizing()}
+                            title="拖拽调整比例 (双击恢复默认)"
+                            className={cn(
+                              "absolute right-0 top-0 h-full w-1 cursor-col-resize z-10 touch-none transition-all opacity-0 group-hover:opacity-100",
+                              isResizing ? "bg-primary/70 opacity-100 w-1.5" : "hover:bg-primary/50",
+                              isResizing && header.getSize() === (header.column.columnDef.minSize ?? 50) && "bg-destructive/70",
+                              isResizing && header.column.columnDef.maxSize && header.getSize() === header.column.columnDef.maxSize && "bg-destructive/70"
+                            )}
+                          />
                         )}
                       </div>
-
-                      {(() => {
-                        const canResize = header.column.getCanResize() && header.index !== headerGroup.headers.length - 1
-                        return canResize && !isMobile
-                      })() && (
-                        <div
-                          onMouseDown={(e) => handleCustomResize(e, header)}
-                          onTouchStart={(e) => handleCustomResize(e, header)}
-                          onDoubleClick={() => table.resetColumnSizing()}
-                          title="拖拽调整比例 (双击恢复默认)"
-                          className={cn(
-                            "absolute right-0 top-0 h-full w-1 cursor-col-resize z-10 touch-none transition-all opacity-0 group-hover:opacity-100",
-                            isResizing ? "bg-primary/70 opacity-100 w-1.5" : "hover:bg-primary/50",
-                            isResizing && header.getSize() === (header.column.columnDef.minSize ?? 50) && "bg-destructive/70",
-                            isResizing && header.column.columnDef.maxSize && header.getSize() === header.column.columnDef.maxSize && "bg-destructive/70"
-                          )}
-                        />
-                      )}
-                    </div>
-                  )
-                })}
-              </React.Fragment>
-            ))}
+                    )
+                  })}
+                  {headerGroup.id === table.getHeaderGroups()[table.getHeaderGroups().length - 1].id && (
+                    null
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -289,7 +359,8 @@ export function DataTable<TData>({
       {/* 表体区 */}
       <div
         ref={bodyScrollRef}
-        className="w-full overflow-x-auto custom-scrollbar relative flex-1"
+        className="w-full overflow-auto custom-scrollbar relative flex-1"
+        style={{ scrollbarGutter: 'stable' }}
         onScroll={(e) => {
           if (headerScrollRef.current) {
             headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft
@@ -314,6 +385,7 @@ export function DataTable<TData>({
                 measureRef={rowVirtualizer.measureElement}
                 renderExpandedRow={renderExpandedRow}
                 getProportionalStyles={getProportionalStyles}
+                noteField={noteField}
               />
             )
           })}

@@ -220,61 +220,83 @@
   box-shadow: -1px 0 10px rgba(0, 0, 0, 0.3), 0 0 3px rgba(0, 0, 0, 0.2);
 }
 
-/* 自定义滚动条 - 纯矩形，悬浮加粗加深，无上下三角 */
+/* =========================================
+   自定义滚动条 - 精修版
+   特性：轻微圆角，悬浮加粗加深，无上下三角，无交界方框
+   ========================================= */
 
-/* 亮色模式 */
+/* 1. 针对 Webkit 浏览器 (Chrome, Edge, Safari) */
+
+/* 统一定义滚动条容器物理总宽度 (10px) */
 ::-webkit-scrollbar {
-  /* 轨道实际宽度稍微给大一点（10px），为 hover 变粗留出物理空间 */
   width: 10px;
-  height: 10px; 
+  height: 10px; /* 横向滚动条高度 */
 }
 
-/* 隐藏滚动条两端的上下/左右三角按钮 */
+/* --- 核心：滑块 (Thumb) --- */
+::-webkit-scrollbar-thumb {
+  /* [颜色] 亮色模式初始颜色 */
+  background-color: #cbd5e1;
+  background-clip: padding-box; /* 关键：确保背景只在 border 内部渲染 */
+  
+  /* [粗细控制 - 初始] */
+  border: 3px solid transparent; /* 3px透明边框，使色块视觉宽度为 10 - 3*2 = 4px */
+  
+  /* [新增强调：轻微圆角] */
+  border-radius: 5px; /* 这里设置略大的值，配合 border 挤压会形成轻微的胶囊感 */
+}
+
+/* [滑块 Hover 状态] */
+::-webkit-scrollbar-thumb:hover {
+  /* [颜色] 悬浮加深 */
+  background-color: #94a3b8;
+  
+  /* [粗细控制 - Hover] */
+  border: 1px solid transparent; /* 1px透明边框，色块向外扩张，视觉宽度为 10 - 1*2 = 8px */
+  
+  /* [关键：Hover 时必须再次声明圆角] */
+  border-radius: 5px;
+}
+
+/* --- 轨道 (Track) --- */
+::-webkit-scrollbar-track {
+  background: transparent; /* 轨道保持透明 */
+}
+
+/* --- [修正：隐藏所有三角按钮] --- */
 ::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+/* --- [新增强调：删除交界处小方框] --- */
+::-webkit-scrollbar-corner {
+  background: transparent; /* 将死角背景设为透明 */
 }
 
-::-webkit-scrollbar-thumb {
-  background-color: #cbd5e1;
-  border-radius: 0; /* 严格矩形，无圆角 */
-  
-  /* 【核心技巧】：利用 3px 的透明边框向内挤压，使实际显示的色块变细 (10 - 3*2 = 4px) */
-  border: 3px solid transparent;
-  background-clip: padding-box;
-}
 
-::-webkit-scrollbar-thumb:hover {
-  background-color: #94a3b8; /* 颜色加深 */
-  
-  /* hover 时减小透明边框，色块向外扩张变粗 (10 - 1*2 = 8px) */
-  border: 1px solid transparent; 
-}
-
-/* 暗黑模式 */
+/* 2. 暗黑模式适配 (基于 .dark 类名) */
 .dark ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background-color: #475569;
 }
-
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background-color: #64748b;
 }
 
-/* Firefox 滚动条 */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
-}
 
-.dark * {
-  scrollbar-color: #475569 transparent;
+/* 3. 针对 Firefox 的降级处理 (Firefox 不支持悬浮变粗和Corner控制) */
+/* 仅在浏览器不支持 webkit 滚动条伪元素时应用 */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin; /* Firefox 只能选 standard 或 thin */
+    scrollbar-color: #cbd5e1 transparent; /* 滑块颜色 轨道颜色 */
+  }
+  
+  .dark * {
+    scrollbar-color: #475569 transparent;
+  }
 }
-
 /* Toast 淡出动画 */
 @keyframes fade-out {
   from {
