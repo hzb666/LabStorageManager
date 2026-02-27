@@ -36,10 +36,30 @@ export function Layout() {
   const { theme, toggleTheme } = useTheme()
   const isMobile = useIsMobile()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [logoutConfirming, setLogoutConfirming] = useState(false)
+
+  // 退出登录处理
+  const handleLogout = () => {
+    if (!logoutConfirming) {
+      setLogoutConfirming(true)
+    } else {
+      logout()
+    }
+  }
+
+  // 失去焦点时重置确认状态
+  const handleLogoutBlur = () => {
+    if (logoutConfirming) {
+      setLogoutConfirming(false)
+    }
+  }
 
   const filteredNavItems = navItems.filter(
     (item) => !item.adminOnly || user?.role === 'admin'
   )
+
+  // 判断当前是否在设备管理页面
+  const isDevicesActive = location.pathname.startsWith('/devices')
 
   // 键盘快捷键支持 Ctrl+B / Cmd+B
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -80,12 +100,9 @@ export function Layout() {
           )}
         >
           {/* 标题区域 */}
-          <div className="flex items-center justify-center h-20 pt-12 pb-12 overflow-hidden whitespace-nowrap">
+          <div className="flex items-center justify-center h-20 pt-16 pb-8 overflow-hidden whitespace-nowrap">
             <h1 className={cn(
-              "text-2xl font-bold text-primary transition-opacity duration-300",
-              // 【核心修改】：废除 max-w 动画。强制赋予元素与展开侧边栏相同的最终宽度(w-64)，
-              // 这样文字的“中心锚点”从一开始就是死死钉在最终位置上的，绝不会横向跳动。
-              "w-64 text-center",
+              "text-2xl font-bold text-primary transition-opacity duration-300 w-64 text-center pl-2",
               sidebarCollapsed ? 'opacity-0' : 'opacity-100'
             )}>
               实验室库存管理
@@ -96,9 +113,7 @@ export function Layout() {
           <nav className="flex-1 overflow-y-auto pl-4 pr-1 custom-scrollbar ">
             {/* 功能组 */}
             <div className="mb-2">
-              <div className=
-                "px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-all duration-300 opacity-100 max-h-10 mt-4 mb-3"
-              >
+              <div className="px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 max-h-10 mt-4 mb-2">
                 功能
               </div>
               <div className="space-y-1">
@@ -120,8 +135,7 @@ export function Layout() {
                       <Icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? '' : 'text-sidebar-foreground')} />
                       <span
                         className={cn(
-                          "whitespace-nowrap overflow-hidden transition-all duration-300",
-                          // 核心动画：依靠宽度和边距平滑过渡，不会换行
+                          "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
                           sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
                         )}
                       >
@@ -135,9 +149,7 @@ export function Layout() {
 
             {/* 管理组 */}
             <div>
-              <div className=
-                "px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-all duration-300 opacity-100 max-h-10 mt-6 mb-3"
-              >
+              <div className="px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 max-h-10 mt-6 mb-2">
                 管理
               </div>
               <div className="space-y-1">
@@ -159,7 +171,7 @@ export function Layout() {
                       <Icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? '' : 'text-sidebar-foreground')} />
                       <span
                         className={cn(
-                          "whitespace-nowrap overflow-hidden transition-all duration-300",
+                          "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
                           sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
                         )}
                       >
@@ -174,14 +186,26 @@ export function Layout() {
 
           {/* 用户与设置区域 */}
           <div className="pl-4 py-4 pr-1">
-            {/* 头像信息 */}
-            <div className="flex items-center overflow-hidden">
+            {/* 头像信息 - 点击进入设备管理 */}
+            <Link
+              to="/devices"
+              className={cn(
+                "flex items-center overflow-hidden hover:bg-muted rounded-lg p-1 -mx-1 transition-colors relative",
+                isDevicesActive ? "bg-muted/50" : ""
+              )}
+              title="设备管理"
+            >
+              {/* 核心：Active 状态的右侧小竖条 */}
+              {isDevicesActive && (
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 h-6 w-1 bg-primary rounded-l-md" />
+              )}
+              
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground mx-auto md:mx-0">
                 {user?.username?.charAt(0).toUpperCase() || 'U'}
               </div>
               <div
                 className={cn(
-                  "flex-1 overflow-hidden transition-all duration-300",
+                  "flex-1 overflow-hidden transition-[max-width,opacity,margin] duration-300",
                   sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[150px] ml-3'
                 )}
               >
@@ -192,19 +216,19 @@ export function Layout() {
                   {user?.role === 'admin' ? '管理员' : '用户'}
                 </p>
               </div>
-            </div>
+            </Link>
 
-            {/* 统一化的垂直功能按钮区：完美解决乱跳和遮挡 */}
+            {/* 统一化的垂直功能按钮区 */}
             <div className="flex flex-col gap-1 overflow-hidden pt-4">
               <Button
                 variant="ghost"
                 onClick={toggleTheme}
-                className="justify-start text-base p-2 h-10 w-full hover:bg-muted text-sidebar-foreground transition-colors"
+                className="justify-start text-base p-2 h-11 w-full hover:bg-muted text-sidebar-foreground transition-colors"
                 title={sidebarCollapsed ? (theme === 'dark' ? '切换亮色' : '切换暗黑') : undefined}
               >
                 {theme === 'dark' ? <Sun className="size-5 shrink-0" /> : <Moon className="size-5 shrink-0" />}
                 <span className={cn(
-                  "whitespace-nowrap overflow-hidden transition-all duration-300",
+                  "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
                   sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
                 )}>
                   {theme === 'dark' ? '切换亮色模式' : '切换暗黑模式'}
@@ -212,17 +236,20 @@ export function Layout() {
               </Button>
 
               <Button
-                variant="ghost"
-                onClick={() => logout()}
-                className="justify-start p-2 h-10 w-full text-base hover:bg-muted text-sidebar-foreground transition-colors"
-                title={sidebarCollapsed ? "退出登录" : undefined}
+                variant={logoutConfirming ? "destructive" : "ghost"}
+                onClick={handleLogout}
+                onBlur={handleLogoutBlur}
+                className={cn(
+                  "justify-start p-2 h-11 w-full text-base", logoutConfirming ? "transition-none" : "hover:bg-muted text-sidebar-foreground"
+                )}
+                title={sidebarCollapsed ? (logoutConfirming ? "再次点击确认退出" : "退出登录") : undefined}
               >
                 <LogOut className="size-5 shrink-0" />
                 <span className={cn(
-                  "whitespace-nowrap overflow-hidden transition-all duration-300",
+                  "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
                   sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
                 )}>
-                  退出登录
+                  {logoutConfirming ? "确认退出" : "退出登录"}
                 </span>
               </Button>
             </div>
@@ -230,7 +257,7 @@ export function Layout() {
         </aside>
       )}
 
-      {/* Mobile Menu (移动端保持基本不变，仅同步了间距标准) */}
+      {/* Mobile Menu */}
       <div
         className={cn(
           "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm md:hidden transition-opacity duration-200",
@@ -246,7 +273,7 @@ export function Layout() {
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex flex-col items-center justify-center pt-8 pb-4">
-            <h1 className="text-xl font-bold text-primary px-2">实验室库存管理</h1>
+            <h1 className="text-2xl font-bold text-primary px-2">实验室库存管理</h1>
           </div>
 
           <nav className="flex-1 space-y-4 p-4 overflow-y-auto">
@@ -304,7 +331,20 @@ export function Layout() {
           </nav>
 
           <div className="mt-auto p-4 border-t border-border/50">
-            <div className="flex items-center gap-3 mb-4">
+            {/* 头像信息 - 点击进入设备管理 */}
+            <Link
+              to="/devices"
+              onClick={() => setMobileMenuOpen(false)}
+              className={cn(
+                "flex items-center gap-3 mb-2 hover:bg-muted rounded-lg p-2 -mx-2 transition-colors relative",
+                isDevicesActive ? "bg-muted/50" : ""
+              )}
+            >
+              {/* 核心：Active 状态的右侧小竖条 */}
+              {isDevicesActive && (
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 h-6 w-1 bg-primary rounded-l-md" />
+              )}
+              
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
                 {user?.username?.charAt(0).toUpperCase() || 'U'}
               </div>
@@ -316,25 +356,28 @@ export function Layout() {
                   {user?.role === 'admin' ? '管理员' : '用户'}
                 </p>
               </div>
-            </div>
+            </Link>
 
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1">
               <Button
                 variant="ghost"
                 onClick={toggleTheme}
-                className="w-full text-base h-10 justify-start p-2 text-sidebar-foreground hover:bg-muted"
+                className="w-full text-base h-10 justify-start p-2 text-sidebar-foreground hover:bg-muted transition-colors"
               >
                 {theme === 'dark' ? <Sun className="mr-3 size-5 shrink-0" /> : <Moon className="mr-3 size-5 shrink-0" />}
                 {theme === 'dark' ? '切换亮色模式' : '切换暗黑模式'}
               </Button>
 
               <Button
-                variant="ghost"
-                className="w-full text-base h-10 justify-start p-2 text-sidebar-foreground hover:bg-muted"
-                onClick={() => logout()}
+                variant={logoutConfirming ? "destructive" : "ghost"}
+                onClick={handleLogout}
+                onBlur={handleLogoutBlur}
+                className={cn(
+                  "justify-start p-2 h-11 w-full text-base", logoutConfirming ? "transition-none" : "hover:bg-muted text-sidebar-foreground"
+                )}
               >
                 <LogOut className="mr-3 size-5 shrink-0" />
-                退出登录
+                {logoutConfirming ? "确认退出" : "退出登录"}
               </Button>
             </div>
           </div>
@@ -359,7 +402,7 @@ export function Layout() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-10 w-10 hidden md:flex"
+                  className="h-10 w-10 hidden md:flex transition-colors"
                   onClick={toggleSidebar}
                   title={sidebarCollapsed ? "展开侧边栏 (Ctrl+B)" : "折叠侧边栏 (Ctrl+B)"}
                 >
@@ -375,7 +418,7 @@ export function Layout() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-10 w-10 md:hidden"
+                  className="h-10 w-10 md:hidden transition-colors"
                   onClick={() => setMobileMenuOpen(true)}
                 >
                   <Menu className="size-5" />
@@ -388,7 +431,7 @@ export function Layout() {
                 variant="ghost"
                 size="icon"
                 onClick={toggleTheme}
-                className="h-10 w-10 md:hidden text-foreground transition-none"
+                className="h-10 w-10 md:hidden text-foreground transition-colors"
               >
                 {theme === 'dark' ? <Sun className="size-5" /> : <Moon className="size-5" />}
               </Button>

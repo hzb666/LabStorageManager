@@ -50,6 +50,18 @@ class Settings(BaseSettings):
     default_admin_password: str = Field(default="", description="Default admin password (set in production)")
     default_admin_full_name: str = Field(default="系统管理员", description="Default admin full name")
     
+    # Session & Device Settings (IP Limit Feature)
+    max_ip_per_user: int = Field(default=5, description="Max distinct IPs per user")
+    max_device_per_user: int = Field(default=10, description="Max devices per user")
+    session_expire_hours: int = Field(default=168, description="Session expiration hours (7 days)")
+    session_strict_ip: bool = Field(default=False, description="Whether to enforce IP consistency")
+    
+    # Redis Configuration (for session caching)
+    redis_host: str = Field(default="localhost", description="Redis host")
+    redis_port: int = Field(default=6379, description="Redis port")
+    redis_db: int = Field(default=0, description="Redis database number")
+    redis_password: Optional[str] = Field(default=None, description="Redis password")
+    
     # CAS Configuration
     cas_pattern: str = r"^\d{2,7}-\d{2}-\d$"
     

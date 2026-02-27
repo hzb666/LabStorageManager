@@ -448,7 +448,7 @@ export function AdminUsersPage() {
       {/* Users Table */}
       <Card className="overflow-hidden">
         <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-lg">
+          <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
             <Users className="w-5 h-5" />
             用户列表 <span className="text-muted-foreground font-normal">(&thinsp;{data.length}&thinsp;)</span>
           </CardTitle>

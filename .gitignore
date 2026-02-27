@@ -24,6 +24,11 @@ env/
 !.vscode/extensions.json
 .idea/
 .cursor/
+.history/
+.claude/
+.kilocode/
+.sonar/
+.docs/
 *.sw?
 *.swo
 

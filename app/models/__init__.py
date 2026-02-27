@@ -16,11 +16,14 @@ from .consumable_order import (
     ConsumableOrderUpdate,
     ConsumableOrderResponse,
 )
+from .user_session import UserSession
 
 __all__ = [
     # User
     "User",
     "UserRole",
+    # Session
+    "UserSession",
     # Inventory
     "Inventory",
     "InventoryStatus",

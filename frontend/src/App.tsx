@@ -9,6 +9,7 @@ import { ReagentOrdersPage } from '@/pages/ReagentOrders'
 import { ConsumableOrdersPage } from '@/pages/ConsumableOrders'
 import { TestErrorPage } from '@/pages/TestError'
 import { NotFoundPage } from '@/pages/NotFound'
+import DeviceManagement from '@/pages/DeviceManagement'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
 import { useTheme } from '@/hooks/useTheme'
@@ -62,6 +63,7 @@ function AppContent() {
               </AdminRoute>
             }
           />
+          <Route path="devices" element={<DeviceManagement />} />
         </Route>
       </Routes>
     </BrowserRouter>

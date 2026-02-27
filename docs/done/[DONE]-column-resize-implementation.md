@@ -75,3 +75,25 @@ interface ColumnSizes {
 2. 需要处理暗黑模式下的样式
 3. 避免拖拽时选中文字（user-select: none）
 4. 移动端检测：使用项目已有的 `useMobile` hook (`frontend/src/hooks/use-mobile.tsx`)
+
+---
+
+## 检查清单
+
+### 实现状态
+
+- [X] Dashboard 表格使用 TanStack Table
+- [X] Inventory 页面使用列宽调整
+- [X] ReagentOrders 页面使用列宽调整
+- [X] ConsumableOrders 页面使用列宽调整
+- [X] AdminUsers 页面使用列宽调整
+- [X] localStorage 持久化列宽
+- [X] 移动端隐藏拖拽手柄
+
+---
+
+**检查完成**: ✅ 全部完成
+
+---
+
+*文档更新时间: 2026-02-28*

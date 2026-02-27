@@ -33,6 +33,7 @@ from app.core.auth import get_current_user, require_admin
 from app.services.cas_utils import normalize_cas
 from app.services.internal_code import generate_internal_code
 from app.services.spec_utils import parse_specification, SpecificationError
+from app.services.pinyin_utils import compute_pinyin_fields
 
 logger = logging.getLogger(__name__)
 
@@ -428,6 +429,14 @@ def manual_add_inventory(
 
     internal_codes = generate_internal_code(db, normalized_cas, item_data.quantity_bottles)
 
+    # 自动计算拼音字段
+    pinyin_fields = compute_pinyin_fields(
+        name=item_data.name,
+        category=item_data.category,
+        brand=item_data.brand,
+        alias=item_data.alias,
+    )
+
     created_items = []
     for internal_code in internal_codes:
         db_inventory = Inventory(
@@ -446,6 +455,7 @@ def manual_add_inventory(
             notes=item_data.notes,
             status=InventoryStatus.IN_STOCK,
             created_by_id=current_user.id,
+            **pinyin_fields,
         )
         db.add(db_inventory)
         created_items.append(db_inventory)
@@ -698,6 +708,14 @@ def list_inventory(
         else_=0
     )
     
+    # 拼音排序字段映射（使用数据库索引加速排序）
+    pinyin_sort_field_map = {
+        'name': Inventory.name_pinyin,
+        'category': Inventory.category_pinyin,
+        'brand': Inventory.brand_pinyin,
+        'alias': Inventory.alias_pinyin,
+    }
+    
     sort_field_map = {
         'cas_number': Inventory.cas_number,
         'name': Inventory.name,
@@ -713,7 +731,6 @@ def list_inventory(
     }
     
     # 确定排序字段和方向
-    order_column = sort_field_map.get(sort_by, Inventory.created_at)
     order_direction = sort_order.lower() if sort_order else 'desc'
     
     # 中文拼音排序字段列表
@@ -722,32 +739,20 @@ def list_inventory(
     # 判断是否需要使用拼音排序
     use_pinyin_sort = sort_by in pinyin_sort_fields
     
-    logger.info(f"[SORT DEBUG] sort_by={sort_by}, sort_order={sort_order}, order_column={order_column}, order_direction={order_direction}, use_pinyin_sort={use_pinyin_sort}")
-    
+
     if use_pinyin_sort:
-        # 中文拼音排序：先按拼音键排序
-        pinyin_key_field = f"{sort_by}_pinyin"
-        logger.info(f"[PINYIN SORT] Using pinyin sorting for field: {sort_by}")
+        # 使用数据库索引排序（高效）
+        order_column = pinyin_sort_field_map.get(sort_by)
+    else:
+        order_column = sort_field_map.get(sort_by, Inventory.created_at)
     
     if order_direction == 'asc':
         order_expr = order_column.asc()
     else:
         order_expr = order_column.desc()
     
-    # 如果 limit 为 0，不使用分页，返回全部数据
-    # 如果需要拼音排序，先获取全部数据再在 Python 中排序
-    if limit == 0 or use_pinyin_sort:
-        items = db.exec(base.order_by(order_expr)).all()
-        if use_pinyin_sort:
-            # Python 端拼音排序
-            logger.info(f"[PINYIN SORT] Performing Python-side pinyin sorting for field: {sort_by}")
-            reverse = order_direction == 'desc'
-            # 使用 pypinyin 转换键进行排序
-            items = sorted(items, key=lambda x: _to_pinyin_sort_key(getattr(x, sort_by) or ''), reverse=reverse)
-            # 如果有 limit，应用分页
-            if limit > 0:
-                items = items[skip:skip + limit]
-    elif limit > 0:
+    # 统一使用数据库排序
+    if limit > 0:
         items = db.exec(base.order_by(order_expr).offset(skip).limit(limit)).all()
     else:
         items = db.exec(base.order_by(order_expr)).all()
@@ -805,6 +810,17 @@ def update_inventory(
     update_data = update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(item, field, value)
+
+    # 如果更新了名称、类别、品牌或别名，自动重新计算拼音
+    if any(field in update_data for field in ['name', 'category', 'brand', 'alias']):
+        pinyin_fields = compute_pinyin_fields(
+            name=item.name,
+            category=item.category,
+            brand=item.brand,
+            alias=item.alias,
+        )
+        for pinyin_field, pinyin_value in pinyin_fields.items():
+            setattr(item, pinyin_field, pinyin_value)
 
     item.updated_at = datetime.now(timezone.utc)
     db.commit()

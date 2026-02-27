@@ -162,7 +162,40 @@
 | P0 | 所有必填项非空检查 | 所有页面 |
 | P1 | 规格格式验证 | ReagentOrders, ConsumableOrders, Inventory |
 | P1 | 数量/价格正数验证 | ReagentOrders, ConsumableOrders, Inventory |
-| P2 | 用户名格式验证 | AdminUsers |
+ 用户名格式验证| P2 | | AdminUsers |
 | P2 | 密码强度验证 | AdminUsers |
 | P3 | 位置格式验证 | Dashboard |
 | P3 | 即时验证 onBlur | 所有页面 |
+
+---
+
+## 检查清单
+
+### 验证工具函数
+
+- [X] `validateCASNumber` - CAS号格式+校验码验证
+- [X] `normalizeCASNumber` - CAS号标准化
+- [X] `validateRequired` - 必填验证
+- [X] `validateStringLength` - 字符串长度验证
+- [X] `validatePositiveNumber` - 正数验证
+- [X] `validateNonNegativeNumber` - 非负数验证
+- [X] `validateUsername` - 用户名格式验证
+- [X] `validatePassword` - 密码强度验证
+- [X] `validateLocation` - 位置格式验证
+- [X] `validateSpecification` - 规格格式验证
+- [X] `validatePrice` - 价格范围验证
+
+### 使用情况
+
+- [X] AdminUsers.tsx 使用验证工具
+- [X] ReagentOrders.tsx 使用验证工具
+- [X] ConsumableOrders.tsx 使用验证工具
+- [X] Inventory.tsx 使用验证工具
+
+---
+
+**检查完成**: ✅ 全部完成
+
+---
+
+*文档更新时间: 2026-02-28*

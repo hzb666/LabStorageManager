@@ -70,6 +70,12 @@ class Inventory(InventoryBase, table=True):
     )
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)  # 排序常用
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # 拼音排序字段（预计算，使用数据库索引加速排序）
+    name_pinyin: Optional[str] = Field(default=None, index=True)
+    category_pinyin: Optional[str] = Field(default=None, index=True)
+    brand_pinyin: Optional[str] = Field(default=None, index=True)
+    alias_pinyin: Optional[str] = Field(default=None, index=True)
 
 
 class InventoryCreate(SQLModel):

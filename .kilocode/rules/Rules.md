@@ -8,7 +8,7 @@
 1.  **Concurrency**: 初始化 SQLite 时必须启用 **WAL Mode**。
 2.  **CAS Normalization**: 所有涉及 CAS 号的输入，必须在后端进行标准化清洗（去除空格、大写）。这是系统的防重基石。
 3.  **Image Optimization**: 禁止将图片存入数据库 Blob。必须在后端使用 Pillow 压缩至 <100KB 并存入文件系统。
-4.  **No Mobile Dependency**: 系统设计不依赖扫码枪或手机摄像头。所有流程闭环在 PC/平板 Web 端完成。
+4.  **不要删除任何未提交的文件除非我同意，危险命令：git clean**
 5.  **Git Commit**: 完成重大修改后，切换到Review模式在当前对话进行Code Review，给出报告与我进行讨论，讨论完成后更新`Readme.md`，更新`milestone.md`，之后执行git提交，注意分支和提交信息。
 6.  **Chinese**: 前端使用中文展示（除英文名称等），后端保存用英文方便管理（除中文名称等），因此需要添加映射表
 7.  **Debug**:我会将我自己发现的问题记录在 `BUGS.md`，在debug时请做好相关记录，你进行代码审查时发现的问题也要写入此文档

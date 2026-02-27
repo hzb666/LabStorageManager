@@ -3,7 +3,7 @@ import { flexRender } from '@tanstack/react-table'
 import type { Table as TableType, Row, Cell, Column } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useMobile'
 
@@ -23,6 +23,10 @@ interface DataTableProps<TData> {
     expandAll: () => void
     collapseAll: () => void
   }) => React.ReactNode
+  hasNextPage?: boolean
+  isFetchingNextPage?: boolean
+  fetchNextPage?: () => void
+  total?: number
 }
 
 // --- 单行组件：全动态测算与 Headless 布局 ---
@@ -61,27 +65,34 @@ function HeadlessVirtualRow<TData>({
         onClick={row.getToggleExpandedHandler()}
       >
         {row.getVisibleCells().map((cell: Cell<TData, unknown>, index: number) => {
-          
           const isFirstCol = index === 0;
           const showAccentLine = isFirstCol && hasNote && !isExpanded;
 
           return (
-            <div
-              key={cell.id}
-              className={cn(
-                "p-3 text-base break-all flex items-center relative transition-colors",
-                // 修复1：第一列始终保留真实的边框占位，永远不挤压文字
-                isFirstCol && "border-l-4 border-transparent"
-              )}
-              style={getProportionalStyles(cell.column)}
-            >
-              {/* 修复1：在透明边框的位置上，盖一个可以任意调整高度的绝对定位条 */}
-              {showAccentLine && (
-                <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-[75%] bg-slate-300 dark:bg-slate-500 rounded-r-[2px]" />
-              )}
-              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-            </div>
-          )
+  <div
+    key={cell.id}
+    className={cn(
+      "p-3 text-base break-all flex items-center relative transition-colors",
+      isFirstCol && "border-l-4 border-transparent"
+    )}
+    style={getProportionalStyles(cell.column)}
+  >
+    {/* 移除 && 条件渲染，改为通过类名控制显隐和动画 */}
+    <div 
+      className={cn(
+        "absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-[75%] bg-slate-300 dark:bg-slate-500 rounded-r-[2px]",
+        // 添加过渡基础属性
+        "transition-all duration-300 ease-in-out origin-center",
+        // 根据状态切换样式：显示时完全不透明且高度为 100%，隐藏时透明且高度压缩
+        showAccentLine 
+          ? "opacity-100 scale-y-100" 
+          : "opacity-0 scale-y-0"
+      )} 
+    />
+    
+    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+  </div>
+)
         })}
       </div>
 
@@ -113,6 +124,10 @@ export function DataTable<TData>({
   isAllExpanded: externalIsAllExpanded,
   onToggleExpandAll,
   noteField,
+  hasNextPage,
+  isFetchingNextPage,
+  fetchNextPage,
+  total,
 }: DataTableProps<TData>) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
@@ -170,6 +185,14 @@ export function DataTable<TData>({
     return () => observer.disconnect()
   }, [])
 
+  // 排序时自动滚动回顶部体验优化
+  useEffect(() => {
+    const sorting = table.getState().sorting;
+    if (bodyScrollRef.current) {
+      bodyScrollRef.current.scrollTop = 0;
+    }
+  }, [table.getState().sorting]);
+
   const isMobile = useIsMobile()
   const { rows } = table.getRowModel()
   const visibleColumns = table.getVisibleLeafColumns()
@@ -192,7 +215,6 @@ export function DataTable<TData>({
     }
   }, [totalWeight])
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleCustomResize = useCallback((e: React.MouseEvent | React.TouchEvent, header: any) => {
     e.preventDefault()
     e.stopPropagation()
@@ -273,6 +295,18 @@ export function DataTable<TData>({
     getScrollElement: () => bodyScrollRef.current,
   })
 
+  // 纯后端无限滚动触发逻辑
+  const handleScroll = useCallback(() => {
+    const el = bodyScrollRef.current
+    if (!el || !hasNextPage || isFetchingNextPage) return
+
+    const { scrollTop, clientHeight } = el
+    const totalHeight = rowVirtualizer.getTotalSize()
+    
+    if (totalHeight - scrollTop - clientHeight < 200) {
+      fetchNextPage?.()
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, rowVirtualizer])
 
   return (
     <div
@@ -280,12 +314,10 @@ export function DataTable<TData>({
       className="w-full bg-card rounded-md flex flex-col overflow-hidden"
       style={{ height: typeof scrollHeight === 'number' ? `${scrollHeight}px` : scrollHeight }}
     >
-      {/* 表头区 */}
       <div 
         className="z-30 w-full rounded-t-md bg-card"
-        style={{ paddingRight: `${scrollbarWidth}px` }} // 让出滚动条位置
+        style={{ paddingRight: `${scrollbarWidth}px` }} 
       >
-        {/* 修复2：把 border-b-2 移到内部的 div 上，这样边框到 padding 处就会截止，不会盖住滚动条 */}
         <div className="w-full border-b-2 border-border">
           <div ref={headerScrollRef} className="w-full overflow-hidden">
             <div 
@@ -346,9 +378,6 @@ export function DataTable<TData>({
                       </div>
                     )
                   })}
-                  {headerGroup.id === table.getHeaderGroups()[table.getHeaderGroups().length - 1].id && (
-                    null
-                  )}
                 </React.Fragment>
               ))}
             </div>
@@ -356,7 +385,6 @@ export function DataTable<TData>({
         </div>
       </div>
 
-      {/* 表体区 */}
       <div
         ref={bodyScrollRef}
         className="w-full overflow-auto custom-scrollbar relative flex-1"
@@ -365,6 +393,7 @@ export function DataTable<TData>({
           if (headerScrollRef.current) {
             headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft
           }
+          handleScroll()
         }}
       >
         <div
@@ -390,6 +419,21 @@ export function DataTable<TData>({
             )
           })}
         </div>
+        
+        {isFetchingNextPage && (
+          <div className="flex items-center justify-center py-4 text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            <span>加载更多...</span>
+          </div>
+        )}
+        
+        {!hasNextPage && !isFetchingNextPage && (
+          <div className="text-center py-4 text-muted-foreground text-sm">
+            {total !== undefined && total > 0 
+              ? `已加载全部 ${rows.length} / ${total} 条记录` 
+              : '无数据'}
+          </div>
+        )}
       </div>
     </div>
   )

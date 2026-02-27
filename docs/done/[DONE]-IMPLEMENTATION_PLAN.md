@@ -417,3 +417,85 @@
 - TanStack Table
 - Axios
 - Zustand (状态管理)
+
+---
+
+## 检查清单
+
+### Phase 1: Infrastructure
+
+- [X] 1.1 FastAPI + SQLModel + SQLite (WAL Mode)
+- [X] 1.2 User Model & JWT Auth
+- [X] 1.3 Image Service (Pillow <100KB)
+- [X] 1.4 CAS Utility (normalize_cas)
+
+### Phase 2: Ordering & Inventory Core
+
+- [X] 2.1 Order CRUD API
+- [X] 2.2 CAS Check API
+- [X] 2.3 Inventory CRUD API (Borrow/Return)
+- [X] 2.4 Stock-In Logic
+- [X] 2.5 Order Workflow (Confirm Arrival)
+- [X] 2.6 Confirm Arrival Optimization
+
+### Phase 3: User Dashboard
+
+- [X] 3.1 Dashboard APIs
+- [X] 3.2 Return Item API
+- [X] 3.3 Frontend Dashboard
+
+### Phase 4: Excel Import
+
+- [X] 4.1 Backend Excel Service
+- [X] 4.2 Frontend Excel UI
+
+### Phase 5: Frontend Pages
+
+- [X] 5.1 React + Shadcn/UI + TanStack Table
+- [X] 5.2 Order Form with CAS Auto-check
+- [X] 5.3 Inventory Table
+
+### Phase 6: Manual Inventory Add
+
+- [X] 6.1 Backend API
+- [X] 6.2 Frontend Manual Add UI
+
+### Phase 7: Admin User Management
+
+- [X] 7.1 Admin APIs
+- [X] 7.2 Frontend Admin Page
+
+### Phase 8: Notifications & Alerts
+
+- [X] 8.1 CAS 重复订购预警
+- [X] 8.2 入库提醒
+- [X] 8.3 低库存警告
+- [X] 8.4 借用超时提醒
+
+### Phase 9: 试剂与耗材分离
+
+- [X] 9.1 数据库模型重构
+- [X] 9.2 API 重构
+- [X] 9.3 前端页面重构
+
+### Phase 10: Error Boundary + Pagination
+
+- [X] 10.1 Error Boundary
+- [X] 10.2 后端分页改造
+- [X] 10.3-10.4 前端分页
+- [X] 10.5 前端隐藏 internal_code 展示
+
+### Future Enhancements
+
+- [ ] 批量操作（批量入库、批量归还）
+- [ ] 高级搜索（多条件筛选、模糊搜索）- 部分完成
+- [ ] 数据导出（Excel 报表导出）
+- [ ] 借用历史（显示最近 10 个借用人）
+
+---
+
+**检查完成**: ✅ 全部完成 (Future Enhancements 部分待完成)
+
+---
+
+*文档更新时间: 2026-02-28*

@@ -2,13 +2,15 @@
 User API Routes - Authentication and User Management
 Critical Rule #3: All data modification endpoints must check current_user
 """
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+import hashlib
 import time
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
+import redis
 
 from app.core.auth import (
     get_current_user,
@@ -17,6 +19,8 @@ from app.core.auth import (
     verify_password,
     get_password_hash,
 )
+from app.core.config import settings
+from app.core.redis import cache_session, delete_cached_session, get_redis
 from app.database import get_db
 from app.models.user import (
     User,
@@ -25,16 +29,20 @@ from app.models.user import (
     UserResponse,
     UserRole,
 )
+from app.models.user_session import UserSession
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
 # ==================== Rate Limiting ====================
-# 简单内存速率限制：记录每个 IP 的登录失败次数
-# 注意：生产环境建议使用 Redis 存储
-LOGIN_ATTEMPTS: Dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次失败时间)
+# 基于 Redis 的速率限制：记录每个 IP 的登录失败次数
+# 使用 Redis 可以支持多实例部署
 MAX_LOGIN_ATTEMPTS = 5  # 最多失败 5 次
 LOGIN_WINDOW_SECONDS = 300  # 5 分钟内
-MAX_CACHE_SIZE = 10000  # 防止内存无限增长
+
+
+def _rate_limit_key(client_ip: str) -> str:
+    """生成速率限制的 Redis Key"""
+    return f"rate_limit:login:{client_ip}"
 
 
 def _get_client_ip(request: Request) -> str:
@@ -46,68 +54,202 @@ def _get_client_ip(request: Request) -> str:
 
 
 def _check_rate_limit(client_ip: str) -> None:
-    """检查 IP 登录速率限制"""
-    # 定期清理过期条目
-    _cleanup_old_entries()
+    """检查 IP 登录速率限制 (Redis 实现)"""
+    redis_client = get_redis()
     
-    if client_ip in LOGIN_ATTEMPTS:
-        attempts, first_attempt = LOGIN_ATTEMPTS[client_ip]
-        # 检查是否在时间窗口内
-        if time.time() - first_attempt < LOGIN_WINDOW_SECONDS:
-            if attempts >= MAX_LOGIN_ATTEMPTS:
+    if redis_client is None:
+        # Redis 不可用时，跳过速率限制检查（降级处理）
+        return
+    
+    key = _rate_limit_key(client_ip)
+    
+    try:
+        # 使用 Redis INCR + EXPIRE 实现速率限制
+        # 先获取当前值
+        current = redis_client.get(key)
+        
+        if current is not None:
+            attempts = int(current)
+            ttl = redis_client.ttl(key)
+            
+            if ttl > 0 and attempts >= MAX_LOGIN_ATTEMPTS:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="登录尝试过多，请 5 分钟后重试"
                 )
-        else:
-            # 时间窗口过期，重置计数
-            del LOGIN_ATTEMPTS[client_ip]
+    except redis.RedisError:
+        # Redis 错误时，跳过速率限制（降级处理）
+        pass
 
 
 def _record_failed_login(client_ip: str) -> None:
-    """记录失败的登录尝试"""
+    """记录失败的登录尝试 (Redis 实现)"""
+    redis_client = get_redis()
+    
+    if redis_client is None:
+        # Redis 不可用时，使用内存后备
+        _record_failed_login_memory(client_ip)
+        return
+    
+    key = _rate_limit_key(client_ip)
+    
+    try:
+        # 使用 INCR 增加计数，EXPIRE 设置过期时间
+        pipe = redis_client.pipeline()
+        pipe.incr(key)
+        # 设置过期时间（如果尚未设置）
+        pipe.expire(key, LOGIN_WINDOW_SECONDS)
+        pipe.execute()
+    except redis.RedisError:
+        # Redis 错误时，使用内存后备
+        _record_failed_login_memory(client_ip)
+
+
+def _reset_login_attempts(client_ip: str) -> None:
+    """登录成功后重置计数 (Redis 实现)"""
+    redis_client = get_redis()
+    
+    if redis_client is None:
+        return
+    
+    key = _rate_limit_key(client_ip)
+    
+    try:
+        redis_client.delete(key)
+    except redis.RedisError:
+        pass
+
+
+# ==================== Memory Fallback Rate Limiting ====================
+# 内存后备速率限制（Redis 不可用时使用）
+LOGIN_ATTEMPTS: Dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次失败时间)
+
+
+def _record_failed_login_memory(client_ip: str) -> None:
+    """记录失败的登录尝试 (内存后备)"""
+    import time
     current_time = time.time()
     if client_ip not in LOGIN_ATTEMPTS:
         LOGIN_ATTEMPTS[client_ip] = (1, current_time)
     else:
         attempts, first_attempt = LOGIN_ATTEMPTS[client_ip]
-        # 如果时间窗口已过期，重置
         if current_time - first_attempt >= LOGIN_WINDOW_SECONDS:
             LOGIN_ATTEMPTS[client_ip] = (1, current_time)
         else:
             LOGIN_ATTEMPTS[client_ip] = (attempts + 1, first_attempt)
 
 
-def _reset_login_attempts(client_ip: str) -> None:
-    """登录成功后重置计数"""
-    if client_ip in LOGIN_ATTEMPTS:
-        del LOGIN_ATTEMPTS[client_ip]
-    # 顺便清理过期条目
-    _cleanup_old_entries()
+# ==================== Device Session Management ====================
+
+def _check_device_limit(db: Session, user_id: int, device_id: str) -> bool:
+    """
+    检查设备数量限制
+    如果超过限制，返回 False 表示需要踢出旧设备
+    """
+    if not device_id:
+        return True  # 没有 device_id 不限制
+    
+    # 统计当前用户的设备数（排除当前设备）
+    count = db.exec(
+        select(func.count(UserSession.id))
+        .where(UserSession.user_id == user_id)
+        .where(UserSession.device_id != device_id)
+    ).one()
+    
+    return count < settings.max_device_per_user
 
 
-def _cleanup_old_entries() -> None:
-    """清理过期条目防止内存无限增长"""
-    current_time = time.time()
-    # 清理超过 1 小时的过期条目
-    expired_ips = [
-        ip for ip, (_, first_attempt) in LOGIN_ATTEMPTS.items()
-        if current_time - first_attempt > 3600
-    ]
-    for ip in expired_ips:
-        del LOGIN_ATTEMPTS[ip]
-    # 如果缓存过大，随机删除一些旧条目
-    if len(LOGIN_ATTEMPTS) > MAX_CACHE_SIZE:
-        # 删除最旧的 20%
-        ips_to_remove = list(LOGIN_ATTEMPTS.keys())[:MAX_CACHE_SIZE // 5]
-        for ip in ips_to_remove:
-            del LOGIN_ATTEMPTS[ip]
+def _check_ip_limit(db: Session, user_id: int, ip_address: str) -> bool:
+    """
+    检查 IP 数量限制
+    如果超过限制，返回 False
+    """
+    if not ip_address:
+        return True
+    
+    # 统计当前用户不同 IP 数（排除当前 IP）
+    unique_ips = db.exec(
+        select(func.count(func.distinct(UserSession.ip_address)))
+        .where(UserSession.user_id == user_id)
+        .where(UserSession.ip_address != ip_address)
+    ).one()
+    
+    return unique_ips < settings.max_ip_per_user
+
+
+def _evict_oldest_session(db: Session, user_id: int) -> None:
+    """踢出最旧的会话"""
+    oldest = db.exec(
+        select(UserSession)
+        .where(UserSession.user_id == user_id)
+        .order_by(UserSession.last_active_at.asc())
+        .limit(1)
+    ).first()
+    
+    if oldest:
+        # 删除 Redis 缓存
+        delete_cached_session(oldest.token_hash)
+        # 删除数据库记录
+        db.delete(oldest)
+        db.commit()
+
+
+def _create_user_session(
+    db: Session,
+    user_id: int,
+    device_id: str,
+    device_name: str,
+    ip_address: str,
+    user_agent: str,
+    token: str
+) -> UserSession:
+    """创建用户会话"""
+    # 计算 token hash
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    
+    # 计算过期时间
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.session_expire_hours)
+    
+    # 创建会话
+    session = UserSession(
+        user_id=user_id,
+        device_id=device_id or "unknown",
+        device_name=device_name or "Unknown Device",
+        ip_address=ip_address,
+        last_ip_address=ip_address,
+        user_agent=user_agent,
+        token_hash=token_hash,
+        expires_at=expires_at,
+    )
+    
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    
+    # 缓存到 Redis
+    cache_session(
+        token_hash,
+        {
+            "session_id": session.id,
+            "user_id": user_id,
+            "device_id": device_id,
+            "device_name": device_name,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "expires_at": expires_at.isoformat(),
+        },
+        settings.session_expire_hours * 3600
+    )
+    
+    return session
 
 
 class LoginRequest(BaseModel):
     """Login request body"""
     username: str
     password: str
+    device_id: Optional[str] = None  # Client device ID
+    device_name: Optional[str] = "Unknown Device"  # Client device name
 
 
 class ChangePasswordRequest(BaseModel):
@@ -140,12 +282,15 @@ def login(
     Args:
         username: Username
         password: Password
+        device_id: Optional device identifier
+        device_name: Optional device name
         db: Database session
     
     Returns:
         User info (token is set as httpOnly Cookie)
     """
     client_ip = _get_client_ip(http_request)
+    user_agent = http_request.headers.get("User-Agent", "Unknown")
     
     # 检查速率限制
     _check_rate_limit(client_ip)
@@ -170,11 +315,33 @@ def login(
     # 登录成功，重置速率限制
     _reset_login_attempts(client_ip)
     
+    # 检查 IP 限制
+    if not _check_ip_limit(db, user.id, client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"IP 数量已达上限 ({settings.max_ip_per_user}个)，请先移除其他设备"
+        )
+    
+    # 检查设备限制，如果超限则踢出旧设备
+    if not _check_device_limit(db, user.id, login_request.device_id):
+        _evict_oldest_session(db, user.id)
+    
     # Create JWT token
     access_token = create_access_token(
         user_id=user.id,
         username=user.username,
         role=user.role.value
+    )
+    
+    # 创建用户会话
+    _create_user_session(
+        db=db,
+        user_id=user.id,
+        device_id=login_request.device_id or "unknown",
+        device_name=login_request.device_name or "Unknown Device",
+        ip_address=client_ip,
+        user_agent=user_agent,
+        token=access_token
     )
     
     # 设置 httpOnly Cookie
@@ -187,15 +354,14 @@ def login(
     from fastapi.responses import JSONResponse
     json_response = JSONResponse(content=response)
     
-    # 设置 httpOnly Cookie (有效期 7 天)
-    from app.core.config import settings
+    # 设置 httpOnly Cookie (有效期与 session_expire_hours 一致)
     json_response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         secure=settings.env != "development",  # 生产环境启用 HTTPS cookie
         samesite="lax",
-        max_age=60 * 60 * 24 * 7,  # 7 days
+        max_age=settings.session_expire_hours * 3600,
         path="/",
     )
     
@@ -203,8 +369,27 @@ def login(
 
 
 @router.post("/logout")
-def logout():
-    """Logout endpoint - clears the authentication cookie"""
+def logout(
+    http_request: Request,
+    db: Session = Depends(get_db)
+):
+    """Logout endpoint - clears the authentication cookie and session"""
+    # 获取 token 并删除会话
+    token = http_request.cookies.get("access_token")
+    if token:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        
+        # 从数据库删除会话
+        session = db.exec(
+            select(UserSession).where(UserSession.token_hash == token_hash)
+        ).first()
+        if session:
+            db.delete(session)
+            db.commit()
+        
+        # 从 Redis 删除缓存
+        delete_cached_session(token_hash)
+    
     from fastapi.responses import JSONResponse
     response = JSONResponse(content={"message": "Logged out successfully"})
     
@@ -421,17 +606,26 @@ def delete_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Prevent self-deactivation
     if user.id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot deactivate yourself"
         )
-    
+
     # Soft delete: set is_active to False
     user.is_active = False
     user.updated_at = datetime.now(timezone.utc)
+
+    # 清理该用户的所有 Redis Session 缓存
+    active_sessions = db.exec(
+        select(UserSession).where(UserSession.user_id == user_id)
+    ).all()
+
+    for session in active_sessions:
+        delete_cached_session(session.token_hash)
+
     db.commit()
 
 

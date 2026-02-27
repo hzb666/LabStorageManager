@@ -10,6 +10,7 @@ from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
 from app.services.internal_code import generate_internal_code
+from app.services.pinyin_utils import compute_pinyin_fields
 from datetime import datetime, timezone
 
 
@@ -309,11 +310,20 @@ def import_inventory_from_excel(
                 db, normalized_cas, sequence_tracker, created_at
             )
             
+            # 自动计算拼音字段
+            name = str(row['name']).strip()
+            pinyin_fields = compute_pinyin_fields(
+                name=name,
+                category=category,
+                brand=brand,
+                alias=alias,
+            )
+            
             # Create inventory item
             inventory = Inventory(
                 internal_code=internal_code,
                 cas_number=normalized_cas,
-                name=str(row['name']).strip(),
+                name=name,
                 english_name=english_name,
                 alias=alias,
                 category=category,
@@ -326,6 +336,7 @@ def import_inventory_from_excel(
                 status=InventoryStatus.IN_STOCK,
                 notes=notes,
                 created_at=created_at,
+                **pinyin_fields,
             )
             
             db.add(inventory)

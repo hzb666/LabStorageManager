@@ -25,6 +25,7 @@ from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.image_service import process_uploaded_image
 from app.services.spec_utils import parse_specification, SpecificationError
 from app.services.internal_code import generate_internal_code
+from app.services.pinyin_utils import compute_pinyin_fields
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
 
@@ -498,6 +499,14 @@ def stock_in_reagent_order(
     # Generate internal codes
     internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
     
+    # 自动计算拼音字段
+    pinyin_fields = compute_pinyin_fields(
+        name=order.name,
+        category=order.category,
+        brand=order.brand,
+        alias=order.alias,
+    )
+    
     # Create Inventory items
     inventory_items = []
     for internal_code in internal_codes:
@@ -517,6 +526,7 @@ def stock_in_reagent_order(
             image_path=order.image_path,
             status=InventoryStatus.IN_STOCK,
             notes=order.notes,
+            **pinyin_fields,
         )
         db.add(inv)
         inventory_items.append(inv)

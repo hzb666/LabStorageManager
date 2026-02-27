@@ -1,5 +1,6 @@
 ﻿import axios from 'axios'
 import { useAuthStore } from '@/store/useStore'
+import { getDeviceId, getDeviceName } from '@/lib/deviceId'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
@@ -50,14 +51,40 @@ export interface PaginationParams {
   limit?: number
 }
 
+// Session Info type for device management
+export interface SessionInfo {
+  id: number
+  user_id: number
+  device_id: string
+  device_name: string
+  ip_address: string
+  user_agent?: string
+  created_at: string
+  last_active_at: string
+  expires_at: string
+}
+
 // Auth APIs
 export const authAPI = {
   login: (username: string, password: string) =>
-    api.post('/users/login', { username, password }),
+    api.post('/users/login', { 
+      username, 
+      password,
+      device_id: getDeviceId(),
+      device_name: getDeviceName()
+    }),
   logout: () => api.post('/users/logout'),
   getProfile: () => api.get('/users/me'),
   changePassword: (oldPassword: string, newPassword: string) =>
     api.post('/users/change-password', { old_password: oldPassword, new_password: newPassword }),
+}
+
+// Session APIs (Device Management)
+export const sessionAPI = {
+  list: () => api.get('/users/me/sessions'),
+  delete: (id: number) => api.delete(`/users/me/sessions/${id}`),
+  deleteAll: () => api.delete('/users/me/sessions'),
+  refresh: () => api.post('/users/me/sessions/refresh'),
 }
 
 // User Admin APIs

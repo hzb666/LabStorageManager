@@ -1,7 +1,9 @@
 # Git 分支管理规范
 
 不要更改此文档！
+不要删除任何未提交的文件除非我同意，危险命令：git clean
 本项目采用 Git Flow 工作流，包含以下分支类型：
+
 ## 注意事项
 
 1. **禁止在 main 分支直接开发**
@@ -11,27 +13,26 @@
 
 ## 分支类型
 
-| 分支 | 用途 | 生命周期 | 合并目标 |
-|-----|------|---------|---------|
-| `main` | 生产环境，包含稳定发布版本 | 长期 | - |
-| `develop` | 开发主分支，包含最新开发成果 | 长期 | `main` |
-| `feature/*` | 新功能开发 | 临时 | `develop` |
-| `release/*` | 发布前准备（bug修复、文档更新） | 临时 | `main` + `develop` |
-| `hotfix/*` | 生产环境紧急修复 | 临时 | `main` + `develop` |
+| 分支          | 用途                            | 生命周期 | 合并目标               |
+| ------------- | ------------------------------- | -------- | ---------------------- |
+| `main`      | 生产环境，包含稳定发布版本      | 长期     | -                      |
+| `develop`   | 开发主分支，包含最新开发成果    | 长期     | `main`               |
+| `feature/*` | 新功能开发                      | 临时     | `develop`            |
+| `release/*` | 发布前准备（bug修复、文档更新） | 临时     | `main` + `develop` |
+| `hotfix/*`  | 生产环境紧急修复                | 临时     | `main` + `develop` |
 
 ## 提交规范
 
-| 类型 | 说明 |
-|-----|------|
-| `feat` | 新功能 |
-| `fix` | Bug修复 |
-| `docs` | 文档更新 |
-| `refactor` | 代码重构 |
-| `perf` | 性能优化 |
-| `chore` | 构建/工具变动 |
+| 类型         | 说明          |
+| ------------ | ------------- |
+| `feat`     | 新功能        |
+| `fix`      | Bug修复       |
+| `docs`     | 文档更新      |
+| `refactor` | 代码重构      |
+| `perf`     | 性能优化      |
+| `chore`    | 构建/工具变动 |
 
 格式：`类型: 简短描述`
-
 
 ## 命名规范
 
@@ -46,6 +47,7 @@ hotfix/security-fix
 ## 工作流程
 
 ### 功能开发 (Feature)
+
 ```bash
 # 1. 创建功能分支
 git checkout develop
@@ -62,6 +64,7 @@ git push origin develop
 ```
 
 ### 发布准备 (Release)
+
 ```bash
 # 1. 创建 release 分支
 git checkout develop
@@ -82,6 +85,7 @@ git push origin develop
 ```
 
 ### 紧急修复 (Hotfix)
+
 ```bash
 # 1. 创建 hotfix 分支
 git checkout main
@@ -99,5 +103,3 @@ git checkout develop
 git merge --no-ff hotfix/xxx
 git push origin develop
 ```
-
-

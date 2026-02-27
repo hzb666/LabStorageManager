@@ -187,3 +187,40 @@ flowchart TD
 4. ✅ 搜索/筛选后保持展开状态（当开启保持展开时）
 5. ✅ 有备注的行显示特殊下边框颜色（amber-500）
 6. ✅ 暗黑模式下颜色正确适配
+
+---
+
+## 检查清单
+
+### DataTable.tsx
+
+- [X] 1.1 添加新的 Props 类型定义
+- [X] 1.2 实现展开/收起状态管理（内部 state）
+- [X] 1.3 实现 localStorage 读写
+- [X] 1.4 实现 `renderExpandAllControls` render prop
+- [X] 1.5 暴露展开/收起方法给外部
+- [X] 1.6 实现备注行边框样式（HeadlessVirtualRow 组件）
+
+### Inventory.tsx
+
+- [X] 2.1 导入图标
+- [X] 2.2 添加 `enableExpandAll` 和 `expandAllStorageKey` 参数
+- [X] 2.3 添加 `noteField="notes"` 参数
+- [X] 2.4 在搜索框旁边渲染展开/收起按钮
+- [X] 2.5 移除原有的 `collapseAllRowsRef` 逻辑
+
+### 测试验证
+
+- [X] 3.1 测试展开/收起功能
+- [X] 3.2 测试 localStorage 持久化
+- [X] 3.3 测试搜索/筛选后保持展开状态
+- [X] 3.4 测试备注行边框颜色
+- [X] 3.5 测试暗黑模式兼容性
+
+---
+
+**检查完成**: ✅ 全部完成
+
+---
+
+*文档更新时间: 2026-02-28*
