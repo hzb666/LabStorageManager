@@ -16,7 +16,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { inventoryAPI } from '@/api/client'
-import type { CursorPaginatedResponse } from '@/api/client'
 import { toast } from '@/components/ui/Toast'
 import { DataTable } from '@/components/ui/DataTable'
 import { formatDate, cn } from '@/lib/utils'
@@ -73,7 +72,6 @@ interface InventoryItem {
 
 const columnHelper = createColumnHelper<InventoryItem>()
 
-// 模糊搜索时正确高亮匹配的内容
 const HighlightText = React.memo(function HighlightText({ text, highlight, fuzzy }: { text: string; highlight: string; fuzzy?: boolean }) {
   const regex = React.useMemo(() => new RegExp(`(${highlight})`, 'gi'), [highlight])
 
@@ -109,7 +107,6 @@ const HighlightText = React.memo(function HighlightText({ text, highlight, fuzzy
   )
 })
 
-// 性能优化：参数化的引用防止渲染崩溃
 const ActionButtons = React.memo(function ActionButtons({
   item,
   onEdit,
@@ -124,7 +121,6 @@ const ActionButtons = React.memo(function ActionButtons({
 
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
-
     if (isLoading) return
 
     if (!isConfirming) {
@@ -223,14 +219,17 @@ export function InventoryPage() {
   const [fuzzySearch, setFuzzySearch] = useState(false)
   const sortingRef = useRef<SortingState>([])
 
-  const queryFn = useCallback(async ({ pageParam }: { pageParam: number | null }) => {
+  // 【核心改造】：查询函数采用基于 skip / limit 的物理偏移逻辑
+  const queryFn = useCallback(async ({ pageParam = 0 }: { pageParam: number }) => {
     const currentSorting = sorting.length > 0 ? sorting : sortingRef.current
     const sort = currentSorting[0]
 
+    // 构建传递给后端的参数
     const params: Record<string, unknown> = {
-      cursor: pageParam,
-      limit: 50,
+      skip: pageParam, // <--- 传递偏移量
+      limit: 50,       // 每次固定拉取 50 条
     }
+    
     if (statusFilter !== 'all') {
       params.status_filter = statusFilter
     }
@@ -248,8 +247,9 @@ export function InventoryPage() {
       params.sort_order = sort.desc ? 'desc' : 'asc'
     }
 
-    const response = await inventoryAPI.list(params as Parameters<typeof inventoryAPI.list>[0])
-    return response.data as CursorPaginatedResponse<InventoryItem>
+    const response = await inventoryAPI.list(params as any)
+    // 返回格式需要包含 data 数组和 total 总数
+    return response.data 
   }, [statusFilter, globalFilter, searchField, fuzzySearch, sorting])
 
   const {
@@ -262,9 +262,20 @@ export function InventoryPage() {
   } = useInfiniteQuery({
     queryKey: ['inventory', statusFilter, globalFilter, searchField, fuzzySearch, sorting],
     queryFn,
-    getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.next_cursor : null,
-    initialPageParam: null as number | null,
-    // 核心防止闪烁的机制
+    // 【核心改造】：初始偏移量为 0
+    initialPageParam: 0, 
+    // 【核心改造】：智能计算下一次的 offset 偏移量
+    getNextPageParam: (lastPage, allPages) => {
+      // 计算目前所有页面累加起来的数据总条数
+      const currentLoadedCount = allPages.reduce((acc, page) => acc + page.data.length, 0);
+      
+      // 如果当前已加载的数量小于后端返回的真实总数 total，说明还有下一页
+      if (currentLoadedCount < (lastPage.total || 0)) {
+        return currentLoadedCount; // 返回的值将作为下一次请求的 pageParam (即 skip)
+      }
+      
+      return null; // 返回 null 表示没有更多数据了
+    },
     placeholderData: keepPreviousData,
   })
 
@@ -292,20 +303,9 @@ export function InventoryPage() {
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
 
   const [editFormData, setEditFormData] = useState({
-    name: '',
-    english_name: '',
-    alias: '',
-    specification: '',
-    category: '',
-    storage_location: '',
-    cas_number: '',
-    remaining_quantity: 0,
-    initial_quantity: 0,
-    unit: 'ml',
-    brand: '',
-    status: '',
-    is_hazardous: false,
-    notes: ''
+    name: '', english_name: '', alias: '', specification: '', category: '',
+    storage_location: '', cas_number: '', remaining_quantity: 0, initial_quantity: 0,
+    unit: 'ml', brand: '', status: '', is_hazardous: false, notes: ''
   })
   const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({})
 
@@ -349,7 +349,6 @@ export function InventoryPage() {
     localStorage.setItem('inventory-table-col-sizes', JSON.stringify(columnSizing))
   }, [columnSizing])
 
-  // 所有引起数据结构改变的操作，都会触发全体折叠，防止虚拟高度计算错误
   const handleStatusFilterChange = (value: string) => {
     collapseAllRowsRef.current()
     setStatusFilter(value)
@@ -455,7 +454,6 @@ export function InventoryPage() {
     setDialogState('edit')
   }, [setDialogState])
 
-  // 配置列：最小宽度总计 840px，分配完美比例，强制锁定 storage_location 的排序识别
   const columns = useMemo(() => [
     columnHelper.accessor('cas_number', {
       header: 'CAS号',
@@ -569,7 +567,6 @@ export function InventoryPage() {
   const table = useReactTable({
     data,
     columns,
-    // 【强制行ID稳定】避免重绘闪烁和动画错乱
     getRowId: (row) => String(row.id),
     getCoreRowModel: getCoreRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
@@ -580,7 +577,6 @@ export function InventoryPage() {
     onColumnSizingChange: setColumnSizing,
     manualSorting: true,
     onSortingChange: (updater) => {
-      // 排序前折叠所有，防止重排发生行高坍叠
       collapseAllRowsRef.current()
       setSorting(prev => {
         const newSorting = typeof updater === 'function' ? updater(prev) : updater
@@ -594,7 +590,6 @@ export function InventoryPage() {
     },
   })
 
-  // 核心防止高度重叠逻辑：直接重置 TanStack Table 的内部 expanded 状态
   collapseAllRowsRef.current = () => {
     setIsAllExpanded(false)      
     table.resetExpanded()        
@@ -732,7 +727,7 @@ export function InventoryPage() {
             placeholder="搜索名称、CAS号、位置..."
             value={globalFilter}
             onChange={(e) => {
-              collapseAllRowsRef.current() // 搜索时强制收起展开项
+              collapseAllRowsRef.current() 
               setGlobalFilter(e.target.value)
             }}
             className="pl-9 pr-8 text-base w-full inline-flex leading-none"

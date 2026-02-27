@@ -177,6 +177,63 @@ def invalidate_cas_info(cas_number: str) -> None:
 - 新建订单时，自动填充 CAS 对应的名称、类别、品牌
 - 库存列表中相同 CAS 号只查一次数据库
 
+### 4.3 缓存失效策略
+
+缓存的最大挑战是**缓存失效（Cache Invalidation）**。以下是针对不同字段的处理策略：
+
+#### 缓存字段与失效规则
+
+| 缓存字段 | 说明 | 更新时处理 |
+|----------|------|------------|
+| `name` | 中文名称 | 删除缓存 |
+| `english_name` | 英文名称 | 删除缓存 |
+| `brand` | 品牌 | 删除缓存 |
+| `category` | 分类 | 删除缓存 |
+| `alias` | 别名 | 删除缓存 |
+| `is_hazardous` | 是否危化品 | 删除缓存 |
+| `unit` | 单位 | 删除缓存 |
+| `specification` | 规格（初始值） | 删除缓存 |
+| `initial_quantity` | 初始数量（默认值参考） | 删除缓存 |
+| `price` | 价格（参考价） | 删除缓存 |
+
+#### 失效策略：写入时删除（Write Invalidate）
+
+```python
+def update_cas_info(cas_number: str, info: dict):
+    """更新 CAS 信息"""
+    # 1. 更新数据库
+    db.update(...)
+
+    # 2. 删除缓存（强制下次查询回源数据库）
+    invalidate_cas_info(cas_number)
+
+def create_order(cas_number: str, order_data: dict):
+    """创建订单时填充 CAS 信息"""
+    # 1. 查询 CAS 信息（优先缓存）
+    cas_info = get_cached_cas_info(cas_number)
+    if not cas_info:
+        cas_info = db.query(CASInfo).filter_by(cas_number=cas_number).first()
+        if cas_info:
+            # 2. 写入缓存
+            cache_cas_info(cas_number, cas_info.to_dict())
+
+    # 3. 填充订单
+    order_data['name'] = cas_info['name']
+    order_data['brand'] = cas_info['brand']
+```
+
+#### TTL 作为最终保障
+
+```python
+CAS_INFO_TTL = 86400  # 24小时
+```
+
+#### 需要失效缓存的场景
+
+1. **库存编辑** - 修改了 CAS 对应的名称/品牌/分类
+2. **手动入库** - 新增 CAS 信息
+3. **批量导入** - 导入新的 CAS 数据
+
 ### 5.2 方案二：分类/品牌列表缓存
 
 **目标**：缓存分类和品牌列表，快速加载下拉选项
@@ -321,12 +378,20 @@ def invalidate_user_cache(user_id: int) -> None:
 - [X] Session 缓存功能
 - [X] 设备管理后端 API
 - [X] 禁用用户时清理 Session 缓存
+- [X] 缓存失效策略文档（写入时删除 + TTL）
+
+### 缓存失效策略
+
+- [X] `invalidate_cas_info` 函数定义
+- [X] 缓存字段列表（name, english_name, brand, category, alias, is_hazardous, unit）
+- [X] 失效场景说明（库存编辑、手动入库、批量导入）
 
 ### 待实现
 
 - [ ] CAS 基础信息缓存
 - [ ] 分类/品牌列表缓存
 - [ ] 用户权限缓存
+- [ ] 实现缓存失效调用（在库存编辑、手动入库、批量导入时）
 
 ---
 

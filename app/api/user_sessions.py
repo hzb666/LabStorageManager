@@ -17,6 +17,9 @@ from app.models.user_session import UserSession
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
+# 导入 get_current_session 用于获取当前会话
+from app.api.deps import get_current_session
+
 
 class SessionResponse(BaseModel):
     """Session response model"""
@@ -87,13 +90,16 @@ def delete_session(
 
 @router.delete("/")
 def delete_all_sessions(
+    request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    current_session: UserSession = Depends(get_current_session)
 ):
-    """Delete all sessions for current user"""
+    """Delete all sessions for current user except the current session"""
     sessions = db.exec(
         select(UserSession)
         .where(UserSession.user_id == current_user.id)
+        .where(UserSession.token_hash != current_session.token_hash)
     ).all()
     
     deleted_count = 0

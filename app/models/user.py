@@ -25,6 +25,8 @@ class UserBase(SQLModel):
 
 class User(UserBase, table=True):
     """User database model"""
+    __tablename__ = "users"
+    
     id: Optional[int] = Field(default=None, primary_key=True)
     password_hash: str
     created_at: datetime = Field(default_factory=datetime.utcnow)

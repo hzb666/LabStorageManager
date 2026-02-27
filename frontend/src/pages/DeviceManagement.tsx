@@ -16,9 +16,10 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import StatusBadge from '@/components/ui/StatusBadge'
 import { sessionAPI, type SessionInfo } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
-import { formatDate } from '@/lib/utils'
+import { formatDateTime } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
 import {
   Search,
@@ -91,18 +92,18 @@ export default function DeviceManagement() {
       header: 'IP地址',
       size: 130,
       cell: info => (
-        <span className="font-mono text-sm">{info.getValue()}</span>
+        <span className="text-base">{info.getValue()}</span>
       ),
     }),
     columnHelper.accessor('last_active_at', {
       header: '最近活跃',
       size: 150,
-      cell: info => formatDate(info.getValue()),
+      cell: info => formatDateTime(info.getValue()),
     }),
     columnHelper.accessor('created_at', {
       header: '首次登录',
       size: 150,
-      cell: info => formatDate(info.getValue()),
+      cell: info => formatDateTime(info.getValue()),
     }),
     columnHelper.display({
       id: 'status',
@@ -111,13 +112,7 @@ export default function DeviceManagement() {
       cell: info => {
         const session = info.row.original
         const isCurrent = session.id === currentDeviceId
-        return isCurrent ? (
-          <span className="bg-primary/10 text-primary px-2 py-1 rounded text-xs font-medium">
-            当前设备
-          </span>
-        ) : (
-          <span className="text-muted-foreground text-xs">其他设备</span>
-        )
+        return <StatusBadge status={isCurrent ? 'current' : 'other'} />
       },
     }),
     columnHelper.display({

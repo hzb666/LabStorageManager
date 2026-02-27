@@ -189,17 +189,13 @@ export function Layout() {
             {/* 头像信息 - 点击进入设备管理 */}
             <Link
               to="/devices"
-              className={cn(
-                "flex items-center overflow-hidden hover:bg-muted rounded-lg p-1 -mx-1 transition-colors relative",
-                isDevicesActive ? "bg-muted/50" : ""
-              )}
-              title="设备管理"
+              className=
+                "flex items-center overflow-hidden hover:bg-muted rounded-lg p-1 -mx-1 transition-colors relative"
             >
               {/* 核心：Active 状态的右侧小竖条 */}
-              {isDevicesActive && (
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 h-6 w-1 bg-primary rounded-l-md" />
-              )}
-              
+              {isDevicesActive && 
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md" />
+              }
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground mx-auto md:mx-0">
                 {user?.username?.charAt(0).toUpperCase() || 'U'}
               </div>
@@ -335,14 +331,12 @@ export function Layout() {
             <Link
               to="/devices"
               onClick={() => setMobileMenuOpen(false)}
-              className={cn(
-                "flex items-center gap-3 mb-2 hover:bg-muted rounded-lg p-2 -mx-2 transition-colors relative",
-                isDevicesActive ? "bg-muted/50" : ""
-              )}
+              className=
+                "flex items-center gap-3 mb-2 hover:bg-muted rounded-lg p-2 -mx-2 transition-colors relative"
             >
               {/* 核心：Active 状态的右侧小竖条 */}
               {isDevicesActive && (
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 h-6 w-1 bg-primary rounded-l-md" />
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md" />
               )}
               
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">

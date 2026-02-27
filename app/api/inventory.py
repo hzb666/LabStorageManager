@@ -235,30 +235,30 @@ def _add_specification(item_dict: dict) -> dict:
     return item_dict
 
 
-def _add_user_names(db: Session, item_dict: dict) -> dict:
-    """Add user names to inventory response dict"""
-    # Get borrower name
-    if item_dict.get("borrower_id"):
-        borrower = db.get(User, item_dict["borrower_id"])
-        item_dict["borrower_name"] = borrower.full_name or borrower.username if borrower else None
-    else:
-        item_dict["borrower_name"] = None
+# def _add_user_names(db: Session, item_dict: dict) -> dict:
+#     """Add user names to inventory response dict"""
+#     # Get borrower name
+#     if item_dict.get("borrower_id"):
+#         borrower = db.get(User, item_dict["borrower_id"])
+#         item_dict["borrower_name"] = borrower.full_name or borrower.username if borrower else None
+#     else:
+#         item_dict["borrower_name"] = None
     
-    # Get last borrower name
-    if item_dict.get("last_borrower_id"):
-        last_borrower = db.get(User, item_dict["last_borrower_id"])
-        item_dict["last_borrower_name"] = last_borrower.full_name or last_borrower.username if last_borrower else None
-    else:
-        item_dict["last_borrower_name"] = None
+#     # Get last borrower name
+#     if item_dict.get("last_borrower_id"):
+#         last_borrower = db.get(User, item_dict["last_borrower_id"])
+#         item_dict["last_borrower_name"] = last_borrower.full_name or last_borrower.username if last_borrower else None
+#     else:
+#         item_dict["last_borrower_name"] = None
     
-    # Get created by name
-    if item_dict.get("created_by_id"):
-        created_by = db.get(User, item_dict["created_by_id"])
-        item_dict["created_by_name"] = created_by.full_name or created_by.username if created_by else None
-    else:
-        item_dict["created_by_name"] = None
+#     # Get created by name
+#     if item_dict.get("created_by_id"):
+#         created_by = db.get(User, item_dict["created_by_id"])
+#         item_dict["created_by_name"] = created_by.full_name or created_by.username if created_by else None
+#     else:
+#         item_dict["created_by_name"] = None
     
-    return item_dict
+#     return item_dict
 
 
 # ==================== Named Routes (BEFORE /{id}) ====================
@@ -757,11 +757,41 @@ def list_inventory(
     else:
         items = db.exec(base.order_by(order_expr)).all()
 
+    # ================= 性能优化核心：批量查询用户（消除 N+1） =================
+    # 遍历当前页的数据，收集所有需要查询的用户 ID
+    user_ids = set()
+    for item in items:
+        if item.borrower_id:
+            user_ids.add(item.borrower_id)
+        if item.last_borrower_id:
+            user_ids.add(item.last_borrower_id)
+        if item.created_by_id:
+            user_ids.add(item.created_by_id)
+
+    # 用一条 SQL IN 语句，一次性查出这 50 条数据对应的所有用户
+    users_map = {}
+    if user_ids:
+        users = db.exec(select(User).where(User.id.in_(user_ids))).all()
+        # 构建内存字典 { user_id: "姓名" }，查找速度是 O(1)
+        users_map = {u.id: (u.full_name or u.username) for u in users}
+
+    # 在内存中完成数据组装，绝不再向数据库发请求
+    result_data = []
+    for item in items:
+        # 序列化单条数据
+        item_dict = InventoryResponse.model_validate(item).model_dump()
+        item_dict = _add_specification(item_dict)
+
+        # 直接从内存字典中塞入用户名字
+        item_dict["borrower_name"] = users_map.get(item.borrower_id)
+        item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
+        item_dict["created_by_name"] = users_map.get(item.created_by_id)
+
+        result_data.append(item_dict)
+    # =========================================================================
+
     result = {
-        "data": [
-            _add_user_names(db, _add_specification(InventoryResponse.model_validate(i).model_dump()))
-            for i in items
-        ],
+        "data": result_data,
         "total": total,
         "skip": skip,
         "limit": limit,
