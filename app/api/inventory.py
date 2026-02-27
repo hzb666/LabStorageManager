@@ -810,7 +810,11 @@ def list_inventory(
 
 
 @router.get("/{inventory_id}", response_model=InventoryResponse)
-def get_inventory(inventory_id: int, db: Session = Depends(get_db)):
+def get_inventory(
+    inventory_id: int, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get inventory item by ID"""
     item = _get_by_id(db, inventory_id)
     if not item:
@@ -883,7 +887,10 @@ def borrow_item(
     db: Session = Depends(get_db),
 ):
     """Borrow an inventory item. Creates BorrowLog record."""
-    item = _get_by_id(db, inventory_id)
+    # 使用悲观锁锁定该行，防止并发借出
+    statement = select(Inventory).where(Inventory.id == inventory_id).with_for_update()
+    item = db.exec(statement).first()
+    
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
