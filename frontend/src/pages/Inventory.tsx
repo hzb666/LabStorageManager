@@ -37,6 +37,7 @@ import {
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
+import { LoadingButton } from '@/components/ui/LoadingButton' // 确保路径正确
 
 // 后端验证错误类型
 interface ValidationError {
@@ -79,11 +80,11 @@ const HighlightText = React.memo(function HighlightText({ text, highlight, fuzzy
 
   if (fuzzy) {
     const normalizedHighlight = highlight
-      .replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D]+/g, '')  
+      .replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D]+/g, '')
       .replace(/-/g, '')
       .replace(/_/g, '')
     const normalizedText = text
-      .replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D]+/g, '')  
+      .replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D]+/g, '')
       .replace(/-/g, '')
       .replace(/_/g, '')
 
@@ -113,7 +114,7 @@ const ActionButtons = React.memo(function ActionButtons({
   onBorrowSuccess
 }: {
   item: InventoryItem
-  onEdit: (item: InventoryItem) => void  
+  onEdit: (item: InventoryItem) => void
   onBorrowSuccess: () => void
 }) {
   const [isConfirming, setIsConfirming] = useState(false)
@@ -129,16 +130,34 @@ const ActionButtons = React.memo(function ActionButtons({
       setIsLoading(true)
       try {
         await inventoryAPI.borrow(item.id)
+
+        // ✅ 成功分支：
+        // 1. 先触发父组件更新数据 (确保它开始 loading 或 fetch)
+        // 2. 不要在这里写 setIsConfirming(false)
+        // 3. 让按钮保持在 Loading 状态，直到父组件把这一行 item 删掉
+        onBorrowSuccess()
+
         toast.success('借用成功')
-        setIsConfirming(false)
-        onBorrowSuccess() 
+
       } catch (error) {
-        const err = error as { response?: { data?: { detail?: string } } }
-        toast.error(err.response?.data?.detail || '借用失败')
+        // ❌ 失败分支：
+        // 只有失败了，我们才需要把按钮变回“借用”或者保持“确认”让用户重试
+        const err = error as { response?: { status?: number; data?: { detail?: string } } }
+        // 409 冲突使用 warning 样式，其他错误使用 error 样式
+        if (err.response?.status === 409) {
+          toast.warning(err.response?.data?.detail || '该物品已被他人借用，请刷新后重试')
+        } else {
+          toast.error(err.response?.data?.detail || '借用失败')
+        }
+
+        // 如果你希望失败后用户能重新点击，这里可以设为 false
         setIsConfirming(false)
-      } finally {
+
+        // 只有在失败时才关闭 Loading，因为成功时我们要让它一直 Load 到消失
         setIsLoading(false)
       }
+      // 注意：去掉了 finally 里的 setIsLoading(false)
+      // 这样成功时按钮会一直转圈直到消失，不会闪烁
     }
   }
 
@@ -158,27 +177,28 @@ const ActionButtons = React.memo(function ActionButtons({
         onClick={(e) => {
           e.stopPropagation()
           setIsConfirming(false)
-          onEdit(item) 
+          onEdit(item)
         }}
       >
         <Pencil className="w-3.5 h-3.5" />
       </Button>
       {item.status === 'in_stock' && (
-        <Button
+        <LoadingButton
           size="sm"
           className={cn(
-            "h-8 text-sm/4 px-3",
+            "h-8 text-sm/4 px-3 border-0",
             isConfirming
-              ? "bg-destructive text-destructive-foreground border-0 hover:bg-destructive/70 dark:hover:bg-destructive/80"
-              : "bg-primary hover:bg-primary/80 border-0",
-            isLoading && "opacity-50 cursor-wait"
+              ? isLoading
+                ? "text-destructive-foreground opacity-100 cursor-wait bg-destructive/70" // 保持红色 Hover 色
+                : "bg-destructive text-destructive-foreground hover:bg-destructive/70"
+              : "bg-primary hover:bg-primary/80"
           )}
           onClick={handleClick}
-          onBlur={handleBlur}
-          disabled={isLoading}
+          isLoading={isLoading}
+        // 💡 不传 loadingText，或者传 loadingText=""
         >
-          {isLoading ? '借用中' : (isConfirming ? '确认' : '借用')}
-        </Button>
+          {isConfirming ? '确认' : '借用'}
+        </LoadingButton>
       )}
     </div>
   )
@@ -204,15 +224,15 @@ export function InventoryPage() {
       return false
     }
   })
-  
+
   useEffect(() => {
     localStorage.setItem('inventory-table-expand-all', isAllExpanded ? 'expanded' : 'collapsed')
   }, [isAllExpanded])
-  
+
   const toggleExpandAll = useCallback(() => {
     setIsAllExpanded(prev => !prev)
   }, [])
-  
+
   const tableHeight = "calc(100vh - 112px - 16px)"
 
   const [searchField, setSearchField] = useState('all')
@@ -229,7 +249,7 @@ export function InventoryPage() {
       skip: pageParam, // <--- 传递偏移量
       limit: 50,       // 每次固定拉取 50 条
     }
-    
+
     if (statusFilter !== 'all') {
       params.status_filter = statusFilter
     }
@@ -249,7 +269,7 @@ export function InventoryPage() {
 
     const response = await inventoryAPI.list(params as any)
     // 返回格式需要包含 data 数组和 total 总数
-    return response.data 
+    return response.data
   }, [statusFilter, globalFilter, searchField, fuzzySearch, sorting])
 
   const {
@@ -258,22 +278,22 @@ export function InventoryPage() {
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    refetch, 
+    refetch,
   } = useInfiniteQuery({
     queryKey: ['inventory', statusFilter, globalFilter, searchField, fuzzySearch, sorting],
     queryFn,
     // 【核心改造】：初始偏移量为 0
-    initialPageParam: 0, 
+    initialPageParam: 0,
     // 【核心改造】：智能计算下一次的 offset 偏移量
     getNextPageParam: (lastPage, allPages) => {
       // 计算目前所有页面累加起来的数据总条数
       const currentLoadedCount = allPages.reduce((acc, page) => acc + page.data.length, 0);
-      
+
       // 如果当前已加载的数量小于后端返回的真实总数 total，说明还有下一页
       if (currentLoadedCount < (lastPage.total || 0)) {
         return currentLoadedCount; // 返回的值将作为下一次请求的 pageParam (即 skip)
       }
-      
+
       return null; // 返回 null 表示没有更多数据了
     },
     placeholderData: keepPreviousData,
@@ -338,7 +358,7 @@ export function InventoryPage() {
     }
   }
 
-  const collapseAllRowsRef = useRef<() => void>(() => {})
+  const collapseAllRowsRef = useRef<() => void>(() => { })
   const [displayFilter, setDisplayFilter] = useState('')
 
   useEffect(() => {
@@ -469,7 +489,7 @@ export function InventoryPage() {
     columnHelper.accessor('name', {
       header: '名称',
       size: 250,
-      minSize: 200, 
+      minSize: 200,
       maxSize: 500,
       cell: info => (
         <div className="flex items-center gap-1.5 break-all">
@@ -497,7 +517,7 @@ export function InventoryPage() {
       size: 100,
       minSize: 80,
       maxSize: 150,
-      sortDescFirst: false, 
+      sortDescFirst: false,
       sortingFn: 'text',
       cell: info => (
         <span className="break-all">
@@ -591,8 +611,8 @@ export function InventoryPage() {
   })
 
   collapseAllRowsRef.current = () => {
-    setIsAllExpanded(false)      
-    table.resetExpanded()        
+    setIsAllExpanded(false)
+    table.resetExpanded()
   }
 
   const validateManualAddForm = useCallback((): boolean => {
@@ -727,7 +747,7 @@ export function InventoryPage() {
             placeholder="搜索名称、CAS号、位置..."
             value={globalFilter}
             onChange={(e) => {
-              collapseAllRowsRef.current() 
+              collapseAllRowsRef.current()
               setGlobalFilter(e.target.value)
             }}
             className="pl-9 pr-8 text-base w-full inline-flex leading-none"
@@ -750,7 +770,7 @@ export function InventoryPage() {
               checked={fuzzySearch}
               onCheckedChange={(checked: boolean | string) => {
                 startTransition(() => {
-                  collapseAllRowsRef.current() 
+                  collapseAllRowsRef.current()
                   setFuzzySearch(checked === true)
                 })
               }}
@@ -760,7 +780,7 @@ export function InventoryPage() {
           <Select
             value={searchField}
             onValueChange={(value) => {
-              collapseAllRowsRef.current() 
+              collapseAllRowsRef.current()
               setSearchField(value)
             }}
           >

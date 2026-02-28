@@ -886,40 +886,71 @@ def borrow_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Borrow an inventory item. Creates BorrowLog record."""
-    # 使用悲观锁锁定该行，防止并发借出
-    statement = select(Inventory).where(Inventory.id == inventory_id).with_for_update()
-    item = db.exec(statement).first()
+    """Borrow an inventory item. Uses atomic conditional update to prevent concurrent borrowing."""
+    logger.info(f"[BORROW] User {current_user.id} attempting to borrow inventory {inventory_id}")
     
+    # 先检查物品是否存在
+    item = db.get(Inventory, inventory_id)
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Inventory item not found",
         )
-
-    if item.status != InventoryStatus.IN_STOCK:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot borrow item with status: {item.status}",
+    
+    # 使用原子化的条件更新：只有当 status = IN_STOCK 时才更新
+    # 这是防止并发借用的关键：把所有逻辑放在一条 SQL 里
+    from sqlmodel import update as sql_update
+    
+    now = datetime.now(timezone.utc)
+    update_statement = (
+        sql_update(Inventory)
+        .where(Inventory.id == inventory_id)
+        .where(Inventory.status == InventoryStatus.IN_STOCK)  # 关键条件
+        .values(
+            status=InventoryStatus.BORROWED,
+            borrower_id=current_user.id,
+            updated_at=now,
         )
-
+    )
+    
+    result = db.exec(update_statement)
+    db.commit()
+    
+    # rowcount == 0 说明：
+    # 1. 物品不存在（但前面已检查）
+    # 2. 状态不是 IN_STOCK（已被他人借用）
+    # 3. 并发冲突：两个请求同时进入，第一个成功，第二个发现状态已变
+    if result.rowcount == 0:
+        # 重新查询获取当前状态，给用户更准确的提示
+        db.refresh(item)
+        if item.status == InventoryStatus.BORROWED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="该物品已被他人借用，请刷新后重试",
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无法借用，当前状态: {item.status}",
+            )
+    
+    # 创建借用记录
     borrow_log = BorrowLog(
         inventory_id=inventory_id,
         borrower_id=current_user.id,
-        borrow_time=datetime.now(timezone.utc),
+        borrow_time=now,
         quantity_borrowed=item.remaining_quantity,
     )
     db.add(borrow_log)
-
-    item.status = InventoryStatus.BORROWED
-    item.borrower_id = current_user.id
-    item.updated_at = datetime.now(timezone.utc)
-
     db.commit()
+    
+    # 重新查询获取更新后的完整数据
     db.refresh(item)
     
-    # 清除列表缓存，确保借用人后立即查询到最新数据
+    # 清除列表缓存
     _clear_list_cache()
+    
+    logger.info(f"[BORROW] Successfully borrowed inventory {inventory_id} by user {current_user.id}")
     
     response = InventoryResponse.model_validate(item).model_dump()
     return _add_specification(response)
