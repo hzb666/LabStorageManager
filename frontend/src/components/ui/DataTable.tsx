@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState, useEffect } from 'react'
+import React, { useRef, useCallback, useState, useEffect, memo } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import type { Table as TableType, Row, Cell, Column } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -17,30 +17,22 @@ interface DataTableProps<TData> {
   isAllExpanded?: boolean
   onToggleExpandAll?: () => void
   noteField?: string
-  renderExpandAllControls?: (props: {
-    isExpanded: boolean
-    toggle: () => void
-    expandAll: () => void
-    collapseAll: () => void
-  }) => React.ReactNode
   hasNextPage?: boolean
   isFetchingNextPage?: boolean
   fetchNextPage?: () => void
   total?: number
 }
 
-// --- 单行组件：全动态测算与 Headless 布局 ---
-function HeadlessVirtualRow<TData>({
+// --- 性能优化：内层组件渲染隔离 ---
+// 1. 去掉自定义对比函数，依靠标准的 memo 浅对比
+// 2. 完美保留 TS 泛型支持
+function InnerRowComponent<TData>({
   row,
-  virtualRow,
-  measureRef,
   renderExpandedRow,
   getProportionalStyles,
   noteField,
 }: {
   row: Row<TData>
-  virtualRow: { index: number; start: number }
-  measureRef: (el: HTMLDivElement | null) => void
   renderExpandedRow?: (row: TData) => React.ReactNode
   getProportionalStyles: (column: Column<TData, unknown>) => React.CSSProperties
   noteField?: string
@@ -51,12 +43,7 @@ function HeadlessVirtualRow<TData>({
   const hasNote = noteField ? Boolean((original as Record<string, unknown>)?.[noteField]) : false
 
   return (
-    <div
-      ref={measureRef}
-      data-index={virtualRow.index}
-      className="absolute top-0 left-0 w-full"
-      style={{ transform: `translateY(${virtualRow.start}px)` }}
-    >
+    <div className="w-full">
       <div
         className={cn(
           "flex w-full cursor-pointer transition-colors items-center hover:bg-accent dark:hover:bg-input border-b",
@@ -69,41 +56,38 @@ function HeadlessVirtualRow<TData>({
           const showAccentLine = isFirstCol && hasNote && !isExpanded;
 
           return (
-  <div
-    key={cell.id}
-    className={cn(
-      "p-3 text-base break-all flex items-center relative transition-colors",
-      isFirstCol && "border-l-4 border-transparent"
-    )}
-    style={getProportionalStyles(cell.column)}
-  >
-    {/* 移除 && 条件渲染，改为通过类名控制显隐和动画 */}
-    <div 
-      className={cn(
-        "absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-[75%] bg-slate-300 dark:bg-slate-500 rounded-r-[2px]",
-        // 添加过渡基础属性
-        "transition-all duration-300 ease-in-out origin-center",
-        // 根据状态切换样式：显示时完全不透明且高度为 100%，隐藏时透明且高度压缩
-        showAccentLine 
-          ? "opacity-100 scale-y-100" 
-          : "opacity-0 scale-y-0"
-      )} 
-    />
-    
-    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-  </div>
-)
+            <div
+              key={cell.id}
+              className={cn(
+                "p-3 text-base break-all flex items-center relative transition-colors",
+                isFirstCol && "border-l-4 border-transparent"
+              )}
+              style={getProportionalStyles(cell.column)}
+            >
+              <div 
+                className={cn(
+                  "absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-[75%] bg-slate-300 dark:bg-slate-500 rounded-r-[2px]",
+                  "transition-all duration-300 ease-in-out origin-center",
+                  showAccentLine 
+                    ? "opacity-100 scale-y-100" 
+                    : "opacity-0 scale-y-0"
+                )} 
+              />
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </div>
+          )
         })}
       </div>
 
-      <AnimatePresence>
+      <AnimatePresence initial={false}>
         {isExpanded && renderExpandedRow && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
+            style={{ willChange: "height, opacity", overflow: "hidden" }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="overflow-hidden bg-muted/30 border-b dark:bg-input/30 border-border"
+            className="bg-muted/30 border-b dark:bg-input/30 border-border"
           >
             {renderExpandedRow(original)}
           </motion.div>
@@ -112,6 +96,9 @@ function HeadlessVirtualRow<TData>({
     </div>
   )
 }
+
+// 封装以支持泛型
+const InnerRow = memo(InnerRowComponent) as typeof InnerRowComponent
 
 // --- 列表主容器：容器级虚拟滚动 ---
 export function DataTable<TData>({
@@ -185,9 +172,7 @@ export function DataTable<TData>({
     return () => observer.disconnect()
   }, [])
 
-  // 排序时自动滚动回顶部体验优化
   useEffect(() => {
-    const sorting = table.getState().sorting;
     if (bodyScrollRef.current) {
       bodyScrollRef.current.scrollTop = 0;
     }
@@ -200,6 +185,7 @@ export function DataTable<TData>({
   const totalWeight = visibleColumns.reduce((sum, col) => sum + col.getSize(), 0)
   const minTableWidth = visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
 
+  // useCallback 的依赖项没问题，因为 totalWeight 在不拖拽列宽时是完全稳定的
   const getProportionalStyles = useCallback((column: Column<TData, unknown>): React.CSSProperties => {
     const size = column.getSize()
     if (size === 0) return { display: 'none' }
@@ -293,9 +279,9 @@ export function DataTable<TData>({
     estimateSize: () => estimatedRowHeight,
     overscan: 10,
     getScrollElement: () => bodyScrollRef.current,
+    getItemKey: useCallback((index: number) => rows[index]?.id ?? index, [rows]),
   })
 
-  // 纯后端无限滚动触发逻辑
   const handleScroll = useCallback(() => {
     const el = bodyScrollRef.current
     if (!el || !hasNextPage || isFetchingNextPage) return
@@ -407,15 +393,22 @@ export function DataTable<TData>({
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
             const row = rows[virtualRow.index]
             return (
-              <HeadlessVirtualRow
-                key={row.id}
-                row={row}
-                virtualRow={virtualRow}
-                measureRef={rowVirtualizer.measureElement}
-                renderExpandedRow={renderExpandedRow}
-                getProportionalStyles={getProportionalStyles}
-                noteField={noteField}
-              />
+              <div
+                key={virtualRow.key}
+                data-index={virtualRow.index} // 关键修复：恢复外层的 data-index 属性
+                ref={rowVirtualizer.measureElement} // 关键修复：让测量 ref 必须绑在同级有 data-index 的节点上
+                className="absolute top-0 left-0 w-full"
+                style={{
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <InnerRow
+                  row={row}
+                  renderExpandedRow={renderExpandedRow}
+                  getProportionalStyles={getProportionalStyles}
+                  noteField={noteField}
+                />
+              </div>
             )
           })}
         </div>

@@ -192,9 +192,11 @@ export function Layout() {
               className="flex items-center overflow-hidden hover:bg-muted rounded-lg p-1 -mx-1 transition-colors relative"
             >
               {/* 核心：Active 状态的右侧小竖条 */}
-              {isDevicesActive &&
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md" />
-              }
+              <div className={cn("absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md transition-all duration-300 ease-in-out origin-center",
+                isDevicesActive 
+                ? "opacity-100 scale-y-100"
+                : "opacity-0 scale-y-0"
+              )} />
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground mx-auto md:mx-0">
                 {user?.username?.charAt(0).toUpperCase() || 'U'}
               </div>

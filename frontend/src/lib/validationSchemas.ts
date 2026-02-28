@@ -196,11 +196,6 @@ export const InventorySchema = v.object({
 })
 
 /**
- * 库存表单 Schema 类型
- */
-export type InventoryFormData = v.InferOutput<typeof InventorySchema>
-
-/**
  * 手动入库 Schema
  * 适配手动入库表单，字段使用 snake_case（与 API 一致）
  * specification 是必填字段（与 API 匹配）
@@ -224,6 +219,42 @@ export const ManualAddInventorySchema = v.object({
  * 手动入库表单 Schema 类型
  */
 export type ManualAddInventoryFormData = v.InferOutput<typeof ManualAddInventorySchema>
+
+// ==========================================
+// 5. 统一库存表单 Schema（用于 BaseForm）
+// ==========================================
+
+/**
+ * 统一库存表单 Schema
+ * 包含所有库存相关字段，通过字段配置控制必填/只读/隐藏
+ */
+export const InventoryFormSchema = v.object({
+  // 基础字段
+  name: createRequiredStringSchema('名称'),
+  cas_number: CasNumberSchema,
+  english_name: v.optional(v.string()),
+  alias: v.optional(v.string()),
+  category: v.optional(v.string()),
+  brand: v.optional(v.string()),
+  specification: SpecificationSchema,
+  storage_location: v.optional(v.string()),
+  notes: v.optional(v.string()),
+
+  // 数量相关 - 入库时使用
+  quantity_bottles: createPositiveNumberSchema('瓶数'),
+  initial_quantity: createPositiveNumberSchema('初始数量'),
+
+  // 剩余量 - 编辑时使用
+  remaining_quantity: createNonNegativeNumberSchema('剩余数量'),
+
+  // 危险品
+  is_hazardous: v.boolean('危险品必须是布尔值'),
+})
+
+/**
+ * 统一库存表单 Schema 类型
+ */
+export type InventoryFormData = v.InferOutput<typeof InventoryFormSchema>
 
 // ==========================================
 // 5. 订单模块 Schema

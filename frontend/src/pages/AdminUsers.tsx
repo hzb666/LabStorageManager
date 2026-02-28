@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import { AxiosError } from 'axios'
 import type { PaginationParams } from '@/api/client'
+
 import { StatusBadge } from '@/components/ui/StatusBadge'
 
 // 用户状态样式 - 使用 StatusBadge 组件
@@ -395,7 +396,7 @@ export function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      {/* 标题和按钮 */}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">用户管理</h1>
         <Button onClick={() => setDialogState('create')} size="lg">
