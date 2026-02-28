@@ -189,11 +189,12 @@ const ActionButtons = React.memo(function ActionButtons({
             "h-8 text-sm/4 px-3 border-0",
             isConfirming
               ? isLoading
-                ? "text-destructive-foreground opacity-100 cursor-wait bg-destructive/70" // 保持红色 Hover 色
-                : "bg-destructive text-destructive-foreground hover:bg-destructive/70"
+                ? "text-destructive-foreground opacity-100 cursor-wait bg-destructive/70 transition-none" // 保持红色 Hover 色
+                : "bg-destructive text-destructive-foreground hover:bg-destructive/70 transition-none"
               : "bg-primary hover:bg-primary/80"
           )}
           onClick={handleClick}
+          onBlur={handleBlur}
           isLoading={isLoading}
         // 💡 不传 loadingText，或者传 loadingText=""
         >
@@ -297,6 +298,9 @@ export function InventoryPage() {
       return null; // 返回 null 表示没有更多数据了
     },
     placeholderData: keepPreviousData,
+    // 【轮询配置】：10秒自动刷新所有已加载的页
+    refetchInterval: 10000,
+    refetchPage: (page, index) => index >= 0,
   })
 
   const loadInventory = useCallback(() => {
