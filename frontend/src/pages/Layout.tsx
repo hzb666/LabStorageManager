@@ -125,14 +125,14 @@ export function Layout() {
                       key={item.href}
                       to={item.href}
                       className={cn(
-                        'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden transition-colors',
+                        'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
                         isActive
                           ? 'bg-primary text-primary-foreground'
-                          : 'text-sidebar-foreground hover:bg-muted'
+                          : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
                       )}
                       title={sidebarCollapsed ? item.title : undefined}
                     >
-                      <Icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? '' : 'text-sidebar-foreground')} />
+                      <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
                       <span
                         className={cn(
                           "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
@@ -161,14 +161,14 @@ export function Layout() {
                       key={item.href}
                       to={item.href}
                       className={cn(
-                        'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden transition-colors',
+                        'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
                         isActive
                           ? 'bg-primary text-primary-foreground'
-                          : 'text-sidebar-foreground hover:bg-muted'
+                          : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
                       )}
                       title={sidebarCollapsed ? item.title : undefined}
                     >
-                      <Icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? '' : 'text-sidebar-foreground')} />
+                      <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
                       <span
                         className={cn(
                           "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
@@ -189,11 +189,10 @@ export function Layout() {
             {/* 头像信息 - 点击进入设备管理 */}
             <Link
               to="/devices"
-              className=
-                "flex items-center overflow-hidden hover:bg-muted rounded-lg p-1 -mx-1 transition-colors relative"
+              className="flex items-center overflow-hidden hover:bg-muted rounded-lg p-1 -mx-1 transition-colors relative"
             >
               {/* 核心：Active 状态的右侧小竖条 */}
-              {isDevicesActive && 
+              {isDevicesActive &&
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md" />
               }
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground mx-auto md:mx-0">
@@ -236,7 +235,7 @@ export function Layout() {
                 onClick={handleLogout}
                 onBlur={handleLogoutBlur}
                 className={cn(
-                  "justify-start p-2 h-11 w-full text-base", logoutConfirming ? "transition-none" : "hover:bg-muted text-sidebar-foreground"
+                  "justify-start p-2 h-11 w-full text-base", logoutConfirming ? "transition-none" : "hover:bg-muted text-sidebar-foreground transition-colors"
                 )}
                 title={sidebarCollapsed ? (logoutConfirming ? "再次点击确认退出" : "退出登录") : undefined}
               >
@@ -285,10 +284,10 @@ export function Layout() {
                       to={item.href}
                       onClick={() => setMobileMenuOpen(false)}
                       className={cn(
-                        'flex items-center rounded-lg pl-3 py-2 text-base transition-colors',
+                        'flex items-center rounded-lg pl-3 py-2 text-base relative isolate',
                         isActive
                           ? 'bg-primary text-primary-foreground'
-                          : 'bg-sidebar text-sidebar-foreground hover:bg-muted hover:text-foreground'
+                          : "text-sidebar-foreground hover:text-foreground transition-[color] duration-200 before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
                       )}
                     >
                       <Icon className="h-5 w-5 shrink-0 mr-3" />
@@ -311,10 +310,10 @@ export function Layout() {
                       to={item.href}
                       onClick={() => setMobileMenuOpen(false)}
                       className={cn(
-                        'flex items-center rounded-lg pl-3 py-2 text-base transition-colors',
+                        'flex items-center rounded-lg pl-3 py-2 text-base relative isolate',
                         isActive
                           ? 'bg-primary text-primary-foreground'
-                          : 'bg-sidebar text-sidebar-foreground hover:bg-muted hover:text-foreground'
+                          : "text-sidebar-foreground hover:text-foreground transition-[color] duration-200 before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
                       )}
                     >
                       <Icon className="h-5 w-5 shrink-0 mr-3" />
@@ -331,14 +330,13 @@ export function Layout() {
             <Link
               to="/devices"
               onClick={() => setMobileMenuOpen(false)}
-              className=
-                "flex items-center gap-3 mb-2 hover:bg-muted rounded-lg p-2 -mx-2 transition-colors relative"
+              className="flex items-center gap-3 mb-2 hover:bg-muted rounded-lg p-2 -mx-2 transition-colors relative"
             >
               {/* 核心：Active 状态的右侧小竖条 */}
               {isDevicesActive && (
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md" />
               )}
-              
+
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
                 {user?.username?.charAt(0).toUpperCase() || 'U'}
               </div>
@@ -367,7 +365,7 @@ export function Layout() {
                 onClick={handleLogout}
                 onBlur={handleLogoutBlur}
                 className={cn(
-                  "justify-start p-2 h-11 w-full text-base", logoutConfirming ? "transition-none" : "hover:bg-muted text-sidebar-foreground"
+                  "justify-start p-2 h-11 w-full text-base", logoutConfirming ? "transition-none" : "hover:bg-muted text-sidebar-foreground transition-colors"
                 )}
               >
                 <LogOut className="mr-3 size-5 shrink-0" />

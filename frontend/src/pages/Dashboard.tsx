@@ -16,8 +16,10 @@ import { toast } from '@/components/ui/Toast'
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { formatDateTime, cn } from '@/lib/utils'
 import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
-import { Package, ShoppingCart, ArrowRightLeft, X, Loader2, PackagePlus, CheckCircle } from 'lucide-react'
+// 移除 Loader2，因为 LoadingButton 内部已经包含了
+import { Package, ShoppingCart, ArrowRightLeft, X, PackagePlus, CheckCircle } from 'lucide-react'
 import { AxiosError } from 'axios'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 
 interface MyBorrowItem {
   inventory_id: number
@@ -284,7 +286,7 @@ export function Dashboard() {
     }),
   ], [])
 
-  // ✅ 缓存耗材表格数据 - 使用 useMemo 稳定数组引用，避免无限重渲染
+  // ✅ 缓存耗材表格数据
   const consumableData = useMemo(() => {
     return myConsumableOrders.slice(
       (consumablePage - 1) * consumablePageSize,
@@ -303,7 +305,7 @@ export function Dashboard() {
   // ✅ 缓存待入库表格数据
   const stockinData = useMemo(() => pendingStockin, [pendingStockin])
 
-  // 创建表格实例 - 传入稳定的数据引用
+  // 创建表格实例
   const consumableTable = useReactTable({
     data: consumableData,
     columns: consumableColumns,
@@ -538,7 +540,6 @@ export function Dashboard() {
     setShowStockinModal(true)
   }
 
-  // 读取缓存的 tab - 懒初始化，避免闪烁
   const getInitialTab = () => {
     const cached = localStorage.getItem('dashboard_active_tab')
     if (cached) {
@@ -554,7 +555,6 @@ export function Dashboard() {
 
   const [activeTab, setActiveTab] = useState<string>(getInitialTab)
 
-  // 保存 tab 到缓存
   const handleTabChange = (value: string) => {
     setActiveTab(value)
     localStorage.setItem('dashboard_active_tab', JSON.stringify({ value, timestamp: Date.now() }))
@@ -566,7 +566,6 @@ export function Dashboard() {
         <h1 className="text-3xl font-bold text-primary card-title-placeholder">仪表盘</h1>
       </div>
 
-      {/* Stats Cards - 可点击切换Tab */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="试剂订单"
@@ -602,7 +601,7 @@ export function Dashboard() {
         />
       </div>
 
-      {/* Content Area - 根据激活的卡片显示对应内容 */}
+      {/* 试剂订单内容区域 */}
       {activeTab === 'reagents' && (
         <Card>
           <CardHeader className="pb-4">
@@ -702,6 +701,7 @@ export function Dashboard() {
         </Card>
       )}
 
+      {/* 耗材订单内容区域 */}
       {activeTab === 'consumables' && (
         <Card>
           <CardHeader className="pb-4">
@@ -761,6 +761,7 @@ export function Dashboard() {
         </Card>
       )}
 
+      {/* 当前借用内容区域 */}
       {activeTab === 'borrows' && (
         <Card>
           <CardHeader className="pb-4">
@@ -820,6 +821,7 @@ export function Dashboard() {
         </Card>
       )}
 
+      {/* 待入库内容区域 */}
       {activeTab === 'stockin' && (
         <Card>
           <CardHeader className="pb-4">
@@ -871,7 +873,7 @@ export function Dashboard() {
         </Card>
       )}
 
-      {/* Return Modal */}
+      {/* Return Modal (已替换 LoadingButton) */}
       <Dialog open={showReturnModal} onOpenChange={setShowReturnModal}>
         <DialogContent>
           <DialogHeader>
@@ -938,6 +940,7 @@ export function Dashboard() {
               )}
             </div>
 
+            {/* 👇 归还弹窗的按钮区 */}
             <div className="flex gap-3 mt-8">
               <Button
                 variant="morden"
@@ -947,27 +950,21 @@ export function Dashboard() {
               >
                 取消
               </Button>
-              <Button
+              <LoadingButton
                 onClick={handleReturn}
-                disabled={returnLoading}
+                isLoading={returnLoading}
+                loadingText="处理中..."
                 className="flex-1"
                 size="lg"
               >
-                {returnLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    处理中...
-                  </>
-                ) : (
-                  '确认归还'
-                )}
-              </Button>
+                确认归还
+              </LoadingButton>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Stockin Location Modal */}
+      {/* Stockin Location Modal (已替换 LoadingButton) */}
       {showStockinModal && selectedStockin && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-background rounded-lg p-6 w-full max-w-md">
@@ -1001,22 +998,17 @@ export function Dashboard() {
                 />
               </div>
 
+              {/* 👇 入库弹窗的按钮区 */}
               <div className="flex gap-3 t-1">
-                <Button
+                <LoadingButton
                   onClick={handleStockin}
-                  disabled={stockinLoading}
+                  isLoading={stockinLoading}
+                  loadingText="处理中..."
                   className="flex-1"
                   size="lg"
                 >
-                  {stockinLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      处理中...
-                    </>
-                  ) : (
-                    '确认分配'
-                  )}
-                </Button>
+                  确认分配
+                </LoadingButton>
                 <Button
                   variant="outline"
                   onClick={() => setShowStockinModal(false)}

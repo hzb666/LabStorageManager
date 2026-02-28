@@ -48,24 +48,24 @@ class Inventory(InventoryBase, table=True):
     borrower_id: Optional[int] = Field(
         default=None,
         index=True,
-        foreign_key="user.id",
+        foreign_key="users.id",
         ondelete="SET NULL"
     )
     last_borrower_id: Optional[int] = Field(
         default=None,
-        foreign_key="user.id",
+        foreign_key="users.id",
         ondelete="SET NULL"
     )
     temporary_keeper_id: Optional[int] = Field(
         default=None,
         index=True,
-        foreign_key="user.id",
+        foreign_key="users.id",
         ondelete="SET NULL"
     )
     created_by_id: Optional[int] = Field(
         default=None,
         index=True,
-        foreign_key="user.id",
+        foreign_key="users.id",
         ondelete="SET NULL"
     )
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)  # 排序常用
@@ -156,7 +156,7 @@ class BorrowLog(SQLModel, table=True):
     )
     borrower_id: int = Field(
         index=True,
-        foreign_key="user.id",
+        foreign_key="users.id",
         ondelete="CASCADE"
     )
     borrow_time: datetime = Field(default_factory=datetime.utcnow)

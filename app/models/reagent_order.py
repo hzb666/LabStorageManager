@@ -63,7 +63,7 @@ class ReagentOrder(ReagentOrderBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     applicant_id: Optional[int] = Field(
         default=None,
-        foreign_key="user.id",
+        foreign_key="users.id",
         ondelete="SET NULL"
     )
     status: ReagentOrderStatus = ReagentOrderStatus.PENDING
