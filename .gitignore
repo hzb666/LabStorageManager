@@ -69,3 +69,6 @@ docs/done/
 docs/exp/
 docs/plans/
 docs/prompt/
+
+# Tests
+tests/
