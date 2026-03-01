@@ -5,7 +5,7 @@ Images are stored in filesystem, database only stores URL/path
 """
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +14,7 @@ from PIL import Image, ImageOps
 import io
 
 from app.core.config import settings, UPLOADS_DIR, THUMBNAILS_DIR
+from app.core.time_utils import get_utc_now
 
 
 def validate_image_type(file: UploadFile) -> bool:
@@ -106,7 +107,7 @@ def process_uploaded_image(file: UploadFile) -> tuple[str, str]:
     thumbnail.thumbnail((200, 200), Image.Resampling.LANCZOS)
     
     # Generate unique filename with UUID
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = get_utc_now().strftime("%Y%m%d_%H%M%S")
     unique_id = str(uuid.uuid4())[:8]
     filename = f"{timestamp}_{unique_id}.jpg"
     
@@ -143,7 +144,7 @@ def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:
     # Generate unique filename
     file_ext = Path(file.filename).suffix.lower() if file.filename else ".bin"
     unique_id = str(uuid.uuid4())[:8]
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = get_utc_now().strftime("%Y%m%d_%H%M%S")
     filename = f"{timestamp}_{unique_id}{file_ext}"
     
     # Determine save path

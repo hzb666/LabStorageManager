@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.core.config import settings
+from app.core.time_utils import get_utc_now
 from app.core.redis import delete_cached_session
 from app.database import get_db
 from app.models.user import User
@@ -136,7 +137,7 @@ def refresh_session(
         )
     
     # 延长会话过期时间
-    session.expires_at = datetime.now(timezone.utc) + timedelta(
+    session.expires_at = get_utc_now() + timedelta(
         hours=settings.session_expire_hours
     )
     db.add(session)

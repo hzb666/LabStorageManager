@@ -11,6 +11,7 @@ from sqlmodel import Session, select, func
 
 from app.database import get_db
 from app.core.auth import get_current_user, require_admin
+from app.core.time_utils import get_utc_now
 from app.models.reagent_order import (
     ReagentOrder,
     ReagentOrderCreate,
@@ -199,7 +200,6 @@ def update_reagent_order(
     for field, value in update_data.items():
         setattr(order, field, value)
     
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -228,7 +228,6 @@ def approve_reagent_order(
         )
     
     order.status = ReagentOrderStatus.APPROVED
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -251,7 +250,6 @@ def reject_reagent_order(
         )
     
     order.status = ReagentOrderStatus.REJECTED
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -305,7 +303,6 @@ def confirm_reagent_arrival(
     
     if body.arrival_notes:
         order.notes = body.arrival_notes
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -533,7 +530,6 @@ def stock_in_reagent_order(
     
     # Update order status
     order.status = ReagentOrderStatus.STOCKED
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     

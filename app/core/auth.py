@@ -56,8 +56,8 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
         "username": username,
         "role": role,
         "type": "access",
-        "exp": datetime.now(timezone.utc) + expires_delta,
-        "iat": datetime.now(timezone.utc),
+        "exp": get_utc_now() + expires_delta,
+        "iat": get_utc_now(),
     }
     
     # Use RS256 with private key, or HS256 with secret_key as fallback

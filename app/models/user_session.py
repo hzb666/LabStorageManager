@@ -2,6 +2,8 @@
 User Session Model - Device and IP Login Management
 """
 from datetime import datetime
+
+from app.core.time_utils import get_utc_now
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -19,6 +21,10 @@ class UserSession(SQLModel, table=True):
     last_ip_address: str = Field(description="Last active IP address")
     user_agent: str = Field(description="Full User-Agent string")
     token_hash: str = Field(index=True, description="SHA-256 hash of JWT token")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="First login time")
-    last_active_at: datetime = Field(default_factory=datetime.utcnow, description="Last API call time")
+    created_at: datetime = Field(default_factory=get_utc_now, description="First login time")
+    last_active_at: datetime = Field(
+        default_factory=get_utc_now,
+        sa_column_kwargs={"onupdate": get_utc_now},
+        description="Last API call time"
+    )
     expires_at: datetime = Field(description="Session absolute expiration time")

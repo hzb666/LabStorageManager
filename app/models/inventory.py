@@ -3,6 +3,8 @@ Inventory Model - Laboratory Reagents and Consumables Tracking
 Critical Rule #2: CAS Number must be normalized (uppercase, no spaces)
 """
 from datetime import datetime
+
+from app.core.time_utils import get_utc_now
 from enum import Enum
 from typing import Optional
 
@@ -68,8 +70,11 @@ class Inventory(InventoryBase, table=True):
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)  # 排序常用
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_utc_now, index=True)  # 排序常用
+    updated_at: datetime = Field(
+        default_factory=get_utc_now,
+        sa_column_kwargs={"onupdate": get_utc_now}
+    )
     
     # 拼音排序字段（预计算，使用数据库索引加速排序）
     name_pinyin: Optional[str] = Field(default=None, index=True)
@@ -159,12 +164,12 @@ class BorrowLog(SQLModel, table=True):
         foreign_key="users.id",
         ondelete="CASCADE"
     )
-    borrow_time: datetime = Field(default_factory=datetime.utcnow)
+    borrow_time: datetime = Field(default_factory=get_utc_now)
     return_time: Optional[datetime] = None
     quantity_borrowed: float = Field(gt=0)
     quantity_returned: Optional[float] = None
     notes: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_utc_now)
 
 
 class BorrowLogResponse(SQLModel):

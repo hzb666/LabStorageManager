@@ -10,6 +10,7 @@ from sqlmodel import Session, select, func
 
 from app.database import get_db
 from app.core.auth import get_current_user, require_admin
+from app.core.time_utils import get_utc_now
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
@@ -163,7 +164,6 @@ def update_consumable_order(
     for field, value in update_data.items():
         setattr(order, field, value)
     
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -192,7 +192,6 @@ def approve_consumable_order(
         )
     
     order.status = ConsumableOrderStatus.APPROVED
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -215,7 +214,6 @@ def reject_consumable_order(
         )
     
     order.status = ConsumableOrderStatus.REJECTED
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)
@@ -256,7 +254,6 @@ def complete_consumable_order(
     
     # Consumables complete directly (no stock-in)
     order.status = ConsumableOrderStatus.COMPLETED
-    order.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(order)

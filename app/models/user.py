@@ -2,6 +2,8 @@
 User Model - Authentication and Authorization
 """
 from datetime import datetime
+
+from app.core.time_utils import get_utc_now
 from enum import Enum
 from typing import Optional
 
@@ -29,8 +31,11 @@ class User(UserBase, table=True):
     
     id: Optional[int] = Field(default=None, primary_key=True)
     password_hash: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_utc_now)
+    updated_at: datetime = Field(
+        default_factory=get_utc_now,
+        sa_column_kwargs={"onupdate": get_utc_now}
+    )
 
 
 class UserCreate(SQLModel):

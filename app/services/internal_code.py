@@ -4,11 +4,12 @@ Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-01")
 Sequence: Auto-increment per CAS number group
 """
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from sqlmodel import Session, select, func
 
 from app.models.inventory import Inventory
+from app.core.time_utils import get_utc_now
 
 
 def _get_max_sequence_for_prefix(session: Session, prefix: str) -> int:
@@ -68,7 +69,7 @@ def generate_internal_code(
         raise ValueError(f"Invalid CAS number format: {cas_number}")
     
     # Get current date in yymmdd format
-    date_str = datetime.now(timezone.utc).strftime("%y%m%d")
+    date_str = get_utc_now().strftime("%y%m%d")
     
     # Get the current max sequence for this CAS number
     # Internal codes follow pattern: CAS-Date-Sequence

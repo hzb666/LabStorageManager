@@ -3,6 +3,8 @@ Consumable Order Model - Consumables Purchase Order Management
 Separated from Reagent for independent workflow (no stock-in needed)
 """
 from datetime import datetime
+
+from app.core.time_utils import get_utc_now
 from enum import Enum
 from typing import Optional
 
@@ -15,6 +17,16 @@ class ConsumableOrderStatus(str, Enum):
     APPROVED = "approved"     # 已审批（采购完成）
     REJECTED = "rejected"    # 未通过
     COMPLETED = "completed"  # 已完成（耗材不需要入库）
+
+
+class ConsumableOrderReason(str, Enum):
+    """Order reason enumeration"""
+    NONE = "none"
+    RUNNING_OUT = "running_out"
+    EMPTY = "empty"
+    COMMON_PUBLIC = "common_public"
+    NOT_FOUND = "not_found"
+    REORDER = "reorder"
 
 
 class ConsumableOrderBase(SQLModel):
@@ -35,6 +47,10 @@ class ConsumableOrderBase(SQLModel):
     quantity: int = Field(gt=0)
     # Price
     price: Optional[float] = Field(None, ge=0)
+    # Order reason
+    order_reason: ConsumableOrderReason = ConsumableOrderReason.NONE
+    # Hazardous flag
+    is_hazardous: bool = False
     # Image path (thumbnail in filesystem)
     image_path: Optional[str] = None
     # Notes
@@ -50,8 +66,11 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
         ondelete="SET NULL"
     )
     status: ConsumableOrderStatus = ConsumableOrderStatus.PENDING
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_utc_now)
+    updated_at: datetime = Field(
+        default_factory=get_utc_now,
+        sa_column_kwargs={"onupdate": get_utc_now}
+    )
 
 
 class ConsumableOrderCreate(SQLModel):
@@ -64,6 +83,8 @@ class ConsumableOrderCreate(SQLModel):
     specification: str = Field(max_length=100)
     quantity: int = Field(gt=0)
     price: Optional[float] = None
+    order_reason: ConsumableOrderReason = ConsumableOrderReason.NONE
+    is_hazardous: bool = False
     notes: Optional[str] = None
 
 

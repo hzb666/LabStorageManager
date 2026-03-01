@@ -20,6 +20,7 @@ from app.core.auth import (
     get_password_hash,
 )
 from app.core.config import settings
+from app.core.time_utils import get_utc_now
 from app.core.redis import cache_session, delete_cached_session, get_redis
 from app.database import get_db
 from app.models.user import (
@@ -208,7 +209,7 @@ def _create_user_session(
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     
     # 计算过期时间
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.session_expire_hours)
+    expires_at = get_utc_now() + timedelta(hours=settings.session_expire_hours)
     
     # 创建会话
     session = UserSession(
@@ -418,7 +419,6 @@ def change_password(
     
     # Update password
     current_user.password_hash = get_password_hash(password_request.new_password)
-    current_user.updated_at = datetime.now(timezone.utc)
     db.commit()
     
     return {"message": "密码修改成功"}
@@ -557,7 +557,6 @@ def update_user(
     for field, value in update_data.items():
         setattr(user, field, value)
     
-    user.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(user)
@@ -586,7 +585,6 @@ def activate_user(
         )
     
     user.is_active = True
-    user.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
     
@@ -616,7 +614,6 @@ def delete_user(
 
     # Soft delete: set is_active to False
     user.is_active = False
-    user.updated_at = datetime.now(timezone.utc)
 
     # 清理该用户的所有 Redis Session 缓存
     active_sessions = db.exec(
@@ -653,7 +650,6 @@ def update_user_role(
             detail=f"Invalid role: {role}. Must be 'admin' or 'user'"
         )
     
-    user.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
     
@@ -689,7 +685,6 @@ def reset_user_password(
     
     # Update password
     user.password_hash = get_password_hash(password_request.new_password)
-    user.updated_at = datetime.now(timezone.utc)
     db.commit()
     
     return {"message": "密码重置成功"}

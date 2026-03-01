@@ -11,7 +11,7 @@ from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
 from app.services.internal_code import generate_internal_code
 from app.services.pinyin_utils import compute_pinyin_fields
-from datetime import datetime, timezone
+from app.core.time_utils import get_utc_now
 
 
 def _parse_boolean(value, default: bool = False) -> bool:
@@ -87,7 +87,7 @@ def _generate_internal_code_with_tracking(
     if created_at:
         date_str = created_at.strftime("%y%m%d")
     else:
-        date_str = datetime.now(timezone.utc).strftime("%y%m%d")
+        date_str = get_utc_now().strftime("%y%m%d")
     
     tracker_key = (cas_number, date_str)
     

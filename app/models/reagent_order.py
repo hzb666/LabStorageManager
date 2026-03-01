@@ -3,6 +3,8 @@ Reagent Order Model - Reagent Purchase Order Management
 Separated from Consumable for independent workflow
 """
 from datetime import datetime
+
+from app.core.time_utils import get_utc_now
 from enum import Enum
 from typing import Optional
 
@@ -67,8 +69,11 @@ class ReagentOrder(ReagentOrderBase, table=True):
         ondelete="SET NULL"
     )
     status: ReagentOrderStatus = ReagentOrderStatus.PENDING
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_utc_now)
+    updated_at: datetime = Field(
+        default_factory=get_utc_now,
+        sa_column_kwargs={"onupdate": get_utc_now}
+    )
 
 
 class ReagentOrderCreate(SQLModel):
