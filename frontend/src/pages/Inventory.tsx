@@ -9,8 +9,8 @@ import {
   getExpandedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import type { SortingState, ColumnSizingState, RowData } from '@tanstack/react-table'
-import { useInfiniteQuery, keepPreviousData } from '@tanstack/react-query'
+import type { SortingState, ColumnSizingState, RowData, Table } from '@tanstack/react-table'
+import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { valibotResolver } from '@hookform/resolvers/valibot'
 
@@ -26,6 +26,7 @@ import { HazardousIcon } from '@/components/ui/HazardousIcon'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { DataTable } from '@/components/ui/DataTable'
+import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/components/ui/Toast'
 
 // 业务组件
@@ -35,7 +36,7 @@ import useDialogState from '@/hooks/useDialogState'
 // 工具与API
 import { inventoryAPI } from '@/api/client'
 import { formatDate, cn } from '@/lib/utils'
-import { InventoryFormSchema } from '@/lib/validationSchemas'
+import { InventoryFormSchema, parseSpecification } from '@/lib/validationSchemas'
 import type { InventoryFormData } from '@/lib/validationSchemas'
 
 // 图标
@@ -118,32 +119,43 @@ const defaultInventoryValues = {
   remaining_quantity: 0
 }
 
-const getInventoryFormFields = (isEdit: boolean) => [
-  { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
-  { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: !isEdit, readOnly: isEdit, placeholder: '如: 64-17-5' },
-  { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
-  { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
-  { name: 'storage_location' as const, label: '存放位置', type: 'input' as const, placeholder: '如: A-1-1 柜' },
-  ...(isEdit 
-    ? [{ name: 'remaining_quantity' as const, label: '剩余量', type: 'number' as const, required: true, placeholder: '如: 100' }]
-    : [{ name: 'quantity_bottles' as const, label: '瓶数', type: 'number' as const, required: true, placeholder: '如: 1' }]
-  ),
-  { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml, 1L' },
-  { name: 'brand' as const, label: '品牌', type: 'input' as const, placeholder: '如: Sigma' },
-  { name: 'category' as const, label: '分类', type: 'input' as const, placeholder: '如: 有机试剂' },
-  { 
-    name: 'is_hazardous' as const, 
-    label: '危险品', 
-    type: 'checkbox' as const,
-    checkboxLabel: (
-      <span className="flex items-center gap-1">
-        <AlertTriangle className="w-4 h-4 text-yellow-500" />
-        危险品
-      </span>
-    )
-  },
-  { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, placeholder: '其他说明...' },
-]
+const getInventoryFormFields = (isEdit: boolean, initialQuantity?: number) => {
+  // 编辑模式下显示：剩余量 + 规格（只读）；添加模式下显示：瓶数 + 规格
+  const quantityFields = isEdit && initialQuantity !== undefined
+    ? [
+        { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, required: true, placeholder: '如: 100' },
+        { name: 'specification' as const, label: '规格', type: 'input' as const, placeholder: '如: 500ml' }
+      ]
+    : [
+        { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, required: true, placeholder: '如: 1' },
+        { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
+      ]
+
+  console.log('📋 表单字段配置:', { isEdit, initialQuantity, quantityFields })
+
+  return [
+    { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
+    { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: !isEdit, readOnly: isEdit, placeholder: '如: 64-17-5' },
+    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
+    { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
+    { name: 'storage_location' as const, label: '存放位置', type: 'input' as const, placeholder: '如: A-1-1 柜' },
+    ...quantityFields,
+    { name: 'brand' as const, label: '品牌', type: 'input' as const, placeholder: '如: Sigma' },
+    { name: 'category' as const, label: '分类', type: 'input' as const, placeholder: '如: 有机试剂' },
+    {
+      name: 'is_hazardous' as const,
+      label: '危险品',
+      type: 'checkbox' as const,
+      checkboxLabel: (
+        <span className="flex items-center gap-1">
+          <AlertTriangle className="w-4 h-4 text-yellow-500" />
+          危险品
+        </span>
+      )
+    },
+    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, placeholder: '其他说明...' },
+  ]
+}
 
 // ============================================================================
 // 辅助组件
@@ -184,6 +196,8 @@ export function InventoryPage() {
   // ---------------------------------------------------------------------------
   // 状态管理
   // ---------------------------------------------------------------------------
+  const queryClient = useQueryClient()
+
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
     try { return JSON.parse(localStorage.getItem('inventory-table-col-sizes') || '{}') } catch { return {} }
@@ -249,7 +263,6 @@ export function InventoryPage() {
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    refetch,
   } = useInfiniteQuery({
     queryKey: ['inventory', statusFilter, globalFilter, searchField, fuzzySearch, sorting],
     queryFn,
@@ -264,7 +277,7 @@ export function InventoryPage() {
   })
 
   // 同步 searchInput 到 globalFilter 并防抖
-  const tableRef = useRef<TableType<InventoryItem> | null>(null)
+  const tableRef = useRef<Table<InventoryItem> | null>(null)
   useEffect(() => {
     const timer = setTimeout(() => {
       if (globalFilter !== searchInput) {
@@ -276,7 +289,11 @@ export function InventoryPage() {
     return () => clearTimeout(timer)
   }, [searchInput, globalFilter])
 
-  const loadInventory = useCallback(() => refetch(), [refetch])
+  // 刷新库存数据
+  const loadInventory = useCallback(async () => {
+    // 使缓存失效，后端已清除服务器缓存，会获取最新数据
+    await queryClient.invalidateQueries({ queryKey: ['inventory'] })
+  }, [queryClient])
   const data = useMemo(() => allData?.pages.flatMap(page => page.data) ?? [], [allData])
   const total = allData?.pages[0]?.total ?? 0
 
@@ -295,6 +312,7 @@ export function InventoryPage() {
   // ---------------------------------------------------------------------------
   // 优化 3：表单实例合并 (DRY)
   // ---------------------------------------------------------------------------
+  // 使用统一的表单验证规则（所有字段可选），在提交时根据模式做额外验证
   const form = useForm<InventoryFormData>({
     resolver: valibotResolver(InventoryFormSchema),
     defaultValues: defaultInventoryValues,
@@ -330,54 +348,94 @@ export function InventoryPage() {
   }, [setDialogState, form])
 
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const handleFormSubmit = form.handleSubmit(async (formData) => {
-    setIsSubmitting(true)
-    try {
+
+  // 表单提交处理 - 使用 Valibot Schema 自动验证
+  const handleFormSubmit = form.handleSubmit(
+    async (formData) => {
+      console.log('✅ 表单验证通过，提交数据:', formData)
+
+      // 编辑模式：验证剩余量（先转换为数字）
       if (dialogState === 'edit' && editingItem) {
-        const status = formData.remaining_quantity === 0 ? 'consumed' : 'in_stock'
-        await inventoryAPI.update(editingItem.id, {
-          name: formData.name || undefined,
-          english_name: formData.english_name || undefined,
-          category: formData.category || undefined,
-          storage_location: formData.storage_location || undefined,
-          remaining_quantity: formData.remaining_quantity,
-          brand: formData.brand || undefined,
-          status: status,
-          notes: formData.notes || undefined
-        })
-        toast.success('库存信息已更新')
-      } else if (dialogState === 'add') {
-        await inventoryAPI.manualAdd({
-          cas_number: formData.cas_number,
-          name: formData.name,
-          english_name: formData.english_name || undefined,
-          alias: formData.alias || undefined,
-          specification: formData.specification,
-          quantity_bottles: formData.quantity_bottles,
-          brand: formData.brand || undefined,
-          category: formData.category || undefined,
-          storage_location: formData.storage_location || undefined,
-          is_hazardous: formData.is_hazardous,
-          notes: formData.notes || undefined
-        })
-        toast.success('手动入库成功！')
+        const remainingVal = formData.remaining_quantity
+        const remaining = typeof remainingVal === 'number' ? remainingVal : parseFloat(String(remainingVal || '0'))
+        
+        // 根据用户填写的规格动态计算新的 initial_quantity
+        let initial = editingItem.initial_quantity // 默认使用旧值
+        if (formData.specification) {
+          const specValue = parseSpecification(formData.specification)
+          if (specValue !== null) {
+            initial = specValue // 规格数值就是初始量
+          }
+        }
+        
+        if (isNaN(remaining)) {
+          form.setError('remaining_quantity', { message: '剩余量必须是有效数字' })
+          return
+        }
+        if (remaining > initial) {
+          form.setError('remaining_quantity', { message: `剩余量不能超过初始量 (${initial})` })
+          return
+        }
       }
-      setDialogState(null)
-      loadInventory()
-    } catch (error) {
-      const err = error as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
-      const errorDetail = err.response?.data?.detail
-      if (dialogState === 'add' && Array.isArray(errorDetail)) {
-        errorDetail.forEach((e: ValidationError) => {
-          if (e.loc && e.loc[1]) form.setError(e.loc[1] as keyof InventoryFormData, { message: e.msg || '验证错误' })
-        })
-      } else {
-        toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
+
+      setIsSubmitting(true)
+      try {
+        if (dialogState === 'edit' && editingItem) {
+          const status = formData.remaining_quantity === 0 ? 'consumed' : 'in_stock'
+          await inventoryAPI.update(editingItem.id, {
+            name: formData.name || undefined,
+            english_name: formData.english_name || undefined,
+            category: formData.category || undefined,
+            storage_location: formData.storage_location || undefined,
+            remaining_quantity: formData.remaining_quantity,
+            brand: formData.brand || undefined,
+            status: status,
+            notes: formData.notes || undefined
+          })
+          toast.success('库存信息已更新')
+          // 刷新数据（等待刷新完成后再关闭对话框）
+          await loadInventory()
+        } else if (dialogState === 'add') {
+          // 添加模式下，specification 和 quantity_bottles 必定存在（因为验证已通过）
+          const spec = formData.specification as string
+          const bottles = formData.quantity_bottles as number
+          await inventoryAPI.manualAdd({
+            cas_number: formData.cas_number,
+            name: formData.name,
+            english_name: formData.english_name || undefined,
+            alias: formData.alias || undefined,
+            specification: spec,
+            quantity_bottles: bottles,
+            brand: formData.brand || undefined,
+            category: formData.category || undefined,
+            storage_location: formData.storage_location || undefined,
+            is_hazardous: formData.is_hazardous,
+            notes: formData.notes || undefined
+          })
+          toast.success('手动入库成功！')
+        }
+        // 先刷新数据，再关闭对话框
+        await loadInventory()
+        setDialogState(null)
+      } catch (err) {
+        const error = err as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
+        const errorDetail = error.response?.data?.detail
+        if (dialogState === 'add' && Array.isArray(errorDetail)) {
+          errorDetail.forEach((e: ValidationError) => {
+            if (e.loc && e.loc[1]) form.setError(e.loc[1] as keyof InventoryFormData, { message: e.msg || '验证错误' })
+          })
+        } else {
+          toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
+        }
+      } finally {
+        setIsSubmitting(false)
       }
-    } finally {
-      setIsSubmitting(false)
+    },
+    // 验证失败时的回调 - 仅在字段下方显示错误，不弹 toast
+    (errors) => {
+      console.log('❌ 表单验证失败:', errors)
     }
-  })
+  )
 
   const handleDeleteClick = async () => {
     if (!editingItem) return
@@ -387,7 +445,8 @@ export function InventoryPage() {
       try {
         await inventoryAPI.delete(editingItem.id)
         setDialogState(null)
-        loadInventory()
+        // 刷新数据（等待刷新完成）
+        await loadInventory()
         toast.success('库存已删除')
       } catch (error) {
         const err = error as { response?: { data?: { detail?: string } } }
@@ -408,7 +467,7 @@ export function InventoryPage() {
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
-    } catch (error) {
+    } catch {
       toast.error('导出失败')
     }
   }, [])
@@ -421,10 +480,10 @@ export function InventoryPage() {
       header: 'CAS号', size: 120, minSize: 100, maxSize: 200,
       cell: info => (
         <span className="break-all">
-          <HighlightText 
-            text={info.getValue() || ''} 
-            highlight={info.table.getState().globalFilter} 
-            fuzzy={info.table.options.meta?.fuzzySearch} 
+          <HighlightText
+            text={info.getValue() || ''}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
           />
         </span>
       ),
@@ -435,10 +494,10 @@ export function InventoryPage() {
         <div className="flex items-center gap-1.5 break-all">
           <HazardousIcon isHazardous={info.row.original.is_hazardous} />
           <span>
-            <HighlightText 
-              text={info.getValue() || ''} 
-              highlight={info.table.getState().globalFilter} 
-              fuzzy={info.table.options.meta?.fuzzySearch} 
+            <HighlightText
+              text={info.getValue() || ''}
+              highlight={info.table.getState().globalFilter}
+              fuzzy={info.table.options.meta?.fuzzySearch}
             />
           </span>
         </div>
@@ -448,10 +507,10 @@ export function InventoryPage() {
       header: '分类', size: 100, minSize: 80, maxSize: 150,
       cell: info => (
         <span className="break-all">
-          <HighlightText 
-            text={info.getValue() || '-'} 
-            highlight={info.table.getState().globalFilter} 
-            fuzzy={info.table.options.meta?.fuzzySearch} 
+          <HighlightText
+            text={info.getValue() || '-'}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
           />
         </span>
       ),
@@ -461,10 +520,10 @@ export function InventoryPage() {
       sortDescFirst: false, sortingFn: 'text',
       cell: info => (
         <span className="break-all">
-          <HighlightText 
-            text={info.row.original.storage_location || '-'} 
-            highlight={info.table.getState().globalFilter} 
-            fuzzy={info.table.options.meta?.fuzzySearch} 
+          <HighlightText
+            text={info.row.original.storage_location || '-'}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
           />
         </span>
       ),
@@ -473,10 +532,10 @@ export function InventoryPage() {
       header: '品牌', size: 100, minSize: 80, maxSize: 150,
       cell: info => (
         <span className="break-all">
-          <HighlightText 
-            text={info.getValue() || '-'} 
-            highlight={info.table.getState().globalFilter} 
-            fuzzy={info.table.options.meta?.fuzzySearch} 
+          <HighlightText
+            text={info.getValue() || '-'}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
           />
         </span>
       ),
@@ -620,10 +679,10 @@ export function InventoryPage() {
       </div>
 
       {/* 统一复用弹窗（新增 & 编辑） */}
-      <Dialog 
-        open={dialogState !== null} 
-        onOpenChange={(open) => { 
-          if (!open) { setDialogState(null); form.reset(); setDeleteConfirm(false) } 
+      <Dialog
+        open={dialogState !== null}
+        onOpenChange={(open) => {
+          if (!open) { setDialogState(null); form.reset(); setDeleteConfirm(false) }
         }}
       >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -633,7 +692,7 @@ export function InventoryPage() {
           <form onSubmit={handleFormSubmit}>
             <BaseForm
               form={form}
-              fields={getInventoryFormFields(dialogState === 'edit')}
+              fields={getInventoryFormFields(dialogState === 'edit', editingItem?.initial_quantity)}
             />
             <div className="flex flex-wrap justify-between items-center gap-3 mt-8">
               {/* 仅在编辑模式且有项目时显示删除按钮 */}
@@ -677,19 +736,30 @@ export function InventoryPage() {
           {isLoading && data.length === 0 ? (
             <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
           ) : data.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">暂无库存数据</div>
+            <div className="text-center py-8 text-muted-foreground">
+              {globalFilter 
+                ? `未找到匹配"${globalFilter}"的记录` 
+                : '暂无库存数据，请先入库'}
+            </div>
           ) : (
             <div className="px-6">
               <DataTable
                 table={table}
                 renderExpandedRow={(item) => (
-                  <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 border-b-1 border-border ">
-                    <div><span className="font-medium">英文名称：</span>{item.english_name || '-'}</div>
-                    <div><span className="font-medium">别名：</span>{item.alias || '-'}</div>
-                    <div><span className="font-medium">入库时间：</span>{formatDate(item.created_at)}</div>
-                    <div><span className="font-medium">入库用户：</span>{item.created_by_name || '-'}</div>
-                    <div><span className="font-medium">上次借用：</span>{item.borrower_name ? `${item.borrower_name} (未归还)` : (item.last_borrower_name ? `${item.last_borrower_name} (已归还)` : '-')}</div>
-                    <div><span className="font-medium">备注：</span>{item.notes || '-'}</div>
+                  <div className="p-3 flex flex-col md:flex-row gap-4 border-b-1 border-border">
+                    {/* 左侧：分子结构式 - 桌面端显示，移动端隐藏 */}
+                    <div className="hidden md:block flex-shrink-0">
+                      <MoleculeStructure casNumber={item.cas_number} width={150} height={100} />
+                    </div>
+                    {/* 右侧：信息网格 - 保持原有的 grid-cols-2 md:grid-cols-3 布局 */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
+                      <div><span className="font-medium">英文名称：</span>{item.english_name || '-'}</div>
+                      <div><span className="font-medium">别名：</span>{item.alias || '-'}</div>
+                      <div><span className="font-medium">入库时间：</span>{formatDate(item.created_at)}</div>
+                      <div><span className="font-medium">入库用户：</span>{item.created_by_name || '-'}</div>
+                      <div><span className="font-medium">上次借用：</span>{item.borrower_name ? `${item.borrower_name} (未归还)` : (item.last_borrower_name ? `${item.last_borrower_name} (已归还)` : '-')}</div>
+                      <div><span className="font-medium">备注：</span>{item.notes || '-'}</div>
+                    </div>
                   </div>
                 )}
                 scrollHeight="calc(100vh - 112px - 16px)"
@@ -702,6 +772,7 @@ export function InventoryPage() {
                 isFetchingNextPage={isFetchingNextPage}
                 fetchNextPage={fetchNextPage}
                 total={total}
+                searchKeyword={globalFilter}
               />
             </div>
           )}
@@ -715,14 +786,14 @@ export function InventoryPage() {
 // 优化 4：表格操作按钮组件（通过 React.memo + custom isEqual 阻断多余渲染）
 // ============================================================================
 
-const ActionButtons = React.memo(function ActionButtons({ 
-  item, 
-  onEdit, 
-  onBorrowSuccess 
-}: { 
-  item: InventoryItem; 
-  onEdit: (item: InventoryItem) => void; 
-  onBorrowSuccess: () => void 
+const ActionButtons = React.memo(function ActionButtons({
+  item,
+  onEdit,
+  onBorrowSuccess
+}: {
+  item: InventoryItem;
+  onEdit: (item: InventoryItem) => void;
+  onBorrowSuccess: () => void
 }) {
   const [isConfirming, setIsConfirming] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -748,6 +819,17 @@ const ActionButtons = React.memo(function ActionButtons({
   }
 
   const handleBlur = () => { if (isConfirming && !isLoading) setIsConfirming(false) }
+
+  // 借用状态显示借用者信息（与借出状态标签颜色一致）
+  if (item.status === 'borrowed') {
+    return (
+      <div className="flex items-center gap-1 text-sm text-muted-foreground">
+        <span className="text-blue-800 dark:text-blue-200" title={`借用者: ${item.borrower_name || '未知'}`}>
+          {item.borrower_name ? `${item.borrower_name}借用中` : '借用中'}
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center gap-1">
@@ -776,7 +858,8 @@ const ActionButtons = React.memo(function ActionButtons({
     </div>
   )
 }, (prevProps, nextProps) => {
-  // 只在 ID 或状态变化时重新渲染这个单元格的操作区域，避免全表 Diff
-  return prevProps.item.id === nextProps.item.id && 
-         prevProps.item.status === nextProps.item.status
+  // 只在 ID、状态或借用者变化时重新渲染这个单元格的操作区域，避免全表 Diff
+  return prevProps.item.id === nextProps.item.id &&
+    prevProps.item.status === nextProps.item.status &&
+    prevProps.item.borrower_name === nextProps.item.borrower_name
 })

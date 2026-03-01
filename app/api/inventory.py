@@ -30,6 +30,7 @@ from app.models.inventory import (
 )
 from app.models.user import User, UserRole
 from app.core.auth import get_current_user, require_admin
+from app.core.time_utils import get_utc_now
 from app.services.cas_utils import normalize_cas
 from app.services.internal_code import generate_internal_code
 from app.services.spec_utils import parse_specification, SpecificationError
@@ -133,7 +134,7 @@ def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
     """从缓存获取结果"""
     if cache_key in SEARCH_CACHE:
         cached_result, cached_time = SEARCH_CACHE[cache_key]
-        if (datetime.now() - cached_time).total_seconds() < CACHE_TTL_SECONDS:
+        if (get_utc_now() - cached_time).total_seconds() < CACHE_TTL_SECONDS:
             return cached_result
         else:
             # 缓存过期，删除
@@ -143,7 +144,7 @@ def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
 
 def _set_cached_result(cache_key: str, result: Dict[str, Any]) -> None:
     """设置缓存结果"""
-    SEARCH_CACHE[cache_key] = (result, datetime.now())
+    SEARCH_CACHE[cache_key] = (result, get_utc_now())
     # 简单清理：只保留最近100个缓存项
     if len(SEARCH_CACHE) > 100:
         # 删除最旧的10个
@@ -346,7 +347,7 @@ def get_inventory_by_internal_code(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
+            detail="未找到该库存项",
         )
     response = InventoryResponse.model_validate(item).model_dump()
     return _add_specification(response)
@@ -393,7 +394,7 @@ def export_inventory(
         ])
 
     output.seek(0)
-    filename = f"inventory_export_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"inventory_export_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.csv"
 
     return StreamingResponse(
         iter([output.getvalue()]),
@@ -464,6 +465,9 @@ def manual_add_inventory(
     for item in created_items:
         db.refresh(item)
 
+    # 清除列表缓存，确保新增后立即查询到最新数据
+    _clear_list_cache()
+
     return {
         "message": "Manual stock-in successful",
         "items_created": len(created_items),
@@ -486,7 +490,7 @@ def get_my_borrows(
 
     items = db.exec(statement).all()
     # Use naive UTC to match SQLite's timezone-naive datetimes
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = get_utc_now()
 
     return {
         "data": [
@@ -750,12 +754,15 @@ def list_inventory(
         order_expr = order_column.asc()
     else:
         order_expr = order_column.desc()
-    
+
+    # 次级排序：始终按创建时间降序，确保同值排序时顺序稳定，最新数据排在前面
+    secondary_order = Inventory.created_at.desc()
+
     # 统一使用数据库排序
     if limit > 0:
-        items = db.exec(base.order_by(order_expr).offset(skip).limit(limit)).all()
+        items = db.exec(base.order_by(order_expr, secondary_order).offset(skip).limit(limit)).all()
     else:
-        items = db.exec(base.order_by(order_expr)).all()
+        items = db.exec(base.order_by(order_expr, secondary_order)).all()
 
     # ================= 性能优化核心：批量查询用户（消除 N+1） =================
     # 遍历当前页的数据，收集所有需要查询的用户 ID
@@ -820,7 +827,7 @@ def get_inventory(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
+            detail="未找到该库存项",
         )
     response = InventoryResponse.model_validate(item).model_dump()
     return _add_specification(response)
@@ -838,7 +845,14 @@ def update_inventory(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
+            detail="未找到该库存项",
+        )
+
+    # 借用状态的试剂不能被修改
+    if item.status == InventoryStatus.BORROWED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="借用中的试剂无法编辑，请等待归还后再操作",
         )
 
     update_data = update.model_dump(exclude_unset=True)
@@ -856,9 +870,12 @@ def update_inventory(
         for pinyin_field, pinyin_value in pinyin_fields.items():
             setattr(item, pinyin_field, pinyin_value)
 
-    item.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(item)
+    
+    # 清除列表缓存，确保更新后立即查询到最新数据
+    _clear_list_cache()
+    
     response = InventoryResponse.model_validate(item).model_dump()
     return _add_specification(response)
 
@@ -874,10 +891,13 @@ def delete_inventory(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
+            detail="未找到该库存项",
         )
     db.delete(item)
     db.commit()
+    
+    # 清除列表缓存，确保删除后立即查询到最新数据
+    _clear_list_cache()
 
 
 @router.post("/{inventory_id}/borrow", response_model=InventoryResponse)
@@ -894,14 +914,14 @@ def borrow_item(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
+            detail="未找到该库存项",
         )
     
     # 使用原子化的条件更新：只有当 status = IN_STOCK 时才更新
     # 这是防止并发借用的关键：把所有逻辑放在一条 SQL 里
     from sqlmodel import update as sql_update
-    
-    now = datetime.now(timezone.utc)
+
+    # 原子更新必须显式传入 updated_at（onupdate 不会触发）
     update_statement = (
         sql_update(Inventory)
         .where(Inventory.id == inventory_id)
@@ -909,7 +929,7 @@ def borrow_item(
         .values(
             status=InventoryStatus.BORROWED,
             borrower_id=current_user.id,
-            updated_at=now,
+            updated_at=get_utc_now(),
         )
     )
     
@@ -938,7 +958,7 @@ def borrow_item(
     borrow_log = BorrowLog(
         inventory_id=inventory_id,
         borrower_id=current_user.id,
-        borrow_time=now,
+        borrow_time=get_utc_now(),
         quantity_borrowed=item.remaining_quantity,
     )
     db.add(borrow_log)
@@ -968,7 +988,7 @@ def return_item(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
+            detail="未找到该库存项",
         )
 
     if item.status != InventoryStatus.BORROWED:
@@ -997,7 +1017,7 @@ def return_item(
     ).first()
 
     if borrow_log:
-        borrow_log.return_time = datetime.now(timezone.utc)
+        borrow_log.return_time = get_utc_now()
         borrow_log.quantity_returned = return_data.remaining_quantity
 
     # Update item
@@ -1015,7 +1035,6 @@ def return_item(
     else:
         item.status = InventoryStatus.CONSUMED
 
-    item.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(item)
     
@@ -1039,7 +1058,7 @@ def get_borrow_history(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
+            detail="未找到该库存项",
         )
 
     logs = db.exec(

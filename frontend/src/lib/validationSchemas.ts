@@ -56,33 +56,91 @@ export const createStringLengthSchema = (
   )
 
 /**
- * 正数验证 - 替代 validatePositiveNumber
+ * 正整数验证 (>=1) - 用于瓶数等必须为整数的字段
+ * 支持字符串和数字输入，在 handleSubmit 中手动转换
  * @param fieldName 字段中文名称
  */
 export const createPositiveNumberSchema = (fieldName: string) =>
   v.pipe(
-    v.number(`${fieldName}必须是数字`),
+    v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
+    v.transform((input) => {
+      if (typeof input === 'number') return input
+      const num = parseFloat(input)
+      return isNaN(num) ? input : num
+    }),
+    v.number(`${fieldName}必须是有效数字`),
+    v.integer(`${fieldName}必须为整数`),
+    v.minValue(1, `${fieldName}必须为大于等于1的整数`)
+  )
+
+/**
+ * 正数验证 (可小数) - 用于初始量等可以是小数 quantity 的字段
+ * 支持字符串和数字输入
+ * @param fieldName 字段中文名称
+ */
+export const createQuantitySchema = (fieldName: string) =>
+  v.pipe(
+    v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
+    v.transform((input) => {
+      if (typeof input === 'number') return input
+      const num = parseFloat(input)
+      return isNaN(num) ? input : num
+    }),
+    v.number(`${fieldName}必须是有效数字`),
     v.gtValue(0, `${fieldName}必须大于0`)
   )
 
 /**
- * 非负数验证 - 替代 validateNonNegativeNumber
+ * 非负数验证 - 用于剩余量等可以为0的字段
+ * 支持字符串和数字输入
  * @param fieldName 字段中文名称
  */
 export const createNonNegativeNumberSchema = (fieldName: string) =>
   v.pipe(
-    v.number(`${fieldName}必须是数字`),
+    v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
+    v.transform((input) => {
+      if (typeof input === 'number') return input
+      const num = parseFloat(input)
+      return isNaN(num) ? input : num
+    }),
+    v.number(`${fieldName}必须是有效数字`),
     v.minValue(0, `${fieldName}不能为负数`)
   )
 
 /**
+ * 剩余量验证 - 用于编辑时验证剩余量不超过初始量
+ * 支持字符串和数字输入
+ * @param fieldName 字段中文名称
+ * @param maxValue 最大值（初始量）
+ */
+export const createRemainingQuantitySchema = (fieldName: string, maxValue: number) =>
+  v.pipe(
+    v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
+    v.transform((input) => {
+      if (typeof input === 'number') return input
+      const num = parseFloat(input)
+      return isNaN(num) ? input : num
+    }),
+    v.number(`${fieldName}必须是有效数字`),
+    v.minValue(0, `${fieldName}不能为负数`),
+    v.maxValue(maxValue, `${fieldName}不能超过初始量 (${maxValue})`)
+  )
+
+/**
  * 价格验证 - 替代 validatePrice
+ * 支持字符串和数字输入
  * @param min 最小值
  * @param max 最大值
  */
 export const createPriceSchema = (min = 0, max = 999999) =>
   v.pipe(
-    v.number('价格必须是数字'),
+    v.union([v.string(), v.number()], '价格必须是有效数字'),
+    v.transform((input) => {
+      if (typeof input === 'number') return input
+      const num = parseFloat(input)
+      return isNaN(num) ? input : num
+    }),
+    v.number('价格必须是有效数字'),
     v.minValue(min, `价格不能小于${min}`),
     v.maxValue(max, `价格不能大于${max}`)
   )
@@ -124,6 +182,13 @@ export const SpecificationSchema = v.pipe(
     '规格格式无效'
   )
 )
+
+// 规格解析辅助函数 - 从规格字符串提取数值
+export function parseSpecification(spec: string): number | null {
+  if (!spec) return null
+  const match = spec.match(/^(\d+\.?\d*)\s*/i)
+  return match ? parseFloat(match[1]) : null
+}
 
 // ==========================================
 // 3. CAS 号高级验证逻辑
@@ -176,57 +241,10 @@ export const CasNumberSchema = v.pipe(
 // ==========================================
 
 /**
- * 库存表单基础 Schema
- */
-export const InventorySchema = v.object({
-  name: createRequiredStringSchema('名称'),
-  cas_number: CasNumberSchema,
-  english_name: v.optional(v.string()),
-  alias: v.optional(v.string()),
-  category: v.optional(v.string()),
-  brand: v.optional(v.string()),
-  specification: SpecificationSchema,
-  initial_quantity: createPositiveNumberSchema('初始数量'),
-  remaining_quantity: createNonNegativeNumberSchema('剩余数量'),
-  quantity_bottles: createPositiveNumberSchema('瓶数'),
-  unit: v.optional(v.string()),
-  storage_location: v.optional(v.string()),
-  is_hazardous: v.optional(v.boolean()),
-  notes: v.optional(v.string())
-})
-
-/**
- * 手动入库 Schema
- * 适配手动入库表单，字段使用 snake_case（与 API 一致）
- * specification 是必填字段（与 API 匹配）
- * is_hazardous 使用 boolean 类型，由表单组件控制
- */
-export const ManualAddInventorySchema = v.object({
-  name: createRequiredStringSchema('试剂名称'),
-  cas_number: CasNumberSchema,
-  english_name: v.optional(v.string()),
-  alias: v.optional(v.string()),
-  category: v.optional(v.string()),
-  brand: v.optional(v.string()),
-  specification: SpecificationSchema,
-  quantity_bottles: createPositiveNumberSchema('瓶数'),
-  storage_location: v.optional(v.string()),
-  is_hazardous: v.boolean('危险品必须是布尔值'),
-  notes: v.optional(v.string())
-})
-
-/**
- * 手动入库表单 Schema 类型
- */
-export type ManualAddInventoryFormData = v.InferOutput<typeof ManualAddInventorySchema>
-
-// ==========================================
-// 5. 统一库存表单 Schema（用于 BaseForm）
-// ==========================================
-
-/**
- * 统一库存表单 Schema
- * 包含所有库存相关字段，通过字段配置控制必填/只读/隐藏
+ * 统一库存表单 Schema（用于手动入库和编辑）
+ * 包含所有库存相关字段
+ * - 添加模式：name, specification, quantity_bottles 为必填
+ * - 编辑模式：remaining_quantity 为必填
  */
 export const InventoryFormSchema = v.object({
   // 基础字段
@@ -236,23 +254,21 @@ export const InventoryFormSchema = v.object({
   alias: v.optional(v.string()),
   category: v.optional(v.string()),
   brand: v.optional(v.string()),
-  specification: SpecificationSchema,
+  specification: SpecificationSchema, // 必填
   storage_location: v.optional(v.string()),
   notes: v.optional(v.string()),
 
-  // 数量相关 - 入库时使用
-  quantity_bottles: createPositiveNumberSchema('瓶数'),
-  initial_quantity: createPositiveNumberSchema('初始数量'),
-
-  // 剩余量 - 编辑时使用
-  remaining_quantity: createNonNegativeNumberSchema('剩余数量'),
+  // 数量相关
+  quantity_bottles: v.optional(createPositiveNumberSchema('瓶数')),
+  initial_quantity: v.optional(createNonNegativeNumberSchema('初始数量')),
+  remaining_quantity: v.optional(createNonNegativeNumberSchema('剩余数量')),
 
   // 危险品
   is_hazardous: v.boolean('危险品必须是布尔值'),
 })
 
 /**
- * 统一库存表单 Schema 类型
+ * 库存表单 Schema 类型
  */
 export type InventoryFormData = v.InferOutput<typeof InventoryFormSchema>
 

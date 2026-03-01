@@ -6,6 +6,7 @@ from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 from sqlmodel import Session, select
 
 from app.core.config import settings
+from app.core.time_utils import get_utc_now
 from app.core.redis import cache_session, delete_cached_session, get_cached_session
 from app.database import get_db, engine  # 必须引入 engine 供后台任务使用
 from app.models.user import User
@@ -24,7 +25,7 @@ def _update_activity_task(session_id: int, current_ip: str) -> None:
     with Session(engine) as db:
         session = db.get(UserSession, session_id)
         if session:
-            session.last_active_at = datetime.now(timezone.utc)
+            session.last_active_at = get_utc_now()
             # 如果活动 IP 变了，记录最新的 IP
             if current_ip and session.last_ip_address != current_ip:
                 session.last_ip_address = current_ip
@@ -64,7 +65,7 @@ def get_current_session(
     cached_data = get_cached_session(token_hash)
     if cached_data:
         expires_at = datetime.fromisoformat(cached_data["expires_at"])
-        if expires_at < datetime.now(timezone.utc):
+        if expires_at < get_utc_now():
             delete_cached_session(token_hash)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -105,7 +106,7 @@ def get_current_session(
         # --- 核心优化点：防抖前置 ---
         # 只有距离上次记录超过 5 分钟，或者 IP 发生了变动，才去更新 Redis 和 数据库
         needs_update = False
-        now_utc = datetime.now(timezone.utc)
+        now_utc = get_utc_now()
         
         if session.last_active_at:
             if (now_utc - session.last_active_at).total_seconds() >= 300:
@@ -141,7 +142,7 @@ def get_current_session(
     if not session:
         raise credentials_exception
     
-    if session.expires_at < datetime.now(timezone.utc):
+    if session.expires_at < get_utc_now():
         db.delete(session)
         db.commit()
         raise HTTPException(status_code=401, detail="Session expired")
@@ -154,7 +155,7 @@ def get_current_session(
         raise credentials_exception
     
     # 缓存未命中时，说明刚登录或者缓存刚过期，直接在当前流程更新
-    session.last_active_at = datetime.now(timezone.utc)
+    session.last_active_at = get_utc_now()
     session.last_ip_address = client_ip
     db.add(session)
     db.commit()
@@ -176,7 +177,7 @@ def get_current_session(
             "expires_at": session.expires_at.isoformat(),
             "last_active_at": session.last_active_at.isoformat(),
         },
-        int((session.expires_at - datetime.now(timezone.utc)).total_seconds())
+        int((session.expires_at - get_utc_now()).total_seconds())
     )
     
     return user, session
