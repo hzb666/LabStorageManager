@@ -910,7 +910,6 @@ export function Dashboard() {
               </label>
               <div className="flex items-center gap-2">
                 <Input
-                  type="number"
                   value={returnMode === 'remaining' ? returnQuantity : usedQuantity}
                   onChange={(e) => {
                     setReturnError('')

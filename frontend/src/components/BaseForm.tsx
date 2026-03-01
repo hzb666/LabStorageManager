@@ -32,6 +32,8 @@ export interface FieldSchema<T extends Record<string, unknown>> {
   required?: boolean     // 是否必填（用于显示 * 标记）
   checkboxLabel?: React.ReactNode  // checkbox 的自定义标签内容（可以包含图标）
   hideLabel?: boolean  // 是否隐藏标签（用 ::before 占据位置）
+  min?: number         // 数字字段的最小值
+  max?: number         // 数字字段的最大值
 }
 
 /**
@@ -193,20 +195,6 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
-            )}
-
-            {field.type === 'number' && (
-              <Input
-                {...controllerField}
-                id={`field-${field.name as string}`}
-                type="number"
-                value={controllerField.value as number ?? ''}
-                onChange={(e) => controllerField.onChange(e.target.value === '' ? 0 : Number(e.target.value))}
-                placeholder={field.placeholder}
-                disabled={isDisabled}
-                readOnly={isReadOnly}
-                className={getInputClassName(hasError, isReadOnly)}
-              />
             )}
 
             {field.type === 'input' && (

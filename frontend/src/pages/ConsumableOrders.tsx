@@ -490,10 +490,8 @@ export function ConsumableOrdersPage() {
                 </Label>
                 <Input
                   id="create_quantity"
-                  type="number"
-                  min="1"
                   value={formData.quantity}
-                  onChange={(e) => setFormData(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                  onChange={(e) => setFormData(prev => ({ ...prev, quantity: e.target.value }))}
                   className={cn(INPUT_STYLES.lg, formErrors.quantity && 'border-destructive')}
                 />
                 {formErrors.quantity && (
@@ -508,9 +506,6 @@ export function ConsumableOrdersPage() {
                 </Label>
                 <Input
                   id="create_price"
-                  type="number"
-                  step="0.01"
-                  min="0"
                   value={formData.price}
                   onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
                   placeholder="如: 25.00"

@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState, useEffect, memo } from 'react'
+import React, { useRef, useCallback, useState, useEffect, memo, useMemo } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import type { Table as TableType, Row, Cell, Column } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -21,26 +21,38 @@ interface DataTableProps<TData> {
   isFetchingNextPage?: boolean
   fetchNextPage?: () => void
   total?: number
+  searchKeyword?: string  // 搜索关键词，用于区分无数据情况
 }
 
 // --- 性能优化：内层组件渲染隔离 ---
-// 1. 去掉自定义对比函数，依靠标准的 memo 浅对比
-// 2. 完美保留 TS 泛型支持
 function InnerRowComponent<TData>({
   row,
   renderExpandedRow,
   getProportionalStyles,
   noteField,
+  onRowClick,
 }: {
   row: Row<TData>
   renderExpandedRow?: (row: TData) => React.ReactNode
   getProportionalStyles: (column: Column<TData, unknown>) => React.CSSProperties
   noteField?: string
+  onRowClick?: (e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => void
 }) {
   const isExpanded = row.getIsExpanded()
   const original = row.original as TData
   
   const hasNote = noteField ? Boolean((original as Record<string, unknown>)?.[noteField]) : false
+
+  const handleToggle = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (onRowClick) {
+        onRowClick(e, row)
+      } else {
+        row.getToggleExpandedHandler()(e)
+      }
+    },
+    [onRowClick, row]
+  )
 
   return (
     <div className="w-full">
@@ -49,7 +61,7 @@ function InnerRowComponent<TData>({
           "flex w-full cursor-pointer transition-colors items-center hover:bg-accent dark:hover:bg-input border-b",
           isExpanded ? "border-transparent" : "border-border"
         )}
-        onClick={row.getToggleExpandedHandler()}
+        onClick={handleToggle}
       >
         {row.getVisibleCells().map((cell: Cell<TData, unknown>, index: number) => {
           const isFirstCol = index === 0;
@@ -97,7 +109,6 @@ function InnerRowComponent<TData>({
   )
 }
 
-// 封装以支持泛型
 const InnerRow = memo(InnerRowComponent) as typeof InnerRowComponent
 
 // --- 列表主容器：容器级虚拟滚动 ---
@@ -115,6 +126,7 @@ export function DataTable<TData>({
   isFetchingNextPage,
   fetchNextPage,
   total,
+  searchKeyword,
 }: DataTableProps<TData>) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
@@ -141,17 +153,10 @@ export function DataTable<TData>({
     }
   }, [isAllExpanded, enableExpandAll, expandAllStorageKey])
 
+  // 🚀 性能优化 1：批量展开
   useEffect(() => {
     if (!enableExpandAll) return
-    
-    const rows = table.getRowModel().rows
-    rows.forEach(row => {
-      if (isAllExpanded && !row.getIsExpanded()) {
-        row.toggleExpanded(true)
-      } else if (!isAllExpanded && row.getIsExpanded()) {
-        row.toggleExpanded(false)
-      }
-    })
+    table.toggleAllRowsExpanded(isAllExpanded)
   }, [isAllExpanded, enableExpandAll, table])
   
   const [scrollbarWidth, setScrollbarWidth] = useState(0)
@@ -181,25 +186,40 @@ export function DataTable<TData>({
   const isMobile = useIsMobile()
   const { rows } = table.getRowModel()
   const visibleColumns = table.getVisibleLeafColumns()
+  const columnSizing = table.getState().columnSizing
 
-  const totalWeight = visibleColumns.reduce((sum, col) => sum + col.getSize(), 0)
-  const minTableWidth = visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
-
-  // useCallback 的依赖项没问题，因为 totalWeight 在不拖拽列宽时是完全稳定的
-  const getProportionalStyles = useCallback((column: Column<TData, unknown>): React.CSSProperties => {
-    const size = column.getSize()
-    if (size === 0) return { display: 'none' }
-
-    const widthPercent = (size / totalWeight) * 100
-    const minSize = column.columnDef.minSize ?? 50
-
+  // 🚀 性能优化 2：缓存列宽求和
+  const { totalWeight, minTableWidth } = useMemo(() => {
     return {
-      flex: `0 0 ${widthPercent}%`,
-      width: `${widthPercent}%`,
-      minWidth: `${minSize}px`,
-      boxSizing: 'border-box',
+      totalWeight: visibleColumns.reduce((sum, col) => sum + col.getSize(), 0),
+      minTableWidth: visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
     }
-  }, [totalWeight])
+  }, [visibleColumns, columnSizing])
+
+  // 🚀 性能优化 3：O(1) 预计算样式字典
+  const columnStyles = useMemo(() => {
+    const styles: Record<string, React.CSSProperties> = {}
+    visibleColumns.forEach(column => {
+      const size = column.getSize()
+      if (size === 0) {
+        styles[column.id] = { display: 'none' }
+        return
+      }
+      const widthPercent = (size / totalWeight) * 100
+      const minSize = column.columnDef.minSize ?? 50
+      styles[column.id] = {
+        flex: `0 0 ${widthPercent}%`,
+        width: `${widthPercent}%`,
+        minWidth: `${minSize}px`,
+        boxSizing: 'border-box',
+      }
+    })
+    return styles
+  }, [visibleColumns, totalWeight, columnSizing])
+
+  const getProportionalStyles = useCallback((column: Column<TData, unknown>): React.CSSProperties => {
+    return columnStyles[column.id] || {}
+  }, [columnStyles])
 
   const handleCustomResize = useCallback((e: React.MouseEvent | React.TouchEvent, header: any) => {
     e.preventDefault()
@@ -225,42 +245,50 @@ export function DataTable<TData>({
 
     setResizingColId(header.column.id)
 
+    // 🚀 性能优化 4：拖拽 rAF 节流防掉帧
+    let animationFrameId: number;
+
     const onMove = (moveEvent: MouseEvent | TouchEvent) => {
-      const currentX = moveEvent.type === 'touchmove'
-        ? (moveEvent as TouchEvent).touches[0].clientX
-        : (moveEvent as MouseEvent).clientX
+      if (animationFrameId) cancelAnimationFrame(animationFrameId)
+      
+      animationFrameId = requestAnimationFrame(() => {
+        const currentX = moveEvent.type === 'touchmove'
+          ? (moveEvent as TouchEvent).touches[0].clientX
+          : (moveEvent as MouseEvent).clientX
 
-      const deltaX = currentX - startX
-      const deltaWeight = deltaX / pixelPerWeight
+        const deltaX = currentX - startX
+        const deltaWeight = deltaX / pixelPerWeight
 
-      let newLeft = startLeftSize + deltaWeight
-      let newRight = startRightSize - deltaWeight
+        let newLeft = startLeftSize + deltaWeight
+        let newRight = startRightSize - deltaWeight
 
-      if (newLeft < leftMin) {
-        newLeft = leftMin
-        newRight = startRightSize + (startLeftSize - leftMin)
-      }
-      if (newRight < rightMin) {
-        newRight = rightMin
-        newLeft = startLeftSize + (startRightSize - rightMin)
-      }
-      if (newLeft > leftMax) {
-        newLeft = leftMax
-        newRight = startRightSize - (leftMax - startLeftSize)
-      }
-      if (newRight > rightMax) {
-        newRight = rightMax
-        newLeft = startLeftSize - (rightMax - startRightSize)
-      }
+        if (newLeft < leftMin) {
+          newLeft = leftMin
+          newRight = startRightSize + (startLeftSize - leftMin)
+        }
+        if (newRight < rightMin) {
+          newRight = rightMin
+          newLeft = startLeftSize + (startRightSize - rightMin)
+        }
+        if (newLeft > leftMax) {
+          newLeft = leftMax
+          newRight = startRightSize - (leftMax - startLeftSize)
+        }
+        if (newRight > rightMax) {
+          newRight = rightMax
+          newLeft = startLeftSize - (rightMax - startRightSize)
+        }
 
-      table.setColumnSizing(old => ({
-        ...old,
-        [leftCol.id]: newLeft,
-        [rightCol.id]: newRight
-      }))
+        table.setColumnSizing(old => ({
+          ...old,
+          [leftCol.id]: newLeft,
+          [rightCol.id]: newRight
+        }))
+      })
     }
 
     const onUp = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId)
       setResizingColId(null)
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
@@ -282,6 +310,12 @@ export function DataTable<TData>({
     getItemKey: useCallback((index: number) => rows[index]?.id ?? index, [rows]),
   })
 
+  // 同步虚拟列表的 ref，供点击事件进行无依赖动态获取
+  const virtualizerRef = useRef(rowVirtualizer)
+  useEffect(() => {
+    virtualizerRef.current = rowVirtualizer
+  })
+
   const handleScroll = useCallback(() => {
     const el = bodyScrollRef.current
     if (!el || !hasNextPage || isFetchingNextPage) return
@@ -293,6 +327,56 @@ export function DataTable<TData>({
       fetchNextPage?.()
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, rowVirtualizer])
+
+  // 🛡️ 终极核心修复：使用动态追踪插值（Dynamic Lerp）强力对抗虚拟列表滚动跳跃
+  const handleRowClick = useCallback((e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => {
+    const isExpanding = !row.getIsExpanded()
+    row.toggleExpanded()
+
+    if (isExpanding) {
+      const el = bodyScrollRef.current
+      const container = e.currentTarget.closest('[data-index]')
+      
+      if (el && container && virtualizerRef.current) {
+        const index = Number(container.getAttribute('data-index'))
+        const initialItem = virtualizerRef.current.getVirtualItems().find(v => v.index === index)
+        
+        // 只有当行在视口上方（被遮挡）时才触发动画
+        if (initialItem && initialItem.start < el.scrollTop) {
+          let startTime = performance.now()
+          
+          const animate = (time: number) => {
+            if (!el || !virtualizerRef.current) return
+            
+            const elapsed = time - startTime
+            
+            // 🔥 关键魔术：每一帧都向虚拟列表索取该行的“最新坐标”
+            // 彻底解决滚动回去重测导致的 Layout Shift 坐标偏移问题！
+            const currentItem = virtualizerRef.current.getVirtualItems().find(v => v.index === index)
+            // 如果瞬间找不到（极低概率），回退到上一次的已知坐标
+            const targetY = currentItem ? currentItem.start : initialItem.start
+            
+            // 计算当前距离目标的差值
+            const diff = targetY - el.scrollTop
+            
+            // 动画执行 400ms (完全覆盖 motion 的 300ms) 或距离 < 1px 时直接吸附停止
+            if (elapsed > 400 || Math.abs(diff) < 1) {
+              el.scrollTop = targetY
+              return
+            }
+            
+            // 丝滑缓动算法：每帧追赶剩余距离的 15%
+            // 如果虚拟列表突然把 targetY 往下挪了，下一帧它会自动调转方向继续追！
+            el.scrollTop += diff * 0.15
+            
+            requestAnimationFrame(animate)
+          }
+          
+          requestAnimationFrame(animate)
+        }
+      }
+    }
+  }, [])
 
   return (
     <div
@@ -395,8 +479,8 @@ export function DataTable<TData>({
             return (
               <div
                 key={virtualRow.key}
-                data-index={virtualRow.index} // 关键修复：恢复外层的 data-index 属性
-                ref={rowVirtualizer.measureElement} // 关键修复：让测量 ref 必须绑在同级有 data-index 的节点上
+                data-index={virtualRow.index} 
+                ref={rowVirtualizer.measureElement} 
                 className="absolute top-0 left-0 w-full"
                 style={{
                   transform: `translateY(${virtualRow.start}px)`,
@@ -407,6 +491,7 @@ export function DataTable<TData>({
                   renderExpandedRow={renderExpandedRow}
                   getProportionalStyles={getProportionalStyles}
                   noteField={noteField}
+                  onRowClick={handleRowClick}
                 />
               </div>
             )
@@ -414,17 +499,19 @@ export function DataTable<TData>({
         </div>
         
         {isFetchingNextPage && (
-          <div className="flex items-center justify-center py-4 text-muted-foreground">
+          <div className="flex items-center justify-center pt-4 text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
             <span>加载更多...</span>
           </div>
         )}
         
         {!hasNextPage && !isFetchingNextPage && (
-          <div className="text-center py-4 text-muted-foreground text-sm">
+          <div className="text-center pt-4 text-muted-foreground text-base">
             {total !== undefined && total > 0 
-              ? `已加载全部 ${rows.length} / ${total} 条记录` 
-              : '无数据'}
+              ? `已加载全部 ${rows.length} 条记录` 
+              : searchKeyword 
+                ? `未找到匹配"${searchKeyword}"的记录`
+                : '暂无库存数据，请先入库'}
           </div>
         )}
       </div>

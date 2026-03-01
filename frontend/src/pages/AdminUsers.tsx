@@ -59,7 +59,7 @@ interface User {
 const columnHelper = createColumnHelper<User>()
 
 export function AdminUsersPage() {
-  const currentUser = useAuthStore((state) => state.user)
+  const { user: currentUser, setAuth } = useAuthStore()
   const [data, setData] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [sorting, setSorting] = useState<SortingState>([])
@@ -285,7 +285,14 @@ export function AdminUsersPage() {
 
     setEditLoading(true)
     try {
-      await userAdminAPI.update(editUser.id, editData)
+      const response = await userAdminAPI.update(editUser.id, editData)
+      const updatedUser = response.data
+      
+      // 如果修改的是当前登录用户，需要更新全局状态
+      if (editUser.id === currentUser?.id && updatedUser) {
+        setAuth(updatedUser)
+      }
+      
       setDialogState(null)
       setEditUser(null)
       loadUsers()
