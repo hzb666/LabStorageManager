@@ -5,6 +5,8 @@ import {
   autoUpdate, 
   offset, 
   shift, 
+  flip, 
+  size, 
   useHover, 
   useInteractions, 
   useTransitionStyles
@@ -41,9 +43,45 @@ type LoadingState = 'idle' | 'loading' | 'ready' | 'error'
 
 let rdkitLoaderPromise: Promise<any> | null = null
 
-// 全局缓存（内存级）
+// 全局缓存（内存级）及大小限制
+const MAX_CACHE_SIZE = 100
 const svgCache = new Map<string, { svg: string; zoomSvg: string; naturalSize: { w: number; h: number } }>()
 const smilesCache = new Map<string, string>()
+
+// --- 新增：全局并发队列与请求去重 ---
+const MAX_CONCURRENT_REQUESTS = 3; // PubChem 建议控制在 3-5 个并发以内
+let activeRequests = 0;
+const requestQueue: (() => void)[] = [];
+const pendingRequests = new Map<string, Promise<string | null>>();
+
+// 简易并发控制器
+const enqueueRequest = <T,>(task: () => Promise<T>): Promise<T> => {
+  return new Promise((resolve, reject) => {
+    const execute = async () => {
+      activeRequests++;
+      try {
+        // 可选：增加 200ms 的硬性延迟，进一步保护 PubChem API 防御 503
+        await new Promise(res => setTimeout(res, 200)); 
+        resolve(await task());
+      } catch (error) {
+        reject(error);
+      } finally {
+        activeRequests--;
+        if (requestQueue.length > 0) {
+          const nextTask = requestQueue.shift();
+          if (nextTask) nextTask();
+        }
+      }
+    };
+
+    if (activeRequests < MAX_CONCURRENT_REQUESTS) {
+      execute();
+    } else {
+      requestQueue.push(execute);
+    }
+  });
+};
+// ------------------------------------
 
 export function MoleculeStructure({ 
   casNumber, 
@@ -58,25 +96,44 @@ export function MoleculeStructure({
   const [error, setError] = useState<string>('')
   
   const [canZoom, setCanZoom] = useState(false)
-  const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 })
-  
   const componentId = useId().replace(/:/g, '') 
 
-  // --- Floating UI 配置 (更新为左对齐上对齐) ---
+  // --- Floating UI 配置 ---
   const [isOpen, setIsOpen] = useState(false)
   
   const { refs, floatingStyles, context } = useFloating({
     open: isOpen && canZoom,
     onOpenChange: setIsOpen,
     placement: 'bottom-start', 
+    strategy: 'fixed', 
     middleware: [
-      // 关键修改：向上偏移原窗口的高度，使其与原窗口 top 齐平；crossAxis: 0 保持 left 齐平
       offset(({ rects }) => ({
         mainAxis: -rects.reference.height,
         crossAxis: 0,
       })),
-      // 只需要 shift 确保不管怎么放大，都不会溢出屏幕即可
-      shift({ padding: 16 }) 
+      // 1. 限制 flip：只允许在上下方向翻转，绝对不尝试其他方向，确保 left 永远贴合
+      flip({ 
+        padding: 16,
+        fallbackPlacements: ['top-start'], 
+      }),
+      // 2. 控制 shift：关闭水平平移，允许垂直平移
+      shift({ 
+        padding: 16,
+        mainAxis: false, // <- 核心修复 1：禁止在水平方向滑动，死死锁住左侧对齐线
+        crossAxis: true, // 允许在垂直方向滑动（上下装不下时可以盖住原图）
+      }),
+      // 3. 计算 size：动态挤压宽度
+      size({
+        padding: 16,
+        apply({ availableWidth, elements }) {
+          Object.assign(elements.floating.style, {
+            // <- 核心修复 2：availableWidth 会自动计算出“从左侧对齐线到屏幕右边缘”的剩余可用宽度
+            // 配合之前写的 [&>svg]:!max-w-full，弹窗一旦碰到屏幕右侧，就不会左移，而是乖乖让内容等比缩小
+            maxWidth: `${availableWidth}px`, 
+            maxHeight: `calc(100vh - 32px)`,
+          });
+        },
+      })
     ],
     whileElementsMounted: autoUpdate, 
   })
@@ -136,25 +193,51 @@ export function MoleculeStructure({
   }, [])
 
   const fetchSmiles = useCallback(async (cas: string): Promise<string | null> => {
-    if (smilesCache.has(cas)) return smilesCache.get(cas)!
+    // 1. LRU 缓存拦截
+    if (smilesCache.has(cas)) {
+      const cachedSmiles = smilesCache.get(cas)!
+      smilesCache.delete(cas)
+      smilesCache.set(cas, cachedSmiles)
+      return cachedSmiles
+    }
 
-    try {
-      const response = await fetch(
-        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(cas)}/property/SMILES/JSON`,
-        { headers: { 'Accept': 'application/json' } }
-      )
-      if (!response.ok) throw new Error('Compound not found')
-      
-      const data = await response.json()
-      const fetchedSmiles = data?.PropertyTable?.Properties?.[0]?.SMILES || null
-      
-      if (fetchedSmiles) {
-        smilesCache.set(cas, fetchedSmiles)
+    // 2. 请求去重：如果该 CAS 正在请求中，直接返回同一个 Promise，不重复发请求
+    if (pendingRequests.has(cas)) {
+      return pendingRequests.get(cas)!;
+    }
+
+    // 3. 包装核心请求逻辑进入并发队列
+    const fetchTask = enqueueRequest(async () => {
+      try {
+        const response = await fetch(
+          `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(cas)}/property/SMILES/JSON`,
+          { headers: { 'Accept': 'application/json' } }
+        )
+        if (!response.ok) throw new Error('Compound not found')
+        
+        const data = await response.json()
+        const fetchedSmiles = data?.PropertyTable?.Properties?.[0]?.SMILES || null
+        
+        if (fetchedSmiles) {
+          if (smilesCache.size >= MAX_CACHE_SIZE) {
+            smilesCache.delete(smilesCache.keys().next().value)
+          }
+          smilesCache.set(cas, fetchedSmiles)
+        }
+        return fetchedSmiles
+      } catch (err) {
+        console.error('获取 SMILES 失败:', err)
+        return null
       }
-      return fetchedSmiles
-    } catch (err) {
-      console.error('获取 SMILES 失败:', err)
-      return null
+    });
+
+    // 4. 将本次 Promise 存入 pending 字典，并在结束后清理
+    pendingRequests.set(cas, fetchTask);
+    
+    try {
+      return await fetchTask;
+    } finally {
+      pendingRequests.delete(cas);
     }
   }, [])
 
@@ -182,13 +265,17 @@ export function MoleculeStructure({
     const renderMolecule = async () => {
       if (svgCache.has(cacheKey)) {
         const cached = svgCache.get(cacheKey)!
+        
+        // LRU 逻辑：命中后先删后加，保持活跃状态在队尾
+        svgCache.delete(cacheKey)
+        svgCache.set(cacheKey, cached)
+
         const processSvgId = (str: string) => 
           str.replace(/id=['"](.+?)['"]/g, `id="${componentId}_$1"`)
              .replace(/url\(#(.+?)\)/g, `url(#${componentId}_$1)`)
 
         setSvg(processSvgId(cached.svg))
         setZoomSvg(processSvgId(cached.zoomSvg))
-        setNaturalSize(cached.naturalSize)
         setCanZoom(cached.naturalSize.w > width || cached.naturalSize.h > height)
         setLoadingState('ready')
         return
@@ -199,11 +286,11 @@ export function MoleculeStructure({
 
         let delay = 100
         if (smiles.length > 45) {
-          delay = 350 
+          delay = 250 
         } else if (smiles.length > 20) {
-          delay = 200
+          delay = 180
         }
-
+        
         await new Promise(resolve => setTimeout(resolve, delay))
         if (!isActive) return 
 
@@ -228,6 +315,11 @@ export function MoleculeStructure({
             zoomSvg: rawZoomSvgString, 
             naturalSize: { w: natWidth, h: natHeight } 
           }
+          
+          // 容量控制：超出 MAX_CACHE_SIZE 后删除第一个（最老未使用的）元素
+          if (svgCache.size >= MAX_CACHE_SIZE) {
+            svgCache.delete(svgCache.keys().next().value)
+          }
           svgCache.set(cacheKey, calcResult)
 
           if (isActive) {
@@ -237,7 +329,6 @@ export function MoleculeStructure({
 
             setSvg(processSvgId(calcResult.svg))
             setZoomSvg(processSvgId(calcResult.zoomSvg))
-            setNaturalSize(calcResult.naturalSize)
             setCanZoom(natWidth > width || natHeight > height)
             setLoadingState('ready')
           }
@@ -267,10 +358,7 @@ export function MoleculeStructure({
 
   if (loadingState === 'loading') {
     return (
-      <div 
-        className={`flex items-center justify-center rounded-md bg-white dark:bg-[#121212] ${isDark === true ? 'bg-[#121212]' : ''}`} 
-        style={{ width, height }}
-      >
+      <div className={`flex items-center justify-center rounded-md bg-white dark:bg-[#121212] ${isDark === true ? 'bg-[#121212]' : ''}`} style={{ width, height }}>
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
           <div className="w-4 h-4 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
           <span>加载中...</span>
@@ -281,10 +369,7 @@ export function MoleculeStructure({
 
   if (error || loadingState === 'error') {
     return (
-      <div 
-        className={`flex items-center justify-center rounded-md bg-white dark:bg-[#121212] ${isDark === true ? 'bg-[#121212]' : ''}`} 
-        style={{ width, height }}
-      >
+      <div className={`flex items-center justify-center rounded-md bg-white dark:bg-[#121212] ${isDark === true ? 'bg-[#121212]' : ''}`} style={{ width, height }}>
         <span className="text-gray-500 text-sm">{error}</span>
       </div>
     )
@@ -306,20 +391,46 @@ export function MoleculeStructure({
         <div 
           ref={refs.setFloating}
           {...getFloatingProps()}
-          className={`
-            fixed z-[9999] pointer-events-none flex items-center justify-center 
-            p-4 rounded-lg shadow-xl bg-white border border-gray-200 dark:border-gray-400
-            ${filterClass}
-          `}
+          className="pointer-events-none z-[9999]"
           style={{
-            ...floatingStyles,
-            ...transitionStyles,
-            transformOrigin: 'top left', // 关键修改：动画缩放基点设置在左上角
-            minWidth: width, 
-            minHeight: height,
+            ...floatingStyles, 
+            width: 'max-content', 
+            height: 'max-content',
+            willChange: 'transform' 
           }}
-          dangerouslySetInnerHTML={{ __html: zoomSvg }}
-        />,
+        >
+          {/* 1. 外层容器：锁定背景色与 SVG 反色后一致，仅优化阴影与边框的弥散感 */}
+          <div
+            className={`
+              flex items-center justify-center p-4 rounded-xl 
+              bg-white dark:bg-[#121212] 
+              border border-black/5 dark:border-white/10 
+              shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_10px_40px_rgba(0,0,0,0.6)]
+              ${isDark === true ? '!bg-[#121212] !border-white/10 !shadow-[0_10px_40px_rgba(0,0,0,0.6)]' : ''}
+              ${isDark === false ? '!bg-white !border-black/5 !shadow-[0_8px_30px_rgb(0,0,0,0.08)]' : ''}
+            `}
+            style={{
+              ...transitionStyles,
+              transformOrigin: 'top left', 
+              minWidth: width, 
+              minHeight: height,
+              maxWidth: '100%',  
+              maxHeight: '100%', 
+              overflow: 'hidden',
+              willChange: 'transform, opacity'
+            }}
+          >
+            {/* 2. 内层容器：专职处理反色，确保 SVG 背景与外层完美融合 */}
+            <div 
+              className={`
+                w-full h-full flex items-center justify-center 
+                [&>svg]:!max-w-full [&>svg]:!h-auto 
+                ${filterClass}
+              `}
+              dangerouslySetInnerHTML={{ __html: zoomSvg }}
+            />
+          </div>
+        </div>,
         document.body
       )}
     </>

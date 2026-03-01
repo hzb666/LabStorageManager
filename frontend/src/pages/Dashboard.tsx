@@ -469,7 +469,8 @@ export function Dashboard() {
       await inventoryAPI.return(selectedBorrow.inventory_id, { remaining_quantity: qty, unit: returnUnit })
       setShowReturnModal(false)
       setSelectedBorrow(null)
-      loadDashboardData()
+      // 先刷新数据，再弹出 toast
+      await loadDashboardData()
       toast.success('归还成功')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
@@ -491,7 +492,8 @@ export function Dashboard() {
       setShowStockinModal(false)
       setSelectedStockin(null)
       setStockinLocation('')
-      loadDashboardData()
+      // 先刷新数据，再弹出 toast
+      await loadDashboardData()
       toast.success('位置分配成功')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
@@ -504,8 +506,9 @@ export function Dashboard() {
   const handleConfirmArrival = async (orderId: number) => {
     try {
       await reagentOrderAPI.confirmArrival(orderId)
+      // 先刷新数据，再弹出 toast
+      await loadDashboardData()
       toast.warning('试剂已到货，请及时完成入库操作！')
-      loadDashboardData()
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
       toast.error(axiosError.response?.data?.detail || '操作失败')
@@ -515,7 +518,8 @@ export function Dashboard() {
   const handleQuickStockIn = async (orderId: number) => {
     try {
       await reagentOrderAPI.stockIn(orderId)
-      loadDashboardData()
+      // 先刷新数据，再弹出 toast
+      await loadDashboardData()
       toast.success('入库成功！')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
@@ -526,7 +530,8 @@ export function Dashboard() {
   const handleConfirmReceive = async (orderId: number) => {
     try {
       await consumableOrderAPI.complete(orderId)
-      loadDashboardData()
+      // 先刷新数据，再弹出 toast
+      await loadDashboardData()
       toast.success('已确认收货')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>

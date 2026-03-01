@@ -49,6 +49,48 @@ export interface PaginatedResponse<T> {
 export interface PaginationParams {
   skip?: number
   limit?: number
+  search?: string
+}
+
+// Reagent Order Status Enum
+export enum ReagentOrderStatus {
+  PENDING = "pending",
+  APPROVED = "approved",
+  ARRIVED = "arrived",
+  STOCKED = "stocked",
+  REJECTED = "rejected",
+}
+
+// Reagent Order Reason Enum
+export enum ReagentOrderReason {
+  NONE = "none",
+  RUNNING_OUT = "running_out",
+  NOT_STOCKED = "not_stocked",
+  COMMON_PUBLIC = "common_public",
+  NOT_FOUND = "not_found",
+  REORDER = "reorder",
+  HIGH_USAGE = "high_usage",
+  DEGRADED = "degraded",
+}
+
+// Consumable Order Status Enum
+export enum ConsumableOrderStatus {
+  PENDING = "pending",
+  APPROVED = "approved",
+  REJECTED = "rejected",
+  COMPLETED = "completed",
+}
+
+// Consumable Order Reason Enum
+export enum ConsumableOrderReason {
+  NONE = "none",
+  RUNNING_OUT = "running_out",
+  NOT_STOCKED = "not_stocked",
+  COMMON_PUBLIC = "common_public",
+  NOT_FOUND = "not_found",
+  REORDER = "reorder",
+  HIGH_USAGE = "high_usage",
+  DEGRADED = "degraded",
 }
 
 // Session Info type for device management
@@ -104,8 +146,14 @@ export const userAdminAPI = {
 
 // Reagent Order APIs
 export const reagentOrderAPI = {
-  list: (params?: PaginationParams & { status_filter?: string }) =>
-    api.get('/reagent-orders', { params }),
+  list: (params?: PaginationParams & {
+    status_filter?: ReagentOrderStatus
+    search?: string
+    search_field?: string
+    fuzzy?: boolean
+    sort_by?: string
+    sort_order?: string
+  }) => api.get('/reagent-orders/', { params }),
   get: (id: number) => api.get(`/reagent-orders/${id}`),
   create: (data: {
     cas_number: string
@@ -116,27 +164,28 @@ export const reagentOrderAPI = {
     brand?: string
     specification: string
     quantity: number
-    price?: number
-    order_reason: string
+    price: number
+    order_reason: ReagentOrderReason
     is_hazardous: boolean
     notes?: string
   }) => api.post('/reagent-orders', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/reagent-orders/${id}`, data),
   delete: (id: number) => api.delete(`/reagent-orders/${id}`),
   approve: (id: number) => api.post(`/reagent-orders/${id}/approve`),
-  reject: (id: number, reason: string) => 
+  reject: (id: number, reason: string) =>
     api.post(`/reagent-orders/${id}/reject`, { reason }),
   confirmArrival: (id: number, notes?: string) =>
     api.post(`/reagent-orders/${id}/confirm-arrival`, { arrival_notes: notes }),
   stockIn: (id: number) => api.post(`/reagent-orders/${id}/stock-in`),
   getMyOrders: () => api.get('/reagent-orders/dashboard/my-orders'),
   getArrivedOrders: () => api.get('/reagent-orders/dashboard/arrived-orders'),
+  exportOrders: () => api.get('/reagent-orders/export', { responseType: 'blob' }),
 }
 
 // Consumable Order APIs (new)
 export const consumableOrderAPI = {
-  list: (params?: PaginationParams & { status_filter?: string }) =>
-    api.get('/consumable-orders', { params }),
+  list: (params?: PaginationParams & { status_filter?: ConsumableOrderStatus }) =>
+    api.get('/consumable-orders/', { params }),
   get: (id: number) => api.get(`/consumable-orders/${id}`),
   create: (data: {
     name: string
@@ -147,12 +196,14 @@ export const consumableOrderAPI = {
     specification: string
     quantity: number
     price?: number
+    order_reason: ConsumableOrderReason
+    is_hazardous: boolean
     notes?: string
   }) => api.post('/consumable-orders', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/consumable-orders/${id}`, data),
   delete: (id: number) => api.delete(`/consumable-orders/${id}`),
   approve: (id: number) => api.post(`/consumable-orders/${id}/approve`),
-  reject: (id: number, reason: string) => 
+  reject: (id: number, reason: string) =>
     api.post(`/consumable-orders/${id}/reject`, { reason }),
   complete: (id: number) => api.post(`/consumable-orders/${id}/complete`),
   getMyOrders: () => api.get('/consumable-orders/dashboard/my-orders'),
@@ -161,7 +212,7 @@ export const consumableOrderAPI = {
 // Inventory APIs
 export const inventoryAPI = {
   list: (params?: PaginationParams & { status_filter?: string; cas_filter?: string; hazardous_only?: boolean }) =>
-    api.get('/inventory', { params }),
+    api.get('/inventory/', { params }),
   get: (id: number) => api.get(`/inventory/${id}`),
   getByCode: (code: string) => api.get(`/inventory/code/${code}`),
   checkCAS: (casNumber: string) => api.get(`/inventory/cas/${casNumber}`),

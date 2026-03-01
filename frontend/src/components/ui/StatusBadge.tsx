@@ -28,6 +28,12 @@ export const STATUS_COLORS: Record<string, BadgeColor> = {
   // 设备状态
   current: 'green',
   other: 'gray',
+  // 订单状态
+  pending: 'orange',
+  approved: 'blue',
+  arrived: 'purple',
+  stocked: 'green',
+  rejected: 'red',
 }
 
 // 状态到中文名称的映射
@@ -37,7 +43,7 @@ export const STATUS_LABELS: Record<string, string> = {
   borrowed: '借出',
   consumed: '用完',
   // 用户状态
-  active: '活跃',
+  active: '启用',
   inactive: '禁用',
   // 用户角色
   admin: '管理员',
@@ -45,6 +51,24 @@ export const STATUS_LABELS: Record<string, string> = {
   // 设备状态
   current: '当前设备',
   other: '其他设备',
+  // 订单状态
+  pending: '待审',
+  approved: '已批',
+  arrived: '已到',
+  stocked: '入库',
+  rejected: '已驳',
+}
+
+// 申购原因到中文名称的映射
+export const ORDER_REASON_LABELS: Record<string, string> = {
+  none: '',
+  running_out: '用完',
+  not_stocked: '没有',
+  common_public: '公用',
+  not_found: '未见',
+  reorder: '追加',
+  high_usage: '大量',
+  degraded: '变质',
 }
 
 interface StatusBadgeProps {

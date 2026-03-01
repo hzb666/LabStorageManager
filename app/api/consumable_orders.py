@@ -20,8 +20,18 @@ from app.models.consumable_order import (
 )
 from app.models.user import User
 from app.services.image_service import process_uploaded_image
+from app.services.spec_utils import parse_specification, SpecificationError, format_specification
+from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
+
+
+def _add_specification(item_dict: dict) -> dict:
+    """Add computed specification field to order response dict"""
+    initial = item_dict.get("initial_quantity", 0)
+    unit = item_dict.get("unit", "")
+    item_dict["specification"] = format_specification(initial, unit)
+    return item_dict
 
 
 def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[ConsumableOrder]:
@@ -36,6 +46,15 @@ def create_consumable_order(
     db: Session = Depends(get_db)
 ):
     """Create a new consumable order"""
+    # Parse specification to get initial_quantity and unit
+    try:
+        initial_quantity, unit = parse_specification(order.specification)
+    except SpecificationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid specification format: {e}"
+        )
+
     # Create order
     db_order = ConsumableOrder(
         name=order.name,
@@ -43,7 +62,8 @@ def create_consumable_order(
         alias=order.alias,
         category=order.category,
         brand=order.brand,
-        specification=order.specification,
+        initial_quantity=initial_quantity,
+        unit=unit,
         quantity=order.quantity,
         price=order.price,
         order_reason=order.order_reason,
@@ -111,15 +131,11 @@ def list_consumable_orders(
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
-    users_map: dict[int, str] = {}
-    if applicant_ids:
-        from app.models.user import User as UserModel
-        users = db.exec(select(UserModel).where(UserModel.id.in_(applicant_ids))).all()
-        users_map = {u.id: u.full_name or u.username for u in users}
+    users_map = batch_get_user_names(db, applicant_ids)
 
     return {
         "data": [
-            {**ConsumableOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
+            _add_specification({**ConsumableOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")})
             for o in orders
         ],
         "total": total,
@@ -287,7 +303,7 @@ def get_my_consumable_orders(
             "order_id": order.id,
             "name": order.name,
             "english_name": order.english_name,
-            "specification": order.specification,
+            "specification": format_specification(order.initial_quantity, order.unit),
             "quantity": order.quantity,
             "price": order.price,
             "is_hazardous": order.is_hazardous,

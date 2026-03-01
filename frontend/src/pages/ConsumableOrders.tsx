@@ -1,328 +1,364 @@
-﻿import { useState, useEffect, useMemo, useCallback } from 'react'
+﻿/**
+ * 耗材订单页面
+ * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、完成
+ * 参考 Inventory 页面实现，使用 DataTable + BaseForm + Valibot
+ */
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   createColumnHelper,
-  flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   useReactTable,
-  getSortedRowModel,
 } from '@tanstack/react-table'
-import type { SortingState } from '@tanstack/react-table'
+import type { SortingState, ColumnSizingState, RowData, Table } from '@tanstack/react-table'
+import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
+import { useForm } from 'react-hook-form'
+import { valibotResolver } from '@hookform/resolvers/valibot'
+
+// UI 组件
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { Label } from '@/components/ui/Label'
-import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { consumableOrderAPI } from '@/api/client'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { HazardousIcon } from '@/components/ui/HazardousIcon'
+import { LoadingButton } from '@/components/ui/LoadingButton'
+import { DataTable } from '@/components/ui/DataTable'
 import { toast } from '@/components/ui/Toast'
-import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
+
+// 业务组件
+import { BaseForm } from '@/components/BaseForm'
+import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
-import { cn } from '@/lib/utils'
-import { validateRequired, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
-import { AxiosError } from 'axios'
+
+// 工具与API
+import { consumableOrderAPI } from '@/api/client'
+import { formatDate } from '@/lib/utils'
+import { ConsumableOrderSchema } from '@/lib/validationSchemas'
+import type { ConsumableOrderFormData } from '@/lib/validationSchemas'
+import { 
+  getConsumableOrderFormFields, 
+  defaultConsumableOrderValues 
+} from '@/lib/formConfigs'
+
+// 图标
 import {
-  Plus,
+  Search,
   Loader2,
   X,
-  Search,
-  ShoppingCart
+  Plus,
+  Pencil,
+  ShoppingCart,
 } from 'lucide-react'
+
+// 类型扩展
+declare module '@tanstack/react-table' {
+  interface TableMeta<TData extends RowData> {
+    onEdit: (item: TData) => void
+  }
+}
+
+interface ValidationError {
+  loc?: (string | number)[]
+  msg?: string
+  type?: string
+}
 
 interface ConsumableOrder {
   id: number
   name: string
-  english_name?: string
-  alias?: string
-  category?: string
-  brand?: string
+  english_name: string | null
+  alias: string | null
+  category: string | null
+  brand: string | null
   specification: string
   quantity: number
-  price?: number
-  image_path?: string
-  notes?: string
-  applicant_id: number
-  applicant_name?: string
+  price: number | null
+  order_reason: string
+  is_hazardous: boolean
+  image_path: string | null
+  notes: string | null
+  applicant_id: number | null
+  applicant_name: string | null
   status: string
   created_at: string
   updated_at: string
 }
 
-// 订单状态映射
-const STATUS_MAPPING: Record<string, string> = {
-  pending: '待审批',
-  approved: '已审批',
-  completed: '已完成',
-  rejected: '已驳回'
-}
-
-// 状态样式 - 使用语义化颜色，支持暗黑模式
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-  approved: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-  completed: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-  rejected: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-}
-
 const columnHelper = createColumnHelper<ConsumableOrder>()
 
+// ============================================================================
+// 主组件
+// ============================================================================
+
 export function ConsumableOrdersPage() {
-  const [orders, setOrders] = useState<ConsumableOrder[]>([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
-  const [loading, setLoading] = useState(true)
-  const [sorting, setSorting] = useState<SortingState>([])
-  const [globalFilter, setGlobalFilter] = useState('')
-  
-  // Dialog state
-  const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  
+  const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === 'admin'
 
-  const [formData, setFormData] = useState({
-    name: '',
-    english_name: '',
-    alias: '',
-    category: '',
-    brand: '',
-    specification: '',
-    quantity: 1,
-    price: '',
-    notes: '',
+  // 表格状态
+  const [sorting, setSorting] = useState<SortingState>([])
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
+    try { return JSON.parse(localStorage.getItem('consumable-orders-table-col-sizes') || '{}') } catch { return {} }
+  })
+  const [globalFilter, setGlobalFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+
+  // Dialog 状态
+  const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
+  const [editingItem, setEditingItem] = useState<ConsumableOrder | null>(null)
+
+  const tableRef = useRef<Table<ConsumableOrder> | null>(null)
+
+  // 防抖搜索
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (globalFilter !== searchInput) {
+        setGlobalFilter(searchInput)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput, globalFilter])
+
+  // 保存列宽
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      localStorage.setItem('consumable-orders-table-col-sizes', JSON.stringify(columnSizing))
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [columnSizing])
+
+  // 数据查询
+  const queryFn = useCallback(async ({ pageParam = 0 }: { pageParam: number }) => {
+    const params = { skip: pageParam, limit: 50 }
+    if (globalFilter) { params.search = globalFilter }
+
+    const response = await consumableOrderAPI.list(params)
+    return response.data
+  }, [globalFilter])
+
+  const {
+    data: allData,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['consumable-orders', globalFilter, sorting],
+    queryFn,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentLoadedCount = allPages.reduce((acc, page) => acc + page.data.length, 0)
+      if (currentLoadedCount < (lastPage.total || 0)) return currentLoadedCount
+      return null
+    },
+    placeholderData: keepPreviousData,
   })
 
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const data = useMemo(() => allData?.pages.flatMap(page => page.data) ?? [], [allData])
+  const total = allData?.pages[0]?.total ?? 0
 
-  // Load orders
+  // 表单实例
+  const form = useForm<ConsumableOrderFormData>({
+    resolver: valibotResolver(ConsumableOrderSchema),
+    defaultValues: defaultConsumableOrderValues,
+    shouldFocusError: false,
+  })
+
+  // 加载数据
   const loadOrders = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = {
-        skip: (page - 1) * pageSize,
-        limit: pageSize,
-      }
-      const response = await consumableOrderAPI.list(params)
-      const result = response.data
-      setOrders(result.data || [])
-      setTotal(result.total || 0)
-    } catch (error) {
-      console.error('Failed to load orders:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [page, pageSize])
+    await queryClient.invalidateQueries({ queryKey: ['consumable-orders'] })
+  }, [queryClient])
 
-  useEffect(() => {
-    loadOrders()
-  }, [loadOrders])
+  // 点击添加按钮
+  const handleAddClick = useCallback(() => {
+    setEditingItem(null)
+    form.reset(defaultConsumableOrderValues)
+    setDialogState('add')
+  }, [form, setDialogState])
 
-  const totalPages = Math.ceil(total / pageSize)
-
-  const handlePageSizeChange = (newSize: number) => {
-    setPageSize(newSize)
-    setPage(1)
-  }
-
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {}
-    
-    // 名称验证：必填
-    const nameValidation = validateRequired(formData.name, '名称')
-    if (!nameValidation.isValid) {
-      newErrors.name = nameValidation.error || '名称不能为空'
-    }
-    
-    // 规格验证：必填
-    const specValidation = validateRequired(formData.specification, '规格')
-    if (!specValidation.isValid) {
-      newErrors.specification = specValidation.error || '规格不能为空'
-    }
-    
-    // 数量验证：正数
-    const quantityValidation = validatePositiveNumber(formData.quantity, '数量')
-    if (!quantityValidation.isValid) {
-      newErrors.quantity = quantityValidation.error || '数量必须大于0'
-    }
-    
-    // 价格验证：必填 + 非负数
-    const priceValue = formData.price ? parseFloat(formData.price) : NaN
-    if (!formData.price || isNaN(priceValue)) {
-      newErrors.price = '价格不能为空'
-    } else {
-      const priceValidation = validateNonNegativeNumber(priceValue, '价格')
-      if (!priceValidation.isValid) {
-        newErrors.price = priceValidation.error || '价格不能为负数'
-      }
-    }
-    
-    setFormErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
-
-  const handleCreateOrder = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!validateForm()) return
-
-    setSubmitting(true)
-    try {
-      await consumableOrderAPI.create({
-        ...formData,
-        category: formData.category || undefined,
-        brand: formData.brand || undefined,
-        price: formData.price ? parseFloat(formData.price) : undefined,
-      })
-      toast.success('耗材订单创建成功')
-      setShowCreateDialog(false)
-      resetForm()
-      loadOrders()
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '创建失败')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      english_name: '',
-      alias: '',
-      category: '',
-      brand: '',
-      specification: '',
-      quantity: 1,
-      price: '',
-      notes: '',
+  // 点击编辑按钮
+  const handleEditClick = useCallback((item: ConsumableOrder) => {
+    setEditingItem(item)
+    form.reset({
+      name: item.name || '',
+      english_name: item.english_name || '',
+      alias: item.alias || '',
+      category: item.category || '',
+      brand: item.brand || '',
+      specification: item.specification || '',
+      quantity: item.quantity || 1,
+      price: item.price || undefined,
+      order_reason: item.order_reason || 'none',
+      is_hazardous: item.is_hazardous || false,
+      notes: item.notes || ''
     })
-    setFormErrors({})
-  }
+    setDialogState('edit')
+  }, [form, setDialogState])
 
-  const handleCloseDialog = (open: boolean) => {
-    setShowCreateDialog(open)
-    if (!open) {
-      resetForm()
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // 表单提交
+  const handleFormSubmit = form.handleSubmit(
+    async (formData) => {
+      console.log('✅ 耗材订单表单验证通过:', formData)
+
+      setIsSubmitting(true)
+      try {
+        if (dialogState === 'edit' && editingItem) {
+          await consumableOrderAPI.update(editingItem.id, {
+            name: formData.name,
+            english_name: formData.english_name || undefined,
+            alias: formData.alias || undefined,
+            category: formData.category || undefined,
+            brand: formData.brand || undefined,
+            specification: formData.specification || undefined,
+            quantity: formData.quantity,
+            price: formData.price,
+            order_reason: formData.order_reason,
+            is_hazardous: formData.is_hazardous,
+            notes: formData.notes || undefined
+          })
+        } else if (dialogState === 'add') {
+          await consumableOrderAPI.create({
+            ...formData,
+            category: formData.category || undefined,
+            brand: formData.brand || undefined,
+            price: formData.price ? parseFloat(String(formData.price)) : undefined,
+          })
+        }
+        // 先刷新数据，再弹出 toast，确保数据已加载完成
+        await loadOrders()
+        if (dialogState === 'edit') {
+          toast.success('订单信息已更新')
+        } else if (dialogState === 'add') {
+          toast.success('耗材订单创建成功')
+        }
+        setDialogState(null)
+      } catch (err) {
+        const error = err as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
+        const errorDetail = error.response?.data?.detail
+        if (dialogState === 'add' && Array.isArray(errorDetail)) {
+          errorDetail.forEach((e: ValidationError) => {
+            if (e.loc && e.loc[1]) form.setError(e.loc[1] as keyof ConsumableOrderFormData, { message: e.msg || '验证错误' })
+          })
+        } else {
+          toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
+        }
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    (errors) => {
+      console.log('❌ 表单验证失败:', errors)
     }
-  }
+  )
 
-  const handleApprove = async (id: number) => {
+  // 审批操作
+  const handleApprove = useCallback(async (id: number) => {
     try {
       await consumableOrderAPI.approve(id)
+      // 先刷新数据，再弹出 toast
+      await loadOrders()
       toast.success('审批通过')
-      loadOrders()
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || '操作失败')
     }
-  }
+  }, [loadOrders])
 
-  const handleReject = async (id: number) => {
+  // 驳回操作
+  const handleReject = useCallback(async (id: number) => {
     try {
       await consumableOrderAPI.reject(id, '管理员驳回')
+      // 先刷新数据，再弹出 toast
+      await loadOrders()
       toast.success('已驳回')
-      loadOrders()
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || '操作失败')
     }
-  }
+  }, [loadOrders])
 
-  const handleComplete = async (id: number) => {
+  // 确认完成
+  const handleComplete = useCallback(async (id: number) => {
     try {
       await consumableOrderAPI.complete(id)
+      // 先刷新数据，再弹出 toast
+      await loadOrders()
       toast.success('耗材订单已完成')
-      loadOrders()
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || '操作失败')
     }
-  }
+  }, [loadOrders])
 
-  // Table columns
+  // 表格列配置
   const columns = useMemo(() => [
-    // 名称
     columnHelper.accessor('name', {
-      header: '名称',
-      size: 180,
+      header: '名称', size: 180,
       cell: info => (
-        <span className="font-medium">{info.getValue()}</span>
+        <div className="flex items-center gap-1.5">
+          <HazardousIcon isHazardous={info.row.original.is_hazardous} />
+          <span className="font-medium">{info.getValue()}</span>
+        </div>
       ),
     }),
-    // 英文名称
     columnHelper.accessor('english_name', {
-      header: '英文名称',
-      size: 120,
+      header: '英文名称', size: 120,
       cell: info => info.getValue() || '-',
     }),
-    // 规格
     columnHelper.accessor('specification', {
-      header: '规格',
-      size: 80,
+      header: '规格', size: 80,
       cell: info => <span className="break-all">{info.getValue()}</span>,
     }),
-    // 数量
     columnHelper.accessor('quantity', {
-      header: '数量',
-      size: 60,
+      header: '数量', size: 60,
       cell: info => <span>×{info.getValue()}</span>,
     }),
-    // 价格
     columnHelper.accessor('price', {
-      header: '价格',
-      size: 80,
+      header: '价格', size: 80,
       cell: info => info.getValue() ? `¥${info.getValue()}` : '-',
     }),
-    // 品牌
     columnHelper.accessor('brand', {
-      header: '品牌',
-      size: 80,
+      header: '品牌', size: 80,
       cell: info => info.getValue() || '-',
     }),
-    // 申请人
     columnHelper.accessor('applicant_name', {
-      header: '申请人',
-      size: 80,
+      header: '申请人', size: 80,
       cell: info => info.getValue() || '-',
     }),
-    // 状态
     columnHelper.accessor('status', {
-      header: '状态',
-      size: 80,
-      cell: info => {
-        const status = info.getValue()
-        return (
-          <span className={cn(
-            'px-2.5 py-1 text-sm rounded-full font-medium whitespace-nowrap',
-            STATUS_STYLES[status] || 'bg-muted'
-          )}>
-            {STATUS_MAPPING[status] || status}
-          </span>
-        )
-      },
+      header: '状态', size: 80,
+      cell: info => <StatusBadge status={info.getValue()} />,
     }),
-    // 操作
     columnHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 160,
+      id: 'actions', header: '操作', size: 160,
       cell: info => {
         const order = info.row.original
         return (
           <div className="flex items-center gap-1 flex-wrap">
+            <Button
+              variant="morden"
+              size="sm"
+              className="h-7 w-8 p-0"
+              title="编辑"
+              onClick={(e) => { e.stopPropagation(); handleEditClick(order) }}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </Button>
             {isAdmin && order.status === 'pending' && (
               <>
-                <Button 
-                  size="sm" 
+                <Button
+                  size="sm"
                   variant="default"
                   className="h-7 text-sm px-2"
                   onClick={() => handleApprove(order.id)}
                 >
                   审批
                 </Button>
-                <Button 
-                  size="sm" 
+                <Button
+                  size="sm"
                   variant="destructive"
                   className="h-7 text-sm px-2"
                   onClick={() => handleReject(order.id)}
@@ -332,8 +368,8 @@ export function ConsumableOrdersPage() {
               </>
             )}
             {order.status === 'approved' && (
-              <Button 
-                size="sm" 
+              <Button
+                size="sm"
                 variant="secondary"
                 className="h-7 text-sm px-2"
                 onClick={() => handleComplete(order.id)}
@@ -345,44 +381,51 @@ export function ConsumableOrdersPage() {
         )
       },
     }),
-  ], [isAdmin])
+  ], [isAdmin, handleEditClick, handleApprove, handleReject, handleComplete])
 
   const table = useReactTable({
-    data: orders,
+    data,
     columns,
-    columnResizeMode: 'onChange',
+    getRowId: (row) => String(row.id),
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getRowCanExpand: () => true,
+    columnResizeMode: 'onChange',
+    enableColumnResizing: true,
+    onColumnSizingChange: setColumnSizing,
     onSortingChange: setSorting,
-    state: {
-      sorting,
-    },
+    state: { sorting, columnSizing, globalFilter },
+    meta: { onEdit: handleEditClick }
   })
 
+  useEffect(() => { tableRef.current = table }, [table])
+
+  // ============================================================================
+  // 渲染
+  // ============================================================================
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* 头部区域 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">耗材订购</h1>
-        <Button onClick={() => setShowCreateDialog(true)} size="lg">
-          <Plus className="w-4 h-4 mr-1.5" />
-          创建订单
+        <Button onClick={handleAddClick} size="lg">
+          <Plus className="w-4 h-4 mr-1.5" /> 创建订单
         </Button>
       </div>
 
-      {/* Search */}
+      {/* 搜索区域 */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <div className="relative flex-1 min-w-50">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="搜索耗材名称..."
-            value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            className="pl-9 pr-8 h-10 text-base w-full"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="pl-9 pr-8 text-base w-full inline-flex leading-none"
           />
-          {globalFilter && (
+          {searchInput && (
             <button
-              onClick={() => setGlobalFilter('')}
+              onClick={() => setSearchInput('')}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <X className="w-4 h-4" />
@@ -391,242 +434,76 @@ export function ConsumableOrdersPage() {
         </div>
       </div>
 
-      {/* Create Order Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={handleCloseDialog}>
+      {/* 创建/编辑对话框 */}
+      <Dialog
+        open={dialogState !== null}
+        onOpenChange={(open) => {
+          if (!open) { setDialogState(null); form.reset() }
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              创建耗材订单
-            </DialogTitle>
+            <DialogTitle>{dialogState === 'edit' ? '编辑订单' : '创建订单'}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleCreateOrder}>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* 中文名称 */}
-              <div className="col-span-1 sm:col-span-2">
-                <Label htmlFor="create_name" className={LABEL_STYLES.base}>
-                  中文名称 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_name"
-                  value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="如: 一次性手套"
-                  className={cn(INPUT_STYLES.lg, formErrors.name && 'border-destructive')}
-                />
-                {formErrors.name && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.name}</p>
-                )}
-              </div>
-
-              {/* 英文名称 */}
-              <div>
-                <Label htmlFor="create_english_name" className={LABEL_STYLES.base}>英文名称</Label>
-                <Input
-                  id="create_english_name"
-                  value={formData.english_name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, english_name: e.target.value }))}
-                  placeholder="如: Disposable Gloves"
-                  className={INPUT_STYLES.lg}
-                />
-              </div>
-
-              {/* 别名 */}
-              <div>
-                <Label htmlFor="create_alias" className={LABEL_STYLES.base}>别名</Label>
-                <Input
-                  id="create_alias"
-                  value={formData.alias}
-                  onChange={(e) => setFormData(prev => ({ ...prev, alias: e.target.value }))}
-                  placeholder="如: 手套"
-                  className={INPUT_STYLES.lg}
-                />
-              </div>
-
-              {/* 分类 */}
-              <div>
-                <Label htmlFor="create_category" className={LABEL_STYLES.base}>分类</Label>
-                <Input
-                  id="create_category"
-                  value={formData.category}
-                  onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-                  placeholder="如: 手套、试管"
-                  className={INPUT_STYLES.lg}
-                />
-              </div>
-
-              {/* 品牌 */}
-              <div>
-                <Label htmlFor="create_brand" className={LABEL_STYLES.base}>品牌</Label>
-                <Input
-                  id="create_brand"
-                  value={formData.brand}
-                  onChange={(e) => setFormData(prev => ({ ...prev, brand: e.target.value }))}
-                  placeholder="如: 3M、Corning"
-                  className={INPUT_STYLES.lg}
-                />
-              </div>
-
-              {/* 规格 */}
-              <div>
-                <Label htmlFor="create_specification" className={LABEL_STYLES.base}>
-                  规格 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_specification"
-                  value={formData.specification}
-                  onChange={(e) => setFormData(prev => ({ ...prev, specification: e.target.value }))}
-                  placeholder="如: 100只/盒"
-                  className={cn(INPUT_STYLES.lg, formErrors.specification && 'border-destructive')}
-                />
-                {formErrors.specification && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.specification}</p>
-                )}
-              </div>
-
-              {/* 数量 */}
-              <div>
-                <Label htmlFor="create_quantity" className={LABEL_STYLES.base}>
-                  数量 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_quantity"
-                  value={formData.quantity}
-                  onChange={(e) => setFormData(prev => ({ ...prev, quantity: e.target.value }))}
-                  className={cn(INPUT_STYLES.lg, formErrors.quantity && 'border-destructive')}
-                />
-                {formErrors.quantity && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.quantity}</p>
-                )}
-              </div>
-
-              {/* 价格 */}
-              <div>
-                <Label htmlFor="create_price" className={LABEL_STYLES.base}>
-                  价格 (元) <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_price"
-                  value={formData.price}
-                  onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
-                  placeholder="如: 25.00"
-                  className={cn(INPUT_STYLES.lg, formErrors.price && 'border-destructive')}
-                />
-                {formErrors.price && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.price}</p>
-                )}
-              </div>
-
-              {/* 备注 */}
-              <div className="col-span-1 sm:col-span-3">
-                <Label htmlFor="create_notes" className={LABEL_STYLES.base}>备注</Label>
-                <Input
-                  id="create_notes"
-                  value={formData.notes}
-                  onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                  className={cn("w-full", INPUT_STYLES.lg)}
-                  placeholder="其他说明..."
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-2 mt-10">
-              <div className="ml-auto flex gap-2">
-                <Button
-                  type="button"
-                  variant="morden"
-                  size="lg"
-                  className="text-base"
-                  onClick={() => handleCloseDialog(false)}
-                >
-                  取消
-                </Button>
-                <Button type="submit" disabled={submitting} size="lg">
-                  {submitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-                      提交中...
-                    </>
-                  ) : (
-                    '提交订单'
-                  )}
-                </Button>
-              </div>
+          <form onSubmit={handleFormSubmit}>
+            <BaseForm
+              form={form}
+              fields={getConsumableOrderFormFields(dialogState === 'edit')}
+            />
+            <div className="flex justify-end gap-2 mt-8">
+              <Button variant="morden" size="lg" type="button" onClick={() => setDialogState(null)}>
+                取消
+              </Button>
+              <LoadingButton type="submit" size="lg" isLoading={isSubmitting}>
+                {dialogState === 'edit' ? '保存' : '提交订单'}
+              </LoadingButton>
             </div>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Table */}
-      <Card>
-        <CardHeader className="pb-4">
+      {/* 数据表格区域 */}
+      <Card className="overflow-hidden">
+        <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <ShoppingCart className="w-5 h-5" />
             耗材订单列表 <span className="text-muted-foreground font-normal">(&thinsp;{total}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {loading && orders.length === 0 ? (
+          {isLoading && data.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
-          ) : orders.length === 0 ? (
+          ) : data.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              暂无订单
+              {globalFilter ? `未找到匹配"${globalFilter}"的记录` : '暂无订单'}
             </div>
           ) : (
-            <>
-              <div className="px-6 rounded-md overflow-auto">
-                <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                  <thead>
-                    {table.getHeaderGroups().map(headerGroup => (
-                      <tr key={headerGroup.id} className="border-b-2 border-border">
-                        {headerGroup.headers.map(header => (
-                          <th 
-                            key={header.id} 
-                            className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm"
-                            style={{ width: header.getSize() }}
-                          >
-                            {header.isPlaceholder
-                              ? null
-                              : flexRender(header.column.columnDef.header, header.getContext())}
-                          </th>
-                        ))}
-                      </tr>
-                    ))}
-                  </thead>
-                  <tbody>
-                    {table.getRowModel().rows.map(row => (
-                      <tr 
-                        key={row.id} 
-                        className="border-b border-border hover:bg-muted/30 cursor-pointer transition-none"
-                      >
-                        {row.getVisibleCells().map(cell => (
-                          <td 
-                            key={cell.id} 
-                            className="p-3 align-middle text-sm"
-                            style={{ width: cell.column.getSize() }}
-                          >
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {totalPages > 1 && (
-                <div className="px-6 flex items-center justify-between pt-4">
-                  <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
-                  <Pagination
-                    currentPage={page}
-                    totalPages={totalPages}
-                    pageSize={pageSize}
-                    onPageChange={setPage}
-                    onPageSizeChange={handlePageSizeChange}
-                  />
-                </div>
-              )}
-            </>
+            <div className="px-6">
+              <DataTable
+                table={table}
+                renderExpandedRow={(item) => (
+                  <div className="p-3 flex flex-col md:flex-row gap-4 border-b-1 border-border">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
+                      <div><span className="font-medium">英文名称：</span>{item.english_name || '-'}</div>
+                      <div><span className="font-medium">别名：</span>{item.alias || '-'}</div>
+                      <div><span className="font-medium">品牌：</span>{item.brand || '-'}</div>
+                      <div><span className="font-medium">申购原因：</span>{item.order_reason || '-'}</div>
+                      <div><span className="font-medium">申购时间：</span>{formatDate(item.created_at)}</div>
+                      <div><span className="font-medium">申请人：</span>{item.applicant_name || '-'}</div>
+                      <div className="col-span-2"><span className="font-medium">备注：</span>{item.notes || '-'}</div>
+                    </div>
+                  </div>
+                )}
+                scrollHeight="calc(100vh - 112px - 16px)"
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
+                fetchNextPage={fetchNextPage}
+                total={total}
+                searchKeyword={globalFilter}
+              />
+            </div>
           )}
         </CardContent>
       </Card>

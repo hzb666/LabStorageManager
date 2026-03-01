@@ -7,6 +7,8 @@ interface QuantityIndicatorProps {
   initial: number
   /** 单位 */
   unit?: string
+  /** 规格（已格式化字符串，如 "500 mL"），优先级高于 unit */
+  specification?: string
   /** 自定义类名 */
   className?: string
   /** 是否显示进度条 */
@@ -26,11 +28,18 @@ export function QuantityIndicator({
   remaining,
   initial,
   unit = '',
+  specification,
   className,
   showBar = true,
   barWidth = 'w-16'
 }: QuantityIndicatorProps) {
   const percentage = initial > 0 ? (remaining / initial) * 100 : 0
+  // 优先使用后端已格式化的 specification，否则使用 unit
+  // 使用极窄空格 \u200A (Hair Space)
+  const narrowSpace = '\u200A'
+  const displayText = specification 
+    ? `${remaining}${narrowSpace}/${narrowSpace}${specification}` 
+    : (unit ? `${remaining}${narrowSpace}/${narrowSpace}${initial} ${unit}` : `${remaining}${narrowSpace}/${narrowSpace}${initial}`)
 
   return (
     <div className={cn('break-all', className)}>
@@ -42,7 +51,7 @@ export function QuantityIndicator({
           percentage === 0 && 'text-destructive font-medium'
         )}
       >
-        {remaining}/{initial} {unit}
+        {displayText}
       </span>
       {showBar && percentage < 20 && (
         <div className={cn(barWidth, 'h-1.5 rounded mt-1', 

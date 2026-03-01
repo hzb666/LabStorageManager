@@ -23,11 +23,13 @@ class ReagentOrderStatus(str, Enum):
 class ReagentOrderReason(str, Enum):
     """Order reason enumeration"""
     NONE = "none"
-    RUNNING_OUT = "running_out"
-    EMPTY = "empty"
-    COMMON_PUBLIC = "common_public"
-    NOT_FOUND = "not_found"
-    REORDER = "reorder"
+    RUNNING_OUT = "running_out"      # 库存用完
+    NOT_STOCKED = "not_stocked"    # 库里没有
+    COMMON_PUBLIC = "common_public"  # 公用常用
+    NOT_FOUND = "not_found"          # 没找到
+    REORDER = "reorder"              # 追加订购
+    HIGH_USAGE = "high_usage"        # 大量使用
+    DEGRADED = "degraded"            # 变质
 
 
 class ReagentOrderBase(SQLModel):
@@ -44,9 +46,11 @@ class ReagentOrderBase(SQLModel):
     category: Optional[str] = Field(None, max_length=100)
     # Brand (e.g., "Sigma", "国药")
     brand: Optional[str] = Field(None, max_length=100)
-    # Specification (e.g., "500ml")
-    specification: str = Field(max_length=100)
-    # Quantity ordered
+    # Initial quantity value (e.g., 500)
+    initial_quantity: Optional[float] = Field(None, ge=0)
+    # Unit (e.g., "ml", "g", "L")
+    unit: Optional[str] = Field(None, max_length=20)
+    # Quantity ordered (number of bottles)
     quantity: int = Field(gt=0)
     # Price
     price: Optional[float] = Field(None, ge=0)
@@ -77,16 +81,19 @@ class ReagentOrder(ReagentOrderBase, table=True):
 
 
 class ReagentOrderCreate(SQLModel):
-    """DTO for creating a new reagent order"""
+    """DTO for creating a new reagent order
+    
+    前端传入 specification (规格字符串)，后端解析为 initial_quantity + unit
+    """
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
     english_name: Optional[str] = None
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
-    specification: str = Field(max_length=100)
+    specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500ml"
     quantity: int = Field(gt=0)
-    price: Optional[float] = None
+    price: float = Field(gt=0)  # 价格必填，必须大于0
     order_reason: ReagentOrderReason = ReagentOrderReason.NONE
     is_hazardous: bool = False
     notes: Optional[str] = None
@@ -100,7 +107,8 @@ class ReagentOrderUpdate(SQLModel):
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
-    specification: Optional[str] = None
+    initial_quantity: Optional[float] = None
+    unit: Optional[str] = None
     quantity: Optional[int] = None
     price: Optional[float] = None
     order_reason: Optional[ReagentOrderReason] = None
@@ -118,7 +126,8 @@ class ReagentOrderResponse(SQLModel):
     alias: Optional[str]
     category: Optional[str]
     brand: Optional[str]
-    specification: str
+    initial_quantity: Optional[float]
+    unit: Optional[str]
     quantity: int
     price: Optional[float]
     order_reason: ReagentOrderReason

@@ -1,53 +1,96 @@
-﻿import { useState, useEffect, useMemo, useCallback } from 'react'
+﻿/**
+ * 试剂订单页面
+ * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、入库
+ * 参考 Inventory 页面实现，使用 DataTable + BaseForm + Valibot
+ */
+import React, { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
 import {
   createColumnHelper,
-  flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   useReactTable,
-  getSortedRowModel,
 } from '@tanstack/react-table'
-import type { SortingState } from '@tanstack/react-table'
+import type { SortingState, ColumnSizingState, RowData, Table } from '@tanstack/react-table'
+import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
+import { useForm } from 'react-hook-form'
+import { valibotResolver } from '@hookform/resolvers/valibot'
+
+// UI 组件
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Checkbox } from '@/components/ui/Checkbox'
-import { Label } from '@/components/ui/Label'
-import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { reagentOrderAPI } from '@/api/client'
+import { StatusBadge, ORDER_REASON_LABELS } from '@/components/ui/StatusBadge'
+import { HazardousIcon } from '@/components/ui/HazardousIcon'
+import { LoadingButton } from '@/components/ui/LoadingButton'
+import { DataTable } from '@/components/ui/DataTable'
+import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/components/ui/Toast'
-import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
+
+// 业务组件
+import { BaseForm } from '@/components/BaseForm'
+import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
-import { cn } from '@/lib/utils'
-import { validateCASNumber, validateRequired, validateSpecification, validatePositiveNumber, validateNonNegativeNumber } from '@/lib/inputValidation'
-import { AxiosError } from 'axios'
+
+// 工具与API
+import { reagentOrderAPI } from '@/api/client'
+import { formatDate } from '@/lib/utils'
+import { ReagentOrderSchema } from '@/lib/validationSchemas'
+import type { ReagentOrderFormData } from '@/lib/validationSchemas'
+import { 
+  getReagentOrderFormFields, 
+  defaultReagentOrderValues 
+} from '@/lib/formConfigs'
+
+// 图标
 import {
-  Plus,
+  Search,
   Loader2,
   X,
+  Plus,
+  Pencil,
+  FlaskConical,
   AlertTriangle,
-  Search,
-  FlaskConical
+  ChevronsDownUp,
+  ChevronsUpDown,
+  ArrowUpFromLine,
 } from 'lucide-react'
+
+// 类型扩展
+declare module '@tanstack/react-table' {
+  interface TableMeta<TData extends RowData> {
+    fuzzySearch: boolean
+    onEdit: (item: TData) => void
+  }
+}
+
+interface ValidationError {
+  loc?: (string | number)[]
+  msg?: string
+  type?: string
+}
 
 interface ReagentOrder {
   id: number
   cas_number: string
   name: string
-  english_name?: string
-  alias?: string
-  category?: string
-  brand?: string
+  english_name: string | null
+  alias: string | null
+  category: string | null
+  brand: string | null
   specification: string
+  initial_quantity: number | null
+  unit: string | null
   quantity: number
-  price?: number
+  price: number | null
   order_reason: string
   is_hazardous: boolean
-  image_path?: string
-  notes?: string
-  applicant_id: number
-  applicant_name?: string
+  image_path: string | null
+  notes: string | null
+  applicant_id: number | null
+  applicant_name: string | null
   status: string
   created_at: string
   updated_at: string
@@ -66,88 +109,125 @@ interface CASWarningInfo {
   }
 }
 
-// 订单状态映射 - 按任务要求
-const STATUS_MAPPING: Record<string, string> = {
-  pending: '待审批',
-  approved: '已审批',
-  arrived: '已到货',
-  stocked: '已入库',
-  rejected: '已驳回'
-}
+// 搜索高亮组件
+const HighlightText = React.memo(function HighlightText({
+  text, highlight, fuzzy
+}: { text: string; highlight?: string; fuzzy?: boolean }) {
+  const regex = React.useMemo(() => new RegExp(`(${highlight})`, 'gi'), [highlight])
+  if (!highlight || !text) return <>{text}</>
 
-// 状态样式 - 使用语义化颜色，支持暗黑模式
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-  approved: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-  arrived: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-  stocked: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200',
-  rejected: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-}
+  if (fuzzy) {
+    const normalizedHighlight = highlight.replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D_.-]+/g, '')
+    const normalizedText = text.replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D_.-]+/g, '')
+    if (normalizedText.toLowerCase().includes(normalizedHighlight.toLowerCase())) {
+      return <span className="bg-amber-200 dark:bg-amber-800/50">{text}</span>
+    }
+    return <>{text}</>
+  }
+
+  const parts = text.split(regex)
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === highlight.toLowerCase() ? (
+          <span key={i} className="bg-amber-200 dark:bg-amber-800/50">{part}</span>
+        ) : part
+      )}
+    </>
+  )
+})
 
 const columnHelper = createColumnHelper<ReagentOrder>()
 
+// ============================================================================
+// 主组件
+// ============================================================================
+
 export function ReagentOrdersPage() {
-  const [orders, setOrders] = useState<ReagentOrder[]>([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
-  const [loading, setLoading] = useState(true)
-  const [sorting, setSorting] = useState<SortingState>([])
-  const [globalFilter, setGlobalFilter] = useState('')
-  
-  // Dialog state
-  const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [casWarning, setCasWarning] = useState<CASWarningInfo | null>(null)
-  const [casLoading, setCasLoading] = useState(false)
-  
+  const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === 'admin'
 
-  const [formData, setFormData] = useState({
-    cas_number: '',
-    name: '',
-    english_name: '',
-    alias: '',
-    category: '',
-    brand: '',
-    specification: '',
-    quantity: 1,
-    price: '',
-    order_reason: 'none',
-    is_hazardous: false,
-    notes: '',
+  // 表格状态
+  const [sorting, setSorting] = useState<SortingState>([])
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('reagent-orders-table-col-sizes') || '{}')
+      // 过滤掉宽度为0的列（防止旧数据导致列消失）
+      const filtered: ColumnSizingState = {}
+      for (const [key, size] of Object.entries(saved)) {
+        if (typeof size === 'number' && size > 0) {
+          filtered[key] = size
+        }
+      }
+      return Object.keys(filtered).length > 0 ? filtered : {}
+    } catch { return {} }
   })
+  const [isAllExpanded, setIsAllExpanded] = useState<boolean>(false)
+  const [globalFilter, setGlobalFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
 
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  // 搜索过滤状态
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [searchField, setSearchField] = useState('all')
+  const [fuzzySearch, setFuzzySearch] = useState(false)
+  const sortingRef = useRef<SortingState>([])
 
-  // CAS check with warning - debounced
+  // 总数统计
+  const [grandTotal, setGrandTotal] = useState(0)
+  const grandTotalRef = useRef(0)
+
+  // Dialog 状态
+  const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
+  const [editingItem, setEditingItem] = useState<ReagentOrder | null>(null)
+  const [casWarning, setCasWarning] = useState<CASWarningInfo | null>(null)
+  const [casLoading, setCasLoading] = useState(false)
+
+  const tableRef = useRef<Table<ReagentOrder> | null>(null)
+
+  // 防抖搜索
   useEffect(() => {
-    if (formData.cas_number.length >= 5) {
-      const timer = setTimeout(() => checkCASWarning(formData.cas_number), 500)
-      return () => clearTimeout(timer)
-    } else {
-      setCasWarning(null)
-    }
-  }, [formData.cas_number])
+    const timer = setTimeout(() => {
+      if (globalFilter !== searchInput) {
+        if (tableRef.current) tableRef.current.resetExpanded()
+        setGlobalFilter(searchInput)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput, globalFilter])
 
-  const checkCASWarning = async (cas: string) => {
+  // 保存列宽
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      localStorage.setItem('reagent-orders-table-col-sizes', JSON.stringify(columnSizing))
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [columnSizing])
+
+  const toggleExpandAll = useCallback(() => setIsAllExpanded(prev => !prev), [])
+
+  // CAS 检查（防抖）
+  const checkCASWarning = useCallback(async (cas: string) => {
+    if (cas.length < 5) {
+      setCasWarning(null)
+      return
+    }
     setCasLoading(true)
     try {
-      // Check existing orders
       const response = await reagentOrderAPI.list()
       const allOrders: ReagentOrder[] = response.data.data || []
-      const existingOrders = allOrders.filter((o: ReagentOrder) => o.cas_number.replace(/-/g, '') === cas.replace(/-/g, ''))
-      
-      // Check inventory (no direct API available)
-      const inventoryInfo = { total_remaining: 0, items_count: 0 }
-      
+      const existingOrders = allOrders.filter(
+        (o: ReagentOrder) => o.cas_number.replace(/-/g, '') === cas.replace(/-/g, '')
+      )
       if (existingOrders.length > 0) {
         setCasWarning({
           cas_number: cas,
           has_warning: true,
-          inventory: inventoryInfo,
-          pending_orders: { total_quantity: existingOrders.reduce((sum: number, o: ReagentOrder) => sum + o.quantity, 0), orders_count: existingOrders.length }
+          inventory: { total_remaining: 0, items_count: 0 },
+          pending_orders: {
+            total_quantity: existingOrders.reduce((sum: number, o: ReagentOrder) => sum + o.quantity, 0),
+            orders_count: existingOrders.length
+          }
         })
       } else {
         setCasWarning(null)
@@ -157,286 +237,326 @@ export function ReagentOrdersPage() {
     } finally {
       setCasLoading(false)
     }
-  }
+  }, [])
 
-  // Load orders
-  const loadOrders = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = {
-        skip: (page - 1) * pageSize,
-        limit: pageSize,
-      }
-      const response = await reagentOrderAPI.list(params)
-      const result = response.data
-      setOrders(result.data || [])
-      setTotal(result.total || 0)
-    } catch (error) {
-      console.error('Failed to load orders:', error)
-    } finally {
-      setLoading(false)
+  // 数据查询
+  const queryFn = useCallback(async ({ pageParam = 0 }: { pageParam: number }) => {
+    const currentSorting = sorting.length > 0 ? sorting : sortingRef.current
+    const sort = currentSorting[0]
+
+    const params: Record<string, unknown> = { skip: pageParam, limit: 50 }
+
+    if (statusFilter !== 'all') params.status_filter = statusFilter
+    if (globalFilter) {
+      params.search = globalFilter
+      if (searchField !== 'all') params.search_field = searchField
+      if (fuzzySearch) params.fuzzy = true
     }
-  }, [page, pageSize])
+    if (sort) {
+      params.sort_by = sort.id
+      params.sort_order = sort.desc ? 'desc' : 'asc'
+    }
 
+    const response = await reagentOrderAPI.list(params as any)
+    return response.data
+  }, [statusFilter, globalFilter, searchField, fuzzySearch, sorting])
+
+  const {
+    data: allData,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['reagent-orders', statusFilter, globalFilter, searchField, fuzzySearch, sorting],
+    queryFn,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentLoadedCount = allPages.reduce((acc, page) => acc + page.data.length, 0)
+      if (currentLoadedCount < (lastPage.total || 0)) return currentLoadedCount
+      return null
+    },
+    placeholderData: keepPreviousData,
+    refetchInterval: 10000,  // 10秒自动刷新，与库存页面保持一致
+  })
+
+  const data = useMemo(() => allData?.pages.flatMap(page => page.data) ?? [], [allData])
+  const total = allData?.pages[0]?.total ?? 0
+
+  // 总数统计
   useEffect(() => {
-    loadOrders()
-  }, [loadOrders])
+    if (!globalFilter && total > 0) {
+      grandTotalRef.current = total
+      setGrandTotal(total)
+    }
+  }, [total, globalFilter])
 
-  const totalPages = Math.ceil(total / pageSize)
+  const displayCount = globalFilter ? `${total}/${grandTotalRef.current}` : `${grandTotal}`
 
-  const handlePageSizeChange = (newSize: number) => {
-    setPageSize(newSize)
-    setPage(1)
-  }
+  // 表单实例
+  const form = useForm<ReagentOrderFormData>({
+    resolver: valibotResolver(ReagentOrderSchema),
+    defaultValues: defaultReagentOrderValues,
+    shouldFocusError: false,
+  })
 
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {}
-    
-    // CAS号验证：必填 + 格式 + 校验码
-    const casValidation = validateCASNumber(formData.cas_number)
-    if (!casValidation.isValid) {
-      newErrors.cas_number = casValidation.error || 'CAS号格式无效'
-    }
-    
-    // 名称验证：必填
-    const nameValidation = validateRequired(formData.name, '名称')
-    if (!nameValidation.isValid) {
-      newErrors.name = nameValidation.error || '名称不能为空'
-    }
-    
-    // 英文名称验证：必填
-    const englishNameValidation = validateRequired(formData.english_name, '英文名称')
-    if (!englishNameValidation.isValid) {
-      newErrors.english_name = englishNameValidation.error || '英文名称不能为空'
-    }
-    
-    // 级别/规格验证：必填
-    const categoryValidation = validateRequired(formData.category, '级别/规格')
-    if (!categoryValidation.isValid) {
-      newErrors.category = categoryValidation.error || '级别/规格不能为空'
-    }
-    
-    // 品牌验证：必填
-    const brandValidation = validateRequired(formData.brand, '品牌')
-    if (!brandValidation.isValid) {
-      newErrors.brand = brandValidation.error || '品牌不能为空'
-    }
-    
-    // 规格验证：必填 + 格式
-    const specValidation = validateRequired(formData.specification, '规格')
-    if (!specValidation.isValid) {
-      newErrors.specification = specValidation.error || '规格不能为空'
-    } else {
-      const specFormatValidation = validateSpecification(formData.specification)
-      if (!specFormatValidation.isValid) {
-        newErrors.specification = specFormatValidation.error || '规格格式无效'
+  // CAS 号变化时检查警告
+  useEffect(() => {
+    const subscription = form.watch((value, field) => {
+      if (field.name === 'cas_number' && value.cas_number) {
+        const timer = setTimeout(() => checkCASWarning(value.cas_number as string), 500)
+        return () => clearTimeout(timer)
       }
-    }
-    
-    // 数量验证：正数
-    const quantityValidation = validatePositiveNumber(formData.quantity, '数量')
-    if (!quantityValidation.isValid) {
-      newErrors.quantity = quantityValidation.error || '数量必须大于0'
-    }
-    
-    // 价格验证：必填 + 非负数
-    const priceValue = formData.price ? parseFloat(formData.price) : NaN
-    if (!formData.price || isNaN(priceValue)) {
-      newErrors.price = '价格不能为空'
-    } else {
-      const priceValidation = validateNonNegativeNumber(priceValue, '价格')
-      if (!priceValidation.isValid) {
-        newErrors.price = priceValidation.error || '价格不能为负数'
-      }
-    }
-    
-    // 订购原因验证：必填
-    if (!formData.order_reason || formData.order_reason === 'none') {
-      newErrors.order_reason = '请选择订购原因'
-    }
-    
-    setFormErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
-
-  const handleCreateOrder = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!validateForm()) return
-
-    setSubmitting(true)
-    try {
-      await reagentOrderAPI.create({
-        ...formData,
-        category: formData.category || undefined,
-        brand: formData.brand || undefined,
-        price: formData.price ? parseFloat(formData.price) : undefined,
-      })
-      toast.success('试剂订单创建成功')
-      setShowCreateDialog(false)
-      resetForm()
-      loadOrders()
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '创建失败')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const resetForm = () => {
-    setFormData({
-      cas_number: '',
-      name: '',
-      english_name: '',
-      alias: '',
-      category: '',
-      brand: '',
-      specification: '',
-      quantity: 1,
-      price: '',
-      order_reason: 'none',
-      is_hazardous: false,
-      notes: '',
     })
-    setFormErrors({})
+    return () => subscription.unsubscribe()
+  }, [form, checkCASWarning])
+
+  // 加载数据
+  const loadOrders = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['reagent-orders'] })
+  }, [queryClient])
+
+  // 点击添加按钮
+  const handleAddClick = useCallback(() => {
+    setEditingItem(null)
+    form.reset(defaultReagentOrderValues)
     setCasWarning(null)
-  }
+    setDialogState('add')
+  }, [form, setDialogState])
 
-  const handleCloseDialog = (open: boolean) => {
-    setShowCreateDialog(open)
-    if (!open) {
-      resetForm()
+  // 点击编辑按钮
+  const handleEditClick = useCallback((item: ReagentOrder) => {
+    setEditingItem(item)
+    form.reset({
+      name: item.name || '',
+      cas_number: item.cas_number || '',
+      english_name: item.english_name || '',
+      alias: item.alias || '',
+      category: item.category || '',
+      brand: item.brand || '',
+      specification: item.specification || '',
+      quantity: item.quantity || 1,
+      price: item.price || undefined,
+      order_reason: item.order_reason || 'none',
+      is_hazardous: item.is_hazardous || false,
+      supplier: '',
+      notes: item.notes || ''
+    })
+    setDialogState('edit')
+  }, [form, setDialogState])
+
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // 表单提交
+  const handleFormSubmit = form.handleSubmit(
+    async (formData) => {
+      console.log('✅ 订单表单验证通过:', formData)
+
+      setIsSubmitting(true)
+      try {
+        if (dialogState === 'edit' && editingItem) {
+          await reagentOrderAPI.update(editingItem.id, {
+            name: formData.name,
+            english_name: formData.english_name || undefined,
+            alias: formData.alias || undefined,
+            category: formData.category || undefined,
+            brand: formData.brand || undefined,
+            specification: formData.specification || undefined,
+            quantity: formData.quantity,
+            price: formData.price,
+            order_reason: formData.order_reason,
+            is_hazardous: formData.is_hazardous,
+            notes: formData.notes || undefined
+          })
+        } else if (dialogState === 'add') {
+          await reagentOrderAPI.create({
+            ...formData,
+            category: formData.category || undefined,
+            brand: formData.brand || undefined,
+            price: formData.price ? parseFloat(String(formData.price)) : undefined,
+          })
+        }
+        // 先刷新数据，再弹出 toast，确保数据已加载完成
+        await loadOrders()
+        if (dialogState === 'edit') {
+          toast.success('订单信息已更新')
+        } else if (dialogState === 'add') {
+          toast.success('试剂订单创建成功')
+        }
+        setDialogState(null)
+      } catch (err) {
+        const error = err as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
+        const errorDetail = error.response?.data?.detail
+        if (dialogState === 'add' && Array.isArray(errorDetail)) {
+          errorDetail.forEach((e: ValidationError) => {
+            if (e.loc && e.loc[1]) form.setError(e.loc[1] as keyof ReagentOrderFormData, { message: e.msg || '验证错误' })
+          })
+        } else {
+          toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
+        }
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    (errors) => {
+      console.log('❌ 表单验证失败:', errors)
     }
-  }
+  )
 
-  const handleApprove = async (id: number) => {
+  // 审批操作
+  const handleApprove = useCallback(async (id: number) => {
     try {
       await reagentOrderAPI.approve(id)
+      // 先刷新数据，再弹出 toast
+      await loadOrders()
       toast.success('审批通过')
-      loadOrders()
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || '操作失败')
     }
-  }
+  }, [loadOrders])
 
-  const handleReject = async (id: number) => {
+  // 驳回操作
+  const handleReject = useCallback(async (id: number) => {
     try {
       await reagentOrderAPI.reject(id, '管理员驳回')
+      // 先刷新数据，再弹出 toast
+      await loadOrders()
       toast.success('已驳回')
-      loadOrders()
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || '操作失败')
     }
-  }
+  }, [loadOrders])
 
-  const handleConfirmArrival = async (id: number) => {
+  // 确认到货
+  const handleConfirmArrival = useCallback(async (id: number) => {
     try {
       const result = await reagentOrderAPI.confirmArrival(id)
+      // 先刷新数据，再弹出 toast
+      await loadOrders()
       toast.success(result.data.message || '确认成功')
-      loadOrders()
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || '操作失败')
     }
-  }
+  }, [loadOrders])
 
-  const handleStockIn = async (id: number) => {
+  // 导出订单
+  const handleExport = useCallback(async () => {
     try {
-      const result = await reagentOrderAPI.stockIn(id)
-      toast.success(`入库成功！创建了 ${result.data.items_created} 个库存条目`)
-      loadOrders()
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '入库失败')
+      const response = await reagentOrderAPI.exportOrders()
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `reagent_orders_${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('导出失败')
     }
-  }
+  }, [])
 
-  // Table columns
+  // 表格列配置
   const columns = useMemo(() => [
-    // CAS号
     columnHelper.accessor('cas_number', {
-      header: 'CAS号',
-      size: 100,
+      header: 'CAS号', size: 110, minSize: 90, maxSize: 180,
       cell: info => (
-        <span className="break-all font-mono text-sm">{info.getValue()}</span>
+        <span className="break-all text-base">
+          <HighlightText
+            text={info.getValue() || ''}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
       ),
     }),
-    // 名称
     columnHelper.accessor('name', {
-      header: '名称',
-      size: 140,
+      header: '名称', size: 180, minSize: 150, maxSize: 300,
       cell: info => (
         <div className="flex items-center gap-1.5">
-          {info.row.original.is_hazardous && (
-            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 shrink-0" />
-          )}
-          <span className="font-medium">{info.getValue()}</span>
+          <HazardousIcon isHazardous={info.row.original.is_hazardous} />
+          <span className="font-medium">
+            <HighlightText
+              text={info.getValue() || ''}
+              highlight={info.table.getState().globalFilter}
+              fuzzy={info.table.options.meta?.fuzzySearch}
+            />
+          </span>
         </div>
       ),
     }),
-    // 规格
+    columnHelper.accessor('brand', {
+      header: '品牌', size: 90, minSize: 70, maxSize: 150,
+      cell: info => <span>{info.getValue() || '-'}</span>,
+    }),
     columnHelper.accessor('specification', {
-      header: '规格',
-      size: 80,
-      cell: info => <span className="break-all">{info.getValue()}</span>,
-    }),
-    // 数量
-    columnHelper.accessor('quantity', {
-      header: '数量',
-      size: 60,
-      cell: info => <span>×{info.getValue()}</span>,
-    }),
-    // 价格
-    columnHelper.accessor('price', {
-      header: '价格',
-      size: 80,
-      cell: info => info.getValue() ? `¥${info.getValue()}` : '-',
-    }),
-    // 申请人
-    columnHelper.accessor('applicant_name', {
-      header: '申请人',
-      size: 80,
-      cell: info => info.getValue() || '-',
-    }),
-    // 状态
-    columnHelper.accessor('status', {
-      header: '状态',
-      size: 80,
+      header: '规格', size: 120, minSize: 80, maxSize: 200,
       cell: info => {
-        const status = info.getValue()
-        return (
-          <span className={cn(
-            'px-2.5 py-1 text-sm rounded-full font-medium whitespace-nowrap',
-            STATUS_STYLES[status] || 'bg-muted'
-          )}>
-            {STATUS_MAPPING[status] || status}
-          </span>
-        )
+        const order = info.row.original
+        const specification = info.getValue()
+        const displayText = specification
+          ? specification
+          : (order.unit ? `${order.initial_quantity} ${order.unit}` : `${order.initial_quantity}`)
+        const qty = order.quantity
+        if (qty > 1) {
+          return <span className="break-all">{qty} × {displayText}</span>
+        }
+        return <span className="break-all">{displayText || '-'}</span>
       },
     }),
-    // 操作
+    columnHelper.accessor('price', {
+      header: '价格', size: 70, minSize: 60, maxSize: 100,
+      cell: info => info.getValue() ? `¥${info.getValue()}` : '-',
+    }),
+    columnHelper.accessor('order_reason', {
+      header: '原因', size: 60, minSize: 50, maxSize: 80,
+      cell: info => {
+        const reason = info.getValue()
+        return <span>{ORDER_REASON_LABELS[reason] || reason}</span>
+      },
+    }),
+    columnHelper.accessor('applicant_name', {
+      header: '订购人', size: 70, minSize: 60, maxSize: 100,
+      cell: info => <span>{info.getValue() || '-'}</span>,
+    }),
+    columnHelper.accessor('created_at', {
+      header: '时间', size: 80, minSize: 70, maxSize: 120,
+      cell: info => <span>{formatDate(info.getValue()).split(' ')[0]}</span>,
+    }),
+    columnHelper.accessor('status', {
+      header: '状态', size: 60, minSize: 50, maxSize: 80,
+      cell: info => <StatusBadge status={info.getValue()} />,
+    }),
     columnHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 180,
+      id: 'actions', header: '操作', size: 140, minSize: 120, maxSize: 200,
       cell: info => {
         const order = info.row.original
         return (
           <div className="flex items-center gap-1 flex-wrap">
+            <Button
+              variant="morden"
+              className="h-8 w-8 p-0"
+              title="编辑"
+              onClick={(e) => { e.stopPropagation(); handleEditClick(order) }}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </Button>
             {isAdmin && order.status === 'pending' && (
               <>
-                <Button 
-                  size="sm" 
+                <Button
+                  size="sm"
                   variant="default"
                   className="h-7 text-sm px-2"
                   onClick={() => handleApprove(order.id)}
                 >
                   审批
                 </Button>
-                <Button 
-                  size="sm" 
+                <Button
+                  size="sm"
                   variant="destructive"
                   className="h-7 text-sm px-2"
                   onClick={() => handleReject(order.id)}
@@ -446,8 +566,8 @@ export function ReagentOrdersPage() {
               </>
             )}
             {order.status === 'approved' && (
-              <Button 
-                size="sm" 
+              <Button
+                size="sm"
                 variant="secondary"
                 className="h-7 text-sm px-2"
                 onClick={() => handleConfirmArrival(order.id)}
@@ -455,391 +575,215 @@ export function ReagentOrdersPage() {
                 确认到货
               </Button>
             )}
-            {order.status === 'arrived' && (
-              <Button 
-                size="sm" 
-                variant="outline"
-                className="h-7 text-sm px-2"
-                disabled={order.order_reason === 'common_public'}
-                title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库' : undefined}
-                onClick={() => handleStockIn(order.id)}
-              >
-                一键入库
-              </Button>
-            )}
           </div>
         )
       },
     }),
-  ], [isAdmin])
+  ], [isAdmin, handleEditClick, handleApprove, handleReject, handleConfirmArrival])
 
   const table = useReactTable({
-    data: orders,
+    data,
     columns,
-    columnResizeMode: 'onChange',
+    getRowId: (row) => String(row.id),
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    onSortingChange: setSorting,
+    getExpandedRowModel: getExpandedRowModel(),
+    getRowCanExpand: () => true,
+    columnResizeMode: 'onChange',
+    enableColumnResizing: true,
+    onColumnSizingChange: setColumnSizing,
+    manualSorting: true,
+    onSortingChange: (updater) => {
+      table.resetExpanded()
+      setSorting(prev => {
+        const newSorting = typeof updater === 'function' ? updater(prev) : updater
+        sortingRef.current = newSorting
+        return newSorting
+      })
+    },
     state: {
       sorting,
+      columnSizing,
+      globalFilter,
     },
+    meta: {
+      fuzzySearch,
+      onEdit: handleEditClick,
+    }
   })
 
+  useEffect(() => { tableRef.current = table }, [table])
+
+  // ============================================================================
+  // 渲染
+  // ============================================================================
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* 头部区域 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">试剂订购</h1>
-        <Button onClick={() => setShowCreateDialog(true)} size="lg">
-          <Plus className="w-4 h-4 mr-1.5" />
-          创建订单
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={handleAddClick} size="lg">
+            <Plus className="w-4 h-4 mr-1.5" /> 创建订单
+          </Button>
+          {isAdmin && (
+            <Button variant="morden" size="lg" onClick={handleExport}>
+              <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Search */}
+      {/* 搜索区域 */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <div className="relative flex-1 min-w-50">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="搜索试剂名称、CAS号..."
-            value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            className="pl-9 pr-8 h-10 text-base w-full"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="pl-9 pr-8 text-base w-full inline-flex leading-none"
           />
-          {globalFilter && (
+          {searchInput && (
             <button
-              onClick={() => setGlobalFilter('')}
+              onClick={() => setSearchInput('')}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <X className="w-4 h-4" />
             </button>
           )}
         </div>
+        <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">
+          <label className="flex items-center gap-2 text-base cursor-pointer whitespace-nowrap">
+            <Checkbox
+              checked={fuzzySearch}
+              onCheckedChange={(checked) => {
+                startTransition(() => {
+                  table.resetExpanded()
+                  setFuzzySearch(checked === true)
+                })
+              }}
+            />
+            <span className="text-base pr-2">模糊搜索</span>
+          </label>
+          <Select value={searchField} onValueChange={(val) => { table.resetExpanded(); setSearchField(val) }}>
+            <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部</SelectItem>
+              <SelectItem value="name">名称</SelectItem>
+              <SelectItem value="cas_number">CAS号</SelectItem>
+              <SelectItem value="brand">品牌</SelectItem>
+              <SelectItem value="category">分类</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={(val) => { table.resetExpanded(); setStatusFilter(val) }}>
+            <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部状态" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部状态</SelectItem>
+              <SelectItem value="pending">待审批</SelectItem>
+              <SelectItem value="approved">已审批</SelectItem>
+              <SelectItem value="arrived">已到货</SelectItem>
+              <SelectItem value="stocked">已入库</SelectItem>
+              <SelectItem value="rejected">已驳回</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      {/* Create Order Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={handleCloseDialog}>
+      {/* 创建/编辑对话框 */}
+      <Dialog
+        open={dialogState !== null}
+        onOpenChange={(open) => {
+          if (!open) { setDialogState(null); form.reset(); setCasWarning(null) }
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              创建试剂订单
-            </DialogTitle>
+            <DialogTitle>{dialogState === 'edit' ? '编辑订单' : '创建订单'}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleCreateOrder}>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* CAS号 - 占满第一行 */}
-              <div className="col-span-1 sm:col-span-3">
-                <Label htmlFor="create_cas" className={LABEL_STYLES.base}>
-                  CAS号 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_cas"
-                  value={formData.cas_number}
-                  onChange={(e) => setFormData(prev => ({ ...prev, cas_number: e.target.value }))}
-                  placeholder="如: 64-17-5"
-                  className={cn(INPUT_STYLES.lg, formErrors.cas_number && 'border-destructive')}
-                />
-                {formErrors.cas_number && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.cas_number}</p>
-                )}
-                {casWarning && casWarning.has_warning && (
-                  <p className="text-sm text-orange-500 mt-1 flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    注意：
-                    {casWarning.pending_orders.orders_count > 0 && 
-                      `${casWarning.pending_orders.orders_count} 个相关订单待处理 (共 ${casWarning.pending_orders.total_quantity})`}
-                  </p>
-                )}
-                {casLoading && (
-                  <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    检查中...
-                  </p>
-                )}
+          <form onSubmit={handleFormSubmit}>
+            <BaseForm
+              form={form}
+              fields={getReagentOrderFormFields(dialogState === 'edit')}
+            />
+            {/* CAS 警告显示 */}
+            {dialogState === 'add' && casWarning && casWarning.has_warning && (
+              <div className="mt-4 p-3 bg-orange-50 dark:bg-orange-950 rounded-md">
+                <p className="text-sm text-orange-600 dark:text-orange-400 flex items-center gap-1">
+                  <AlertTriangle className="w-4 h-4" />
+                  注意：{casWarning.pending_orders.orders_count} 个相关订单待处理 (共 {casWarning.pending_orders.total_quantity})
+                </p>
               </div>
-
-              {/* 中文名称 */}
-              <div className="col-span-1 sm:col-span-2">
-                <Label htmlFor="create_name" className={LABEL_STYLES.base}>
-                  中文名称 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_name"
-                  value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="如: 乙醇"
-                  className={cn(INPUT_STYLES.lg, formErrors.name && 'border-destructive')}
-                />
-                {formErrors.name && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.name}</p>
-                )}
-              </div>
-
-              {/* 英文名称 */}
-              <div>
-                <Label htmlFor="create_english_name" className={LABEL_STYLES.base}>
-                  英文名称 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_english_name"
-                  value={formData.english_name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, english_name: e.target.value }))}
-                  placeholder="如: Ethanol"
-                  className={cn(INPUT_STYLES.lg, formErrors.english_name && 'border-destructive')}
-                />
-                {formErrors.english_name && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.english_name}</p>
-                )}
-              </div>
-
-              {/* 别名 */}
-              <div>
-                <Label htmlFor="create_alias" className={LABEL_STYLES.base}>别名</Label>
-                <Input
-                  id="create_alias"
-                  value={formData.alias}
-                  onChange={(e) => setFormData(prev => ({ ...prev, alias: e.target.value }))}
-                  placeholder="如: 酒精"
-                  className={INPUT_STYLES.lg}
-                />
-              </div>
-
-              {/* 级别/规格 */}
-              <div>
-                <Label htmlFor="create_category" className={LABEL_STYLES.base}>
-                  级别/规格 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_category"
-                  value={formData.category}
-                  onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-                  placeholder="如: 分析纯"
-                  className={cn(INPUT_STYLES.lg, formErrors.category && 'border-destructive')}
-                />
-                {formErrors.category && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.category}</p>
-                )}
-              </div>
-
-              {/* 品牌 */}
-              <div>
-                <Label htmlFor="create_brand" className={LABEL_STYLES.base}>
-                  品牌 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_brand"
-                  value={formData.brand}
-                  onChange={(e) => setFormData(prev => ({ ...prev, brand: e.target.value }))}
-                  placeholder="如: Sigma"
-                  className={cn(INPUT_STYLES.lg, formErrors.brand && 'border-destructive')}
-                />
-                {formErrors.brand && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.brand}</p>
-                )}
-              </div>
-
-              {/* 规格 */}
-              <div>
-                <Label htmlFor="create_specification" className={LABEL_STYLES.base}>
-                  规格 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_specification"
-                  value={formData.specification}
-                  onChange={(e) => setFormData(prev => ({ ...prev, specification: e.target.value }))}
-                  placeholder="如: 500ml"
-                  className={cn(INPUT_STYLES.lg, formErrors.specification && 'border-destructive')}
-                />
-                {formErrors.specification && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.specification}</p>
-                )}
-              </div>
-
-              {/* 数量 */}
-              <div>
-                <Label htmlFor="create_quantity" className={LABEL_STYLES.base}>
-                  数量 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_quantity"
-                  value={formData.quantity}
-                  onChange={(e) => setFormData(prev => ({ ...prev, quantity: e.target.value }))}
-                  className={cn(INPUT_STYLES.lg, formErrors.quantity && 'border-destructive')}
-                />
-                {formErrors.quantity && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.quantity}</p>
-                )}
-              </div>
-
-              {/* 价格 */}
-              <div>
-                <Label htmlFor="create_price" className={LABEL_STYLES.base}>
-                  价格 (元) <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="create_price"
-                  value={formData.price}
-                  onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
-                  placeholder="如: 150.00"
-                  className={cn(INPUT_STYLES.lg, formErrors.price && 'border-destructive')}
-                />
-                {formErrors.price && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.price}</p>
-                )}
-              </div>
-
-              {/* 订购原因 */}
-              <div>
-                <Label htmlFor="create_order_reason" className={LABEL_STYLES.base}>
-                  订购原因 <span className="text-destructive">*</span>
-                </Label>
-                <Select
-                  value={formData.order_reason}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, order_reason: value }))}
-                >
-                  <SelectTrigger className={cn("h-9", formErrors.order_reason && 'border-destructive')}>
-                    <SelectValue placeholder="选择订购原因" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">没有</SelectItem>
-                    <SelectItem value="running_out">快用完</SelectItem>
-                    <SelectItem value="empty">用完</SelectItem>
-                    <SelectItem value="common_public">常用或公用</SelectItem>
-                    <SelectItem value="not_found">找不到</SelectItem>
-                    <SelectItem value="reorder">重新下单</SelectItem>
-                  </SelectContent>
-                </Select>
-                {formErrors.order_reason && (
-                  <p className="text-sm text-destructive mt-1">{formErrors.order_reason}</p>
-                )}
-              </div>
-
-              {/* 危险品 */}
-              <div className="flex items-center gap-2 h-9">
-                <Checkbox
-                  id="create_is_hazardous"
-                  checked={formData.is_hazardous}
-                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, is_hazardous: checked === true }))}
-                />
-                <Label htmlFor="create_is_hazardous" className="flex items-center gap-1 cursor-pointer mb-0">
-                  <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                  危险品
-                </Label>
-              </div>
-
-              {/* 备注 */}
-              <div className="col-span-1 sm:col-span-3">
-                <Label htmlFor="create_notes" className={LABEL_STYLES.base}>备注</Label>
-                <Input
-                  id="create_notes"
-                  value={formData.notes}
-                  onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                  className={cn("w-full", INPUT_STYLES.lg)}
-                  placeholder="其他说明..."
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-2 mt-10">
-              <div className="ml-auto flex gap-2">
-                <Button
-                  type="button"
-                  variant="morden"
-                  size="lg"
-                  className="text-base"
-                  onClick={() => handleCloseDialog(false)}
-                >
-                  取消
-                </Button>
-                <Button type="submit" disabled={submitting} size="lg">
-                  {submitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-                      提交中...
-                    </>
-                  ) : (
-                    '提交订单'
-                  )}
-                </Button>
-              </div>
+            )}
+            {casLoading && dialogState === 'add' && (
+              <p className="text-sm text-muted-foreground mt-2 flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                检查CAS号...
+              </p>
+            )}
+            <div className="flex justify-end gap-2 mt-8">
+              <Button variant="morden" size="lg" type="button" onClick={() => setDialogState(null)}>
+                取消
+              </Button>
+              <LoadingButton type="submit" size="lg" isLoading={isSubmitting}>
+                {dialogState === 'edit' ? '保存' : '提交订单'}
+              </LoadingButton>
             </div>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Filters */}
-
-      {/* Table */}
-      <Card>
-        <CardHeader className="pb-4">
+      {/* 数据表格区域 */}
+      <Card className="overflow-hidden">
+        <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <FlaskConical className="w-5 h-5" />
-            试剂订单列表 <span className="text-muted-foreground font-normal">(&thinsp;{total}&thinsp;)</span>
+            试剂订单列表 <span className="text-muted-foreground font-normal">(&thinsp;{displayCount}&thinsp;)</span>
+            <Button variant="morden" size="lg" onClick={toggleExpandAll} className="ml-auto flex font-normal">
+              {isAllExpanded ? <><ChevronsDownUp className="size-4 mr-1.5" />收起全部</> : <><ChevronsUpDown className="size-4 mr-1.5" />展开全部</>}
+            </Button>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {loading && orders.length === 0 ? (
+          {isLoading && data.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
-          ) : orders.length === 0 ? (
+          ) : data.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              暂无订单
+              {globalFilter ? `未找到匹配"${globalFilter}"的记录` : '暂无订单'}
             </div>
           ) : (
-            <>
-              <div className="px-6 rounded-md overflow-auto">
-                <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                  <thead>
-                    {table.getHeaderGroups().map(headerGroup => (
-                      <tr key={headerGroup.id} className="border-b-2 border-border">
-                        {headerGroup.headers.map(header => (
-                          <th 
-                            key={header.id} 
-                            className="h-11 px-3 font-semibold text-foreground text-left align-middle text-sm"
-                            style={{ width: header.getSize() }}
-                          >
-                            {header.isPlaceholder
-                              ? null
-                              : flexRender(header.column.columnDef.header, header.getContext())}
-                          </th>
-                        ))}
-                      </tr>
-                    ))}
-                  </thead>
-                  <tbody>
-                    {table.getRowModel().rows.map(row => (
-                      <tr 
-                        key={row.id} 
-                        className="border-b border-border hover:bg-muted/30 cursor-pointer transition-all"
-                      >
-                        {row.getVisibleCells().map(cell => (
-                          <td 
-                            key={cell.id} 
-                            className="p-3 align-middle text-sm"
-                            style={{ width: cell.column.getSize() }}
-                          >
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {totalPages > 1 && (
-                <div className="px-6 flex items-center justify-between pt-4">
-                  <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
-                  <Pagination
-                    currentPage={page}
-                    totalPages={totalPages}
-                    pageSize={pageSize}
-                    onPageChange={setPage}
-                    onPageSizeChange={handlePageSizeChange}
-                  />
-                </div>
-              )}
-            </>
+            <div className="px-6">
+              <DataTable
+                table={table}
+                renderExpandedRow={(item) => (
+                  <div className="p-2 flex flex-col md:flex-row gap-4 border-b-1 border-border">
+                    {/* 左侧：分子结构式 - 桌面端显示，移动端隐藏 */}
+                    <div className="hidden md:block flex-shrink-0">
+                      <MoleculeStructure casNumber={item.cas_number} width={120} height={80} />
+                    </div>
+                    {/* 右侧：信息网格 - 精简版 */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 flex-1 m-2">
+                      <div><span>英文名：</span>{item.english_name || '-'}</div>
+                      <div><span>别名：</span>{item.alias || '-'}</div>
+                      <div><span>品牌：</span>{item.brand || '-'}</div>
+                      <div className="col-span-2 md:col-span-3"><span>备注：</span>{item.notes || '-'}</div>
+                    </div>
+                  </div>
+                )}
+                scrollHeight="calc(100vh - 112px - 16px)"
+                enableExpandAll={true}
+                expandAllStorageKey="reagent-orders-table-expand-all"
+                noteField="notes"
+                isAllExpanded={isAllExpanded}
+                onToggleExpandAll={toggleExpandAll}
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
+                fetchNextPage={fetchNextPage}
+                total={total}
+                searchKeyword={globalFilter}
+              />
+            </div>
           )}
         </CardContent>
       </Card>

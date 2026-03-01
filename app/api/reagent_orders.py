@@ -2,10 +2,13 @@
 Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
-from datetime import datetime, timezone
-from typing import Optional
+import io
+import csv
+from datetime import datetime
+from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
@@ -24,11 +27,56 @@ from app.models.user import User
 from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.image_service import process_uploaded_image
-from app.services.spec_utils import parse_specification, SpecificationError
+from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.internal_code import generate_internal_code
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
+
+# ==================== Search Cache ====================
+# 简单内存缓存，用于减少重复搜索查询
+REAGENT_ORDER_CACHE: Dict[str, tuple[Any, datetime]] = {}
+CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
+
+
+def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
+    """从缓存获取结果"""
+    if cache_key in REAGENT_ORDER_CACHE:
+        cached_result, cached_time = REAGENT_ORDER_CACHE[cache_key]
+        if (get_utc_now() - cached_time).total_seconds() < CACHE_TTL_SECONDS:
+            return cached_result
+        else:
+            # 缓存过期，删除
+            del REAGENT_ORDER_CACHE[cache_key]
+    return None
+
+
+def _set_cached_result(cache_key: str, result: Dict[str, Any]) -> None:
+    """设置缓存结果"""
+    REAGENT_ORDER_CACHE[cache_key] = (result, get_utc_now())
+    # 简单清理：只保留最近100个缓存项
+    if len(REAGENT_ORDER_CACHE) > 100:
+        # 删除最旧的10个
+        oldest_keys = sorted(REAGENT_ORDER_CACHE.keys(), key=lambda k: REAGENT_ORDER_CACHE[k][1])[:10]
+        for key in oldest_keys:
+            del REAGENT_ORDER_CACHE[key]
+
+
+def _clear_reagent_order_cache() -> None:
+    """清除所有列表缓存（当订单数据发生变化时调用）"""
+    # 清除所有以 "list:" 开头的缓存键
+    keys_to_delete = [key for key in REAGENT_ORDER_CACHE.keys() if key.startswith("list:")]
+    for key in keys_to_delete:
+        del REAGENT_ORDER_CACHE[key]
+
+
+def _add_specification(item_dict: dict) -> dict:
+    """Add computed specification field to order response dict"""
+    initial = item_dict.get("initial_quantity", 0)
+    unit = item_dict.get("unit", "")
+    item_dict["specification"] = format_specification(initial, unit)
+    return item_dict
 
 
 class ConfirmArrivalRequest(BaseModel):
@@ -61,6 +109,15 @@ def create_reagent_order(
             detail=f"Invalid CAS format: {error}"
         )
     
+    # Parse specification to get initial_quantity and unit
+    try:
+        initial_quantity, unit = parse_specification(order.specification)
+    except SpecificationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid specification format: {e}"
+        )
+    
     # Create order
     db_order = ReagentOrder(
         cas_number=normalized_cas,
@@ -69,7 +126,8 @@ def create_reagent_order(
         alias=order.alias,
         category=order.category,
         brand=order.brand,
-        specification=order.specification,
+        initial_quantity=initial_quantity,
+        unit=unit,
         quantity=order.quantity,
         price=order.price,
         order_reason=order.order_reason,
@@ -123,34 +181,197 @@ def list_reagent_orders(
     skip: int = 0,
     limit: int = 50,
     status_filter: Optional[ReagentOrderStatus] = None,
+    search: Optional[str] = None,
+    search_field: Optional[str] = None,
+    fuzzy: bool = False,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = 'desc',
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List reagent orders with optional filters, pagination, and applicant name"""
+    """List reagent orders with optional filters, pagination, search, sort and applicant name"""
+    # 生成缓存key（包含所有搜索参数，包括分页和排序）
+    cache_key = f"list:{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
+
+    # 尝试从缓存获取（仅当是第一页且无搜索条件时）
+    is_first_page = skip == 0
+    has_search = bool(search or status_filter or sort_by)
+    should_use_cache = is_first_page and not has_search
+
+    if should_use_cache:
+        cached = _get_cached_result(cache_key)
+        if cached is not None:
+            return {
+                **cached,
+                "skip": skip,
+                "limit": limit,
+            }
+
     base = select(ReagentOrder)
 
     if status_filter:
         base = base.where(ReagentOrder.status == status_filter)
 
+    # 搜索处理
+    if search:
+        if fuzzy:
+            # 模糊搜索：标准化搜索词
+            search_normalized = search.strip().replace(" ", "").replace("-", "").replace("_", "")
+
+            from sqlmodel import func as sql_func
+
+            def norm_field(field):
+                f = sql_func.replace(field, '-', '')
+                f = sql_func.replace(f, ' ', '')
+                f = sql_func.replace(f, '\u00A0', '')
+                f = sql_func.replace(f, '\u2002', '')
+                f = sql_func.replace(f, '\u2003', '')
+                f = sql_func.replace(f, '\u2009', '')
+                f = sql_func.replace(f, '\u200C', '')
+                f = sql_func.replace(f, '\u200D', '')
+                f = sql_func.replace(f, '_', '')
+                return f
+
+            base = base.where(
+                (norm_field(ReagentOrder.cas_number).ilike(f"%{search_normalized}%")) |
+                (norm_field(ReagentOrder.name).ilike(f"%{search_normalized}%")) |
+                (norm_field(ReagentOrder.brand).ilike(f"%{search_normalized}%")) |
+                (norm_field(ReagentOrder.category).ilike(f"%{search_normalized}%"))
+            )
+        else:
+            search_pattern = f"%{search}%"
+
+            if search_field and search_field != 'all':
+                field_map = {
+                    'name': ReagentOrder.name,
+                    'cas_number': ReagentOrder.cas_number,
+                    'brand': ReagentOrder.brand,
+                    'category': ReagentOrder.category,
+                }
+                if search_field in field_map:
+                    base = base.where(field_map[search_field].ilike(search_pattern))
+                else:
+                    base = base.where(
+                        (ReagentOrder.name.ilike(search_pattern)) |
+                        (ReagentOrder.cas_number.ilike(search_pattern)) |
+                        (ReagentOrder.brand.ilike(search_pattern)) |
+                        (ReagentOrder.category.ilike(search_pattern))
+                    )
+            else:
+                base = base.where(
+                    (ReagentOrder.name.ilike(search_pattern)) |
+                    (ReagentOrder.cas_number.ilike(search_pattern)) |
+                    (ReagentOrder.brand.ilike(search_pattern)) |
+                    (ReagentOrder.category.ilike(search_pattern))
+                )
+
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
-    orders = db.exec(base.order_by(ReagentOrder.created_at.desc()).offset(skip).limit(limit)).all()
+
+    # 排序处理
+    sort_field_map = {
+        'cas_number': ReagentOrder.cas_number,
+        'name': ReagentOrder.name,
+        'category': ReagentOrder.category,
+        'brand': ReagentOrder.brand,
+        'quantity': ReagentOrder.quantity,
+        'price': ReagentOrder.price,
+        'status': ReagentOrder.status,
+        'order_reason': ReagentOrder.order_reason,
+        'created_at': ReagentOrder.created_at,
+        'updated_at': ReagentOrder.updated_at,
+    }
+
+    order_direction = sort_order.lower() if sort_order else 'desc'
+    order_column = sort_field_map.get(sort_by, ReagentOrder.created_at)
+
+    if order_direction == 'asc':
+        order_expr = order_column.asc()
+    else:
+        order_expr = order_column.desc()
+
+    secondary_order = ReagentOrder.created_at.desc()
+
+    orders = db.exec(base.order_by(order_expr, secondary_order).offset(skip).limit(limit)).all()
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
-    users_map: dict[int, str] = {}
-    if applicant_ids:
-        users = db.exec(select(User).where(User.id.in_(applicant_ids))).all()
-        users_map = {u.id: u.full_name or u.username for u in users}
+    users_map = batch_get_user_names(db, applicant_ids)
 
-    return {
+    result = {
         "data": [
-            {**ReagentOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")}
+            _add_specification({**ReagentOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")})
             for o in orders
         ],
         "total": total,
         "skip": skip,
         "limit": limit,
     }
+
+    # 缓存查询结果（仅当是第一页且无搜索条件时）
+    if should_use_cache:
+        cache_data = {
+            "data": result["data"],
+            "total": result["total"],
+        }
+        _set_cached_result(cache_key, cache_data)
+
+    return result
+
+
+# --- Export ---
+
+@router.get("/export")
+def export_reagent_orders(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Export reagent orders as a downloadable CSV file."""
+    statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
+    orders = db.exec(statement).all()
+
+    # 查询所有申请人ID用于导出
+    all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
+    all_users_map = batch_get_user_names(db, all_applicant_ids)
+
+    output = io.StringIO()
+    output.write("\ufeff")
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "CAS号", "名称", "英文名", "别名", "分类", "品牌",
+        "规格", "数量", "单价", "申购原因", "状态",
+        "是否危险品", "申请人", "申购时间", "备注",
+    ])
+
+    for order in orders:
+        # 使用公共函数格式化规格
+        spec = format_specification(order.initial_quantity, order.unit)
+        writer.writerow([
+            order.cas_number,
+            order.name,
+            order.english_name or "",
+            order.alias or "",
+            order.category or "",
+            order.brand or "",
+            spec or "",
+            order.quantity,
+            order.price or "",
+            order.order_reason.value if hasattr(order.order_reason, "value") else order.order_reason,
+            order.status.value if hasattr(order.status, "value") else order.status,
+            "是" if order.is_hazardous else "否",
+            all_users_map.get(order.applicant_id, "") if order.applicant_id else "",
+            order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
+            order.notes or "",
+        ])
+
+    output.seek(0)
+    filename = f"reagent_orders_export_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/{order_id}", response_model=ReagentOrderResponse)
@@ -334,7 +555,7 @@ def get_arrived_reagent_orders(
                 "cas_number": order.cas_number,
                 "name": order.name,
                 "english_name": order.english_name,
-                "specification": order.specification,
+                "specification": format_specification(order.initial_quantity, order.unit),
                 "quantity": order.quantity,
                 "price": order.price,
                 "is_hazardous": order.is_hazardous,
@@ -371,7 +592,7 @@ def get_my_reagent_orders(
             "cas_number": order.cas_number,
             "name": order.name,
             "english_name": order.english_name,
-            "specification": order.specification,
+            "specification": format_specification(order.initial_quantity, order.unit),
             "quantity": order.quantity,
             "price": order.price,
             "is_hazardous": order.is_hazardous,
@@ -487,11 +708,15 @@ def stock_in_reagent_order(
             detail="Invalid order quantity"
         )
     
-    # Parse specification to get value and unit
-    try:
-        per_bottle_value, unit = parse_specification(order.specification)
-    except SpecificationError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # Use initial_quantity and unit from order (already parsed during creation)
+    if order.initial_quantity is None or order.unit is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order missing initial_quantity or unit. Please update the order."
+        )
+    
+    per_bottle_value = order.initial_quantity
+    unit = order.unit
     
     # Generate internal codes
     internal_codes = generate_internal_code(db, order.cas_number, order.quantity)

@@ -55,7 +55,7 @@ export function DialogHeader({ children, className }: { children: React.ReactNod
 }
 
 export function DialogTitle({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <h2 className={cn("font-semibold text-2xl flex items-center gap-2 mb-6", className)}>{children}</h2>
+  return <h2 className={cn("font-semibold text-2xl flex items-center gap-2 mb-8", className)}>{children}</h2>
 }
 
 export function DialogTrigger({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {

@@ -202,9 +202,7 @@ export function InventoryPage() {
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
     try { return JSON.parse(localStorage.getItem('inventory-table-col-sizes') || '{}') } catch { return {} }
   })
-  const [isAllExpanded, setIsAllExpanded] = useState<boolean>(() => {
-    return localStorage.getItem('inventory-table-expand-all') === 'expanded'
-  })
+  const [isAllExpanded, setIsAllExpanded] = useState<boolean>(false)
 
   // 优化 1：使用节流/防抖降低 localStorage 写入频率
   useEffect(() => {
@@ -213,10 +211,6 @@ export function InventoryPage() {
     }, 500)
     return () => clearTimeout(timer)
   }, [columnSizing])
-
-  useEffect(() => {
-    localStorage.setItem('inventory-table-expand-all', isAllExpanded ? 'expanded' : 'collapsed')
-  }, [isAllExpanded])
 
   const toggleExpandAll = useCallback(() => setIsAllExpanded(prev => !prev), [])
 
@@ -257,23 +251,30 @@ export function InventoryPage() {
     return response.data
   }, [statusFilter, globalFilter, searchField, fuzzySearch, sorting])
 
+  const MAX_PAGES = 4 // 最多加载4页，每页50条 = 200条
+
   const {
     data: allData,
     isLoading,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
+    refetch,
   } = useInfiniteQuery({
     queryKey: ['inventory', statusFilter, globalFilter, searchField, fuzzySearch, sorting],
     queryFn,
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
+      // [DEBUG] 诊断日志：记录轮询时的页面状态
+      console.log('[Inventory] refetch triggered, pages loaded:', allPages.length, 'total items:', lastPage.total)
+      // 限制最大页数，避免无限加载
+      if (allPages.length >= MAX_PAGES) return null
       const currentLoadedCount = allPages.reduce((acc, page) => acc + page.data.length, 0)
       if (currentLoadedCount < (lastPage.total || 0)) return currentLoadedCount
       return null
     },
     placeholderData: keepPreviousData,
-    refetchInterval: 10000,
+    // refetchInterval: 10000, // [FIXME] 反模式：无限查询不应使用全局轮询，会导致请求爆炸
   })
 
   // 同步 searchInput 到 globalFilter 并防抖
@@ -281,7 +282,6 @@ export function InventoryPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (globalFilter !== searchInput) {
-        setIsAllExpanded(false)
         if (tableRef.current) tableRef.current.resetExpanded()
         setGlobalFilter(searchInput)
       }
@@ -392,9 +392,9 @@ export function InventoryPage() {
             status: status,
             notes: formData.notes || undefined
           })
-          toast.success('库存信息已更新')
-          // 刷新数据（等待刷新完成后再关闭对话框）
+          // 刷新数据后再弹出 toast
           await loadInventory()
+          toast.success('库存信息已更新')
         } else if (dialogState === 'add') {
           // 添加模式下，specification 和 quantity_bottles 必定存在（因为验证已通过）
           const spec = formData.specification as string
@@ -412,10 +412,12 @@ export function InventoryPage() {
             is_hazardous: formData.is_hazardous,
             notes: formData.notes || undefined
           })
+        }
+        // 先刷新数据，再弹出 toast，确保数据已加载完成
+        await loadInventory()
+        if (dialogState === 'add') {
           toast.success('手动入库成功！')
         }
-        // 先刷新数据，再关闭对话框
-        await loadInventory()
         setDialogState(null)
       } catch (err) {
         const error = err as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
@@ -546,7 +548,7 @@ export function InventoryPage() {
         <QuantityIndicator
           remaining={info.getValue()}
           initial={info.row.original.initial_quantity}
-          unit={info.row.original.unit}
+          specification={info.row.original.specification}
         />
       ),
     }),
@@ -581,7 +583,6 @@ export function InventoryPage() {
     onColumnSizingChange: setColumnSizing,
     manualSorting: true,
     onSortingChange: (updater) => {
-      setIsAllExpanded(false)
       table.resetExpanded()
       setSorting(prev => {
         const newSorting = typeof updater === 'function' ? updater(prev) : updater
@@ -647,7 +648,6 @@ export function InventoryPage() {
               checked={fuzzySearch}
               onCheckedChange={(checked) => {
                 startTransition(() => {
-                  setIsAllExpanded(false)
                   table.resetExpanded()
                   setFuzzySearch(checked === true)
                 })
@@ -655,7 +655,7 @@ export function InventoryPage() {
             />
             <span className="text-base pr-2">模糊搜索</span>
           </label>
-          <Select value={searchField} onValueChange={(val) => { setIsAllExpanded(false); table.resetExpanded(); setSearchField(val) }}>
+          <Select value={searchField} onValueChange={(val) => { table.resetExpanded(); setSearchField(val) }}>
             <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部</SelectItem>
@@ -666,7 +666,7 @@ export function InventoryPage() {
               <SelectItem value="category">分类</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={(val) => { setIsAllExpanded(false); table.resetExpanded(); setStatusFilter(val) }}>
+          <Select value={statusFilter} onValueChange={(val) => { table.resetExpanded(); setStatusFilter(val) }}>
             <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部状态" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部状态</SelectItem>
@@ -807,7 +807,8 @@ const ActionButtons = React.memo(function ActionButtons({
       setIsLoading(true)
       try {
         await inventoryAPI.borrow(item.id)
-        onBorrowSuccess()
+        // 先刷新数据，再弹出 toast
+        await onBorrowSuccess()
         toast.success('借用成功')
       } catch (error) {
         const err = error as { response?: { status?: number; data?: { detail?: string } } }
@@ -825,7 +826,7 @@ const ActionButtons = React.memo(function ActionButtons({
     return (
       <div className="flex items-center gap-1 text-sm text-muted-foreground">
         <span className="text-blue-800 dark:text-blue-200" title={`借用者: ${item.borrower_name || '未知'}`}>
-          {item.borrower_name ? `${item.borrower_name}借用中` : '借用中'}
+          {item.borrower_name ? `${item.borrower_name}借用` : '借用中'}
         </span>
       </div>
     )

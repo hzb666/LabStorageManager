@@ -24,6 +24,7 @@ env/
 !.vscode/extensions.json
 .idea/
 .cursor/
+.github/
 .history/
 .claude/
 .kilocode/
@@ -58,3 +59,13 @@ dist/
 
 # Template/External projects (do not commit)
 shadcn-admin/
+
+
+# Local library files
+frontend/public/lib/
+
+# Docs subdirectories (keep root docs)
+docs/done/
+docs/exp/
+docs/plans/
+docs/prompt/

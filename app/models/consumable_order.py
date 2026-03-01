@@ -23,10 +23,12 @@ class ConsumableOrderReason(str, Enum):
     """Order reason enumeration"""
     NONE = "none"
     RUNNING_OUT = "running_out"
-    EMPTY = "empty"
+    NOT_STOCKED = "not_stocked"    # 库里没有
     COMMON_PUBLIC = "common_public"
     NOT_FOUND = "not_found"
     REORDER = "reorder"
+    HIGH_USAGE = "high_usage"
+    DEGRADED = "degraded"
 
 
 class ConsumableOrderBase(SQLModel):
@@ -41,8 +43,10 @@ class ConsumableOrderBase(SQLModel):
     category: Optional[str] = Field(None, max_length=100)
     # Brand (e.g., "3M", "Corning")
     brand: Optional[str] = Field(None, max_length=100)
-    # Specification (e.g., "500ml")
-    specification: str = Field(max_length=100)
+    # Initial quantity value (e.g., 500)
+    initial_quantity: Optional[float] = Field(None, ge=0)
+    # Unit (e.g., "盒", "包", "个")
+    unit: Optional[str] = Field(None, max_length=20)
     # Quantity ordered
     quantity: int = Field(gt=0)
     # Price
@@ -74,13 +78,16 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
 
 
 class ConsumableOrderCreate(SQLModel):
-    """DTO for creating a new consumable order"""
+    """DTO for creating a new consumable order
+
+    前端传入 specification (规格字符串)，后端解析为 initial_quantity + unit
+    """
     name: str = Field(max_length=200)
     english_name: Optional[str] = None
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
-    specification: str = Field(max_length=100)
+    specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500个"
     quantity: int = Field(gt=0)
     price: Optional[float] = None
     order_reason: ConsumableOrderReason = ConsumableOrderReason.NONE
@@ -95,9 +102,12 @@ class ConsumableOrderUpdate(SQLModel):
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
-    specification: Optional[str] = None
+    initial_quantity: Optional[float] = None
+    unit: Optional[str] = None
     quantity: Optional[int] = None
     price: Optional[float] = None
+    order_reason: Optional[ConsumableOrderReason] = None
+    is_hazardous: Optional[bool] = None
     status: Optional[ConsumableOrderStatus] = None
     notes: Optional[str] = None
 
@@ -110,9 +120,12 @@ class ConsumableOrderResponse(SQLModel):
     alias: Optional[str]
     category: Optional[str]
     brand: Optional[str]
-    specification: str
+    initial_quantity: Optional[float]
+    unit: Optional[str]
     quantity: int
     price: Optional[float]
+    order_reason: ConsumableOrderReason
+    is_hazardous: bool
     image_path: Optional[str]
     notes: Optional[str]
     applicant_id: Optional[int]

@@ -21,7 +21,8 @@ import { toast } from '@/components/ui/Toast'
 import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
-import { validateRequired } from '@/lib/inputValidation'
+import * as v from 'valibot'
+import { UserCreateSchema, ChangePasswordWithConfirmSchema } from '@/lib/validationSchemas'
 import {
   Search,
   Users,
@@ -227,32 +228,28 @@ export function AdminUsersPage() {
 
   // Create user handlers
   const validateCreateForm = useCallback((): boolean => {
-    const errors: Record<string, string> = {}
-    
-    // 用户名验证：必填 + 格式
-    const usernameValidation = validateRequired(createData.username, '用户名')
-    if (!usernameValidation.isValid) {
-      errors.username = usernameValidation.error || '用户名不能为空'
-    } else if (createData.username.length < 3) {
-      errors.username = '用户名至少3个字符'
+    try {
+      v.parse(UserCreateSchema, {
+        username: createData.username,
+        password: createData.password,
+        full_name: createData.full_name,
+        role: createData.role
+      })
+      setCreateErrors({})
+      return true
+    } catch (error) {
+      if (error instanceof v.ValiError) {
+        const errors: Record<string, string> = {}
+        for (const issue of error.issues) {
+          const field = issue.path?.[0]?.key
+          if (field) {
+            errors[field] = issue.message
+          }
+        }
+        setCreateErrors(errors)
+      }
+      return false
     }
-    
-    // 密码验证：必填 + 长度
-    const passwordValidation = validateRequired(createData.password, '密码')
-    if (!passwordValidation.isValid) {
-      errors.password = passwordValidation.error || '密码不能为空'
-    } else if (createData.password.length < 6) {
-      errors.password = '密码至少6个字符'
-    }
-    
-    // 姓名验证：必填（新增）
-    const fullnameValidation = validateRequired(createData.full_name, '姓名')
-    if (!fullnameValidation.isValid) {
-      errors.full_name = fullnameValidation.error || '姓名不能为空'
-    }
-    
-    setCreateErrors(errors)
-    return Object.keys(errors).length === 0
   }, [createData])
 
   const handleCreate = async () => {
@@ -343,31 +340,27 @@ export function AdminUsersPage() {
 
   // Change password handlers
   const validateChangePasswordForm = useCallback((): boolean => {
-    const errors: Record<string, string> = {}
-    
-    // 旧密码验证
-    const oldPwdValidation = validateRequired(changePasswordData.old_password, '原密码')
-    if (!oldPwdValidation.isValid) {
-      errors.old_password = oldPwdValidation.error || '原密码不能为空'
+    try {
+      v.parse(ChangePasswordWithConfirmSchema, {
+        old_password: changePasswordData.old_password,
+        new_password: changePasswordData.new_password,
+        confirm_password: changePasswordData.confirm_password
+      })
+      setChangePasswordErrors({})
+      return true
+    } catch (error) {
+      if (error instanceof v.ValiError) {
+        const errors: Record<string, string> = {}
+        for (const issue of error.issues) {
+          const field = issue.path?.[0]?.key
+          if (field) {
+            errors[field] = issue.message
+          }
+        }
+        setChangePasswordErrors(errors)
+      }
+      return false
     }
-    
-    // 新密码验证
-    const newPwdValidation = validateRequired(changePasswordData.new_password, '新密码')
-    if (!newPwdValidation.isValid) {
-      errors.new_password = newPwdValidation.error || '新密码不能为空'
-    } else if (changePasswordData.new_password.length < 6) {
-      errors.new_password = '新密码至少6个字符'
-    }
-    
-    // 确认密码验证
-    if (!changePasswordData.confirm_password) {
-      errors.confirm_password = '请再次输入新密码'
-    } else if (changePasswordData.confirm_password !== changePasswordData.new_password) {
-      errors.confirm_password = '两次输入的密码不一致'
-    }
-    
-    setChangePasswordErrors(errors)
-    return Object.keys(errors).length === 0
   }, [changePasswordData])
 
   const handleChangePassword = async () => {

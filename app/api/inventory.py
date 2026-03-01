@@ -33,8 +33,9 @@ from app.core.auth import get_current_user, require_admin
 from app.core.time_utils import get_utc_now
 from app.services.cas_utils import normalize_cas
 from app.services.internal_code import generate_internal_code
-from app.services.spec_utils import parse_specification, SpecificationError
+from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.user_utils import batch_get_user_names
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ def validate_uploaded_file(file: UploadFile) -> None:
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
-CACHE_TTL_SECONDS = 60  # 缓存有效期60秒
+CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
 
 
 def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
@@ -225,14 +226,7 @@ def _add_specification(item_dict: dict) -> dict:
     """Add computed specification field to inventory response dict"""
     initial = item_dict.get("initial_quantity", 0)
     unit = item_dict.get("unit", "")
-    # Format: "500 ml" or "250.5 ml" (no trailing zeros, space between number and unit)
-    if initial == int(initial):
-        # No decimal part, show as integer
-        formatted = f"{int(initial)} {unit}"
-    else:
-        # Has decimal part, keep the decimal without trailing zeros
-        formatted = f"{float(initial)} {unit}"
-    item_dict["specification"] = formatted if initial else None
+    item_dict["specification"] = format_specification(initial, unit)
     return item_dict
 
 
@@ -602,7 +596,7 @@ def import_inventory(
 @router.get("/")
 def list_inventory(
     skip: int = 0,
-    limit: int = 0,  # 0 表示不分页，返回全部数据
+    limit: int = 50,  # 默认分页50条，与前端保持一致
     status_filter: Optional[InventoryStatus] = None,
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
@@ -617,8 +611,13 @@ def list_inventory(
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = f"list:{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
     
-    # 尝试从缓存获取（仅当是不分页查询或第一页时）
-    if limit == 0 or skip == 0:
+    # 尝试从缓存获取（仅当是第一页且无搜索条件时）
+    # 这样可以避免分页数据不一致的问题
+    is_first_page = skip == 0
+    has_search = bool(search or status_filter or cas_filter or hazardous_only or sort_by)
+    should_use_cache = is_first_page and not has_search
+    
+    if should_use_cache:
         cached = _get_cached_result(cache_key)
         if cached is not None:
             # 返回缓存结果，但更新分页参数
@@ -775,12 +774,8 @@ def list_inventory(
         if item.created_by_id:
             user_ids.add(item.created_by_id)
 
-    # 用一条 SQL IN 语句，一次性查出这 50 条数据对应的所有用户
-    users_map = {}
-    if user_ids:
-        users = db.exec(select(User).where(User.id.in_(user_ids))).all()
-        # 构建内存字典 { user_id: "姓名" }，查找速度是 O(1)
-        users_map = {u.id: (u.full_name or u.username) for u in users}
+    # 使用通用函数批量查询用户姓名
+    users_map = batch_get_user_names(db, user_ids)
 
     # 在内存中完成数据组装，绝不再向数据库发请求
     result_data = []
@@ -804,8 +799,8 @@ def list_inventory(
         "limit": limit,
     }
     
-    # 缓存查询结果（不分页或第一页时缓存）
-    if limit == 0 or skip == 0:
+    # 缓存查询结果（仅当是第一页且无搜索条件时）
+    if should_use_cache:
         # 缓存时不包含分页参数
         cache_data = {
             "data": result["data"],

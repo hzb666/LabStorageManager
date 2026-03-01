@@ -3,6 +3,7 @@ import { Controller, type UseFormReturn, type FieldPath } from "react-hook-form"
 import { Input } from "./ui/Input"
 import { Checkbox } from "./ui/Checkbox"
 import { FormField } from "./ui/FormField"
+import { Autocomplete, type AutocompleteOption } from "./ui/AutoComplete"
 import { cn } from "@/lib/utils"
 import { INPUT_STYLES } from "@/lib/constants"
 
@@ -21,10 +22,10 @@ export interface SelectOption {
 export interface FieldSchema<T extends Record<string, unknown>> {
   name: FieldPath<T>           // 字段名
   label: string          // 标签
-  type: 'input' | 'select' | 'checkbox' | 'textarea' | 'number'
+  type: 'input' | 'select' | 'checkbox' | 'textarea' | 'number' | 'autocomplete'
   inputType?: 'text' | 'number'  // input 元素的类型，默认 text
   placeholder?: string
-  options?: SelectOption[]  // select选项
+  options?: AutocompleteOption[]  // select/autocomplete选项
   readOnly?: boolean
   disabled?: boolean
   colSpan?: number       // 跨列数
@@ -207,6 +208,17 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
                 placeholder={field.placeholder}
                 disabled={isDisabled}
                 readOnly={isReadOnly}
+                className={getInputClassName(hasError, isReadOnly)}
+              />
+            )}
+
+            {field.type === 'autocomplete' && (
+              <Autocomplete
+                options={field.options || []}
+                value={(controllerField.value as string) ?? ''}
+                onChange={controllerField.onChange}
+                placeholder={field.placeholder}
+                disabled={isDisabled}
                 className={getInputClassName(hasError, isReadOnly)}
               />
             )}
