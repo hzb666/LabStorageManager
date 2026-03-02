@@ -207,6 +207,7 @@ export const consumableOrderAPI = {
     api.post(`/consumable-orders/${id}/reject`, { reason }),
   complete: (id: number) => api.post(`/consumable-orders/${id}/complete`),
   getMyOrders: () => api.get('/consumable-orders/dashboard/my-orders'),
+  exportOrders: () => api.get('/consumable-orders/export', { responseType: 'blob' as const }),
 }
 
 // Inventory APIs
