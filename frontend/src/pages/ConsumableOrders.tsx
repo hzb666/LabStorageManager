@@ -136,7 +136,17 @@ export function ConsumableOrdersPage() {
   // 表格状态
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
-    try { return JSON.parse(localStorage.getItem('consumable-orders-table-col-sizes') || '{}') } catch { return {} }
+    try {
+      const saved = JSON.parse(localStorage.getItem('consumable-orders-table-col-sizes') || '{}')
+      // 过滤掉宽度为0的列（防止旧数据导致列消失）
+      const filtered: ColumnSizingState = {}
+      for (const [key, size] of Object.entries(saved)) {
+        if (typeof size === 'number' && size > 0) {
+          filtered[key] = size
+        }
+      }
+      return Object.keys(filtered).length > 0 ? filtered : {}
+    } catch { return {} }
   })
   const [isAllExpanded, setIsAllExpanded] = useState<boolean>(false)
 
