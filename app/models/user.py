@@ -7,7 +7,9 @@ from app.core.time_utils import get_utc_now
 from enum import Enum
 from typing import Optional
 
-from pydantic import ConfigDict
+import re
+
+from pydantic import ConfigDict, field_validator
 from sqlmodel import Field, SQLModel
 
 
@@ -19,7 +21,15 @@ class UserRole(str, Enum):
 
 class UserBase(SQLModel):
     """Base user model with common fields"""
-    username: str = Field(unique=True, index=True, min_length=3, max_length=50)
+    username: str = Field(unique=True, index=True, min_length=3, max_length=20)
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9_]+$', v):
+            raise ValueError('用户名只能包含字母、数字和下划线')
+        return v
+
     full_name: Optional[str] = Field(default=None, max_length=100)
     role: UserRole = Field(default=UserRole.USER)
     is_active: bool = Field(default=True)
@@ -40,7 +50,7 @@ class User(UserBase, table=True):
 
 class UserCreate(SQLModel):
     """DTO for creating a new user"""
-    username: str = Field(min_length=3, max_length=50)
+    username: str = Field(min_length=3, max_length=20)
     password: str = Field(min_length=6)
     full_name: Optional[str] = None
     role: UserRole = UserRole.USER
@@ -48,7 +58,7 @@ class UserCreate(SQLModel):
 
 class UserUpdate(SQLModel):
     """DTO for updating user information"""
-    username: Optional[str] = Field(None, min_length=3, max_length=50)
+    username: Optional[str] = Field(None, min_length=3, max_length=20)
     full_name: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None

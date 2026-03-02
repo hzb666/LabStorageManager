@@ -118,6 +118,12 @@ def create_reagent_order(
             detail=f"Invalid specification format: {e}"
         )
     
+    # 计算拼音字段
+    pinyin_fields = compute_pinyin_fields(
+        name=order.name,
+        brand=order.brand,
+    )
+    
     # Create order
     db_order = ReagentOrder(
         cas_number=normalized_cas,
@@ -133,6 +139,7 @@ def create_reagent_order(
         order_reason=order.order_reason,
         is_hazardous=order.is_hazardous,
         applicant_id=current_user.id,
+        **pinyin_fields,
     )
     
     db.add(db_order)
@@ -176,10 +183,13 @@ async def upload_reagent_order_image(
         )
 
 
+# 分页限制常量
+MAX_PAGE_SIZE = 100
+
 @router.get("/")
 def list_reagent_orders(
     skip: int = 0,
-    limit: int = 50,
+    limit: int = min(50, MAX_PAGE_SIZE),
     status_filter: Optional[ReagentOrderStatus] = None,
     search: Optional[str] = None,
     search_field: Optional[str] = None,
@@ -271,8 +281,10 @@ def list_reagent_orders(
     sort_field_map = {
         'cas_number': ReagentOrder.cas_number,
         'name': ReagentOrder.name,
+        'name_pinyin': ReagentOrder.name_pinyin,
         'category': ReagentOrder.category,
         'brand': ReagentOrder.brand,
+        'brand_pinyin': ReagentOrder.brand_pinyin,
         'quantity': ReagentOrder.quantity,
         'price': ReagentOrder.price,
         'status': ReagentOrder.status,
@@ -417,6 +429,13 @@ def update_reagent_order(
                 detail=f"Invalid CAS format: {error}"
             )
         update_data["cas_number"] = normalized_cas
+    
+    # 如果更新了 name 或 brand，重新计算拼音字段
+    if "name" in update_data or "brand" in update_data:
+        name = update_data.get("name", order.name)
+        brand = update_data.get("brand", order.brand)
+        pinyin_fields = compute_pinyin_fields(name=name, brand=brand)
+        update_data.update(pinyin_fields)
     
     for field, value in update_data.items():
         setattr(order, field, value)

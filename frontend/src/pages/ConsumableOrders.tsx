@@ -23,7 +23,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { HazardousIcon } from '@/components/ui/HazardousIcon'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { DataTable } from '@/components/ui/DataTable'
 import { toast } from '@/components/ui/Toast'
@@ -35,7 +34,7 @@ import { useAuthStore } from '@/store/useStore'
 
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
-import { formatDate, cn } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
 import { ConsumableOrderSchema } from '@/lib/validationSchemas'
 import type { ConsumableOrderFormData } from '@/lib/validationSchemas'
 import {
@@ -78,10 +77,9 @@ interface ConsumableOrder {
   category: string | null
   brand: string | null
   specification: string
+  unit: string | null
   quantity: number
   price: number | null
-  order_reason: string
-  is_hazardous: boolean
   image_path: string | null
   notes: string | null
   applicant_id: number | null
@@ -207,7 +205,7 @@ export function ConsumableOrdersPage() {
     return response.data
   }, [statusFilter, globalFilter, searchField, fuzzySearch, sorting])
 
-  const MAX_PAGES = 4 // 最多加载4页，每页50条 = 200条
+  // 不限制最大页数，支持无限滚动
 
   const {
     data: allData,
@@ -220,14 +218,13 @@ export function ConsumableOrdersPage() {
     queryFn,
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
-      // 限制最大页数，避免无限加载
-      if (allPages.length >= MAX_PAGES) return null
+      // 无限滚动：只要还有数据就继续加载
       const currentLoadedCount = allPages.reduce((acc, page) => acc + page.data.length, 0)
       if (currentLoadedCount < (lastPage.total || 0)) return currentLoadedCount
       return null
     },
     placeholderData: keepPreviousData,
-    refetchInterval: 10000,
+    // refetchInterval: 10000, // [FIXME] 反模式：无限查询不应使用全局轮询
   })
 
   const data = useMemo(() => allData?.pages.flatMap(page => page.data) ?? [], [allData])
@@ -274,10 +271,9 @@ export function ConsumableOrdersPage() {
       category: item.category || '',
       brand: item.brand || '',
       specification: item.specification || '',
+      unit: item.unit || '',
       quantity: item.quantity || 1,
       price: item.price || undefined,
-      order_reason: item.order_reason || 'none',
-      is_hazardous: item.is_hazardous || false,
       notes: item.notes || ''
     })
     setDialogState('edit')
@@ -300,18 +296,21 @@ export function ConsumableOrdersPage() {
             category: formData.category || undefined,
             brand: formData.brand || undefined,
             specification: formData.specification || undefined,
+            unit: formData.unit || undefined,
             quantity: formData.quantity,
             price: formData.price,
-            order_reason: formData.order_reason,
-            is_hazardous: formData.is_hazardous,
             notes: formData.notes || undefined
           })
         } else if (dialogState === 'add') {
           await consumableOrderAPI.create({
-            ...formData,
+            name: formData.name,
+            specification: formData.specification,
+            unit: formData.unit || undefined,
+            quantity: formData.quantity,
             category: formData.category || undefined,
             brand: formData.brand || undefined,
             price: formData.price ? parseFloat(String(formData.price)) : undefined,
+            notes: formData.notes || undefined,
           })
         }
         // 先刷新数据，再弹出 toast，确保数据已加载完成
@@ -404,7 +403,6 @@ export function ConsumableOrdersPage() {
       header: '名称', size: 180, minSize: 150, maxSize: 300,
       cell: info => (
         <div className="flex items-center gap-1.5">
-          <HazardousIcon isHazardous={info.row.original.is_hazardous} />
           <span className="font-medium">
             <HighlightText
               text={info.getValue() || ''}
@@ -675,7 +673,7 @@ export function ConsumableOrdersPage() {
                       <div><span className="font-medium">英文名称：</span>{item.english_name || '-'}</div>
                       <div><span className="font-medium">别名：</span>{item.alias || '-'}</div>
                       <div><span className="font-medium">品牌：</span>{item.brand || '-'}</div>
-                      <div><span className="font-medium">申购原因：</span>{item.order_reason || '-'}</div>
+                      <div><span className="font-medium">单位：</span>{item.unit || '-'}</div>
                       <div><span className="font-medium">申购时间：</span>{formatDate(item.created_at)}</div>
                       <div><span className="font-medium">申请人：</span>{item.applicant_name || '-'}</div>
                       <div className="col-span-2"><span className="font-medium">备注：</span>{item.notes || '-'}</div>

@@ -194,10 +194,9 @@ export const consumableOrderAPI = {
     category?: string
     brand?: string
     specification: string
+    unit?: string
     quantity: number
     price?: number
-    order_reason: ConsumableOrderReason
-    is_hazardous: boolean
     notes?: string
   }) => api.post('/consumable-orders', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/consumable-orders/${id}`, data),

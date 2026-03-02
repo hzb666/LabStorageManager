@@ -251,8 +251,6 @@ export function InventoryPage() {
     return response.data
   }, [statusFilter, globalFilter, searchField, fuzzySearch, sorting])
 
-  const MAX_PAGES = 4 // 最多加载4页，每页50条 = 200条
-
   const {
     data: allData,
     isLoading,
@@ -282,7 +280,7 @@ export function InventoryPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (globalFilter !== searchInput) {
-        if (tableRef.current) tableRef.current.resetExpanded()
+        // 不再调用 tableRef.current.resetExpanded()，保持展开全部状态
         setGlobalFilter(searchInput)
       }
     }, 300)
@@ -583,7 +581,7 @@ export function InventoryPage() {
     onColumnSizingChange: setColumnSizing,
     manualSorting: true,
     onSortingChange: (updater) => {
-      table.resetExpanded()
+      // 不再调用 table.resetExpanded()，保持展开全部状态
       setSorting(prev => {
         const newSorting = typeof updater === 'function' ? updater(prev) : updater
         sortingRef.current = newSorting
@@ -648,14 +646,14 @@ export function InventoryPage() {
               checked={fuzzySearch}
               onCheckedChange={(checked) => {
                 startTransition(() => {
-                  table.resetExpanded()
+                  // 不再调用 table.resetExpanded()，保持展开全部状态
                   setFuzzySearch(checked === true)
                 })
               }}
             />
             <span className="text-base pr-2">模糊搜索</span>
           </label>
-          <Select value={searchField} onValueChange={(val) => { table.resetExpanded(); setSearchField(val) }}>
+          <Select value={searchField} onValueChange={(val) => { setSearchField(val) }}>
             <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部</SelectItem>
@@ -666,7 +664,7 @@ export function InventoryPage() {
               <SelectItem value="category">分类</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={(val) => { table.resetExpanded(); setStatusFilter(val) }}>
+          <Select value={statusFilter} onValueChange={(val) => { setStatusFilter(val) }}>
             <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部状态" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部状态</SelectItem>

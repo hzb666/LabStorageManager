@@ -150,7 +150,7 @@ export function Login() {
                 <p className="text-sm text-destructive">{String(errors.password.message)}</p>
               )}
             </div>
-            <Button type="submit" className="w-full" size="lg" disabled={loading}>
+            <Button type="submit" className="w-full mt-2" size="lg" disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

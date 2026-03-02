@@ -304,6 +304,10 @@ export const ReagentOrderSchema = v.object({
 
 /**
  * 耗材订单 Schema
+ * 与后端 ConsumableOrderCreate 保持一致
+ * - specification: 必填
+ * - unit: 可选
+ * - 移除了 order_reason 和 is_hazardous
  */
 export const ConsumableOrderSchema = v.object({
   name: createRequiredStringSchema('名称'),
@@ -311,11 +315,12 @@ export const ConsumableOrderSchema = v.object({
   alias: v.optional(v.string()),
   category: v.optional(v.string()),
   brand: v.optional(v.string()),
-  specification: v.optional(SpecificationSchema),
+  specification: createRequiredStringSchema('规格'),  // 后端必填
+  unit: v.optional(v.string()),  // 后端新增可选字段
   quantity: createPositiveNumberSchema('数量'),
   price: v.optional(createPriceSchema()),
-  order_reason: OrderReasonSchema,
-  is_hazardous: v.boolean('危险品必须是布尔值'),
+  // 移除了 order_reason (后端已移除)
+  // 移除了 is_hazardous (后端已移除)
   notes: v.optional(v.string())
 })
 

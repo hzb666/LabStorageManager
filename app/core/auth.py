@@ -2,7 +2,7 @@
 JWT Authentication Module
 Critical Rule #3: All data modification endpoints must check current_user
 """
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
@@ -11,6 +11,7 @@ import bcrypt
 from sqlmodel import Session
 
 from app.core.config import settings
+from app.core.time_utils import get_utc_now
 from app.database import get_db
 from app.models.user import User, UserRole
 
