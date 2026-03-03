@@ -33,11 +33,19 @@ export function ImportPage() {
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // 最大文件大小 (2MB)
+  const MAX_FILE_SIZE = 2 * 1024 * 1024
+
   const validateFile = useCallback((selectedFile: File): boolean => {
     const validExtensions = ['.csv', '.xlsx', '.xls']
     const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase()
     if (!validExtensions.includes(extension)) {
       toast.warning('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
+      return false
+    }
+    // 检查文件大小
+    if (selectedFile.size > MAX_FILE_SIZE) {
+      toast.warning(`文件大小不能超过 2MB，当前文件大小为 ${(selectedFile.size / 1024 / 1024).toFixed(2)}MB`)
       return false
     }
     return true
@@ -328,29 +336,29 @@ export function ImportPage() {
 
                 {/* Error Details */}
                 {result.errors && result.errors.length > 0 && (
-                  <div className="border rounded-lg overflow-hidden">
-                    <div className="bg-destructive/10 px-4 py-2 border-b">
-                      <h4 className="font-medium text-sm text-destructive">错误详情</h4>
+                  <div className="border border-destructive rounded-lg overflow-hidden">
+                    <div className="bg-destructive/10 px-4 py-2 border-b border-destructive/20">
+                      <h4 className="font-medium text-destructive">错误详情</h4>
                     </div>
                     <div className="max-h-75 overflow-y-auto">
-                      <table className="w-full text-sm">
+                      <table className="w-full">
                         <thead className="bg-muted/50 sticky top-0">
                           <tr>
-                            <th className="px-4 py-2 text-left font-medium text-sm text-muted-foreground w-16">行号</th>
-                            <th className="px-4 py-2 text-left font-medium text-sm text-muted-foreground">错误信息</th>
+                            <th className="px-4 py-2 text-left font-medium text-muted-foreground w-16">行号</th>
+                            <th className="px-4 py-2 text-left font-medium text-muted-foreground">错误信息</th>
                           </tr>
                         </thead>
                         <tbody>
                           {result.errors.slice(0, 50).map((err, i) => (
                             <tr key={i} className="border-t border-border">
-                              <td className="px-4 py-2 font-mono text-sm">{err.row}</td>
+                              <td className="px-4 py-2 text-sm">{err.row}</td>
                               <td className="px-4 py-2 text-destructive text-sm">{err.error}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                       {result.errors.length > 50 && (
-                        <div className="px-4 py-2 text-center text-sm text-muted-foreground border-t bg-muted/30">
+                        <div className="px-4 py-2 text-center text-sm text-muted-foreground bg-muted/30">
                           ... 还有 {result.errors.length - 50} 条错误
                         </div>
                       )}
