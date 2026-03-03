@@ -70,6 +70,9 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
         ondelete="SET NULL"
     )
     status: ConsumableOrderStatus = ConsumableOrderStatus.PENDING
+    # 拼音索引字段（用于排序和搜索）
+    name_pinyin: Optional[str] = Field(None, max_length=200, index=True)
+    category_pinyin: Optional[str] = Field(None, max_length=100, index=True)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
