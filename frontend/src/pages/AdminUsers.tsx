@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useCallback } from 'react'
+﻿import React, { useState, useMemo, useCallback } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -8,6 +8,7 @@ import {
   getFilteredRowModel,
 } from '@tanstack/react-table'
 import type { SortingState } from '@tanstack/react-table'
+import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
@@ -61,12 +62,32 @@ const columnHelper = createColumnHelper<User>()
 
 export function AdminUsersPage() {
   const { user: currentUser, setAuth } = useAuthStore()
-  const [data, setData] = useState<User[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+
+  // 使用 React Query 获取用户列表，配合 keepPreviousData 避免闪烁
+  const { data: userData = [], isLoading } = useQuery({
+    queryKey: ['adminUsers', roleFilter, statusFilter],
+    queryFn: async () => {
+      const params: UserListParams = {}
+      if (roleFilter !== 'all') params.role = roleFilter
+      if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
+      const response = await userAdminAPI.list(params)
+      return response.data || []
+    },
+    placeholderData: keepPreviousData,
+  })
+
+  // 为了兼容性，保留 data 变量
+  const data = userData
+
+  // 刷新数据函数
+  const refetchUsers = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['adminUsers'] })
+  }, [queryClient])
 
   // Dialog state - 使用 useDialogState 管理 create/edit/delete 对话框
   const [dialogState, setDialogState] = useDialogState<"create" | "edit" | "delete">()
@@ -102,26 +123,6 @@ export function AdminUsersPage() {
   })
   const [changePasswordErrors, setChangePasswordErrors] = useState<Record<string, string>>({})
   const [changePasswordLoading, setChangePasswordLoading] = useState(false)
-
-  // 使用 useCallback 优化 loadUsers 函数
-  const loadUsers = useCallback(async () => {
-    try {
-      const params: UserListParams = {}
-      if (roleFilter !== 'all') params.role = roleFilter
-      if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
-      
-      const response = await userAdminAPI.list(params)
-      setData(response.data || [])
-    } catch (error) {
-      console.error('Failed to load users:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [roleFilter, statusFilter])
-
-  useEffect(() => {
-    loadUsers()
-  }, [loadUsers])
 
   // 表格列定义
   const columns = useMemo(() => [
@@ -260,7 +261,7 @@ export function AdminUsersPage() {
       await userAdminAPI.create(createData)
       setDialogState(null)
       setCreateData({ username: '', password: '', full_name: '', role: 'user' })
-      loadUsers()
+      refetchUsers()
       toast.success('用户创建成功')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
@@ -292,7 +293,7 @@ export function AdminUsersPage() {
       
       setDialogState(null)
       setEditUser(null)
-      loadUsers()
+      refetchUsers()
       toast.success('用户更新成功')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
@@ -316,7 +317,7 @@ export function AdminUsersPage() {
       await userAdminAPI.delete(deleteUser.id)
       setDialogState(null)
       setDeleteUser(null)
-      loadUsers()
+      refetchUsers()
       toast.success('用户已禁用')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
@@ -330,7 +331,7 @@ export function AdminUsersPage() {
   const handleActivate = async (userId: number) => {
     try {
       await userAdminAPI.activate(userId)
-      loadUsers()
+      refetchUsers()
       toast.success('用户已启用')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
@@ -455,16 +456,7 @@ export function AdminUsersPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {/* 有数据时在角落显示加载指示器 */}
-          {loading && data.length > 0 && (
-            <div className="flex justify-end mb-2">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>加载中...</span>
-              </div>
-            </div>
-          )}
-          {loading && data.length === 0 ? (
+          {isLoading && data.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>

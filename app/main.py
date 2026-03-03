@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.database import init_db
-from app.api import users, inventory, reagent_orders, consumable_orders, user_sessions
+from app.api import users, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync
 
 # Configure logging
 logging.basicConfig(
@@ -60,6 +60,7 @@ app.include_router(inventory.router, prefix="/api")
 app.include_router(reagent_orders.router, prefix="/api")
 app.include_router(consumable_orders.router, prefix="/api")
 app.include_router(user_sessions.router, prefix="/api/users/me")
+app.include_router(cart_sync.router, prefix="/api")
 
 
 @app.get("/")
