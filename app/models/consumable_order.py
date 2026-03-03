@@ -19,22 +19,10 @@ class ConsumableOrderStatus(str, Enum):
     COMPLETED = "completed"  # 已完成（耗材不需要入库）
 
 
-class ConsumableOrderReason(str, Enum):
-    """Order reason enumeration"""
-    NONE = "none"
-    RUNNING_OUT = "running_out"
-    NOT_STOCKED = "not_stocked"    # 库里没有
-    COMMON_PUBLIC = "common_public"
-    NOT_FOUND = "not_found"
-    REORDER = "reorder"
-    HIGH_USAGE = "high_usage"
-    DEGRADED = "degraded"
-
-
 class ConsumableOrderBase(SQLModel):
     """Base consumable order model"""
-    # Chinese name
-    name: str = Field(max_length=200)
+    # Chinese name (with index for query)
+    name: str = Field(index=True, max_length=200)
     # English name
     english_name: Optional[str] = Field(None, max_length=200)
     # Alias (e.g., "酒精, Ethanol")
@@ -43,18 +31,14 @@ class ConsumableOrderBase(SQLModel):
     category: Optional[str] = Field(None, max_length=100)
     # Brand (e.g., "3M", "Corning")
     brand: Optional[str] = Field(None, max_length=100)
-    # Initial quantity value (e.g., 500)
-    initial_quantity: Optional[float] = Field(None, ge=0)
-    # Unit (e.g., "盒", "包", "个")
+    # Specification (规格型号，如 "500ml"、M码)
+    specification: str = Field(max_length=100)
+    # Unit (单位，如 "箱"、"个") - 选填
     unit: Optional[str] = Field(None, max_length=20)
-    # Quantity ordered
+    # Quantity ordered (必填，大于0)
     quantity: int = Field(gt=0)
     # Price
     price: Optional[float] = Field(None, ge=0)
-    # Order reason
-    order_reason: ConsumableOrderReason = ConsumableOrderReason.NONE
-    # Hazardous flag
-    is_hazardous: bool = False
     # Image path (thumbnail in filesystem)
     image_path: Optional[str] = None
     # Notes
@@ -66,35 +50,38 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     applicant_id: Optional[int] = Field(
         default=None,
+        index=True,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    status: ConsumableOrderStatus = ConsumableOrderStatus.PENDING
+    status: ConsumableOrderStatus = Field(default=ConsumableOrderStatus.PENDING, index=True)
     # 拼音索引字段（用于排序和搜索）
     name_pinyin: Optional[str] = Field(None, max_length=200, index=True)
     category_pinyin: Optional[str] = Field(None, max_length=100, index=True)
-    created_at: datetime = Field(default_factory=get_utc_now)
+    created_at: datetime = Field(default_factory=get_utc_now, index=True)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
         sa_column_kwargs={"onupdate": get_utc_now}
     )
 
+    # 拼音排序字段（预计算，使用数据库索引加速排序）
+    name_pinyin: Optional[str] = Field(default=None, index=True)
+
 
 class ConsumableOrderCreate(SQLModel):
     """DTO for creating a new consumable order
 
-    前端传入 specification (规格字符串)，后端解析为 initial_quantity + unit
+    前端传入 quantity (数量) 和 specification (规格)
     """
     name: str = Field(max_length=200)
     english_name: Optional[str] = None
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
-    specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500个"
-    quantity: int = Field(gt=0)
+    specification: str = Field(max_length=100)  # 规格型号，必填
+    unit: Optional[str] = None  # 单位，选填
+    quantity: int = Field(gt=0)  # 数量，必填，大于0
     price: Optional[float] = None
-    order_reason: ConsumableOrderReason = ConsumableOrderReason.NONE
-    is_hazardous: bool = False
     notes: Optional[str] = None
 
 
@@ -105,12 +92,10 @@ class ConsumableOrderUpdate(SQLModel):
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
-    initial_quantity: Optional[float] = None
+    specification: Optional[str] = None
     unit: Optional[str] = None
     quantity: Optional[int] = None
     price: Optional[float] = None
-    order_reason: Optional[ConsumableOrderReason] = None
-    is_hazardous: Optional[bool] = None
     status: Optional[ConsumableOrderStatus] = None
     notes: Optional[str] = None
 
@@ -123,15 +108,15 @@ class ConsumableOrderResponse(SQLModel):
     alias: Optional[str]
     category: Optional[str]
     brand: Optional[str]
-    initial_quantity: Optional[float]
+    specification: str
     unit: Optional[str]
     quantity: int
     price: Optional[float]
-    order_reason: ConsumableOrderReason
-    is_hazardous: bool
     image_path: Optional[str]
     notes: Optional[str]
     applicant_id: Optional[int]
     status: ConsumableOrderStatus
     created_at: datetime
     updated_at: datetime
+    # 拼音排序字段
+    name_pinyin: Optional[str] = None

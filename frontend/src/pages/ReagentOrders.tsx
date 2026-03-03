@@ -189,7 +189,7 @@ export function ReagentOrdersPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (globalFilter !== searchInput) {
-        if (tableRef.current) tableRef.current.resetExpanded()
+        // 不再调用 tableRef.current.resetExpanded()，保持展开全部状态
         setGlobalFilter(searchInput)
       }
     }, 300)
@@ -277,7 +277,7 @@ export function ReagentOrdersPage() {
       return null
     },
     placeholderData: keepPreviousData,
-    refetchInterval: 10000,  // 10秒自动刷新，与库存页面保持一致
+    // refetchInterval: 10000, // [FIXME] 反模式：无限查询不应使用全局轮询
   })
 
   const data = useMemo(() => allData?.pages.flatMap(page => page.data) ?? [], [allData])
@@ -593,7 +593,7 @@ export function ReagentOrdersPage() {
     onColumnSizingChange: setColumnSizing,
     manualSorting: true,
     onSortingChange: (updater) => {
-      table.resetExpanded()
+      // 不再调用 table.resetExpanded()，保持展开全部状态
       setSorting(prev => {
         const newSorting = typeof updater === 'function' ? updater(prev) : updater
         sortingRef.current = newSorting
@@ -658,14 +658,14 @@ export function ReagentOrdersPage() {
               checked={fuzzySearch}
               onCheckedChange={(checked) => {
                 startTransition(() => {
-                  table.resetExpanded()
+                  // 不再调用 table.resetExpanded()，保持展开全部状态
                   setFuzzySearch(checked === true)
                 })
               }}
             />
             <span className="text-base pr-2">模糊搜索</span>
           </label>
-          <Select value={searchField} onValueChange={(val) => { table.resetExpanded(); setSearchField(val) }}>
+          <Select value={searchField} onValueChange={(val) => { setSearchField(val) }}>
             <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部</SelectItem>
@@ -675,7 +675,7 @@ export function ReagentOrdersPage() {
               <SelectItem value="category">分类</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={(val) => { table.resetExpanded(); setStatusFilter(val) }}>
+          <Select value={statusFilter} onValueChange={(val) => { setStatusFilter(val) }}>
             <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部状态" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部状态</SelectItem>

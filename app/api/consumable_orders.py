@@ -67,10 +67,10 @@ def _clear_reagent_order_cache() -> None:
 
 
 def _add_specification(item_dict: dict) -> dict:
-    """Add computed specification field to order response dict"""
-    initial = item_dict.get("initial_quantity", 0)
-    unit = item_dict.get("unit", "")
-    item_dict["specification"] = format_specification(initial, unit)
+    """Add specification field to order response dict
+    注意：specification 是用户直接输入的完整规格字符串，无需拼接
+    """
+    # specification 字段已包含在 model_dump 中，无需额外处理
     return item_dict
 
 
@@ -86,14 +86,8 @@ def create_consumable_order(
     db: Session = Depends(get_db)
 ):
     """Create a new consumable order"""
-    # Parse specification to get initial_quantity and unit
-    try:
-        initial_quantity, unit = parse_specification(order.specification)
-    except SpecificationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid specification format: {e}"
-        )
+    # specification 是用户直接输入的完整规格字符串（如 "500个"、"1箱"）
+    # 不需要从中解析任何内容，直接存储即可
     
     # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(name=order.name)
@@ -105,12 +99,10 @@ def create_consumable_order(
         alias=order.alias,
         category=order.category,
         brand=order.brand,
-        initial_quantity=initial_quantity,
-        unit=unit,
+        specification=order.specification,  # 规格字符串直接存储
+        unit=order.unit,  # 单位，选填
         quantity=order.quantity,
         price=order.price,
-        order_reason=order.order_reason,
-        is_hazardous=order.is_hazardous,
         applicant_id=current_user.id,
         **pinyin_fields,
     )
@@ -156,10 +148,13 @@ async def upload_consumable_order_image(
         )
 
 
+# 分页限制常量
+MAX_PAGE_SIZE = 100
+
 @router.get("/")
 def list_consumable_orders(
     skip: int = 0,
-    limit: int = 50,
+    limit: int = min(50, MAX_PAGE_SIZE),
     status_filter: Optional[ConsumableOrderStatus] = None,
     search: Optional[str] = None,
     search_field: Optional[str] = None,
@@ -314,13 +309,13 @@ def export_consumable_orders(
 
     writer.writerow([
         "名称", "英文名", "别名", "分类", "品牌",
-        "规格", "数量", "单价", "申购原因", "状态",
-        "是否危险品", "申请人", "申购时间", "备注",
+        "规格", "数量", "单价", "状态",
+        "申请人", "申购时间", "备注",
     ])
 
     for order in orders:
-        # 使用公共函数格式化规格
-        spec = format_specification(order.initial_quantity, order.unit)
+        # 使用直接存储的规格字符串
+        spec = getattr(order, 'specification', '') or ''
         writer.writerow([
             order.name,
             order.english_name or "",
@@ -330,9 +325,7 @@ def export_consumable_orders(
             spec or "",
             order.quantity,
             order.price or "",
-            order.order_reason.value if hasattr(order.order_reason, "value") else order.order_reason,
             order.status.value if hasattr(order.status, "value") else order.status,
-            "是" if order.is_hazardous else "否",
             all_users_map.get(order.applicant_id, "") if order.applicant_id else "",
             order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
             order.notes or "",
@@ -378,7 +371,15 @@ def update_consumable_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
-    
+
+    # 检查权限：只有申请人和管理员可以更新
+    from app.models.user import UserRole
+    if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the order applicant or admin can update this order"
+        )
+
     update_data = order_update.model_dump(exclude_unset=True)
     
     # 如果更新了 name，重新计算拼音字段
@@ -513,12 +514,10 @@ def get_my_consumable_orders(
             "order_id": order.id,
             "name": order.name,
             "english_name": order.english_name,
-            "specification": format_specification(order.initial_quantity, order.unit),
+            "specification": getattr(order, 'specification', '') or '',
             "quantity": order.quantity,
             "price": order.price,
-            "is_hazardous": order.is_hazardous,
             "notes": order.notes,
-            "order_reason": order.order_reason,
             "created_at": order.created_at,
             "updated_at": order.updated_at
         }

@@ -593,10 +593,13 @@ def import_inventory(
 
 # ==================== Generic / ID-based Routes ====================
 
+# 分页限制常量
+MAX_PAGE_SIZE = 100
+
 @router.get("/")
 def list_inventory(
     skip: int = 0,
-    limit: int = 50,  # 默认分页50条，与前端保持一致
+    limit: int = min(50, MAX_PAGE_SIZE),  # 默认分页50条，最大100条
     status_filter: Optional[InventoryStatus] = None,
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
@@ -716,7 +719,6 @@ def list_inventory(
         'name': Inventory.name_pinyin,
         'category': Inventory.category_pinyin,
         'brand': Inventory.brand_pinyin,
-        'alias': Inventory.alias_pinyin,
     }
     
     sort_field_map = {

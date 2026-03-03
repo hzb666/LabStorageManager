@@ -80,7 +80,6 @@ class Inventory(InventoryBase, table=True):
     name_pinyin: Optional[str] = Field(default=None, index=True)
     category_pinyin: Optional[str] = Field(default=None, index=True)
     brand_pinyin: Optional[str] = Field(default=None, index=True)
-    alias_pinyin: Optional[str] = Field(default=None, index=True)
 
 
 class InventoryCreate(SQLModel):

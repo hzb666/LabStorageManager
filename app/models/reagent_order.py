@@ -36,16 +36,16 @@ class ReagentOrderBase(SQLModel):
     """Base reagent order model with common fields"""
     # CAS Number - Critical field for reagents
     cas_number: str = Field(index=True, max_length=50)
-    # Chinese name
-    name: str = Field(max_length=200)
+    # Chinese name (with index for query and pinyin for sorting)
+    name: str = Field(index=True, max_length=200)
     # English name
     english_name: Optional[str] = Field(None, max_length=200)
     # Alias (e.g., "酒精, Ethanol")
     alias: Optional[str] = Field(None, max_length=200)
-    # Category (e.g., "分析纯", "实验级")
-    category: Optional[str] = Field(None, max_length=100)
-    # Brand (e.g., "Sigma", "国药")
-    brand: Optional[str] = Field(None, max_length=100)
+    # Category (with index for query and pinyin for sorting)
+    category: Optional[str] = Field(index=True, max_length=100)
+    # Brand (with index for query and pinyin for sorting)
+    brand: Optional[str] = Field(index=True, max_length=100)
     # Initial quantity value (e.g., 500)
     initial_quantity: Optional[float] = Field(None, ge=0)
     # Unit (e.g., "ml", "g", "L")
@@ -69,15 +69,20 @@ class ReagentOrder(ReagentOrderBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     applicant_id: Optional[int] = Field(
         default=None,
+        index=True,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    status: ReagentOrderStatus = ReagentOrderStatus.PENDING
-    created_at: datetime = Field(default_factory=get_utc_now)
+    status: ReagentOrderStatus = Field(default=ReagentOrderStatus.PENDING, index=True)
+    created_at: datetime = Field(default_factory=get_utc_now, index=True)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
         sa_column_kwargs={"onupdate": get_utc_now}
     )
+    
+    # 拼音排序字段（预计算，使用数据库索引加速排序）
+    name_pinyin: Optional[str] = Field(default=None, index=True)
+    brand_pinyin: Optional[str] = Field(default=None, index=True)
 
 
 class ReagentOrderCreate(SQLModel):
@@ -138,3 +143,6 @@ class ReagentOrderResponse(SQLModel):
     status: ReagentOrderStatus
     created_at: datetime
     updated_at: datetime
+    # 拼音排序字段
+    name_pinyin: Optional[str] = None
+    brand_pinyin: Optional[str] = None

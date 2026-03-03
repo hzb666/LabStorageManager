@@ -115,7 +115,7 @@ const InnerRow = memo(InnerRowComponent) as typeof InnerRowComponent
 export function DataTable<TData>({
   table,
   renderExpandedRow,
-  estimatedRowHeight = 53,
+  estimatedRowHeight = 56.8, // 更新默认行高
   scrollHeight = 600,
   enableExpandAll = false,
   expandAllStorageKey,
@@ -302,10 +302,15 @@ export function DataTable<TData>({
     document.addEventListener('touchend', onUp)
   }, [visibleColumns, totalWeight, minTableWidth, table])
 
+  // 🎯 修改处：动态处理 overscan 和 estimateSize
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
-    estimateSize: () => estimatedRowHeight,
-    overscan: 10,
+    estimateSize: useCallback((index: number) => {
+      const row = rows[index]
+      // 动态判断该行是否展开，如果展开则返回基础高度 + 展开高度
+      return row?.getIsExpanded() ? estimatedRowHeight + 124.8 : estimatedRowHeight
+    }, [rows, estimatedRowHeight]),
+    overscan: isAllExpanded ? 5 : 10, // 展开全部时降低 overscan 渲染量
     getScrollElement: () => bodyScrollRef.current,
     getItemKey: useCallback((index: number) => rows[index]?.id ?? index, [rows]),
   })
