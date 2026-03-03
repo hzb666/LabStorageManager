@@ -71,8 +71,8 @@ FILE_MAGIC_BYTES = {
     ".csv": b"",  # CSV is text, no magic bytes needed
 }
 
-# 最大文件大小 (2MB)
-MAX_FILE_SIZE = 2 * 1024 * 1024
+# 最大文件大小 (10MB)
+MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
 def validate_uploaded_file(file: UploadFile) -> None:

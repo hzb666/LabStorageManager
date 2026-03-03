@@ -2,7 +2,7 @@
  * 设备管理页面
  * 用户可以查看和管理自己的登录设备
  */
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -12,7 +12,6 @@ import {
   getFilteredRowModel,
 } from '@tanstack/react-table'
 import type { SortingState } from '@tanstack/react-table'
-import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -38,7 +37,8 @@ const columnHelper = createColumnHelper<SessionInfo>()
 
 export default function DeviceManagement() {
   const logout = useAuthStore((state) => state.logout)
-  const queryClient = useQueryClient()
+  const [data, setData] = useState<SessionInfo[]>([])
+  const [loading, setLoading] = useState(true)
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
 
@@ -52,23 +52,23 @@ export default function DeviceManagement() {
   // Kick all devices
   const [kickAllLoading, setKickAllLoading] = useState(false)
 
-  // 使用 React Query 获取会话数据，配合 keepPreviousData 避免闪烁
-  const { data: sessionData = [], isLoading } = useQuery({
-    queryKey: ['sessions'],
-    queryFn: async () => {
+  // Fetch sessions
+  const fetchSessions = useCallback(async () => {
+    try {
       const response = await sessionAPI.list()
-      return response.data || []
-    },
-    placeholderData: keepPreviousData,
-  })
+      console.log('Sessions response:', response)
+      setData(response.data || [])
+    } catch (error) {
+      console.error('Failed to load sessions:', error)
+      toast.error('加载设备列表失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  // 为了兼容性，保留 data 变量
-  const data = sessionData
-
-  // 刷新数据函数
-  const refetchSessions = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['sessions'] })
-  }, [queryClient])
+  useEffect(() => {
+    fetchSessions()
+  }, [fetchSessions])
 
   // Determine current device (first one is most recent)
   const currentDeviceId = useMemo(() => {
@@ -174,9 +174,9 @@ export default function DeviceManagement() {
       await sessionAPI.delete(kickSession.id)
       setDialogState(null)
       setKickSession(null)
-      refetchSessions()
+      fetchSessions()
       toast.success('设备已踢出')
-    } catch {
+    } catch (error) {
       toast.error('操作失败')
     } finally {
       setKickLoading(false)
@@ -193,11 +193,11 @@ export default function DeviceManagement() {
     try {
       await sessionAPI.deleteAll()
       setDialogState(null)
-      refetchSessions()
+      fetchSessions()
       // Redirect to login
       logout()
       toast.success('已踢出所有其他设备，请重新登录')
-    } catch {
+    } catch (error) {
       toast.error('操作失败')
     } finally {
       setKickAllLoading(false)
@@ -208,7 +208,7 @@ export default function DeviceManagement() {
   const handleRefresh = async () => {
     try {
       await sessionAPI.refresh()
-      refetchSessions()
+      fetchSessions()
       toast.success('会话已刷新')
     } catch {
       toast.error('刷新失败')
@@ -264,13 +264,22 @@ export default function DeviceManagement() {
       {/* Devices Table */}
       <Card className="overflow-hidden">
         <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
+          <CardTitle className="flex items-center gap-2 text-lg 设备列表">
             <Laptop className="w-5 h-5" />
             设备列表 <span className="text-muted-foreground font-normal">(&thinsp;{data.length}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading && data.length === 0 ? (
+          {/* Loading indicator */}
+          {loading && data.length > 0 && (
+            <div className="flex justify-end mb-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>加载中...</span>
+              </div>
+            </div>
+          )}
+          {loading && data.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>

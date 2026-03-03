@@ -654,6 +654,9 @@ export function ConsumableOrdersPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
+          {isLoading && data.length > 0 && (
+            <div className="flex justify-end mb-2"><div className="flex items-center gap-2 text-base text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /><span>加载中...</span></div></div>
+          )}
           {isLoading && data.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />

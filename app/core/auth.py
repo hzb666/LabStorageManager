@@ -11,7 +11,6 @@ import bcrypt
 from sqlmodel import Session
 
 from app.core.config import settings
-from app.core.time_utils import get_utc_now
 from app.database import get_db
 from app.models.user import User, UserRole
 

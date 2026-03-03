@@ -336,7 +336,6 @@ def import_inventory_from_excel(
                 status=InventoryStatus.IN_STOCK,
                 notes=notes,
                 created_at=created_at,
-                created_by_id=user_id,
                 **pinyin_fields,
             )
             
