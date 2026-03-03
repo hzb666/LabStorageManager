@@ -24,6 +24,29 @@ interface DataTableProps<TData> {
   searchKeyword?: string  // 搜索关键词，用于区分无数据情况
 }
 
+// 定义属性类型
+interface MemoizedExpandedRowProps<TData> {
+  original: TData;
+  renderExpandedRow: (row: TData) => React.ReactNode;
+}
+
+// 使用 memo 包裹，并提供自定义的对比函数 (arePropsEqual)
+const MemoizedExpandedRow = memo(
+  <TData,>({ original, renderExpandedRow }: MemoizedExpandedRowProps<TData>) => {
+    // 这里单纯执行原本的渲染逻辑
+    return <>{renderExpandedRow(original)}</>;
+  },
+  (prevProps, nextProps) => {
+    // 🛡️ 核心隔离逻辑：
+    // 如果前后两帧的"原始行数据"没有发生变化，就直接复用上一次的渲染结果！
+    // 这样，外部的列宽变化、hover 状态变化，都无法穿透进来触发重渲染。
+    
+    // 注意：如果你的 TData 中有唯一标识（比如 id），建议改成：
+    // return (prevProps.original as any).id === (nextProps.original as any).id;
+    return prevProps.original === nextProps.original;
+  }
+) as <TData>(props: MemoizedExpandedRowProps<TData>) => JSX.Element;
+
 // --- 性能优化：内层组件渲染隔离 ---
 function InnerRowComponent<TData>({
   row,
@@ -101,7 +124,11 @@ function InnerRowComponent<TData>({
             transition={{ duration: 0.3, ease: "easeInOut" }}
             className="bg-muted/30 border-b dark:bg-input/30 border-border"
           >
-            {renderExpandedRow(original)}
+            {/* 🚀 替换为 Memoized 组件 */}
+            <MemoizedExpandedRow 
+              original={original} 
+              renderExpandedRow={renderExpandedRow} 
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -196,26 +223,31 @@ export function DataTable<TData>({
     }
   }, [visibleColumns, columnSizing])
 
-  // 🚀 性能优化 3：O(1) 预计算样式字典
+// 🚀 核心修复：完全拥抱 Flex-grow，抛弃硬算百分比
   const columnStyles = useMemo(() => {
     const styles: Record<string, React.CSSProperties> = {}
+    
     visibleColumns.forEach(column => {
       const size = column.getSize()
       if (size === 0) {
         styles[column.id] = { display: 'none' }
         return
       }
-      const widthPercent = (size / totalWeight) * 100
+      
       const minSize = column.columnDef.minSize ?? 50
+      
       styles[column.id] = {
-        flex: `0 0 ${widthPercent}%`,
-        width: `${widthPercent}%`,
-        minWidth: `${minSize}px`,
+        // flex-grow 用你的 size 作为分配权重
+        // flex-shrink 为 0 防止被非正常挤压
+        // flex-basis 设为 0%，让所有空间都作为“剩余空间”按比例分配
+        flex: `${size} 0 0%`, 
+        minWidth: `${minSize}px`, // 触底反弹的底线
         boxSizing: 'border-box',
+        overflow: 'hidden', // 确保内容不会意外撑开单元格
       }
     })
     return styles
-  }, [visibleColumns, totalWeight, columnSizing])
+  }, [visibleColumns, columnSizing])
 
   const getProportionalStyles = useCallback((column: Column<TData, unknown>): React.CSSProperties => {
     return columnStyles[column.id] || {}
@@ -334,51 +366,58 @@ export function DataTable<TData>({
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, rowVirtualizer])
 
   // 🛡️ 终极核心修复：使用动态追踪插值（Dynamic Lerp）强力对抗虚拟列表滚动跳跃
+  // 🛡️ 核心修复：点击时先完成顶部对齐平滑滚动，然后再执行展开操作
+// 🛡️ 优雅的异步展开与滚动对齐 (Cubic Ease-Out 时间轴动画)
   const handleRowClick = useCallback((e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => {
     const isExpanding = !row.getIsExpanded()
+    
+    // 🚀 核心修改 1：无论是否需要滚动，立即触发展开动画（实现异步同时进行）
     row.toggleExpanded()
 
-    if (isExpanding) {
-      const el = bodyScrollRef.current
-      const container = e.currentTarget.closest('[data-index]')
+    const el = bodyScrollRef.current
+    const container = e.currentTarget.closest('[data-index]')
+
+    if (isExpanding && el && container && virtualizerRef.current) {
+      const index = Number(container.getAttribute('data-index'))
+      const initialItem = virtualizerRef.current.getVirtualItems().find(v => v.index === index)
       
-      if (el && container && virtualizerRef.current) {
-        const index = Number(container.getAttribute('data-index'))
-        const initialItem = virtualizerRef.current.getVirtualItems().find(v => v.index === index)
+      // 🎯 检查：如果该行在顶部未能完全显示 (被遮挡)
+      if (initialItem && initialItem.start < el.scrollTop) {
+        const targetY = initialItem.start
+        const startY = el.scrollTop
+        const distance = targetY - startY
+        const duration = 300 // 动画时长 300ms (与展开动画时间基本对齐)
+        let startTime: number | null = null
+        let expectedScrollTop = startY
         
-        // 只有当行在视口上方（被遮挡）时才触发动画
-        if (initialItem && initialItem.start < el.scrollTop) {
-          let startTime = performance.now()
+        // 优雅的缓动函数：Cubic Ease-Out (起步快，结尾平滑减速)
+        const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
+
+        const smoothScroll = (currentTime: number) => {
+          if (!el) return
           
-          const animate = (time: number) => {
-            if (!el || !virtualizerRef.current) return
-            
-            const elapsed = time - startTime
-            
-            // 🔥 关键魔术：每一帧都向虚拟列表索取该行的“最新坐标”
-            // 彻底解决滚动回去重测导致的 Layout Shift 坐标偏移问题！
-            const currentItem = virtualizerRef.current.getVirtualItems().find(v => v.index === index)
-            // 如果瞬间找不到（极低概率），回退到上一次的已知坐标
-            const targetY = currentItem ? currentItem.start : initialItem.start
-            
-            // 计算当前距离目标的差值
-            const diff = targetY - el.scrollTop
-            
-            // 动画执行 400ms (完全覆盖 motion 的 300ms) 或距离 < 1px 时直接吸附停止
-            if (elapsed > 400 || Math.abs(diff) < 1) {
-              el.scrollTop = targetY
-              return
-            }
-            
-            // 丝滑缓动算法：每帧追赶剩余距离的 15%
-            // 如果虚拟列表突然把 targetY 往下挪了，下一帧它会自动调转方向继续追！
-            el.scrollTop += diff * 0.15
-            
-            requestAnimationFrame(animate)
+          // 防干预：如果用户主动触摸/滚轮介入了滚动，立即中止程序接管
+          if (Math.abs(el.scrollTop - expectedScrollTop) > 2) return
+          
+          if (!startTime) startTime = currentTime
+          const elapsed = currentTime - startTime
+          
+          // 计算当前进度比例 (0 到 1)
+          const progress = Math.min(elapsed / duration, 1)
+          
+          // 🚀 核心修改 2：使用时间轴和缓动函数计算当前应处的位置
+          const currentPosition = startY + distance * easeOutCubic(progress)
+          
+          el.scrollTop = currentPosition
+          expectedScrollTop = el.scrollTop 
+          
+          // 如果动画未结束，继续请求下一帧
+          if (progress < 1) {
+            requestAnimationFrame(smoothScroll)
           }
-          
-          requestAnimationFrame(animate)
         }
+        
+        requestAnimationFrame(smoothScroll)
       }
     }
   }, [])
@@ -441,9 +480,9 @@ export function DataTable<TData>({
                             onMouseDown={(e) => handleCustomResize(e, header)}
                             onTouchStart={(e) => handleCustomResize(e, header)}
                             onDoubleClick={() => table.resetColumnSizing()}
-                            title="拖拽调整比例 (双击恢复默认)"
+                            title="拖拽调整列宽 (双击恢复默认)"
                             className={cn(
-                              "absolute right-0 top-0 h-full w-1 cursor-col-resize z-10 touch-none transition-all opacity-0 group-hover:opacity-100",
+                              "absolute right-0 top-1.5 h-full w-1 cursor-col-resize z-10 touch-none transition-all opacity-0 group-hover:opacity-100",
                               isResizing ? "bg-primary/70 opacity-100 w-1.5" : "hover:bg-primary/50",
                               isResizing && header.getSize() === (header.column.columnDef.minSize ?? 50) && "bg-destructive/70",
                               isResizing && header.column.columnDef.maxSize && header.getSize() === header.column.columnDef.maxSize && "bg-destructive/70"

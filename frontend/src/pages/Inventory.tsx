@@ -265,8 +265,7 @@ export function InventoryPage() {
     getNextPageParam: (lastPage, allPages) => {
       // [DEBUG] 诊断日志：记录轮询时的页面状态
       console.log('[Inventory] refetch triggered, pages loaded:', allPages.length, 'total items:', lastPage.total)
-      // 限制最大页数，避免无限加载
-      if (allPages.length >= MAX_PAGES) return null
+      // 无限滚动：只要还有数据就继续加载
       const currentLoadedCount = allPages.reduce((acc, page) => acc + page.data.length, 0)
       if (currentLoadedCount < (lastPage.total || 0)) return currentLoadedCount
       return null
@@ -503,18 +502,6 @@ export function InventoryPage() {
         </div>
       ),
     }),
-    columnHelper.accessor('category', {
-      header: '分类', size: 100, minSize: 80, maxSize: 150,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={info.getValue() || '-'}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
-    }),
     columnHelper.accessor('storage_location', {
       id: 'storage_location', header: '位置', size: 100, minSize: 80, maxSize: 150,
       sortDescFirst: false, sortingFn: 'text',
@@ -522,6 +509,18 @@ export function InventoryPage() {
         <span className="break-all">
           <HighlightText
             text={info.row.original.storage_location || '-'}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
+    }),
+    columnHelper.accessor('category', {
+      header: '分类', size: 100, minSize: 80, maxSize: 150,
+      cell: info => (
+        <span className="break-all">
+          <HighlightText
+            text={info.getValue() || '-'}
             highlight={info.table.getState().globalFilter}
             fuzzy={info.table.options.meta?.fuzzySearch}
           />
@@ -541,7 +540,7 @@ export function InventoryPage() {
       ),
     }),
     columnHelper.accessor('remaining_quantity', {
-      id: 'remaining_percent', header: '剩余/规格', size: 140, minSize: 120, maxSize: 200,
+      id: 'remaining_percent', header: '剩余/规格', size: 120, minSize: 120, maxSize: 150,
       cell: info => (
         <QuantityIndicator
           remaining={info.getValue()}

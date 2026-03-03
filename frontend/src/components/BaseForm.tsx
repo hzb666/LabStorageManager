@@ -155,7 +155,15 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
     const isReadOnly = readOnly || field.readOnly
 
     // 其他类型字段 - 都在 FormField 内部渲染
-    const colSpanClass = field.colSpan ? `sm:col-span-${field.colSpan}` : ''
+    // 使用 switch 确保 Tailwind JIT 编译器能识别静态类名
+    const colSpanClass = (() => {
+      switch (field.colSpan) {
+        case 1: return 'sm:col-span-1'
+        case 2: return 'sm:col-span-2'
+        case 3: return 'sm:col-span-3'
+        default: return ''
+      }
+    })()
     return (
       <Controller
         key={field.name as string}
