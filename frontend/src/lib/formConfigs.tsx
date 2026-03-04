@@ -1,13 +1,79 @@
 /**
- * 订单表单字段配置
- * 统一管理试剂订单和耗材订单的表单字段配置，供 BaseForm 组件使用
+ * 表单字段配置
+ * 统一管理库存、试剂订单和耗材订单的表单字段配置，供 BaseForm 组件使用
  */
 
 import React from 'react'
 import { AlertTriangle } from 'lucide-react'
 import type { FieldSchema } from '../components/BaseForm'
-import type { ReagentOrderFormData, ConsumableOrderFormData } from './validationSchemas'
+import type { ReagentOrderFormData, ConsumableOrderFormData, InventoryFormData } from './validationSchemas'
 import { ORDER_REASON_OPTIONS, REAGENT_CATEGORY_OPTIONS, REAGENT_BRAND_OPTIONS } from './options'
+
+// ============================================================================
+// 库存表单配置
+// ============================================================================
+
+/** 库存表单默认值 */
+export const defaultInventoryValues: InventoryFormData = {
+  name: '',
+  cas_number: '',
+  english_name: '',
+  alias: '',
+  specification: '',
+  category: '',
+  brand: '',
+  storage_location: '',
+  is_hazardous: false,
+  notes: '',
+  quantity_bottles: 1,
+  initial_quantity: 0,
+  remaining_quantity: 0
+}
+
+/**
+ * 获取库存表单字段配置
+ * @param isEdit 是否为编辑模式
+ * @param initialQuantity 初始数量（编辑模式下使用）
+ */
+export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number): FieldSchema<InventoryFormData>[] {
+  // 编辑模式下显示：剩余量 + 规格；添加模式下显示：瓶数 + 规格
+  const quantityFields = isEdit && initialQuantity !== undefined
+    ? [
+        { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 100', min: 0 },
+        { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
+      ]
+    : [
+        { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 1', min: 1 },
+        { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
+      ]
+
+  return [
+    { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
+    { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
+    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
+    { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
+    { name: 'storage_location' as const, label: '存放位置', type: 'input' as const, placeholder: '如: A-1-1 柜' },
+    ...quantityFields,
+    { name: 'brand' as const, label: '品牌', type: 'input' as const, placeholder: '如: Sigma' },
+    { name: 'category' as const, label: '分类', type: 'input' as const, placeholder: '如: 有机试剂' },
+    {
+      name: 'is_hazardous' as const,
+      label: '危险品',
+      type: 'checkbox' as const,
+      checkboxLabel: (
+        <span className="flex items-center gap-1">
+          <AlertTriangle className="w-4 h-4 text-yellow-500" />
+          危险品
+        </span>
+      )
+    },
+    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
+  ]
+}
+
+// ============================================================================
+// 试剂订单表单配置
+// ============================================================================
 
 // 试剂订单默认值
 export const defaultReagentOrderValues: ReagentOrderFormData = {
@@ -15,7 +81,6 @@ export const defaultReagentOrderValues: ReagentOrderFormData = {
   cas_number: '',
   english_name: '',
   alias: '',
-  category: '',
   brand: '',
   specification: '',
   quantity: 1,
@@ -29,8 +94,6 @@ export const defaultReagentOrderValues: ReagentOrderFormData = {
 export const defaultConsumableOrderValues: ConsumableOrderFormData = {
   name: '',
   english_name: '',
-  alias: '',
-  category: '',
   brand: '',
   specification: '',
   unit: '',
@@ -46,12 +109,11 @@ export const defaultConsumableOrderValues: ConsumableOrderFormData = {
 export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentOrderFormData>[] {
   return [
     { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
-    { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: !isEdit, readOnly: isEdit, placeholder: '如: 64-17-5' },
+    { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
-    { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: REAGENT_CATEGORY_OPTIONS, placeholder: '输入分类名称' },
     { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称' },
-    { name: 'specification' as const, label: '规格', type: 'input' as const, placeholder: '如: 500ml' },
+    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' },
     { 
       name: 'quantity' as const, 
       label: '数量', 
@@ -61,7 +123,7 @@ export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentO
       min: 1,
       placeholder: '如: 1' 
     },
-    { name: 'price' as const, label: '单价(元)', type: 'input' as const, inputType: 'number' as const, placeholder: '如: 100' },
+    { name: 'price' as const, label: '单价(元)', type: 'input' as const, required: true, inputType: 'number' as const, placeholder: '如: 100' },
     {
       name: 'order_reason' as const,
       label: '申购原因',
@@ -80,7 +142,7 @@ export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentO
         </span>
       )
     },
-    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, placeholder: '其他说明...' },
+    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
   ]
 }
 
@@ -107,6 +169,6 @@ export function getConsumableOrderFormFields(_isEdit: boolean): FieldSchema<Cons
       placeholder: '如: 1' 
     },
     { name: 'price' as const, label: '单价(元)', type: 'input' as const, inputType: 'number' as const, placeholder: '如: 50' },
-    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, placeholder: '其他说明...' },
-  ]
-}
+      { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
+      ]
+  }

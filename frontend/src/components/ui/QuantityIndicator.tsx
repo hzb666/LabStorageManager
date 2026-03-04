@@ -23,6 +23,7 @@ interface QuantityIndicatorProps {
  * - 0%: 红色（用完）
  * - 0-20%: 琥珀色（快用完）
  * - >20%: 正常颜色
+ * - initial 为 0 时：显示 "-"
  */
 export function QuantityIndicator({
   remaining,
@@ -33,18 +34,26 @@ export function QuantityIndicator({
   showBar = true,
   barWidth = 'w-16'
 }: QuantityIndicatorProps) {
+  // 当 initial 为 0 时，不显示剩余量/规格，显示 "-"
+  if (initial === 0) {
+    return (
+      <div className={cn('flex items-center h-8 break-all', className)}>
+        <span className="text-muted-foreground">-</span>
+      </div>
+    )
+  }
+
   const percentage = initial > 0 ? (remaining / initial) * 100 : 0
-  // 优先使用后端已格式化的 specification，否则使用 unit
-  // 使用极窄空格 \u200A (Hair Space)
   const narrowSpace = '\u200A'
   const displayText = specification 
     ? `${remaining}${narrowSpace}/${narrowSpace}${specification}` 
     : (unit ? `${remaining}${narrowSpace}/${narrowSpace}${initial} ${unit}` : `${remaining}${narrowSpace}/${narrowSpace}${initial}`)
 
   return (
-    <div className={cn('break-all', className)}>
+    <div className={cn('flex flex-col justify-center h-8 break-all', className)}>
       <span
         className={cn(
+          'leading-none', // 【核心修改】：消除默认行高带来的上下留白
           // 快用完时 (0 < percentage < 20)：使用琥珀色
           percentage < 20 && percentage > 0 && 'text-amber-600 font-medium dark:text-amber-400',
           // 完全耗尽时 (percentage === 0)：使用红色
@@ -54,7 +63,7 @@ export function QuantityIndicator({
         {displayText}
       </span>
       {showBar && percentage < 20 && (
-        <div className={cn(barWidth, 'h-1.5 rounded mt-1', 
+        <div className={cn(barWidth, 'h-1.5 rounded mt-1.5', // mt-1.5 配合 leading-none 让视觉更紧凑
           percentage === 0 ? 'bg-destructive/20' : 'bg-amber-500/20'
         )}>
           <div

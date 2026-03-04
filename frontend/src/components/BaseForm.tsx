@@ -35,6 +35,7 @@ export interface FieldSchema<T extends Record<string, unknown>> {
   hideLabel?: boolean  // 是否隐藏标签（用 ::before 占据位置）
   min?: number         // 数字字段的最小值
   max?: number         // 数字字段的最大值
+  enableTagToggle?: boolean  // 是否开启状态功能（如 [强调] 前缀）
 }
 
 /**
@@ -217,6 +218,8 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
                 disabled={isDisabled}
                 readOnly={isReadOnly}
                 className={getInputClassName(hasError, isReadOnly)}
+                enableTagToggle={field.enableTagToggle}
+                tag="[强调]"
               />
             )}
 
@@ -232,20 +235,18 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
             )}
 
             {field.type === 'checkbox' && (
-              <div className="flex items-center gap-2">
+              <label 
+                htmlFor={`field-${field.name as string}`}
+                className="flex items-center gap-2 cursor-pointer text-base h-5"
+              >
                 <Checkbox
                   id={`field-${field.name as string}`}
                   checked={Boolean(controllerField.value)}
                   onCheckedChange={(checked) => controllerField.onChange(checked === true)}
                   disabled={isDisabled}
                 />
-                <label 
-                  htmlFor={`field-${field.name as string}`}
-                  className="cursor-pointer text-base"
-                >
-                  {field.checkboxLabel}
-                </label>
-              </div>
+                {field.checkboxLabel}
+              </label>
             )}
             </FormField>
           </div>

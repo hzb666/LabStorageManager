@@ -33,7 +33,7 @@ const FormField = React.forwardRef<HTMLDivElement, FormFieldProps>(
       <div ref={ref} className={cn("flex flex-col", className)} {...props}>
         <Label className={cn("text-base mb-1.5 block", hideLabel && "before:content-[''] before:h-[22px] before:block")}>
           {hideLabel ? '' : label}
-          {required && !hideLabel && <span className="text-destructive text-lg">&thinsp;*</span>}
+          {required && !hideLabel && <span className="text-destructive text-lg leading-4">&thinsp;*</span>}
         </Label>
         {children}
         {error && (

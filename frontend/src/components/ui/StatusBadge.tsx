@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 
 // 预定义颜色
-export type BadgeColor = 'green' | 'blue' | 'orange' | 'gray' | 'purple' | 'red'
+export type BadgeColor = 'green' | 'blue' | 'orange' | 'gray' | 'purple' | 'red' | 'amber'
 
 // 颜色样式映射
 export const BADGE_COLORS: Record<BadgeColor, string> = {
@@ -11,12 +11,14 @@ export const BADGE_COLORS: Record<BadgeColor, string> = {
   gray: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700',
   purple: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 border border-purple-300 dark:border-purple-700',
   red: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 border border-red-300 dark:border-red-700',
+  amber: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700',
 }
 
 // 状态到颜色的默认映射
 export const STATUS_COLORS: Record<string, BadgeColor> = {
   // 库存状态
   in_stock: 'green',
+  not_in_stock: 'amber',
   borrowed: 'blue',
   consumed: 'gray',
   // 用户状态
@@ -40,6 +42,7 @@ export const STATUS_COLORS: Record<string, BadgeColor> = {
 export const STATUS_LABELS: Record<string, string> = {
   // 库存状态
   in_stock: '在库',
+  not_in_stock: '没有',
   borrowed: '借出',
   consumed: '用完',
   // 用户状态

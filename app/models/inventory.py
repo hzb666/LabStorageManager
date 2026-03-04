@@ -103,14 +103,18 @@ class InventoryCreate(SQLModel):
 
 class InventoryUpdate(SQLModel):
     """DTO for updating inventory"""
+    name: Optional[str] = None
+    cas_number: Optional[str] = None
     storage_location: Optional[str] = None
     remaining_quantity: Optional[float] = None
     status: Optional[InventoryStatus] = None
     temporary_keeper_id: Optional[int] = None
     notes: Optional[str] = None
     english_name: Optional[str] = None
+    alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
+    is_hazardous: Optional[bool] = None
 
 
 class InventoryBorrowReturn(SQLModel):

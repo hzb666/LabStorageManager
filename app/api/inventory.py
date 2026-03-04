@@ -633,6 +633,7 @@ def list_inventory(
     base = select(Inventory)
 
     if status_filter:
+        # 直接使用枚举值进行精确匹配
         base = base.where(Inventory.status == status_filter)
     if cas_filter:
         base = base.where(Inventory.cas_number == normalize_cas(cas_filter))
@@ -738,6 +739,9 @@ def list_inventory(
     # 确定排序字段和方向
     order_direction = sort_order.lower() if sort_order else 'desc'
     
+    # [DEBUG] 添加日志诊断排序问题
+    logger.info(f"[SORT_DEBUG] sort_by={sort_by}, sort_order={sort_order}, order_direction={order_direction}, status_filter={status_filter}")
+    
     # 中文拼音排序字段列表
     pinyin_sort_fields = {'name', 'category', 'brand', 'alias'}
     
@@ -757,13 +761,15 @@ def list_inventory(
         order_expr = order_column.desc()
 
     # 次级排序：始终按创建时间降序，确保同值排序时顺序稳定，最新数据排在前面
+    # 第三级排序：按ID降序（确保排序完全稳定，避免相同created_at导致顺序变化）
     secondary_order = Inventory.created_at.desc()
+    tertiary_order = Inventory.id.desc()
 
     # 统一使用数据库排序
     if limit > 0:
-        items = db.exec(base.order_by(order_expr, secondary_order).offset(skip).limit(limit)).all()
+        items = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
     else:
-        items = db.exec(base.order_by(order_expr, secondary_order)).all()
+        items = db.exec(base.order_by(order_expr, secondary_order, tertiary_order)).all()
 
     # ================= 性能优化核心：批量查询用户（消除 N+1） =================
     # 遍历当前页的数据，收集所有需要查询的用户 ID

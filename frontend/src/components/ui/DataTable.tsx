@@ -1,3 +1,4 @@
+// DataTable.tsx
 import React, { useRef, useCallback, useState, useEffect, memo, useMemo } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import type { Table as TableType, Row, Cell, Column } from '@tanstack/react-table'
@@ -37,12 +38,6 @@ const MemoizedExpandedRow = memo(
     return <>{renderExpandedRow(original)}</>;
   },
   (prevProps, nextProps) => {
-    // 🛡️ 核心隔离逻辑：
-    // 如果前后两帧的"原始行数据"没有发生变化，就直接复用上一次的渲染结果！
-    // 这样，外部的列宽变化、hover 状态变化，都无法穿透进来触发重渲染。
-    
-    // 注意：如果你的 TData 中有唯一标识（比如 id），建议改成：
-    // return (prevProps.original as any).id === (nextProps.original as any).id;
     return prevProps.original === nextProps.original;
   }
 ) as <TData>(props: MemoizedExpandedRowProps<TData>) => JSX.Element;
@@ -50,21 +45,26 @@ const MemoizedExpandedRow = memo(
 // --- 性能优化：内层组件渲染隔离 ---
 function InnerRowComponent<TData>({
   row,
+  isExpanded,
   renderExpandedRow,
   getProportionalStyles,
   noteField,
   onRowClick,
 }: {
   row: Row<TData>
+  isExpanded: boolean 
   renderExpandedRow?: (row: TData) => React.ReactNode
   getProportionalStyles: (column: Column<TData, unknown>) => React.CSSProperties
   noteField?: string
   onRowClick?: (e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => void
 }) {
-  const isExpanded = row.getIsExpanded()
   const original = row.original as TData
-  
-  const hasNote = noteField ? Boolean((original as Record<string, unknown>)?.[noteField]) : false
+
+  const noteValue = noteField
+    ? (original as Record<string, unknown>)?.[noteField] as string | undefined
+    : undefined
+  const hasNote = Boolean(noteValue)
+  const isHighlighted = noteValue?.startsWith('[强调]') || false
 
   const handleToggle = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -99,15 +99,21 @@ function InnerRowComponent<TData>({
               )}
               style={getProportionalStyles(cell.column)}
             >
-              <div 
-                className={cn(
-                  "absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-[75%] bg-slate-300 dark:bg-slate-500 rounded-r-[2px]",
-                  "transition-all duration-300 ease-in-out origin-center",
-                  showAccentLine 
-                    ? "opacity-100 scale-y-100" 
-                    : "opacity-0 scale-y-0"
-                )} 
-              />
+              {/* 仅在第一列渲染这个指示线 DOM */}
+              {isFirstCol && (
+                <div
+                  className={cn(
+                    "absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-[75%] rounded-r-[2px]",
+                    isHighlighted
+                      ? "bg-amber-400 dark:bg-amber-600"
+                      : "bg-slate-300 dark:bg-slate-500",
+                    "transition-all duration-300 ease-in-out origin-center",
+                    showAccentLine
+                      ? "opacity-100 scale-y-100"
+                      : "opacity-0 scale-y-0"
+                  )}
+                />
+              )}
               {flexRender(cell.column.columnDef.cell, cell.getContext())}
             </div>
           )
@@ -136,7 +142,22 @@ function InnerRowComponent<TData>({
   )
 }
 
-const InnerRow = memo(InnerRowComponent) as typeof InnerRowComponent
+// 🚀 修正后的性能优化：在比对中加入 row.original
+const InnerRow = memo(InnerRowComponent, (prevProps, nextProps) => {
+  return (
+    // 1. 核心数据必须一致（如果编辑了数据，row.original 的引用会发生变化）
+    prevProps.row.original === nextProps.row.original && 
+    // 2. 唯一标识必须一致
+    prevProps.row.id === nextProps.row.id &&
+    // 3. 展开状态必须一致
+    prevProps.isExpanded === nextProps.isExpanded &&
+    // 4. 其他 UI 相关的 Props 比对
+    prevProps.renderExpandedRow === nextProps.renderExpandedRow &&
+    prevProps.getProportionalStyles === nextProps.getProportionalStyles &&
+    prevProps.noteField === nextProps.noteField &&
+    prevProps.onRowClick === nextProps.onRowClick
+  )
+}) as typeof InnerRowComponent
 
 // --- 列表主容器：容器级虚拟滚动 ---
 export function DataTable<TData>({
@@ -239,11 +260,11 @@ export function DataTable<TData>({
       styles[column.id] = {
         // flex-grow 用你的 size 作为分配权重
         // flex-shrink 为 0 防止被非正常挤压
-        // flex-basis 设为 0%，让所有空间都作为“剩余空间”按比例分配
-        flex: `${size} 0 0%`, 
+        // flex-basis 设为 0%，让所有空间都作为”剩余空间”按比例分配
+        flex: `${size} 0 0%`,
         minWidth: `${minSize}px`, // 触底反弹的底线
         boxSizing: 'border-box',
-        overflow: 'hidden', // 确保内容不会意外撑开单元格
+        // 移除 overflow: 'hidden'，允许备注提示条显示在单元格左侧
       }
     })
     return styles
@@ -532,6 +553,7 @@ export function DataTable<TData>({
               >
                 <InnerRow
                   row={row}
+                  isExpanded={row.getIsExpanded()} // 🚀 核心修复：强制向内部传递布尔值打破浅比较
                   renderExpandedRow={renderExpandedRow}
                   getProportionalStyles={getProportionalStyles}
                   noteField={noteField}

@@ -1,7 +1,7 @@
 /**
  * 通用表格操作按钮组件
  * 通过 Props 传入配置，实现不同表格的操作按钮复用
- * 使用 React.memo + 自定义 isEqual 优化性能
+ * 使用 React.memo + 通用浅比较 优化性能并防止闭包陷阱
  */
 import React, { useState } from 'react'
 import { Button } from '@/components/ui/Button'
@@ -60,6 +60,8 @@ export interface TableActionButtonsProps<T> {
     label: string
     /** 样式类名 */
     className?: string
+    /** 鼠标悬停提示 (新增) */
+    title?: string
   }[]
   /** 紧凑模式 */
   compact?: boolean
@@ -92,7 +94,10 @@ export function TableActionButtons<T extends Record<string, unknown>>({
     if (matchedStatus) {
       return (
         <div className="flex items-center gap-1 text-sm text-muted-foreground">
-          <span className={matchedStatus.className}>{matchedStatus.label}</span>
+          {/* 新增了 title 属性的支持 */}
+          <span className={matchedStatus.className} title={matchedStatus.title}>
+            {matchedStatus.label}
+          </span>
         </div>
       )
     }
@@ -207,7 +212,7 @@ function ActionButton<T extends Record<string, unknown>>({
         size="sm"
         className={cn(
           config.className,
-          'h-8',
+          'h-8 text-sm leading-4',
           // 动态样式：保持与 Inventory.tsx 一致
           isConfirming
             ? isLoading
@@ -269,13 +274,29 @@ function ActionButton<T extends Record<string, unknown>>({
 export const TableActionButtonsMemo = React.memo(
   TableActionButtons,
   (prevProps, nextProps) => {
-    // 自定义比较函数：只比较关键属性
-    return (
-      prevProps.item.id === nextProps.item.id &&
-      prevProps.item.status === nextProps.item.status &&
-      prevProps.isAdmin === nextProps.isAdmin &&
-      prevProps.showEdit === nextProps.showEdit &&
-      prevProps.compact === nextProps.compact
-    )
+    // 1. 比较配置项引用 (防止父组件配置变化时组件不更新)
+    if (
+      prevProps.isAdmin !== nextProps.isAdmin ||
+      prevProps.showEdit !== nextProps.showEdit ||
+      prevProps.compact !== nextProps.compact ||
+      prevProps.onEdit !== nextProps.onEdit ||
+      prevProps.actions !== nextProps.actions ||
+      prevProps.statusDisplay !== nextProps.statusDisplay
+    ) {
+      return false
+    }
+
+    // 2. 动态遍历比较 item 的所有属性 (抹平泛型差异，杜绝硬编码导致的闭包缓存)
+    const prevItem = prevProps.item as Record<string, unknown>
+    const nextItem = nextProps.item as Record<string, unknown>
+
+    if (prevItem === nextItem) return true
+
+    const prevKeys = Object.keys(prevItem)
+    const nextKeys = Object.keys(nextItem)
+
+    if (prevKeys.length !== nextKeys.length) return false
+
+    return prevKeys.every((key) => prevItem[key] === nextItem[key])
   }
 ) as typeof TableActionButtons

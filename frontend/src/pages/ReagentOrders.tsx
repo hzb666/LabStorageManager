@@ -357,16 +357,16 @@ export function ReagentOrdersPage() {
         if (dialogState === 'edit' && editingItem) {
           await reagentOrderAPI.update(editingItem.id, {
             name: formData.name,
-            english_name: formData.english_name || undefined,
-            alias: formData.alias || undefined,
-            category: formData.category || undefined,
-            brand: formData.brand || undefined,
-            specification: formData.specification || undefined,
+            english_name: formData.english_name || '',
+            alias: formData.alias || '',
+            category: formData.category || '',
+            brand: formData.brand || '',
+            specification: formData.specification || '',
             quantity: formData.quantity,
             price: formData.price,
             order_reason: formData.order_reason,
             is_hazardous: formData.is_hazardous,
-            notes: formData.notes || undefined
+            notes: formData.notes || ''
           })
         } else if (dialogState === 'add') {
           await reagentOrderAPI.create({
@@ -672,7 +672,6 @@ export function ReagentOrdersPage() {
               <SelectItem value="name">名称</SelectItem>
               <SelectItem value="cas_number">CAS号</SelectItem>
               <SelectItem value="brand">品牌</SelectItem>
-              <SelectItem value="category">分类</SelectItem>
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={(val) => { setStatusFilter(val) }}>

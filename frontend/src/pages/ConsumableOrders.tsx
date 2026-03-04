@@ -291,15 +291,15 @@ export function ConsumableOrdersPage() {
         if (dialogState === 'edit' && editingItem) {
           await consumableOrderAPI.update(editingItem.id, {
             name: formData.name,
-            english_name: formData.english_name || undefined,
-            alias: formData.alias || undefined,
-            category: formData.category || undefined,
-            brand: formData.brand || undefined,
-            specification: formData.specification || undefined,
-            unit: formData.unit || undefined,
+            english_name: formData.english_name || '',
+            alias: formData.alias || '',
+            category: formData.category || '',
+            brand: formData.brand || '',
+            specification: formData.specification || '',
+            unit: formData.unit || '',
             quantity: formData.quantity,
             price: formData.price,
-            notes: formData.notes || undefined
+            notes: formData.notes || ''
           })
         } else if (dialogState === 'add') {
           await consumableOrderAPI.create({
@@ -310,7 +310,7 @@ export function ConsumableOrdersPage() {
             category: formData.category || undefined,
             brand: formData.brand || undefined,
             price: formData.price ? parseFloat(String(formData.price)) : undefined,
-            notes: formData.notes || undefined,
+            notes: formData.notes || '',
           })
         }
         // 先刷新数据，再弹出 toast，确保数据已加载完成

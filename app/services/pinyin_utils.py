@@ -39,5 +39,4 @@ def compute_pinyin_fields(name: str = None, category: str = None,
         'name_pinyin': to_pinyin(name) if name else None,
         'category_pinyin': to_pinyin(category) if category else None,
         'brand_pinyin': to_pinyin(brand) if brand else None,
-        'alias_pinyin': to_pinyin(alias) if alias else None,
     }
