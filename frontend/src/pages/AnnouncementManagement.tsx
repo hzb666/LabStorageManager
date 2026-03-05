@@ -14,9 +14,8 @@ import { Label } from '@/components/ui/Label'
 import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { announcementAPI, type Announcement, type StorageInfo } from '@/api/client'
+import { announcementAPI, type Announcement } from '@/api/client'
 import { toast } from '@/components/ui/Toast'
-import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
 import { AxiosError } from 'axios'
@@ -101,6 +100,63 @@ export function AnnouncementManagement() {
     queryClient.invalidateQueries({ queryKey: ['announcements'] })
     queryClient.invalidateQueries({ queryKey: ['announcementStorageInfo'] })
   }, [queryClient])
+
+  // 处理置顶切换
+  const handleTogglePin = async (id: number) => {
+    try {
+      await announcementAPI.togglePin(id)
+      refetchAnnouncements()
+      toast.success('置顶状态已更新')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
+    }
+  }
+
+  // 处理显示/隐藏切换
+  const handleToggleVisibility = async (id: number) => {
+    try {
+      await announcementAPI.toggleVisibility(id)
+      refetchAnnouncements()
+      toast.success('显示状态已更新')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '操作失败')
+    }
+  }
+
+  // 打开编辑弹窗
+  const openEditModal = (announcement: Announcement) => {
+    setEditingId(announcement.id)
+    setFormData({
+      title: announcement.title,
+      content: announcement.content,
+      images: [...announcement.images],
+      is_pinned: announcement.is_pinned,
+      is_visible: announcement.is_visible,
+    })
+    setFormErrors({})
+    setDialogState('edit')
+  }
+
+  // 打开删除弹窗
+  const openDeleteModal = (announcement: Announcement) => {
+    setDeleteId(announcement.id)
+    setDialogState('delete')
+  }
+
+  // 重置表单
+  const resetForm = () => {
+    setFormData({
+      title: '',
+      content: '',
+      images: [],
+      is_pinned: false,
+      is_visible: true,
+    })
+    setFormErrors({})
+    setEditingId(null)
+  }
 
   // 表格列定义
   const columns = useMemo(() => [
@@ -315,106 +371,6 @@ export function AnnouncementManagement() {
     }
   }
 
-  // 处理置顶切换
-  const handleTogglePin = async (id: number) => {
-    try {
-      await announcementAPI.togglePin(id)
-      refetchAnnouncements()
-      toast.success('置顶状态已更新')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
-    }
-  }
-
-  // 处理显示/隐藏切换
-  const handleToggleVisibility = async (id: number) => {
-    try {
-      await announcementAPI.toggleVisibility(id)
-      refetchAnnouncements()
-      toast.success('显示状态已更新')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
-    }
-  }
-
-  // 处理图片上传
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    // 验证文件类型
-    if (!file.type.startsWith('image/')) {
-      toast.error('请上传图片文件')
-      return
-    }
-
-    // 验证文件大小 (最大 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('图片大小不能超过 5MB')
-      return
-    }
-
-    setUploading(true)
-    try {
-      const url = await announcementAPI.uploadImage(file)
-      setFormData(prev => ({
-        ...prev,
-        images: [...prev.images, url]
-      }))
-      toast.success('图片上传成功')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '图片上传失败')
-    } finally {
-      setUploading(false)
-      // 清空 input 以便再次选择同一文件
-      e.target.value = ''
-    }
-  }
-
-  // 处理删除图片
-  const handleRemoveImage = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      images: prev.images.filter((_, i) => i !== index)
-    }))
-  }
-
-  // 打开编辑弹窗
-  const openEditModal = (announcement: Announcement) => {
-    setEditingId(announcement.id)
-    setFormData({
-      title: announcement.title,
-      content: announcement.content,
-      images: [...announcement.images],
-      is_pinned: announcement.is_pinned,
-      is_visible: announcement.is_visible,
-    })
-    setFormErrors({})
-    setDialogState('edit')
-  }
-
-  // 打开删除弹窗
-  const openDeleteModal = (announcement: Announcement) => {
-    setDeleteId(announcement.id)
-    setDialogState('delete')
-  }
-
-  // 重置表单
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      content: '',
-      images: [],
-      is_pinned: false,
-      is_visible: true,
-    })
-    setFormErrors({})
-    setEditingId(null)
-  }
-
   // 关闭创建弹窗时清空表单
   const handleCreateModalClose = (open: boolean) => {
     setDialogState(open ? 'create' : null)
@@ -571,8 +527,8 @@ export function AnnouncementManagement() {
                 {/* 已上传的图片预览 */}
                 {formData.images.length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {formData.images.map((url, index) => (
-                      <div key={index} className="relative group">
+                    {formData.images.map((url) => (
+                      <div key={url} className="relative group">
                         <img
                           src={url}
                           alt={`图片 ${index + 1}`}
@@ -580,7 +536,7 @@ export function AnnouncementManagement() {
                         />
                         <button
                           type="button"
-                          onClick={() => handleRemoveImage(index)}
+                          onClick={() => handleRemoveImage(url)}
                           className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           <X className="w-4 h-4" />
@@ -666,8 +622,8 @@ export function AnnouncementManagement() {
                 {/* 已上传的图片预览 */}
                 {formData.images.length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {formData.images.map((url, index) => (
-                      <div key={index} className="relative group">
+                    {formData.images.map((url) => (
+                      <div key={url} className="relative group">
                         <img
                           src={url}
                           alt={`图片 ${index + 1}`}
@@ -675,7 +631,7 @@ export function AnnouncementManagement() {
                         />
                         <button
                           type="button"
-                          onClick={() => handleRemoveImage(index)}
+                          onClick={() => handleRemoveImage(url)}
                           className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           <X className="w-4 h-4" />
