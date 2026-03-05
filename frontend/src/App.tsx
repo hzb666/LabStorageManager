@@ -14,6 +14,7 @@ import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
 import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { isAdmin } from '@/lib/constants'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -25,7 +26,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((state) => state.user)
-  if (user?.role !== 'admin') {
+  if (!isAdmin(user)) {
     return <Navigate to="/" replace />
   }
   return <>{children}</>

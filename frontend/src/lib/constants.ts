@@ -78,6 +78,39 @@ export const USER_ROLE_MAP: Record<string, string> = {
   user: '普通用户',
 }
 
+// User Role 常量 - 用于代码中的角色判断
+export const UserRoles = {
+  ADMIN: 'admin',
+  USER: 'user',
+} as const
+
+export type UserRole = typeof UserRoles[keyof typeof UserRoles]
+
+// 用户类型定义
+export interface User {
+  id: number
+  username: string
+  full_name: string | null
+  role: UserRole
+  is_active: boolean
+  created_at: string
+}
+
+/**
+ * 判断用户是否为管理员
+ */
+export function isAdmin(user: { role: string } | null | undefined): boolean {
+  return user?.role === UserRoles.ADMIN
+}
+
+/**
+ * 判断用户是否为管理员或本人（用于操作权限判断）
+ */
+export function isAdminOrSelf(currentUser: { role: string; id: number } | null | undefined, targetId: number): boolean {
+  if (!currentUser) return false
+  return currentUser.role === UserRoles.ADMIN || currentUser.id === targetId
+}
+
 // === Import Template Columns ===
 export interface ImportColumn {
   name: string

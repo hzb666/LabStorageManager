@@ -420,6 +420,14 @@ def update_reagent_order(
             detail="Order not found"
         )
     
+    # 检查权限：普通用户只能编辑自己的订单，管理员可以编辑所有人的订单
+    from app.models.user import UserRole
+    if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the order applicant or admin can edit this order"
+        )
+    
     update_data = order_update.model_dump(exclude_unset=True)
     
     # Normalize CAS if being updated

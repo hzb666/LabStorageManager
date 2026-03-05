@@ -20,6 +20,7 @@ import {
 import { BugReportButton, getBugButtonHidden, clearBugButtonHidden } from '@/components/BugReportButton'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
+import { isAdmin, USER_ROLE_MAP } from '@/lib/constants'
 
 const navItems = [
   { title: '仪表盘', href: '/', icon: LayoutDashboard, group: '功能' },
@@ -63,7 +64,7 @@ export function Layout() {
   }
 
   const filteredNavItems = navItems.filter(
-    (item) => !item.adminOnly || user?.role === 'admin'
+    (item) => !item.adminOnly || isAdmin(user)
   )
 
   // 判断当前是否在设备管理页面
@@ -218,7 +219,7 @@ export function Layout() {
                   {user?.full_name || user?.username}
                 </p>
                 <p className="text-sm text-sidebar-foreground/70 truncate">
-                  {user?.role === 'admin' ? '管理员' : '用户'}
+                  {user?.role ? USER_ROLE_MAP[user.role] || user.role : '用户'}
                 </p>
               </div>
             </Link>
@@ -355,7 +356,7 @@ export function Layout() {
                   {user?.full_name || user?.username}
                 </p>
                 <p className="text-sm text-sidebar-foreground/70 truncate">
-                  {user?.role === 'admin' ? '管理员' : '用户'}
+                  {user?.role ? USER_ROLE_MAP[user.role] || user.role : '用户'}
                 </p>
               </div>
             </Link>

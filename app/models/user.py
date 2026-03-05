@@ -52,14 +52,14 @@ class UserCreate(SQLModel):
     """DTO for creating a new user"""
     username: str = Field(min_length=3, max_length=20)
     password: str = Field(min_length=6)
-    full_name: Optional[str] = None
+    full_name: str = Field(min_length=1, max_length=100)  # 必填
     role: UserRole = UserRole.USER
 
 
 class UserUpdate(SQLModel):
     """DTO for updating user information"""
     username: Optional[str] = Field(None, min_length=3, max_length=20)
-    full_name: Optional[str] = None
+    full_name: str  # 必填，不允许为空
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
 

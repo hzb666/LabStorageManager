@@ -23,7 +23,7 @@ import { useAuthStore } from '@/store/useStore'
 import { formatDate, cn } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
 import * as v from 'valibot'
-import { UserCreateSchema, ChangePasswordWithConfirmSchema } from '@/lib/validationSchemas'
+import { UserCreateSchema, UserUpdateSchema, ChangePasswordWithConfirmSchema, createRequiredStringSchema, UsernameSchema } from '@/lib/validationSchemas'
 import {
   Search,
   Users,
@@ -39,6 +39,8 @@ import { AxiosError } from 'axios'
 import type { PaginationParams } from '@/api/client'
 
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 
 // 用户状态样式 - 使用 StatusBadge 组件
 
@@ -66,28 +68,72 @@ export function AdminUsersPage() {
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('all')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<string>('active')
+
+  // 分页状态
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
 
   // 使用 React Query 获取用户列表，配合 keepPreviousData 避免闪烁
   const { data: userData = [], isLoading } = useQuery({
-    queryKey: ['adminUsers', roleFilter, statusFilter],
+    queryKey: ['adminUsers', roleFilter, statusFilter, currentPage, pageSize],
     queryFn: async () => {
-      const params: UserListParams = {}
+      const params: UserListParams = {
+        skip: (currentPage - 1) * pageSize,
+        limit: pageSize,
+      }
       if (roleFilter !== 'all') params.role = roleFilter
       if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
       const response = await userAdminAPI.list(params)
-      return response.data || []
+      return response.data.data || []
     },
     placeholderData: keepPreviousData,
   })
 
-  // 为了兼容性，保留 data 变量
-  const data = userData
+  // 获取总数
+  const { data: totalData } = useQuery({
+    queryKey: ['adminUsers', 'total', roleFilter, statusFilter],
+    queryFn: async () => {
+      const params: UserListParams = { skip: 0, limit: 1 }
+      if (roleFilter !== 'all') params.role = roleFilter
+      if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
+      const response = await userAdminAPI.list(params)
+      return response.data.total || 0
+    },
+    enabled: true,
+  })
+
+  const total = totalData || 0
+  const totalPages = Math.ceil(total / pageSize)
+
+  // 将当前管理员账户置顶显示
+  const data = useMemo(() => {
+    if (!currentUser) return userData
+    const currentUserId = currentUser.id
+    const currentUserIndex = userData.findIndex((user: User) => user.id === currentUserId)
+    if (currentUserIndex === -1 || currentUserIndex === 0) return userData
+    
+    // 将当前用户移到数组最前面
+    const result = [...userData]
+    const [currentUserItem] = result.splice(currentUserIndex, 1)
+    result.unshift(currentUserItem)
+    return result
+  }, [userData, currentUser])
 
   // 刷新数据函数
   const refetchUsers = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['adminUsers'] })
   }, [queryClient])
+
+  // 分页变化处理
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+  }
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size)
+    setCurrentPage(1) // 重置到第一页
+  }
 
   // Dialog state - 使用 useDialogState 管理 create/edit/delete 对话框
   const [dialogState, setDialogState] = useDialogState<"create" | "edit" | "delete">()
@@ -105,17 +151,19 @@ export function AdminUsersPage() {
   // Edit user modal
   const [editUser, setEditUser] = useState<User | null>(null)
   const [editData, setEditData] = useState({
+    username: '',
     full_name: '',
     role: 'user' as 'admin' | 'user'
   })
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({})
   const [editLoading, setEditLoading] = useState(false)
 
   // Delete confirmation
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
 
-  // Change password modal state
-  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false)
+  // Change password state (集成在 Edit Modal 中)
+  const [isEditingPassword, setIsEditingPassword] = useState(false)
   const [changePasswordData, setChangePasswordData] = useState({
     old_password: '',
     new_password: '',
@@ -153,7 +201,7 @@ export function AdminUsersPage() {
     }),
     columnHelper.accessor('created_at', {
       header: '创建时间',
-      size: 150,
+      size: 120,
       cell: info => formatDate(info.getValue()),
     }),
     columnHelper.display({
@@ -163,7 +211,7 @@ export function AdminUsersPage() {
       cell: info => {
         const user = info.row.original
         const isSelf = user.id === currentUser?.id
-        
+
         return (
           <div className="flex items-center gap-1">
             <Button
@@ -227,6 +275,27 @@ export function AdminUsersPage() {
     },
   })
 
+  // 通用验证错误解析函数
+  const parseValidationErrors = (error: unknown): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    if (error instanceof v.ValiError) {
+      for (const issue of error.issues) {
+        const field = issue.path?.[0]?.key as string
+        if (field) errors[field] = issue.message
+      }
+    }
+    return errors
+  }
+
+  // 通用 API 错误处理函数
+  const handleApiError = (error: unknown, defaultMsg: string): string => {
+    const axiosError = error as AxiosError<{ detail?: string | { msg: string } }>
+    const detail = axiosError.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (detail && 'msg' in detail) return (detail as { msg: string }).msg
+    return defaultMsg
+  }
+
   // Create user handlers
   const validateCreateForm = useCallback((): boolean => {
     try {
@@ -239,16 +308,7 @@ export function AdminUsersPage() {
       setCreateErrors({})
       return true
     } catch (error) {
-      if (error instanceof v.ValiError) {
-        const errors: Record<string, string> = {}
-        for (const issue of error.issues) {
-          const field = issue.path?.[0]?.key
-          if (field) {
-            errors[field] = issue.message
-          }
-        }
-        setCreateErrors(errors)
-      }
+      setCreateErrors(parseValidationErrors(error))
       return false
     }
   }, [createData])
@@ -264,8 +324,7 @@ export function AdminUsersPage() {
       refetchUsers()
       toast.success('用户创建成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '创建失败')
+      toast.error(handleApiError(error, '创建失败'))
     } finally {
       setCreateLoading(false)
     }
@@ -274,30 +333,47 @@ export function AdminUsersPage() {
   // Edit user handlers
   const openEditModal = (user: User) => {
     setEditUser(user)
-    setEditData({ full_name: user.full_name || '', role: user.role })
+    setEditData({ username: user.username, full_name: user.full_name || '', role: user.role })
+    setEditErrors({})
+    setIsEditingPassword(false)
     setDialogState('edit')
   }
 
+  // 验证编辑表单 - 使用统一的验证 Schema
+  const validateEditForm = useCallback((): boolean => {
+    try {
+      v.parse(UserUpdateSchema, {
+        username: editData.username,
+        full_name: editData.full_name,
+        role: editData.role
+      })
+      setEditErrors({})
+      return true
+    } catch (error) {
+      setEditErrors(parseValidationErrors(error))
+      return false
+    }
+  }, [editData])
+
   const handleEdit = async () => {
-    if (!editUser) return
+    if (!editUser || !validateEditForm()) return
 
     setEditLoading(true)
     try {
       const response = await userAdminAPI.update(editUser.id, editData)
       const updatedUser = response.data
-      
+
       // 如果修改的是当前登录用户，需要更新全局状态
       if (editUser.id === currentUser?.id && updatedUser) {
         setAuth(updatedUser)
       }
-      
+
       setDialogState(null)
       setEditUser(null)
       refetchUsers()
       toast.success('用户更新成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '更新失败')
+      toast.error(handleApiError(error, '更新失败'))
     } finally {
       setEditLoading(false)
     }
@@ -370,7 +446,8 @@ export function AdminUsersPage() {
     setChangePasswordLoading(true)
     try {
       await authAPI.changePassword(changePasswordData.old_password, changePasswordData.new_password)
-      setShowChangePasswordModal(false)
+      setDialogState(null)
+      setIsEditingPassword(false)
       setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
       toast.success('密码修改成功，请重新登录')
       // 可选：自动登出
@@ -409,7 +486,7 @@ export function AdminUsersPage() {
       {/* Search & Filters */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <div className="relative flex-1 min-w-50">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
           <Input
             placeholder="搜索用户名、姓名..."
             value={globalFilter}
@@ -437,7 +514,7 @@ export function AdminUsersPage() {
         </Select>
         <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
           <SelectTrigger className="w-30 min-h-10">
-            <SelectValue placeholder="全部状态" />
+            <SelectValue placeholder="已启用" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部状态</SelectItem>
@@ -471,8 +548,8 @@ export function AdminUsersPage() {
                   {table.getHeaderGroups().map(headerGroup => (
                     <tr key={headerGroup.id} className="border-b-2 border-border">
                       {headerGroup.headers.map(header => (
-                        <th 
-                          key={header.id} 
+                        <th
+                          key={header.id}
                           className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
                           style={{ width: header.getSize() }}
                         >
@@ -488,8 +565,8 @@ export function AdminUsersPage() {
                   {table.getRowModel().rows.map(row => (
                     <tr key={row.id} className="border-b border-border hover:bg-muted/30">
                       {row.getVisibleCells().map(cell => (
-                        <td 
-                          key={cell.id} 
+                        <td
+                          key={cell.id}
                           className="p-3 align-middle text-base"
                           style={{ width: cell.column.getSize() }}
                         >
@@ -503,6 +580,21 @@ export function AdminUsersPage() {
             </div>
           )}
         </CardContent>
+        {/* 分页组件 */}
+        <div className="flex items-center justify-between px-6 py-4 mt-2">
+          <PaginationInfo
+            currentPage={currentPage}
+            pageSize={pageSize}
+            total={total}
+          />
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
+          />
+        </div>
       </Card>
 
       {/* Create User Modal */}
@@ -514,7 +606,7 @@ export function AdminUsersPage() {
           <div className="grid gap-4">
             <div>
               <Label htmlFor="create_username" className={LABEL_STYLES.base}>
-                用户名 <span className="text-destructive">*</span>
+                用户名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
               </Label>
               <Input
                 id="create_username"
@@ -529,7 +621,7 @@ export function AdminUsersPage() {
             </div>
             <div>
               <Label htmlFor="create_password" className={LABEL_STYLES.base}>
-                密码 <span className="text-destructive">*</span>
+                密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
               </Label>
               <Input
                 id="create_password"
@@ -545,7 +637,7 @@ export function AdminUsersPage() {
             </div>
             <div>
               <Label htmlFor="create_fullname" className={LABEL_STYLES.base}>
-                姓名 <span className="text-destructive">*</span>
+                姓名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
               </Label>
               <Input
                 id="create_fullname"
@@ -577,78 +669,190 @@ export function AdminUsersPage() {
             </div>
           </div>
           <div className="flex gap-3 mt-6">
-              <Button variant="morden" onClick={() => handleCreateModalClose(false)} size="lg" className="flex-1">
-                取消
-              </Button>
-              <Button onClick={handleCreate} disabled={createLoading} size="lg" className="flex-1">
-                {createLoading ? '创建中...' : '创建'}
-              </Button>
+            <Button variant="morden" onClick={() => handleCreateModalClose(false)} size="lg" className="flex-1">
+              取消
+            </Button>
+            <Button onClick={handleCreate} disabled={createLoading} size="lg" className="flex-1">
+              {createLoading ? '创建中...' : '创建'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
-      {/* Edit User Modal */}
-      <Dialog open={dialogState === 'edit'} onOpenChange={(open) => setDialogState(open ? 'edit' : null)}>
+
+      {/* Edit User / Change Password Modal */}
+      <Dialog
+        open={dialogState === 'edit'}
+        onOpenChange={(open) => {
+          setDialogState(open ? 'edit' : null)
+          if (!open) setIsEditingPassword(false)
+        }}
+      >
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>编辑用户</DialogTitle>
+            <DialogTitle>{isEditingPassword ? '修改密码' : '编辑用户'}</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 space-y-2">
-            <div>
-              <Label htmlFor="edit_username" className={LABEL_STYLES.base}>用户名</Label>
-              <Input
-                id="edit_username"
-                value={editUser?.username || ''} 
-                readOnly 
-                className={cn(INPUT_STYLES.lg, "bg-muted")}
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit_fullname" className={LABEL_STYLES.base}>姓名</Label>
-              <Input
-                id="edit_fullname"
-                value={editData.full_name}
-                onChange={(e) => setEditData({ ...editData, full_name: e.target.value })}
-                placeholder="请输入姓名"
-                className={INPUT_STYLES.lg}
-              />
-            </div>
-            <div>
-              <Label className={LABEL_STYLES.base}>角色</Label>
-              <RadioGroup
-                value={editData.role}
-                onValueChange={(value) => setEditData({ ...editData, role: value as 'admin' | 'user' })}
-                className="flex gap-4 mt-2"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="user" id="edit_role_user" />
-                  <Label htmlFor="edit_role_user" className="text-base cursor-pointer">用户</Label>
+
+          {isEditingPassword ? (
+            <>
+              <div className="grid gap-4 space-y-2">
+                <div>
+                  <Label htmlFor="old_password" className={LABEL_STYLES.base}>
+                    原密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
+                  </Label>
+                  <Input
+                    id="old_password"
+                    type="password"
+                    value={changePasswordData.old_password}
+                    onChange={(e) => setChangePasswordData({ ...changePasswordData, old_password: e.target.value })}
+                    placeholder="请输入原密码"
+                    className={cn(INPUT_STYLES.lg, changePasswordErrors.old_password && 'border-destructive')}
+                  />
+                  {changePasswordErrors.old_password && (
+                    <p className="text-sm text-destructive mt-1">{changePasswordErrors.old_password}</p>
+                  )}
                 </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="admin" id="edit_role_admin" />
-                  <Label htmlFor="edit_role_admin" className="text-base cursor-pointer">管理员</Label>
+                <div>
+                  <Label htmlFor="new_password" className={LABEL_STYLES.base}>
+                    新密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
+                  </Label>
+                  <Input
+                    id="new_password"
+                    type="password"
+                    value={changePasswordData.new_password}
+                    onChange={(e) => setChangePasswordData({ ...changePasswordData, new_password: e.target.value })}
+                    placeholder="请输入新密码"
+                    className={cn(INPUT_STYLES.lg, changePasswordErrors.new_password && 'border-destructive')}
+                  />
+                  {changePasswordErrors.new_password && (
+                    <p className="text-sm text-destructive mt-1">{changePasswordErrors.new_password}</p>
+                  )}
                 </div>
-              </RadioGroup>
-            </div>
-          </div>
-          <div className="flex gap-3 mt-6">
-              {editUser?.id === currentUser?.id && (
-                <Button 
-                  variant="morden" 
-                  onClick={() => setShowChangePasswordModal(true)} 
-                  size="lg"
-                  className="flex-1"
-                >
-                  <Lock className="w-4 h-4 mr-1.5" />
-                  修改密码
+                <div>
+                  <Label htmlFor="confirm_password" className={LABEL_STYLES.base}>
+                    确认新密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
+                  </Label>
+                  <Input
+                    id="confirm_password"
+                    type="password"
+                    value={changePasswordData.confirm_password}
+                    onChange={(e) => setChangePasswordData({ ...changePasswordData, confirm_password: e.target.value })}
+                    placeholder="请再次输入新密码"
+                    className={cn(INPUT_STYLES.lg, changePasswordErrors.confirm_password && 'border-destructive')}
+                  />
+                  {changePasswordErrors.confirm_password && (
+                    <p className="text-sm text-destructive mt-1">{changePasswordErrors.confirm_password}</p>
+                  )}
+                </div>
+              </div>
+              <div key="pwd-actions" className="flex gap-3 mt-6">
+                <Button onClick={handleChangePassword} disabled={changePasswordLoading} size="lg" className="flex-1">
+                  {changePasswordLoading ? '处理中...' : '确认修改'}
                 </Button>
-              )}
-              <Button onClick={handleEdit} disabled={editLoading} size="lg">
-                {editLoading ? '保存中...' : '保存'}
-              </Button>
-              <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base">
-                取消
-              </Button>
-            </div>
+                <Button variant="morden" onClick={() => setIsEditingPassword(false)} size="lg" className="flex-1">
+                  返回
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid gap-4 space-y-2">
+                <div>
+                  <Label htmlFor="edit_username" className={LABEL_STYLES.base}>
+                    用户名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
+                  </Label>
+                  <Input
+                    id="edit_username"
+                    value={editData.username}
+                    onChange={(e) => {
+                      setEditData({ ...editData, username: e.target.value })
+                      if (e.target.value) {
+                        try {
+                          v.parse(UsernameSchema, e.target.value)
+                          setEditErrors(prev => ({ ...prev, username: '' }))
+                        } catch (error) {
+                          if (error instanceof v.ValiError) {
+                            setEditErrors(prev => ({ ...prev, username: error.message }))
+                          }
+                        }
+                      } else {
+                        setEditErrors(prev => ({ ...prev, username: '用户名不能为空' }))
+                      }
+                    }}
+                    placeholder="请输入用户名"
+                    className={cn(INPUT_STYLES.lg, editErrors.username && 'border-destructive')}
+                  />
+                  {editErrors.username && editErrors.username !== '' && (
+                    <p className="text-sm text-destructive mt-1">{editErrors.username}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="edit_fullname" className={LABEL_STYLES.base}>
+                    姓名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
+                  </Label>
+                  <Input
+                    id="edit_fullname"
+                    value={editData.full_name}
+                    onChange={(e) => {
+                      setEditData({ ...editData, full_name: e.target.value })
+                      try {
+                        v.parse(createRequiredStringSchema('姓名'), e.target.value)
+                        setEditErrors(prev => ({ ...prev, full_name: '' }))
+                      } catch (error) {
+                        if (error instanceof v.ValiError) {
+                          setEditErrors(prev => ({ ...prev, full_name: error.message }))
+                        }
+                      }
+                    }}
+                    placeholder="请输入姓名"
+                    className={cn(INPUT_STYLES.lg, editErrors.full_name && 'border-destructive')}
+                  />
+                  {editErrors.full_name && editErrors.full_name !== '' && (
+                    <p className="text-sm text-destructive mt-1">{editErrors.full_name}</p>
+                  )}
+                </div>
+                <div>
+                  <Label className={LABEL_STYLES.base}>角色</Label>
+                  <RadioGroup
+                    value={editData.role}
+                    onValueChange={(value) => setEditData({ ...editData, role: value as 'admin' | 'user' })}
+                    className="flex gap-4 mt-2 mb-3.5"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="user" id="edit_role_user" />
+                      <Label htmlFor="edit_role_user" className="text-base cursor-pointer">用户</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="admin" id="edit_role_admin" />
+                      <Label htmlFor="edit_role_admin" className="text-base cursor-pointer">管理员</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+              </div>
+              <div key="edit-actions" className="flex gap-2 mt-6">
+                {editUser?.id === currentUser?.id && (
+                  <Button
+                    variant="morden"
+                    onClick={() => {
+                      setIsEditingPassword(true)
+                      setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
+                      setChangePasswordErrors({})
+                    }}
+                    size="lg"
+                    className="flex-3"
+                  >
+                    <Lock className="w-4 h-4 mr-1.5" />
+                    修改密码
+                  </Button>
+                )}
+                <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="flex-1">
+                  取消
+                </Button>
+                <LoadingButton onClick={handleEdit} isLoading={editLoading} size="lg" className="flex-1">
+                  保存
+                </LoadingButton>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -660,7 +864,7 @@ export function AdminUsersPage() {
           </DialogHeader>
           <div className="py-4">
             <p>确定要禁用用户 <strong>{deleteUser?.username}</strong> 吗？</p>
-            <p className="text-sm text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
+            <p className="text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
           </div>
           <div className="flex gap-2">
             <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg">
@@ -669,73 +873,6 @@ export function AdminUsersPage() {
             <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base">
               取消
             </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Change Password Modal */}
-      <Dialog open={showChangePasswordModal} onOpenChange={setShowChangePasswordModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-xl">修改密码</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <div>
-              <Label htmlFor="old_password" className={LABEL_STYLES.base}>
-                原密码 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="old_password"
-                type="password"
-                value={changePasswordData.old_password}
-                onChange={(e) => setChangePasswordData({ ...changePasswordData, old_password: e.target.value })}
-                placeholder="请输入原密码"
-                className={cn(INPUT_STYLES.lg, changePasswordErrors.old_password && 'border-destructive')}
-              />
-              {changePasswordErrors.old_password && (
-                <p className="text-sm text-destructive mt-1">{changePasswordErrors.old_password}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="new_password" className={LABEL_STYLES.base}>
-                新密码 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="new_password"
-                type="password"
-                value={changePasswordData.new_password}
-                onChange={(e) => setChangePasswordData({ ...changePasswordData, new_password: e.target.value })}
-                placeholder="请输入新密码"
-                className={cn(INPUT_STYLES.lg, changePasswordErrors.new_password && 'border-destructive')}
-              />
-              {changePasswordErrors.new_password && (
-                <p className="text-sm text-destructive mt-1">{changePasswordErrors.new_password}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="confirm_password" className={LABEL_STYLES.base}>
-                确认新密码 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="confirm_password"
-                type="password"
-                value={changePasswordData.confirm_password}
-                onChange={(e) => setChangePasswordData({ ...changePasswordData, confirm_password: e.target.value })}
-                placeholder="请再次输入新密码"
-                className={cn(INPUT_STYLES.lg, changePasswordErrors.confirm_password && 'border-destructive')}
-              />
-              {changePasswordErrors.confirm_password && (
-                <p className="text-sm text-destructive mt-1">{changePasswordErrors.confirm_password}</p>
-              )}
-            </div>
-            <div className="flex gap-2 pt-3 border-t">
-              <Button onClick={handleChangePassword} disabled={changePasswordLoading} size="lg" className="flex-1">
-                {changePasswordLoading ? '处理中...' : '确认修改'}
-              </Button>
-              <Button variant="morden" onClick={() => setShowChangePasswordModal(false)} size="lg" className="flex-1">
-                取消
-              </Button>
-            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -403,9 +403,11 @@ export const UserCreateSchema = v.object({
 
 /**
  * 更新用户 Schema (AdminUsers 页面用)
+ * 包含 username（必填）、full_name（必填）、role
  */
 export const UserUpdateSchema = v.object({
-  full_name: v.optional(v.string()),
+  username: UsernameSchema,  // 用户名必填
+  full_name: createRequiredStringSchema('姓名'),  // 必填
   role: v.optional(v.picklist(['admin', 'user']))
 })
 

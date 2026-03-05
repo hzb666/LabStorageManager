@@ -243,7 +243,7 @@ export default function DeviceManagement() {
       {/* Search */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <div className="relative flex-1 min-w-50">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
           <Input
             placeholder="搜索设备名称、IP地址..."
             value={globalFilter}

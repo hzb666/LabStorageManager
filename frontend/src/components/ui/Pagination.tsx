@@ -165,7 +165,6 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
 
       {/* 跳转页 - 右侧 */}
       <div className="flex items-center gap-1">
-        <span className="text-base text-muted-foreground">跳至</span>
         <Input
           type="number"
           min={1}

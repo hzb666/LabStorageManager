@@ -454,10 +454,10 @@ def create_user(
     return db_user
 
 
-@router.get("/", response_model=List[UserResponse])
+@router.get("/", response_model=dict)
 def list_users(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     username: Optional[str] = None,
     role: Optional[str] = None,
     is_active: Optional[bool] = None,
@@ -481,8 +481,17 @@ def list_users(
     if is_active is not None:
         statement = statement.where(User.is_active == is_active)
     
+    total = db.exec(select(func.count(User.id)).select_from(statement.subquery())).one()
+    
     statement = statement.offset(skip).limit(limit).order_by(User.created_at.desc())
-    return db.exec(statement).all()
+    users = db.exec(statement).all()
+    
+    return {
+        "data": [UserResponse.model_validate(user).model_dump(mode='json') for user in users],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
 
 
 @router.get("/me", response_model=UserResponse)

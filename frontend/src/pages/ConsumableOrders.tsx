@@ -20,6 +20,7 @@ import { TableActionButtonsMemo } from '@/components/ui/TableActionButtons'
 import { BaseForm } from '@/components/BaseForm'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
+import { UserRoles } from '@/lib/constants'
 import { useTableState } from '@/hooks/useTableState'
 
 // 工具与API
@@ -122,7 +123,7 @@ const HighlightText = React.memo(function HighlightText({
 
 export function ConsumableOrdersPage() {
   const currentUser = useAuthStore((state) => state.user)
-  const isAdmin = currentUser?.role === 'admin'
+  const isAdmin = currentUser?.role === UserRoles.ADMIN
 
   // 使用 useTableState 管理表格状态
   const filter = useTableState({
