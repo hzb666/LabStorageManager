@@ -5,13 +5,12 @@ import { AnnouncementDetail } from './AnnouncementDetail'
 
 interface AnnouncementBannerProps {
   announcements: Announcement[]
-  onRefresh?: () => void
 }
 
 const CLOSED_KEY_PREFIX = 'announcement_closed_'
 const CLOSED_DURATION = 24 * 60 * 60 * 1000 // 1 day in milliseconds
 
-export function AnnouncementBanner({ announcements, onRefresh }: AnnouncementBannerProps) {
+export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
   // Filter to pinned and visible announcements that are not closed
   const [visibleAnnouncements, setVisibleAnnouncements] = useState<Announcement[]>([])
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)

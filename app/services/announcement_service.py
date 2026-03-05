@@ -2,7 +2,6 @@
 Announcement Image Service - Upload and manage announcement images
 Images are stored in filesystem, database only stores URL/path
 """
-import os
 import uuid
 from pathlib import Path
 from typing import List, Tuple

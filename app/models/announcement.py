@@ -5,14 +5,18 @@ from datetime import datetime
 from typing import Optional, List
 
 from pydantic import ConfigDict
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, SQLModel, JSON
 
 
 class AnnouncementBase(SQLModel):
     """Base announcement model with common fields"""
     title: str = Field(max_length=200)
     content: str
-    images: Optional[List[str]] = Field(default=None)
+    images: Optional[List[str]] = Field(
+        default=None,
+        sa_type=JSON,
+        sa_column_kwargs={"default": "[]"}
+    )
     is_pinned: bool = Field(default=False)
     is_visible: bool = Field(default=True)
 

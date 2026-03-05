@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlmodel import Session, select, func
 
-from app.core.auth import get_current_user, require_admin
+from app.core.auth import require_admin
 from app.database import get_db
 from app.models.announcement import (
     Announcement,
@@ -19,7 +19,7 @@ from app.models.announcement import (
     AnnouncementUpdate,
 )
 from app.models.user import User
-from app.services import announcement_image_service
+from app.services import announcement_service as announcement_image_service
 from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/announcements", tags=["Announcements"])
@@ -234,7 +234,7 @@ def delete_announcement(
             try:
                 announcement_image_service.delete_image(image_url)
             except Exception as e:
-                logger.error(f"Failed to delete image {image_url}: {e}")
+                logger.error("Failed to delete image %s: %s", image_url, e)
 
     db.delete(announcement)
     db.commit()
