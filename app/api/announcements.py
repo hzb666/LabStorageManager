@@ -2,7 +2,7 @@
 Announcement API Routes - System Announcements Management
 """
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlmodel import Session, select
@@ -17,6 +17,7 @@ from app.models.announcement import (
 )
 from app.models.user import User
 from app.services import announcement_image_service
+from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/announcements", tags=["Announcements"])
 
@@ -27,6 +28,15 @@ router = APIRouter(prefix="/announcements", tags=["Announcements"])
 def get_announcement_by_id(db: Session, announcement_id: int) -> Optional[Announcement]:
     """Get announcement by ID"""
     return db.get(Announcement, announcement_id)
+
+
+def enrich_with_creator_name(announcement: Announcement, db: Session) -> AnnouncementResponse:
+    """Enrich announcement response with creator's name"""
+    resp = AnnouncementResponse.model_validate(announcement)
+    if announcement.created_by:
+        user = db.get(User, announcement.created_by)
+        resp.created_by_name = user.full_name or user.username if user else None
+    return resp
 
 
 # ==================== Public Endpoints ====================
@@ -47,7 +57,18 @@ def get_public_announcements(
         .order_by(Announcement.created_at.desc())
     )
     announcements = db.exec(statement).all()
-    return announcements
+
+    # 批量获取创建者姓名
+    user_ids = {a.created_by for a in announcements if a.created_by}
+    users_map = batch_get_user_names(db, user_ids)
+
+    # 填充创建者姓名
+    result = []
+    for a in announcements:
+        resp = AnnouncementResponse.model_validate(a)
+        resp.created_by_name = users_map.get(a.created_by) if a.created_by else None
+        result.append(resp)
+    return result
 
 
 # ==================== Admin Endpoints ====================
@@ -72,7 +93,18 @@ def list_announcements(
         .limit(limit)
     )
     announcements = db.exec(statement).all()
-    return announcements
+
+    # 批量获取创建者姓名
+    user_ids = {a.created_by for a in announcements if a.created_by}
+    users_map = batch_get_user_names(db, user_ids)
+
+    # 填充创建者姓名
+    result = []
+    for a in announcements:
+        resp = AnnouncementResponse.model_validate(a)
+        resp.created_by_name = users_map.get(a.created_by) if a.created_by else None
+        result.append(resp)
+    return result
 
 
 @router.post("/", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
@@ -97,7 +129,7 @@ def create_announcement(
     db.commit()
     db.refresh(db_announcement)
 
-    return db_announcement
+    return enrich_with_creator_name(db_announcement, db)
 
 
 @router.get("/{announcement_id}", response_model=AnnouncementResponse)
@@ -115,7 +147,7 @@ def get_announcement(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Announcement not found"
         )
-    return announcement
+    return enrich_with_creator_name(announcement, db)
 
 
 @router.put("/{announcement_id}", response_model=AnnouncementResponse)
@@ -146,7 +178,7 @@ def update_announcement(
     db.commit()
     db.refresh(announcement)
 
-    return announcement
+    return enrich_with_creator_name(announcement, db)
 
 
 @router.delete("/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -201,7 +233,7 @@ def toggle_pin_announcement(
     db.commit()
     db.refresh(announcement)
 
-    return announcement
+    return enrich_with_creator_name(announcement, db)
 
 
 @router.post("/{announcement_id}/toggle-visibility", response_model=AnnouncementResponse)
@@ -226,7 +258,7 @@ def toggle_visibility_announcement(
     db.commit()
     db.refresh(announcement)
 
-    return announcement
+    return enrich_with_creator_name(announcement, db)
 
 
 @router.post("/upload-image")

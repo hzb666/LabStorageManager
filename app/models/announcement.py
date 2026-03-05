@@ -56,5 +56,6 @@ class AnnouncementResponse(SQLModel):
     is_pinned: bool
     is_visible: bool
     created_by: Optional[int]
+    created_by_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
