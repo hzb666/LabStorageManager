@@ -107,6 +107,11 @@ def list_announcements(
     return result
 
 
+# 管理员公告数量限制
+MAX_TOTAL_ANNOUNCEMENTS = 10  # 每个管理员最多创建10条
+MAX_VISIBLE_ANNOUNCEMENTS = 5  # 每个管理员最多显示5条
+
+
 @router.post("/", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
 def create_announcement(
     announcement: AnnouncementCreate,
@@ -116,6 +121,28 @@ def create_announcement(
     """
     Create a new announcement (admin only)
     """
+    # 检查总数量限制
+    stmt = select(Announcement).where(Announcement.created_by == current_user.id)
+    total_count = len(db.exec(stmt).all())
+    if total_count >= MAX_TOTAL_ANNOUNCEMENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"每个管理员最多创建{MAX_TOTAL_ANNOUNCEMENTS}条公告"
+        )
+
+    # 检查显示数量限制（如果设为显示状态）
+    if announcement.is_visible:
+        stmt = select(Announcement).where(
+            Announcement.created_by == current_user.id,
+            Announcement.is_visible == True
+        )
+        visible_count = len(db.exec(stmt).all())
+        if visible_count >= MAX_VISIBLE_ANNOUNCEMENTS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"每个管理员最多显示{MAX_VISIBLE_ANNOUNCEMENTS}条公告"
+            )
+
     db_announcement = Announcement(
         title=announcement.title,
         content=announcement.content,
