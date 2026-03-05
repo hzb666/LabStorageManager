@@ -25,8 +25,9 @@ import { useAuthStore } from '@/store/useStore'
 import { useTableState } from '@/hooks/useTableState'
 
 // 工具与API
-import { reagentOrderAPI } from '@/api/client'
-import { ReagentOrderSchema } from '@/lib/validationSchemas'
+import { reagentOrderAPI, chemicalAPI } from '@/api/client'
+import { processNotes } from '@/lib/utils'
+import { ReagentOrderSchema, validateCASLogic } from '@/lib/validationSchemas'
 import type { ReagentOrderFormData } from '@/lib/validationSchemas'
 import { getReagentOrderTableColumns } from '@/lib/tableConfigs'
 import {
@@ -41,6 +42,7 @@ import {
   AlertTriangle,
   Loader2,
   ArrowUpFromLine,
+  ScanSearch,
 } from 'lucide-react'
 
 interface ValidationError {
@@ -162,6 +164,7 @@ export function ReagentOrdersPage() {
   const [casWarning, setCasWarning] = useState<CASWarningInfo | null>(null)
   const [casLoading, setCasLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
 
   // CAS 检查（防抖）
   const checkCASWarning = useCallback(async (cas: string) => {
@@ -267,7 +270,7 @@ export function ReagentOrdersPage() {
             price: formData.price,
             order_reason: formData.order_reason,
             is_hazardous: formData.is_hazardous,
-            notes: formData.notes || ''
+            notes: processNotes(formData.notes)
           })
         } else if (dialogState === 'add') {
           await reagentOrderAPI.create({
@@ -275,6 +278,7 @@ export function ReagentOrdersPage() {
             category: formData.category || undefined,
             brand: formData.brand || undefined,
             price: formData.price ? parseFloat(String(formData.price)) : undefined,
+            notes: processNotes(formData.notes)
           })
         }
         // 先刷新数据，再弹出 toast，确保数据已加载完成
@@ -360,6 +364,52 @@ export function ReagentOrdersPage() {
       toast.error('导出失败')
     }
   }, [])
+
+  // CAS 号自动识别回调
+  const handleCasLookup = useCallback(async () => {
+    const casValue = form.getValues('cas_number')
+    if (!casValue || casValue.trim() === '') {
+      form.setError('cas_number', { message: '请先输入 CAS 号' })
+      return
+    }
+
+    // CAS 号格式和校验码验证
+    const normalizedCas = casValue.trim().toUpperCase()
+    const casRegex = /^\d{2,7}-\d{2}-\d$/
+    if (!casRegex.test(normalizedCas)) {
+      form.setError('cas_number', { message: 'CAS号格式无效' })
+      return
+    }
+
+    // 使用统一的校验码验证逻辑
+    if (!validateCASLogic(normalizedCas)) {
+      form.setError('cas_number', { message: 'CAS号校验码错误' })
+      return
+    }
+
+    setIsCasLookupLoading(true)
+    try {
+      const response = await chemicalAPI.getInfo(normalizedCas)
+      const info = response.data
+      if (info.name) {
+        form.setValue('name', info.name, { shouldValidate: true })
+      }
+      if (info.english_name) {
+        form.setValue('english_name', info.english_name, { shouldValidate: true })
+      }
+      toast.success('CAS 号识别成功')
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      const detail = err.response?.data?.detail
+      if (typeof detail === 'string') {
+        form.setError('cas_number', { message: detail })
+      } else {
+        toast.error('CAS 号识别失败')
+      }
+    } finally {
+      setIsCasLookupLoading(false)
+    }
+  }, [form])
 
   // 表格操作按钮组件
   const ActionButtons = React.memo(function ActionButtons({
@@ -497,7 +547,18 @@ export function ReagentOrdersPage() {
           <form onSubmit={handleFormSubmit}>
             <BaseForm
               form={form}
-              fields={getReagentOrderFormFields(dialogState === 'edit')}
+              fields={useMemo(() => {
+                const fields = getReagentOrderFormFields(dialogState === 'edit')
+                // 为 CAS 号字段添加自动识别按钮（仅在新增模式时显示）
+                if (dialogState === 'add') {
+                  return fields.map(field => 
+                    field.name === 'cas_number' 
+                      ? { ...field, prefixButton: { onClick: handleCasLookup, loading: isCasLookupLoading, title: '识别 CAS 号', icon: ScanSearch } }
+                      : field
+                  )
+                }
+                return fields
+              }, [dialogState, handleCasLookup, isCasLookupLoading])}
             />
             {/* CAS 警告显示 */}
             {dialogState === 'add' && casWarning && casWarning.has_warning && (

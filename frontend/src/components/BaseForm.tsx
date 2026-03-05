@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Controller, type UseFormReturn, type FieldPath } from "react-hook-form"
-import { Input } from "./ui/Input"
+import { Input, type PrefixButtonConfig } from "./ui/Input"
 import { Checkbox } from "./ui/Checkbox"
 import { FormField } from "./ui/FormField"
 import { Autocomplete, type AutocompleteOption } from "./ui/AutoComplete"
@@ -36,6 +36,8 @@ export interface FieldSchema<T extends Record<string, unknown>> {
   min?: number         // 数字字段的最小值
   max?: number         // 数字字段的最大值
   enableTagToggle?: boolean  // 是否开启状态功能（如 [强调] 前缀）
+  tag?: string        // 标签前缀（默认 [强调]），与 enableTagToggle 配合使用
+  prefixButton?: PrefixButtonConfig  // 输入框左侧按钮配置
 }
 
 /**
@@ -122,7 +124,7 @@ function isSchemaMode<T>(props: BaseFormProps<T>): props is SchemaBaseFormProps<
  */
 function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
   const { form, disabled = false, readOnly = false } = props
-  
+
   // 获取 fields
   const fields = isSchemaMode(props) ? props.schema.fields : props.fields
 
@@ -219,7 +221,8 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
                 readOnly={isReadOnly}
                 className={getInputClassName(hasError, isReadOnly)}
                 enableTagToggle={field.enableTagToggle}
-                tag="[强调]"
+                prefixButton={field.prefixButton}
+                tag={field.tag}
               />
             )}
 

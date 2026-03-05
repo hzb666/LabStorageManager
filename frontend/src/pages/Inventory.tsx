@@ -24,9 +24,9 @@ import { FilterTable } from '@/components/ui/FilterTable'
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
 
 // 工具与API
-import { inventoryAPI } from '@/api/client'
-import { formatDate } from '@/lib/utils'
-import { InventoryFormSchema, parseSpecification } from '@/lib/validationSchemas'
+import { inventoryAPI, chemicalAPI } from '@/api/client'
+import { formatDate, processNotes } from '@/lib/utils'
+import { InventoryFormSchema, parseSpecification, validateCASLogic } from '@/lib/validationSchemas'
 import type { InventoryFormData } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 
@@ -38,7 +38,9 @@ import {
   ArrowUpFromLine,
   Plus,
   Trash2,
-  Package
+  Package,
+  FlaskConical,
+  ScanSearch
 } from 'lucide-react'
 
 // ============================================================================
@@ -92,6 +94,7 @@ export function InventoryPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
 
   // 刷新库存数据
   const loadInventory = useCallback(async () => {
@@ -131,8 +134,9 @@ export function InventoryPage() {
       brand: item.brand || '',
       storage_location: item.storage_location || '',
       quantity_bottles: 1,
-      initial_quantity: item.initial_quantity,
-      remaining_quantity: item.remaining_quantity,
+      initial_quantity: item.initial_quantity ?? undefined,
+      // 区分 null 和 0：null 显示为空让用户填写，0 显示为 0
+      remaining_quantity: item.remaining_quantity === null ? 0 : (item.remaining_quantity ?? 0),
       is_hazardous: item.is_hazardous || false,
       notes: item.notes || ''
     })
@@ -144,8 +148,9 @@ export function InventoryPage() {
       console.log('✅ 表单验证通过，提交数据:', formData)
 
       if (dialogState === 'edit' && editingItem) {
-        const remainingVal = formData.remaining_quantity
-        const remaining = typeof remainingVal === 'number' ? remainingVal : (remainingVal === '' ? 0 : parseFloat(String(remainingVal)) || 0)
+        // remaining_quantity 现在由 schema 验证保证不为 null/空字符串
+        // 但仍需检查不超过初始量
+        const remaining = formData.remaining_quantity
 
         let initial = editingItem.initial_quantity
         if (formData.specification) {
@@ -155,10 +160,7 @@ export function InventoryPage() {
           }
         }
 
-        if (isNaN(remaining)) {
-          form.setError('remaining_quantity', { message: '剩余量必须是有效数字' })
-          return
-        }
+        // 验证剩余量不超过初始量
         if (remaining > initial) {
           form.setError('remaining_quantity', { message: `剩余量不能超过规格 (${initial})` })
           return
@@ -169,8 +171,12 @@ export function InventoryPage() {
       try {
         if (dialogState === 'edit' && editingItem) {
           const status = formData.remaining_quantity === 0 ? 'consumed' : 'in_stock'
+          
+          // 直接传递 specification 字符串，后端使用 parse_specification 解析
+          // 使用 processNotes 处理备注：如果只有标签前缀但没有内容，则返回空字符串
           await inventoryAPI.update(editingItem.id, {
             name: formData.name || '',
+            cas_number: formData.cas_number || '',
             english_name: formData.english_name || '',
             category: formData.category || '',
             storage_location: formData.storage_location || '',
@@ -178,7 +184,8 @@ export function InventoryPage() {
             brand: formData.brand || '',
             status: status,
             is_hazardous: formData.is_hazardous,
-            notes: formData.notes || ''
+            notes: processNotes(formData.notes),
+            specification: formData.specification || ''
           })
           await loadInventory()
           toast.success('库存信息已更新')
@@ -196,7 +203,7 @@ export function InventoryPage() {
             category: formData.category || undefined,
             storage_location: formData.storage_location || undefined,
             is_hazardous: formData.is_hazardous,
-            notes: formData.notes || ''
+            notes: processNotes(formData.notes)
           })
         }
         await loadInventory()
@@ -256,6 +263,52 @@ export function InventoryPage() {
       toast.error('导出失败')
     }
   }, [])
+
+  // CAS 号自动识别回调
+  const handleCasLookup = useCallback(async () => {
+    const casValue = form.getValues('cas_number')
+    if (!casValue || casValue.trim() === '') {
+      form.setError('cas_number', { message: '请先输入 CAS 号' })
+      return
+    }
+
+    // CAS 号格式和校验码验证
+    const normalizedCas = casValue.trim().toUpperCase()
+    const casRegex = /^\d{2,7}-\d{2}-\d$/
+    if (!casRegex.test(normalizedCas)) {
+      form.setError('cas_number', { message: 'CAS号格式无效' })
+      return
+    }
+
+    // 使用统一的校验码验证逻辑
+    if (!validateCASLogic(normalizedCas)) {
+      form.setError('cas_number', { message: 'CAS号校验码错误' })
+      return
+    }
+
+    setIsCasLookupLoading(true)
+    try {
+      const response = await chemicalAPI.getInfo(casValue.trim())
+      const info = response.data
+      if (info.name) {
+        form.setValue('name', info.name, { shouldValidate: true })
+      }
+      if (info.english_name) {
+        form.setValue('english_name', info.english_name, { shouldValidate: true })
+      }
+      toast.success('CAS 号识别成功')
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      const detail = err.response?.data?.detail
+      if (typeof detail === 'string') {
+        form.setError('cas_number', { message: detail })
+      } else {
+        toast.error('CAS 号识别失败')
+      }
+    } finally {
+      setIsCasLookupLoading(false)
+    }
+  }, [form])
 
   // ---------------------------------------------------------------------------
   // 表格列配置
@@ -344,7 +397,18 @@ export function InventoryPage() {
           <form onSubmit={handleFormSubmit}>
             <BaseForm
               form={form}
-              fields={getInventoryFormFields(dialogState === 'edit', editingItem?.initial_quantity)}
+              fields={useMemo(() => {
+                const fields = getInventoryFormFields(dialogState === 'edit', editingItem?.initial_quantity)
+                // 为 CAS 号字段添加自动识别按钮（仅在新增模式时显示）
+                if (dialogState === 'add') {
+                  return fields.map(field => 
+                    field.name === 'cas_number' 
+                      ? { ...field, prefixButton: { onClick: handleCasLookup, loading: isCasLookupLoading, title: '识别 CAS 号', icon: ScanSearch } }
+                      : field
+                  )
+                }
+                return fields
+              }, [dialogState, editingItem?.initial_quantity, handleCasLookup, isCasLookupLoading])}
             />
             <div className="flex flex-wrap justify-between items-center gap-3 mt-8">
               {dialogState === 'edit' && editingItem && (

@@ -31,6 +31,7 @@ pandas = "^2.1.0"
 pydantic = "^2.5.0"
 pydantic-settings = "^2.1.0"
 pypinyin = "^0.55.0"
+requests = "^2.31.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

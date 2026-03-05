@@ -33,9 +33,10 @@ class InventoryBase(SQLModel):
     category: Optional[str] = Field(index=True, max_length=100)  # 排序/搜索常用
     brand: Optional[str] = Field(index=True, max_length=100)  # 排序/搜索常用
     storage_location: Optional[str] = Field(index=True, max_length=200)  # 排序/搜索常用
-    initial_quantity: float = Field(gt=0)
-    remaining_quantity: float = Field(default=0.0)
-    unit: str = Field(max_length=20, default="ml")  # Case-insensitive storage
+    # 数据库模型：允许 NULL 以兼容旧数据
+    initial_quantity: Optional[float] = Field(default=None)
+    remaining_quantity: Optional[float] = Field(default=None)
+    unit: Optional[str] = Field(default=None, max_length=20)  # Case-insensitive storage
     is_hazardous: bool = False
     image_path: Optional[str] = None  # Copied from Order
     notes: Optional[str] = Field(None, max_length=500)  # User custom notes
@@ -92,9 +93,10 @@ class InventoryCreate(SQLModel):
     category: Optional[str] = None
     brand: Optional[str] = None
     storage_location: Optional[str] = None
-    initial_quantity: float = Field(gt=0)
-    remaining_quantity: float = Field(default=0.0)
-    unit: str = Field(max_length=20, default="ml")
+    # 数据库模型：允许 NULL 以兼容旧数据
+    initial_quantity: Optional[float] = None
+    remaining_quantity: Optional[float] = None
+    unit: Optional[str] = Field(default=None, max_length=20)
     is_hazardous: bool = False
     image_path: Optional[str] = None
     temporary_keeper_id: Optional[int] = None
@@ -115,12 +117,14 @@ class InventoryUpdate(SQLModel):
     category: Optional[str] = None
     brand: Optional[str] = None
     is_hazardous: Optional[bool] = None
+    # 规格字段：前端传入规格字符串（如 "500ml"），后端用 parse_specification 解析
+    specification: Optional[str] = None
 
 
 class InventoryBorrowReturn(SQLModel):
     """DTO for borrow/return operations"""
-    remaining_quantity: float = Field(ge=0)
-    unit: str = Field(max_length=20)
+    remaining_quantity: Optional[float] = Field(default=None, ge=0)
+    unit: Optional[str] = Field(default=None, max_length=20)
 
 
 class InventoryResponse(SQLModel):
@@ -133,9 +137,10 @@ class InventoryResponse(SQLModel):
     category: Optional[str]
     brand: Optional[str]
     storage_location: Optional[str]
-    initial_quantity: float
-    remaining_quantity: float
-    unit: str
+    # 允许 NULL 以兼容旧数据
+    initial_quantity: Optional[float]
+    remaining_quantity: Optional[float]
+    unit: Optional[str]
     status: InventoryStatus
     borrower_id: Optional[int]
     last_borrower_id: Optional[int]

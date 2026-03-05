@@ -101,7 +101,7 @@ export const createNonNegativeNumberSchema = (fieldName: string) =>
     v.transform((input) => {
       if (typeof input === 'number') return input
       const num = parseFloat(input)
-      return isNaN(num) ? input : num
+      return isNaN(num) ? undefined : num
     }),
     v.number(`${fieldName}必须是有效数字`),
     v.minValue(0, `${fieldName}不能为负数`)
@@ -199,7 +199,7 @@ export function parseSpecification(spec: string): number | null {
  * CAS号格式：三部分组成，第一部分2-6位数字，第二部分2位数字，第三部分1位校验码
  * 校验码计算：将第一二部分的数字从右到左依次乘以1,2,3...，求和后取模10
  */
-const validateCASLogic = (input: string): boolean => {
+export const validateCASLogic = (input: string): boolean => {
   const parts = input.split('-')
   if (parts.length !== 3) return false
 
@@ -247,10 +247,29 @@ export const CasNumberSchema = v.pipe(
 export const OrderReasonSchema = v.optional(v.string())
 
 /**
+ * 剩余量验证（非负数，允许0，但不能是null/undefined/空字符串）
+ * 使用 v.union 在最外层拒绝空字符串
+ */
+const RemainingQuantitySchema = v.pipe(
+  v.union([
+    v.pipe(v.string(), v.trim(), v.minLength(1, '剩余数量不能为空')),
+    v.number()
+  ], '剩余数量必须是有效数字'),
+  v.transform((input) => {
+    if (typeof input === 'number') return input
+    const num = parseFloat(input)
+    if (isNaN(num)) return undefined  // 无效数字返回 undefined，后续验证会失败
+    return num
+  }),
+  v.number('剩余数量必须是有效数字'),
+  v.minValue(0, '剩余数量不能为负数')
+)
+
+/**
  * 统一库存表单 Schema（用于手动入库和编辑）
  * 包含所有库存相关字段
- * - 添加模式：name, specification, quantity_bottles 为必填
- * - 编辑模式：remaining_quantity 为必填
+ * - 添加模式：name, specification, quantity_bottles, initial_quantity, unit 为必填
+ * - 编辑模式：remaining_quantity 为必填（不能为 null）
  */
 export const InventoryFormSchema = v.object({
   // 基础字段
@@ -264,10 +283,11 @@ export const InventoryFormSchema = v.object({
   storage_location: v.optional(v.string()),
   notes: v.optional(v.string()),
 
-  // 数量相关
+  // 数量相关 - API层必填，数据库层允许NULL
   quantity_bottles: v.optional(createPositiveNumberSchema('瓶数')),
-  initial_quantity: v.optional(createNonNegativeNumberSchema('初始数量')),
-  remaining_quantity: v.optional(createNonNegativeNumberSchema('剩余数量')),
+  initial_quantity: v.optional(createQuantitySchema('初始数量')),  // 可选，后端从规格中自动解析
+  unit: v.optional(createRequiredStringSchema('单位')),  // 可选，从规格中解析
+  remaining_quantity: RemainingQuantitySchema,  // 不能为 null/undefined/空字符串
 
   // 危险品
   is_hazardous: v.boolean('危险品必须是布尔值'),

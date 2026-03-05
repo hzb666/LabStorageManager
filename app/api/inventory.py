@@ -859,6 +859,28 @@ def update_inventory(
         )
 
     update_data = update.model_dump(exclude_unset=True)
+    
+    # CAS号规范化：如果传入了 cas_number，进行规范化处理
+    if 'cas_number' in update_data and update_data['cas_number']:
+        normalized_cas = normalize_cas(update_data['cas_number'])
+        if normalized_cas:
+            update_data['cas_number'] = normalized_cas
+    
+    # 处理规格更新：如果传入了 specification 字符串，使用 parse_specification 解析
+    if 'specification' in update_data and update_data['specification']:
+        spec_str = update_data['specification']
+        try:
+            quantity, unit = parse_specification(spec_str)
+            item.initial_quantity = quantity
+            item.unit = unit
+        except SpecificationError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+        # 移除 specification，避免重复设置
+        update_data.pop('specification')
+    
     for field, value in update_data.items():
         setattr(item, field, value)
 

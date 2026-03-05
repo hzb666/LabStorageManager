@@ -24,7 +24,7 @@ import { useTableState } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
-import { formatDate } from '@/lib/utils'
+import { formatDate, processNotes } from '@/lib/utils'
 import { ConsumableOrderSchema } from '@/lib/validationSchemas'
 import type { ConsumableOrderFormData } from '@/lib/validationSchemas'
 import { getConsumableOrderTableColumns } from '@/lib/tableConfigs'
@@ -199,7 +199,7 @@ export function ConsumableOrdersPage() {
             unit: formData.unit || '',
             quantity: formData.quantity,
             price: formData.price,
-            notes: formData.notes || ''
+            notes: processNotes(formData.notes)
           })
         } else if (dialogState === 'add') {
           await consumableOrderAPI.create({
@@ -210,7 +210,7 @@ export function ConsumableOrdersPage() {
             category: formData.category || undefined,
             brand: formData.brand || undefined,
             price: formData.price ? parseFloat(String(formData.price)) : undefined,
-            notes: formData.notes || '',
+            notes: processNotes(formData.notes),
           })
         }
         // 先刷新数据，再弹出 toast，确保数据已加载完成

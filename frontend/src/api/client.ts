@@ -244,3 +244,14 @@ export const inventoryAPI = {
   }) => api.post('/inventory/manual-add', data),
   exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
 }
+
+// Chemical Info APIs
+export interface ChemicalInfo {
+  cas_number: string
+  name: string | null
+  english_name: string | null
+}
+
+export const chemicalAPI = {
+  getInfo: (casNumber: string) => api.get<ChemicalInfo>(`/chemical-info/${casNumber}`),
+}

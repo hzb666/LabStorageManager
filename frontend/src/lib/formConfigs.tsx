@@ -26,7 +26,9 @@ export const defaultInventoryValues: InventoryFormData = {
   is_hazardous: false,
   notes: '',
   quantity_bottles: 1,
-  initial_quantity: 0,
+  initial_quantity: undefined,
+  unit: undefined,
+  // remaining_quantity 默认为 0（必须填写）
   remaining_quantity: 0
 }
 
