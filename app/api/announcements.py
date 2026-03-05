@@ -299,16 +299,8 @@ async def upload_announcement_image(
     Upload announcement image (admin only)
     Returns the URL of the uploaded image
     """
-    try:
-        image_url = announcement_image_service.save_image(file)
-        return {"url": image_url, "message": "Image uploaded successfully"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload image: {str(e)}"
-        )
+    image_url = announcement_image_service.save_image(file)
+    return {"url": image_url, "message": "Image uploaded successfully"}
 
 
 @router.delete("/images/{filename}", status_code=status.HTTP_204_NO_CONTENT)
@@ -322,19 +314,11 @@ def delete_announcement_image(
     # Construct the URL path
     url_path = f"/static/announcements/{filename}"
 
-    try:
-        deleted = announcement_image_service.delete_image(url_path)
-        if not deleted:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Image not found"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
+    deleted = announcement_image_service.delete_image(url_path)
+    if not deleted:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete image: {str(e)}"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found"
         )
 
 
