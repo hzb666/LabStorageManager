@@ -16,6 +16,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   FolderInput,
+  Megaphone,
 } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
@@ -27,6 +28,7 @@ const navItems = [
   { title: '库存列表', href: '/inventory', icon: Package, group: '功能' },
   { title: '导入数据', href: '/import', icon: FolderInput, group: '功能' },
   { title: '用户管理', href: '/admin/users', icon: Users, adminOnly: true, group: '管理' },
+  { title: '公告管理', href: '/admin/announcements', icon: Megaphone, adminOnly: true, group: '管理' },
 ]
 
 export function Layout() {
