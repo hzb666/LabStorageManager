@@ -17,6 +17,13 @@ from .consumable_order import (
     ConsumableOrderResponse,
 )
 from .user_session import UserSession
+from .announcement import (
+    Announcement,
+    AnnouncementBase,
+    AnnouncementCreate,
+    AnnouncementUpdate,
+    AnnouncementResponse,
+)
 
 __all__ = [
     # User
@@ -42,4 +49,10 @@ __all__ = [
     "ConsumableOrderCreate",
     "ConsumableOrderUpdate",
     "ConsumableOrderResponse",
+    # Announcement
+    "Announcement",
+    "AnnouncementBase",
+    "AnnouncementCreate",
+    "AnnouncementUpdate",
+    "AnnouncementResponse",
 ]

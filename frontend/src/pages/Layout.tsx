@@ -3,6 +3,9 @@ import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
+import { AnnouncementBanner } from '@/components/AnnouncementBanner'
+import { AnnouncementButton } from '@/components/AnnouncementButton'
+import { announcementAPI, Announcement } from '@/api/client'
 import {
   LayoutDashboard,
   Package,
@@ -16,6 +19,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   FolderInput,
+  Megaphone,
 } from 'lucide-react'
 import { BugReportButton, getBugButtonHidden, clearBugButtonHidden } from '@/components/BugReportButton'
 import { useTheme } from '@/hooks/useTheme'
@@ -29,6 +33,7 @@ const navItems = [
   { title: '库存列表', href: '/inventory', icon: Package, group: '功能' },
   { title: '导入数据', href: '/import', icon: FolderInput, group: '功能' },
   { title: '用户管理', href: '/admin/users', icon: Users, adminOnly: true, group: '管理' },
+  { title: '公告管理', href: '/admin/announcements', icon: Megaphone, adminOnly: true, group: '管理' },
 ]
 
 export function Layout() {
@@ -39,6 +44,24 @@ export function Layout() {
   const isMobile = useIsMobile()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [logoutConfirming, setLogoutConfirming] = useState(false)
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+
+  // Fetch public announcements
+  useEffect(() => {
+    const fetchAnnouncements = async () => {
+      try {
+        const response = await announcementAPI.getPublic()
+        setAnnouncements(response.data)
+      } catch (error) {
+        console.error('Failed to fetch announcements:', error)
+      }
+    }
+
+    fetchAnnouncements()
+  }, [])
+
+  // Determine if user is regular user (not admin)
+  const isRegularUser = user?.role !== 'admin'
   const [showBugButton, setShowBugButton] = useState(() => !getBugButtonHidden())
 
   // 右键隐藏按钮后刷新状态
@@ -394,6 +417,11 @@ export function Layout() {
           showDesktopSidebar ? (sidebarCollapsed ? "md:ml-16" : "md:ml-64") : ""
         )}
       >
+        {/* Announcement Banner - Only show for regular users */}
+        {isRegularUser && (
+          <AnnouncementBanner announcements={announcements} />
+        )}
+
         <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pl-3 md:pr-3 lg:pl-3 lg:pr-4">
           <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
             <header
@@ -434,6 +462,9 @@ export function Layout() {
               )}
 
               <div className="flex-1" />
+
+              {/* Announcement Button - Only show for regular users */}
+              {isRegularUser && <AnnouncementButton announcements={announcements} />}
 
               <Button
                 variant="ghost"
