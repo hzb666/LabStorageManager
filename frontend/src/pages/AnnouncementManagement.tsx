@@ -10,7 +10,9 @@ import type { SortingState } from '@tanstack/react-table'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { Label } from '@/components/ui/Label'
+import { Textarea } from '@/components/ui/Textarea'
 import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
@@ -37,26 +39,11 @@ import {
 
 const columnHelper = createColumnHelper<Announcement>()
 
-// Simple Textarea component
-const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  ({ className, ...props }, ref) => {
-    return (
-      <textarea
-        className={cn(
-          "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
-          className
-        )}
-        ref={ref}
-        {...props}
-      />
-    )
-  }
-)
-Textarea.displayName = "Textarea"
-
 export function AnnouncementManagement() {
   const queryClient = useQueryClient()
-  const [sorting, setSorting] = useState<SortingState>([])
+  const [sorting] = useState<SortingState>([])
+  const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all')
+  const [pinnedFilter, setPinnedFilter] = useState<'all' | 'pinned' | 'unpinned'>('all')
 
   // Dialog state - 使用 useDialogState 管理 create/edit/delete 对话框
   const [dialogState, setDialogState] = useDialogState<"create" | "edit" | "delete">()
@@ -168,12 +155,12 @@ export function AnnouncementManagement() {
         const isVisible = info.row.original.is_visible
         return (
           <div className="flex items-center gap-2">
-            {isPinned && <Pin className="w-3.5 h-3.5 text-yellow-500" />}
+            {isPinned && <Pin className="size-4 text-amber-600 dark:text-amber-500" />}
             <span className={cn(!isVisible && "text-muted-foreground")}>
               {info.getValue()}
             </span>
             {!isVisible && (
-              <span className="text-xs text-muted-foreground">(已隐藏)</span>
+              <span className="text-sm text-muted-foreground">(已隐藏)</span>
             )}
           </div>
         )
@@ -183,12 +170,11 @@ export function AnnouncementManagement() {
       header: '内容',
       size: 300,
       cell: info => {
-        const content = info.getValue()
         return (
-          <span className="line-clamp-2 text-muted-foreground">
-            {content.length > 100 ? content.substring(0, 100) + '...' : content}
-          </span>
-        )
+          <div className="truncate" title={info.getValue()}>
+            {info.getValue()}
+          </div>
+        );
       },
     }),
     columnHelper.accessor('images', {
@@ -230,7 +216,7 @@ export function AnnouncementManagement() {
               }}
             >
               {announcement.is_pinned ? (
-                <PinOff className="w-3.5 h-3.5 text-yellow-500" />
+                <PinOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-500" />
               ) : (
                 <Pin className="w-3.5 h-3.5" />
               )}
@@ -287,19 +273,31 @@ export function AnnouncementManagement() {
     }),
   ], [])
 
+  // 筛选后的公告数据（必须在 table 定义之前）
+  const filteredAnnouncements = useMemo(() => {
+    return announcements.filter(announcement => {
+      // 显示状态筛选
+      if (visibilityFilter === 'visible' && !announcement.is_visible) return false
+      if (visibilityFilter === 'hidden' && announcement.is_visible) return false
+      // 置顶状态筛选
+      if (pinnedFilter === 'pinned' && !announcement.is_pinned) return false
+      if (pinnedFilter === 'unpinned' && announcement.is_pinned) return false
+      return true
+    })
+  }, [announcements, visibilityFilter, pinnedFilter])
+
+  // Table definition
   const table = useReactTable({
-    data: announcements,
+    data: filteredAnnouncements,
     columns,
     columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    onSortingChange: setSorting,
     state: {
       sorting,
     },
   })
 
-  // 表单验证
   const validateForm = useCallback((): boolean => {
     const errors: Record<string, string> = {}
 
@@ -387,6 +385,63 @@ export function AnnouncementManagement() {
     }
   }
 
+  // 处理图片上传
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // 验证文件类型
+    if (!file.type.startsWith('image/')) {
+      toast.error('请选择图片文件')
+      return
+    }
+
+    // 验证文件大小 (最大 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('图片大小不能超过 5MB')
+      return
+    }
+
+    setUploading(true)
+    try {
+      const url = await announcementAPI.uploadImage(file)
+      setFormData(prev => ({
+        ...prev,
+        images: [...prev.images, url]
+      }))
+      toast.success('图片上传成功')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '图片上传失败')
+    } finally {
+      setUploading(false)
+      // 清空 input 值，允许重复选择同一文件
+      e.target.value = ''
+    }
+  }
+
+  // 处理移除图片
+  const handleRemoveImage = async (url: string) => {
+    try {
+      // 提取文件名
+      const filename = url.split('/').pop()
+      if (filename) {
+        await announcementAPI.deleteImage(filename)
+      }
+      setFormData(prev => ({
+        ...prev,
+        images: prev.images.filter(img => img !== url)
+      }))
+      toast.success('图片已移除')
+    } catch {
+      // 即使删除远程文件失败，也从表单中移除
+      setFormData(prev => ({
+        ...prev,
+        images: prev.images.filter(img => img !== url)
+      }))
+    }
+  }
+
   return (
     <div className="space-y-6">
 
@@ -398,47 +453,73 @@ export function AnnouncementManagement() {
         </Button>
       </div>
 
-      {/* Storage Info Card */}
-      {storageInfo && (
-        <Card className="bg-muted/30">
-          <CardContent className="py-3">
-            <div className="flex items-center gap-4">
-              <HardDrive className="w-5 h-5 text-muted-foreground" />
-              <div className="flex-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    存储空间: {storageInfo.used_mb} MB / {storageInfo.max_mb} MB
-                  </span>
-                  <span className="text-muted-foreground">
-                    {storageInfo.image_count} 张图片
-                  </span>
-                </div>
-                <div className="mt-1 h-2 bg-secondary rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary transition-all"
-                    style={{ width: `${Math.min(storageInfo.usage_percent, 100)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Storage Info and Filter */}
+      {/* Storage Info and Filters */}
+{storageInfo && (
+  <div className="flex items-center gap-3">
+    
+    {/* Storage Info - 背景融合进度条风格 (高度严格保持 h-10) */}
+    <div className="relative flex-1 h-10 rounded-md border border-input bg-card overflow-hidden flex items-center">
+      
+      {/* 1. 底层：动态推进的背景色 (充当进度条) */}
+      <div
+        className="absolute inset-y-0 left-0 bg-muted transition-all duration-500 ease-in-out"
+        style={{ width: `${Math.min(storageInfo.usage_percent, 100)}%` }}
+      />
+
+      {/* 2. 上层内容：Relative + z-10 确保文字始终在色块上方 */}
+      <div className="relative z-10 flex items-center justify-between w-full px-3 gap-3">
+        
+        {/* 左侧：图标 + 容量信息 */}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <HardDrive className="w-4 h-4 text-muted-foreground shrink-0" />
+          <span className="text-base text-foreground truncate">
+            存储: <span className="font-medium">{storageInfo.used_mb}</span> / {storageInfo.max_mb} MB
+          </span>
+        </div>
+      </div>
+    </div>
+
+    {/* Filter Selects - 将 min-h-10 改为 h-10 确保完美对齐 */}
+    <Select value={visibilityFilter} onValueChange={(value: 'all' | 'visible' | 'hidden') => setVisibilityFilter(value)}>
+      <SelectTrigger className="w-30 min-h-10">
+        <SelectValue placeholder="显示状态" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">全部</SelectItem>
+        <SelectItem value="visible">显示</SelectItem>
+        <SelectItem value="hidden">隐藏</SelectItem>
+      </SelectContent>
+    </Select>
+
+    <Select value={pinnedFilter} onValueChange={(value: 'all' | 'pinned' | 'unpinned') => setPinnedFilter(value)}>
+      <SelectTrigger className="w-30 min-h-10">
+        <SelectValue placeholder="置顶状态" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">全部</SelectItem>
+        <SelectItem value="pinned">置顶</SelectItem>
+        <SelectItem value="unpinned">未置顶</SelectItem>
+      </SelectContent>
+    </Select>
+    
+  </div>
+)}
 
       {/* Announcements Table */}
       <Card className="overflow-hidden">
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
             <Megaphone className="w-5 h-5" />
-            公告列表 <span className="text-muted-foreground font-normal">(&thinsp;{announcements.length}&thinsp;)</span>
+            公告列表 <span className="text-muted-foreground font-normal">(&thinsp;{filteredAnnouncements.length}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading && announcements.length === 0 ? (
+          {isLoading && filteredAnnouncements.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
-          ) : announcements.length === 0 ? (
+          ) : filteredAnnouncements.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               暂无公告数据
             </div>
@@ -527,7 +608,7 @@ export function AnnouncementManagement() {
                 {/* 已上传的图片预览 */}
                 {formData.images.length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {formData.images.map((url) => (
+                    {formData.images.map((url, index) => (
                       <div key={url} className="relative group">
                         <img
                           src={url}
@@ -563,7 +644,7 @@ export function AnnouncementManagement() {
                     className="hidden"
                   />
                 </label>
-                <p className="text-xs text-muted-foreground">支持 jpg, png, gif 格式，最大 5MB</p>
+                <p className="text-sm text-muted-foreground">支持 jpg, png, gif 格式，最大 5MB</p>
               </div>
             </div>
           </div>
@@ -622,7 +703,7 @@ export function AnnouncementManagement() {
                 {/* 已上传的图片预览 */}
                 {formData.images.length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {formData.images.map((url) => (
+                    {formData.images.map((url, index) => (
                       <div key={url} className="relative group">
                         <img
                           src={url}
@@ -658,7 +739,7 @@ export function AnnouncementManagement() {
                     className="hidden"
                   />
                 </label>
-                <p className="text-xs text-muted-foreground">支持 jpg, png, gif 格式，最大 5MB</p>
+                <p className="text-sm text-muted-foreground">支持 jpg, png, gif 格式，最大 5MB</p>
               </div>
             </div>
           </div>

@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useCallback } from 'react'
+﻿import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -41,6 +41,7 @@ import type { PaginationParams } from '@/api/client'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { LoadingButton } from '@/components/ui/LoadingButton'
+import { TableEmptyState } from '@/components/ui/TableFilters'
 
 // 用户状态样式 - 使用 StatusBadge 组件
 
@@ -49,6 +50,7 @@ import { LoadingButton } from '@/components/ui/LoadingButton'
 interface UserListParams extends PaginationParams {
   role?: string
   is_active?: boolean
+  username?: string
 }
 
 interface User {
@@ -67,6 +69,16 @@ export function AdminUsersPage() {
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
+  // 防抖搜索
+  const [debouncedFilter, setDebouncedFilter] = useState('')
+  
+  // 防抖 effect - 300ms 延迟
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedFilter(globalFilter)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [globalFilter])
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('active')
 
@@ -76,7 +88,7 @@ export function AdminUsersPage() {
 
   // 使用 React Query 获取用户列表，配合 keepPreviousData 避免闪烁
   const { data: userData = [], isLoading } = useQuery({
-    queryKey: ['adminUsers', roleFilter, statusFilter, currentPage, pageSize],
+    queryKey: ['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize],
     queryFn: async () => {
       const params: UserListParams = {
         skip: (currentPage - 1) * pageSize,
@@ -84,6 +96,7 @@ export function AdminUsersPage() {
       }
       if (roleFilter !== 'all') params.role = roleFilter
       if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
+      if (debouncedFilter) params.username = debouncedFilter
       const response = await userAdminAPI.list(params)
       return response.data.data || []
     },
@@ -92,11 +105,12 @@ export function AdminUsersPage() {
 
   // 获取总数
   const { data: totalData } = useQuery({
-    queryKey: ['adminUsers', 'total', roleFilter, statusFilter],
+    queryKey: ['adminUsers', 'total', roleFilter, statusFilter, debouncedFilter],
     queryFn: async () => {
       const params: UserListParams = { skip: 0, limit: 1 }
       if (roleFilter !== 'all') params.role = roleFilter
       if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
+      if (debouncedFilter) params.username = debouncedFilter
       const response = await userAdminAPI.list(params)
       return response.data.total || 0
     },
@@ -105,6 +119,9 @@ export function AdminUsersPage() {
 
   const total = totalData || 0
   const totalPages = Math.ceil(total / pageSize)
+
+  // 判断是否有筛选条件
+  const hasFilter = Boolean(debouncedFilter || roleFilter !== 'all' || statusFilter !== 'active')
 
   // 将当前管理员账户置顶显示
   const data = useMemo(() => {
@@ -529,7 +546,7 @@ export function AdminUsersPage() {
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
             <Users className="w-5 h-5" />
-            用户列表 <span className="text-muted-foreground font-normal">(&thinsp;{data.length}&thinsp;)</span>
+            用户列表 <span className="text-muted-foreground font-normal">(&thinsp;{total}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -538,9 +555,11 @@ export function AdminUsersPage() {
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
           ) : data.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              暂无用户数据
-            </div>
+            <TableEmptyState
+              searchKeyword={debouncedFilter}
+              hasFilter={hasFilter}
+              emptyText="没有符合条件的用户"
+            />
           ) : (
             <div className="px-6 rounded-md overflow-auto">
               <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
@@ -580,21 +599,23 @@ export function AdminUsersPage() {
             </div>
           )}
         </CardContent>
-        {/* 分页组件 */}
-        <div className="flex items-center justify-between px-6 py-4 mt-2">
-          <PaginationInfo
-            currentPage={currentPage}
-            pageSize={pageSize}
-            total={total}
-          />
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            pageSize={pageSize}
-            onPageChange={handlePageChange}
-            onPageSizeChange={handlePageSizeChange}
-          />
-        </div>
+        {/* 分页组件 - 数据大于20条时显示 */}
+        {total > 20 && (
+          <div className="flex items-center justify-between px-6 py-4 mt-2">
+            <PaginationInfo
+              currentPage={currentPage}
+              pageSize={pageSize}
+              total={total}
+            />
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
+          </div>
+        )}
       </Card>
 
       {/* Create User Modal */}

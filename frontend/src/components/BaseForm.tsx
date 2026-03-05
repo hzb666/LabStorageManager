@@ -4,6 +4,14 @@ import { Input, type PrefixButtonConfig } from "./ui/Input"
 import { Checkbox } from "./ui/Checkbox"
 import { FormField } from "./ui/FormField"
 import { Autocomplete, type AutocompleteOption } from "./ui/AutoComplete"
+import { Textarea } from "./ui/Textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/Select"
 import { cn } from "@/lib/utils"
 import { INPUT_STYLES } from "@/lib/constants"
 
@@ -181,7 +189,7 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
               hideLabel={field.type === 'checkbox'}
             >
             {field.type === 'textarea' && (
-              <textarea
+              <Textarea
                 {...controllerField}
                 id={`field-${field.name as string}`}
                 value={(controllerField.value as string) ?? ''}
@@ -194,19 +202,21 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
             )}
 
             {field.type === 'select' && (
-              <select
+              <Select
                 {...controllerField}
-                id={`field-${field.name as string}`}
                 value={(controllerField.value as string) ?? ''}
-                onChange={(e) => controllerField.onChange(e.target.value)}
+                onValueChange={controllerField.onChange}
                 disabled={isDisabled}
-                className={cn(getInputClassName(hasError, isReadOnly), "w-full")}
               >
-                <option value="">{field.placeholder || '请选择'}</option>
-                {field.options?.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+                <SelectTrigger id={`field-${field.name as string}`} className={cn(getInputClassName(hasError, isReadOnly), "w-full")}>
+                  <SelectValue placeholder={field.placeholder || '请选择'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {field.options?.map(opt => (
+                    <SelectItem key={opt.value} value={String(opt.value)}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
 
             {field.type === 'input' && (

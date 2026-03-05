@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X } from 'lucide-react'
-import { Announcement } from '@/api/client'
+import { type Announcement } from '@/api/client'
 import { AnnouncementDetail } from './AnnouncementDetail'
 
 interface AnnouncementBannerProps {
@@ -16,36 +16,20 @@ export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
 
-  // Check if announcement is closed (within 1 day)
-  const isAnnouncementClosed = useCallback((id: number): boolean => {
-    try {
-      const closedData = localStorage.getItem(`${CLOSED_KEY_PREFIX}${id}`)
-      if (!closedData) return false
-
-      const { timestamp } = JSON.parse(closedData)
-      const now = Date.now()
-      // Check if 1 day has passed
-      if (now - timestamp > CLOSED_DURATION) {
-        // Expired, remove from localStorage
-        localStorage.removeItem(`${CLOSED_KEY_PREFIX}${id}`)
-        return false
-      }
-      return true
-    } catch {
-      return false
-    }
+  // For pinned announcements - always show (ignore closed status)
+  // Non-pinned announcements are not returned by the API anyway
+  const shouldShowAnnouncement = useCallback((announcement: Announcement): boolean => {
+    return announcement.is_pinned && announcement.is_visible
   }, [])
 
   // Update visible announcements when the list changes
   useEffect(() => {
-    const filtered = announcements.filter(
-      (announcement) => announcement.is_pinned && announcement.is_visible && !isAnnouncementClosed(announcement.id)
-    )
+    const filtered = announcements.filter(shouldShowAnnouncement)
     setVisibleAnnouncements(filtered)
-  }, [announcements, isAnnouncementClosed])
+  }, [announcements, shouldShowAnnouncement])
 
   // Handle close announcement
-  const handleClose = (id: number, e: React.MouseEvent) => {
+  const handleClose = (id: number, _updatedAt: string | undefined, e: React.MouseEvent) => {
     e.stopPropagation()
     // Save to localStorage with timestamp
     localStorage.setItem(
@@ -61,37 +45,34 @@ export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
     setIsDetailOpen(true)
   }
 
-  // If no visible announcements, don't render
+  // If no visible announcements, maintain the layout spacing for the header
   if (visibleAnnouncements.length === 0) {
-    return null
+    return <div className="flex-1" />
   }
 
   return (
     <>
-      <div className="bg-gradient-to-r from-amber-50 to-amber-100 dark:from-amber-950 dark:to-amber-900 border-b border-amber-200 dark:border-amber-800 overflow-hidden">
-        <div className="max-w-full overflow-hidden relative">
-          {/* LED style banner with marquee effect */}
-          <div className="flex items-center h-10 md:h-12 py-2">
-            <div className="flex-1 overflow-hidden relative">
-              <div className="flex animate-marquee whitespace-nowrap">
-                {visibleAnnouncements.map((announcement) => (
-                  <div
-                    key={announcement.id}
-                    className="inline-flex items-center mx-6 cursor-pointer hover:opacity-80 transition-opacity group"
-                    onClick={() => handleBannerClick(announcement)}
-                  >
-                    <span className="inline-flex items-center justify-center w-2 h-2 rounded-full bg-red-500 mr-2 animate-pulse" />
-                    <span className="text-amber-900 dark:text-amber-100 font-medium text-sm md:text-base">
-                      {announcement.title}
-                    </span>
-                    <X
-                      className="ml-2 w-4 h-4 text-amber-600 dark:text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => handleClose(announcement.id, e)}
-                    />
-                  </div>
-                ))}
+      <div className="flex-1 overflow-hidden relative mx-2 md:mx-4 flex items-center h-full">
+        {/* LED style banner with marquee effect */}
+        <div className="w-full overflow-hidden">
+          {/* 复制内容以实现无缝滚动效果 */}
+          <div className="flex animate-marquee whitespace-nowrap">
+            {[...visibleAnnouncements, ...visibleAnnouncements].map((announcement, index) => (
+              <div
+                key={`${announcement.id}-${index}`}
+                className="inline-flex items-center mx-6 cursor-pointer hover:opacity-80 transition-opacity group"
+                onClick={() => handleBannerClick(announcement)}
+              >
+                <span className="inline-flex items-center justify-center w-2 h-2 rounded-full bg-primary mr-2 animate-pulse" />
+                <span className="text-foreground font-medium text-sm md:text-base">
+                  {announcement.title}
+                </span>
+                <X
+                  className="ml-2 w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:text-foreground"
+                  onClick={(e) => handleClose(announcement.id, announcement.updated_at, e)}
+                />
               </div>
-            </div>
+            ))}
           </div>
         </div>
       </div>

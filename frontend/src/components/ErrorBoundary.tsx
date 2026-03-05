@@ -52,6 +52,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
     window.location.reload()
   }
 
+  handleBack = () => {
+    if (window.history.length > 1) {
+      window.history.back()
+    } else {
+      // 如果没有历史记录，跳转到首页
+      window.location.href = '/'
+    }
+  }
+
   handleReset = () => {
     this.setState({ hasError: false, error: null })
   }
@@ -82,7 +91,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
                 <div className="flex gap-3">
                   <Button
                     variant="morden"
-                    onClick={this.handleReset}
+                    onClick={this.handleBack}
                     className="flex-1"
                     size="lg"
                   >

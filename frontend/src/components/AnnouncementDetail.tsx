@@ -1,6 +1,6 @@
 import { X } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { Announcement } from '@/api/client'
+import { type Announcement } from '@/api/client'
 
 interface AnnouncementDetailProps {
   announcement: Announcement | null

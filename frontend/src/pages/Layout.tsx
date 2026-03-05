@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { AnnouncementBanner } from '@/components/AnnouncementBanner'
 import { AnnouncementButton } from '@/components/AnnouncementButton'
-import { announcementAPI, Announcement } from '@/api/client'
+import { announcementAPI, type Announcement } from '@/api/client'
 import {
   LayoutDashboard,
   Package,
@@ -46,7 +46,7 @@ export function Layout() {
   const [logoutConfirming, setLogoutConfirming] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
 
-  // Fetch public announcements
+  // Fetch public announcements when location changes (navigation)
   useEffect(() => {
     const fetchAnnouncements = async () => {
       try {
@@ -58,7 +58,7 @@ export function Layout() {
     }
 
     fetchAnnouncements()
-  }, [])
+  }, [location])
 
   // Determine if user is regular user (not admin)
   const isRegularUser = user?.role !== 'admin'
@@ -417,11 +417,6 @@ export function Layout() {
           showDesktopSidebar ? (sidebarCollapsed ? "md:ml-16" : "md:ml-64") : ""
         )}
       >
-        {/* Announcement Banner - Only show for regular users */}
-        {isRegularUser && (
-          <AnnouncementBanner announcements={announcements} />
-        )}
-
         <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pl-3 md:pr-3 lg:pl-3 lg:pr-4">
           <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
             <header
@@ -461,7 +456,8 @@ export function Layout() {
                 </Button>
               )}
 
-              <div className="flex-1" />
+              {/* 将 AnnouncementBanner 放置在这里，替代原本的 div */}
+              <AnnouncementBanner announcements={announcements} />
 
               {/* Announcement Button - Only show for regular users */}
               {isRegularUser && <AnnouncementButton announcements={announcements} />}

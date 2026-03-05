@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Bell, X } from 'lucide-react'
-import { Announcement } from '@/api/client'
+import { type Announcement } from '@/api/client'
 import { AnnouncementDetail } from './AnnouncementDetail'
 
 interface AnnouncementButtonProps {

@@ -74,6 +74,31 @@ def get_public_announcements(
     return result
 
 
+@router.get("/storage-info")
+def get_storage_info(
+    current_user: User = Depends(require_admin),
+):
+    """
+    Get storage usage information for announcement images (admin only)
+    """
+    used_bytes, max_bytes = announcement_image_service.get_storage_usage()
+
+    # Get count of image files
+    images_dir = announcement_image_service.get_announcement_images_dir()
+    image_count = 0
+    if images_dir.exists():
+        image_count = sum(1 for f in images_dir.iterdir() if f.is_file())
+
+    return {
+        "used_bytes": used_bytes,
+        "used_mb": round(used_bytes / (1024 * 1024), 2),
+        "max_bytes": max_bytes,
+        "max_mb": round(max_bytes / (1024 * 1024), 2),
+        "usage_percent": round((used_bytes / max_bytes) * 100, 2) if max_bytes > 0 else 0,
+        "image_count": image_count,
+    }
+
+
 # ==================== Admin Endpoints ====================
 
 
@@ -320,28 +345,3 @@ def delete_announcement_image(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Image not found"
         )
-
-
-@router.get("/storage-info")
-def get_storage_info(
-    current_user: User = Depends(require_admin),
-):
-    """
-    Get storage usage information for announcement images (admin only)
-    """
-    used_bytes, max_bytes = announcement_image_service.get_storage_usage()
-
-    # Get count of image files
-    images_dir = announcement_image_service.get_announcement_images_dir()
-    image_count = 0
-    if images_dir.exists():
-        image_count = sum(1 for f in images_dir.iterdir() if f.is_file())
-
-    return {
-        "used_bytes": used_bytes,
-        "used_mb": round(used_bytes / (1024 * 1024), 2),
-        "max_bytes": max_bytes,
-        "max_mb": round(max_bytes / (1024 * 1024), 2),
-        "usage_percent": round((used_bytes / max_bytes) * 100, 2) if max_bytes > 0 else 0,
-        "image_count": image_count,
-    }

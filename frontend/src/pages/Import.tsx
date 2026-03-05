@@ -239,7 +239,7 @@ export function ImportPage() {
                     <>
                       <Upload className="w-10 h-10 text-muted-foreground"/>
                       <div>
-                        <p className="text-sm font-medium">
+                        <p className="text-base">
                           点击或拖拽文件到此处上传
                         </p>
                         <p className="text-sm text-muted-foreground mt-1">

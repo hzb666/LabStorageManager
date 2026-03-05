@@ -9,7 +9,7 @@ from typing import List, Tuple
 from fastapi import UploadFile, HTTPException
 from PIL import Image
 
-from app.core.config import settings
+from app.core.config import settings, BASE_DIR
 
 
 # Configuration constants
@@ -26,7 +26,7 @@ def get_announcement_images_dir() -> Path:
     Returns:
         Path to the announcement images directory
     """
-    return settings.BASE_DIR / ANNOUNCEMENT_IMAGES_DIR
+    return BASE_DIR / ANNOUNCEMENT_IMAGES_DIR
 
 
 def ensure_images_dir() -> Path:

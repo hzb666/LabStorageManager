@@ -52,7 +52,7 @@ export function ToastContainer() {
 
   const removeToast = useCallback((id: string) => {
     clearToastTimer(id)
-    setToasts(prev => prev.map(t => 
+    setToasts(prev => prev.map(t =>
       t.id === id ? { ...t, exiting: true } : t
     ))
     setTimeout(() => {
@@ -76,12 +76,12 @@ export function ToastContainer() {
       removeToast(id)
     }, 3500)
   }, [clearToastTimer, removeToast])
-  
+
   const handleMouseEnter = React.useCallback((id: string) => {
     hoveredRef.current.add(id)
     clearToastTimer(id)
   }, [clearToastTimer])
-  
+
   const handleMouseLeave = React.useCallback((id: string) => {
     hoveredRef.current.delete(id)
     const toast = toasts.find(t => t.id === id)
@@ -89,13 +89,13 @@ export function ToastContainer() {
       setToastTimer(id)
     }
   }, [toasts, setToastTimer])
-  
+
   useEffect(() => {
     const currentIds = new Set(toasts.map(t => t.id))
     Object.keys(timersRef.current).forEach(id => {
       if (!currentIds.has(id)) clearToastTimer(id)
     })
-    
+
     toasts.forEach(toast => {
       if (!timersRef.current[toast.id] && !hoveredRef.current.has(toast.id) && !toast.exiting) {
         setToastTimer(toast.id)
@@ -121,13 +121,12 @@ export function ToastContainer() {
           onMouseLeave={() => handleMouseLeave(t.id)}
         >
           {/* 必须加 min-height: 0 才能让 grid-rows-[0fr] 生效 */}
-          <div className="overflow-hidden min-h-0">
+          <div className="overflow-hidden min-h-0 rounded-lg">
             <div
               className={cn(
-                'flex items-start gap-3 px-6 py-4 rounded-lg border shadow-lg',
+                'flex gap-3 px-6 h-16 items-center rounded-lg border shadow-lg',
                 'animate-in slide-in-from-right-full fade-in duration-300',
-                t.exiting && 'animate-out fade-out slide-out-to-right-full duration-300',
-                styles[t.type]
+                t.exiting && 'animate-out fade-out zoom-out-95 duration-300', styles[t.type]
               )}
             >
               <span className="shrink-0 mt-0.5">{icons[t.type]}</span>

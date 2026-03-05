@@ -27,8 +27,8 @@ class Announcement(AnnouncementBase, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default=datetime.utcnow)
-    updated_at: datetime = Field(default=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class AnnouncementCreate(SQLModel):
