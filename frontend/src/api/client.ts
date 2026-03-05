@@ -255,3 +255,56 @@ export interface ChemicalInfo {
 export const chemicalAPI = {
   getInfo: (casNumber: string) => api.get<ChemicalInfo>(`/chemical-info/${casNumber}`),
 }
+
+// Announcement types
+export interface Announcement {
+  id: number
+  title: string
+  content: string
+  images: string[]
+  is_pinned: boolean
+  is_visible: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface StorageInfo {
+  used_mb: number
+  max_mb: number
+  usage_percent: number
+  image_count: number
+}
+
+// Announcement APIs
+export const announcementAPI = {
+  list: (params?: { skip?: number; limit?: number }) =>
+    api.get<Announcement[]>('/announcements/', { params }),
+  get: (id: number) => api.get<Announcement>(`/announcements/${id}`),
+  create: (data: {
+    title: string
+    content: string
+    images?: string[]
+    is_pinned?: boolean
+    is_visible?: boolean
+  }) => api.post<Announcement>('/announcements/', data),
+  update: (id: number, data: {
+    title?: string
+    content?: string
+    images?: string[]
+    is_pinned?: boolean
+    is_visible?: boolean
+  }) => api.put<Announcement>(`/announcements/${id}`, data),
+  delete: (id: number) => api.delete(`/announcements/${id}`),
+  togglePin: (id: number) => api.post<Announcement>(`/announcements/${id}/toggle-pin`),
+  toggleVisibility: (id: number) => api.post<Announcement>(`/announcements/${id}/toggle-visibility`),
+  uploadImage: async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await api.post<{ url: string }>('/announcements/upload-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return response.data.url
+  },
+  deleteImage: (filename: string) => api.delete(`/announcements/images/${filename}`),
+  getStorageInfo: () => api.get<StorageInfo>('/announcements/storage-info'),
+}

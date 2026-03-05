@@ -10,6 +10,7 @@ import { ConsumableOrdersPage } from '@/pages/ConsumableOrders'
 import { TestErrorPage } from '@/pages/TestError'
 import { NotFoundPage } from '@/pages/NotFound'
 import DeviceManagement from '@/pages/DeviceManagement'
+import { AnnouncementManagement } from '@/pages/AnnouncementManagement'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
 import { useTheme } from '@/hooks/useTheme'
@@ -60,6 +61,14 @@ function AppContent() {
             element={
               <AdminRoute>
                 <AdminUsersPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="admin/announcements"
+            element={
+              <AdminRoute>
+                <AnnouncementManagement />
               </AdminRoute>
             }
           />
