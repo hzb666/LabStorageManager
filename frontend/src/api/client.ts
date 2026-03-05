@@ -264,6 +264,8 @@ export interface Announcement {
   images: string[]
   is_pinned: boolean
   is_visible: boolean
+  created_by: number | null
+  created_by_name: string | null
   created_at: string
   updated_at: string
 }
