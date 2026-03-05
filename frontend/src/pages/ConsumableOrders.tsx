@@ -1,42 +1,33 @@
 ﻿/**
  * 耗材订单页面
  * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、完成
- * 参考 Inventory 页面实现，使用 DataTable + BaseForm + Valibot
+ * 参考 Inventory 页面实现，使用 FilterTable 组件
  */
-import React, { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
-import {
-  createColumnHelper,
-  getCoreRowModel,
-  getExpandedRowModel,
-  useReactTable,
-} from '@tanstack/react-table'
-import type { SortingState, ColumnSizingState, RowData, Table } from '@tanstack/react-table'
-import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
+import React, { useState, useMemo, useCallback } from 'react'
+import { createColumnHelper, type RowData } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
 import { valibotResolver } from '@hookform/resolvers/valibot'
 
 // UI 组件
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
-import { Checkbox } from '@/components/ui/Checkbox'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { StatusBadge } from '@/components/ui/StatusBadge'
 import { LoadingButton } from '@/components/ui/LoadingButton'
-import { DataTable } from '@/components/ui/DataTable'
 import { toast } from '@/components/ui/Toast'
+import { FilterTable } from '@/components/ui/FilterTable'
+import { TableActionButtonsMemo } from '@/components/ui/TableActionButtons'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
+import { useTableState } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
 import { formatDate } from '@/lib/utils'
 import { ConsumableOrderSchema } from '@/lib/validationSchemas'
 import type { ConsumableOrderFormData } from '@/lib/validationSchemas'
+import { getConsumableOrderTableColumns } from '@/lib/tableConfigs'
 import {
   getConsumableOrderFormFields,
   defaultConsumableOrderValues
@@ -44,24 +35,10 @@ import {
 
 // 图标
 import {
-  Search,
-  Loader2,
-  X,
   Plus,
-  Pencil,
   ShoppingCart,
   ArrowUpFromLine,
-  ChevronsDownUp,
-  ChevronsUpDown,
 } from 'lucide-react'
-
-// 类型扩展
-declare module '@tanstack/react-table' {
-  interface TableMeta<TData extends RowData> {
-    fuzzySearch: boolean
-    onEdit: (item: TData) => void
-  }
-}
 
 interface ValidationError {
   loc?: (string | number)[]
@@ -90,6 +67,23 @@ interface ConsumableOrder {
 }
 
 const columnHelper = createColumnHelper<ConsumableOrder>()
+
+// 耗材订单状态筛选选项
+const CONSUMABLE_ORDER_STATUS_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'pending', label: '待审批' },
+  { value: 'approved', label: '已审批' },
+  { value: 'rejected', label: '已驳回' },
+  { value: 'completed', label: '已完成' },
+]
+
+// 耗材订单搜索字段选项
+const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
+  { value: 'all', label: '全部' },
+  { value: 'name', label: '名称' },
+  { value: 'category', label: '分类' },
+  { value: 'brand', label: '品牌' },
+]
 
 // ============================================================================
 // 辅助组件
@@ -127,120 +121,27 @@ const HighlightText = React.memo(function HighlightText({
 // ============================================================================
 
 export function ConsumableOrdersPage() {
-  const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === 'admin'
 
-  // 表格状态
-  const [sorting, setSorting] = useState<SortingState>([])
-  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('consumable-orders-table-col-sizes') || '{}')
-      // 过滤掉宽度为0的列（防止旧数据导致列消失）
-      const filtered: ColumnSizingState = {}
-      for (const [key, size] of Object.entries(saved)) {
-        if (typeof size === 'number' && size > 0) {
-          filtered[key] = size
-        }
-      }
-      return Object.keys(filtered).length > 0 ? filtered : {}
-    } catch { return {} }
+  // 使用 useTableState 管理表格状态
+  const filter = useTableState({
+    api: consumableOrderAPI,
+    queryKey: ['consumable-orders'],
+    tableId: 'consumable-orders-table',
+    statusOptions: CONSUMABLE_ORDER_STATUS_OPTIONS,
+    searchFieldOptions: CONSUMABLE_SEARCH_FIELD_OPTIONS,
+    defaultStatus: 'all',
+    defaultSearchField: 'all',
+    pageSize: 50,
+    debounceMs: 300,
+    expandStorageKey: 'consumable-orders-expand-all',
   })
-  const [isAllExpanded, setIsAllExpanded] = useState<boolean>(false)
-
-  // 优化：使用节流/防抖降低 localStorage 写入频率
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      localStorage.setItem('consumable-orders-table-col-sizes', JSON.stringify(columnSizing))
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [columnSizing])
-
-  const toggleExpandAll = useCallback(() => setIsAllExpanded(prev => !prev), [])
-
-  const sortingRef = useRef<SortingState>([])
-
-  // 优化：分离输入框状态与接口查询状态，防抖 300ms 避免网络请求风暴
-  const [searchInput, setSearchInput] = useState('')
-  const [globalFilter, setGlobalFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [searchField, setSearchField] = useState('all')
-  const [fuzzySearch, setFuzzySearch] = useState(false)
 
   // Dialog 状态
   const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
   const [editingItem, setEditingItem] = useState<ConsumableOrder | null>(null)
-
-  const tableRef = useRef<Table<ConsumableOrder> | null>(null)
-
-  // 同步 searchInput 到 globalFilter 并防抖
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (globalFilter !== searchInput) {
-        setGlobalFilter(searchInput)
-      }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [searchInput, globalFilter])
-
-  // 数据查询 (API)
-  const queryFn = useCallback(async ({ pageParam = 0 }: { pageParam: number }) => {
-    const currentSorting = sorting.length > 0 ? sorting : sortingRef.current
-    const sort = currentSorting[0]
-
-    const params: Record<string, unknown> = { skip: pageParam, limit: 50 }
-
-    if (statusFilter !== 'all') params.status_filter = statusFilter
-    if (globalFilter) {
-      params.search = globalFilter
-      if (searchField !== 'all') params.search_field = searchField
-      if (fuzzySearch) params.fuzzy = true
-    }
-    if (sort) {
-      params.sort_by = sort.id
-      params.sort_order = sort.desc ? 'desc' : 'asc'
-    }
-
-    const response = await consumableOrderAPI.list(params as any)
-    return response.data
-  }, [statusFilter, globalFilter, searchField, fuzzySearch, sorting])
-
-  // 不限制最大页数，支持无限滚动
-
-  const {
-    data: allData,
-    isLoading,
-    isFetchingNextPage,
-    hasNextPage,
-    fetchNextPage,
-  } = useInfiniteQuery({
-    queryKey: ['consumable-orders', statusFilter, globalFilter, searchField, fuzzySearch, sorting],
-    queryFn,
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) => {
-      // 无限滚动：只要还有数据就继续加载
-      const currentLoadedCount = allPages.reduce((acc, page) => acc + page.data.length, 0)
-      if (currentLoadedCount < (lastPage.total || 0)) return currentLoadedCount
-      return null
-    },
-    placeholderData: keepPreviousData,
-    // refetchInterval: 10000, // [FIXME] 反模式：无限查询不应使用全局轮询
-  })
-
-  const data = useMemo(() => allData?.pages.flatMap(page => page.data) ?? [], [allData])
-  const total = allData?.pages[0]?.total ?? 0
-
-  const [grandTotal, setGrandTotal] = useState(0)
-  const grandTotalRef = useRef(0)
-
-  useEffect(() => {
-    if (!globalFilter && total > 0) {
-      grandTotalRef.current = total
-      setGrandTotal(total)
-    }
-  }, [total, globalFilter])
-
-  const displayCount = globalFilter ? `${total}/${grandTotalRef.current}` : `${grandTotal}`
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // 表单实例
   const form = useForm<ConsumableOrderFormData>({
@@ -251,8 +152,8 @@ export function ConsumableOrdersPage() {
 
   // 加载数据
   const loadOrders = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ['consumable-orders'] })
-  }, [queryClient])
+    await filter.invalidate()
+  }, [filter])
 
   // 点击添加按钮
   const handleAddClick = useCallback(() => {
@@ -262,7 +163,8 @@ export function ConsumableOrdersPage() {
   }, [form, setDialogState])
 
   // 点击编辑按钮
-  const handleEditClick = useCallback((item: ConsumableOrder) => {
+  const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
+    const item = itemRaw as unknown as ConsumableOrder
     setEditingItem(item)
     form.reset({
       name: item.name || '',
@@ -278,8 +180,6 @@ export function ConsumableOrdersPage() {
     })
     setDialogState('edit')
   }, [form, setDialogState])
-
-  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // 表单提交
   const handleFormSubmit = form.handleSubmit(
@@ -340,45 +240,6 @@ export function ConsumableOrdersPage() {
     }
   )
 
-  // 审批操作
-  const handleApprove = useCallback(async (id: number) => {
-    try {
-      await consumableOrderAPI.approve(id)
-      // 先刷新数据，再弹出 toast
-      await loadOrders()
-      toast.success('审批通过')
-    } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || '操作失败')
-    }
-  }, [loadOrders])
-
-  // 驳回操作
-  const handleReject = useCallback(async (id: number) => {
-    try {
-      await consumableOrderAPI.reject(id, '管理员驳回')
-      // 先刷新数据，再弹出 toast
-      await loadOrders()
-      toast.success('已驳回')
-    } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || '操作失败')
-    }
-  }, [loadOrders])
-
-  // 确认完成
-  const handleComplete = useCallback(async (id: number) => {
-    try {
-      await consumableOrderAPI.complete(id)
-      // 先刷新数据，再弹出 toast
-      await loadOrders()
-      toast.success('耗材订单已完成')
-    } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || '操作失败')
-    }
-  }, [loadOrders])
-
   // 导出功能
   const handleExport = useCallback(async () => {
     try {
@@ -397,147 +258,107 @@ export function ConsumableOrdersPage() {
     }
   }, [])
 
-  // 表格列配置
-  const columns = useMemo(() => [
-    columnHelper.accessor('name', {
-      header: '名称', size: 180, minSize: 150, maxSize: 300,
-      cell: info => (
-        <div className="flex items-center gap-1.5">
-          <span className="font-medium">
-            <HighlightText
-              text={info.getValue() || ''}
-              highlight={info.table.getState().globalFilter}
-              fuzzy={info.table.options.meta?.fuzzySearch}
-            />
-          </span>
-        </div>
-      ),
-    }),
-    columnHelper.accessor('category', {
-      header: '分类', size: 100, minSize: 80, maxSize: 150,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={info.getValue() || '-'}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
-    }),
-    columnHelper.accessor('brand', {
-      header: '品牌', size: 100, minSize: 80, maxSize: 150,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={info.getValue() || '-'}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
-    }),
-    columnHelper.accessor('specification', {
-      header: '规格', size: 100, minSize: 80, maxSize: 150,
-      cell: info => <span className="break-all">{info.getValue()}</span>,
-    }),
-    columnHelper.accessor('quantity', {
-      header: '数量', size: 60, minSize: 50, maxSize: 100,
-      cell: info => <span>×{info.getValue()}</span>,
-    }),
-    columnHelper.accessor('price', {
-      header: '价格', size: 80, minSize: 60, maxSize: 120,
-      cell: info => info.getValue() ? `¥${info.getValue()}` : '-',
-    }),
-    columnHelper.accessor('applicant_name', {
-      header: '申请人', size: 80, minSize: 60, maxSize: 120,
-      cell: info => info.getValue() || '-',
-    }),
-    columnHelper.accessor('status', {
-      header: '状态', size: 80, minSize: 60, maxSize: 120,
-      cell: info => <StatusBadge status={info.getValue()} />,
-    }),
-    columnHelper.display({
-      id: 'actions', header: '操作', size: 160, minSize: 120, maxSize: 200,
-      cell: info => {
-        const order = info.row.original
-        return (
-          <div className="flex items-center gap-1 flex-wrap">
-            <Button
-              variant="morden"
-              size="sm"
-              className="h-7 w-8 p-0"
-              title="编辑"
-              onClick={(e) => { e.stopPropagation(); handleEditClick(order) }}
-            >
-              <Pencil className="w-3.5 h-3.5" />
-            </Button>
-            {isAdmin && order.status === 'pending' && (
-              <>
-                <Button
-                  size="sm"
-                  variant="default"
-                  className="h-7 text-sm px-2"
-                  onClick={() => handleApprove(order.id)}
-                >
-                  审批
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="h-7 text-sm px-2"
-                  onClick={() => handleReject(order.id)}
-                >
-                  驳回
-                </Button>
-              </>
-            )}
-            {order.status === 'approved' && (
-              <Button
-                size="sm"
-                variant="secondary"
-                className="h-7 text-sm px-2"
-                onClick={() => handleComplete(order.id)}
-              >
-                确认完成
-              </Button>
-            )}
-          </div>
-        )
+  // 表格操作按钮组件
+  const ActionButtons = React.memo(function ActionButtons({
+    item,
+    onEdit,
+  }: {
+    item: Record<string, unknown>;
+    onEdit: (item: Record<string, unknown>) => void;
+  }) {
+    const actions = useMemo(() => [
+      {
+        id: 'approve',
+        label: '审批',
+        showWhen: (currItem) => isAdmin && currItem.status === 'pending',
+        onClick: async (currItem) => {
+          await consumableOrderAPI.approve(currItem.id as number)
+          await filter.invalidate()
+          toast.success('审批通过')
+        }
       },
-    }),
-  ], [isAdmin, handleEditClick, handleApprove, handleReject, handleComplete])
+      {
+        id: 'reject',
+        label: '驳回',
+        showWhen: (currItem) => isAdmin && currItem.status === 'pending',
+        onClick: async (currItem) => {
+          await consumableOrderAPI.reject(currItem.id as number, '管理员驳回')
+          await filter.invalidate()
+          toast.success('已驳回')
+        }
+      },
+      {
+        id: 'complete',
+        label: '确认完成',
+        showWhen: (currItem) => currItem.status === 'approved',
+        onClick: async (currItem) => {
+          await consumableOrderAPI.complete(currItem.id as number)
+          await filter.invalidate()
+          toast.success('耗材订单已完成')
+        }
+      }
+    ], [isAdmin, filter])
 
-  const table = useReactTable({
-    data,
-    columns,
-    getRowId: (row) => String(row.id),
-    getCoreRowModel: getCoreRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getRowCanExpand: () => true,
-    columnResizeMode: 'onChange',
-    enableColumnResizing: true,
-    onColumnSizingChange: setColumnSizing,
-    manualSorting: true,
-    onSortingChange: (updater) => {
-      setSorting(prev => {
-        const newSorting = typeof updater === 'function' ? updater(prev) : updater
-        sortingRef.current = newSorting
-        return newSorting
-      })
-    },
-    state: {
-      sorting,
-      columnSizing,
-      globalFilter,
-    },
-    meta: {
-      fuzzySearch,
-      onEdit: handleEditClick,
-    }
+    return (
+      <TableActionButtonsMemo
+        item={item}
+        actions={actions}
+        showEdit={true}
+        onEdit={onEdit}
+      />
+    )
+  }, (prevProps, nextProps) => {
+    if (prevProps.onEdit !== nextProps.onEdit) return false
+    const prevItem = prevProps.item
+    const nextItem = nextProps.item
+    if (prevItem === nextItem) return true
+    const prevKeys = Object.keys(prevItem)
+    const nextKeys = Object.keys(nextItem)
+    if (prevKeys.length !== nextKeys.length) return false
+    return prevKeys.every((key) => prevItem[key] === nextItem[key])
   })
 
-  useEffect(() => { tableRef.current = table }, [table])
+  // 表格列配置
+  const columns = useMemo(() => {
+    const baseColumns = getConsumableOrderTableColumns() as any[]
+
+    const actionColumn = columnHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 160,
+      minSize: 120,
+      maxSize: 200,
+      cell: info => {
+        const meta = info.table.options.meta as any
+        return (
+          <ActionButtons
+            item={info.row.original as unknown as Record<string, unknown>}
+            onEdit={meta?.onEdit}
+          />
+        )
+      },
+    })
+
+    return [...baseColumns, actionColumn]
+  }, [])
+
+  // 展开行渲染
+  const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
+    const item = itemRaw as unknown as ConsumableOrder
+    return (
+      <div className="p-3 flex flex-col md:flex-row gap-4 border-b-1 border-border">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
+          <div><span className="font-medium">英文名称：</span>{item.english_name || '-'}</div>
+          <div><span className="font-medium">别名：</span>{item.alias || '-'}</div>
+          <div><span className="font-medium">品牌：</span>{item.brand || '-'}</div>
+          <div><span className="font-medium">单位：</span>{item.unit || '-'}</div>
+          <div><span className="font-medium">申购时间：</span>{formatDate(item.created_at)}</div>
+          <div><span className="font-medium">申请人：</span>{item.applicant_name || '-'}</div>
+          <div className="col-span-2"><span className="font-medium">备注：</span>{item.notes || '-'}</div>
+        </div>
+      </div>
+    )
+  }, [])
 
   // ============================================================================
   // 渲染
@@ -559,58 +380,6 @@ export function ConsumableOrdersPage() {
         </div>
       </div>
 
-      {/* 搜索过滤区域 */}
-      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-        <div className="relative flex-1 min-w-50">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索名称、分类、品牌..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            className="pl-9 pr-8 text-base w-full inline-flex leading-none"
-          />
-          {searchInput && (
-            <button
-              onClick={() => setSearchInput('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">
-          <label className="flex items-center gap-2 text-base cursor-pointer whitespace-nowrap">
-            <Checkbox
-              checked={fuzzySearch}
-              onCheckedChange={(checked) => {
-                startTransition(() => {
-                  setFuzzySearch(checked === true)
-                })
-              }}
-            />
-            <span className="text-base pr-2">模糊搜索</span>
-          </label>
-          <Select value={searchField} onValueChange={(val) => { setSearchField(val) }}>
-            <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部</SelectItem>
-              <SelectItem value="name">名称</SelectItem>
-              <SelectItem value="category">分类</SelectItem>
-              <SelectItem value="brand">品牌</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={statusFilter} onValueChange={(val) => { setStatusFilter(val) }}>
-            <SelectTrigger className="w-30 min-h-10"><SelectValue placeholder="全部状态" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="pending">待审批</SelectItem>
-              <SelectItem value="approved">已审批</SelectItem>
-              <SelectItem value="rejected">已驳回</SelectItem>
-              <SelectItem value="completed">已完成</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
 
       {/* 创建/编辑对话框 */}
       <Dialog
@@ -641,58 +410,17 @@ export function ConsumableOrdersPage() {
       </Dialog>
 
       {/* 数据表格区域 */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <ShoppingCart className="w-5 h-5" />
-            耗材订单列表 <span className="text-muted-foreground font-normal">(&thinsp;{displayCount}&thinsp;)</span>
-            <Button variant="morden" size="lg" onClick={toggleExpandAll} className="ml-auto flex font-normal">
-              {isAllExpanded ? <><ChevronsDownUp className="size-4 mr-1.5" />收起全部</> : <><ChevronsUpDown className="size-4 mr-1.5" />展开全部</>}
-            </Button>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading && data.length === 0 ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : data.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              {globalFilter ? `未找到匹配"${globalFilter}"的记录` : '暂无订单'}
-            </div>
-          ) : (
-            <div className="px-6">
-              <DataTable
-                table={table}
-                renderExpandedRow={(item) => (
-                  <div className="p-3 flex flex-col md:flex-row gap-4 border-b-1 border-border">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
-                      <div><span className="font-medium">英文名称：</span>{item.english_name || '-'}</div>
-                      <div><span className="font-medium">别名：</span>{item.alias || '-'}</div>
-                      <div><span className="font-medium">品牌：</span>{item.brand || '-'}</div>
-                      <div><span className="font-medium">单位：</span>{item.unit || '-'}</div>
-                      <div><span className="font-medium">申购时间：</span>{formatDate(item.created_at)}</div>
-                      <div><span className="font-medium">申请人：</span>{item.applicant_name || '-'}</div>
-                      <div className="col-span-2"><span className="font-medium">备注：</span>{item.notes || '-'}</div>
-                    </div>
-                  </div>
-                )}
-                scrollHeight="calc(100vh - 112px - 16px)"
-                enableExpandAll={true}
-                expandAllStorageKey="consumable-orders-table-expand-all"
-                noteField="notes"
-                isAllExpanded={isAllExpanded}
-                onToggleExpandAll={toggleExpandAll}
-                hasNextPage={hasNextPage}
-                isFetchingNextPage={isFetchingNextPage}
-                fetchNextPage={fetchNextPage}
-                total={total}
-                searchKeyword={globalFilter}
-              />
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <FilterTable
+        api={consumableOrderAPI as any}
+        queryKey={['consumable-orders']}
+        tableId="consumable-orders-table"
+        customColumns={columns as any}
+        onEdit={handleEditClick}
+        title={<><ShoppingCart className="w-5 h-5" /> 耗材订单列表</>}
+        searchPlaceholder="搜索名称、分类、品牌..."
+        renderExpandedRow={renderExpandedRow}
+        noteField="notes"
+      />
     </div>
   )
 }
