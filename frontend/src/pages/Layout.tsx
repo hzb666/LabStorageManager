@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   FolderInput,
 } from 'lucide-react'
+import { BugReportButton, getBugButtonHidden, clearBugButtonHidden } from '@/components/BugReportButton'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
 
@@ -37,12 +38,19 @@ export function Layout() {
   const isMobile = useIsMobile()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [logoutConfirming, setLogoutConfirming] = useState(false)
+  const [showBugButton, setShowBugButton] = useState(() => !getBugButtonHidden())
+
+  // 右键隐藏按钮后刷新状态
+  const handleBugButtonRightClick = useCallback(() => {
+    setShowBugButton(false)
+  }, [])
 
   // 退出登录处理
   const handleLogout = () => {
     if (!logoutConfirming) {
       setLogoutConfirming(true)
     } else {
+      clearBugButtonHidden() // 清除按钮隐藏状态
       logout()
     }
   }
@@ -388,24 +396,29 @@ export function Layout() {
         <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pl-3 md:pr-3 lg:pl-3 lg:pr-4">
           <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
             <header
-              className="sticky top-0 z-40 flex h-16 items-center gap-4 px-4 bg-page-card border-b border-border rounded-tl-lg rounded-tr-lg"
+              className="sticky top-0 z-40 flex h-16 items-center gap-1 px-4 bg-page-card border-b border-border rounded-tl-lg rounded-tr-lg"
               data-sticky-header="true"
               id="page-header"
             >
               {showDesktopSidebar && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 hidden md:flex transition-colors"
-                  onClick={toggleSidebar}
-                  title={sidebarCollapsed ? "展开侧边栏 (Ctrl+B)" : "折叠侧边栏 (Ctrl+B)"}
-                >
-                  {sidebarCollapsed ? (
-                    <PanelLeftOpen className="size-5" />
-                  ) : (
-                    <PanelLeftClose className="size-5" />
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 hidden md:flex transition-colors"
+                    onClick={toggleSidebar}
+                    title={sidebarCollapsed ? "展开侧边栏 (Ctrl+B)" : "折叠侧边栏 (Ctrl+B)"}
+                  >
+                    {sidebarCollapsed ? (
+                      <PanelLeftOpen className="size-5" />
+                    ) : (
+                      <PanelLeftClose className="size-5" />
+                    )}
+                  </Button>
+                  {showBugButton && (
+                    <BugReportButton variant="ghost" size="icon" className="h-10 w-10 hidden md:flex transition-colors" showText={false} onRightClick={handleBugButtonRightClick} />
                   )}
-                </Button>
+                </>
               )}
 
               {!mobileMenuOpen && (
