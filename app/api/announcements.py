@@ -2,10 +2,13 @@
 Announcement API Routes - System Announcements Management
 """
 from datetime import datetime
-from typing import List, Optional, Set
+from typing import List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 
 from app.core.auth import get_current_user, require_admin
 from app.database import get_db
@@ -122,8 +125,8 @@ def create_announcement(
     Create a new announcement (admin only)
     """
     # 检查总数量限制
-    stmt = select(Announcement).where(Announcement.created_by == current_user.id)
-    total_count = len(db.exec(stmt).all())
+    stmt = select(func.count()).where(Announcement.created_by == current_user.id)
+    total_count = db.exec(stmt).one()
     if total_count >= MAX_TOTAL_ANNOUNCEMENTS:
         raise HTTPException(
             status_code=400,
@@ -132,11 +135,11 @@ def create_announcement(
 
     # 检查显示数量限制（如果设为显示状态）
     if announcement.is_visible:
-        stmt = select(Announcement).where(
+        stmt = select(func.count()).where(
             Announcement.created_by == current_user.id,
             Announcement.is_visible == True
         )
-        visible_count = len(db.exec(stmt).all())
+        visible_count = db.exec(stmt).one()
         if visible_count >= MAX_VISIBLE_ANNOUNCEMENTS:
             raise HTTPException(
                 status_code=400,
@@ -230,9 +233,8 @@ def delete_announcement(
         for image_url in announcement.images:
             try:
                 announcement_image_service.delete_image(image_url)
-            except Exception:
-                # Log error but continue with deletion
-                pass
+            except Exception as e:
+                logger.error(f"Failed to delete image {image_url}: {e}")
 
     db.delete(announcement)
     db.commit()

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from fastapi import UploadFile, HTTPException
+from PIL import Image
 
 from app.core.config import settings
 
@@ -64,7 +65,7 @@ def get_storage_usage() -> Tuple[int, int]:
 
 def validate_image(file: UploadFile) -> None:
     """
-    Validate uploaded image file (size and extension).
+    Validate uploaded image file (size, extension, and content).
 
     Args:
         file: Uploaded file object
@@ -95,6 +96,18 @@ def validate_image(file: UploadFile) -> None:
         raise HTTPException(
             status_code=400,
             detail="File is empty"
+        )
+
+    # Validate image content using PIL
+    try:
+        file.file.seek(0)
+        img = Image.open(file.file)
+        img.verify()  # Verify it's a valid image
+        file.file.seek(0)  # Reset file pointer after verify
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image file content"
         )
 
 
@@ -154,6 +167,11 @@ def delete_image(url: str) -> bool:
 
     # Extract filename from URL
     filename = url.split("/")[-1]
+
+    # Validate filename to prevent path traversal
+    if not filename or ".." in filename or filename.startswith("/"):
+        return False
+
     file_path = get_announcement_images_dir() / filename
 
     if file_path.exists():
