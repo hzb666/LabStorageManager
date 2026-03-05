@@ -279,6 +279,7 @@ export interface StorageInfo {
 export const announcementAPI = {
   list: (params?: { skip?: number; limit?: number }) =>
     api.get<Announcement[]>('/announcements/', { params }),
+  getPublic: () => api.get<Announcement[]>('/announcements/public'),
   get: (id: number) => api.get<Announcement>(`/announcements/${id}`),
   create: (data: {
     title: string

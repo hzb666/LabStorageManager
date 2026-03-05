@@ -324,3 +324,16 @@
 .table-row-expand-exit {
   animation: row-collapse 0.2s ease-in forwards;
 }
+
+/* =========================================
+   Marquee Animation for Announcement Banner
+   ========================================= */
+@keyframes marquee {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+.animate-marquee {
+  animation: marquee 15s linear infinite;
+  display: inline-block;
+}

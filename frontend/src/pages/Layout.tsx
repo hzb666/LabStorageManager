@@ -3,6 +3,9 @@ import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
+import { AnnouncementBanner } from '@/components/AnnouncementBanner'
+import { AnnouncementButton } from '@/components/AnnouncementButton'
+import { announcementAPI, Announcement } from '@/api/client'
 import {
   LayoutDashboard,
   Package,
@@ -39,6 +42,24 @@ export function Layout() {
   const isMobile = useIsMobile()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [logoutConfirming, setLogoutConfirming] = useState(false)
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+
+  // Fetch public announcements
+  useEffect(() => {
+    const fetchAnnouncements = async () => {
+      try {
+        const response = await announcementAPI.getPublic()
+        setAnnouncements(response.data)
+      } catch (error) {
+        console.error('Failed to fetch announcements:', error)
+      }
+    }
+
+    fetchAnnouncements()
+  }, [])
+
+  // Determine if user is regular user (not admin)
+  const isRegularUser = user?.role !== 'admin'
 
   // 退出登录处理
   const handleLogout = () => {
@@ -387,6 +408,11 @@ export function Layout() {
           showDesktopSidebar ? (sidebarCollapsed ? "md:ml-16" : "md:ml-64") : ""
         )}
       >
+        {/* Announcement Banner - Only show for regular users */}
+        {isRegularUser && (
+          <AnnouncementBanner announcements={announcements} />
+        )}
+
         <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pl-3 md:pr-3 lg:pl-3 lg:pr-4">
           <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
             <header
@@ -422,6 +448,9 @@ export function Layout() {
               )}
 
               <div className="flex-1" />
+
+              {/* Announcement Button - Only show for regular users */}
+              {isRegularUser && <AnnouncementButton announcements={announcements} />}
 
               <Button
                 variant="ghost"
