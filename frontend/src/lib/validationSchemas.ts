@@ -249,6 +249,7 @@ export const OrderReasonSchema = v.optional(v.string())
 /**
  * 剩余量验证（非负数，允许0，但不能是null/undefined/空字符串）
  * 使用 v.union 在最外层拒绝空字符串
+ * 注意：此 Schema 用于基础验证，编辑模式下 additional 验证在 handleFormSubmit 中单独处理
  */
 const RemainingQuantitySchema = v.pipe(
   v.union([
@@ -265,11 +266,12 @@ const RemainingQuantitySchema = v.pipe(
   v.minValue(0, '剩余数量不能为负数')
 )
 
+
+
 /**
- * 统一库存表单 Schema（用于手动入库和编辑）
- * 包含所有库存相关字段
- * - 添加模式：remaining_quantity 可选（后端自动计算）
- * - 编辑模式：remaining_quantity 必填（但因为是同一个 schema，这里保持可选，由前端 handleFormSubmit 处理）
+ * 库存表单 Schema
+ * remaining_quantity 可选（后端自动计算等于 initial_quantity）
+ * 编辑模式下 remaining_quantity 必填的验证在 handleFormSubmit 中处理
  */
 export const InventoryFormSchema = v.object({
   // 基础字段
@@ -279,15 +281,14 @@ export const InventoryFormSchema = v.object({
   alias: v.optional(v.string()),
   category: v.optional(v.string()),
   brand: v.optional(v.string()),
-  specification: SpecificationSchema, // 必填
+  specification: SpecificationSchema,
   storage_location: v.optional(v.string()),
   notes: v.optional(v.string()),
 
-  // 数量相关 - 手动入库时这些字段可选（后端自动从规格解析），编辑时由前端逻辑处理
+  // 数量相关
   quantity_bottles: v.optional(createPositiveNumberSchema('瓶数')),
-  initial_quantity: v.optional(createQuantitySchema('初始数量')),  // 可选，后端从规格中自动解析
-  unit: v.optional(createRequiredStringSchema('单位')),  // 可选，从规格中解析
-  // remaining_quantity 在手动入库时可选（后端自动设为等于 initial_quantity），编辑时必填
+  initial_quantity: v.optional(createQuantitySchema('初始数量')),
+  unit: v.optional(createRequiredStringSchema('单位')),
   remaining_quantity: v.optional(RemainingQuantitySchema),
 
   // 危险品

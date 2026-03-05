@@ -106,6 +106,12 @@ export function FilterTable({
   }, [customColumns])
 
   const table = useReactTable({
+    defaultColumn: {
+      // 1. 强制点击循环为：无 -> 升序 (asc) -> 降序 (desc) -> 无
+      sortDescFirst: false,
+      // 2. 使用 alphanumeric 替代默认 text，对中英混排支持更佳
+      sortingFn: 'text',
+    },
     data: filter.data as Record<string, unknown>[],
     columns: tableColumns as any,
     // 修复 1：绝对不能用 Math.random()，改用 id，若无 id 则用稳定的 index 兜底
@@ -206,11 +212,11 @@ export function FilterTable({
                 (&thinsp;{filter.displayCount}&thinsp;)
               </span>
               {enableExpandAll && (
-                <Button 
-                  variant="morden" 
-                  size="lg" 
+                <Button
+                  variant="morden"
+                  size="lg"
                   // 修复 2：直接使用 filter 内部的切换逻辑，将具体表格操作交回 DataTable 组件内部处理，避免双重触发
-                  onClick={filter.toggleExpandAll} 
+                  onClick={filter.toggleExpandAll}
                   className="ml-auto flex font-normal"
                 >
                   {filter.isAllExpanded ? (

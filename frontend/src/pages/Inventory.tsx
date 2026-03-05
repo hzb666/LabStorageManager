@@ -39,7 +39,6 @@ import {
   Plus,
   Trash2,
   Package,
-  FlaskConical,
   ScanSearch
 } from 'lucide-react'
 
@@ -147,15 +146,8 @@ export function InventoryPage() {
 
   const handleFormSubmit = form.handleSubmit(
     async (formData) => {
-      console.log('✅ 表单验证通过，提交数据:', formData)
-
+      // 编辑模式：remaining_quantity 额外验证（Schema 中是可选的）
       if (dialogState === 'edit' && editingItem) {
-        // 编辑模式：remaining_quantity 必须填写（不能为 undefined/null）
-        if (formData.remaining_quantity === undefined || formData.remaining_quantity === null) {
-          form.setError('remaining_quantity', { message: '剩余数量不能为空' })
-          return
-        }
-
         const remaining = formData.remaining_quantity
 
         let initial = editingItem.initial_quantity
@@ -167,11 +159,13 @@ export function InventoryPage() {
         }
 
         // 验证剩余量不超过初始量
-        if (remaining > initial) {
+        if (remaining !== undefined && remaining !== null && remaining > initial) {
           form.setError('remaining_quantity', { message: `剩余量不能超过规格 (${initial})` })
           return
         }
       }
+
+      console.log('✅ 表单验证通过，提交数据:', formData)
 
       setIsSubmitting(true)
       try {
@@ -233,6 +227,17 @@ export function InventoryPage() {
     },
     (errors) => {
       console.log('❌ 表单验证失败:', errors)
+
+      // 编辑模式下：即使 Schema 验证失败，也手动检查 remaining_quantity 是否填写
+      if (dialogState === 'edit' && editingItem) {
+        const remainingValue = form.getValues('remaining_quantity')
+        if (remainingValue === undefined || remainingValue === null) {
+          // 只有当还没有 remaining_quantity 错误时才设置
+          if (!errors.remaining_quantity) {
+            form.setError('remaining_quantity', { message: '剩余数量不能为空' })
+          }
+        }
+      }
     }
   )
 
@@ -490,6 +495,16 @@ const ActionButtons = React.memo(function ActionButtons({
         confirmLabel: '确认',
         showWhen: (currItem: InventoryItem) => currItem.status === 'in_stock',
         onClick: async (currItem: InventoryItem) => {
+          // 借用前校验：检查规格和剩余量是否填写
+          if (!currItem.specification || currItem.specification.trim() === '') {
+            toast.warning('请先填写规格才能借用')
+            throw new Error('规格未填写')
+          }
+          if (currItem.remaining_quantity === undefined || currItem.remaining_quantity === null) {
+            toast.warning('请先填写剩余量才能借用')
+            throw new Error('剩余量未填写')
+          }
+
           try {
             await inventoryAPI.borrow(currItem.id)
             await onBorrowSuccess()

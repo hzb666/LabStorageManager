@@ -261,7 +261,10 @@ def list_consumable_orders(
 
     secondary_order = ConsumableOrder.created_at.desc()
 
-    orders = db.exec(base.order_by(order_expr, secondary_order).offset(skip).limit(limit)).all()
+    # 第三级排序：按ID降序（确保排序完全稳定）
+    tertiary_order = ConsumableOrder.id.desc()
+
+    orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}

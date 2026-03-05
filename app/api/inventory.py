@@ -17,6 +17,19 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func, case
+from sqlalchemy import func as sql_func
+
+
+def _empty_to_none(obj, fields: list[str]) -> dict:
+    """将指定字段的空字符串转换为 None"""
+    result = {}
+    for field in fields:
+        if isinstance(obj, dict):
+            value = obj.get(field)
+        else:
+            value = getattr(obj, field, None)
+        result[field] = None if value == '' else value
+    return result
 
 from app.database import get_db
 from app.models.inventory import (
@@ -432,22 +445,25 @@ def manual_add_inventory(
         alias=item_data.alias,
     )
 
+    optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'notes']
+    string_fields = _empty_to_none(item_data, optional_string_fields)
+
     created_items = []
     for internal_code in internal_codes:
         db_inventory = Inventory(
             internal_code=internal_code,
             cas_number=normalized_cas,
             name=item_data.name,
-            english_name=item_data.english_name,
-            alias=item_data.alias,
-            category=item_data.category,
-            brand=item_data.brand,
-            storage_location=item_data.storage_location,
+            english_name=string_fields['english_name'],
+            alias=string_fields['alias'],
+            category=string_fields['category'],
+            brand=string_fields['brand'],
+            storage_location=string_fields['storage_location'],
             initial_quantity=per_bottle_value,
             remaining_quantity=per_bottle_value,
             unit=unit,
             is_hazardous=item_data.is_hazardous,
-            notes=item_data.notes,
+            notes=string_fields['notes'],
             status=InventoryStatus.IN_STOCK,
             created_by_id=current_user.id,
             **pinyin_fields,
@@ -707,12 +723,11 @@ def list_inventory(
     # 构建排序表达式
     # 支持的排序字段映射
     # 使用 CASE 表达式处理 initial_quantity 为 0 的情况，避免除零错误
-    from sqlmodel import case as sql_case
-    
     # 计算剩余百分比（处理除零情况）
-    remaining_percent_expr = sql_case(
+    # 保留原始 NULL 值，不转为 0，这样可以在排序时区分 NULL 和 0
+    remaining_percent_expr = case(
         (Inventory.initial_quantity > 0, Inventory.remaining_quantity * 1.0 / Inventory.initial_quantity),
-        else_=0
+        else_=None  # 保留 NULL，不转为 0
     )
     
     # 拼音排序字段映射（使用数据库索引加速排序）
@@ -737,11 +752,8 @@ def list_inventory(
     }
     
     # 确定排序字段和方向
-    order_direction = sort_order.lower() if sort_order else 'desc'
-    
-    # [DEBUG] 添加日志诊断排序问题
-    logger.info(f"[SORT_DEBUG] sort_by={sort_by}, sort_order={sort_order}, order_direction={order_direction}, status_filter={status_filter}")
-    
+    sort_direction = sort_order.lower() if sort_order else 'desc'
+
     # 中文拼音排序字段列表
     pinyin_sort_fields = {'name', 'category', 'brand', 'alias'}
     
@@ -755,10 +767,22 @@ def list_inventory(
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
     
-    if order_direction == 'asc':
-        order_expr = order_column.asc()
+    # 特殊处理 remaining_percent 排序：NULL 值始终排在最后
+    # 使用 SQLite 的 ifnull() 函数将 NULL 转为特殊值
+    # 升序时：NULL -> 2 (大于最大1)，排在最后
+    # 降序时：NULL -> -1 (最小)，排在最后
+    if sort_by == 'remaining_percent' and order_column is not None:
+        if sort_direction == 'asc':
+            # 升序：NULL 转为 2 (大于最大百分比 1)
+            order_expr = sql_func.ifnull(order_column, 2).asc()
+        else:
+            # 降序：NULL 转为 -1 (最小)
+            order_expr = sql_func.ifnull(order_column, -1).desc()
     else:
-        order_expr = order_column.desc()
+        if sort_direction == 'asc':
+            order_expr = order_column.asc()
+        else:
+            order_expr = order_column.desc()
 
     # 次级排序：始终按创建时间降序，确保同值排序时顺序稳定，最新数据排在前面
     # 第三级排序：按ID降序（确保排序完全稳定，避免相同created_at导致顺序变化）
@@ -859,6 +883,9 @@ def update_inventory(
         )
 
     update_data = update.model_dump(exclude_unset=True)
+    
+    optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'notes']
+    update_data = _empty_to_none(update_data, optional_string_fields)
     
     # CAS号规范化：如果传入了 cas_number，进行规范化处理
     if 'cas_number' in update_data and update_data['cas_number']:
