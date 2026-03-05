@@ -268,8 +268,8 @@ const RemainingQuantitySchema = v.pipe(
 /**
  * 统一库存表单 Schema（用于手动入库和编辑）
  * 包含所有库存相关字段
- * - 添加模式：name, specification, quantity_bottles, initial_quantity, unit 为必填
- * - 编辑模式：remaining_quantity 为必填（不能为 null）
+ * - 添加模式：remaining_quantity 可选（后端自动计算）
+ * - 编辑模式：remaining_quantity 必填（但因为是同一个 schema，这里保持可选，由前端 handleFormSubmit 处理）
  */
 export const InventoryFormSchema = v.object({
   // 基础字段
@@ -283,11 +283,12 @@ export const InventoryFormSchema = v.object({
   storage_location: v.optional(v.string()),
   notes: v.optional(v.string()),
 
-  // 数量相关 - API层必填，数据库层允许NULL
+  // 数量相关 - 手动入库时这些字段可选（后端自动从规格解析），编辑时由前端逻辑处理
   quantity_bottles: v.optional(createPositiveNumberSchema('瓶数')),
   initial_quantity: v.optional(createQuantitySchema('初始数量')),  // 可选，后端从规格中自动解析
   unit: v.optional(createRequiredStringSchema('单位')),  // 可选，从规格中解析
-  remaining_quantity: RemainingQuantitySchema,  // 不能为 null/undefined/空字符串
+  // remaining_quantity 在手动入库时可选（后端自动设为等于 initial_quantity），编辑时必填
+  remaining_quantity: v.optional(RemainingQuantitySchema),
 
   // 危险品
   is_hazardous: v.boolean('危险品必须是布尔值'),

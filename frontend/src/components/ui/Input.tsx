@@ -34,7 +34,8 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
     const isNumber = type === "number"
     const isControlled = value !== undefined
-    const rawValue = isControlled ? String(value || "") : ""
+    // 修复：0 是有效值，应该显示为 "0" 而不是空字符串
+    const rawValue = isControlled ? (value !== null && value !== undefined ? String(value) : "") : ""
     const isActive = enableTagToggle && rawValue.startsWith(tag)
     const displayValue = isActive ? rawValue.slice(tag.length) : rawValue
 

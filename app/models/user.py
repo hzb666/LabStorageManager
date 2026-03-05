@@ -30,7 +30,7 @@ class UserBase(SQLModel):
             raise ValueError('用户名只能包含字母、数字和下划线')
         return v
 
-    full_name: Optional[str] = Field(default=None, max_length=100)
+    full_name: str = Field(max_length=100)
     role: UserRole = Field(default=UserRole.USER)
     is_active: bool = Field(default=True)
 

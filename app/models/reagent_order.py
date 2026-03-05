@@ -46,14 +46,14 @@ class ReagentOrderBase(SQLModel):
     category: Optional[str] = Field(index=True, max_length=100)
     # Brand (with index for query and pinyin for sorting)
     brand: Optional[str] = Field(index=True, max_length=100)
-    # Initial quantity value (e.g., 500)
-    initial_quantity: Optional[float] = Field(None, ge=0)
+    # 数据库模型：允许 NULL 以兼容旧数据
+    initial_quantity: Optional[float] = Field(default=None)
     # Unit (e.g., "ml", "g", "L")
     unit: Optional[str] = Field(None, max_length=20)
     # Quantity ordered (number of bottles)
     quantity: int = Field(gt=0)
     # Price
-    price: Optional[float] = Field(None, ge=0)
+    price: float = Field(ge=0)
     # Order reason
     order_reason: ReagentOrderReason = ReagentOrderReason.NONE
     # Hazardous flag

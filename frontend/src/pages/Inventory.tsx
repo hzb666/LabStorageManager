@@ -124,6 +124,8 @@ export function InventoryPage() {
     const item = itemRaw as unknown as InventoryItem
     setEditingItem(item)
     setDeleteConfirm(false)
+    // 区分 null 和 0：null 显示为空让用户填写，0 显示为 "0"
+    const remainingQty = item.remaining_quantity
     form.reset({
       name: item.name || '',
       cas_number: item.cas_number || '',
@@ -135,8 +137,8 @@ export function InventoryPage() {
       storage_location: item.storage_location || '',
       quantity_bottles: 1,
       initial_quantity: item.initial_quantity ?? undefined,
-      // 区分 null 和 0：null 显示为空让用户填写，0 显示为 0
-      remaining_quantity: item.remaining_quantity === null ? 0 : (item.remaining_quantity ?? 0),
+      // null → undefined（显示为空），0 → 0（显示为"0"）
+      remaining_quantity: remainingQty === null ? undefined : (remainingQty ?? 0),
       is_hazardous: item.is_hazardous || false,
       notes: item.notes || ''
     })
@@ -148,8 +150,12 @@ export function InventoryPage() {
       console.log('✅ 表单验证通过，提交数据:', formData)
 
       if (dialogState === 'edit' && editingItem) {
-        // remaining_quantity 现在由 schema 验证保证不为 null/空字符串
-        // 但仍需检查不超过初始量
+        // 编辑模式：remaining_quantity 必须填写（不能为 undefined/null）
+        if (formData.remaining_quantity === undefined || formData.remaining_quantity === null) {
+          form.setError('remaining_quantity', { message: '剩余数量不能为空' })
+          return
+        }
+
         const remaining = formData.remaining_quantity
 
         let initial = editingItem.initial_quantity
