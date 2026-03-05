@@ -78,3 +78,6 @@ docs/prompt/
 # Tests
 tests/
 scripts/
+
+# Plans (do not commit)
+plans/
