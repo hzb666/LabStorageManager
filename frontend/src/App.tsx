@@ -13,9 +13,12 @@ import DeviceManagement from '@/pages/DeviceManagement'
 import { AnnouncementManagement } from '@/pages/AnnouncementManagement'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
+import { TooltipProvider } from '@/components/ui/Tooltip'
 import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { isAdmin } from '@/lib/constants'
+import { useEffect, useRef } from 'react'
+import { authAPI } from '@/api/client'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -37,46 +40,62 @@ function AppContent() {
   // 初始化主题
   useTheme()
 
+  const setAuth = useAuthStore((state) => state.setAuth)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const hasFetchedUser = useRef(false)
+
+  // 刷新页面时获取最新用户信息（包括头像）
+  useEffect(() => {
+    if (isAuthenticated && !hasFetchedUser.current) {
+      hasFetchedUser.current = true
+      authAPI.getProfile().then((res) => {
+        setAuth(res.data)
+      }).catch(console.error)
+    }
+  }, [isAuthenticated, setAuth])
+
   return (
-    <BrowserRouter>
-      <ToastContainer />
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/test-error" element={<TestErrorPage />} />
-        <Route path="*" element={<NotFoundPage />} />
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <Layout />
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<Dashboard />} />
-          <Route path="reagents" element={<ReagentOrdersPage />} />
-          <Route path="consumables" element={<ConsumableOrdersPage />} />
-          <Route path="inventory" element={<InventoryPage />} />
-          <Route path="import" element={<ImportPage />} />
+    <TooltipProvider>
+      <BrowserRouter>
+        <ToastContainer />
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/test-error" element={<TestErrorPage />} />
+          <Route path="*" element={<NotFoundPage />} />
           <Route
-            path="admin/users"
+            path="/"
             element={
-              <AdminRoute>
-                <AdminUsersPage />
-              </AdminRoute>
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
             }
-          />
-          <Route
-            path="admin/announcements"
-            element={
-              <AdminRoute>
-                <AnnouncementManagement />
-              </AdminRoute>
-            }
-          />
-          <Route path="devices" element={<DeviceManagement />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="reagents" element={<ReagentOrdersPage />} />
+            <Route path="consumables" element={<ConsumableOrdersPage />} />
+            <Route path="inventory" element={<InventoryPage />} />
+            <Route path="import" element={<ImportPage />} />
+            <Route
+              path="admin/users"
+              element={
+                <AdminRoute>
+                  <AdminUsersPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="admin/announcements"
+              element={
+                <AdminRoute>
+                  <AnnouncementManagement />
+                </AdminRoute>
+              }
+            />
+            <Route path="devices" element={<DeviceManagement />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
   )
 }
 

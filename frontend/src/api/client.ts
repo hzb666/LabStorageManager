@@ -132,7 +132,7 @@ export const sessionAPI = {
 // User Admin APIs
 export const userAdminAPI = {
   list: (params?: { skip?: number; limit?: number; username?: string; role?: string; is_active?: boolean }) =>
-    api.get('/users', { params }),
+    api.get('/users/', { params }),
   create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' }) =>
     api.post('/users', data),
   update: (id: number, data: { username?: string; full_name?: string; role?: string; is_active?: boolean }) =>
@@ -140,8 +140,21 @@ export const userAdminAPI = {
   delete: (id: number) => api.delete(`/users/${id}`),
   activate: (id: number) => api.post(`/users/${id}/activate`),
   updateRole: (id: number, role: string) => api.put(`/users/${id}/role`, null, { params: { role } }),
-  resetPassword: (id: number, newPassword: string) => 
-    api.post(`/users/${id}/reset-password`, { new_password: newPassword }),
+  resetPassword: (id: number, newPassword: string, oldPassword?: string) =>
+    api.post(`/users/${id}/reset-password`, {
+      new_password: newPassword,
+      ...(oldPassword && { old_password: oldPassword })
+    }),
+  uploadAvatar: (userId: number, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<{ avatar_url: string }>(`/users/${userId}/avatar`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  deleteAvatar: (userId: number) => {
+    return api.delete<{ avatar_url: null }>(`/users/${userId}/avatar`)
+  },
 }
 
 // Reagent Order APIs

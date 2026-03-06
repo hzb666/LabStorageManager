@@ -12,7 +12,7 @@ import { valibotResolver } from '@hookform/resolvers/valibot'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { LoadingButton } from '@/components/ui/LoadingButton'
-import { toast } from '@/components/ui/Toast'
+import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/ui/TableActionButtons'
 
@@ -136,7 +136,6 @@ export function ConsumableOrdersPage() {
     defaultSearchField: 'all',
     pageSize: 50,
     debounceMs: 300,
-    expandStorageKey: 'consumable-orders-expand-all',
   })
 
   // Dialog 状态
@@ -349,13 +348,13 @@ export function ConsumableOrdersPage() {
     return (
       <div className="p-3 flex flex-col md:flex-row gap-4 border-b-1 border-border">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
-          <div><span className="font-medium">英文名称：</span>{item.english_name || '-'}</div>
-          <div><span className="font-medium">别名：</span>{item.alias || '-'}</div>
-          <div><span className="font-medium">品牌：</span>{item.brand || '-'}</div>
-          <div><span className="font-medium">单位：</span>{item.unit || '-'}</div>
-          <div><span className="font-medium">申购时间：</span>{formatDate(item.created_at)}</div>
-          <div><span className="font-medium">申请人：</span>{item.applicant_name || '-'}</div>
-          <div className="col-span-2"><span className="font-medium">备注：</span>{item.notes || '-'}</div>
+          <div><span>英文名称：</span>{item.english_name || '-'}</div>
+          <div><span>别名：</span>{item.alias || '-'}</div>
+          <div><span>品牌：</span>{item.brand || '-'}</div>
+          <div><span>单位：</span>{item.unit || '-'}</div>
+          <div><span>申购时间：</span>{formatDate(item.created_at)}</div>
+          <div><span>申请人：</span>{item.applicant_name || '-'}</div>
+          <div className="col-span-2"><span>备注：</span>{item.notes || '-'}</div>
         </div>
       </div>
     )

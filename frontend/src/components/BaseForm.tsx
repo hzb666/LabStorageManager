@@ -5,6 +5,7 @@ import { Checkbox } from "./ui/Checkbox"
 import { FormField } from "./ui/FormField"
 import { Autocomplete, type AutocompleteOption } from "./ui/AutoComplete"
 import { Textarea } from "./ui/Textarea"
+import { PasswordInput } from "./ui/PasswordInput"
 import {
   Select,
   SelectContent,
@@ -30,7 +31,7 @@ export interface SelectOption {
 export interface FieldSchema<T extends Record<string, unknown>> {
   name: FieldPath<T>           // 字段名
   label: string          // 标签
-  type: 'input' | 'select' | 'checkbox' | 'textarea' | 'number' | 'autocomplete'
+  type: 'input' | 'password' | 'select' | 'checkbox' | 'textarea' | 'number' | 'autocomplete'
   inputType?: 'text' | 'number'  // input 元素的类型，默认 text
   placeholder?: string
   options?: AutocompleteOption[]  // select/autocomplete选项
@@ -46,6 +47,7 @@ export interface FieldSchema<T extends Record<string, unknown>> {
   enableTagToggle?: boolean  // 是否开启状态功能（如 [强调] 前缀）
   tag?: string        // 标签前缀（默认 [强调]），与 enableTagToggle 配合使用
   prefixButton?: PrefixButtonConfig  // 输入框左侧按钮配置
+  autoComplete?: string  // 自动完成属性（如 "username", "current-password" 等）
 }
 
 /**
@@ -63,6 +65,8 @@ interface SimpleBaseFormProps<T extends Record<string, unknown>> {
   form: UseFormReturn<T>
   fields: FieldSchema<T>[]
   columns?: number
+  layout?: 'grid' | 'flex' | 'stack'  // 布局模式：grid-网格布局(默认), flex-弹性布局, stack-垂直堆叠
+  className?: string   // 自定义容器类名
   disabled?: boolean
   readOnly?: boolean
   loading?: boolean
@@ -131,7 +135,7 @@ function isSchemaMode<T>(props: BaseFormProps<T>): props is SchemaBaseFormProps<
  * ```
  */
 function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
-  const { form, disabled = false, readOnly = false } = props
+  const { form, disabled = false, readOnly = false, layout = 'grid', className = '' } = props
 
   // 获取 fields
   const fields = isSchemaMode(props) ? props.schema.fields : props.fields
@@ -148,7 +152,7 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
   const getInputClassName = (hasError: boolean, isFieldReadOnly?: boolean) => {
     return cn(
       INPUT_STYLES.lg,
-      hasError && 'border-destructive',
+      hasError && 'border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30',
       disabled && 'opacity-50 cursor-not-allowed',
       isFieldReadOnly && 'bg-muted cursor-not-allowed'
     )
@@ -161,7 +165,7 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
       return null
     }
 
-    const hasError = !!getFieldError(field.name as string)
+    const hasError = getFieldError(field.name as string) !== undefined
     const isDisabled = disabled || field.disabled
     const isReadOnly = readOnly || field.readOnly
 
@@ -188,79 +192,94 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
               required={field.required}
               hideLabel={field.type === 'checkbox'}
             >
-            {field.type === 'textarea' && (
-              <Textarea
-                {...controllerField}
-                id={`field-${field.name as string}`}
-                value={(controllerField.value as string) ?? ''}
-                onChange={(e) => controllerField.onChange(e.target.value)}
-                placeholder={field.placeholder}
-                disabled={isDisabled}
-                readOnly={isReadOnly}
-                className={cn(getInputClassName(hasError, isReadOnly), "min-h-[80px] resize-y")}
-              />
-            )}
-
-            {field.type === 'select' && (
-              <Select
-                {...controllerField}
-                value={(controllerField.value as string) ?? ''}
-                onValueChange={controllerField.onChange}
-                disabled={isDisabled}
-              >
-                <SelectTrigger id={`field-${field.name as string}`} className={cn(getInputClassName(hasError, isReadOnly), "w-full")}>
-                  <SelectValue placeholder={field.placeholder || '请选择'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {field.options?.map(opt => (
-                    <SelectItem key={opt.value} value={String(opt.value)}>{opt.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-
-            {field.type === 'input' && (
-              <Input
-                {...controllerField}
-                id={`field-${field.name as string}`}
-                type={field.inputType || 'text'}
-                value={(controllerField.value as string) ?? ''}
-                onChange={(e) => controllerField.onChange(e.target.value)}
-                placeholder={field.placeholder}
-                disabled={isDisabled}
-                readOnly={isReadOnly}
-                className={getInputClassName(hasError, isReadOnly)}
-                enableTagToggle={field.enableTagToggle}
-                prefixButton={field.prefixButton}
-                tag={field.tag}
-              />
-            )}
-
-            {field.type === 'autocomplete' && (
-              <Autocomplete
-                options={field.options || []}
-                value={(controllerField.value as string) ?? ''}
-                onChange={controllerField.onChange}
-                placeholder={field.placeholder}
-                disabled={isDisabled}
-                className={getInputClassName(hasError, isReadOnly)}
-              />
-            )}
-
-            {field.type === 'checkbox' && (
-              <label 
-                htmlFor={`field-${field.name as string}`}
-                className="flex items-center gap-2 cursor-pointer text-base h-5"
-              >
-                <Checkbox
+              {field.type === 'textarea' && (
+                <Textarea
+                  {...controllerField}
                   id={`field-${field.name as string}`}
-                  checked={Boolean(controllerField.value)}
-                  onCheckedChange={(checked) => controllerField.onChange(checked === true)}
+                  value={(controllerField.value as string) ?? ''}
+                  onChange={(e) => controllerField.onChange(e.target.value)}
+                  placeholder={field.placeholder}
                   disabled={isDisabled}
+                  readOnly={isReadOnly}
+                  className={cn(getInputClassName(hasError, isReadOnly), "min-h-[80px] resize-y")}
                 />
-                {field.checkboxLabel}
-              </label>
+              )}
+
+              {field.type === 'select' && (
+                <Select
+                  {...controllerField}
+                  value={(controllerField.value as string) ?? ''}
+                  onValueChange={controllerField.onChange}
+                  disabled={isDisabled}
+                >
+                  <SelectTrigger id={`field-${field.name as string}`} className={cn(getInputClassName(hasError, isReadOnly), "w-full")}>
+                    <SelectValue placeholder={field.placeholder || '请选择'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {field.options?.map(opt => (
+                      <SelectItem key={opt.value} value={String(opt.value)}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+            {field.type === 'password' && (
+              <PasswordInput
+                {...controllerField}
+                id={`field-${field.name as string}`}
+                value={(controllerField.value as string) ?? ''}
+                onChange={(e) => controllerField.onChange(e.target.value)}
+                placeholder={field.placeholder}
+                disabled={isDisabled}
+                readOnly={isReadOnly}
+                autoComplete={field.autoComplete}
+                className={getInputClassName(hasError, isReadOnly)}
+              />
             )}
+
+              {field.type === 'input' && (
+                <Input
+                  {...controllerField}
+                  id={`field-${field.name as string}`}
+                  type={field.inputType || 'text'}
+                  value={(controllerField.value as string) ?? ''}
+                  onChange={(e) => controllerField.onChange(e.target.value)}
+                  placeholder={field.placeholder}
+                  disabled={isDisabled}
+                  readOnly={isReadOnly}
+                  autoComplete={field.autoComplete}
+                  className={getInputClassName(hasError, isReadOnly)}
+                  enableTagToggle={field.enableTagToggle}
+                  prefixButton={field.prefixButton}
+                  tag={field.tag}
+                />
+              )}
+
+              {field.type === 'autocomplete' && (
+                <Autocomplete
+                  options={field.options || []}
+                  value={(controllerField.value as string) ?? ''}
+                  onChange={controllerField.onChange}
+                  placeholder={field.placeholder}
+                  disabled={isDisabled}
+                  className={getInputClassName(hasError, isReadOnly)}
+                />
+              )}
+
+              {field.type === 'checkbox' && (
+                <label
+                  htmlFor={`field-${field.name as string}`}
+                  className="flex items-center gap-2 cursor-pointer text-base h-5"
+                >
+                  <Checkbox
+                    id={`field-${field.name as string}`}
+                    checked={Boolean(controllerField.value)}
+                    onCheckedChange={(checked) => controllerField.onChange(checked === true)}
+                    disabled={isDisabled}
+                  />
+                  {field.checkboxLabel}
+                </label>
+              )}
             </FormField>
           </div>
         )}
@@ -268,12 +287,21 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
     )
   }
 
-  // 简单渲染：直接用 grid 布局，响应式列数
+  // 根据布局模式生成容器类名
+  const getContainerClassName = () => {
+    const baseClasses = {
+      grid: 'grid grid-cols-1 sm:grid-cols-3 gap-4',
+      flex: 'flex flex-wrap gap-4',
+      stack: 'space-y-4',
+    }
+    return `${baseClasses[layout]} ${className}`.trim()
+  }
+
   // 注意：按钮不在 BaseForm 中渲染，由使用方自行添加
   return (
-    <div 
+    <div
       id="base-form-container"
-      className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+      className={getContainerClassName()}
     >
       {fields.map(renderField)}
     </div>

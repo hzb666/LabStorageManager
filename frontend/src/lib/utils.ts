@@ -11,6 +11,7 @@ export function formatDate(date: string | Date): string {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
+    timeZone: 'Asia/Shanghai',
   })
 }
 
@@ -21,6 +22,7 @@ export function formatDateTime(date: string | Date): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Asia/Shanghai',
   })
 }
 
@@ -48,3 +50,13 @@ export function processNotes(notes: string | undefined): string {
   }
   return notes
 }
+
+export function getFullImageUrl(url: string): string {
+  if (!url) return '' 
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  return `${API_BASE_URL}${url}`
+}
+

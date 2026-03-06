@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '@/store/useStore'
-import { cn } from '@/lib/utils'
+import { cn, getFullImageUrl } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { AnnouncementBanner } from '@/components/AnnouncementBanner'
 import { AnnouncementButton } from '@/components/AnnouncementButton'
@@ -25,6 +25,8 @@ import { BugReportButton, getBugButtonHidden, clearBugButtonHidden } from '@/com
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
 import { isAdmin, USER_ROLE_MAP } from '@/lib/constants'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 
 const navItems = [
   { title: '仪表盘', href: '/', icon: LayoutDashboard, group: '功能' },
@@ -46,7 +48,7 @@ export function Layout() {
   const [logoutConfirming, setLogoutConfirming] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
 
-  // Fetch public announcements when location changes (navigation)
+  // Fetch public announcements on mount only (not on every route change)
   useEffect(() => {
     const fetchAnnouncements = async () => {
       try {
@@ -58,10 +60,10 @@ export function Layout() {
     }
 
     fetchAnnouncements()
-  }, [location])
+  }, []) // Only fetch on mount
 
   // Determine if user is regular user (not admin)
-  const isRegularUser = user?.role !== 'admin'
+  const isRegularUser = !isAdmin(user)
   const [showBugButton, setShowBugButton] = useState(() => !getBugButtonHidden())
 
   // 右键隐藏按钮后刷新状态
@@ -127,7 +129,7 @@ export function Layout() {
       {showDesktopSidebar && (
         <aside
           className={cn(
-            'fixed inset-y-0 left-0 z-50 bg-sidebar flex flex-col transition-[width] duration-300 ease-in-out',
+            'fixed inset-y-0 left-0 z-30 bg-sidebar flex flex-col transition-[width] duration-300 ease-in-out',
             sidebarCollapsed ? 'w-16' : 'w-64'
           )}
         >
@@ -153,27 +155,34 @@ export function Layout() {
                   const isActive = location.pathname === item.href
                   const Icon = item.icon
                   return (
-                    <Link
-                      key={item.href}
-                      to={item.href}
-                      className={cn(
-                        'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
-                        isActive
-                          ? 'bg-primary text-primary-foreground'
-                          : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                    <Tooltip key={item.href}>
+                      <TooltipTrigger asChild>
+                        <Link
+                          to={item.href}
+                          className={cn(
+                            'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
+                            isActive
+                              ? 'bg-primary text-primary-foreground'
+                              : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                          )}
+                        >
+                          <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
+                          <span
+                            className={cn(
+                              "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
+                              sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
+                            )}
+                          >
+                            {item.title}
+                          </span>
+                        </Link>
+                      </TooltipTrigger>
+                      {sidebarCollapsed && (
+                        <TooltipContent side="right">
+                          <p>{item.title}</p>
+                        </TooltipContent>
                       )}
-                      title={sidebarCollapsed ? item.title : undefined}
-                    >
-                      <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
-                      <span
-                        className={cn(
-                          "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                          sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
-                        )}
-                      >
-                        {item.title}
-                      </span>
-                    </Link>
+                    </Tooltip>
                   )
                 })}
               </div>
@@ -189,27 +198,34 @@ export function Layout() {
                   const isActive = location.pathname === item.href
                   const Icon = item.icon
                   return (
-                    <Link
-                      key={item.href}
-                      to={item.href}
-                      className={cn(
-                        'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
-                        isActive
-                          ? 'bg-primary text-primary-foreground'
-                          : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                    <Tooltip key={item.href}>
+                      <TooltipTrigger asChild>
+                        <Link
+                          to={item.href}
+                          className={cn(
+                            'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
+                            isActive
+                              ? 'bg-primary text-primary-foreground'
+                              : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                          )}
+                        >
+                          <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
+                          <span
+                            className={cn(
+                              "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
+                              sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
+                            )}
+                          >
+                            {item.title}
+                          </span>
+                        </Link>
+                      </TooltipTrigger>
+                      {sidebarCollapsed && (
+                        <TooltipContent side="right">
+                          <p>{item.title}</p>
+                        </TooltipContent>
                       )}
-                      title={sidebarCollapsed ? item.title : undefined}
-                    >
-                      <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
-                      <span
-                        className={cn(
-                          "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                          sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
-                        )}
-                      >
-                        {item.title}
-                      </span>
-                    </Link>
+                    </Tooltip>
                   )
                 })}
               </div>
@@ -229,9 +245,12 @@ export function Layout() {
                 ? "opacity-100 scale-y-100"
                 : "opacity-0 scale-y-0"
               )} />
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground mx-auto md:mx-0">
-                {user?.username?.charAt(0).toUpperCase() || 'U'}
-              </div>
+              <Avatar className="h-10 w-10 shrink-0 mx-auto md:mx-0">
+                <AvatarImage src={user?.avatar_url ? getFullImageUrl(user.avatar_url) : undefined} alt={user?.username} />
+                <AvatarFallback className="bg-primary text-primary-foreground dark:text-sidebar-foreground">
+                  {user?.username?.charAt(0).toUpperCase() || 'U'}
+                </AvatarFallback>
+              </Avatar>
               <div
                 className={cn(
                   "flex-1 overflow-hidden transition-[max-width,opacity,margin] duration-300",
@@ -249,38 +268,54 @@ export function Layout() {
 
             {/* 统一化的垂直功能按钮区 */}
             <div className="flex flex-col gap-1 overflow-hidden pt-4">
-              <Button
-                variant="ghost"
-                onClick={toggleTheme}
-                className="justify-start text-base p-2 h-11 w-full hover:bg-muted text-sidebar-foreground transition-colors"
-                title={sidebarCollapsed ? (theme === 'dark' ? '切换亮色' : '切换暗黑') : undefined}
-              >
-                {theme === 'dark' ? <Sun className="size-5 shrink-0" /> : <Moon className="size-5 shrink-0" />}
-                <span className={cn(
-                  "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                  sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
-                )}>
-                  {theme === 'dark' ? '切换亮色模式' : '切换暗黑模式'}
-                </span>
-              </Button>
-
-              <Button
-                variant={logoutConfirming ? "destructive" : "ghost"}
-                onClick={handleLogout}
-                onBlur={handleLogoutBlur}
-                className={cn(
-                  "justify-start p-2 h-11 w-full text-base", logoutConfirming ? "transition-none" : "hover:bg-muted text-sidebar-foreground transition-colors"
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    onClick={toggleTheme}
+                    className="justify-start text-base p-2 h-11 w-full hover:bg-muted text-sidebar-foreground transition-colors"
+                  >
+                    {theme === 'dark' ? <Sun className="size-5 shrink-0" /> : <Moon className="size-5 shrink-0" />}
+                    <span className={cn(
+                      "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
+                      sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
+                    )}>
+                      {theme === 'dark' ? '切换亮色模式' : '切换暗黑模式'}
+                    </span>
+                  </Button>
+                </TooltipTrigger>
+                {sidebarCollapsed && (
+                  <TooltipContent side="right">
+                    <p>{theme === 'dark' ? '切换亮色' : '切换暗黑'}</p>
+                  </TooltipContent>
                 )}
-                title={sidebarCollapsed ? (logoutConfirming ? "再次点击确认退出" : "退出登录") : undefined}
-              >
-                <LogOut className="size-5 shrink-0" />
-                <span className={cn(
-                  "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                  sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
-                )}>
-                  {logoutConfirming ? "确认退出" : "退出登录"}
-                </span>
-              </Button>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={logoutConfirming ? "destructive" : "ghost"}
+                    onClick={handleLogout}
+                    onBlur={handleLogoutBlur}
+                    className={cn(
+                      "justify-start p-2 h-11 w-full text-base", logoutConfirming ? "transition-none" : "hover:bg-muted text-sidebar-foreground transition-colors"
+                    )}
+                  >
+                    <LogOut className="size-5 shrink-0" />
+                    <span className={cn(
+                      "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
+                      sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
+                    )}>
+                      {logoutConfirming ? "确认退出" : "退出登录"}
+                    </span>
+                  </Button>
+                </TooltipTrigger>
+                {sidebarCollapsed && (
+                  <TooltipContent side="right">
+                    <p>{logoutConfirming ? "再次点击确认退出" : "退出登录"}</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
             </div>
           </div>
         </aside>
@@ -289,7 +324,7 @@ export function Layout() {
       {/* Mobile Menu */}
       <div
         className={cn(
-          "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm md:hidden transition-opacity duration-200",
+          "fixed inset-0 z-30 bg-background/80 backdrop-blur-sm md:hidden transition-opacity duration-200",
           mobileMenuOpen ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
         onClick={() => setMobileMenuOpen(false)}
@@ -371,9 +406,12 @@ export function Layout() {
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md" />
               )}
 
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                {user?.username?.charAt(0).toUpperCase() || 'U'}
-              </div>
+              <Avatar className="h-10 w-10 shrink-0">
+                <AvatarImage src={user?.avatar_url ? getFullImageUrl(user.avatar_url) : undefined} alt={user?.username} />
+                <AvatarFallback className="bg-primary text-primary-foreground dark:text-sidebar-foreground">
+                  {user?.username?.charAt(0).toUpperCase() || 'U'}
+                </AvatarFallback>
+              </Avatar>
               <div className="flex-1 min-w-0">
                 <p className="text-base truncate text-sidebar-foreground">
                   {user?.full_name || user?.username}
@@ -426,19 +464,25 @@ export function Layout() {
             >
               {showDesktopSidebar && (
                 <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-10 w-10 hidden md:flex transition-colors"
-                    onClick={toggleSidebar}
-                    title={sidebarCollapsed ? "展开侧边栏 (Ctrl+B)" : "折叠侧边栏 (Ctrl+B)"}
-                  >
-                    {sidebarCollapsed ? (
-                      <PanelLeftOpen className="size-5" />
-                    ) : (
-                      <PanelLeftClose className="size-5" />
-                    )}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-10 w-10 hidden md:flex transition-colors"
+                        onClick={toggleSidebar}
+                      >
+                        {sidebarCollapsed ? (
+                          <PanelLeftOpen className="size-5" />
+                        ) : (
+                          <PanelLeftClose className="size-5" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{sidebarCollapsed ? "展开侧边栏 (Ctrl+B)" : "折叠侧边栏 (Ctrl+B)"}</p>
+                    </TooltipContent>
+                  </Tooltip>
                   {showBugButton && (
                     <BugReportButton variant="ghost" size="icon" className="h-10 w-10 hidden md:flex transition-colors" showText={false} onRightClick={handleBugButtonRightClick} />
                   )}
@@ -459,8 +503,8 @@ export function Layout() {
               {/* 将 AnnouncementBanner 放置在这里，替代原本的 div */}
               <AnnouncementBanner announcements={announcements} />
 
-              {/* Announcement Button - Only show for regular users */}
-              {isRegularUser && <AnnouncementButton announcements={announcements} />}
+              {/* Announcement Button */}
+              {<AnnouncementButton announcements={announcements} />}
 
               <Button
                 variant="ghost"

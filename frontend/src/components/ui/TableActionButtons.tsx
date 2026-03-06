@@ -6,7 +6,9 @@
 import React, { useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { LoadingButton } from '@/components/ui/LoadingButton'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { cn } from '@/lib/utils'
+import { UserRoles } from '@/lib/constants'
 
 // ============================================================================
 // 类型定义
@@ -35,7 +37,7 @@ export interface ActionButtonConfig<T> {
   /** 二次确认时的显示文本 */
   confirmLabel?: string
   /** 权限要求 */
-  requiredRole?: 'admin' | 'user'
+  requiredRole?: typeof UserRoles.ADMIN | typeof UserRoles.USER
 }
 
 /** 组件 Props */
@@ -106,8 +108,8 @@ export function TableActionButtons<T extends Record<string, unknown>>({
   // 过滤可见的按钮
   const visibleActions = actions.filter(action => {
     // 权限检查
-    if (action.requiredRole === 'admin' && !isAdmin) return false
-    if (action.requiredRole === 'user' && isAdmin === undefined) return false
+    if (action.requiredRole === UserRoles.ADMIN && !isAdmin) return false
+    if (action.requiredRole === UserRoles.USER && isAdmin === undefined) return false
     // 条件显示检查
     if (action.showWhen) return action.showWhen(item, isAdmin)
     return true
@@ -118,32 +120,38 @@ export function TableActionButtons<T extends Record<string, unknown>>({
     <div className={cn('flex items-center gap-1', compact ? 'flex-wrap' : 'flex-wrap')}>
       {/* 编辑按钮 */}
       {showEdit && onEdit && (
-        <Button
-          variant="morden"
-          size="sm"
-          className="h-8 w-8 p-0"
-          title="编辑"
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit(item)
-          }}
-        >
-          {/* Pencil 图标 */}
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-            <path d="m15 5 4 4" />
-          </svg>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="morden"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={(e) => {
+                e.stopPropagation()
+                onEdit(item)
+              }}
+            >
+              {/* Pencil 图标 */}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                <path d="m15 5 4 4" />
+              </svg>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>编辑</p>
+          </TooltipContent>
+        </Tooltip>
       )}
 
       {/* 动态操作按钮 */}
@@ -233,18 +241,24 @@ function ActionButton<T extends Record<string, unknown>>({
   if (config.icon && !config.label) {
     // 图标按钮
     return (
-      <Button
-        variant={config.variant || 'morden'}
-        size="sm"
-        className={cn('h-8 w-8 p-0', config.className)}
-        title={config.label}
-        onClick={(e) => {
-          e.stopPropagation()
-          config.onClick(item)
-        }}
-      >
-        {config.icon}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant={config.variant || 'morden'}
+            size="sm"
+            className={cn('h-8 w-8 p-0', config.className)}
+            onClick={(e) => {
+              e.stopPropagation()
+              config.onClick(item)
+            }}
+          >
+            {config.icon}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>{config.label}</p>
+        </TooltipContent>
+      </Tooltip>
     )
   }
 

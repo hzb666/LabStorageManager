@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import { Label } from '@/components/ui/Label'
 import { reagentOrderAPI, inventoryAPI, consumableOrderAPI } from '@/api/client'
-import { toast } from '@/components/ui/Toast'
+import { toast } from '@/lib/toast'
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { formatDateTime, cn } from '@/lib/utils'
 import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
@@ -120,7 +120,7 @@ function StatCard({
       onClick={onClick}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base font-medium">{title}</CardTitle>
+        <CardTitle className="text-base">{title}</CardTitle>
         <Icon className={cn("h-4 w-4", isActive ? "text-primary" : "text-muted-foreground")} />
       </CardHeader>
       <CardContent>
@@ -173,7 +173,7 @@ export function Dashboard() {
     consumableOrderHelper.accessor('name', {
       header: '名称',
       size: 180,
-      cell: info => <span className="font-medium">{info.getValue()}</span>,
+      cell: info => <span>{info.getValue()}</span>,
     }),
     consumableOrderHelper.accessor('status', {
       header: '状态',
@@ -182,7 +182,7 @@ export function Dashboard() {
         const status = info.getValue()
         return (
           <span className={cn(
-            'px-2.5 py-1 text-sm rounded-full font-medium whitespace-nowrap',
+            'px-2.5 py-1 text-sm rounded-full whitespace-nowrap',
             CONSUMABLE_STATUS_STYLES[status] || 'bg-muted'
           )}>
             {status === 'pending' ? '待审批' : status === 'approved' ? '已审批' : status}
@@ -217,7 +217,7 @@ export function Dashboard() {
     borrowHelper.accessor('name', {
       header: '名称',
       size: 150,
-      cell: info => <span className="font-medium">{info.getValue()}</span>,
+      cell: info => <span>{info.getValue()}</span>,
     }),
     borrowHelper.accessor('cas_number', {
       header: 'CAS号',
@@ -254,7 +254,7 @@ export function Dashboard() {
     stockinHelper.accessor('name', {
       header: '名称',
       size: 150,
-      cell: info => <span className="font-medium">{info.getValue()}</span>,
+      cell: info => <span>{info.getValue()}</span>,
     }),
     stockinHelper.accessor('cas_number', {
       header: 'CAS号',
@@ -625,7 +625,7 @@ export function Dashboard() {
                     className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted transition-all"
                   >
                     <div>
-                      <p className="font-medium">{order.name}</p>
+                      <p>{order.name}</p>
                       <p className="text-sm text-muted-foreground">
                         CAS: {order.cas_number || '-'} • {formatDateTime(order.created_at)}
                       </p>
@@ -727,7 +727,7 @@ export function Dashboard() {
                           {headerGroup.headers.map(header => (
                             <th
                               key={header.id}
-                              className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                              className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
                             >
                               {header.isPlaceholder
                                 ? null
@@ -787,7 +787,7 @@ export function Dashboard() {
                           {headerGroup.headers.map(header => (
                             <th
                               key={header.id}
-                              className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                              className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
                             >
                               {header.isPlaceholder
                                 ? null
@@ -846,7 +846,7 @@ export function Dashboard() {
                         {headerGroup.headers.map(header => (
                           <th
                             key={header.id}
-                            className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                            className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
                           >
                             {header.isPlaceholder
                               ? null
@@ -887,7 +887,7 @@ export function Dashboard() {
 
           <div className="space-y-4">
             <div>
-              <p className="font-medium">{selectedBorrow?.name}</p>
+              <p>{selectedBorrow?.name}</p>
               <p className="text-sm text-muted-foreground">
                 CAS: {selectedBorrow?.cas_number}
               </p>
@@ -984,7 +984,7 @@ export function Dashboard() {
 
             <div className="space-y-4">
               <div className="p-4 bg-muted rounded-lg">
-                <p className="font-medium">{selectedStockin.name}</p>
+                <p>{selectedStockin.name}</p>
                 <p className="text-sm text-muted-foreground">
                   CAS: {selectedStockin.cas_number} • {selectedStockin.initial_quantity} {selectedStockin.unit}
                 </p>

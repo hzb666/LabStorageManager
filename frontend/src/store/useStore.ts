@@ -39,6 +39,7 @@ interface User {
   full_name: string | null
   role: 'admin' | 'user'
   created_at: string
+  avatar_url?: string
 }
 
 interface AuthState {

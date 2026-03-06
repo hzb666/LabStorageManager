@@ -12,6 +12,11 @@ import { Bug, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useErrorLogger, fetchBackendErrorLogs } from '@/hooks/useErrorLogger'
 import { useAuthStore } from '@/store/useStore'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/Tooltip'
 
 // 收件人邮箱
 const RECIPIENT_EMAIL = 'hzb666@88.com'
@@ -174,24 +179,30 @@ export function BugReportButton({
   }, [errorLogs, getLogsContent, user])
   
   return (
-    <Button
-      variant={variant}
-      size={size}
-      onClick={handleReport}
-      onContextMenu={handleRightClick}
-      disabled={isLoading}
-      className={showText ? `justify-start ${className}` : className}
-      title={`${title}，右键隐藏`}
-    >
-      {isLoading ? (
-        <Loader2 className="size-5 animate-spin" />
-      ) : (
-        <Bug className="size-5 text-muted-foreground" />
-      )}
-      {showText && (
-        <span className="ml-3">反馈问题</span>
-      )}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant={variant}
+          size={size}
+          onClick={handleReport}
+          onContextMenu={handleRightClick}
+          disabled={isLoading}
+          className={showText ? `justify-start ${className}` : className}
+        >
+          {isLoading ? (
+            <Loader2 className="size-5 animate-spin" />
+          ) : (
+            <Bug className="size-5 text-muted-foreground" />
+          )}
+          {showText && (
+            <span className="ml-3">反馈问题</span>
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p>{title}，右键隐藏</p>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

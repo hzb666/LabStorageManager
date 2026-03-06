@@ -10,13 +10,13 @@ interface DialogProps {
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
   // 锁定 body 滚动
   React.useEffect(() => {
-    if (open) {
-      const originalStyle = window.getComputedStyle(document.body).overflow
-      document.body.style.overflow = 'hidden'
-      return () => {
-        document.body.style.overflow = originalStyle
-      }
-    }
+    //if (open) {
+   //   const originalStyle = document.documentElement.style.overflow
+   //   document.documentElement.style.overflow = 'hidden'
+  //    return () => {
+  //      document.documentElement.style.overflow = originalStyle
+   //   }
+   // }
   }, [open])
 
   if (!open) return null
@@ -55,7 +55,7 @@ export function DialogHeader({ children, className }: { children: React.ReactNod
 }
 
 export function DialogTitle({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <h2 className={cn("font-semibold text-2xl flex items-center gap-2 mb-8", className)}>{children}</h2>
+  return <h2 className={cn("font-bold text-2xl flex items-center gap-2 mb-8", className)}>{children}</h2>
 }
 
 export function DialogTrigger({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {

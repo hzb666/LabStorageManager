@@ -7,6 +7,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, ArrowUp, ArrowUpDown, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useMobile'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/Tooltip'
 
 interface DataTableProps<TData> {
   table: TableType<TData>
@@ -470,7 +475,7 @@ export function DataTable<TData>({
                       <div
                         key={header.id}
                         className={cn(
-                          "relative p-3 mt-3 font-semibold text-foreground flex items-center group select-none hover:bg-accent dark:hover:bg-input transition-colors rounded-t-md",
+                          "relative p-3 mt-3 font-bold text-foreground flex items-center group select-none hover:bg-accent dark:hover:bg-input transition-colors rounded-t-md",
                           index === 0 && "border-l-4 border-transparent"
                         )}
                         style={getProportionalStyles(header.column)}
@@ -497,18 +502,24 @@ export function DataTable<TData>({
                           const canResize = header.column.getCanResize() && header.index !== headerGroup.headers.length - 1
                           return canResize && !isMobile
                         })() && (
-                          <div
-                            onMouseDown={(e) => handleCustomResize(e, header)}
-                            onTouchStart={(e) => handleCustomResize(e, header)}
-                            onDoubleClick={() => table.resetColumnSizing()}
-                            title="拖拽调整列宽 (双击恢复默认)"
-                            className={cn(
-                              "absolute right-0 top-1.5 h-full w-1 cursor-col-resize z-10 touch-none transition-all opacity-0 group-hover:opacity-100",
-                              isResizing ? "bg-primary/70 opacity-100 w-1.5" : "hover:bg-primary/50",
-                              isResizing && header.getSize() === (header.column.columnDef.minSize ?? 50) && "bg-destructive/70",
-                              isResizing && header.column.columnDef.maxSize && header.getSize() === header.column.columnDef.maxSize && "bg-destructive/70"
-                            )}
-                          />
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div
+                                onMouseDown={(e) => handleCustomResize(e, header)}
+                                onTouchStart={(e) => handleCustomResize(e, header)}
+                                onDoubleClick={() => table.resetColumnSizing()}
+                                className={cn(
+                                  "absolute right-0 top-1.5 h-full w-1 cursor-col-resize z-10 touch-none transition-all opacity-0 group-hover:opacity-100",
+                                  isResizing ? "bg-primary/70 opacity-100 w-1.5" : "hover:bg-primary/50",
+                                  isResizing && header.getSize() === (header.column.columnDef.minSize ?? 50) && "bg-destructive/70",
+                                  isResizing && header.column.columnDef.maxSize && header.getSize() === header.column.columnDef.maxSize && "bg-destructive/70"
+                                )}
+                              />
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">
+                              <p>拖拽调整列宽 (双击恢复默认)</p>
+                            </TooltipContent>
+                          </Tooltip>
                         )}
                       </div>
                     )

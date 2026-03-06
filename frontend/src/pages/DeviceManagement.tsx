@@ -21,6 +21,7 @@ import StatusBadge from '@/components/ui/StatusBadge'
 import { sessionAPI, type SessionInfo } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
 import { formatDateTime } from '@/lib/utils'
+import { getDeviceId } from '@/lib/deviceId'
 import useDialogState from '@/hooks/useDialogState'
 import {
   Search,
@@ -32,7 +33,8 @@ import {
   LogOut,
   Shield,
 } from 'lucide-react'
-import { toast } from '@/components/ui/Toast'
+import { toast } from '@/lib/toast'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 
 const columnHelper = createColumnHelper<SessionInfo>()
 
@@ -72,9 +74,8 @@ export default function DeviceManagement() {
 
   // Determine current device (first one is most recent)
   const currentDeviceId = useMemo(() => {
-    if (data.length > 0) return data[0].id
-    return null
-  }, [data])
+    return getDeviceId()
+  }, [])
 
   // Table columns
   const columns = useMemo(() => [
@@ -90,7 +91,7 @@ export default function DeviceManagement() {
     }),
     columnHelper.accessor('ip_address', {
       header: 'IP地址',
-      size: 130,
+      size: 120,
       cell: info => (
         <span className="text-base">{info.getValue()}</span>
       ),
@@ -111,7 +112,7 @@ export default function DeviceManagement() {
       size: 80,
       cell: info => {
         const session = info.row.original
-        const isCurrent = session.id === currentDeviceId
+        const isCurrent = session.device_id === currentDeviceId
         return <StatusBadge status={isCurrent ? 'current' : 'other'} />
       },
     }),
@@ -121,23 +122,29 @@ export default function DeviceManagement() {
       size: 100,
       cell: info => {
         const session = info.row.original
-        const isCurrent = session.id === currentDeviceId
+        const isCurrent = session.device_id === currentDeviceId
         
         return (
           <div className="flex items-center gap-1">
             {!isCurrent && (
-              <Button
-                variant="morden"
-                size="sm"
-                className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                title="踢出设备"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  openKickModal(session)
-                }}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="morden"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openKickModal(session)
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>踢出设备</p>
+                </TooltipContent>
+              </Tooltip>
             )}
           </div>
         )
@@ -287,7 +294,7 @@ export default function DeviceManagement() {
                       {headerGroup.headers.map(header => (
                         <th 
                           key={header.id} 
-                          className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                          className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
                           style={{ width: header.getSize() }}
                         >
                           {header.isPlaceholder

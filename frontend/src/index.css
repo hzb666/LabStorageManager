@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "tailwindcss-animate";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -328,12 +329,37 @@
 /* =========================================
    Marquee Animation for Announcement Banner
    ========================================= */
-@keyframes marquee {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+/* index.css */
+
+/* index.css */
+
+@keyframes marquee-infinite {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    /* 移动整个容器的宽度 */
+    transform: translateX(-100%);
+  }
 }
 
-.animate-marquee {
-  animation: marquee 30s linear infinite;
-  width: fit-content;
+.marquee-root {
+  display: flex;
+  overflow: hidden;
+  width: 100%;
+  position: relative;
+}
+
+.marquee-content {
+  display: flex;
+  flex-shrink: 0;
+  /* 确保每一组内容至少撑满整个父容器宽度，防止中间断裂 */
+  min-width: 100%; 
+  align-items: center;
+  animation: marquee-infinite 50s linear infinite;
+}
+
+/* 悬停时，两个内容块必须同时停止，否则会错位 */
+.marquee-root:hover .marquee-content {
+  animation-play-state: paused;
 }

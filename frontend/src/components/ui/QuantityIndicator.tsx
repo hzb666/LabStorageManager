@@ -55,9 +55,9 @@ export function QuantityIndicator({
         className={cn(
           'leading-none', // 【核心修改】：消除默认行高带来的上下留白
           // 快用完时 (0 < percentage < 20)：使用琥珀色
-          percentage < 20 && percentage > 0 && 'text-amber-600 font-medium dark:text-amber-400',
+          percentage < 20 && percentage > 0 && 'text-amber-600 dark:text-amber-400',
           // 完全耗尽时 (percentage === 0)：使用红色
-          percentage === 0 && 'text-destructive font-medium'
+          percentage === 0 && 'text-destructive'
         )}
       >
         {displayText}

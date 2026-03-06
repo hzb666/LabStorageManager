@@ -27,7 +27,7 @@ import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { DataTable } from '@/components/ui/DataTable'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
-import { toast } from '@/components/ui/Toast'
+import { toast } from '@/lib/toast'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
@@ -786,12 +786,12 @@ export function InventoryPage() {
                     </div>
                     {/* 右侧：信息网格 - 保持原有的 grid-cols-2 md:grid-cols-3 布局 */}
                     <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
-                      <div><span className="font-medium">英文名称：</span>{item.english_name || '-'}</div>
-                      <div><span className="font-medium">别名：</span>{item.alias || '-'}</div>
-                      <div><span className="font-medium">入库时间：</span>{formatDate(item.created_at)}</div>
-                      <div><span className="font-medium">入库用户：</span>{item.created_by_name || '-'}</div>
-                      <div><span className="font-medium">上次借用：</span>{item.borrower_name ? `${item.borrower_name} (未归还)` : (item.last_borrower_name ? `${item.last_borrower_name} (已归还)` : '-')}</div>
-                      <div><span className="font-medium">备注：</span>{item.notes || '-'}</div>
+                      <div><span>英文名称：</span>{item.english_name || '-'}</div>
+                      <div><span>别名：</span>{item.alias || '-'}</div>
+                      <div><span>入库时间：</span>{formatDate(item.created_at)}</div>
+                      <div><span>入库用户：</span>{item.created_by_name || '-'}</div>
+                      <div><span>上次借用：</span>{item.borrower_name ? `${item.borrower_name} (未归还)` : (item.last_borrower_name ? `${item.last_borrower_name} (已归还)` : '-')}</div>
+                      <div><span>备注：</span>{item.notes || '-'}</div>
                     </div>
                   </div>
                 )}

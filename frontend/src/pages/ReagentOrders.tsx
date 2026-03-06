@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
-import { toast } from '@/components/ui/Toast'
+import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/ui/TableActionButtons'
 
@@ -156,7 +156,6 @@ export function ReagentOrdersPage() {
     defaultSearchField: 'all',
     pageSize: 50,
     debounceMs: 300,
-    expandStorageKey: 'reagent-orders-expand-all',
   })
 
   // Dialog 状态

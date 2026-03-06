@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
-import { toast } from '@/components/ui/Toast'
+import { toast } from '@/lib/toast'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'

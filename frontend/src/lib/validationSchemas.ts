@@ -32,9 +32,9 @@ export { valibotResolver }
  */
 export const createRequiredStringSchema = (fieldName: string) =>
   v.pipe(
-    v.string(`${fieldName}必须是字符串`),
+    v.string(`${fieldName}不能为空`),
     v.trim(),
-    v.minLength(1, `${fieldName}不能为空`)
+    v.nonEmpty(`${fieldName}不能为空`)
   )
 
 /**
@@ -361,6 +361,13 @@ export type ConsumableOrderFormData = v.InferOutput<typeof ConsumableOrderSchema
  */
 export const LoginSchema = v.object({
   username: createRequiredStringSchema('用户名'),
+  password: createRequiredStringSchema('密码')
+})
+
+/**
+ * 锁屏模式 Schema（只需密码）
+ */
+export const LockScreenSchema = v.object({
   password: createRequiredStringSchema('密码')
 })
 

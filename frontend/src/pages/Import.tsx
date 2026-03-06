@@ -2,7 +2,7 @@
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { inventoryAPI } from '@/api/client'
-import { toast } from '@/components/ui/Toast'
+import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { IMPORT_TEMPLATE_COLUMNS } from '@/lib/constants'
 import { 
@@ -166,7 +166,7 @@ export function ImportPage() {
             {/* Template Download */}
             <div className="rounded-lg my-4">
               <div className="flex items-center justify-between mb-4">
-                <h4 className="font-medium">模板字段说明（标 <span className="text-destructive">*</span> 为必填项）</h4>
+                <h4>模板字段说明（标 <span className="text-destructive">*</span> 为必填项）</h4>
                 <Button variant="morden" size="lg" onClick={downloadTemplate}>
                   <Download className="w-4 h-4 mr-2" />
                   下载模板
@@ -191,7 +191,7 @@ export function ImportPage() {
 
             {/* Drag & Drop Upload Area */}
             <div>
-              <label className="block text-base font-medium mb-2 mt-10">上传文件</label>
+              <label className="block text-base mb-2 mt-10">上传文件</label>
               <div
                 className={cn(
                   "relative border-2 border-dashed rounded-lg p-6 transition-all duration-200 cursor-pointer",
@@ -216,7 +216,7 @@ export function ImportPage() {
                     <>
                       <div className="flex items-center gap-2">
                         {getFileIcon(file.name)}
-                        <span className="font-medium text-sm truncate max-w-50">{file.name}</span>
+                        <span className="text-sm truncate max-w-50">{file.name}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-muted-foreground">
@@ -307,7 +307,7 @@ export function ImportPage() {
                       <XCircle className="w-5 h-5 text-destructive" />
                     )}
                     <span className={cn(
-                      "font-semibold",
+                      "font-bold",
                       result.success ? "text-green-700 dark:text-green-300" : "text-destructive"
                     )}>
                       {result.success ? '导入成功' : '导入失败'}
@@ -338,14 +338,14 @@ export function ImportPage() {
                 {result.errors && result.errors.length > 0 && (
                   <div className="border border-destructive rounded-lg overflow-hidden">
                     <div className="bg-destructive/10 px-4 py-2 border-b border-destructive/20">
-                      <h4 className="font-medium text-destructive">错误详情</h4>
+                      <h4 className="text-destructive">错误详情</h4>
                     </div>
                     <div className="max-h-75 overflow-y-auto">
                       <table className="w-full">
                         <thead className="bg-muted/50 sticky top-0">
                           <tr>
-                            <th className="px-4 py-2 text-left font-medium text-muted-foreground w-16">行号</th>
-                            <th className="px-4 py-2 text-left font-medium text-muted-foreground">错误信息</th>
+                            <th className="px-4 py-2 text-left text-muted-foreground w-16">行号</th>
+                            <th className="px-4 py-2 text-left text-muted-foreground">错误信息</th>
                           </tr>
                         </thead>
                         <tbody>

@@ -4,9 +4,6 @@ import { ChevronUp, ChevronDown, Loader2 } from "lucide-react"
 // 统一从配置文件导入
 import { inputConfigs, defaultInputStyles, type InputStyles } from "@/lib/inputConfigs"
 
-// 导出所有标签供外部使用
-export { inputConfigs }
-
 export interface PrefixButtonConfig {
   onClick: () => void
   title?: string
@@ -14,8 +11,8 @@ export interface PrefixButtonConfig {
   icon?: React.ElementType // 支持自定义图标
 }
 
-export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
-  step?: number; min?: number; max?: number;
+export interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'prefix'> {
+  step?: number | string; min?: number | string; max?: number | string;
   prefix?: React.ReactNode; suffix?: React.ReactNode;
   tag?: string; enableTagToggle?: boolean;
   prefixButton?: PrefixButtonConfig;
@@ -31,6 +28,11 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
     // 合并传入样式与默认样式
     const styles = { ...defaultInputStyles, ...customStyles } as InputStyles
+
+    // 转换为数字类型，确保数学运算正确
+    const numStep = Number(step)
+    const numMin = Number(min)
+    const numMax = Number(max)
 
     const isNumber = type === "number"
     const isControlled = value !== undefined
@@ -66,7 +68,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
     const handleNumberChange = (delta: number) => {
       const currentNum = displayValue === "" ? 0 : Number(displayValue)
-      emitChange(String(Math.max(min, Math.min(max, currentNum + delta))), isActive)
+      emitChange(String(Math.max(numMin, Math.min(numMax, currentNum + delta))), isActive)
     }
 
     const showLeftArea = enableTagToggle || prefix || prefixButton
@@ -135,10 +137,10 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
         {isNumber ? (
           <div className={styles.stepper.wrapper}>
-            <button type="button" tabIndex={-1} onClick={() => handleNumberChange(step)} className={styles.stepper.button} disabled={Number(displayValue) >= max}>
+            <button type="button" tabIndex={-1} onClick={() => handleNumberChange(numStep)} className={styles.stepper.button} disabled={Number(displayValue) >= numMax}>
               <ChevronUp className={styles.stepper.icon} />
             </button>
-            <button type="button" tabIndex={-1} onClick={() => handleNumberChange(-step)} className={styles.stepper.button} disabled={Number(displayValue) <= min}>
+            <button type="button" tabIndex={-1} onClick={() => handleNumberChange(-numStep)} className={styles.stepper.button} disabled={Number(displayValue) <= numMin}>
               <ChevronDown className={styles.stepper.icon} />
             </button>
           </div>

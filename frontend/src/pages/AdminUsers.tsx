@@ -12,15 +12,16 @@ import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-quer
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
-import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
+import { LABEL_STYLES, INPUT_STYLES, UserRoles } from '@/lib/constants'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { userAdminAPI, authAPI } from '@/api/client'
-import { toast } from '@/components/ui/Toast'
+import { toast } from '@/lib/toast'
 import { useAuthStore } from '@/store/useStore'
-import { formatDate, cn } from '@/lib/utils'
+import { useRememberedUser } from '@/hooks/useRememberedUser'
+import { formatDate, cn, getFullImageUrl } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
 import * as v from 'valibot'
 import { UserCreateSchema, UserUpdateSchema, ChangePasswordWithConfirmSchema, createRequiredStringSchema, UsernameSchema } from '@/lib/validationSchemas'
@@ -42,8 +43,9 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { TableEmptyState } from '@/components/ui/TableFilters'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 
-// 用户状态样式 - 使用 StatusBadge 组件
 
 // 角色样式 - 使用 StatusBadge 组件
 
@@ -60,18 +62,20 @@ interface User {
   role: 'admin' | 'user'
   is_active: boolean
   created_at: string
+  avatar_url?: string
 }
 
 const columnHelper = createColumnHelper<User>()
 
 export function AdminUsersPage() {
   const { user: currentUser, setAuth } = useAuthStore()
+  const { rememberedUser, updateRememberedUser, clearRememberedUser } = useRememberedUser()
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   // 防抖搜索
   const [debouncedFilter, setDebouncedFilter] = useState('')
-  
+
   // 防抖 effect - 300ms 延迟
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -129,7 +133,7 @@ export function AdminUsersPage() {
     const currentUserId = currentUser.id
     const currentUserIndex = userData.findIndex((user: User) => user.id === currentUserId)
     if (currentUserIndex === -1 || currentUserIndex === 0) return userData
-    
+
     // 将当前用户移到数组最前面
     const result = [...userData]
     const [currentUserItem] = result.splice(currentUserIndex, 1)
@@ -175,6 +179,22 @@ export function AdminUsersPage() {
   const [editErrors, setEditErrors] = useState<Record<string, string>>({})
   const [editLoading, setEditLoading] = useState(false)
 
+  // Avatar upload state
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [avatarPreview, setAvatarPreview] = useState<string>('')
+  const [avatarLoading, setAvatarLoading] = useState(false)
+  // 记录初始头像 URL，用于判断是否删除了头像
+  const [originalAvatarUrl, setOriginalAvatarUrl] = useState<string>('')
+
+  // 组件卸载时释放 Object URL 防止内存泄漏
+  React.useEffect(() => {
+    return () => {
+      if (avatarPreview) {
+        URL.revokeObjectURL(avatarPreview)
+      }
+    }
+  }, [avatarPreview])
+
   // Delete confirmation
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
@@ -191,6 +211,20 @@ export function AdminUsersPage() {
 
   // 表格列定义
   const columns = useMemo(() => [
+    columnHelper.display({
+      id: 'avatar',
+      header: '',
+      size: 60,
+      cell: info => {
+        const user = info.row.original
+        return (
+          <Avatar className="h-8 w-8">
+            <AvatarImage src={user.avatar_url ? getFullImageUrl(user.avatar_url) : undefined} alt={user.username} />
+            <AvatarFallback>{user.username.charAt(0).toUpperCase()}</AvatarFallback>
+          </Avatar>
+        )
+      },
+    }),
     columnHelper.accessor('username', {
       header: '用户名',
       size: 120,
@@ -231,45 +265,63 @@ export function AdminUsersPage() {
 
         return (
           <div className="flex items-center gap-1">
-            <Button
-              variant="morden"
-              size="sm"
-              className="h-8 w-8 p-0"
-              title="编辑"
-              onClick={(e) => {
-                e.stopPropagation()
-                openEditModal(user)
-              }}
-            >
-              <Edit className="w-3.5 h-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="morden"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openEditModal(user)
+                  }}
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>编辑</p>
+              </TooltipContent>
+            </Tooltip>
             {!user.is_active && !isSelf && (
-              <Button
-                variant="morden"
-                size="sm"
-                className="h-8 w-8 p-0 text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-950"
-                title="激活"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleActivate(user.id)
-                }}
-              >
-                <UserCheck className="w-3.5 h-3.5" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="morden"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-950"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleActivate(user.id)
+                    }}
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>激活</p>
+                </TooltipContent>
+              </Tooltip>
             )}
             {user.is_active && !isSelf && (
-              <Button
-                variant="morden"
-                size="sm"
-                className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                title="禁用"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  openDeleteModal(user)
-                }}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="morden"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openDeleteModal(user)
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>禁用</p>
+                </TooltipContent>
+              </Tooltip>
             )}
           </div>
         )
@@ -353,6 +405,9 @@ export function AdminUsersPage() {
     setEditData({ username: user.username, full_name: user.full_name || '', role: user.role })
     setEditErrors({})
     setIsEditingPassword(false)
+    setAvatarFile(null)
+    setAvatarPreview(user.avatar_url ? getFullImageUrl(user.avatar_url) : '')
+    setOriginalAvatarUrl(user.avatar_url ? getFullImageUrl(user.avatar_url) : '')  // 保存原始头像 URL
     setDialogState('edit')
   }
 
@@ -377,8 +432,85 @@ export function AdminUsersPage() {
 
     setEditLoading(true)
     try {
-      const response = await userAdminAPI.update(editUser.id, editData)
+      // 如果删除了头像（originalAvatarUrl 存在但 avatarPreview 为空，且没有新文件）
+      const wasAvatarDeleted = originalAvatarUrl && !avatarPreview && !avatarFile
+      
+      if (wasAvatarDeleted) {
+        // 调用后端 API 删除头像
+        try {
+          await userAdminAPI.deleteAvatar(editUser.id)
+          // 立即更新缓存
+          queryClient.setQueryData(['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize], (oldData: User[] | undefined) => {
+            if (!oldData) return oldData
+            return oldData.map(user => 
+              user.id === editUser.id ? { ...user, avatar_url: undefined } : user
+            )
+          })
+        } catch {
+          toast.error('头像删除失败')
+          setEditLoading(false)
+          return
+        }
+      } else if (avatarFile && editUser) {
+        // 如果选择了新头像，先上传（后端会自动删除旧头像）
+        setAvatarLoading(true)
+        try {
+          const response = await userAdminAPI.uploadAvatar(editUser.id, avatarFile)
+          const newAvatarUrl = response.data.avatar_url
+          setAvatarPreview(newAvatarUrl)
+          
+          // 立即更新 React Query 缓存中的用户数据
+          queryClient.setQueryData(['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize], (oldData: User[] | undefined) => {
+            if (!oldData) return oldData
+            return oldData.map(user => 
+              user.id === editUser.id ? { ...user, avatar_url: newAvatarUrl } : user
+            )
+          })
+          
+          // 同时更新 editUser 的 avatar_url，以便后续使用
+          setEditUser({ ...editUser, avatar_url: newAvatarUrl })
+          
+          // 同步更新 localStorage 中记住的用户信息
+          if (rememberedUser && rememberedUser.userId === editUser.id) {
+            updateRememberedUser({
+              avatar_url: newAvatarUrl,
+            })
+          }
+        } catch (error) {
+          const axiosError = error as AxiosError<{ detail?: string }>
+          const errorMsg = axiosError.response?.data?.detail || '头像上传失败'
+          // 将英文错误消息转换为中文
+          if (errorMsg.includes('Invalid image type')) {
+            toast.error('不支持该图像格式')
+          } else if (errorMsg.includes('Image size exceeds')) {
+            toast.error('图片大小超过限制')
+          } else {
+            toast.error(errorMsg)
+          }
+          setAvatarLoading(false)
+          setEditLoading(false)
+          return
+        }
+        setAvatarLoading(false)
+      }
+
+      // 更新用户信息
+      const response = await userAdminAPI.update(editUser.id, {
+        username: editData.username,
+        full_name: editData.full_name,
+        role: editData.role
+      })
       const updatedUser = response.data
+
+      // 如果用户名发生变化，清除记住的用户信息（强制重新登录）
+      if (rememberedUser && rememberedUser.userId === editUser.id && editUser.username !== editData.username) {
+        clearRememberedUser()
+      } else if (rememberedUser && rememberedUser.userId === editUser.id) {
+        // 用户名没变但可能改了姓名，同步更新 full_name
+        updateRememberedUser({
+          full_name: editData.full_name,
+        })
+      }
 
       // 如果修改的是当前登录用户，需要更新全局状态
       if (editUser.id === currentUser?.id && updatedUser) {
@@ -387,6 +519,9 @@ export function AdminUsersPage() {
 
       setDialogState(null)
       setEditUser(null)
+      setAvatarFile(null)
+      setAvatarPreview('')
+      setOriginalAvatarUrl('')
       refetchUsers()
       toast.success('用户更新成功')
     } catch (error) {
@@ -434,44 +569,57 @@ export function AdminUsersPage() {
 
   // Change password handlers
   const validateChangePasswordForm = useCallback((): boolean => {
-    try {
-      v.parse(ChangePasswordWithConfirmSchema, {
-        old_password: changePasswordData.old_password,
-        new_password: changePasswordData.new_password,
-        confirm_password: changePasswordData.confirm_password
-      })
-      setChangePasswordErrors({})
-      return true
-    } catch (error) {
-      if (error instanceof v.ValiError) {
-        const errors: Record<string, string> = {}
-        for (const issue of error.issues) {
-          const field = issue.path?.[0]?.key
-          if (field) {
-            errors[field] = issue.message
-          }
-        }
-        setChangePasswordErrors(errors)
+    const errors: Record<string, string> = {}
+    const isSelf = editUser?.id === currentUser?.id
+    const isTargetAdmin = editUser?.role === UserRoles.ADMIN
+
+    // 修改自己或修改管理员需要原密码
+    if (isSelf || isTargetAdmin) {
+      if (!changePasswordData.old_password) {
+        errors.old_password = '请输入原密码'
       }
-      return false
     }
-  }, [changePasswordData])
+
+    if (!changePasswordData.new_password) {
+      errors.new_password = '请输入新密码'
+    } else if (changePasswordData.new_password.length < 6) {
+      errors.new_password = '新密码至少6个字符'
+    }
+
+    if (!changePasswordData.confirm_password) {
+      errors.confirm_password = '请再次输入新密码'
+    } else if (changePasswordData.new_password !== changePasswordData.confirm_password) {
+      errors.confirm_password = '两次输入的密码不一致'
+    }
+
+    setChangePasswordErrors(errors)
+    return Object.keys(errors).length === 0
+  }, [changePasswordData, editUser, currentUser])
 
   const handleChangePassword = async () => {
     if (!validateChangePasswordForm()) return
 
     setChangePasswordLoading(true)
     try {
-      await authAPI.changePassword(changePasswordData.old_password, changePasswordData.new_password)
-      setDialogState(null)
-      setIsEditingPassword(false)
-      setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
-      toast.success('密码修改成功，请重新登录')
-      // 可选：自动登出
-      setTimeout(() => {
-        useAuthStore.getState().logout()
-        window.location.href = '/login'
-      }, 1500)
+      // 如果修改的是自己，使用 changePassword API；否则使用 resetPassword API
+      if (editUser?.id === currentUser?.id) {
+        await authAPI.changePassword(changePasswordData.old_password, changePasswordData.new_password)
+        setDialogState(null)
+        setIsEditingPassword(false)
+        setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
+        toast.success('密码修改成功，请重新登录')
+        setTimeout(() => {
+          useAuthStore.getState().logout()
+          window.location.href = '/login'
+        }, 1500)
+      } else {
+        // 管理员重置其他用户密码
+        const oldPassword = editUser?.role === UserRoles.ADMIN ? changePasswordData.old_password : undefined
+        await userAdminAPI.resetPassword(editUser!.id, changePasswordData.new_password, oldPassword)
+        setIsEditingPassword(false)
+        setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
+        toast.success('密码重置成功')
+      }
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
       toast.error(axiosError.response?.data?.detail || '密码修改失败')
@@ -569,7 +717,7 @@ export function AdminUsersPage() {
                       {headerGroup.headers.map(header => (
                         <th
                           key={header.id}
-                          className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                          className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
                           style={{ width: header.getSize() }}
                         >
                           {header.isPlaceholder
@@ -716,22 +864,25 @@ export function AdminUsersPage() {
           {isEditingPassword ? (
             <>
               <div className="grid gap-4 space-y-2">
-                <div>
-                  <Label htmlFor="old_password" className={LABEL_STYLES.base}>
-                    原密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-                  </Label>
-                  <Input
-                    id="old_password"
-                    type="password"
-                    value={changePasswordData.old_password}
-                    onChange={(e) => setChangePasswordData({ ...changePasswordData, old_password: e.target.value })}
-                    placeholder="请输入原密码"
-                    className={cn(INPUT_STYLES.lg, changePasswordErrors.old_password && 'border-destructive')}
-                  />
-                  {changePasswordErrors.old_password && (
-                    <p className="text-sm text-destructive mt-1">{changePasswordErrors.old_password}</p>
-                  )}
-                </div>
+                {/* 原密码 - 修改自己或修改管理员时需要 */}
+                {(editUser?.id === currentUser?.id || editUser?.role === UserRoles.ADMIN) && (
+                  <div>
+                    <Label htmlFor="old_password" className={LABEL_STYLES.base}>
+                      原密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
+                    </Label>
+                    <Input
+                      id="old_password"
+                      type="password"
+                      value={changePasswordData.old_password}
+                      onChange={(e) => setChangePasswordData({ ...changePasswordData, old_password: e.target.value })}
+                      placeholder="请输入原密码"
+                      className={cn(INPUT_STYLES.lg, changePasswordErrors.old_password && 'border-destructive')}
+                    />
+                    {changePasswordErrors.old_password && (
+                      <p className="text-sm text-destructive mt-1">{changePasswordErrors.old_password}</p>
+                    )}
+                  </div>
+                )}
                 <div>
                   <Label htmlFor="new_password" className={LABEL_STYLES.base}>
                     新密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
@@ -777,6 +928,88 @@ export function AdminUsersPage() {
           ) : (
             <>
               <div className="grid gap-4 space-y-2">
+                {/* Avatar Upload */}
+                <div className="flex flex-col items-center gap-3 mb-4">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="relative group">
+                        <input
+                          type="file"
+                          id="avatar-upload"
+                          accept="image/jpeg,image/png,image/gif,image/webp"
+                          className="hidden"
+                          disabled={avatarLoading}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            if (file) {
+                              // 前端验证：文件类型检查
+                              const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif']
+                              if (!allowedTypes.includes(file.type)) {
+                                toast.error('仅支持 JPG、PNG、GIF、WebP 格式的图片')
+                                e.target.value = ''
+                                return
+                              }
+                              // 前端验证：文件大小检查
+                              const maxSizeMB = 5
+                              if (file.size > maxSizeMB * 1024 * 1024) {
+                                toast.error(`图片大小不能超过 ${maxSizeMB}MB`)
+                                e.target.value = ''
+                                return
+                              }
+                              setAvatarFile(file)
+                              // 释放旧的 Object URL 防止内存泄漏
+                              if (avatarPreview) {
+                                URL.revokeObjectURL(avatarPreview)
+                              }
+                              setAvatarPreview(URL.createObjectURL(file))
+                            }
+                          }}
+                        />
+                        <Label htmlFor="avatar-upload" className="cursor-pointer block">
+                          <div className="relative h-20 w-20">
+                            <Avatar className="h-20 w-20 transition-colors">
+                              <AvatarImage src={avatarPreview || undefined} alt={editUser?.username} className="object-cover" />
+                              <AvatarFallback className="text-2xl">
+                                {avatarLoading ? '...' : editUser?.username?.charAt(0).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            {/* Hover overlay with + icon */}
+                            <div className="absolute inset-0 bg-gray-600/50 dark:bg-gray-800/60 rounded-full border-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 cursor-pointer">
+                              {avatarLoading ? (
+                                <Loader2 className="w-8 h-8 text-white animate-spin" />
+                              ) : (
+                                <span className="text-white text-3xl drop-shadow-md">+</span>
+                              )}
+                            </div>
+                            {/* Delete button on hover */}
+                            {avatarPreview && !avatarLoading && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  setAvatarFile(null)
+                                  setAvatarPreview('')
+                                  // 注意：这里不要清空 originalAvatarUrl，这样点击保存时才能对比出被删除了
+                                  // Reset file input
+                                  const fileInput = document.getElementById('avatar-upload') as HTMLInputElement
+                                  if (fileInput) fileInput.value = ''
+                                }}
+                                className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/80"
+                              >
+                                <X className="size-3.5 stroke-3" />
+                              </button>
+                            )}
+                          </div>
+                        </Label>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>点击上传头像</p>
+                      <p>图片应小于5MB</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <div>
                   <Label htmlFor="edit_username" className={LABEL_STYLES.base}>
                     用户名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
@@ -850,21 +1083,19 @@ export function AdminUsersPage() {
                 </div>
               </div>
               <div key="edit-actions" className="flex gap-2 mt-6">
-                {editUser?.id === currentUser?.id && (
-                  <Button
-                    variant="morden"
-                    onClick={() => {
-                      setIsEditingPassword(true)
-                      setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
-                      setChangePasswordErrors({})
-                    }}
-                    size="lg"
-                    className="flex-3"
-                  >
-                    <Lock className="w-4 h-4 mr-1.5" />
-                    修改密码
-                  </Button>
-                )}
+                <Button
+                  variant="morden"
+                  onClick={() => {
+                    setIsEditingPassword(true)
+                    setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
+                    setChangePasswordErrors({})
+                  }}
+                  size="lg"
+                  className="flex-3"
+                >
+                  <Lock className="w-4 h-4 mr-1.5" />
+                  修改密码
+                </Button>
                 <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="flex-1">
                   取消
                 </Button>

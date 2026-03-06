@@ -85,7 +85,7 @@ interface StatusBadgeProps {
  * 自动根据 status 映射到对应颜色
  */
 export function StatusBadge({ status, color, className }: StatusBadgeProps) {
-  const baseClass = 'inline-flex items-center h-8 px-2.5 text-sm rounded-lg font-medium whitespace-nowrap'
+  const baseClass = 'inline-flex items-center h-8 px-2.5 text-sm rounded-lg whitespace-nowrap'
   const badgeColor = color || STATUS_COLORS[status] || 'gray'
   const label = STATUS_LABELS[status] || status
 

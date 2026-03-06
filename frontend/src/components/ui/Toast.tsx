@@ -1,28 +1,8 @@
-﻿import React, { useState, useEffect, useCallback } from 'react'
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { CheckCircle, XCircle, AlertTriangle, Info, X } from 'lucide-react'
-
-type ToastType = 'success' | 'error' | 'warning' | 'info'
-
-interface Toast {
-  id: string
-  message: string
-  type: ToastType
-  exiting?: boolean
-}
-
-let addToastExternal: ((message: string, type: ToastType) => void) | null = null
-
-export function toast(message: string, type: ToastType = 'info') {
-  if (addToastExternal) {
-    addToastExternal(message, type)
-  }
-}
-
-toast.success = (message: string) => toast(message, 'success')
-toast.error = (message: string) => toast(message, 'error')
-toast.warning = (message: string) => toast(message, 'warning')
-toast.info = (message: string) => toast(message, 'info')
+// 确保这个路径指向你抽离出的 toast.ts 逻辑文件
+import { subscribeToToasts, type ToastData, type ToastType } from '@/lib/toast'
 
 const icons: Record<ToastType, React.ReactNode> = {
   success: <CheckCircle className="size-6 text-green-600 dark:text-green-400" />,
@@ -38,108 +18,85 @@ const styles: Record<ToastType, string> = {
   info: 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-900/50 dark:text-blue-200',
 }
 
-export function ToastContainer() {
-  const [toasts, setToasts] = useState<Toast[]>([])
-  const timersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-  const hoveredRef = React.useRef<Set<string>>(new Set())
+function ToastItem({ toast, onRemove }: Readonly<{ toast: ToastData; onRemove: (id: string) => void }>) {
+  // 只保留控制离场的 isExiting 状态，去掉了复杂的 isMounted
+  const [isExiting, setIsExiting] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const clearToastTimer = React.useCallback((id: string) => {
-    if (timersRef.current[id]) {
-      clearTimeout(timersRef.current[id])
-      delete timersRef.current[id]
-    }
-  }, [])
-
-  const removeToast = useCallback((id: string) => {
-    clearToastTimer(id)
-    setToasts(prev => prev.map(t =>
-      t.id === id ? { ...t, exiting: true } : t
-    ))
+  const triggerExit = useCallback(() => {
+    setIsExiting(true)
     setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id))
+      onRemove(toast.id)
     }, 300)
-  }, [clearToastTimer])
+  }, [toast.id, onRemove])
 
-  const addToast = useCallback((message: string, type: ToastType) => {
-    const id = Date.now().toString() + Math.random().toString(36).slice(2, 6)
-    setToasts(prev => [...prev, { id, message, type }])
+  const startTimer = useCallback(() => {
+    timerRef.current = setTimeout(triggerExit, 3500)
+  }, [triggerExit])
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current)
   }, [])
 
   useEffect(() => {
-    addToastExternal = addToast
-    return () => { addToastExternal = null }
-  }, [addToast])
+    startTimer()
+    return clearTimer
+  }, [startTimer, clearTimer])
 
-  const setToastTimer = React.useCallback((id: string) => {
-    clearToastTimer(id)
-    timersRef.current[id] = setTimeout(() => {
-      removeToast(id)
-    }, 3500)
-  }, [clearToastTimer, removeToast])
+  return (
+    <div
+      className={cn(
+        'grid transition-all duration-300 ease-in-out opacity-100 mb-2',
+        'grid-rows-[1fr]',
+        isExiting && 'grid-rows-[0fr] !mb-0 !opacity-0 pointer-events-none'
+      )}
+      onMouseEnter={clearTimer}
+      onMouseLeave={startTimer}
+    >
+      <div className="overflow-hidden min-h-0 rounded-lg">
+        <div
+          className={cn(
+            'flex gap-3 px-6 min-h-16 items-center rounded-lg border shadow-lg',
+            'animate-in slide-in-from-right-full fade-in duration-300',
+            isExiting && 'animate-out fade-out zoom-out-95 duration-300',
+            styles[toast.type]
+          )}
+        >
+          <span className="shrink-0 mt-0.5">{icons[toast.type]}</span>
+          <span className="text-lg flex-1 py-3">{toast.message}</span>
+          <button
+            onClick={triggerExit}
+            className="shrink-0 opacity-60 ml-0.5 hover:opacity-100 flex items-center self-center"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
-  const handleMouseEnter = React.useCallback((id: string) => {
-    hoveredRef.current.add(id)
-    clearToastTimer(id)
-  }, [clearToastTimer])
-
-  const handleMouseLeave = React.useCallback((id: string) => {
-    hoveredRef.current.delete(id)
-    const toast = toasts.find(t => t.id === id)
-    if (toast && !toast.exiting) {
-      setToastTimer(id)
-    }
-  }, [toasts, setToastTimer])
+export function ToastContainer() {
+  const [toasts, setToasts] = useState<ToastData[]>([])
 
   useEffect(() => {
-    const currentIds = new Set(toasts.map(t => t.id))
-    Object.keys(timersRef.current).forEach(id => {
-      if (!currentIds.has(id)) clearToastTimer(id)
-    })
+    const handleAdd = (newToast: ToastData) => {
+      setToasts((prev) => [newToast, ...prev])
+    }
+    const unsubscribe = subscribeToToasts(handleAdd)
+    return unsubscribe
+  }, [])
 
-    toasts.forEach(toast => {
-      if (!timersRef.current[toast.id] && !hoveredRef.current.has(toast.id) && !toast.exiting) {
-        setToastTimer(toast.id)
-      }
-    })
-  }, [toasts, clearToastTimer, setToastTimer])
+  const handleRemove = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
+  }, [])
 
   if (toasts.length === 0) return null
 
   return (
-    // 使用 padding-bottom 而不是 gap，方便后续高度计算
     <div className="fixed top-4 right-4 z-[100] flex flex-col max-w-sm">
-      {toasts.map(t => (
-        <div
-          key={t.id}
-          className={cn(
-            'grid transition-all duration-300 ease-in-out opacity-100 mb-2',
-            // 使用 grid-template-rows 实现完美的高度塌陷动画
-            'grid-rows-[1fr]',
-            t.exiting && 'grid-rows-[0fr] !mb-0 !opacity-0 pointer-events-none'
-          )}
-          onMouseEnter={() => handleMouseEnter(t.id)}
-          onMouseLeave={() => handleMouseLeave(t.id)}
-        >
-          {/* 必须加 min-height: 0 才能让 grid-rows-[0fr] 生效 */}
-          <div className="overflow-hidden min-h-0 rounded-lg">
-            <div
-              className={cn(
-                'flex gap-3 px-6 h-16 items-center rounded-lg border shadow-lg',
-                'animate-in slide-in-from-right-full fade-in duration-300',
-                t.exiting && 'animate-out fade-out zoom-out-95 duration-300', styles[t.type]
-              )}
-            >
-              <span className="shrink-0 mt-0.5">{icons[t.type]}</span>
-              <span className="text-lg flex-1">{t.message}</span>
-              <button
-                onClick={() => removeToast(t.id)}
-                className="shrink-0 opacity-60 ml-0.5 hover:opacity-100 flex items-center self-center"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-          </div>
-        </div>
+      {toasts.map((t) => (
+        <ToastItem key={t.id} toast={t} onRemove={handleRemove} />
       ))}
     </div>
   )

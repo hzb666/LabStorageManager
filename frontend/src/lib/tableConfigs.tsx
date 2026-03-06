@@ -161,7 +161,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       cell: info => (
         <div className="flex items-center gap-1.5">
           <HazardousIcon isHazardous={Boolean(info.row.original.is_hazardous)} />
-          <span className="font-medium">
+          <span>
             <HighlightText
               text={String(info.getValue() ?? '')}
               highlight={info.table.getState().globalFilter}

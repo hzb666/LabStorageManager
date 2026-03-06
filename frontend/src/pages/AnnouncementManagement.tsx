@@ -17,10 +17,11 @@ import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { announcementAPI, type Announcement } from '@/api/client'
-import { toast } from '@/components/ui/Toast'
-import { formatDate, cn } from '@/lib/utils'
+import { toast } from '@/lib/toast'
+import { formatDate, cn, getFullImageUrl } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
 import { AxiosError } from 'axios'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import {
   Megaphone,
   Loader2,
@@ -62,6 +63,7 @@ export function AnnouncementManagement() {
   const [deleteId, setDeleteId] = useState<number | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
 
   // 使用 React Query 获取公告列表
   const { data: announcements = [], isLoading } = useQuery({
@@ -153,14 +155,15 @@ export function AnnouncementManagement() {
       cell: info => {
         const isPinned = info.row.original.is_pinned
         const isVisible = info.row.original.is_visible
+        const title = info.getValue()
         return (
-          <div className="flex items-center gap-2">
-            {isPinned && <Pin className="size-4 text-amber-600 dark:text-amber-500" />}
-            <span className={cn(!isVisible && "text-muted-foreground")}>
-              {info.getValue()}
+          <div className="flex items-center gap-2 min-w-0">
+            {isPinned && <Pin className="size-4 text-amber-600 dark:text-amber-500 shrink-0" />}
+            <span className={cn("truncate", !isVisible && "text-muted-foreground")} title={title}>
+              {title}
             </span>
             {!isVisible && (
-              <span className="text-sm text-muted-foreground">(已隐藏)</span>
+              <span className="text-sm text-muted-foreground shrink-0">(已隐藏)</span>
             )}
           </div>
         )
@@ -205,68 +208,92 @@ export function AnnouncementManagement() {
         return (
           <div className="flex items-center gap-1">
             {/* 置顶按钮 */}
-            <Button
-              variant="morden"
-              size="sm"
-              className="h-8 w-8 p-0"
-              title={announcement.is_pinned ? "取消置顶" : "置顶"}
-              onClick={(e) => {
-                e.stopPropagation()
-                handleTogglePin(announcement.id)
-              }}
-            >
-              {announcement.is_pinned ? (
-                <PinOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-500" />
-              ) : (
-                <Pin className="w-3.5 h-3.5" />
-              )}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="morden"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleTogglePin(announcement.id)
+                  }}
+                >
+                  {announcement.is_pinned ? (
+                    <PinOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-500" />
+                  ) : (
+                    <Pin className="w-3.5 h-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>{announcement.is_pinned ? "取消置顶" : "置顶"}</p>
+              </TooltipContent>
+            </Tooltip>
 
             {/* 显示/隐藏按钮 */}
-            <Button
-              variant="morden"
-              size="sm"
-              className="h-8 w-8 p-0"
-              title={announcement.is_visible ? "隐藏" : "显示"}
-              onClick={(e) => {
-                e.stopPropagation()
-                handleToggleVisibility(announcement.id)
-              }}
-            >
-              {announcement.is_visible ? (
-                <Eye className="w-3.5 h-3.5" />
-              ) : (
-                <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
-              )}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="morden"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleToggleVisibility(announcement.id)
+                  }}
+                >
+                  {announcement.is_visible ? (
+                    <Eye className="w-3.5 h-3.5" />
+                  ) : (
+                    <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>{announcement.is_visible ? "隐藏" : "显示"}</p>
+              </TooltipContent>
+            </Tooltip>
 
             {/* 编辑按钮 */}
-            <Button
-              variant="morden"
-              size="sm"
-              className="h-8 w-8 p-0"
-              title="编辑"
-              onClick={(e) => {
-                e.stopPropagation()
-                openEditModal(announcement)
-              }}
-            >
-              <Edit className="w-3.5 h-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="morden"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openEditModal(announcement)
+                  }}
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>编辑</p>
+              </TooltipContent>
+            </Tooltip>
 
             {/* 删除按钮 */}
-            <Button
-              variant="morden"
-              size="sm"
-              className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-              title="删除"
-              onClick={(e) => {
-                e.stopPropagation()
-                openDeleteModal(announcement)
-              }}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="morden"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openDeleteModal(announcement)
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>删除</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         )
       },
@@ -303,10 +330,14 @@ export function AnnouncementManagement() {
 
     if (!formData.title.trim()) {
       errors.title = '请输入公告标题'
+    } else if (formData.title.length > 200) {
+      errors.title = '标题不能超过200字符'
     }
 
     if (!formData.content.trim()) {
       errors.content = '请输入公告内容'
+    } else if (formData.content.length > 10000) {
+      errors.content = '内容不能超过10000字符'
     }
 
     setFormErrors(errors)
@@ -369,18 +400,10 @@ export function AnnouncementManagement() {
     }
   }
 
-  // 关闭创建弹窗时清空表单
-  const handleCreateModalClose = (open: boolean) => {
-    setDialogState(open ? 'create' : null)
+  // 关闭弹窗时清空表单
+  const handleModalClose = (open: boolean) => {
     if (!open) {
-      resetForm()
-    }
-  }
-
-  // 关闭编辑弹窗时清空表单
-  const handleEditModalClose = (open: boolean) => {
-    setDialogState(open ? 'edit' : null)
-    if (!open) {
+      setDialogState(null)
       resetForm()
     }
   }
@@ -412,7 +435,15 @@ export function AnnouncementManagement() {
       toast.success('图片上传成功')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '图片上传失败')
+      const errorMsg = axiosError.response?.data?.detail || '图片上传失败'
+      // 将英文错误消息转换为中文
+      if (errorMsg.includes('Invalid image type')) {
+        toast.error('不支持该图像格式')
+      } else if (errorMsg.includes('Image size exceeds')) {
+        toast.error('图片大小超过限制')
+      } else {
+        toast.error(errorMsg)
+      }
     } finally {
       setUploading(false)
       // 清空 input 值，允许重复选择同一文件
@@ -439,6 +470,72 @@ export function AnnouncementManagement() {
         ...prev,
         images: prev.images.filter(img => img !== url)
       }))
+    }
+  }
+
+  // 处理拖拽事件
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  // 处理拖拽释放
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length === 0) return
+
+    // 处理每个拖拽的文件
+    for (const file of files) {
+      // 验证文件类型
+      if (!file.type.startsWith('image/')) {
+        toast.error('请选择图片文件')
+        continue
+      }
+
+      // 验证文件大小 (最大 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('图片大小不能超过 5MB')
+        continue
+      }
+
+      setUploading(true)
+      try {
+        const url = await announcementAPI.uploadImage(file)
+        setFormData(prev => ({
+          ...prev,
+          images: [...prev.images, url]
+        }))
+        toast.success('图片上传成功')
+      } catch (error) {
+        const axiosError = error as AxiosError<{ detail?: string }>
+        const errorMsg = axiosError.response?.data?.detail || '图片上传失败'
+        // 将英文错误消息转换为中文
+        if (errorMsg.includes('Invalid image type')) {
+          toast.error('不支持该图像格式')
+        } else if (errorMsg.includes('Image size exceeds')) {
+          toast.error('图片大小超过限制')
+        } else {
+          toast.error(errorMsg)
+        }
+      } finally {
+        setUploading(false)
+      }
     }
   }
 
@@ -474,7 +571,7 @@ export function AnnouncementManagement() {
         <div className="flex items-center gap-2.5 min-w-0">
           <HardDrive className="w-4 h-4 text-muted-foreground shrink-0" />
           <span className="text-base text-foreground truncate">
-            存储: <span className="font-medium">{storageInfo.used_mb}</span> / {storageInfo.max_mb} MB
+            存储: <span>{storageInfo.used_mb}</span> / {storageInfo.max_mb} MB
           </span>
         </div>
       </div>
@@ -532,7 +629,7 @@ export function AnnouncementManagement() {
                       {headerGroup.headers.map(header => (
                         <th
                           key={header.id}
-                          className="h-11 px-3 font-semibold text-foreground text-left align-middle text-base"
+                          className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
                           style={{ width: header.getSize() }}
                         >
                           {header.isPlaceholder
@@ -564,19 +661,19 @@ export function AnnouncementManagement() {
         </CardContent>
       </Card>
 
-      {/* Create Announcement Modal */}
-      <Dialog open={dialogState === 'create'} onOpenChange={handleCreateModalClose}>
+      {/* Create/Edit Announcement Modal */}
+      <Dialog open={dialogState === 'create' || dialogState === 'edit'} onOpenChange={handleModalClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>创建公告</DialogTitle>
+            <DialogTitle>{dialogState === 'create' ? '创建公告' : '编辑公告'}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
             <div>
-              <Label htmlFor="create_title" className={LABEL_STYLES.base}>
+              <Label htmlFor="announcement_title" className={LABEL_STYLES.base}>
                 标题 <span className="text-destructive">*</span>
               </Label>
               <Input
-                id="create_title"
+                id="announcement_title"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 placeholder="请输入公告标题"
@@ -587,11 +684,11 @@ export function AnnouncementManagement() {
               )}
             </div>
             <div>
-              <Label htmlFor="create_content" className={LABEL_STYLES.base}>
+              <Label htmlFor="announcement_content" className={LABEL_STYLES.base}>
                 内容 <span className="text-destructive">*</span>
               </Label>
               <Textarea
-                id="create_content"
+                id="announcement_content"
                 value={formData.content}
                 onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                 placeholder="请输入公告内容"
@@ -611,30 +708,39 @@ export function AnnouncementManagement() {
                     {formData.images.map((url, index) => (
                       <div key={url} className="relative group">
                         <img
-                          src={url}
+                          src={getFullImageUrl(url)}
                           alt={`图片 ${index + 1}`}
-                          className="w-20 h-20 object-cover rounded-md border"
+                          className="w-20 h-20 object-cover rounded-md border border-input"
                         />
                         <button
                           type="button"
                           onClick={() => handleRemoveImage(url)}
                           className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
-                          <X className="w-4 h-4" />
+                          <X className="size-3.5 stroke-3" />
                         </button>
                       </div>
                     ))}
                   </div>
                 )}
-                {/* 上传按钮 */}
-                <label className="flex items-center justify-center w-full h-20 border-2 border-dashed border-border rounded-md cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors">
+                {/* 上传按钮 - 支持点击和拖拽 */}
+                <label
+                  className={cn(
+                    "flex items-center justify-center w-full h-20 border-2 border-dashed rounded-md cursor-pointer transition-colors",
+                    isDragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-muted/50"
+                  )}
+                  onDragEnter={handleDragEnter}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                >
                   <div className="flex items-center gap-2 text-muted-foreground">
                     {uploading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
                     ) : (
                       <Upload className="w-5 h-5" />
                     )}
-                    <span>{uploading ? '上传中...' : '点击上传图片'}</span>
+                    <span>{uploading ? '上传中...' : '点击或拖拽上传图片'}</span>
                   </div>
                   <input
                     type="file"
@@ -644,111 +750,16 @@ export function AnnouncementManagement() {
                     className="hidden"
                   />
                 </label>
-                <p className="text-sm text-muted-foreground">支持 jpg, png, gif 格式，最大 5MB</p>
+                <p className="text-sm text-muted-foreground">支持 jpg, png, gif, webp 格式，最大 5MB</p>
               </div>
             </div>
           </div>
           <div className="flex gap-3 mt-6">
-            <Button variant="morden" onClick={() => handleCreateModalClose(false)} size="lg" className="flex-1">
+            <Button variant="morden" onClick={() => handleModalClose(false)} size="lg" className="flex-1">
               取消
             </Button>
             <Button onClick={handleSubmit} disabled={formLoading} size="lg" className="flex-1">
-              {formLoading ? '创建中...' : '创建'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Announcement Modal */}
-      <Dialog open={dialogState === 'edit'} onOpenChange={handleEditModalClose}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>编辑公告</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div>
-              <Label htmlFor="edit_title" className={LABEL_STYLES.base}>
-                标题 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="edit_title"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="请输入公告标题"
-                className={cn(INPUT_STYLES.lg, formErrors.title && 'border-destructive')}
-              />
-              {formErrors.title && (
-                <p className="text-sm text-destructive mt-1">{formErrors.title}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="edit_content" className={LABEL_STYLES.base}>
-                内容 <span className="text-destructive">*</span>
-              </Label>
-              <Textarea
-                id="edit_content"
-                value={formData.content}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                placeholder="请输入公告内容"
-                rows={5}
-                className={cn(formErrors.content && 'border-destructive')}
-              />
-              {formErrors.content && (
-                <p className="text-sm text-destructive mt-1">{formErrors.content}</p>
-              )}
-            </div>
-            <div>
-              <Label className={LABEL_STYLES.base}>图片</Label>
-              <div className="mt-2 space-y-2">
-                {/* 已上传的图片预览 */}
-                {formData.images.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {formData.images.map((url, index) => (
-                      <div key={url} className="relative group">
-                        <img
-                          src={url}
-                          alt={`图片 ${index + 1}`}
-                          className="w-20 h-20 object-cover rounded-md border"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveImage(url)}
-                          className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {/* 上传按钮 */}
-                <label className="flex items-center justify-center w-full h-20 border-2 border-dashed border-border rounded-md cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    {uploading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Upload className="w-5 h-5" />
-                    )}
-                    <span>{uploading ? '上传中...' : '点击上传图片'}</span>
-                  </div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleUpload}
-                    disabled={uploading}
-                    className="hidden"
-                  />
-                </label>
-                <p className="text-sm text-muted-foreground">支持 jpg, png, gif 格式，最大 5MB</p>
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-3 mt-6">
-            <Button variant="morden" onClick={() => handleEditModalClose(false)} size="lg" className="flex-1">
-              取消
-            </Button>
-            <Button onClick={handleSubmit} disabled={formLoading} size="lg" className="flex-1">
-              {formLoading ? '保存中...' : '保存'}
+              {formLoading ? (dialogState === 'create' ? '创建中...' : '保存中...') : (dialogState === 'create' ? '创建' : '保存')}
             </Button>
           </div>
         </DialogContent>
@@ -760,15 +771,15 @@ export function AnnouncementManagement() {
           <DialogHeader>
             <DialogTitle>确认删除公告</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
+          <div>
             <p>确定要删除这条公告吗？</p>
-            <p className="text-sm text-muted-foreground mt-2">此操作不可恢复，关联的图片也将被删除。</p>
+            <p className="text-sm text-muted-foreground mt-1">此操作不可恢复，关联的图片也将被删除。</p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg">
+          <div className="flex gap-3 mt-8">
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg" className="flex-1">
               {deleteLoading ? '处理中...' : '确认删除'}
             </Button>
-            <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base">
+            <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="flex-1">
               取消
             </Button>
           </div>
