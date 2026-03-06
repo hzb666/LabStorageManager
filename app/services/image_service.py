@@ -1,6 +1,6 @@
 """
 Image Service - Upload and Compression
-Critical Rule #3: Images must be compressed to <100KB using Pillow
+Critical Rule #3: 
 Images are stored in filesystem, database only stores URL/path
 """
 import os
@@ -9,17 +9,64 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import UploadFile
+from fastapi import UploadFile, HTTPException
 from PIL import Image, ImageOps
 import io
 
-from app.core.config import settings, UPLOADS_DIR, THUMBNAILS_DIR
+from app.core.config import settings, BASE_DIR, UPLOADS_DIR, THUMBNAILS_DIR
 from app.core.time_utils import get_utc_now
+
+
+def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
+    """
+    Validate uploaded file is an allowed image type and return file content.
+    Also validates by reading file content to prevent malicious extension spoofing.
+    
+    Args:
+        file: Uploaded file object
+        
+    Returns:
+        Tuple of (is_valid, file_content_bytes)
+    """
+    if file.content_type not in settings.allowed_image_types:
+        return False, b''
+    
+    content = file.file.read()
+    
+    header = content[:16]
+    is_valid = False
+    
+    if header.startswith(b'\xff\xd8\xff'):  # JPEG
+        is_valid = file.content_type in ['image/jpeg', 'image/jpg']
+    elif header.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
+        is_valid = file.content_type == 'image/png'
+    elif header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):  # GIF
+        is_valid = file.content_type == 'image/gif'
+    elif header[:4] == b'RIFF' and header[8:12] == b'WEBP':  # WebP
+        is_valid = file.content_type == 'image/webp'
+    
+    return is_valid, content
+
+
+def validate_image_size_from_bytes(content: bytes, max_size_mb: float = 1.0) -> bool:
+    """
+    Validate file size from bytes content.
+    
+    Args:
+        content: File content in bytes
+        max_size_mb: Maximum size in MB (default 1MB)
+        
+    Returns:
+        True if valid size, False otherwise
+    """
+    max_size_bytes = int(max_size_mb * 1024 * 1024)
+    return len(content) <= max_size_bytes
 
 
 def validate_image_type(file: UploadFile) -> bool:
     """
     Validate uploaded file is an allowed image type.
+    Also validates by reading file content to prevent malicious extension spoofing.
     
     Args:
         file: Uploaded file object
@@ -27,7 +74,45 @@ def validate_image_type(file: UploadFile) -> bool:
     Returns:
         True if valid image type, False otherwise
     """
-    return file.content_type in settings.allowed_image_types
+    if file.content_type not in settings.allowed_image_types:
+        return False
+    
+    file.file.seek(0)
+    header = file.file.read(16)
+    file.file.seek(0)
+    
+    is_valid = False
+    
+    if header.startswith(b'\xff\xd8\xff'):  # JPEG
+        is_valid = file.content_type in ['image/jpeg', 'image/jpg']
+    elif header.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
+        is_valid = file.content_type == 'image/png'
+    elif header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):  # GIF
+        is_valid = file.content_type == 'image/gif'
+    elif header[:4] == b'RIFF' and header[8:12] == b'WEBP':  # WebP
+        is_valid = file.content_type == 'image/webp'
+    
+    return is_valid
+
+
+def validate_image_size(file: UploadFile, max_size_mb: float = 1.0) -> bool:
+    """
+    Validate uploaded file size is within limits.
+    
+    Args:
+        file: Uploaded file object
+        max_size_mb: Maximum size in MB (default 1MB)
+        
+    Returns:
+        True if valid size, False otherwise
+    """
+    max_size_bytes = int(max_size_mb * 1024 * 1024)
+    
+    file.file.seek(0, 2)  
+    size = file.file.tell()
+    file.file.seek(0)  
+    
+    return size <= max_size_bytes
 
 
 def compress_image(
@@ -57,14 +142,11 @@ def compress_image(
     if max_height is None:
         max_height = settings.max_image_height
     
-    # Resize if too large
     image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
     
-    # Convert to RGB if necessary (for PNG with transparency)
     if image.mode in ("RGBA", "P") and image.format != "JPEG":
         image = image.convert("RGB")
     
-    # Compress quality until size is acceptable
     quality = 85
     min_quality = 30
     
@@ -83,7 +165,7 @@ def compress_image(
     return Image.open(output)
 
 
-def process_uploaded_image(file: UploadFile) -> tuple[str, str]:
+def process_uploaded_image(file: UploadFile, max_size_mb: float = 1.0) -> tuple[str, str]:
     """
     Process uploaded image: validate, compress, save.
     
@@ -91,39 +173,35 @@ def process_uploaded_image(file: UploadFile) -> tuple[str, str]:
     
     Args:
         file: Uploaded file from FastAPI
+        max_size_mb: Maximum file size in MB (default 1MB for avatars)
         
     Returns:
         Tuple of (image_url, thumbnail_url)
     """
-    # Validate file type
     if not validate_image_type(file):
         raise ValueError(f"Invalid image type. Allowed: {settings.allowed_image_types}")
     
-    # Open and process image
+    if not validate_image_size(file, max_size_mb):
+        raise ValueError(f"Image size exceeds {max_size_mb}MB limit")
+    
     image = Image.open(file.file)
     
-    # Create thumbnail for database display
     thumbnail = image.copy()
     thumbnail.thumbnail((200, 200), Image.Resampling.LANCZOS)
     
-    # Generate unique filename with UUID
     timestamp = get_utc_now().strftime("%Y%m%d_%H%M%S")
     unique_id = str(uuid.uuid4())[:8]
     filename = f"{timestamp}_{unique_id}.jpg"
     
-    # Compress main image
     compressed_image = compress_image(image)
     
-    # Save main image
     image_path = UPLOADS_DIR / filename
     compressed_image.save(image_path, format="JPEG", quality=85, optimize=True)
     
-    # Save thumbnail
     thumbnail_path = THUMBNAILS_DIR / filename
     thumbnail_rgb = thumbnail.convert("RGB") if thumbnail.mode != "RGB" else thumbnail
     thumbnail_rgb.save(thumbnail_path, format="JPEG", quality=75, optimize=True)
     
-    # Return relative URLs for database storage
     image_url = f"/static/uploads/{filename}"
     thumbnail_url = f"/static/thumbnails/{filename}"
     
@@ -141,23 +219,19 @@ def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:
     Returns:
         Relative URL path for database storage
     """
-    # Generate unique filename
     file_ext = Path(file.filename).suffix.lower() if file.filename else ".bin"
     unique_id = str(uuid.uuid4())[:8]
     timestamp = get_utc_now().strftime("%Y%m%d_%H%M%S")
     filename = f"{timestamp}_{unique_id}{file_ext}"
     
-    # Determine save path
     save_dir = UPLOADS_DIR / subfolder
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / filename
     
-    # Save file
     content = file.file.read()
     with open(save_path, "wb") as f:
         f.write(content)
     
-    # Return relative URL
     return f"/static/uploads/{subfolder}/{filename}"
 
 
@@ -171,7 +245,7 @@ def delete_file(file_path: str) -> bool:
     Returns:
         True if deleted successfully, False otherwise
     """
-    full_path = settings.BASE_DIR / file_path.lstrip("/")
+    full_path = BASE_DIR / file_path.lstrip("/")
     
     if full_path.exists():
         full_path.unlink()
@@ -182,15 +256,134 @@ def delete_file(file_path: str) -> bool:
 def get_file_size_kb(file_path: str) -> float:
     """
     Get file size in KB.
-    
+
     Args:
         file_path: Relative path from static directory
-        
+
     Returns:
         File size in KB
     """
-    full_path = settings.BASE_DIR / file_path.lstrip("/")
-    
+    full_path = BASE_DIR / file_path.lstrip("/")
+
     if full_path.exists():
         return full_path.stat().st_size / 1024
     return 0.0
+
+
+def get_directory_storage_info(subdir: str) -> dict:
+    """
+    Get storage usage information for a subdirectory.
+
+    Args:
+        subdir: Subdirectory name under static/ (e.g., 'announcements', 'avatars')
+
+    Returns:
+        Dictionary with used_bytes, used_mb, max_bytes, max_mb, usage_percent, image_count
+    """
+    static_dir = BASE_DIR / "static" / subdir
+    max_mb = 50  
+    max_bytes = int(max_mb * 1024 * 1024)
+
+    if not static_dir.exists():
+        return {
+            "used_bytes": 0,
+            "used_mb": 0,
+            "max_bytes": max_bytes,
+            "max_mb": max_mb,
+            "usage_percent": 0,
+            "image_count": 0,
+        }
+
+    used_bytes = 0
+    image_count = 0
+
+    for file_path in static_dir.iterdir():
+        if file_path.is_file():
+            used_bytes += file_path.stat().st_size
+            image_count += 1
+
+    return {
+        "used_bytes": used_bytes,
+        "used_mb": round(used_bytes / (1024 * 1024), 2),
+        "max_bytes": max_bytes,
+        "max_mb": max_mb,
+        "usage_percent": round((used_bytes / max_bytes) * 100, 2) if max_bytes > 0 else 0,
+        "image_count": image_count,
+    }
+
+
+def save_avatar(file: UploadFile, user_id: int) -> str:
+    """
+    Save user avatar image (compressed to <100KB, max 200x200).
+
+    Args:
+        file: Uploaded file object
+        user_id: User ID for naming
+
+    Returns:
+        Relative URL path for database storage
+    """
+    is_valid, file_content = validate_image_type_and_get_bytes(file)
+
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image type. Allowed: JPG, PNG, GIF, WebP"
+        )
+
+    if not validate_image_size_from_bytes(file_content, 5.0):
+        raise HTTPException(
+            status_code=400,
+            detail="Image size exceeds 5MB limit"
+        )
+
+    avatars_dir = BASE_DIR / "static" / "avatars"
+    avatars_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = get_utc_now().strftime("%Y%m%d_%H%M%S")
+    unique_id = str(uuid.uuid4())[:8]
+    filename = f"avatar_{user_id}_{timestamp}_{unique_id}.jpg"
+
+    image = Image.open(io.BytesIO(file_content))
+    compressed_image = compress_image(image, max_size_kb=100, max_width=200, max_height=200)
+
+    save_path = avatars_dir / filename
+    compressed_image.save(save_path, format="JPEG", quality=85, optimize=True)
+
+    return f"/static/avatars/{filename}"
+
+
+def save_announcement_image(file: UploadFile) -> str:
+    """
+    Validate and save an announcement image (No compression applied based on original logic).
+    
+    Args:
+        file: Uploaded file object
+
+    Returns:
+        Relative URL path for database storage
+    """
+    is_valid, content = validate_image_type_and_get_bytes(file)
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image type. Allowed: JPG, PNG, GIF, WebP"
+        )
+        
+    if not validate_image_size_from_bytes(content, max_size_mb=5.0):
+        raise HTTPException(
+            status_code=400,
+            detail="Image size exceeds 5MB limit"
+        )
+        
+    file_ext = Path(file.filename).suffix.lower() if file.filename else ".jpg"
+    unique_id = str(uuid.uuid4())
+    filename = f"{unique_id}{file_ext}"
+    
+    announcement_dir = BASE_DIR / "static" / "announcements"
+    announcement_dir.mkdir(parents=True, exist_ok=True)
+    
+    file_path = announcement_dir / filename
+    file_path.write_bytes(content)
+    
+    return f"/static/announcements/{filename}"
