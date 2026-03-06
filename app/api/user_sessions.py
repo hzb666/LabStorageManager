@@ -36,6 +36,7 @@ class SessionResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        json_encoders = {datetime: lambda v: v.isoformat() + 'Z'}
 
 
 # 直接使用 auth 模块的 get_current_user
@@ -47,13 +48,15 @@ def list_sessions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """List all sessions for current user"""
+    """List all sessions for current user (excluding expired)"""
+    now = get_utc_now()
     sessions = db.exec(
         select(UserSession)
         .where(UserSession.user_id == current_user.id)
+        .where(UserSession.expires_at > now)  # 过滤掉过期的会话
         .order_by(UserSession.last_active_at.desc())
     ).all()
-    
+
     return sessions
 
 
@@ -119,16 +122,12 @@ def delete_all_sessions(
 @router.post("/refresh")
 def refresh_session(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    current_session: UserSession = Depends(get_current_session)
 ):
     """Refresh current session expiration time"""
-    # 获取当前用户的最新会话
-    session = db.exec(
-        select(UserSession)
-        .where(UserSession.user_id == current_user.id)
-        .order_by(UserSession.last_active_at.desc())
-        .limit(1)
-    ).first()
+    # 获取当前会话（通过 token_hash 精确匹配当前会话）
+    session = db.get(UserSession, current_session.id)
     
     if not session:
         raise HTTPException(

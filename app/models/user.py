@@ -33,6 +33,7 @@ class UserBase(SQLModel):
     full_name: str = Field(max_length=100)
     role: UserRole = Field(default=UserRole.USER)
     is_active: bool = Field(default=True)
+    avatar_url: Optional[str] = Field(default=None, max_length=500)
 
 
 class User(UserBase, table=True):
@@ -62,6 +63,7 @@ class UserUpdate(SQLModel):
     full_name: str  # 必填，不允许为空
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    avatar_url: Optional[str] = None
 
 
 class UserResponse(SQLModel):
@@ -74,3 +76,4 @@ class UserResponse(SQLModel):
     role: UserRole
     is_active: bool
     created_at: datetime
+    avatar_url: Optional[str] = None

@@ -53,8 +53,12 @@ class Settings(BaseSettings):
     # Session & Device Settings (IP Limit Feature)
     max_ip_per_user: int = Field(default=5, description="Max distinct IPs per user")
     max_device_per_user: int = Field(default=10, description="Max devices per user")
-    session_expire_hours: int = Field(default=168, description="Session expiration hours (7 days)")
+    session_expire_hours: int = Field(default=72, description="Session expiration hours (3 days)")
     session_strict_ip: bool = Field(default=False, description="Whether to enforce IP consistency")
+
+    # Announcement Settings
+    max_total_announcements: int = Field(default=10, description="Max announcements per admin")
+    max_visible_announcements: int = Field(default=5, description="Max visible announcements per admin")
     
     # Redis Configuration (for session caching)
     redis_host: str = Field(default="localhost", description="Redis host")

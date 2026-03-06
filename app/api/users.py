@@ -1,13 +1,16 @@
+# app/routers/users.py
 """
 User API Routes - Authentication and User Management
 Critical Rule #3: All data modification endpoints must check current_user
 """
 import hashlib
+import secrets
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from datetime import timedelta
+from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select, func
 import redis
@@ -31,6 +34,7 @@ from app.models.user import (
     UserRole,
 )
 from app.models.user_session import UserSession
+from app.services.image_service import save_avatar, delete_file
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -107,37 +111,53 @@ def _record_failed_login(client_ip: str) -> None:
 
 
 def _reset_login_attempts(client_ip: str) -> None:
-    """登录成功后重置计数 (Redis 实现)"""
-    redis_client = get_redis()
+    """登录成功后重置计数
     
-    if redis_client is None:
-        return
-    
-    key = _rate_limit_key(client_ip)
-    
-    try:
-        redis_client.delete(key)
-    except redis.RedisError:
-        pass
+    直接跳过删除，依赖 Redis key 的 5 分钟 TTL 自动过期。
+    这是工程化最优解：减少一次 Redis 操作，同时保持速率限制有效性。
+    """
+    pass
 
 
 # ==================== Memory Fallback Rate Limiting ====================
 # 内存后备速率限制（Redis 不可用时使用）
+import threading
+
 LOGIN_ATTEMPTS: Dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次失败时间)
+_login_attempts_lock = threading.Lock()  # 线程锁，保护并发访问
 
 
 def _record_failed_login_memory(client_ip: str) -> None:
-    """记录失败的登录尝试 (内存后备)"""
-    import time
+    """记录失败的登录尝试 (内存后备，线程安全)"""
     current_time = time.time()
-    if client_ip not in LOGIN_ATTEMPTS:
-        LOGIN_ATTEMPTS[client_ip] = (1, current_time)
-    else:
-        attempts, first_attempt = LOGIN_ATTEMPTS[client_ip]
-        if current_time - first_attempt >= LOGIN_WINDOW_SECONDS:
+    with _login_attempts_lock:
+        if client_ip not in LOGIN_ATTEMPTS:
             LOGIN_ATTEMPTS[client_ip] = (1, current_time)
         else:
-            LOGIN_ATTEMPTS[client_ip] = (attempts + 1, first_attempt)
+            attempts, first_attempt = LOGIN_ATTEMPTS[client_ip]
+            if current_time - first_attempt >= LOGIN_WINDOW_SECONDS:
+                LOGIN_ATTEMPTS[client_ip] = (1, current_time)
+            else:
+                LOGIN_ATTEMPTS[client_ip] = (attempts + 1, first_attempt)
+
+
+def cleanup_expired_sessions(db: Session) -> int:
+    """清理过期的会话，返回删除的数量"""
+    now = get_utc_now()
+    result = db.exec(
+        select(UserSession).where(UserSession.expires_at < now)
+    ).all()
+
+    count = 0
+    for session in result:
+        delete_cached_session(session.token_hash)
+        db.delete(session)
+        count += 1
+
+    if count > 0:
+        db.commit()
+
+    return count
 
 
 # ==================== Device Session Management ====================
@@ -204,28 +224,49 @@ def _create_user_session(
     user_agent: str,
     token: str
 ) -> UserSession:
-    """创建用户会话"""
+    """创建用户会话，如果已存在相同设备的会话则更新"""
     # 计算 token hash
     token_hash = hashlib.sha256(token.encode()).hexdigest()
-    
+
     # 计算过期时间
     expires_at = get_utc_now() + timedelta(hours=settings.session_expire_hours)
-    
-    # 创建会话
-    session = UserSession(
-        user_id=user_id,
-        device_id=device_id or "unknown",
-        device_name=device_name or "Unknown Device",
-        ip_address=ip_address,
-        last_ip_address=ip_address,
-        user_agent=user_agent,
-        token_hash=token_hash,
-        expires_at=expires_at,
-    )
-    
-    db.add(session)
-    db.commit()
-    db.refresh(session)
+
+    # 检查是否已存在相同 user_id 和 device_id 的会话
+    # 如果存在则更新，而不是创建新记录
+    existing_session = db.exec(
+        select(UserSession)
+        .where(UserSession.user_id == user_id)
+        .where(UserSession.device_id == device_id)
+    ).first()
+
+    if existing_session:
+        # 更新现有会话
+        existing_session.token_hash = token_hash
+        existing_session.ip_address = ip_address
+        existing_session.last_ip_address = ip_address
+        existing_session.user_agent = user_agent
+        existing_session.expires_at = expires_at
+        existing_session.last_active_at = get_utc_now()
+        db.commit()
+        db.refresh(existing_session)
+        session = existing_session
+    else:
+        # 创建新会话
+        # 如果没有 device_id，生成唯一的匿名设备 ID，避免冲突
+        final_device_id = device_id or f"anonymous-{secrets.token_hex(8)}"
+        session = UserSession(
+            user_id=user_id,
+            device_id=final_device_id,
+            device_name=device_name or "Unknown Device",
+            ip_address=ip_address,
+            last_ip_address=ip_address,
+            user_agent=user_agent,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
     
     # 缓存到 Redis
     cache_session(
@@ -290,6 +331,9 @@ def login(
     Returns:
         User info (token is set as httpOnly Cookie)
     """
+    # 清理过期会话
+    cleanup_expired_sessions(db)
+
     client_ip = _get_client_ip(http_request)
     user_agent = http_request.headers.get("User-Agent", "Unknown")
     
@@ -313,7 +357,7 @@ def login(
             detail="User account is disabled"
         )
     
-    # 登录成功，重置速率限制
+    # 登录成功，重置速率限制（已优化：跳过 Redis delete，依赖 TTL 自动过期）
     _reset_login_attempts(client_ip)
     
     # 检查 IP 限制
@@ -334,11 +378,11 @@ def login(
         role=user.role.value
     )
     
-    # 创建用户会话
+    # 创建用户会话（如果 device_id 为空，会在函数内生成唯一的匿名 ID）
     _create_user_session(
         db=db,
         user_id=user.id,
-        device_id=login_request.device_id or "unknown",
+        device_id=login_request.device_id,
         device_name=login_request.device_name or "Unknown Device",
         ip_address=client_ip,
         user_agent=user_agent,
@@ -348,12 +392,18 @@ def login(
     # 设置 httpOnly Cookie
     response = {
         "token_type": "bearer",
-        "user": UserResponse.model_validate(user).model_dump(mode='json')
+        "user": UserResponse.model_validate(user).model_dump(mode='json'),
+        "redis_warning": None
     }
     
     # 返回 Response 对象以设置 Cookie
-    from fastapi.responses import JSONResponse
     json_response = JSONResponse(content=response)
+    
+    # 检查 Redis 是否可用，如果不可用则添加警告
+    redis_client = get_redis()
+    if redis_client is None:
+        # Redis 不可用，添加警告头
+        json_response.headers["X-Redis-Status"] = "unavailable"
     
     # 设置 httpOnly Cookie (有效期与 session_expire_hours 一致)
     json_response.set_cookie(
@@ -391,7 +441,6 @@ def logout(
         # 从 Redis 删除缓存
         delete_cached_session(token_hash)
     
-    from fastapi.responses import JSONResponse
     response = JSONResponse(content={"message": "Logged out successfully"})
     
     # 清除 Cookie
@@ -481,7 +530,7 @@ def list_users(
     if is_active is not None:
         statement = statement.where(User.is_active == is_active)
     
-    total = db.exec(select(func.count(User.id)).select_from(statement.subquery())).one()
+    total = db.exec(select(func.count()).select_from(statement.subquery())).one()
     
     statement = statement.offset(skip).limit(limit).order_by(User.created_at.desc())
     users = db.exec(statement).all()
@@ -668,6 +717,7 @@ def update_user_role(
 class ResetPasswordRequest(BaseModel):
     """Reset password request body (admin only)"""
     new_password: str
+    old_password: Optional[str] = None  # Required when resetting admin password
 
 
 @router.post("/{user_id}/reset-password")
@@ -677,7 +727,65 @@ def reset_user_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """Reset user password (admin only - no need old password)"""
+    """Reset user password (admin only)
+
+    - For regular users: no old password required
+    - For admin users: old password required
+    """
+    user = get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # Validate password
+    if len(password_request.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters"
+        )
+
+    # If target user is admin, require old password verification
+    if user.role == UserRole.ADMIN:
+        if not password_request.old_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="修改管理员密码需要提供原密码"
+            )
+        # Verify old password
+        if not verify_password(password_request.old_password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="原密码错误"
+            )
+
+    # Update password
+    user.password_hash = get_password_hash(password_request.new_password)
+    db.commit()
+
+    return {"message": "密码重置成功"}
+
+
+# ==================== Avatar Upload ====================
+
+@router.delete("/{user_id}/avatar", response_model=dict)
+def delete_avatar(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete user avatar image.
+    用户可以删除自己的头像，管理员可以删除任意用户头像。
+    """
+    # 权限检查
+    if current_user.id != user_id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete avatar for other users"
+        )
+    
     user = get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(
@@ -685,15 +793,54 @@ def reset_user_password(
             detail="User not found"
         )
     
-    # Validate password
-    if len(password_request.new_password) < 6:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 6 characters"
-        )
+    # 如果有旧头像，删除文件
+    if user.avatar_url:
+        delete_file(user.avatar_url)
     
-    # Update password
-    user.password_hash = get_password_hash(password_request.new_password)
+    # 清空数据库中的头像 URL
+    user.avatar_url = None
     db.commit()
+    db.refresh(user)
     
-    return {"message": "密码重置成功"}
+    return {"avatar_url": None}
+
+
+@router.post("/{user_id}/avatar", response_model=dict)
+def upload_avatar(
+    user_id: int,
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload user avatar image.
+    用户可以上传自己的头像，管理员可以上传任意用户头像。
+    上传新头像时会自动删除旧头像文件。
+    """
+    # 权限检查：用户只能上传自己的头像，除非是管理员
+    if current_user.id != user_id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot upload avatar for other users"
+        )
+
+    user = get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # 删除旧头像文件（如果存在）
+    if user.avatar_url:
+        delete_file(user.avatar_url)
+
+    # 保存新头像
+    avatar_url = save_avatar(file, user_id)
+
+    # 更新用户头像 URL
+    user.avatar_url = avatar_url
+    db.commit()
+    db.refresh(user)
+
+    return {"avatar_url": avatar_url}

@@ -1,3 +1,4 @@
+# app/routers/announcements.py
 """
 Announcement API Routes - System Announcements Management
 """
@@ -11,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlmodel import Session, select, func
 
 from app.core.auth import require_admin
+from app.core.config import settings
+from app.core.time_utils import get_utc_now
 from app.database import get_db
 from app.models.announcement import (
     Announcement,
@@ -19,7 +22,7 @@ from app.models.announcement import (
     AnnouncementUpdate,
 )
 from app.models.user import User
-from app.services import announcement_service as announcement_image_service
+from app.services.image_service import save_announcement_image, delete_file, get_directory_storage_info
 from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/announcements", tags=["Announcements"])
@@ -51,12 +54,12 @@ def get_public_announcements(
 ):
     """
     Get public announcements - no login required
-    Returns only pinned and visible announcements
+    Returns all visible announcements (both pinned and unpinned), sorted by pin status and creation date
     """
     statement = (
         select(Announcement)
-        .where(Announcement.is_pinned == True)
         .where(Announcement.is_visible == True)
+        .order_by(Announcement.is_pinned.desc())
         .order_by(Announcement.created_at.desc())
     )
     announcements = db.exec(statement).all()
@@ -81,22 +84,8 @@ def get_storage_info(
     """
     Get storage usage information for announcement images (admin only)
     """
-    used_bytes, max_bytes = announcement_image_service.get_storage_usage()
-
-    # Get count of image files
-    images_dir = announcement_image_service.get_announcement_images_dir()
-    image_count = 0
-    if images_dir.exists():
-        image_count = sum(1 for f in images_dir.iterdir() if f.is_file())
-
-    return {
-        "used_bytes": used_bytes,
-        "used_mb": round(used_bytes / (1024 * 1024), 2),
-        "max_bytes": max_bytes,
-        "max_mb": round(max_bytes / (1024 * 1024), 2),
-        "usage_percent": round((used_bytes / max_bytes) * 100, 2) if max_bytes > 0 else 0,
-        "image_count": image_count,
-    }
+    storage_info = get_directory_storage_info("announcements")
+    return storage_info
 
 
 # ==================== Admin Endpoints ====================
@@ -135,9 +124,9 @@ def list_announcements(
     return result
 
 
-# 管理员公告数量限制
-MAX_TOTAL_ANNOUNCEMENTS = 10  # 每个管理员最多创建10条
-MAX_VISIBLE_ANNOUNCEMENTS = 5  # 每个管理员最多显示5条
+# 管理员公告数量限制（从配置读取）
+MAX_TOTAL_ANNOUNCEMENTS = settings.max_total_announcements
+MAX_VISIBLE_ANNOUNCEMENTS = settings.max_visible_announcements
 
 
 @router.post("/", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
@@ -228,7 +217,7 @@ def update_announcement(
         setattr(announcement, field, value)
 
     # Update timestamp
-    announcement.updated_at = datetime.utcnow()
+    announcement.updated_at = get_utc_now()
 
     db.commit()
     db.refresh(announcement)
@@ -257,7 +246,7 @@ def delete_announcement(
     if announcement.images:
         for image_url in announcement.images:
             try:
-                announcement_image_service.delete_image(image_url)
+                delete_file(image_url)
             except Exception as e:
                 logger.error("Failed to delete image %s: %s", image_url, e)
 
@@ -282,7 +271,7 @@ def toggle_pin_announcement(
         )
 
     announcement.is_pinned = not announcement.is_pinned
-    announcement.updated_at = datetime.utcnow()
+    announcement.updated_at = get_utc_now()
 
     db.commit()
     db.refresh(announcement)
@@ -307,7 +296,7 @@ def toggle_visibility_announcement(
         )
 
     announcement.is_visible = not announcement.is_visible
-    announcement.updated_at = datetime.utcnow()
+    announcement.updated_at = get_utc_now()
 
     db.commit()
     db.refresh(announcement)
@@ -324,7 +313,16 @@ async def upload_announcement_image(
     Upload announcement image (admin only)
     Returns the URL of the uploaded image
     """
-    image_url = announcement_image_service.save_image(file)
+    # 检查存储容量配额
+    storage_info = get_directory_storage_info("announcements")
+    if storage_info["used_bytes"] >= storage_info["max_bytes"]:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Storage limit exceeded. Maximum storage: {storage_info['max_mb']}MB"
+        )
+        
+    # 使用带有格式和大小校验的函数
+    image_url = save_announcement_image(file)
     return {"url": image_url, "message": "Image uploaded successfully"}
 
 
@@ -336,10 +334,14 @@ def delete_announcement_image(
     """
     Delete announcement image (admin only)
     """
+    # 修复路径穿越漏洞
+    if ".." in filename or filename.startswith("/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename")
+
     # Construct the URL path
     url_path = f"/static/announcements/{filename}"
 
-    deleted = announcement_image_service.delete_image(url_path)
+    deleted = delete_file(url_path)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
