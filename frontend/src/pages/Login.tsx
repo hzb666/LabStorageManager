@@ -2,13 +2,12 @@
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { valibotResolver } from '@hookform/resolvers/valibot'
-import { Loader2, LogIn, Eye, EyeOff, Sun, Moon, ArrowLeft } from 'lucide-react'
+import { Loader2, LogIn, Sun, Moon, ArrowLeft } from 'lucide-react'
 import { authAPI } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
 import { useTheme } from '@/hooks/useTheme'
 import { useRememberedUser } from '@/hooks/useRememberedUser'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import {
@@ -18,7 +17,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/Card'
-import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { LoginSchema, LockScreenSchema, type LoginFormData } from '@/lib/validationSchemas'
 import { BaseForm, type FieldSchema } from '@/components/BaseForm'
@@ -31,39 +29,6 @@ const getFullImageUrl = (url: string): string => {
   }
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
   return `${API_BASE_URL}${url}`
-}
-
-// 自定义密码输入组件，内部管理显示/隐藏状态
-function PasswordInput({
-  className,
-  ...props
-}: React.InputHTMLAttributes<HTMLInputElement>) {
-  const [showPassword, setShowPassword] = useState(false)
-
-  return (
-    <div className="relative">
-      <Input
-        type={showPassword ? 'text' : 'password'}
-        className={cn(
-          "pr-10",
-          // 密码掩码模式增大字符间距
-          !showPassword && "tracking-widest",
-          // placeholder 保持正常
-          "placeholder:tracking-normal",
-          className
-        )}
-        {...props}
-      />
-      <button
-        type="button"
-        onClick={() => setShowPassword(!showPassword)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-        tabIndex={-1}
-      >
-        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-      </button>
-    </div>
-  )
 }
 
 // 锁屏模式验证模式（只需密码）
@@ -114,9 +79,12 @@ export function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
+  // [FIXME] 追踪是否正在等待导航完成，避免登录成功后闪烁显示锁屏
+  const [isNavigating, setIsNavigating] = useState(false)
 
   // 锁屏模式：是否显示锁屏界面（登录过程中不显示）
-  const isLockScreen = !!rememberedUser && !isLoggingIn
+  // 修复：增加 isNavigating 检查，确保登录成功后等待导航期间不显示锁屏
+  const isLockScreen = !!rememberedUser && !isLoggingIn && !isNavigating
 
   // 普通登录表单
   const formNormal = useForm<NormalLoginForm>({
@@ -155,6 +123,8 @@ export function Login() {
         avatar_url: user.avatar_url,
       })
 
+      // [FIXME] 设置导航状态，防止登录成功后闪烁显示锁屏
+      setIsNavigating(true)
       navigate('/')
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } }
@@ -273,6 +243,7 @@ export function Login() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
+                type="button"
                 variant="morden"
                 size="lg"
                 onClick={handleSwitchUser}
@@ -370,3 +341,5 @@ export function Login() {
     </div>
   )
 }
+
+// [FIXME]:锁屏模式头像更新

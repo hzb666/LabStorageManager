@@ -521,8 +521,8 @@ def get_my_consumable_orders(
             "quantity": order.quantity,
             "price": order.price,
             "notes": order.notes,
-            "created_at": order.created_at,
-            "updated_at": order.updated_at
+            "created_at": order.created_at.isoformat() + 'Z' if order.created_at else None,
+            "updated_at": order.updated_at.isoformat() + 'Z' if order.updated_at else None
         }
         
         if order.status == ConsumableOrderStatus.PENDING:

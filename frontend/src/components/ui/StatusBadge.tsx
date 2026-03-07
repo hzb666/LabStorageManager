@@ -36,6 +36,13 @@ export const STATUS_COLORS: Record<string, BadgeColor> = {
   arrived: 'purple',
   stocked: 'green',
   rejected: 'red',
+  completed: 'green',
+  // 日志类型
+  reagent_order: 'blue',
+  consumable_order: 'purple',
+  inventory: 'green',
+  borrow: 'orange',
+  session: 'gray',
 }
 
 // 状态到中文名称的映射
@@ -56,10 +63,17 @@ export const STATUS_LABELS: Record<string, string> = {
   other: '其他设备',
   // 订单状态
   pending: '待审',
-  approved: '已批',
-  arrived: '已到',
+  approved: '批准',
+  arrived: '到货',
   stocked: '入库',
-  rejected: '已驳',
+  rejected: '驳回',
+  completed: '完成',
+  // 日志类型
+  reagent_order: '试剂',
+  consumable_order: '耗材',
+  inventory: '入库',
+  borrow: '借用',
+  session: '登录',
 }
 
 // 申购原因到中文名称的映射

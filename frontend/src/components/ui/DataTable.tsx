@@ -588,7 +588,7 @@ export function DataTable<TData>({
               ? `已加载全部 ${rows.length} 条记录` 
               : searchKeyword 
                 ? `未找到匹配"${searchKeyword}"的记录`
-                : '暂无库存数据，请先入库'}
+                : '暂无数据'}
           </div>
         )}
       </div>

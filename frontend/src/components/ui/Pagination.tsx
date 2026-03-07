@@ -212,18 +212,11 @@ interface PaginationInfoProps {
 }
 
 export function PaginationInfo({ currentPage, pageSize, total, className }: PaginationInfoProps) {
-  const isMobile = useIsMobile()
-  
-  // 移动端不显示
-  if (isMobile) {
-    return null
-  }
-
   const from = total === 0 ? 0 : (currentPage - 1) * pageSize + 1
   const to = Math.min(currentPage * pageSize, total)
 
   return (
-    <div className={cn('flex items-center gap-2 text-base text-muted-foreground', className)}>
+    <div className={cn('hidden md:flex items-center gap-2 text-base text-muted-foreground', className)}>
       <span>
         显示 {from}-{to} 条，共 {total} 条
       </span>

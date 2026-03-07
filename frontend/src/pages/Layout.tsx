@@ -321,10 +321,10 @@ export function Layout() {
         </aside>
       )}
 
-      {/* Mobile Menu */}
+      {/* Mobile Menu Overlay */}
       <div
         className={cn(
-          "fixed inset-0 z-30 bg-background/80 backdrop-blur-sm md:hidden transition-opacity duration-200",
+          "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm md:hidden transition-opacity duration-200",
           mobileMenuOpen ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
         onClick={() => setMobileMenuOpen(false)}
@@ -500,23 +500,27 @@ export function Layout() {
                 </Button>
               )}
 
-              {/* 将 AnnouncementBanner 放置在这里，替代原本的 div */}
+              {/* 桌面端：Banner + 公告按钮 */}
               <AnnouncementBanner announcements={announcements} />
+              <div className="hidden md:block">
+                <AnnouncementButton announcements={announcements} />
+              </div>
 
-              {/* Announcement Button */}
-              {<AnnouncementButton announcements={announcements} />}
-
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={toggleTheme}
-                className="h-10 w-10 md:hidden text-foreground transition-colors"
-              >
-                {theme === 'dark' ? <Sun className="size-5" /> : <Moon className="size-5" />}
-              </Button>
+              {/* 移动端：暗黑按钮 + 公告按钮（右侧） */}
+              <div className="flex items-center gap-1 md:hidden ml-auto">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={toggleTheme}
+                  className="h-10 w-10 text-foreground transition-colors"
+                >
+                  {theme === 'dark' ? <Sun className="size-5" /> : <Moon className="size-5" />}
+                </Button>
+                <AnnouncementButton announcements={announcements} />
+              </div>
             </header>
 
-            <div className="p-6">
+            <div className="px-4 py-6 md:px-6">
               <Outlet />
             </div>
           </div>

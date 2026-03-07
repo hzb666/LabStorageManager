@@ -165,8 +165,6 @@ export function InventoryPage() {
         }
       }
 
-      console.log('✅ 表单验证通过，提交数据:', formData)
-
       setIsSubmitting(true)
       try {
         if (dialogState === 'edit' && editingItem) {
@@ -178,6 +176,7 @@ export function InventoryPage() {
             name: formData.name || '',
             cas_number: formData.cas_number || '',
             english_name: formData.english_name || '',
+            alias: formData.alias || '',
             category: formData.category || '',
             storage_location: formData.storage_location || '',
             remaining_quantity: formData.remaining_quantity,
@@ -226,8 +225,6 @@ export function InventoryPage() {
       }
     },
     (errors) => {
-      console.log('❌ 表单验证失败:', errors)
-
       // 编辑模式下：即使 Schema 验证失败，也手动检查 remaining_quantity 是否填写
       if (dialogState === 'edit' && editingItem) {
         const remainingValue = form.getValues('remaining_quantity')

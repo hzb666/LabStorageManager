@@ -1,8 +1,8 @@
 /**
- * 设备管理页面
- * 用户可以查看和管理自己的登录设备
+ * 账户管理页面
+ * 用户可以查看和管理自己的账户信息、头像、密码，以及查看和管理登录设备
  */
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import StatusBadge from '@/components/ui/StatusBadge'
-import { sessionAPI, type SessionInfo } from '@/api/client'
+import { sessionAPI, authAPI, type SessionInfo } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
 import { formatDateTime } from '@/lib/utils'
 import { getDeviceId } from '@/lib/deviceId'
@@ -29,23 +29,27 @@ import {
   Loader2,
   Trash2,
   RefreshCw,
-  X,
   LogOut,
   Shield,
+  Edit,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
+import { UserEditDialog, type User } from '@/components/UserEditDialog'
 
 const columnHelper = createColumnHelper<SessionInfo>()
 
 export default function DeviceManagement() {
+  const { user: currentUser, setAuth } = useAuthStore()
   const logout = useAuthStore((state) => state.logout)
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
 
-  // Dialog state
+  // Dialog state - 支持 kick/kickAll
   const [dialogState, setDialogState] = useDialogState<"kick" | "kickAll">()
+
+  // 编辑用户弹窗状态
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
 
   // Kick single device
   const [kickSession, setKickSession] = useState<SessionInfo | null>(null)
@@ -53,6 +57,17 @@ export default function DeviceManagement() {
 
   // Kick all devices
   const [kickAllLoading, setKickAllLoading] = useState(false)
+
+  // ========== 用户信息相关状态 ==========
+  // 使用 React Query 获取当前用户信息
+  const { data: userData, refetch: refetchUser } = useQuery({
+    queryKey: ['currentUser'],
+    queryFn: async () => {
+      const response = await authAPI.getProfile()
+      return response.data as UserInfo
+    },
+    enabled: true,
+  })
 
   // 使用 React Query 获取会话数据，配合 keepPreviousData 避免闪烁
   const { data: sessionData = [], isLoading } = useQuery({
@@ -167,6 +182,7 @@ export default function DeviceManagement() {
     },
   })
 
+  // ========== 设备管理相关函数 ==========
   // Kick single device handlers
   const openKickModal = (session: SessionInfo) => {
     setKickSession(session)
@@ -222,7 +238,7 @@ export default function DeviceManagement() {
     }
   }
 
-  // Close create modal
+  // 关闭弹窗
   const handleModalClose = (open: boolean) => {
     if (!open) {
       setDialogState(null)
@@ -234,8 +250,12 @@ export default function DeviceManagement() {
     <div className="space-y-6">
       {/* 标题和按钮 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary">设备管理</h1>
+        <h1 className="text-3xl font-bold text-primary">个人账户</h1>
         <div className="flex gap-2">
+          <Button onClick={() => setEditDialogOpen(true)} size="lg" variant="morden">
+            <Edit className="w-4 h-4 mr-1.5" />
+            修改信息
+          </Button>
           <Button onClick={handleRefresh} size="lg" variant="morden">
             <RefreshCw className="w-4 h-4 mr-1.5" />
             刷新会话
@@ -247,7 +267,7 @@ export default function DeviceManagement() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* 搜索 */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <div className="relative flex-1 min-w-50">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
@@ -268,7 +288,7 @@ export default function DeviceManagement() {
         </div>
       </div>
 
-      {/* Devices Table */}
+      {/* 设备列表 */}
       <Card className="overflow-hidden">
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
@@ -380,6 +400,15 @@ export default function DeviceManagement() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Edit User Modal */}
+      <UserEditDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        user={userData || null}
+        mode="profile"
+        onSuccess={() => refetchUser()}
+      />
 
       {/* Info note */}
       <div className="text-sm text-muted-foreground">

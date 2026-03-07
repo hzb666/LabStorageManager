@@ -11,6 +11,7 @@ import { TestErrorPage } from '@/pages/TestError'
 import { NotFoundPage } from '@/pages/NotFound'
 import DeviceManagement from '@/pages/DeviceManagement'
 import { AnnouncementManagement } from '@/pages/AnnouncementManagement'
+import OperationLogsPage from '@/pages/OperationLogs'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
 import { TooltipProvider } from '@/components/ui/Tooltip'
@@ -92,6 +93,14 @@ function AppContent() {
               }
             />
             <Route path="devices" element={<DeviceManagement />} />
+            <Route
+              path="admin/logs/:token"
+              element={
+                <AdminRoute>
+                  <OperationLogsPage />
+                </AdminRoute>
+              }
+            />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -1,6 +1,7 @@
 ﻿import axios from 'axios'
 import { useAuthStore } from '@/store/useStore'
 import { getDeviceId, getDeviceName } from '@/lib/deviceId'
+import { toast } from '@/lib/toast'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
@@ -31,6 +32,12 @@ api.interceptors.response.use(
     // 排除登录接口的 401 错误，避免页面刷新导致登录页错误信息丢失
     const isLoginRequest = error.config?.url?.includes('/users/login')
     if (error.response?.status === 401 && !isLoginRequest) {
+      // 获取错误详情
+      const errorDetail = error.response?.data?.detail
+      // 如果是会话失效错误，先显示提示再跳转
+      if (errorDetail === '会话失效，请重新登录') {
+        toast.error('会话失效，请重新登录')
+      }
       useAuthStore.getState().logout()
       window.location.href = '/login'
     }
@@ -155,6 +162,9 @@ export const userAdminAPI = {
   deleteAvatar: (userId: number) => {
     return api.delete<{ avatar_url: null }>(`/users/${userId}/avatar`)
   },
+  // 生成日志访问令牌
+  generateLogsToken: (userId: number) => 
+    api.post<{ token: string }>(`/users/admin/users/${userId}/logs-token`),
 }
 
 // Reagent Order APIs
@@ -324,3 +334,50 @@ export const announcementAPI = {
   deleteImage: (filename: string) => api.delete(`/announcements/images/${filename}`),
   getStorageInfo: () => api.get<StorageInfo>('/announcements/storage-info'),
 }
+
+// User Operation Logs APIs
+export interface LogItem {
+  time: string | null
+  type: string
+  detail: string
+  // 展开后显示的完整数据（所有数据库字段）
+  full_data?: Record<string, unknown>
+}
+
+export interface LogsResponse {
+  user_id: number
+  username: string
+  data: LogItem[]
+  total: number
+}
+
+export interface LogsAPI {
+  list: (params: {
+    skip?: number
+    limit?: number
+    search?: string
+    log_type?: string
+  }) => Promise<{ data: { data: LogItem[]; total: number } }>
+}
+
+// 创建日志 API 适配器（用于 FilterTable）
+// 注意：FilterTable 使用 status_filter 参数，但日志 API 需要 log_type，需要转换
+export const createLogsAPI = (token: string): LogsAPI => ({
+  list: async (params) => {
+    const queryParams = new URLSearchParams()
+    if (params.skip !== undefined) queryParams.append('skip', String(params.skip))
+    if (params.limit !== undefined) queryParams.append('limit', String(params.limit))
+    if (params.search) queryParams.append('keyword', params.search)
+    
+    // 将 status_filter 转换为 log_type（FilterTable 使用 status_filter，日志 API 需要 log_type）
+    // 注意：'all' 表示全部类型，不传参给后端
+    if (params.status_filter && params.status_filter !== 'all') {
+      queryParams.append('log_type', params.status_filter)
+    }
+    
+    const response = await api.get<LogsResponse>(`/users/admin/logs/${token}?${queryParams.toString()}`, {
+      credentials: 'include'
+    })
+    return { data: { data: response.data.data, total: response.data.total } }
+  }
+})

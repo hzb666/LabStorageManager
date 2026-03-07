@@ -4,6 +4,7 @@ User Model - Authentication and Authorization
 from datetime import datetime
 
 from app.core.time_utils import get_utc_now
+from app.models import BaseResponse
 from enum import Enum
 from typing import Optional
 
@@ -42,6 +43,7 @@ class User(UserBase, table=True):
     
     id: Optional[int] = Field(default=None, primary_key=True)
     password_hash: str
+    username_version: int = Field(default=1, description="用户名版本号，每次修改用户名时+1")
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
@@ -60,16 +62,24 @@ class UserCreate(SQLModel):
 class UserUpdate(SQLModel):
     """DTO for updating user information"""
     username: Optional[str] = Field(None, min_length=3, max_length=20)
-    full_name: str  # 必填，不允许为空
+    
+    # 添加 username 格式验证
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not re.match(r'^[a-zA-Z0-9_]+$', v):
+            raise ValueError('用户名只能包含字母，数字和下划线')
+        return v
+    
+    full_name: str = Field(min_length=1, max_length=100)  # 必填，不允许为空
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     avatar_url: Optional[str] = None
 
 
-class UserResponse(SQLModel):
+class UserResponse(BaseResponse):
     """DTO for user API responses (excludes sensitive data)"""
-    model_config = ConfigDict(from_attributes=True, json_encoders={datetime: lambda v: v.isoformat()})
-    
+
     id: int
     username: str
     full_name: Optional[str]

@@ -550,58 +550,54 @@ export function AnnouncementManagement() {
         </Button>
       </div>
 
-      {/* Storage Info and Filter */}
       {/* Storage Info and Filters */}
-{storageInfo && (
-  <div className="flex items-center gap-3">
-    
-    {/* Storage Info - 背景融合进度条风格 (高度严格保持 h-10) */}
-    <div className="relative flex-1 h-10 rounded-md border border-input bg-card overflow-hidden flex items-center">
-      
-      {/* 1. 底层：动态推进的背景色 (充当进度条) */}
-      <div
-        className="absolute inset-y-0 left-0 bg-muted transition-all duration-500 ease-in-out"
-        style={{ width: `${Math.min(storageInfo.usage_percent, 100)}%` }}
-      />
-
-      {/* 2. 上层内容：Relative + z-10 确保文字始终在色块上方 */}
-      <div className="relative z-10 flex items-center justify-between w-full px-3 gap-3">
+      <div className="flex items-center gap-3">
         
-        {/* 左侧：图标 + 容量信息 */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <HardDrive className="w-4 h-4 text-muted-foreground shrink-0" />
-          <span className="text-base text-foreground truncate">
-            存储: <span>{storageInfo.used_mb}</span> / {storageInfo.max_mb} MB
-          </span>
+        {/* Storage Info - 背景融合进度条风格 (高度严格保持 h-10) */}
+        {/* 始终显示存储信息，使用默认值0，数据加载后平滑过渡 */}
+        <div className="relative flex-1 h-10 rounded-md border border-input bg-card overflow-hidden flex items-center">
+          {/* 底层：动态推进的背景色 (充当进度条) */}
+          <div
+            className="absolute inset-y-0 left-0 bg-muted transition-all duration-500 ease-in-out"
+            style={{ width: `${Math.min(storageInfo?.usage_percent ?? 0, 100)}%` }}
+          />
+
+          {/* 上层内容：Relative + z-10 确保文字始终在色块上方 */}
+          <div className="relative z-10 flex items-center justify-between w-full px-3 gap-3">
+            {/* 左侧：图标 + 容量信息 */}
+            <div className="flex items-center gap-2.5 min-w-0">
+              <HardDrive className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span className="text-base text-foreground truncate">
+                存储: <span>{storageInfo?.used_mb ?? 0}</span> / {storageInfo?.max_mb ?? 50} MB
+              </span>
+            </div>
+          </div>
         </div>
+
+        {/* Filter Selects - 将 min-h-10 改为 h-10 确保完美对齐 */}
+        <Select value={visibilityFilter} onValueChange={(value: 'all' | 'visible' | 'hidden') => setVisibilityFilter(value)}>
+          <SelectTrigger className="w-30 min-h-10">
+            <SelectValue placeholder="显示状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="visible">显示</SelectItem>
+            <SelectItem value="hidden">隐藏</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={pinnedFilter} onValueChange={(value: 'all' | 'pinned' | 'unpinned') => setPinnedFilter(value)}>
+          <SelectTrigger className="w-30 min-h-10">
+            <SelectValue placeholder="置顶状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="pinned">置顶</SelectItem>
+            <SelectItem value="unpinned">未置顶</SelectItem>
+          </SelectContent>
+        </Select>
+        
       </div>
-    </div>
-
-    {/* Filter Selects - 将 min-h-10 改为 h-10 确保完美对齐 */}
-    <Select value={visibilityFilter} onValueChange={(value: 'all' | 'visible' | 'hidden') => setVisibilityFilter(value)}>
-      <SelectTrigger className="w-30 min-h-10">
-        <SelectValue placeholder="显示状态" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">全部</SelectItem>
-        <SelectItem value="visible">显示</SelectItem>
-        <SelectItem value="hidden">隐藏</SelectItem>
-      </SelectContent>
-    </Select>
-
-    <Select value={pinnedFilter} onValueChange={(value: 'all' | 'pinned' | 'unpinned') => setPinnedFilter(value)}>
-      <SelectTrigger className="w-30 min-h-10">
-        <SelectValue placeholder="置顶状态" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">全部</SelectItem>
-        <SelectItem value="pinned">置顶</SelectItem>
-        <SelectItem value="unpinned">未置顶</SelectItem>
-      </SelectContent>
-    </Select>
-    
-  </div>
-)}
 
       {/* Announcements Table */}
       <Card className="overflow-hidden">

@@ -5,8 +5,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
@@ -19,6 +20,24 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+class CachedStaticFiles(StaticFiles):
+    """Custom static files with caching headers for images"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    async def get_response(self, path: str, scope):
+        """Override to add cache headers for static files"""
+        response = await super().get_response(path, scope)
+
+        # Add cache headers for static files (images, fonts, etc.)
+        # Cache for 7 days (604800 seconds)
+        response.headers["Cache-Control"] = "public, max-age=604800, immutable"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
+        return response
 
 
 @asynccontextmanager
@@ -48,10 +67,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files
+# Mount static files with caching
 STATIC_DIR = Path(__file__).parent.parent / "static"
 if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # Include routers

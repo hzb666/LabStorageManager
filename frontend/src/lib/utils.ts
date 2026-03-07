@@ -36,7 +36,7 @@ export function getAllTags(): string[] {
   return Object.keys(inputConfigs)
 }
 
-// 处理备注字段：如果有标签前缀但内容为空或只有空格，则返回空字符串
+// 处理备注字段：保留标签前缀，只移除内容为空的标签
 // 支持所有在 inputConfigs 中定义的标签
 export function processNotes(notes: string | undefined): string {
   if (!notes) return ''
@@ -45,7 +45,12 @@ export function processNotes(notes: string | undefined): string {
   for (const tag of getAllTags()) {
     if (notes.startsWith(tag)) {
       const content = notes.slice(tag.length).trim()
-      return content || ''
+      // 如果内容为空或只有空格，返回空字符串（删除标签）
+      if (!content) {
+        return ''
+      }
+      // 保留标签前缀和内容
+      return notes
     }
   }
   return notes

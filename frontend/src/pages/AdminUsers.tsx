@@ -9,22 +9,27 @@ import {
 } from '@tanstack/react-table'
 import type { SortingState } from '@tanstack/react-table'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
+import { useForm } from 'react-hook-form'
+import { useNavigate } from 'react-router-dom'
+import { valibotResolver } from '@hookform/resolvers/valibot'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
-import { LABEL_STYLES, INPUT_STYLES, UserRoles } from '@/lib/constants'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { userAdminAPI, authAPI } from '@/api/client'
+import { userAdminAPI } from '@/api/client'
 import { toast } from '@/lib/toast'
 import { useAuthStore } from '@/store/useStore'
-import { useRememberedUser } from '@/hooks/useRememberedUser'
-import { formatDate, cn, getFullImageUrl } from '@/lib/utils'
+import { formatDate, getFullImageUrl } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
-import * as v from 'valibot'
-import { UserCreateSchema, UserUpdateSchema, ChangePasswordWithConfirmSchema, createRequiredStringSchema, UsernameSchema } from '@/lib/validationSchemas'
+import { BaseForm, type FieldSchema } from '@/components/BaseForm'
+import { UserEditDialog, type User } from '@/components/UserEditDialog'
+import {
+  UserCreateSchema,
+  type UserCreateFormData,
+} from '@/lib/validationSchemas'
 import {
   Search,
   Users,
@@ -34,7 +39,7 @@ import {
   UserCheck,
   X,
   UserPlus,
-  Lock
+  FileText,
 } from 'lucide-react'
 import { AxiosError } from 'axios'
 import type { PaginationParams } from '@/api/client'
@@ -46,30 +51,17 @@ import { TableEmptyState } from '@/components/ui/TableFilters'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 
-
-// 角色样式 - 使用 StatusBadge 组件
-
 interface UserListParams extends PaginationParams {
   role?: string
   is_active?: boolean
   username?: string
 }
 
-interface User {
-  id: number
-  username: string
-  full_name: string | null
-  role: 'admin' | 'user'
-  is_active: boolean
-  created_at: string
-  avatar_url?: string
-}
-
 const columnHelper = createColumnHelper<User>()
 
 export function AdminUsersPage() {
-  const { user: currentUser, setAuth } = useAuthStore()
-  const { rememberedUser, updateRememberedUser, clearRememberedUser } = useRememberedUser()
+  const { user: currentUser } = useAuthStore()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
@@ -83,6 +75,7 @@ export function AdminUsersPage() {
     }, 300)
     return () => clearTimeout(timer)
   }, [globalFilter])
+
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('active')
 
@@ -90,8 +83,13 @@ export function AdminUsersPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
 
-  // 使用 React Query 获取用户列表，配合 keepPreviousData 避免闪烁
-  const { data: userData = [], isLoading } = useQuery({
+  // 当搜索词、角色过滤、状态过滤发生变化时，重置回第一页
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [debouncedFilter, roleFilter, statusFilter])
+
+  // 使用单一 React Query 获取用户列表及总数，配合 keepPreviousData 避免闪烁
+  const { data: queryResult, isLoading } = useQuery({
     queryKey: ['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize],
     queryFn: async () => {
       const params: UserListParams = {
@@ -101,27 +99,19 @@ export function AdminUsersPage() {
       if (roleFilter !== 'all') params.role = roleFilter
       if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
       if (debouncedFilter) params.username = debouncedFilter
+
       const response = await userAdminAPI.list(params)
-      return response.data.data || []
+      return {
+        data: response.data.data || [],
+        total: response.data.total || 0
+      }
     },
     placeholderData: keepPreviousData,
   })
 
-  // 获取总数
-  const { data: totalData } = useQuery({
-    queryKey: ['adminUsers', 'total', roleFilter, statusFilter, debouncedFilter],
-    queryFn: async () => {
-      const params: UserListParams = { skip: 0, limit: 1 }
-      if (roleFilter !== 'all') params.role = roleFilter
-      if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
-      if (debouncedFilter) params.username = debouncedFilter
-      const response = await userAdminAPI.list(params)
-      return response.data.total || 0
-    },
-    enabled: true,
-  })
-
-  const total = totalData || 0
+  // 派生出 userData 和 total
+  const userData = queryResult?.data || []
+  const total = queryResult?.total || 0
   const totalPages = Math.ceil(total / pageSize)
 
   // 判断是否有筛选条件
@@ -159,66 +149,43 @@ export function AdminUsersPage() {
   // Dialog state - 使用 useDialogState 管理 create/edit/delete 对话框
   const [dialogState, setDialogState] = useDialogState<"create" | "edit" | "delete">()
 
-  // Create user modal
-  const [createData, setCreateData] = useState({
-    username: '',
-    password: '',
-    full_name: '',
-    role: 'user' as 'admin' | 'user'
+  // 创建用户表单 - 使用 useForm + BaseForm
+  const createForm = useForm<UserCreateFormData>({
+    resolver: valibotResolver(UserCreateSchema),
+    defaultValues: {
+      username: '',
+      password: '',
+      full_name: '',
+      role: 'user',
+    },
   })
-  const [createErrors, setCreateErrors] = useState<Record<string, string>>({})
+  const { reset: resetCreateForm } = createForm
   const [createLoading, setCreateLoading] = useState(false)
+
+  // 创建用户表单字段配置（不包含角色，角色单独用 RadioGroup 渲染）
+  const createFormFields: FieldSchema<UserCreateFormData>[] = [
+    { name: 'username', label: '用户名', type: 'input', required: true, placeholder: '请输入用户名' },
+    { name: 'password', label: '密码', type: 'password', required: true, placeholder: '请输入密码' },
+    { name: 'full_name', label: '姓名', type: 'input', required: true, placeholder: '请输入姓名' },
+  ]
 
   // Edit user modal
   const [editUser, setEditUser] = useState<User | null>(null)
-  const [editData, setEditData] = useState({
-    username: '',
-    full_name: '',
-    role: 'user' as 'admin' | 'user'
-  })
-  const [editErrors, setEditErrors] = useState<Record<string, string>>({})
-  const [editLoading, setEditLoading] = useState(false)
-
-  // Avatar upload state
-  const [avatarFile, setAvatarFile] = useState<File | null>(null)
-  const [avatarPreview, setAvatarPreview] = useState<string>('')
-  const [avatarLoading, setAvatarLoading] = useState(false)
-  // 记录初始头像 URL，用于判断是否删除了头像
-  const [originalAvatarUrl, setOriginalAvatarUrl] = useState<string>('')
-
-  // 组件卸载时释放 Object URL 防止内存泄漏
-  React.useEffect(() => {
-    return () => {
-      if (avatarPreview) {
-        URL.revokeObjectURL(avatarPreview)
-      }
-    }
-  }, [avatarPreview])
 
   // Delete confirmation
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
-
-  // Change password state (集成在 Edit Modal 中)
-  const [isEditingPassword, setIsEditingPassword] = useState(false)
-  const [changePasswordData, setChangePasswordData] = useState({
-    old_password: '',
-    new_password: '',
-    confirm_password: ''
-  })
-  const [changePasswordErrors, setChangePasswordErrors] = useState<Record<string, string>>({})
-  const [changePasswordLoading, setChangePasswordLoading] = useState(false)
 
   // 表格列定义
   const columns = useMemo(() => [
     columnHelper.display({
       id: 'avatar',
       header: '',
-      size: 60,
+      size: 50,
       cell: info => {
         const user = info.row.original
         return (
-          <Avatar className="h-8 w-8">
+          <Avatar className="size-8">
             <AvatarImage src={user.avatar_url ? getFullImageUrl(user.avatar_url) : undefined} alt={user.username} />
             <AvatarFallback>{user.username.charAt(0).toUpperCase()}</AvatarFallback>
           </Avatar>
@@ -258,7 +225,7 @@ export function AdminUsersPage() {
     columnHelper.display({
       id: 'actions',
       header: '操作',
-      size: 120,
+      size: 200,
       cell: info => {
         const user = info.row.original
         const isSelf = user.id === currentUser?.id
@@ -271,8 +238,12 @@ export function AdminUsersPage() {
                   variant="morden"
                   size="sm"
                   className="h-8 w-8 p-0"
+                  disabled={isSelf}
                   onClick={(e) => {
                     e.stopPropagation()
+                    if (isSelf) {
+                      return // 显示tooltip即可
+                    }
                     openEditModal(user)
                   }}
                 >
@@ -280,7 +251,33 @@ export function AdminUsersPage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                <p>编辑</p>
+                <p>{isSelf ? '请到账户管理页面修改自己的信息' : '编辑'}</p>
+              </TooltipContent>
+            </Tooltip>
+            {/* 查看日志按钮 - 所有用户都可以查看日志 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="morden"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-indigo-600 hover:text-indigo-700
+           dark:text-indigo-400 dark:hover:text-indigo-300"
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    try {
+                      const response = await userAdminAPI.generateLogsToken(user.id)
+                      const token = response.data.token
+                      navigate(`/admin/logs/${token}`)
+                    } catch {
+                      toast.error('获取日志访问失败')
+                    }
+                  }}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>查看日志</p>
               </TooltipContent>
             </Tooltip>
             {!user.is_active && !isSelf && (
@@ -327,7 +324,7 @@ export function AdminUsersPage() {
         )
       },
     }),
-  ], [currentUser])
+  ], [currentUser, navigate])
 
   const table = useReactTable({
     data,
@@ -344,191 +341,32 @@ export function AdminUsersPage() {
     },
   })
 
-  // 通用验证错误解析函数
-  const parseValidationErrors = (error: unknown): Record<string, string> => {
-    const errors: Record<string, string> = {}
-    if (error instanceof v.ValiError) {
-      for (const issue of error.issues) {
-        const field = issue.path?.[0]?.key as string
-        if (field) errors[field] = issue.message
-      }
+  // Create user handlers - 使用 react-hook-form 的 handleSubmit
+  const handleCreate = createForm.handleSubmit(async (formData) => {
+    // 确保 role 始终有值
+    const userData = {
+      ...formData,
+      role: formData.role || 'user' as const,
     }
-    return errors
-  }
-
-  // 通用 API 错误处理函数
-  const handleApiError = (error: unknown, defaultMsg: string): string => {
-    const axiosError = error as AxiosError<{ detail?: string | { msg: string } }>
-    const detail = axiosError.response?.data?.detail
-    if (typeof detail === 'string') return detail
-    if (detail && 'msg' in detail) return (detail as { msg: string }).msg
-    return defaultMsg
-  }
-
-  // Create user handlers
-  const validateCreateForm = useCallback((): boolean => {
-    try {
-      v.parse(UserCreateSchema, {
-        username: createData.username,
-        password: createData.password,
-        full_name: createData.full_name,
-        role: createData.role
-      })
-      setCreateErrors({})
-      return true
-    } catch (error) {
-      setCreateErrors(parseValidationErrors(error))
-      return false
-    }
-  }, [createData])
-
-  const handleCreate = async () => {
-    if (!validateCreateForm()) return
-
     setCreateLoading(true)
     try {
-      await userAdminAPI.create(createData)
+      await userAdminAPI.create(userData)
       setDialogState(null)
-      setCreateData({ username: '', password: '', full_name: '', role: 'user' })
+      resetCreateForm({ username: '', password: '', full_name: '', role: 'user' })
       refetchUsers()
       toast.success('用户创建成功')
     } catch (error) {
-      toast.error(handleApiError(error, '创建失败'))
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '创建失败')
     } finally {
       setCreateLoading(false)
     }
-  }
+  })
 
-  // Edit user handlers
+  // 打开编辑弹窗
   const openEditModal = (user: User) => {
     setEditUser(user)
-    setEditData({ username: user.username, full_name: user.full_name || '', role: user.role })
-    setEditErrors({})
-    setIsEditingPassword(false)
-    setAvatarFile(null)
-    setAvatarPreview(user.avatar_url ? getFullImageUrl(user.avatar_url) : '')
-    setOriginalAvatarUrl(user.avatar_url ? getFullImageUrl(user.avatar_url) : '')  // 保存原始头像 URL
     setDialogState('edit')
-  }
-
-  // 验证编辑表单 - 使用统一的验证 Schema
-  const validateEditForm = useCallback((): boolean => {
-    try {
-      v.parse(UserUpdateSchema, {
-        username: editData.username,
-        full_name: editData.full_name,
-        role: editData.role
-      })
-      setEditErrors({})
-      return true
-    } catch (error) {
-      setEditErrors(parseValidationErrors(error))
-      return false
-    }
-  }, [editData])
-
-  const handleEdit = async () => {
-    if (!editUser || !validateEditForm()) return
-
-    setEditLoading(true)
-    try {
-      // 如果删除了头像（originalAvatarUrl 存在但 avatarPreview 为空，且没有新文件）
-      const wasAvatarDeleted = originalAvatarUrl && !avatarPreview && !avatarFile
-      
-      if (wasAvatarDeleted) {
-        // 调用后端 API 删除头像
-        try {
-          await userAdminAPI.deleteAvatar(editUser.id)
-          // 立即更新缓存
-          queryClient.setQueryData(['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize], (oldData: User[] | undefined) => {
-            if (!oldData) return oldData
-            return oldData.map(user => 
-              user.id === editUser.id ? { ...user, avatar_url: undefined } : user
-            )
-          })
-        } catch {
-          toast.error('头像删除失败')
-          setEditLoading(false)
-          return
-        }
-      } else if (avatarFile && editUser) {
-        // 如果选择了新头像，先上传（后端会自动删除旧头像）
-        setAvatarLoading(true)
-        try {
-          const response = await userAdminAPI.uploadAvatar(editUser.id, avatarFile)
-          const newAvatarUrl = response.data.avatar_url
-          setAvatarPreview(newAvatarUrl)
-          
-          // 立即更新 React Query 缓存中的用户数据
-          queryClient.setQueryData(['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize], (oldData: User[] | undefined) => {
-            if (!oldData) return oldData
-            return oldData.map(user => 
-              user.id === editUser.id ? { ...user, avatar_url: newAvatarUrl } : user
-            )
-          })
-          
-          // 同时更新 editUser 的 avatar_url，以便后续使用
-          setEditUser({ ...editUser, avatar_url: newAvatarUrl })
-          
-          // 同步更新 localStorage 中记住的用户信息
-          if (rememberedUser && rememberedUser.userId === editUser.id) {
-            updateRememberedUser({
-              avatar_url: newAvatarUrl,
-            })
-          }
-        } catch (error) {
-          const axiosError = error as AxiosError<{ detail?: string }>
-          const errorMsg = axiosError.response?.data?.detail || '头像上传失败'
-          // 将英文错误消息转换为中文
-          if (errorMsg.includes('Invalid image type')) {
-            toast.error('不支持该图像格式')
-          } else if (errorMsg.includes('Image size exceeds')) {
-            toast.error('图片大小超过限制')
-          } else {
-            toast.error(errorMsg)
-          }
-          setAvatarLoading(false)
-          setEditLoading(false)
-          return
-        }
-        setAvatarLoading(false)
-      }
-
-      // 更新用户信息
-      const response = await userAdminAPI.update(editUser.id, {
-        username: editData.username,
-        full_name: editData.full_name,
-        role: editData.role
-      })
-      const updatedUser = response.data
-
-      // 如果用户名发生变化，清除记住的用户信息（强制重新登录）
-      if (rememberedUser && rememberedUser.userId === editUser.id && editUser.username !== editData.username) {
-        clearRememberedUser()
-      } else if (rememberedUser && rememberedUser.userId === editUser.id) {
-        // 用户名没变但可能改了姓名，同步更新 full_name
-        updateRememberedUser({
-          full_name: editData.full_name,
-        })
-      }
-
-      // 如果修改的是当前登录用户，需要更新全局状态
-      if (editUser.id === currentUser?.id && updatedUser) {
-        setAuth(updatedUser)
-      }
-
-      setDialogState(null)
-      setEditUser(null)
-      setAvatarFile(null)
-      setAvatarPreview('')
-      setOriginalAvatarUrl('')
-      refetchUsers()
-      toast.success('用户更新成功')
-    } catch (error) {
-      toast.error(handleApiError(error, '更新失败'))
-    } finally {
-      setEditLoading(false)
-    }
   }
 
   // Delete/Deactivate handlers
@@ -567,73 +405,11 @@ export function AdminUsersPage() {
     }
   }
 
-  // Change password handlers
-  const validateChangePasswordForm = useCallback((): boolean => {
-    const errors: Record<string, string> = {}
-    const isSelf = editUser?.id === currentUser?.id
-    const isTargetAdmin = editUser?.role === UserRoles.ADMIN
-
-    // 修改自己或修改管理员需要原密码
-    if (isSelf || isTargetAdmin) {
-      if (!changePasswordData.old_password) {
-        errors.old_password = '请输入原密码'
-      }
-    }
-
-    if (!changePasswordData.new_password) {
-      errors.new_password = '请输入新密码'
-    } else if (changePasswordData.new_password.length < 6) {
-      errors.new_password = '新密码至少6个字符'
-    }
-
-    if (!changePasswordData.confirm_password) {
-      errors.confirm_password = '请再次输入新密码'
-    } else if (changePasswordData.new_password !== changePasswordData.confirm_password) {
-      errors.confirm_password = '两次输入的密码不一致'
-    }
-
-    setChangePasswordErrors(errors)
-    return Object.keys(errors).length === 0
-  }, [changePasswordData, editUser, currentUser])
-
-  const handleChangePassword = async () => {
-    if (!validateChangePasswordForm()) return
-
-    setChangePasswordLoading(true)
-    try {
-      // 如果修改的是自己，使用 changePassword API；否则使用 resetPassword API
-      if (editUser?.id === currentUser?.id) {
-        await authAPI.changePassword(changePasswordData.old_password, changePasswordData.new_password)
-        setDialogState(null)
-        setIsEditingPassword(false)
-        setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
-        toast.success('密码修改成功，请重新登录')
-        setTimeout(() => {
-          useAuthStore.getState().logout()
-          window.location.href = '/login'
-        }, 1500)
-      } else {
-        // 管理员重置其他用户密码
-        const oldPassword = editUser?.role === UserRoles.ADMIN ? changePasswordData.old_password : undefined
-        await userAdminAPI.resetPassword(editUser!.id, changePasswordData.new_password, oldPassword)
-        setIsEditingPassword(false)
-        setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
-        toast.success('密码重置成功')
-      }
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '密码修改失败')
-    } finally {
-      setChangePasswordLoading(false)
-    }
-  }
-
   // 关闭创建弹窗时清空表单
   const handleCreateModalClose = (open: boolean) => {
     setDialogState(open ? 'create' : null)
     if (!open) {
-      setCreateData({ username: '', password: '', full_name: '', role: 'user' })
-      setCreateErrors({})
+      resetCreateForm({ username: '', password: '', full_name: '', role: 'user' })
     }
   }
 
@@ -773,57 +549,18 @@ export function AdminUsersPage() {
             <DialogTitle>创建用户</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
+            {/* 使用 BaseForm 统一表单字段 */}
+            <BaseForm
+              form={createForm}
+              fields={createFormFields}
+              layout="stack"
+            />
+            {/* 角色选择 - 使用 RadioGroup */}
             <div>
-              <Label htmlFor="create_username" className={LABEL_STYLES.base}>
-                用户名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-              </Label>
-              <Input
-                id="create_username"
-                value={createData.username}
-                onChange={(e) => setCreateData({ ...createData, username: e.target.value })}
-                placeholder="请输入用户名"
-                className={cn(INPUT_STYLES.lg, createErrors.username && 'border-destructive')}
-              />
-              {createErrors.username && (
-                <p className="text-sm text-destructive mt-1">{createErrors.username}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="create_password" className={LABEL_STYLES.base}>
-                密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-              </Label>
-              <Input
-                id="create_password"
-                type="password"
-                value={createData.password}
-                onChange={(e) => setCreateData({ ...createData, password: e.target.value })}
-                placeholder="请输入密码"
-                className={cn(INPUT_STYLES.lg, createErrors.password && 'border-destructive')}
-              />
-              {createErrors.password && (
-                <p className="text-sm text-destructive mt-1">{createErrors.password}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="create_fullname" className={LABEL_STYLES.base}>
-                姓名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-              </Label>
-              <Input
-                id="create_fullname"
-                value={createData.full_name}
-                onChange={(e) => setCreateData({ ...createData, full_name: e.target.value })}
-                placeholder="请输入姓名"
-                className={cn(INPUT_STYLES.lg, createErrors.full_name && 'border-destructive')}
-              />
-              {createErrors.full_name && (
-                <p className="text-sm text-destructive mt-1">{createErrors.full_name}</p>
-              )}
-            </div>
-            <div>
-              <Label className={LABEL_STYLES.base}>角色</Label>
+              <Label className="text-base">角色</Label>
               <RadioGroup
-                value={createData.role}
-                onValueChange={(value) => setCreateData({ ...createData, role: value as 'admin' | 'user' })}
+                value={createForm.watch('role')}
+                onValueChange={(value) => createForm.setValue('role', value as 'admin' | 'user')}
                 className="flex gap-4 mt-2"
               >
                 <div className="flex items-center space-x-2">
@@ -837,276 +574,25 @@ export function AdminUsersPage() {
               </RadioGroup>
             </div>
           </div>
-          <div className="flex gap-3 mt-6">
+          <div className="flex gap-3 mt-8">
             <Button variant="morden" onClick={() => handleCreateModalClose(false)} size="lg" className="flex-1">
               取消
             </Button>
-            <Button onClick={handleCreate} disabled={createLoading} size="lg" className="flex-1">
+            <LoadingButton onClick={handleCreate} isLoading={createLoading} size="lg" className="flex-1">
               {createLoading ? '创建中...' : '创建'}
-            </Button>
+            </LoadingButton>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Edit User / Change Password Modal */}
-      <Dialog
+      {/* Edit User Modal */}
+      <UserEditDialog
         open={dialogState === 'edit'}
-        onOpenChange={(open) => {
-          setDialogState(open ? 'edit' : null)
-          if (!open) setIsEditingPassword(false)
-        }}
-      >
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{isEditingPassword ? '修改密码' : '编辑用户'}</DialogTitle>
-          </DialogHeader>
-
-          {isEditingPassword ? (
-            <>
-              <div className="grid gap-4 space-y-2">
-                {/* 原密码 - 修改自己或修改管理员时需要 */}
-                {(editUser?.id === currentUser?.id || editUser?.role === UserRoles.ADMIN) && (
-                  <div>
-                    <Label htmlFor="old_password" className={LABEL_STYLES.base}>
-                      原密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-                    </Label>
-                    <Input
-                      id="old_password"
-                      type="password"
-                      value={changePasswordData.old_password}
-                      onChange={(e) => setChangePasswordData({ ...changePasswordData, old_password: e.target.value })}
-                      placeholder="请输入原密码"
-                      className={cn(INPUT_STYLES.lg, changePasswordErrors.old_password && 'border-destructive')}
-                    />
-                    {changePasswordErrors.old_password && (
-                      <p className="text-sm text-destructive mt-1">{changePasswordErrors.old_password}</p>
-                    )}
-                  </div>
-                )}
-                <div>
-                  <Label htmlFor="new_password" className={LABEL_STYLES.base}>
-                    新密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-                  </Label>
-                  <Input
-                    id="new_password"
-                    type="password"
-                    value={changePasswordData.new_password}
-                    onChange={(e) => setChangePasswordData({ ...changePasswordData, new_password: e.target.value })}
-                    placeholder="请输入新密码"
-                    className={cn(INPUT_STYLES.lg, changePasswordErrors.new_password && 'border-destructive')}
-                  />
-                  {changePasswordErrors.new_password && (
-                    <p className="text-sm text-destructive mt-1">{changePasswordErrors.new_password}</p>
-                  )}
-                </div>
-                <div>
-                  <Label htmlFor="confirm_password" className={LABEL_STYLES.base}>
-                    确认新密码<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-                  </Label>
-                  <Input
-                    id="confirm_password"
-                    type="password"
-                    value={changePasswordData.confirm_password}
-                    onChange={(e) => setChangePasswordData({ ...changePasswordData, confirm_password: e.target.value })}
-                    placeholder="请再次输入新密码"
-                    className={cn(INPUT_STYLES.lg, changePasswordErrors.confirm_password && 'border-destructive')}
-                  />
-                  {changePasswordErrors.confirm_password && (
-                    <p className="text-sm text-destructive mt-1">{changePasswordErrors.confirm_password}</p>
-                  )}
-                </div>
-              </div>
-              <div key="pwd-actions" className="flex gap-3 mt-6">
-                <Button onClick={handleChangePassword} disabled={changePasswordLoading} size="lg" className="flex-1">
-                  {changePasswordLoading ? '处理中...' : '确认修改'}
-                </Button>
-                <Button variant="morden" onClick={() => setIsEditingPassword(false)} size="lg" className="flex-1">
-                  返回
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="grid gap-4 space-y-2">
-                {/* Avatar Upload */}
-                <div className="flex flex-col items-center gap-3 mb-4">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="relative group">
-                        <input
-                          type="file"
-                          id="avatar-upload"
-                          accept="image/jpeg,image/png,image/gif,image/webp"
-                          className="hidden"
-                          disabled={avatarLoading}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0]
-                            if (file) {
-                              // 前端验证：文件类型检查
-                              const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif']
-                              if (!allowedTypes.includes(file.type)) {
-                                toast.error('仅支持 JPG、PNG、GIF、WebP 格式的图片')
-                                e.target.value = ''
-                                return
-                              }
-                              // 前端验证：文件大小检查
-                              const maxSizeMB = 5
-                              if (file.size > maxSizeMB * 1024 * 1024) {
-                                toast.error(`图片大小不能超过 ${maxSizeMB}MB`)
-                                e.target.value = ''
-                                return
-                              }
-                              setAvatarFile(file)
-                              // 释放旧的 Object URL 防止内存泄漏
-                              if (avatarPreview) {
-                                URL.revokeObjectURL(avatarPreview)
-                              }
-                              setAvatarPreview(URL.createObjectURL(file))
-                            }
-                          }}
-                        />
-                        <Label htmlFor="avatar-upload" className="cursor-pointer block">
-                          <div className="relative h-20 w-20">
-                            <Avatar className="h-20 w-20 transition-colors">
-                              <AvatarImage src={avatarPreview || undefined} alt={editUser?.username} className="object-cover" />
-                              <AvatarFallback className="text-2xl">
-                                {avatarLoading ? '...' : editUser?.username?.charAt(0).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            {/* Hover overlay with + icon */}
-                            <div className="absolute inset-0 bg-gray-600/50 dark:bg-gray-800/60 rounded-full border-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 cursor-pointer">
-                              {avatarLoading ? (
-                                <Loader2 className="w-8 h-8 text-white animate-spin" />
-                              ) : (
-                                <span className="text-white text-3xl drop-shadow-md">+</span>
-                              )}
-                            </div>
-                            {/* Delete button on hover */}
-                            {avatarPreview && !avatarLoading && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  setAvatarFile(null)
-                                  setAvatarPreview('')
-                                  // 注意：这里不要清空 originalAvatarUrl，这样点击保存时才能对比出被删除了
-                                  // Reset file input
-                                  const fileInput = document.getElementById('avatar-upload') as HTMLInputElement
-                                  if (fileInput) fileInput.value = ''
-                                }}
-                                className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/80"
-                              >
-                                <X className="size-3.5 stroke-3" />
-                              </button>
-                            )}
-                          </div>
-                        </Label>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      <p>点击上传头像</p>
-                      <p>图片应小于5MB</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <div>
-                  <Label htmlFor="edit_username" className={LABEL_STYLES.base}>
-                    用户名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-                  </Label>
-                  <Input
-                    id="edit_username"
-                    value={editData.username}
-                    onChange={(e) => {
-                      setEditData({ ...editData, username: e.target.value })
-                      if (e.target.value) {
-                        try {
-                          v.parse(UsernameSchema, e.target.value)
-                          setEditErrors(prev => ({ ...prev, username: '' }))
-                        } catch (error) {
-                          if (error instanceof v.ValiError) {
-                            setEditErrors(prev => ({ ...prev, username: error.message }))
-                          }
-                        }
-                      } else {
-                        setEditErrors(prev => ({ ...prev, username: '用户名不能为空' }))
-                      }
-                    }}
-                    placeholder="请输入用户名"
-                    className={cn(INPUT_STYLES.lg, editErrors.username && 'border-destructive')}
-                  />
-                  {editErrors.username && editErrors.username !== '' && (
-                    <p className="text-sm text-destructive mt-1">{editErrors.username}</p>
-                  )}
-                </div>
-                <div>
-                  <Label htmlFor="edit_fullname" className={LABEL_STYLES.base}>
-                    姓名<span className="text-destructive text-lg leading-4">&thinsp;*</span>
-                  </Label>
-                  <Input
-                    id="edit_fullname"
-                    value={editData.full_name}
-                    onChange={(e) => {
-                      setEditData({ ...editData, full_name: e.target.value })
-                      try {
-                        v.parse(createRequiredStringSchema('姓名'), e.target.value)
-                        setEditErrors(prev => ({ ...prev, full_name: '' }))
-                      } catch (error) {
-                        if (error instanceof v.ValiError) {
-                          setEditErrors(prev => ({ ...prev, full_name: error.message }))
-                        }
-                      }
-                    }}
-                    placeholder="请输入姓名"
-                    className={cn(INPUT_STYLES.lg, editErrors.full_name && 'border-destructive')}
-                  />
-                  {editErrors.full_name && editErrors.full_name !== '' && (
-                    <p className="text-sm text-destructive mt-1">{editErrors.full_name}</p>
-                  )}
-                </div>
-                <div>
-                  <Label className={LABEL_STYLES.base}>角色</Label>
-                  <RadioGroup
-                    value={editData.role}
-                    onValueChange={(value) => setEditData({ ...editData, role: value as 'admin' | 'user' })}
-                    className="flex gap-4 mt-2 mb-3.5"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="user" id="edit_role_user" />
-                      <Label htmlFor="edit_role_user" className="text-base cursor-pointer">用户</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="admin" id="edit_role_admin" />
-                      <Label htmlFor="edit_role_admin" className="text-base cursor-pointer">管理员</Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-              </div>
-              <div key="edit-actions" className="flex gap-2 mt-6">
-                <Button
-                  variant="morden"
-                  onClick={() => {
-                    setIsEditingPassword(true)
-                    setChangePasswordData({ old_password: '', new_password: '', confirm_password: '' })
-                    setChangePasswordErrors({})
-                  }}
-                  size="lg"
-                  className="flex-3"
-                >
-                  <Lock className="w-4 h-4 mr-1.5" />
-                  修改密码
-                </Button>
-                <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="flex-1">
-                  取消
-                </Button>
-                <LoadingButton onClick={handleEdit} isLoading={editLoading} size="lg" className="flex-1">
-                  保存
-                </LoadingButton>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+        onOpenChange={(open) => setDialogState(open ? 'edit' : null)}
+        user={editUser}
+        mode="admin"
+        onSuccess={() => refetchUsers()}
+      />
 
       {/* Delete Confirmation Modal */}
       <Dialog open={dialogState === 'delete'} onOpenChange={(open) => setDialogState(open ? 'delete' : null)}>

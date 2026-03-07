@@ -510,7 +510,7 @@ def get_my_borrows(
                 "cas_number": item.cas_number,
                 "remaining_quantity": item.remaining_quantity,
                 "unit": item.unit,
-                "borrow_time": item.updated_at,
+                "borrow_time": item.updated_at.isoformat() + 'Z' if item.updated_at else None,
                 "borrow_days": (now - item.updated_at).days if item.updated_at else 0,
                 "is_overdue": ((now - item.updated_at).days > 3) if item.updated_at else False,
             }
@@ -545,7 +545,7 @@ def get_pending_stockin(
                 "cas_number": item.cas_number,
                 "initial_quantity": item.initial_quantity,
                 "unit": item.unit,
-                "stockin_time": item.created_at,
+                "stockin_time": item.created_at.isoformat() + 'Z' if item.created_at else None,
             }
             for item in items
         ],
@@ -885,15 +885,16 @@ def update_inventory(
     update_data = update.model_dump(exclude_unset=True)
     
     optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'notes']
-    update_data = _empty_to_none(update_data, optional_string_fields)
+    for field in optional_string_fields:
+        if field in update_data and update_data[field] == '':
+            update_data[field] = None
     
     # CAS号规范化：如果传入了 cas_number，进行规范化处理
     if 'cas_number' in update_data and update_data['cas_number']:
         normalized_cas = normalize_cas(update_data['cas_number'])
         if normalized_cas:
             update_data['cas_number'] = normalized_cas
-    
-    # 处理规格更新：如果传入了 specification 字符串，使用 parse_specification 解析
+    spec_updated = False
     if 'specification' in update_data and update_data['specification']:
         spec_str = update_data['specification']
         try:
@@ -907,7 +908,13 @@ def update_inventory(
             )
         # 移除 specification，避免重复设置
         update_data.pop('specification')
+        spec_updated = True
     
+    # 显式设置 remaining_quantity，确保它被更新
+    if 'remaining_quantity' in update_data:
+        new_remaining = update_data['remaining_quantity']
+        item.remaining_quantity = new_remaining
+        
     for field, value in update_data.items():
         setattr(item, field, value)
 
@@ -1127,8 +1134,8 @@ def get_borrow_history(
             {
                 "id": log.id,
                 "borrower_id": log.borrower_id,
-                "borrow_time": log.borrow_time,
-                "return_time": log.return_time,
+                "borrow_time": log.borrow_time.isoformat() + 'Z' if log.borrow_time else None,
+                "return_time": log.return_time.isoformat() + 'Z' if log.return_time else None,
                 "quantity_borrowed": log.quantity_borrowed,
                 "quantity_returned": log.quantity_returned,
             }

@@ -29,42 +29,26 @@ const setAnnouncementRead = (id: number) => {
   localStorage.setItem(READ_KEY, JSON.stringify(storage))
 }
 
-// 检查公告是否已读 - 如果公告有更新则删除记录并视为未读
-// 使用 UTC 毫秒数比较
+// 检查公告是否已读
 const checkAnnouncementRead = (id: number, currentUpdatedAt: string): boolean => {
   const storage = getReadStorage()
   const key = id.toString()
   const timestamp = storage[key]
-  
-  if (!timestamp) {
-    return false
-  }
-  
-  // 将时间统一转换为 UTC 毫秒数进行比较
-  // 处理带 Z 和不带 Z 的 ISO 字符串
+
+  if (!timestamp) return false
+
   const parseUTC = (dateStr: string): number => {
-    // 如果没有 Z 后缀，添加 Z 以便正确解析为 UTC
     const normalized = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z'
     return new Date(normalized).getTime()
   }
-  
+
   const updatedTime = parseUTC(currentUpdatedAt)
-  
-  console.log('[Announcement] checkAnnouncementRead:', { 
-    id, 
-    currentUpdatedAt, 
-    timestamp, 
-    updatedTime,
-    isUpdated: updatedTime > timestamp 
-  })
-  
-  // 如果公告更新时间晚于用户点击时间，说明公告有更新，需要重新标记为未读
+
   if (updatedTime > timestamp) {
     delete storage[key]
     localStorage.setItem(READ_KEY, JSON.stringify(storage))
     return false
   }
-  
   return true
 }
 
@@ -74,73 +58,42 @@ export function AnnouncementButton({ announcements }: AnnouncementButtonProps) {
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // Filter to visible announcements (both pinned and unpinned)
   const visibleAnnouncements = announcements.filter((a) => a.is_visible)
 
-  // Calculate unread count (announcements that are not read or have been updated)
   const unreadCount = visibleAnnouncements.filter((announcement) => {
     return !checkAnnouncementRead(announcement.id, announcement.updated_at)
   }).length
 
-  // Check if we should show the button (not mobile)
-  const [isDesktop, setIsDesktop] = useState(false)
-
-  useEffect(() => {
-    const checkScreenSize = () => {
-      setIsDesktop(window.innerWidth >= 768)
-    }
-
-    checkScreenSize()
-    window.addEventListener('resize', checkScreenSize)
-
-    return () => window.removeEventListener('resize', checkScreenSize)
-  }, [])
-
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false)
       }
     }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
+    if (isOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isOpen])
 
-  // Handle clicking on an announcement item
   const handleAnnouncementClick = (announcement: Announcement) => {
-    // Mark as read - store timestamp (permanent until announcement updates)
     setAnnouncementRead(announcement.id)
     setSelectedAnnouncement(announcement)
     setIsDetailOpen(true)
     setIsOpen(false)
   }
 
-  // Don't render on mobile
-  if (!isDesktop) {
-    return null
-  }
-
   return (
     <div className="relative" ref={dropdownRef}>
-      {/* Bell Button */}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             onClick={() => setIsOpen(!isOpen)}
             variant="ghost"
             size="icon"
-            className="h-10 w-10 hidden md:flex transition-colors"
+            className="h-10 w-10 transition-colors"
           >
             <Bell className="size-5" />
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] text-xs font-bold text-destructive-foreground bg-destructive rounded-full px-1">
+              <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] text-sm font-bold text-destructive-foreground bg-destructive rounded-full px-1">
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
@@ -151,9 +104,8 @@ export function AnnouncementButton({ announcements }: AnnouncementButtonProps) {
         </TooltipContent>
       </Tooltip>
 
-      {/* Dropdown */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-80 md:w-96 max-h-[400px] overflow-y-auto bg-card border border-border rounded-lg shadow-lg z-50">
+        <div className="absolute right-0 top-full mt-2 w-[85vw] md:w-96 max-h-100 overflow-y-auto bg-card border border-border rounded-lg shadow-lg z-50">
           <div className="flex items-center justify-between px-4 py-2 border-b border-border">
             <h3 className="font-bold">公告列表</h3>
             <Button
@@ -167,9 +119,7 @@ export function AnnouncementButton({ announcements }: AnnouncementButtonProps) {
 
           <div className="divide-y divide-border">
             {visibleAnnouncements.length === 0 ? (
-              <div className="px-4 py-8 text-center text-muted-foreground">
-                暂无公告
-              </div>
+              <div className="px-4 py-8 text-center text-muted-foreground">暂无公告</div>
             ) : (
               visibleAnnouncements.map((announcement) => {
                 const unread = !checkAnnouncementRead(announcement.id, announcement.updated_at)
@@ -184,13 +134,16 @@ export function AnnouncementButton({ announcements }: AnnouncementButtonProps) {
                     <div className="flex items-start gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
+                          {unread && (
+                            <span className="size-2 bg-destructive rounded-full shrink-0" />
+                          )}
                           {announcement.is_pinned && (
                             <Pin className="size-3 text-amber-600 dark:text-amber-500 shrink-0" />
                           )}
-                          <span className={`font-bold truncate text-sm ${unread ? '' : 'text-muted-foreground'}`}>
+                          <span className={`font-bold truncate text-base ${unread ? '' : 'text-muted-foreground'}`}>
                             {announcement.title}
                           </span>
-                          <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                          <span className="ml-auto text-sm text-muted-foreground shrink-0">
                             {formatDate(announcement.created_at)}
                           </span>
                         </div>
@@ -207,7 +160,7 @@ export function AnnouncementButton({ announcements }: AnnouncementButtonProps) {
         </div>
       )}
 
-      {/* Announcement Detail Dialog */}
+      {/* 父组件不用再传 hasImages 了，最干净的调用方式 */}
       <AnnouncementDetail
         announcement={selectedAnnouncement}
         open={isDetailOpen}

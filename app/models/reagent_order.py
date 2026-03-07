@@ -5,6 +5,7 @@ Separated from Consumable for independent workflow
 from datetime import datetime
 
 from app.core.time_utils import get_utc_now
+from app.models import BaseResponse
 from enum import Enum
 from typing import Optional
 
@@ -122,7 +123,7 @@ class ReagentOrderUpdate(SQLModel):
     notes: Optional[str] = None
 
 
-class ReagentOrderResponse(SQLModel):
+class ReagentOrderResponse(BaseResponse):
     """DTO for reagent order API responses"""
     id: int
     cas_number: str

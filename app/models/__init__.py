@@ -1,6 +1,16 @@
 # Models module - Database models for LIMS
-from .user import User, UserRole
-from .inventory import Inventory, InventoryStatus, BorrowLog, BorrowLogResponse
+from datetime import datetime
+from pydantic import ConfigDict
+from sqlmodel import SQLModel
+
+
+class BaseResponse(SQLModel):
+    """全局 Response 基类 - 所有 API 响应都继承此类，自动处理 datetime 为 UTC + Z"""
+    model_config = ConfigDict(from_attributes=True, json_encoders={datetime: lambda v: v.isoformat() + 'Z'})
+
+
+from .user import User, UserRole, UserResponse
+from .inventory import Inventory, InventoryStatus, BorrowLog, BorrowLogResponse, InventoryResponse
 from .reagent_order import (
     ReagentOrder,
     ReagentOrderStatus,
@@ -26,9 +36,12 @@ from .announcement import (
 )
 
 __all__ = [
+    # Base
+    "BaseResponse",
     # User
     "User",
     "UserRole",
+    "UserResponse",
     # Session
     "UserSession",
     # Inventory
@@ -36,6 +49,7 @@ __all__ = [
     "InventoryStatus",
     "BorrowLog",
     "BorrowLogResponse",
+    "InventoryResponse",
     # Reagent Order
     "ReagentOrder",
     "ReagentOrderStatus",

@@ -40,17 +40,29 @@ export function Autocomplete({
     if (!inputValue) return []
     return options.filter(
       (opt) =>
-        opt.label.toLowerCase().includes(inputValue.toLowerCase()) &&
-        opt.label !== inputValue
+        opt.label.toLowerCase().includes(inputValue.toLowerCase())
     )
   }, [options, inputValue])
 
-  // 处理输入变化与双字符触发逻辑 (cmdk 的 onValueChange 直接返回 string)
+  // 处理输入变化与双字符触发逻辑
   const handleValueChange = (val: string) => {
     setInputValue(val)
     onChange?.(val)
 
     // 输入字符 >= 2 时才打开下拉面板
+    if (val.length >= 2) {
+      setOpen(true)
+    } else {
+      setOpen(false)
+    }
+  }
+
+  // 直接处理 Input 的 onChange 事件
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value
+    setInputValue(val)
+    onChange?.(val)
+    
     if (val.length >= 2) {
       setOpen(true)
     } else {
@@ -86,6 +98,7 @@ export function Autocomplete({
               placeholder={placeholder}
               disabled={disabled}
               className="w-full"
+              onChange={handleInputChange}
               // 点击输入框时，如果已经满足条件直接展开
               onClick={() => inputValue.length >= 2 && setOpen(true)}
             />

@@ -5,13 +5,13 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.time_utils import get_utc_now
 from app.core.redis import delete_cached_session
 from app.database import get_db
+from app.models import BaseResponse
 from app.models.user import User
 from app.models.user_session import UserSession
 
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/sessions", tags=["Sessions"])
 from app.api.deps import get_current_session
 
 
-class SessionResponse(BaseModel):
+class SessionResponse(BaseResponse):
     """Session response model"""
     id: int
     device_id: str
@@ -33,10 +33,6 @@ class SessionResponse(BaseModel):
     created_at: datetime
     last_active_at: datetime
     expires_at: datetime
-    
-    class Config:
-        from_attributes = True
-        json_encoders = {datetime: lambda v: v.isoformat() + 'Z'}
 
 
 # 直接使用 auth 模块的 get_current_user
@@ -123,9 +119,11 @@ def delete_all_sessions(
 def refresh_session(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    current_session: UserSession = Depends(get_current_session)
+    current: tuple[User, UserSession] = Depends(get_current_session)
 ):
     """Refresh current session expiration time"""
+    # 解包 tuple
+    _, current_session = current
     # 获取当前会话（通过 token_hash 精确匹配当前会话）
     session = db.get(UserSession, current_session.id)
     

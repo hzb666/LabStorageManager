@@ -233,7 +233,6 @@ export function FilterTable({
           {filter.isLoading && filter.data.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
               <Loader2 className="w-5 h-5 animate-spin mr-2" />
-              <span>加载中...</span>
             </div>
           ) : filter.data.length === 0 ? (
             <TableEmptyState

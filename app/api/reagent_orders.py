@@ -628,8 +628,8 @@ def get_my_reagent_orders(
             "is_hazardous": order.is_hazardous,
             "notes": order.notes,
             "order_reason": order.order_reason,
-            "created_at": order.created_at,
-            "updated_at": order.updated_at
+            "created_at": order.created_at.isoformat() + 'Z' if order.created_at else None,
+            "updated_at": order.updated_at.isoformat() + 'Z' if order.updated_at else None
         }
         
         if order.status == ReagentOrderStatus.PENDING:

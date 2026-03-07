@@ -8,6 +8,7 @@ from pydantic import ConfigDict
 from sqlmodel import Field, SQLModel, JSON
 
 from app.core.time_utils import get_utc_now
+from app.models import BaseResponse
 
 
 class AnnouncementBase(SQLModel):
@@ -51,9 +52,8 @@ class AnnouncementUpdate(SQLModel):
     is_visible: Optional[bool] = None
 
 
-class AnnouncementResponse(SQLModel):
+class AnnouncementResponse(BaseResponse):
     """DTO for announcement API responses"""
-    model_config = ConfigDict(from_attributes=True, json_encoders={datetime: lambda v: v.isoformat() + 'Z'})
 
     id: int
     title: str

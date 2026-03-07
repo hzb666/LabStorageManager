@@ -5,6 +5,7 @@ Critical Rule #2: CAS Number must be normalized (uppercase, no spaces)
 from datetime import datetime
 
 from app.core.time_utils import get_utc_now
+from app.models import BaseResponse
 from enum import Enum
 from typing import Optional
 
@@ -127,7 +128,7 @@ class InventoryBorrowReturn(SQLModel):
     unit: Optional[str] = Field(default=None, max_length=20)
 
 
-class InventoryResponse(SQLModel):
+class InventoryResponse(BaseResponse):
     """DTO for inventory API responses"""
     id: int
     cas_number: str
@@ -180,7 +181,7 @@ class BorrowLog(SQLModel, table=True):
     created_at: datetime = Field(default_factory=get_utc_now)
 
 
-class BorrowLogResponse(SQLModel):
+class BorrowLogResponse(BaseResponse):
     """DTO for borrow log API responses"""
     id: int
     inventory_id: int

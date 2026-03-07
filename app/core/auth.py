@@ -38,7 +38,7 @@ def get_password_hash(password: str) -> str:
     ).decode('utf-8')
 
 
-def create_access_token(user_id: int, username: str, role: str) -> str:
+def create_access_token(user_id: int, username: str, role: str, username_version: int = 1) -> str:
     """
     Create JWT access token
     
@@ -46,6 +46,7 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
         user_id: User ID
         username: Username
         role: User role (admin/user)
+        username_version: Username version for session invalidation
     
     Returns:
         JWT token string
@@ -56,6 +57,7 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
         "sub": str(user_id),
         "username": username,
         "role": role,
+        "username_version": username_version,
         "type": "access",
         "exp": get_utc_now() + expires_delta,
         "iat": get_utc_now(),
@@ -180,6 +182,15 @@ def get_current_user(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is disabled"
+            )
+        
+        # Check username_version to invalidate sessions when username changes
+        token_version = payload.get("username_version")
+        if token_version is not None and user.username_version != token_version:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="会话失效，请重新登录",
+                headers={"WWW-Authenticate": "Bearer"},
             )
         
         return user

@@ -55,8 +55,8 @@ export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
     { name: 'storage_location' as const, label: '存放位置', type: 'input' as const, placeholder: '如: A-1-1 柜' },
     ...quantityFields,
-    { name: 'brand' as const, label: '品牌', type: 'input' as const, placeholder: '如: Sigma' },
-    { name: 'category' as const, label: '分类', type: 'input' as const, placeholder: '如: 有机试剂' },
+    { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称' },
+    { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: REAGENT_CATEGORY_OPTIONS, placeholder: '输入分类名称' },
     {
       name: 'is_hazardous' as const,
       label: '危险品',
@@ -147,6 +147,49 @@ export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentO
   ]
 }
 
+// ============================================================================
+// 用户管理表单配置
+// ============================================================================
+
+/** 角色选项 */
+export const USER_ROLE_OPTIONS: { label: string; value: string }[] = [
+  { label: '用户', value: 'user' },
+  { label: '管理员', value: 'admin' },
+]
+
+// 用户表单默认值
+export const defaultUserValues = {
+  username: '',
+  full_name: '',
+  role: 'user' as 'admin' | 'user'
+}
+
+/**
+ * 获取用户创建表单字段配置
+ */
+export function getUserCreateFormFields(): FieldSchema<{ username: string; full_name: string; role: 'admin' | 'user' }>[] {
+  return [
+    { name: 'username' as const, label: '用户名', type: 'input' as const, required: true, placeholder: '请输入用户名' },
+    { name: 'full_name' as const, label: '姓名', type: 'input' as const, required: true, placeholder: '请输入姓名' },
+    { name: 'role' as const, label: '角色', type: 'select' as const, options: USER_ROLE_OPTIONS, required: true },
+  ]
+}
+
+/**
+ * 获取用户编辑表单字段配置
+ */
+export function getUserEditFormFields(): FieldSchema<{ username: string; full_name: string; role: 'admin' | 'user' }>[] {
+  return [
+    { name: 'username' as const, label: '用户名', type: 'input' as const, required: true, placeholder: '请输入用户名' },
+    { name: 'full_name' as const, label: '姓名', type: 'input' as const, required: true, placeholder: '请输入姓名' },
+    { name: 'role' as const, label: '角色', type: 'select' as const, options: USER_ROLE_OPTIONS, required: true },
+  ]
+}
+
+// ============================================================================
+// 耗材订单表单配置
+// ============================================================================
+
 /**
  * 获取耗材订单表单字段配置
  * @param isEdit 是否为编辑模式
@@ -156,8 +199,8 @@ export function getConsumableOrderFormFields(_isEdit: boolean): FieldSchema<Cons
     { name: 'name' as const, label: '耗材名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 一次性手套' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Disposable Gloves' },
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 实验手套' },
-    { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: REAGENT_CATEGORY_OPTIONS, placeholder: '输入分类名称' },
-    { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称' },
+    { name: 'category' as const, label: '分类', type: 'input' as const, placeholder: '如: 实验分类' },
+    { name: 'brand' as const, label: '品牌', type: 'input' as const, placeholder: '如: 3M' },
     { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: M码' },
     { name: 'unit' as const, label: '单位', type: 'input' as const, placeholder: '如: 箱、盒、个' },
     { 

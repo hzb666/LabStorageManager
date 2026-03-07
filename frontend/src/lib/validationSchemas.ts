@@ -161,15 +161,6 @@ export const UsernameSchema = v.pipe(
 )
 
 /**
- * 密码验证 - 仅验证底线
- * 强度计算由组件自行处理
- */
-export const PasswordBaseSchema = v.pipe(
-  v.string('密码不能为空'),
-  v.minLength(6, '密码至少6个字符')
-)
-
-/**
  * 规格验证 - 替代 validateSpecification
  * 支持格式: 500ml, 1L, 100g, 500 ml, 1.5L 等
  */
@@ -376,20 +367,6 @@ export const LockScreenSchema = v.object({
  */
 export type LoginFormData = v.InferOutput<typeof LoginSchema>
 
-/**
- * 用户创建/更新 Schema
- */
-export const UserSchema = v.object({
-  username: UsernameSchema,
-  password: PasswordBaseSchema,
-  full_name: v.optional(v.string()),
-  role: v.optional(v.picklist(['admin', 'user']))
-})
-
-/**
- * 用户表单 Schema 类型
- */
-export type UserFormData = v.InferOutput<typeof UserSchema>
 
 // ==========================================
 // 7. 用户管理模块 Schema (Admin)
