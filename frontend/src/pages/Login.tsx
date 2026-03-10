@@ -8,7 +8,7 @@ import { useAuthStore } from '@/store/useStore'
 import { useTheme } from '@/hooks/useTheme'
 import { useRememberedUser } from '@/hooks/useRememberedUser'
 import { Button } from '@/components/ui/Button'
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import {
   Card,

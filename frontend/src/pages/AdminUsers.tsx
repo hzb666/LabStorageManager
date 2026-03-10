@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { userAdminAPI } from '@/api/client'
 import { toast } from '@/lib/toast'
 import { useAuthStore } from '@/store/useStore'
-import { formatDate, getFullImageUrl } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
 import { BaseForm, type FieldSchema } from '@/components/BaseForm'
 import { UserEditDialog, type User } from '@/components/UserEditDialog'
@@ -44,12 +44,11 @@ import {
 import { AxiosError } from 'axios'
 import type { PaginationParams } from '@/api/client'
 
-import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { TableEmptyState } from '@/components/ui/TableFilters'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import { getAdminUsersTableColumns } from '@/lib/tableConfigs'
 
 interface UserListParams extends PaginationParams {
   role?: string
@@ -176,53 +175,12 @@ export function AdminUsersPage() {
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
 
-  // 表格列定义
-  const columns = useMemo(() => [
-    columnHelper.display({
-      id: 'avatar',
-      header: '',
-      size: 50,
-      cell: info => {
-        const user = info.row.original
-        return (
-          <Avatar className="size-8">
-            <AvatarImage src={user.avatar_url ? getFullImageUrl(user.avatar_url) : undefined} alt={user.username} />
-            <AvatarFallback>{user.username.charAt(0).toUpperCase()}</AvatarFallback>
-          </Avatar>
-        )
-      },
-    }),
-    columnHelper.accessor('username', {
-      header: '用户名',
-      size: 120,
-      cell: info => <span>{info.getValue()}</span>,
-    }),
-    columnHelper.accessor('full_name', {
-      header: '姓名',
-      size: 120,
-      cell: info => info.getValue() || '-',
-    }),
-    columnHelper.accessor('role', {
-      header: '角色',
-      size: 80,
-      cell: info => (
-        <StatusBadge status={info.getValue()} />
-      ),
-    }),
-    columnHelper.accessor('is_active', {
-      header: '状态',
-      size: 80,
-      cell: info => {
-        const isActive = info.getValue()
-        return <StatusBadge status={isActive ? 'active' : 'inactive'} />
-      },
-    }),
-    columnHelper.accessor('created_at', {
-      header: '创建时间',
-      size: 120,
-      cell: info => formatDate(info.getValue()),
-    }),
-    columnHelper.display({
+  // 表格列定义 - 使用 tableConfigs 中的基础列 + 页面特定的操作列
+  const columns = useMemo(() => {
+    const baseColumns = getAdminUsersTableColumns() as any[]
+
+    // 追加页面特定的操作列
+    const actionColumn = columnHelper.display({
       id: 'actions',
       header: '操作',
       size: 200,
@@ -323,8 +281,10 @@ export function AdminUsersPage() {
           </div>
         )
       },
-    }),
-  ], [currentUser, navigate])
+    })
+
+    return [...baseColumns, actionColumn]
+  }, [currentUser, navigate])
 
   const table = useReactTable({
     data,
@@ -339,28 +299,6 @@ export function AdminUsersPage() {
       sorting,
       globalFilter,
     },
-  })
-
-  // Create user handlers - 使用 react-hook-form 的 handleSubmit
-  const handleCreate = createForm.handleSubmit(async (formData) => {
-    // 确保 role 始终有值
-    const userData = {
-      ...formData,
-      role: formData.role || 'user' as const,
-    }
-    setCreateLoading(true)
-    try {
-      await userAdminAPI.create(userData)
-      setDialogState(null)
-      resetCreateForm({ username: '', password: '', full_name: '', role: 'user' })
-      refetchUsers()
-      toast.success('用户创建成功')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '创建失败')
-    } finally {
-      setCreateLoading(false)
-    }
   })
 
   // 打开编辑弹窗
@@ -404,6 +342,28 @@ export function AdminUsersPage() {
       toast.error(axiosError.response?.data?.detail || '操作失败')
     }
   }
+
+  // Create user handlers - 使用 react-hook-form 的 handleSubmit
+  const handleCreate = createForm.handleSubmit(async (formData) => {
+    // 确保 role 始终有值
+    const userData = {
+      ...formData,
+      role: formData.role || 'user' as const,
+    }
+    setCreateLoading(true)
+    try {
+      await userAdminAPI.create(userData)
+      setDialogState(null)
+      resetCreateForm({ username: '', password: '', full_name: '', role: 'user' })
+      refetchUsers()
+      toast.success('用户创建成功')
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(axiosError.response?.data?.detail || '创建失败')
+    } finally {
+      setCreateLoading(false)
+    }
+  })
 
   // 关闭创建弹窗时清空表单
   const handleCreateModalClose = (open: boolean) => {

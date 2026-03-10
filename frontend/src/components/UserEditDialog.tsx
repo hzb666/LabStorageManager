@@ -27,7 +27,7 @@ import { Label } from '@/components/ui/Label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import { BaseForm, type FieldSchema } from '@/components/BaseForm'
 import { LoadingButton } from '@/components/ui/LoadingButton'
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { AxiosError } from 'axios'
 

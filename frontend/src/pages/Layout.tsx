@@ -26,7 +26,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
 import { isAdmin, USER_ROLE_MAP } from '@/lib/constants'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 
 const navItems = [
   { title: '仪表盘', href: '/', icon: LayoutDashboard, group: '功能' },

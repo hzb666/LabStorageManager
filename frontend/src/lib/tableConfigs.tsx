@@ -9,12 +9,12 @@
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { HighlightText } from '@/components/ui/HighlightText'
-import { StatusBadge } from '@/components/ui/StatusBadge'
+import { StatusBadge, ORDER_REASON_LABELS } from '@/components/ui/StatusBadge'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
-import { formatDate, formatDateTime } from '@/lib/utils'
-import { ORDER_REASON_LABELS } from '@/components/ui/StatusBadge'
+import { formatDate, formatDateTime, getFullImageUrl } from '@/lib/utils'
 import { Laptop } from 'lucide-react'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 
 // 使用 any 类型简化类型复杂性
 type TableRowData = Record<string, unknown>
@@ -176,7 +176,10 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 90,
       minSize: 70,
       maxSize: 150,
-      cell: info => <span>{info.getValue() || '-'}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span>{value == null ? '-' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('specification', {
       header: '规格',
@@ -218,7 +221,10 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 70,
       minSize: 60,
       maxSize: 100,
-      cell: info => <span>{info.getValue() || '-'}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span>{value == null ? '-' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('created_at', {
       header: '时间',
@@ -263,28 +269,40 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       size: 100,
       minSize: 80,
       maxSize: 150,
-      cell: info => <span className="break-all">{info.getValue() || '-'}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span className="break-all">{value == null ? '-' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('brand', {
       header: '品牌',
       size: 100,
       minSize: 80,
       maxSize: 150,
-      cell: info => <span className="break-all">{info.getValue() || '-'}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span className="break-all">{value == null ? '-' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('specification', {
       header: '规格',
       size: 100,
       minSize: 80,
       maxSize: 150,
-      cell: info => <span className="break-all">{info.getValue() || '-'}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span className="break-all">{value == null ? '-' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('quantity', {
       header: '数量',
       size: 60,
       minSize: 50,
       maxSize: 100,
-      cell: info => <span>{info.getValue()}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span>{value == null ? '' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('price', {
       header: '价格',
@@ -298,7 +316,10 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       size: 80,
       minSize: 60,
       maxSize: 120,
-      cell: info => <span>{info.getValue() || '-'}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span>{value == null ? '-' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('status', {
       header: '状态',
@@ -316,10 +337,27 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
  */
 export function getAdminUsersTableColumns(): ColumnDef<TableRowData, unknown>[] {
   return [
+    columnHelper.display({
+      id: 'avatar',
+      header: '',
+      size: 50,
+      cell: info => {
+        const user = info.row.original as unknown as { username: string; avatar_url?: string }
+        return (
+          <Avatar className="size-8">
+            <AvatarImage src={user.avatar_url ? getFullImageUrl(user.avatar_url) : undefined} alt={user.username} />
+            <AvatarFallback>{user.username.charAt(0).toUpperCase()}</AvatarFallback>
+          </Avatar>
+        )
+      },
+    }),
     columnHelper.accessor('username', {
       header: '用户名',
       size: 120,
-      cell: info => <span>{info.getValue()}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span>{value == null ? '' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('full_name', {
       header: '姓名',
@@ -356,17 +394,23 @@ export function getDeviceManagementTableColumns(): ColumnDef<TableRowData, unkno
     columnHelper.accessor('device_name', {
       header: '设备名称',
       size: 150,
-      cell: info => (
-        <div className="flex items-center gap-2">
-          <Laptop className="w-4 h-4 text-muted-foreground" />
-          <span>{info.getValue()}</span>
-        </div>
-      ),
+      cell: info => {
+        const value = info.getValue()
+        return (
+          <div className="flex items-center gap-2">
+            <Laptop className="w-4 h-4 text-muted-foreground" />
+            <span>{value == null ? '' : String(value)}</span>
+          </div>
+        )
+      },
     }),
     columnHelper.accessor('ip_address', {
       header: 'IP地址',
       size: 130,
-      cell: info => <span className="text-base">{info.getValue()}</span>,
+      cell: info => {
+        const value = info.getValue()
+        return <span className="text-base">{value == null ? '' : String(value)}</span>
+      },
     }),
     columnHelper.accessor('last_active_at', {
       header: '最近活跃',

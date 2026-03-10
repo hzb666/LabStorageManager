@@ -357,6 +357,7 @@ export interface LogsAPI {
     limit?: number
     search?: string
     log_type?: string
+    status_filter?: string
   }) => Promise<{ data: { data: LogItem[]; total: number } }>
 }
 
@@ -368,16 +369,16 @@ export const createLogsAPI = (token: string): LogsAPI => ({
     if (params.skip !== undefined) queryParams.append('skip', String(params.skip))
     if (params.limit !== undefined) queryParams.append('limit', String(params.limit))
     if (params.search) queryParams.append('keyword', params.search)
-    
+
     // 将 status_filter 转换为 log_type（FilterTable 使用 status_filter，日志 API 需要 log_type）
     // 注意：'all' 表示全部类型，不传参给后端
     if (params.status_filter && params.status_filter !== 'all') {
       queryParams.append('log_type', params.status_filter)
     }
-    
-    const response = await api.get<LogsResponse>(`/users/admin/logs/${token}?${queryParams.toString()}`, {
-      credentials: 'include'
-    })
-    return { data: { data: response.data.data, total: response.data.total } }
+
+    const response = await api.get<LogsResponse>(`/users/admin/logs/${token}?${queryParams.toString()}`)
+    // LogsResponse 包含 { user_id, username, data: LogItem[], total }
+    const logsData = response.data
+    return { data: { data: logsData.data, total: logsData.total } }
   }
 })

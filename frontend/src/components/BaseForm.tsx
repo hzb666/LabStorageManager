@@ -98,7 +98,7 @@ interface SchemaBaseFormProps<T extends Record<string, unknown>> {
 type BaseFormProps<T extends Record<string, unknown>> = SimpleBaseFormProps<T> | SchemaBaseFormProps<T>
 
 // 判断是否为 Schema 模式
-function isSchemaMode<T>(props: BaseFormProps<T>): props is SchemaBaseFormProps<T> {
+function isSchemaMode<T extends Record<string, unknown>>(props: BaseFormProps<T>): props is SchemaBaseFormProps<T> {
   return 'schema' in props && !('fields' in props)
 }
 
@@ -135,7 +135,10 @@ function isSchemaMode<T>(props: BaseFormProps<T>): props is SchemaBaseFormProps<
  * ```
  */
 function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
-  const { form, disabled = false, readOnly = false, layout = 'grid', className = '' } = props
+  // 获取 layout 和 className（从 props 中解构）
+  const layout = 'layout' in props ? props.layout : 'grid'
+  const className = 'className' in props ? props.className : ''
+  const { form, disabled = false, readOnly = false } = props
 
   // 获取 fields
   const fields = isSchemaMode(props) ? props.schema.fields : props.fields
@@ -289,12 +292,13 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
 
   // 根据布局模式生成容器类名
   const getContainerClassName = () => {
-    const baseClasses = {
+    const baseClasses: Record<string, string> = {
       grid: 'grid grid-cols-1 sm:grid-cols-3 gap-4',
       flex: 'flex flex-wrap gap-4',
       stack: 'space-y-4',
     }
-    return `${baseClasses[layout]} ${className}`.trim()
+    const currentLayout = layout || 'grid'
+    return `${baseClasses[currentLayout]} ${className || ''}`.trim()
   }
 
   // 注意：按钮不在 BaseForm 中渲染，由使用方自行添加

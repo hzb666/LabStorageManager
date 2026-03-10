@@ -1,17 +1,7 @@
 ﻿import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
-import { Dashboard } from '@/pages/Dashboard'
-import { InventoryPage } from '@/pages/Inventory'
-import { ImportPage } from '@/pages/Import'
-import { AdminUsersPage } from '@/pages/AdminUsers'
-import { ReagentOrdersPage } from '@/pages/ReagentOrders'
-import { ConsumableOrdersPage } from '@/pages/ConsumableOrders'
-import { TestErrorPage } from '@/pages/TestError'
-import { NotFoundPage } from '@/pages/NotFound'
-import DeviceManagement from '@/pages/DeviceManagement'
-import { AnnouncementManagement } from '@/pages/AnnouncementManagement'
-import OperationLogsPage from '@/pages/OperationLogs'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
 import { TooltipProvider } from '@/components/ui/Tooltip'
@@ -20,6 +10,19 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { isAdmin } from '@/lib/constants'
 import { useEffect, useRef } from 'react'
 import { authAPI } from '@/api/client'
+
+// 懒加载页面组件 - 使用默认导出
+const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
+const InventoryPage = lazy(() => import('@/pages/Inventory').then(m => ({ default: m.InventoryPage })))
+const ImportPage = lazy(() => import('@/pages/Import').then(m => ({ default: m.ImportPage })))
+const AdminUsersPage = lazy(() => import('@/pages/AdminUsers').then(m => ({ default: m.AdminUsersPage })))
+const ReagentOrdersPage = lazy(() => import('@/pages/ReagentOrders').then(m => ({ default: m.ReagentOrdersPage })))
+const ConsumableOrdersPage = lazy(() => import('@/pages/ConsumableOrders').then(m => ({ default: m.ConsumableOrdersPage })))
+const TestErrorPage = lazy(() => import('@/pages/TestError').then(m => ({ default: m.TestErrorPage })))
+const NotFoundPage = lazy(() => import('@/pages/NotFound').then(m => ({ default: m.NotFoundPage })))
+const DeviceManagement = lazy(() => import('@/pages/DeviceManagement').then(m => ({ default: m.default })))
+const AnnouncementManagement = lazy(() => import('@/pages/AnnouncementManagement').then(m => ({ default: m.AnnouncementManagement })))
+const OperationLogsPage = lazy(() => import('@/pages/OperationLogs').then(m => ({ default: m.default })))
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -59,50 +62,56 @@ function AppContent() {
     <TooltipProvider>
       <BrowserRouter>
         <ToastContainer />
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/test-error" element={<TestErrorPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="reagents" element={<ReagentOrdersPage />} />
-            <Route path="consumables" element={<ConsumableOrdersPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
-            <Route path="import" element={<ImportPage />} />
+        <Suspense fallback={
+          <div className="flex items-center justify-center h-screen">
+            <div className="animate-pulse bg-gray-200 rounded-lg h-32 w-96" />
+          </div>
+        }>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/test-error" element={<TestErrorPage />} />
+            <Route path="*" element={<NotFoundPage />} />
             <Route
-              path="admin/users"
+              path="/"
               element={
-                <AdminRoute>
-                  <AdminUsersPage />
-                </AdminRoute>
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
               }
-            />
-            <Route
-              path="admin/announcements"
-              element={
-                <AdminRoute>
-                  <AnnouncementManagement />
-                </AdminRoute>
-              }
-            />
-            <Route path="devices" element={<DeviceManagement />} />
-            <Route
-              path="admin/logs/:token"
-              element={
-                <AdminRoute>
-                  <OperationLogsPage />
-                </AdminRoute>
-              }
-            />
-          </Route>
-        </Routes>
+            >
+              <Route index element={<Dashboard />} />
+              <Route path="reagents" element={<ReagentOrdersPage />} />
+              <Route path="consumables" element={<ConsumableOrdersPage />} />
+              <Route path="inventory" element={<InventoryPage />} />
+              <Route path="import" element={<ImportPage />} />
+              <Route
+                path="admin/users"
+                element={
+                  <AdminRoute>
+                    <AdminUsersPage />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="admin/announcements"
+                element={
+                  <AdminRoute>
+                    <AnnouncementManagement />
+                  </AdminRoute>
+                }
+              />
+              <Route path="devices" element={<DeviceManagement />} />
+              <Route
+                path="admin/logs/:token"
+                element={
+                  <AdminRoute>
+                    <OperationLogsPage />
+                  </AdminRoute>
+                }
+              />
+            </Route>
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </TooltipProvider>
   )
