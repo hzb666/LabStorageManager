@@ -4,7 +4,7 @@ Cart Sync API - 北大医学部购物车同步
 """
 import logging
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Annotated
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
@@ -113,8 +113,8 @@ def match_reagent_order(db: Session, item: CartItem) -> MatchedItem:
 @router.post("", response_model=CartSyncResponse)
 async def sync_cart(
     request: CartItemRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """同步购物车数据并匹配现有订单"""
     if not request.items:
@@ -146,8 +146,8 @@ async def sync_cart(
 @router.post("/import", response_model=CartImportResponse)
 async def import_cart(
     request: CartImportRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """导入购物车商品到系统"""
     if not request.items:

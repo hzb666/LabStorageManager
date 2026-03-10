@@ -11,14 +11,33 @@ from pypinyin import lazy_pinyin
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, Dict, Any
+from datetime import datetime
+from typing import Optional, Dict, Any, Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func, case
-from sqlalchemy import func as sql_func
 
+from app.database import get_db, DBSession
+from app.models.inventory import (
+    Inventory,
+    InventoryUpdate,
+    InventoryResponse,
+    InventoryStatus,
+    InventoryBorrowReturn,
+    BorrowLog,
+    ManualInventoryCreate,
+)
+from app.models.user import User, UserRole
+from app.core.auth import get_current_user, require_admin, CurrentUser, AdminUser
+from app.core.time_utils import get_utc_now
+from app.services.cas_utils import normalize_cas
+from app.services.internal_code import generate_internal_code
+from app.services.spec_utils import parse_specification, SpecificationError, format_specification
+from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.user_utils import batch_get_user_names
+from app.services.excel_service import validate_uploaded_file
+
+logger = logging.getLogger(__name__)
 
 def _empty_to_none(obj, fields: list[str]) -> dict:
     """将指定字段的空字符串转换为 None"""
@@ -30,28 +49,6 @@ def _empty_to_none(obj, fields: list[str]) -> dict:
             value = getattr(obj, field, None)
         result[field] = None if value == '' else value
     return result
-
-from app.database import get_db
-from app.models.inventory import (
-    Inventory,
-    InventoryUpdate,
-    InventoryResponse,
-    InventoryStatus,
-    InventoryBorrowReturn,
-    BorrowLog,
-    ManualInventoryCreate,
-)
-from app.models.user import User, UserRole
-from app.core.auth import get_current_user, require_admin
-from app.core.time_utils import get_utc_now
-from app.services.cas_utils import normalize_cas
-from app.services.internal_code import generate_internal_code
-from app.services.spec_utils import parse_specification, SpecificationError, format_specification
-from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.user_utils import batch_get_user_names
-
-logger = logging.getLogger(__name__)
-
 
 def _to_pinyin_sort_key(text: str) -> str:
     """
@@ -65,78 +62,6 @@ def _to_pinyin_sort_key(text: str) -> str:
     return ''.join(pinyin_list)
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
-
-# ==================== File Upload Security ====================
-# 允许的文件扩展名
-ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
-
-# 允许的 MIME 类型
-ALLOWED_MIME_TYPES = {
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".xls": "application/vnd.ms-excel",
-    ".csv": "text/csv",
-}
-
-# 文件魔数（文件头签名）
-FILE_MAGIC_BYTES = {
-    ".xlsx": b"PK\x03\x04",  # ZIP-based (Office Open XML)
-    ".xls": b"\xd0\xcf\x11\xe0",  # OLE2 compound document
-    ".csv": b"",  # CSV is text, no magic bytes needed
-}
-
-# 最大文件大小 (2MB)
-MAX_FILE_SIZE = 2 * 1024 * 1024
-
-
-def validate_uploaded_file(file: UploadFile) -> None:
-    """
-    验证上传的文件类型和内容
-    包括：文件扩展名、MIME类型、文件魔数、文件大小
-    """
-    # 1. 检查文件扩展名
-    ext = Path(file.filename).suffix.lower() if file.filename else ""
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file type. Only .xlsx, .xls, .csv are allowed"
-        )
-
-    # 2. 检查文件大小
-    file.file.seek(0, 2)  # Seek to end
-    file_size = file.file.tell()
-    file.file.seek(0)  # Reset to start
-
-    if file_size > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File size exceeds 10MB limit"
-        )
-
-    if file_size == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File is empty"
-        )
-
-    # 3. 检查文件魔数
-    header = file.file.read(8)
-    file.file.seek(0)  # Reset to start
-
-    if ext == ".xlsx":
-        # XLSX is ZIP-based, check for PK\x03\x04
-        if not header.startswith(b"PK\x03\x04"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid XLSX file format"
-            )
-    elif ext == ".xls":
-        # XLS is OLE2 compound document
-        if not header.startswith(b"\xd0\xcf\x11\xe0"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid XLS file format"
-            )
-    # CSV doesn't need magic bytes check (it's plain text)
 
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
@@ -276,8 +201,8 @@ def _add_specification(item_dict: dict) -> dict:
 @router.get("/cas/{cas_number}")
 def check_cas_inventory(
     cas_number: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """
     Check CAS number inventory status.
@@ -320,8 +245,8 @@ def check_cas_inventory(
 @router.get("/cas/{cas_number}/total")
 def get_cas_total_quantity(
     cas_number: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """Get total remaining quantity for a CAS number."""
     normalized_cas = normalize_cas(cas_number)
@@ -346,8 +271,8 @@ def get_cas_total_quantity(
 @router.get("/code/{internal_code}", response_model=InventoryResponse)
 def get_inventory_by_internal_code(
     internal_code: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """Get inventory item by internal code"""
     item = _find_by_code(db, internal_code)
@@ -364,8 +289,8 @@ def get_inventory_by_internal_code(
 
 @router.get("/export")
 def export_inventory(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: AdminUser,
+    db: DBSession,
 ):
     """Export inventory items as a downloadable CSV file."""
     statement = select(Inventory).order_by(Inventory.created_at.desc())
@@ -415,8 +340,8 @@ def export_inventory(
 @router.post("/manual-add", response_model=dict)
 def manual_add_inventory(
     item_data: ManualInventoryCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Manually add inventory items without going through the order process.
@@ -489,8 +414,8 @@ def manual_add_inventory(
 
 @router.get("/dashboard/my-borrows")
 def get_my_borrows(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Get items borrowed by current user."""
     statement = select(Inventory).where(
@@ -526,8 +451,8 @@ def get_my_borrows(
 
 @router.get("/dashboard/pending-stockin")
 def get_pending_stockin(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Get items pending storage_location assignment (temporary keeper = current user)."""
     statement = select(Inventory).where(
@@ -564,11 +489,11 @@ def get_import_template():
 
 @router.post("/import")
 def import_inventory(
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
+    admin_user: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
     default_storage_location: Optional[str] = None,
     default_is_hazardous: bool = False,
-    admin_user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ):
     """Import inventory items from Excel file (admin only)."""
     from app.services.excel_service import import_inventory_from_excel
@@ -614,6 +539,7 @@ MAX_PAGE_SIZE = 100
 
 @router.get("/")
 def list_inventory(
+    db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = min(50, MAX_PAGE_SIZE),  # 默认分页50条，最大100条
     status_filter: Optional[InventoryStatus] = None,
@@ -624,14 +550,12 @@ def list_inventory(
     fuzzy: bool = False,                  # 模糊搜索（忽略空格和连字符）
     sort_by: Optional[str] = None,       # 排序字段
     sort_order: Optional[str] = 'desc',   # 排序方向：asc 或 desc
-    db: Session = Depends(get_db),
 ):
     """List inventory with optional filters and pagination"""
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = f"list:{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
     
-    # 尝试从缓存获取（仅当是第一页且无搜索条件时）
-    # 这样可以避免分页数据不一致的问题
+    # 尝试从缓存获取（仅当是第一页且无搜索条件时）这样可以避免分页数据不一致的问题
     is_first_page = skip == 0
     has_search = bool(search or status_filter or cas_filter or hazardous_only or sort_by)
     should_use_cache = is_first_page and not has_search
@@ -725,7 +649,8 @@ def list_inventory(
     # 使用 CASE 表达式处理 initial_quantity 为 0 的情况，避免除零错误
     # 计算剩余百分比（处理除零情况）
     # 保留原始 NULL 值，不转为 0，这样可以在排序时区分 NULL 和 0
-    remaining_percent_expr = case(
+    # 预先计算 CASE 表达式，避免在排序时重复创建
+    remaining_percent_case = case(
         (Inventory.initial_quantity > 0, Inventory.remaining_quantity * 1.0 / Inventory.initial_quantity),
         else_=None  # 保留 NULL，不转为 0
     )
@@ -744,7 +669,7 @@ def list_inventory(
         'storage_location': Inventory.storage_location,
         'brand': Inventory.brand,
         'remaining_quantity': Inventory.remaining_quantity,
-        'remaining_percent': remaining_percent_expr,
+        'remaining_percent': remaining_percent_case,
         'initial_quantity': Inventory.initial_quantity,
         'status': Inventory.status,
         'created_at': Inventory.created_at,
@@ -784,8 +709,7 @@ def list_inventory(
         else:
             order_expr = order_column.desc()
 
-    # 次级排序：始终按创建时间降序，确保同值排序时顺序稳定，最新数据排在前面
-    # 第三级排序：按ID降序（确保排序完全稳定，避免相同created_at导致顺序变化）
+    # 次级排序：始终按创建时间降序，确保同值排序时顺序稳定，最新数据排在前面 第三级排序：按ID降序（确保排序完全稳定，避免相同created_at导致顺序变化）
     secondary_order = Inventory.created_at.desc()
     tertiary_order = Inventory.id.desc()
 
@@ -845,9 +769,9 @@ def list_inventory(
 
 @router.get("/{inventory_id}", response_model=InventoryResponse)
 def get_inventory(
-    inventory_id: int, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    inventory_id: int,
+    db: DBSession,
+    _: CurrentUser,
 ):
     """Get inventory item by ID"""
     item = _get_by_id(db, inventory_id)
@@ -864,8 +788,8 @@ def get_inventory(
 def update_inventory(
     inventory_id: int,
     update: InventoryUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Update inventory information"""
     item = _get_by_id(db, inventory_id)
@@ -894,7 +818,6 @@ def update_inventory(
         normalized_cas = normalize_cas(update_data['cas_number'])
         if normalized_cas:
             update_data['cas_number'] = normalized_cas
-    spec_updated = False
     if 'specification' in update_data and update_data['specification']:
         spec_str = update_data['specification']
         try:
@@ -908,7 +831,6 @@ def update_inventory(
             )
         # 移除 specification，避免重复设置
         update_data.pop('specification')
-        spec_updated = True
     
     # 显式设置 remaining_quantity，确保它被更新
     if 'remaining_quantity' in update_data:
@@ -942,8 +864,8 @@ def update_inventory(
 @router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_inventory(
     inventory_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ):
     """Delete inventory item (admin only, prefer status change)"""
     item = _get_by_id(db, inventory_id)
@@ -962,8 +884,8 @@ def delete_inventory(
 @router.post("/{inventory_id}/borrow", response_model=InventoryResponse)
 def borrow_item(
     inventory_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Borrow an inventory item. Uses atomic conditional update to prevent concurrent borrowing."""
     logger.info(f"[BORROW] User {current_user.id} attempting to borrow inventory {inventory_id}")
@@ -1039,8 +961,8 @@ def borrow_item(
 def return_item(
     inventory_id: int,
     return_data: InventoryBorrowReturn,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Return a borrowed item. Returns low quantity warning if remaining < 20%."""
     item = _get_by_id(db, inventory_id)
@@ -1109,8 +1031,8 @@ def return_item(
 @router.get("/{inventory_id}/borrow-history")
 def get_borrow_history(
     inventory_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Get borrow history for an inventory item (last 10 records)."""
     item = _get_by_id(db, inventory_id)

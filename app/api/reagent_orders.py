@@ -5,7 +5,7 @@ Separated from Consumable orders for independent workflow
 import io
 import csv
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -92,8 +92,8 @@ def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
 def create_reagent_order(
     order: ReagentOrderCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """
     Create a new reagent order.
@@ -152,9 +152,9 @@ def create_reagent_order(
 @router.post("/{order_id}/upload-image")
 async def upload_reagent_order_image(
     order_id: int,
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    file: Annotated[UploadFile, File(...)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """Upload and compress image for a reagent order"""
     order = get_reagent_order_by_id(db, order_id)
@@ -188,6 +188,8 @@ MAX_PAGE_SIZE = 100
 
 @router.get("/")
 def list_reagent_orders(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = min(50, MAX_PAGE_SIZE),
     status_filter: Optional[ReagentOrderStatus] = None,
@@ -196,8 +198,6 @@ def list_reagent_orders(
     fuzzy: bool = False,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = 'desc',
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """List reagent orders with optional filters, pagination, search, sort and applicant name"""
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
@@ -337,8 +337,8 @@ def list_reagent_orders(
 
 @router.get("/export")
 def export_reagent_orders(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ):
     """Export reagent orders as a downloadable CSV file."""
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
@@ -392,8 +392,8 @@ def export_reagent_orders(
 @router.get("/{order_id}", response_model=ReagentOrderResponse)
 def get_reagent_order(
     order_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Get reagent order by ID"""
     order = get_reagent_order_by_id(db, order_id)
@@ -409,8 +409,8 @@ def get_reagent_order(
 def update_reagent_order(
     order_id: int,
     order_update: ReagentOrderUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Update reagent order information"""
     order = get_reagent_order_by_id(db, order_id)
@@ -461,8 +461,8 @@ def update_reagent_order(
 @router.post("/{order_id}/approve")
 def approve_reagent_order(
     order_id: int,
-    admin_user: User = Depends(require_admin),
-    db: Session = Depends(get_db)
+    admin_user: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """Approve a reagent order (Admin only)"""
     order = get_reagent_order_by_id(db, order_id)
@@ -489,8 +489,8 @@ def approve_reagent_order(
 @router.post("/{order_id}/reject")
 def reject_reagent_order(
     order_id: int,
-    admin_user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
+    admin_user: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Reject a reagent order (Admin only). Does not modify notes."""
     order = get_reagent_order_by_id(db, order_id)
@@ -510,10 +510,10 @@ def reject_reagent_order(
 
 @router.post("/{order_id}/confirm-arrival")
 def confirm_reagent_arrival(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
     order_id: int,
     body: ConfirmArrivalRequest = ConfirmArrivalRequest(),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """
     Confirm reagent order has arrived.
@@ -568,8 +568,8 @@ def confirm_reagent_arrival(
 
 @router.get("/dashboard/arrived-orders")
 def get_arrived_reagent_orders(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Get all reagent orders that have arrived but not yet stocked in"""
     statement = select(ReagentOrder).where(
@@ -600,8 +600,8 @@ def get_arrived_reagent_orders(
 
 @router.get("/dashboard/my-orders")
 def get_my_reagent_orders(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """Get current user's reagent order progress"""
     statement = select(ReagentOrder).where(
@@ -664,8 +664,8 @@ def get_my_reagent_orders(
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_reagent_order(
     order_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Delete a reagent order (only applicant or admin can delete)"""
     order = get_reagent_order_by_id(db, order_id)
@@ -690,8 +690,8 @@ def delete_reagent_order(
 @router.post("/{order_id}/stock-in", response_model=dict)
 def stock_in_reagent_order(
     order_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """
     Stock-in reagent order: Convert Order to Inventory items.

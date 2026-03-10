@@ -4,10 +4,11 @@ Critical Rule #1: SQLite must enable WAL Mode for concurrency
 """
 import logging
 import os
-from typing import Generator
+from typing import Annotated, Generator
 
 from sqlalchemy import event
 from sqlmodel import SQLModel, Session, create_engine, select
+from fastapi import Depends
 
 from app.models.user import User, UserRole
 
@@ -42,6 +43,11 @@ def get_db() -> Generator[Session, None, None]:
         yield session
 
 
+# Annotated type alias for database session dependency
+# Usage: def endpoint(db: DBSession): ...
+DBSession = Annotated[Session, Depends(get_db)]
+
+
 def init_db() -> None:
     """Initialize database and create all tables"""
     SQLModel.metadata.create_all(engine)
@@ -64,13 +70,12 @@ def _create_default_admin() -> None:
     default_password = settings.default_admin_password
     default_full_name = settings.default_admin_full_name
     
-    # Production: require password to be set
+    # Always require password from environment variable
     if not default_password:
-        if settings.env == "production":
-            raise ValueError("DEFAULT_ADMIN_PASSWORD must be set in production environment")
-        # Development: use default password with warning
-        default_password = "admin123"
-        logger.warning("Using default password 'admin123' in development mode. Set DEFAULT_ADMIN_PASSWORD in .env for production.")
+        raise ValueError(
+            "DEFAULT_ADMIN_PASSWORD must be set. "
+            "Set in .env for production or .env.local for development."
+        )
     
     with Session(engine) as session:
         # Check if any admin users exist (only check for admins, not all users)

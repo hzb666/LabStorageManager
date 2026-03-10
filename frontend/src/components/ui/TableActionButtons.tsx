@@ -77,7 +77,7 @@ export interface TableActionButtonsProps<T> {
  * 通用表格操作按钮组件
  * 通过配置化 Props 实现不同场景的复用
  */
-export function TableActionButtons<T extends Record<string, unknown>>({
+export function TableActionButtons<T>({
   item,
   actions,
   showEdit = true,
@@ -177,7 +177,7 @@ interface ActionButtonProps<T> {
   isAdmin: boolean
 }
 
-function ActionButton<T extends Record<string, unknown>>({
+function ActionButton<T>({
   config,
   item,
 }: ActionButtonProps<T>) {

@@ -4,14 +4,12 @@
  * 参考 Inventory 页面实现，使用 FilterTable 组件
  */
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { createColumnHelper, type RowData } from '@tanstack/react-table'
+import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
-import { valibotResolver } from '@hookform/resolvers/valibot'
 
 // UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { StatusBadge } from '@/components/ui/StatusBadge'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/lib/toast'
@@ -23,12 +21,12 @@ import { BaseForm } from '@/components/BaseForm'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
 import { UserRoles } from '@/lib/constants'
-import { useTableState } from '@/hooks/useTableState'
+import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { reagentOrderAPI, chemicalAPI, ReagentOrderReason } from '@/api/client'
 import { processNotes } from '@/lib/utils'
-import { ReagentOrderSchema, validateCASLogic } from '@/lib/validationSchemas'
+import { ReagentOrderSchema, validateCASLogic, createValibotResolver } from '@/lib/validationSchemas'
 import type { ReagentOrderFormData } from '@/lib/validationSchemas'
 import { getReagentOrderTableColumns } from '@/lib/tableConfigs'
 import {
@@ -88,34 +86,6 @@ interface CASWarningInfo {
     orders_count: number
   }
 }
-
-// 搜索高亮组件
-const HighlightText = React.memo(function HighlightText({
-  text, highlight, fuzzy
-}: { text: string; highlight?: string; fuzzy?: boolean }) {
-  const regex = React.useMemo(() => new RegExp(`(${highlight})`, 'gi'), [highlight])
-  if (!highlight || !text) return <>{text}</>
-
-  if (fuzzy) {
-    const normalizedHighlight = highlight.replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D_.-]+/g, '')
-    const normalizedText = text.replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D_.-]+/g, '')
-    if (normalizedText.toLowerCase().includes(normalizedHighlight.toLowerCase())) {
-      return <span className="bg-amber-200 dark:bg-amber-800/50">{text}</span>
-    }
-    return <>{text}</>
-  }
-
-  const parts = text.split(regex)
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.toLowerCase() === highlight.toLowerCase() ? (
-          <span key={i} className="bg-amber-200 dark:bg-amber-800/50">{part}</span>
-        ) : part
-      )}
-    </>
-  )
-})
 
 const columnHelper = createColumnHelper<ReagentOrder>()
 
@@ -177,7 +147,7 @@ export function ReagentOrdersPage() {
       const response = await reagentOrderAPI.list()
       const allOrders: ReagentOrder[] = response.data.data || []
       const existingOrders = allOrders.filter(
-        (o: ReagentOrder) => o.cas_number.replace(/-/g, '') === cas.replace(/-/g, '')
+        (o: ReagentOrder) => o.cas_number.replaceAll('-', '') === cas.replaceAll('-', '')
       )
       if (existingOrders.length > 0) {
         setCasWarning({
@@ -201,7 +171,7 @@ export function ReagentOrdersPage() {
 
   // 表单实例
   const form = useForm<ReagentOrderFormData>({
-    resolver: valibotResolver(ReagentOrderSchema) as any,
+    resolver: createValibotResolver(ReagentOrderSchema),
     defaultValues: defaultReagentOrderValues,
     shouldFocusError: false,
   })
@@ -297,11 +267,11 @@ export function ReagentOrdersPage() {
         }
         setDialogState(null)
       } catch (err) {
-        const error = err as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
+        const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
         const errorDetail = error.response?.data?.detail
         if (dialogState === 'add' && Array.isArray(errorDetail)) {
           errorDetail.forEach((e: ValidationError) => {
-            if (e.loc && e.loc[1]) form.setError(e.loc[1] as keyof ReagentOrderFormData, { message: e.msg || '验证错误' })
+            if (e.loc?.[1]) form.setError(e.loc[1] as keyof ReagentOrderFormData, { message: e.msg || '验证错误' })
           })
         } else {
           toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
@@ -316,43 +286,10 @@ export function ReagentOrdersPage() {
   )
 
   // 审批操作
-  const handleApprove = useCallback(async (id: number) => {
-    try {
-      await reagentOrderAPI.approve(id)
-      // 先刷新数据，再弹出 toast
-      await loadOrders()
-      toast.success('审批通过')
-    } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || '操作失败')
-    }
-  }, [loadOrders])
 
   // 驳回操作
-  const handleReject = useCallback(async (id: number) => {
-    try {
-      await reagentOrderAPI.reject(id, '管理员驳回')
-      // 先刷新数据，再弹出 toast
-      await loadOrders()
-      toast.success('已驳回')
-    } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || '操作失败')
-    }
-  }, [loadOrders])
 
   // 确认到货
-  const handleConfirmArrival = useCallback(async (id: number) => {
-    try {
-      const result = await reagentOrderAPI.confirmArrival(id)
-      // 先刷新数据，再弹出 toast
-      await loadOrders()
-      toast.success(result.data.message || '确认成功')
-    } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || '操作失败')
-    }
-  }, [loadOrders])
 
   // 导出订单
   const handleExport = useCallback(async () => {
@@ -365,7 +302,7 @@ export function ReagentOrdersPage() {
       link.download = `reagent_orders_${new Date().toISOString().slice(0, 10)}.csv`
       document.body.appendChild(link)
       link.click()
-      document.body.removeChild(link)
+      link.remove()
       URL.revokeObjectURL(url)
     } catch {
       toast.error('导出失败')
@@ -480,7 +417,7 @@ export function ReagentOrdersPage() {
 
   // 表格列配置
   const columns = useMemo(() => {
-    const baseColumns = getReagentOrderTableColumns() as any[]
+    const baseColumns = getReagentOrderTableColumns()
 
     const actionColumn = columnHelper.display({
       id: 'actions',
@@ -489,25 +426,25 @@ export function ReagentOrdersPage() {
       minSize: 120,
       maxSize: 200,
       cell: info => {
-        const meta = info.table.options.meta as any
+        const meta = info.table.options.meta
         return (
           <ActionButtons
             item={info.row.original as unknown as Record<string, unknown>}
-            onEdit={meta?.onEdit}
+            onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
           />
         )
       },
     })
 
-    return [...baseColumns, actionColumn]
+    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
   }, [])
 
   // 展开行渲染
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ReagentOrder
     return (
-      <div className="p-3 flex flex-col md:flex-row gap-4 border-b-1 border-border">
-        <div className="hidden md:block flex-shrink-0">
+      <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
+        <div className="hidden md:block shrink-0">
           <MoleculeStructure casNumber={item.cas_number} width={120} height={80} />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 flex-1">
@@ -596,10 +533,10 @@ export function ReagentOrdersPage() {
 
       {/* 数据表格区域 */}
       <FilterTable
-        api={reagentOrderAPI as any}
+        api={reagentOrderAPI as FilterAPI}
         queryKey={['reagent-orders']}
         tableId="reagent-orders-table"
-        customColumns={columns as any}
+        customColumns={columns}
         onEdit={handleEditClick}
         title={<><FlaskConical className="w-5 h-5" /> 试剂订单列表</>}
         searchPlaceholder="搜索名称、CAS号..."

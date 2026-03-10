@@ -20,6 +20,7 @@ import { ArrowLeft, FileText } from 'lucide-react'
 import { createLogsAPI, type LogItem } from '@/api/client'
 import { api } from '@/api/client'
 import type { FilterAPI } from '@/hooks/useTableState'
+import { safeString } from '@/lib/validationSchemas'
 
 // 类型定义
 interface LogItemData extends LogItem {
@@ -45,7 +46,8 @@ const formatTime = (time: string | null) => {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZone: 'Asia/Shanghai',
     })
   } catch {
     return time
@@ -62,7 +64,8 @@ const formatDateTime = (time: string | null) => {
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit'
+      second: '2-digit',
+      timeZone: 'Asia/Shanghai',
     })
   } catch {
     return time
@@ -112,20 +115,20 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
       // 借用记录：显示借了多少、是否已归还、归还多少
       return (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-4 flex-1">
-          <div><span className="text-muted-foreground">物品名称：</span>{String(fullData.inventory_name || '-')}</div>
-          <div><span className="text-muted-foreground">CAS号：</span>{String(fullData.cas_number || '-')}</div>
-          <div><span className="text-muted-foreground">借用时数量：</span><span className="text-blue-600">{String(fullData.quantity_borrowed)} {String(fullData.unit || '')}</span></div>
+          <div><span className="text-muted-foreground">物品名称：</span>{safeString(fullData.inventory_name)}</div>
+          <div><span className="text-muted-foreground">CAS号：</span>{safeString(fullData.cas_number)}</div>
+          <div><span className="text-muted-foreground">借用时数量：</span><span className="text-blue-600">{safeString(fullData.quantity_borrowed)} {safeString(fullData.unit)}</span></div>
           <div>
             <span className="text-muted-foreground">归还状态：</span>
             {fullData.is_returned ? (
-              <span className="text-green-600">已归还 ({String(fullData.quantity_returned)} {String(fullData.unit || '')})</span>
+              <span className="text-green-600">已归还 ({safeString(fullData.quantity_returned)} {safeString(fullData.unit)})</span>
             ) : (
               <span className="text-orange-600">未归还</span>
             )}
           </div>
           <div><span className="text-muted-foreground">借用时间：</span>{formatDateTime(fullData.borrow_time as string)}</div>
           <div><span className="text-muted-foreground">归还时间：</span>{fullData.return_time ? formatDateTime(fullData.return_time as string) : '-'}</div>
-          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{String(fullData.notes || '-')}</div>
+          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(fullData.notes)}</div>
         </div>
       )
 
@@ -133,17 +136,17 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
       // 试剂订单
       return (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
-          <div><span className="text-muted-foreground">试剂名称：</span>{String(fullData.name || '-')}</div>
-          <div><span className="text-muted-foreground">CAS号：</span>{String(fullData.cas_number || '-')}</div>
-          <div><span className="text-muted-foreground">规格：</span>{String(fullData.specification || '-')}</div>
-          <div><span className="text-muted-foreground">数量：</span>{String(fullData.quantity || '-')}</div>
-          <div><span className="text-muted-foreground">品牌：</span>{String(fullData.brand || '-')}</div>
-          <div><span className="text-muted-foreground">价格：</span>{fullData.price ? `¥${fullData.price}` : '-'}</div>
-          <div><span className="text-muted-foreground">申购原因：</span>{String(fullData.order_reason || '-')}</div>
-          <div><span className="text-muted-foreground">状态：</span>{String(fullData.status || '-')}</div>
-          <div><span className="text-muted-foreground">类别：</span>{String(fullData.category || '-')}</div>
+          <div><span className="text-muted-foreground">试剂名称：</span>{safeString(fullData.name)}</div>
+          <div><span className="text-muted-foreground">CAS号：</span>{safeString(fullData.cas_number)}</div>
+          <div><span className="text-muted-foreground">规格：</span>{safeString(fullData.specification)}</div>
+          <div><span className="text-muted-foreground">数量：</span>{safeString(fullData.quantity)}</div>
+          <div><span className="text-muted-foreground">品牌：</span>{safeString(fullData.brand)}</div>
+          <div><span className="text-muted-foreground">价格：</span>{fullData.price ? `¥${safeString(fullData.price)}` : '-'}</div>
+          <div><span className="text-muted-foreground">申购原因：</span>{safeString(fullData.order_reason)}</div>
+          <div><span className="text-muted-foreground">状态：</span>{safeString(fullData.status)}</div>
+          <div><span className="text-muted-foreground">类别：</span>{safeString(fullData.category)}</div>
           <div><span className="text-muted-foreground">创建时间：</span>{formatDateTime(fullData.created_at as string)}</div>
-          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{String(fullData.notes || '-')}</div>
+          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(fullData.notes)}</div>
         </div>
       )
 
@@ -151,16 +154,16 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
       // 耗材订单
       return (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
-          <div><span className="text-muted-foreground">耗材名称：</span>{String(fullData.name || '-')}</div>
-          <div><span className="text-muted-foreground">规格：</span>{String(fullData.specification || '-')}</div>
-          <div><span className="text-muted-foreground">数量：</span>{String(fullData.quantity || '-')}</div>
-          <div><span className="text-muted-foreground">单位：</span>{String(fullData.unit || '-')}</div>
-          <div><span className="text-muted-foreground">品牌：</span>{String(fullData.brand || '-')}</div>
-          <div><span className="text-muted-foreground">价格：</span>{fullData.price ? `¥${fullData.price}` : '-'}</div>
-          <div><span className="text-muted-foreground">状态：</span>{String(fullData.status || '-')}</div>
-          <div><span className="text-muted-foreground">类别：</span>{String(fullData.category || '-')}</div>
+          <div><span className="text-muted-foreground">耗材名称：</span>{safeString(fullData.name)}</div>
+          <div><span className="text-muted-foreground">规格：</span>{safeString(fullData.specification)}</div>
+          <div><span className="text-muted-foreground">数量：</span>{safeString(fullData.quantity)}</div>
+          <div><span className="text-muted-foreground">单位：</span>{safeString(fullData.unit)}</div>
+          <div><span className="text-muted-foreground">品牌：</span>{safeString(fullData.brand)}</div>
+          <div><span className="text-muted-foreground">价格：</span>{fullData.price ? `¥${safeString(fullData.price)}` : '-'}</div>
+          <div><span className="text-muted-foreground">状态：</span>{safeString(fullData.status)}</div>
+          <div><span className="text-muted-foreground">类别：</span>{safeString(fullData.category)}</div>
           <div><span className="text-muted-foreground">创建时间：</span>{formatDateTime(fullData.created_at as string)}</div>
-          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{String(fullData.notes || '-')}</div>
+          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(fullData.notes)}</div>
         </div>
       )
 
@@ -168,17 +171,17 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
       // 入库记录
       return (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
-          <div><span className="text-muted-foreground">物品名称：</span>{String(fullData.name || '-')}</div>
-          <div><span className="text-muted-foreground">CAS号：</span>{String(fullData.cas_number || '-')}</div>
-          <div><span className="text-muted-foreground">入库数量：</span><span className="text-green-600">{String(fullData.initial_quantity)} {String(fullData.unit || '')}</span></div>
-          <div><span className="text-muted-foreground">剩余数量：</span>{String(fullData.remaining_quantity)} {String(fullData.unit || '')}</div>
-          <div><span className="text-muted-foreground">品牌：</span>{String(fullData.brand || '-')}</div>
-          <div><span className="text-muted-foreground">存放位置：</span>{String(fullData.storage_location || '-')}</div>
-          <div><span className="text-muted-foreground">状态：</span>{String(fullData.status || '-')}</div>
-          <div><span className="text-muted-foreground">内部编号：</span><span className="font-mono">{String(fullData.internal_code || '-')}</span></div>
-          <div><span className="text-muted-foreground">类别：</span>{String(fullData.category || '-')}</div>
+          <div><span className="text-muted-foreground">物品名称：</span>{safeString(fullData.name)}</div>
+          <div><span className="text-muted-foreground">CAS号：</span>{safeString(fullData.cas_number)}</div>
+          <div><span className="text-muted-foreground">入库数量：</span><span className="text-green-600">{safeString(fullData.initial_quantity)} {safeString(fullData.unit)}</span></div>
+          <div><span className="text-muted-foreground">剩余数量：</span>{safeString(fullData.remaining_quantity)} {safeString(fullData.unit)}</div>
+          <div><span className="text-muted-foreground">品牌：</span>{safeString(fullData.brand)}</div>
+          <div><span className="text-muted-foreground">存放位置：</span>{safeString(fullData.storage_location)}</div>
+          <div><span className="text-muted-foreground">状态：</span>{safeString(fullData.status)}</div>
+          <div><span className="text-muted-foreground">内部编号：</span><span className="font-base">{safeString(fullData.internal_code)}</span></div>
+          <div><span className="text-muted-foreground">类别：</span>{safeString(fullData.category)}</div>
           <div><span className="text-muted-foreground">创建时间：</span>{formatDateTime(fullData.created_at as string)}</div>
-          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{String(fullData.notes || '-')}</div>
+          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(fullData.notes)}</div>
         </div>
       )
 
@@ -186,11 +189,11 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
       // 登录记录
       return (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
-          <div><span className="text-muted-foreground">设备名称：</span>{String(fullData.device_name || '-')}</div>
-          <div><span className="text-muted-foreground">设备ID：</span><span className="font-mono text-xs">{String(fullData.device_id || '-')}</span></div>
-          <div><span className="text-muted-foreground">IP地址：</span>{String(fullData.ip_address || '-')}</div>
-          <div><span className="text-muted-foreground">最近IP：</span>{String(fullData.last_ip_address || '-')}</div>
-          <div className="col-span-2"><span className="text-muted-foreground">User-Agent：</span><span className="font-mono text-xs truncate">{String(fullData.user_agent || '-')}</span></div>
+          <div><span className="text-muted-foreground">设备名称：</span>{safeString(fullData.device_name)}</div>
+          <div><span className="text-muted-foreground">设备ID：</span><span className="font-base text-sm">{safeString(fullData.device_id)}</span></div>
+          <div><span className="text-muted-foreground">IP地址：</span>{safeString(fullData.ip_address)}</div>
+          <div><span className="text-muted-foreground">最近IP：</span>{safeString(fullData.last_ip_address)}</div>
+          <div className="col-span-2"><span className="text-muted-foreground">User-Agent：</span><span className="font-base text-sm truncate">{safeString(fullData.user_agent)}</span></div>
           <div><span className="text-muted-foreground">首次登录：</span>{formatDateTime(fullData.created_at as string)}</div>
           <div><span className="text-muted-foreground">最后活跃：</span>{formatDateTime(fullData.last_active_at as string)}</div>
           <div><span className="text-muted-foreground">过期时间：</span>{formatDateTime(fullData.expires_at as string)}</div>
@@ -200,7 +203,7 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
     default:
       // 默认显示 JSON
       return (
-        <pre className="text-xs bg-muted p-3 rounded-md overflow-x-auto">
+        <pre className="text-sm bg-muted p-3 rounded-md overflow-x-auto">
           {JSON.stringify(fullData, null, 2)}
         </pre>
       )
@@ -223,7 +226,7 @@ export default function OperationLogsPage() {
     queryKey: ['logs-user-info', token],
     queryFn: async () => {
       if (!token) return null
-      const response = await api.get<{ username: string; user_id: number; total: number }>(`/users/admin/logs/${token}?skip=0&limit=0`)
+      const response = await api.get<{ username: string; user_id: number; total: number }>(`/admin/users/logs/${token}?skip=0&limit=0`)
       return response.data
     },
     enabled: !!token,
@@ -241,7 +244,7 @@ export default function OperationLogsPage() {
     const fullData = (item.full_data || item) as Record<string, unknown>
     
     return (
-      <div className="p-4 flex flex-col md:flex-row gap-4 border-b-1 border-border">
+      <div className="p-4 flex flex-col md:flex-row gap-4 border-b border-border">
         {renderExpandedTable(fullData, type)}
       </div>
     )

@@ -1,6 +1,7 @@
 """
 化学物质信息查询 API
 """
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.models.user import User
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/chemical-info", tags=["Chemical Info"])
 @router.get("/{cas_number}")
 def get_chemical_info(
     cas_number: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """
     根据 CAS 号查询化学物质信息

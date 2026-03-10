@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # CAS Configuration
     cas_pattern: str = r"^\d{2,7}-\d{2}-\d$"
     
+    # Niutrans Translation API
+    niutrans_appid: str = Field(default="", description="Niutrans API appId")
+    niutrans_apikey: str = Field(default="", description="Niutrans API key")
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

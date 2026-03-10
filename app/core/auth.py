@@ -3,6 +3,7 @@ JWT Authentication Module
 Critical Rule #3: All data modification endpoints must check current_user
 """
 from datetime import timedelta
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
@@ -219,3 +220,11 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
         )
     
     return current_user
+
+
+# Annotated type aliases for dependency injection
+# Usage in endpoints:
+#   @app.get("/items")
+#   def read_items(user: CurrentUser): ...
+CurrentUser = Annotated[User, Depends(get_current_user)]
+AdminUser = Annotated[User, Depends(require_admin)]

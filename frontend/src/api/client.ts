@@ -39,7 +39,7 @@ api.interceptors.response.use(
         toast.error('会话失效，请重新登录')
       }
       useAuthStore.getState().logout()
-      window.location.href = '/login'
+      globalThis.location.href = '/login'
     }
     return Promise.reject(error)
   }
@@ -164,7 +164,7 @@ export const userAdminAPI = {
   },
   // 生成日志访问令牌
   generateLogsToken: (userId: number) => 
-    api.post<{ token: string }>(`/users/admin/users/${userId}/logs-token`),
+    api.post<{ token: string }>(`/admin/users/${userId}/logs-token`),
 }
 
 // Reagent Order APIs
@@ -376,7 +376,7 @@ export const createLogsAPI = (token: string): LogsAPI => ({
       queryParams.append('log_type', params.status_filter)
     }
 
-    const response = await api.get<LogsResponse>(`/users/admin/logs/${token}?${queryParams.toString()}`)
+    const response = await api.get<LogsResponse>(`/admin/users/logs/${token}?${queryParams.toString()}`)
     // LogsResponse 包含 { user_id, username, data: LogItem[], total }
     const logsData = response.data
     return { data: { data: logsData.data, total: logsData.total } }

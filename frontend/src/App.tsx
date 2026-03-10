@@ -1,5 +1,5 @@
 ﻿import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
 import { useAuthStore } from '@/store/useStore'
@@ -8,7 +8,6 @@ import { TooltipProvider } from '@/components/ui/Tooltip'
 import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { isAdmin } from '@/lib/constants'
-import { useEffect, useRef } from 'react'
 import { authAPI } from '@/api/client'
 
 // 懒加载页面组件 - 使用默认导出
@@ -24,7 +23,7 @@ const DeviceManagement = lazy(() => import('@/pages/DeviceManagement').then(m =>
 const AnnouncementManagement = lazy(() => import('@/pages/AnnouncementManagement').then(m => ({ default: m.AnnouncementManagement })))
 const OperationLogsPage = lazy(() => import('@/pages/OperationLogs').then(m => ({ default: m.default })))
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
@@ -32,7 +31,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-function AdminRoute({ children }: { children: React.ReactNode }) {
+function AdminRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = useAuthStore((state) => state.user)
   if (!isAdmin(user)) {
     return <Navigate to="/" replace />

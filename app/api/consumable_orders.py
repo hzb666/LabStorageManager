@@ -5,7 +5,7 @@ Separated from Reagent orders (no stock-in needed)
 import io
 import csv
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -22,8 +22,6 @@ from app.models.consumable_order import (
     ConsumableOrderStatus,
 )
 from app.models.user import User
-from app.services.image_service import process_uploaded_image
-from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
 
@@ -82,8 +80,8 @@ def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[Consumabl
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
 def create_consumable_order(
     order: ConsumableOrderCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """Create a new consumable order"""
     # specification 是用户直接输入的完整规格字符串（如 "500个"、"1箱"）
@@ -96,13 +94,11 @@ def create_consumable_order(
     db_order = ConsumableOrder(
         name=order.name,
         english_name=order.english_name,
-        alias=order.alias,
-        category=order.category,
-        brand=order.brand,
         specification=order.specification,  # 规格字符串直接存储
         unit=order.unit,  # 单位，选填
         quantity=order.quantity,
         price=order.price,
+        communication=order.communication,
         applicant_id=current_user.id,
         **pinyin_fields,
     )
@@ -114,45 +110,13 @@ def create_consumable_order(
     return db_order
 
 
-@router.post("/{order_id}/upload-image")
-async def upload_consumable_order_image(
-    order_id: int,
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Upload and compress image for a consumable order"""
-    order = get_consumable_order_by_id(db, order_id)
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
-        )
-    
-    try:
-        image_url, thumbnail_url = process_uploaded_image(file)
-        
-        order.image_path = thumbnail_url
-        db.commit()
-        db.refresh(order)
-        
-        return {
-            "message": "Image uploaded successfully",
-            "image_url": image_url,
-            "thumbnail_url": thumbnail_url
-        }
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
 # 分页限制常量
 MAX_PAGE_SIZE = 100
 
 @router.get("/")
 def list_consumable_orders(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = min(50, MAX_PAGE_SIZE),
     status_filter: Optional[ConsumableOrderStatus] = None,
@@ -161,8 +125,6 @@ def list_consumable_orders(
     fuzzy: bool = False,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = 'desc',
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """List consumable orders with optional filters, pagination, search, sort and applicant name"""
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
@@ -208,9 +170,7 @@ def list_consumable_orders(
                 return f
 
             base = base.where(
-                (norm_field(ConsumableOrder.name).ilike(f"%{search_normalized}%")) |
-                (norm_field(ConsumableOrder.brand).ilike(f"%{search_normalized}%")) |
-                (norm_field(ConsumableOrder.category).ilike(f"%{search_normalized}%"))
+                (norm_field(ConsumableOrder.name).ilike(f"%{search_normalized}%"))
             )
         else:
             search_pattern = f"%{search}%"
@@ -218,22 +178,16 @@ def list_consumable_orders(
             if search_field and search_field != 'all':
                 field_map = {
                     'name': ConsumableOrder.name,
-                    'category': ConsumableOrder.category,
-                    'brand': ConsumableOrder.brand,
                 }
                 if search_field in field_map:
                     base = base.where(field_map[search_field].ilike(search_pattern))
                 else:
                     base = base.where(
-                        (ConsumableOrder.name.ilike(search_pattern)) |
-                        (ConsumableOrder.category.ilike(search_pattern)) |
-                        (ConsumableOrder.brand.ilike(search_pattern))
+                        (ConsumableOrder.name.ilike(search_pattern))
                     )
             else:
                 base = base.where(
-                    (ConsumableOrder.name.ilike(search_pattern)) |
-                    (ConsumableOrder.category.ilike(search_pattern)) |
-                    (ConsumableOrder.brand.ilike(search_pattern))
+                    (ConsumableOrder.name.ilike(search_pattern))
                 )
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
@@ -242,8 +196,6 @@ def list_consumable_orders(
     sort_field_map = {
         'name': ConsumableOrder.name,
         'name_pinyin': ConsumableOrder.name_pinyin,
-        'category': ConsumableOrder.category,
-        'brand': ConsumableOrder.brand,
         'quantity': ConsumableOrder.quantity,
         'price': ConsumableOrder.price,
         'status': ConsumableOrder.status,
@@ -295,8 +247,8 @@ def list_consumable_orders(
 
 @router.get("/export")
 def export_consumable_orders(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ):
     """Export consumable orders as a downloadable CSV file."""
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
@@ -311,8 +263,7 @@ def export_consumable_orders(
     writer = csv.writer(output)
 
     writer.writerow([
-        "名称", "英文名", "别名", "分类", "品牌",
-        "规格", "数量", "单价", "状态",
+        "名称", "英文名", "规格", "数量", "单价", "状态",
         "申请人", "申购时间", "备注",
     ])
 
@@ -322,9 +273,6 @@ def export_consumable_orders(
         writer.writerow([
             order.name,
             order.english_name or "",
-            order.alias or "",
-            order.category or "",
-            order.brand or "",
             spec or "",
             order.quantity,
             order.price or "",
@@ -347,8 +295,8 @@ def export_consumable_orders(
 @router.get("/{order_id}", response_model=ConsumableOrderResponse)
 def get_consumable_order(
     order_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Get consumable order by ID"""
     order = get_consumable_order_by_id(db, order_id)
@@ -364,8 +312,8 @@ def get_consumable_order(
 def update_consumable_order(
     order_id: int,
     order_update: ConsumableOrderUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Update consumable order information"""
     order = get_consumable_order_by_id(db, order_id)
@@ -404,8 +352,8 @@ def update_consumable_order(
 @router.post("/{order_id}/approve")
 def approve_consumable_order(
     order_id: int,
-    admin_user: User = Depends(require_admin),
-    db: Session = Depends(get_db)
+    admin_user: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """Approve a consumable order (Admin only)"""
     order = get_consumable_order_by_id(db, order_id)
@@ -432,8 +380,8 @@ def approve_consumable_order(
 @router.post("/{order_id}/reject")
 def reject_consumable_order(
     order_id: int,
-    admin_user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
+    admin_user: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Reject a consumable order (Admin only). Does not modify notes."""
     order = get_consumable_order_by_id(db, order_id)
@@ -454,8 +402,8 @@ def reject_consumable_order(
 @router.post("/{order_id}/complete")
 def complete_consumable_order(
     order_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """
     Complete consumable order (consumables don't need stock-in)
@@ -497,8 +445,8 @@ def complete_consumable_order(
 
 @router.get("/dashboard/my-orders")
 def get_my_consumable_orders(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
 ):
     """Get current user's consumable order progress"""
     statement = select(ConsumableOrder).where(
@@ -550,8 +498,8 @@ def get_my_consumable_orders(
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_consumable_order(
     order_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Delete a consumable order (only applicant or admin can delete)"""
     order = get_consumable_order_by_id(db, order_id)

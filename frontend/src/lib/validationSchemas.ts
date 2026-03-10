@@ -19,8 +19,13 @@
 import * as v from 'valibot'
 import { valibotResolver } from '@hookform/resolvers/valibot'
 
-// 重新导出 valibotResolver 方便使用
-export { valibotResolver }
+// 类型化 resolver - 解决类型推断问题
+// 使用方法: resolver: createValibotResolver(InventoryFormSchema)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createValibotResolver(_schema: any): any {
+  return valibotResolver(_schema)
+}
+
 
 // ==========================================
 // 1. 基础通用类型验证
@@ -65,8 +70,8 @@ export const createPositiveNumberSchema = (fieldName: string) =>
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
     v.transform((input) => {
       if (typeof input === 'number') return input
-      const num = parseFloat(input)
-      return isNaN(num) ? NaN : num
+      const num = Number.parseFloat(input)
+      return Number.isNaN(num) ? Number.NaN : num
     }),
     v.number(`${fieldName}必须是有效数字`),
     v.integer(`${fieldName}必须为整数`),
@@ -83,8 +88,8 @@ export const createQuantitySchema = (fieldName: string) =>
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
     v.transform((input) => {
       if (typeof input === 'number') return input
-      const num = parseFloat(input)
-      return isNaN(num) ? NaN : num
+      const num = Number.parseFloat(input)
+      return Number.isNaN(num) ? Number.NaN : num
     }),
     v.number(`${fieldName}必须是有效数字`),
     v.gtValue(0, `${fieldName}必须大于0`)
@@ -100,8 +105,8 @@ export const createNonNegativeNumberSchema = (fieldName: string) =>
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
     v.transform((input) => {
       if (typeof input === 'number') return input
-      const num = parseFloat(input)
-      return isNaN(num) ? undefined : num
+      const num = Number.parseFloat(input)
+      return Number.isNaN(num) ? undefined : num
     }),
     v.number(`${fieldName}必须是有效数字`),
     v.minValue(0, `${fieldName}不能为负数`)
@@ -118,8 +123,8 @@ export const createRemainingQuantitySchema = (fieldName: string, maxValue: numbe
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
     v.transform((input) => {
       if (typeof input === 'number') return input
-      const num = parseFloat(input)
-      return isNaN(num) ? NaN : num
+      const num = Number.parseFloat(input)
+      return Number.isNaN(num) ? Number.NaN : num
     }),
     v.number(`${fieldName}必须是有效数字`),
     v.minValue(0, `${fieldName}不能为负数`),
@@ -137,8 +142,8 @@ export const createPriceSchema = (min = 0, max = 999999) =>
     v.union([v.string(), v.number()], '价格必须是有效数字'),
     v.transform((input) => {
       if (typeof input === 'number') return input
-      const num = parseFloat(input)
-      return isNaN(num) ? NaN : num
+      const num = Number.parseFloat(input)
+      return Number.isNaN(num) ? Number.NaN : num
     }),
     v.number('价格必须是有效数字'),
     v.minValue(min, `价格不能小于${min}`),
@@ -157,7 +162,7 @@ export const UsernameSchema = v.pipe(
   v.trim(),
   v.minLength(3, '用户名至少3个字符'),
   v.maxLength(20, '用户名最多20个字符'),
-  v.regex(/^[a-zA-Z0-9_]+$/, '用户名只能包含字母、数字和下划线')
+  v.regex(/^\w+$/, '用户名只能包含字母、数字和下划线')
 )
 
 /**
@@ -177,8 +182,8 @@ export const SpecificationSchema = v.pipe(
 // 规格解析辅助函数 - 从规格字符串提取数值
 export function parseSpecification(spec: string): number | null {
   if (!spec) return null
-  const match = spec.match(/^(\d+\.?\d*)\s*/i)
-  return match ? parseFloat(match[1]) : null
+  const match = new RegExp(/^(\d+\.?\d*)\s*/i).exec(spec)
+  return match ? Number.parseFloat(match[1]) : null
 }
 
 // ==========================================
@@ -204,13 +209,13 @@ export const validateCASLogic = (input: string): boolean => {
 
   let sum = 0
   for (let i = 0; i < digits.length; i++) {
-    const digit = parseInt(digits[i], 10)
+    const digit = Number.parseInt(digits[i], 10)
     const multiplier = i + 1
     sum += digit * multiplier
   }
 
   const calculatedCheckDigit = sum % 10
-  const actualCheckDigit = parseInt(thirdPart, 10)
+  const actualCheckDigit = Number.parseInt(thirdPart, 10)
 
   return calculatedCheckDigit === actualCheckDigit
 }
@@ -249,8 +254,8 @@ const RemainingQuantitySchema = v.pipe(
   ], '剩余数量必须是有效数字'),
   v.transform((input) => {
     if (typeof input === 'number') return input
-    const num = parseFloat(input)
-    if (isNaN(num)) return undefined  // 无效数字返回 undefined，后续验证会失败
+    const num = Number.parseFloat(input)
+    if (Number.isNaN(num)) return undefined  // 无效数字返回 undefined，后续验证会失败
     return num
   }),
   v.number('剩余数量必须是有效数字'),
@@ -321,19 +326,19 @@ export const ReagentOrderSchema = v.object({
  * - specification: 必填
  * - unit: 可选
  * - 移除了 order_reason 和 is_hazardous
+ * - 移除了 alias, category, brand, image_path
  */
 export const ConsumableOrderSchema = v.object({
   name: createRequiredStringSchema('名称'),
   english_name: v.optional(v.string()),
-  alias: v.optional(v.string()),
-  category: v.optional(v.string()),
-  brand: v.optional(v.string()),
   specification: createRequiredStringSchema('规格'),  // 后端必填
   unit: v.optional(v.string()),  // 后端新增可选字段
   quantity: createPositiveNumberSchema('数量'),
   price: v.optional(createPriceSchema()),
+  communication: v.optional(v.string()),
   // 移除了 order_reason (后端已移除)
   // 移除了 is_hazardous (后端已移除)
+  // 移除了 alias, category, brand (用户要求删除)
   notes: v.optional(v.string())
 })
 
@@ -432,3 +437,25 @@ export type UserUpdateFormData = v.InferOutput<typeof UserUpdateSchema>
  * 修改密码表单类型
  */
 export type ChangePasswordFormData = v.InferOutput<typeof ChangePasswordWithConfirmSchema>
+
+// ==========================================
+// 8. 通用工具函数
+// ==========================================
+
+/**
+ * 安全的值转换为字符串
+ * 避免 [object Object] 问题
+ * @param value 要转换的值
+ * @param fallback 回退值，默认为 '-'
+ * @returns 字符串值或回退值
+ */
+export const safeString = (value: unknown, fallback = '-'): string => {
+  if (value === null || value === undefined) return fallback
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  // 对象类型，返回 fallback 而不是 [object Object]
+  return fallback
+}
+
+export {valibotResolver} from '@hookform/resolvers/valibot'

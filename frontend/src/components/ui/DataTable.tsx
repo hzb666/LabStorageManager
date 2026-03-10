@@ -1,7 +1,7 @@
 // DataTable.tsx
 import React, { useRef, useCallback, useState, useEffect, memo, useMemo } from 'react'
 import { flexRender } from '@tanstack/react-table'
-import type { Table as TableType, Row, Cell, Column } from '@tanstack/react-table'
+import type { Table as TableType, Row, Cell, Column, Header } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, ArrowUp, ArrowUpDown, Loader2 } from 'lucide-react'
@@ -59,15 +59,15 @@ function InnerRowComponent<TData>({
   getProportionalStyles,
   noteField,
   onRowClick,
-}: {
+}: Readonly<{
   row: Row<TData>
   isExpanded: boolean 
   renderExpandedRow?: (row: TData) => React.ReactNode
   getProportionalStyles: (column: Column<TData, unknown>) => React.CSSProperties
   noteField?: string
   onRowClick?: (e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => void
-}) {
-  const original = row.original as TData
+}>) {
+  const original = row.original
 
   // 检查当前行是否包含备注信息，以及是否需要被特殊高亮（以 "[强调]" 开头）
   const noteValue = noteField
@@ -159,8 +159,8 @@ function InnerRowComponent<TData>({
 // 缓存 InnerRowComponent，通过精准的浅比较策略，防止非当前可视区的行在滚动时触发重渲染
 const InnerRow = memo(InnerRowComponent, (prevProps, nextProps) => {
   return (
+    prevProps.row.id === nextProps.row.id && // 🚀 性能优化 2：优先校验 ID 避免内存地址变更击穿缓存
     prevProps.row.original === nextProps.row.original && 
-    prevProps.row.id === nextProps.row.id &&
     prevProps.isExpanded === nextProps.isExpanded &&
     prevProps.renderExpandedRow === nextProps.renderExpandedRow &&
     prevProps.getProportionalStyles === nextProps.getProportionalStyles &&
@@ -185,7 +185,7 @@ export function DataTable<TData>({
   fetchNextPage,
   total,
   searchKeyword,
-}: DataTableProps<TData>) {
+}: Readonly<DataTableProps<TData>>) {
   // DOM 引用
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
@@ -291,7 +291,7 @@ export function DataTable<TData>({
   }, [columnStyles])
 
   // 处理自定义列宽拖拽调整的核心逻辑
-  const handleCustomResize = useCallback((e: React.MouseEvent | React.TouchEvent, header: any) => {
+  const handleCustomResize = useCallback((e: React.MouseEvent | React.TouchEvent, header: Header<TData, unknown>) => {
     e.preventDefault()
     e.stopPropagation()
 
@@ -383,6 +383,7 @@ export function DataTable<TData>({
   }, [visibleColumns, totalWeight, minTableWidth, table])
 
   // 配置虚拟滚动：利用 @tanstack/react-virtual 仅渲染视窗内的元素，极大提升长列表性能
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     // 根据行是否展开，动态提供估计的高度
@@ -402,19 +403,20 @@ export function DataTable<TData>({
     virtualizerRef.current = rowVirtualizer
   })
 
-  // 🚀 性能优化 2：引入滚动锁，并在下一个动画帧(rAF)处理触底计算，解耦渲染和事件流
+  // 🚀 性能优化 3：引入滚动锁，并在下一个动画帧(rAF)处理触底计算，解耦渲染和事件流
   const scrollLockRef = useRef(false)
 
-  // 处理滚动触底加载更多
+  // 处理滚动触底加载更多 (已剥离对 rowVirtualizer 的依赖引用)
   const handleScroll = useCallback(() => {
     if (scrollLockRef.current || !hasNextPage || isFetchingNextPage) return
 
     scrollLockRef.current = true
     requestAnimationFrame(() => {
       const el = bodyScrollRef.current
-      if (el) {
+      const virtualizer = virtualizerRef.current
+      if (el && virtualizer) {
         const { scrollTop, clientHeight } = el
-        const totalHeight = rowVirtualizer.getTotalSize()
+        const totalHeight = virtualizer.getTotalSize()
         
         // 当滚动到距离底部小于 200px 时，触发翻页请求
         if (totalHeight - scrollTop - clientHeight < 200) {
@@ -423,7 +425,7 @@ export function DataTable<TData>({
       }
       scrollLockRef.current = false
     })
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, rowVirtualizer])
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   // 点击展开行时的平滑滚动追踪逻辑 (Cubic Ease-Out 缓动)
   const handleRowClick = useCallback((e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => {
@@ -480,6 +482,15 @@ export function DataTable<TData>({
     }
   }, [])
 
+  // 🚀 性能优化 4：提取稳定的滚动事件处理函数，避免内联函数在频繁渲染时不断销毁重建
+  const handleContainerScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    // 同步滚动表头，保持对齐
+    if (headerScrollRef.current) {
+      headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft
+    }
+    handleScroll()
+  }, [handleScroll])
+
   return (
     <div
       ref={scrollContainerRef}
@@ -525,7 +536,7 @@ export function DataTable<TData>({
                           </span>
                           {/* 排序图标显示 */}
                           {canSort && (
-                            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center text-muted-foreground">
+                            <span className="w-4 h-4 shrink-0 flex items-center justify-center text-muted-foreground">
                               {isSorted === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : 
                                isSorted === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : 
                                <ArrowUpDown className="w-3.5 h-3.5 opacity-0 group-hover:opacity-50 transition-opacity" />}
@@ -572,13 +583,7 @@ export function DataTable<TData>({
         ref={bodyScrollRef}
         className="w-full overflow-auto custom-scrollbar relative flex-1"
         style={{ scrollbarGutter: 'stable' }} // 防止滚动条闪烁导致的布局跳动
-        onScroll={(e) => {
-          // 同步滚动表头，保持对齐
-          if (headerScrollRef.current) {
-            headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft
-          }
-          handleScroll()
-        }}
+        onScroll={handleContainerScroll}
       >
         {/* 承载虚拟元素的定高大容器 */}
         <div

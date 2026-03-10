@@ -5,9 +5,9 @@
  */
 import React, { useState, useMemo, useCallback } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
-import { valibotResolver } from '@hookform/resolvers/valibot'
 
 // UI 组件
 import { Button } from '@/components/ui/Button'
@@ -22,11 +22,12 @@ import useDialogState from '@/hooks/useDialogState'
 import { TableActionButtonsMemo } from '@/components/ui/TableActionButtons'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
+import type { FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { inventoryAPI, chemicalAPI } from '@/api/client'
 import { formatDate, processNotes } from '@/lib/utils'
-import { InventoryFormSchema, parseSpecification, validateCASLogic } from '@/lib/validationSchemas'
+import { InventoryFormSchema, parseSpecification, validateCASLogic, createValibotResolver } from '@/lib/validationSchemas'
 import type { InventoryFormData } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 
@@ -107,7 +108,7 @@ export function InventoryPage() {
   // 表单逻辑
   // ---------------------------------------------------------------------------
   const form = useForm<InventoryFormData>({
-    resolver: valibotResolver(InventoryFormSchema) as any,
+    resolver: createValibotResolver(InventoryFormSchema),
     defaultValues: defaultInventoryValues,
     shouldFocusError: false,
   })
@@ -189,7 +190,7 @@ export function InventoryPage() {
           await loadInventory()
           toast.success('库存信息已更新')
         } else if (dialogState === 'add') {
-          const spec = formData.specification as string
+          const spec = formData.specification
           const bottles = formData.quantity_bottles as number
           await inventoryAPI.manualAdd({
             cas_number: formData.cas_number,
@@ -211,11 +212,11 @@ export function InventoryPage() {
         }
         setDialogState(null)
       } catch (err) {
-        const error = err as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
+        const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
         const errorDetail = error.response?.data?.detail
         if (dialogState === 'add' && Array.isArray(errorDetail)) {
           errorDetail.forEach((e: ValidationError) => {
-            if (e.loc && e.loc[1]) form.setError(e.loc[1] as keyof InventoryFormData, { message: e.msg || '验证错误' })
+            if (e.loc?.[1]) form.setError(e.loc[1] as keyof InventoryFormData, { message: e.msg || '验证错误' })
           })
         } else {
           toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
@@ -240,9 +241,7 @@ export function InventoryPage() {
 
   const handleDeleteClick = async () => {
     if (!editingItem) return
-    if (!deleteConfirm) {
-      setDeleteConfirm(true)
-    } else {
+    if (deleteConfirm) {
       try {
         await inventoryAPI.delete(editingItem.id)
         setDialogState(null)
@@ -252,6 +251,8 @@ export function InventoryPage() {
         const err = error as { response?: { data?: { detail?: string } } }
         toast.error(err.response?.data?.detail || '删除失败')
       }
+    } else {
+      setDeleteConfirm(true)
     }
   }
 
@@ -265,7 +266,7 @@ export function InventoryPage() {
       link.download = `inventory_export_${new Date().toISOString().slice(0, 10)}.csv`
       document.body.appendChild(link)
       link.click()
-      document.body.removeChild(link)
+      link.remove()
       URL.revokeObjectURL(url)
     } catch {
       toast.error('导出失败')
@@ -323,7 +324,7 @@ export function InventoryPage() {
   // ---------------------------------------------------------------------------
   const columns = useMemo(() => {
     // 获取抽离的基础列配置
-    const baseColumns = getInventoryTableColumns() as any[]
+    const baseColumns = getInventoryTableColumns()
 
     // 追加页面特定的操作列
     const actionColumn = columnHelper.display({
@@ -333,18 +334,18 @@ export function InventoryPage() {
       minSize: 120,
       maxSize: 150,
       cell: info => {
-        const meta = info.table.options.meta as any
+        const meta = info.table.options.meta
         return (
           <ActionButtons
             item={{ ...(info.row.original as unknown as InventoryItem) }}
-            onEdit={meta?.onEdit}
-            onBorrowSuccess={meta?.onBorrowSuccess}
+            onEdit={meta?.onEdit as (item: InventoryItem) => void}
+            onBorrowSuccess={meta?.onBorrowSuccess as () => void}
           />
         )
       },
     })
 
-    return [...baseColumns, actionColumn]
+    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
   }, [])
 
   // ---------------------------------------------------------------------------
@@ -355,9 +356,9 @@ export function InventoryPage() {
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as InventoryItem
     return (
-      <div className="p-3 flex flex-col md:flex-row gap-4 border-b-1 border-border">
+      <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
         {/* 左侧：分子结构式 - 桌面端显示，移动端隐藏 */}
-        <div className="hidden md:block flex-shrink-0">
+        <div className="hidden md:block shrink-0">
           <MoleculeStructure casNumber={item.cas_number} width={150} height={100} />
         </div>
         {/* 右侧：信息网格 */}
@@ -443,10 +444,10 @@ export function InventoryPage() {
 
       {/* 数据表格区域 */}
       <FilterTable
-        api={inventoryAPI as any}
+        api={inventoryAPI as FilterAPI}
         queryKey={['inventory']}
         tableId="inventory-table"
-        customColumns={columns as any}
+        customColumns={columns}
         onEdit={handleEditClick}
         onBorrowSuccess={loadInventory}
         title={<><Package className="w-5 h-5" /> 库存列表</>}
@@ -520,10 +521,10 @@ const ActionButtons = React.memo(function ActionButtons({
 
   return (
     <TableActionButtonsMemo
-      item={item as any}
-      actions={actions as any}
+      item={item}
+      actions={actions}
       showEdit={true}
-      onEdit={onEdit as any}
+      onEdit={onEdit}
       statusField="status"
       statusDisplay={statusDisplay}
     />

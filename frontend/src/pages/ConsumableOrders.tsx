@@ -4,9 +4,8 @@
  * 参考 Inventory 页面实现，使用 FilterTable 组件
  */
 import React, { useState, useMemo, useCallback } from 'react'
-import { createColumnHelper, type RowData } from '@tanstack/react-table'
+import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
-import { valibotResolver } from '@hookform/resolvers/valibot'
 
 // UI 组件
 import { Button } from '@/components/ui/Button'
@@ -21,12 +20,12 @@ import { BaseForm } from '@/components/BaseForm'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
 import { UserRoles } from '@/lib/constants'
-import { useTableState } from '@/hooks/useTableState'
+import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
 import { formatDate, processNotes } from '@/lib/utils'
-import { ConsumableOrderSchema } from '@/lib/validationSchemas'
+import { ConsumableOrderSchema, createValibotResolver } from '@/lib/validationSchemas'
 import type { ConsumableOrderFormData } from '@/lib/validationSchemas'
 import { getConsumableOrderTableColumns } from '@/lib/tableConfigs'
 import {
@@ -87,37 +86,6 @@ const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
 ]
 
 // ============================================================================
-// 辅助组件
-// ============================================================================
-
-const HighlightText = React.memo(function HighlightText({
-  text, highlight, fuzzy
-}: { text: string; highlight?: string; fuzzy?: boolean }) {
-  const regex = React.useMemo(() => new RegExp(`(${highlight})`, 'gi'), [highlight])
-  if (!highlight || !text) return <>{text}</>
-
-  if (fuzzy) {
-    const normalizedHighlight = highlight.replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D_.-]+/g, '')
-    const normalizedText = text.replace(/[\s\u00A0\u2002\u2003\u2009\u200C\u200D_.-]+/g, '')
-    if (normalizedText.toLowerCase().includes(normalizedHighlight.toLowerCase())) {
-      return <span className="bg-amber-200 dark:bg-amber-800/50">{text}</span>
-    }
-    return <>{text}</>
-  }
-
-  const parts = text.split(regex)
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.toLowerCase() === highlight.toLowerCase() ? (
-          <span key={i} className="bg-amber-200 dark:bg-amber-800/50">{part}</span>
-        ) : part
-      )}
-    </>
-  )
-})
-
-// ============================================================================
 // 主组件
 // ============================================================================
 
@@ -145,7 +113,7 @@ export function ConsumableOrdersPage() {
 
   // 表单实例
   const form = useForm<ConsumableOrderFormData>({
-    resolver: valibotResolver(ConsumableOrderSchema) as any,
+    resolver: createValibotResolver(ConsumableOrderSchema),
     defaultValues: defaultConsumableOrderValues,
     shouldFocusError: false,
   })
@@ -222,7 +190,7 @@ export function ConsumableOrdersPage() {
         }
         setDialogState(null)
       } catch (err) {
-        const error = err as { response?: { data?: { detail?: string | ValidationError[] | unknown } } }
+        const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
         const errorDetail = error.response?.data?.detail
         if (dialogState === 'add' && Array.isArray(errorDetail)) {
           errorDetail.forEach((e: ValidationError) => {
@@ -320,7 +288,7 @@ export function ConsumableOrdersPage() {
 
   // 表格列配置
   const columns = useMemo(() => {
-    const baseColumns = getConsumableOrderTableColumns() as any[]
+    const baseColumns = getConsumableOrderTableColumns()
 
     const actionColumn = columnHelper.display({
       id: 'actions',
@@ -329,17 +297,17 @@ export function ConsumableOrdersPage() {
       minSize: 120,
       maxSize: 200,
       cell: info => {
-        const meta = info.table.options.meta as any
+        const meta = info.table.options.meta
         return (
           <ActionButtons
             item={info.row.original as unknown as Record<string, unknown>}
-            onEdit={meta?.onEdit}
+            onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
           />
         )
       },
     })
 
-    return [...baseColumns, actionColumn]
+    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
   }, [])
 
   // 展开行渲染
@@ -411,10 +379,10 @@ export function ConsumableOrdersPage() {
 
       {/* 数据表格区域 */}
       <FilterTable
-        api={consumableOrderAPI as any}
+        api={consumableOrderAPI as FilterAPI}
         queryKey={['consumable-orders']}
         tableId="consumable-orders-table"
-        customColumns={columns as any}
+        customColumns={columns}
         onEdit={handleEditClick}
         title={<><ShoppingCart className="w-5 h-5" /> 耗材订单列表</>}
         searchPlaceholder="搜索名称、分类、品牌..."

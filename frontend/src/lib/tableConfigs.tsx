@@ -19,6 +19,9 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 // 使用 any 类型简化类型复杂性
 type TableRowData = Record<string, unknown>
 
+// 导出表格列类型供外部使用
+export type { TableRowData }
+
 const columnHelper = createColumnHelper<TableRowData>()
 
 /**

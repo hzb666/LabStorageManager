@@ -3,14 +3,12 @@ Error Logs API - 错误日志获取接口
 
 提供API让前端获取后端错误日志（仅管理员可访问）
 """
-from typing import Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlmodel import Session
 
 from app.api.deps import get_current_session
-from app.database import get_db
 from app.models.user import User
 from app.models.user_session import UserSession
 from app.services.error_logger import get_error_logs_since, get_recent_error_logs
@@ -19,7 +17,7 @@ router = APIRouter()
 
 
 def get_current_user(
-    current: tuple[User, UserSession] = Depends(get_current_session)
+    current: Annotated[tuple[User, UserSession], Depends(get_current_session)]
 ) -> User:
     """获取当前登录用户"""
     user, _ = current
@@ -32,12 +30,11 @@ class ErrorLogsResponse(BaseModel):
     count: int
 
 
-@router.get("/error-logs", response_model=ErrorLogsResponse)
+@router.get("/error-logs")
 def get_error_logs(
-    hours: int = Query(default=24, ge=1, le=168),  # 最多7天
-    lines: int = Query(default=100, ge=1, le=1000),  # 最多1000行
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: Annotated[User, Depends(get_current_user)],
+    hours: Annotated[int, Query(ge=1, le=168)] = 24,  # 最多7天
+    lines: Annotated[int, Query(ge=1, le=1000)] = 100,  # 最多1000行
 ) -> ErrorLogsResponse:
     """
     获取后端错误日志

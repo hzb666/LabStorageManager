@@ -104,34 +104,30 @@ function isSchemaMode<T extends Record<string, unknown>>(props: BaseFormProps<T>
 
 /**
  * BaseForm - 基于 Schema 配置的表单渲染组件
- * 
- * 两种使用方式：
- * 
- * 1. 简化的字段数组模式：
+ * * 两种使用方式：
+ * * 1. 简化的字段数组模式：
  * ```tsx
  * <BaseForm
- *   form={form}
- *   fields={[
- *     { name: 'name', label: '名称', type: 'input', required: true },
- *     { name: 'category', label: '分类', type: 'select', options: [...] },
- *   ]}
- *   columns={3}
- *   onSubmit={handleSubmit}
- *   submitText="提交"
+ * form={form}
+ * fields={[
+ * { name: 'name', label: '名称', type: 'input', required: true },
+ * { name: 'category', label: '分类', type: 'select', options: [...] },
+ * ]}
+ * columns={3}
+ * onSubmit={handleSubmit}
+ * submitText="提交"
  * />
  * ```
- * 
- * 2. Schema 模式：
+ * * 2. Schema 模式：
  * ```tsx
  * const schema: FormSchema<MyFormData> = {
- *   columns: 2,
- *   fields: [
- *     { name: 'name', label: '名称', type: 'input', placeholder: '请输入名称' },
- *     { name: 'category', label: '分类', type: 'select', options: [...] },
- *   ]
+ * columns: 2,
+ * fields: [
+ * { name: 'name', label: '名称', type: 'input', placeholder: '请输入名称' },
+ * { name: 'category', label: '分类', type: 'select', options: [...] },
+ * ]
  * }
- * 
- * <BaseForm schema={schema} form={form} />
+ * * <BaseForm schema={schema} form={form} />
  * ```
  */
 function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
@@ -145,10 +141,33 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
 
   const { control, formState: { errors } } = form
 
-  // 获取字段的错误信息
+  // ==========================================
+  // 🛠️ 核心修复区域：安全的错误获取逻辑 (严格类型版)
+  // ==========================================
   const getFieldError = (name: string) => {
-    const error = errors[name]
-    return error?.message as string | undefined
+    // 1. 防御性保护
+    if (!errors) return undefined;
+
+    // 2. 解析嵌套路径（使用 unknown 泛型替代 any）
+    const errorObj = name.split('.').reduce<unknown>((acc, part) => {
+      // 只有当 acc 是对象时，才安全地向下读取属性
+      if (acc && typeof acc === 'object') {
+        return (acc as Record<string, unknown>)[part];
+      }
+      return undefined;
+    }, errors);
+
+    // 3. 严格类型校验：判断提取出的对象是否有 message 且为 string 类型
+    if (
+      errorObj &&
+      typeof errorObj === 'object' &&
+      'message' in errorObj &&
+      typeof errorObj.message === 'string'
+    ) {
+      return errorObj.message;
+    }
+
+    return undefined;
   }
 
   // 基础输入控件的通用样式
@@ -182,6 +201,7 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
         default: return ''
       }
     })()
+    
     return (
       <Controller
         key={field.name as string}
@@ -204,7 +224,7 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
                   placeholder={field.placeholder}
                   disabled={isDisabled}
                   readOnly={isReadOnly}
-                  className={cn(getInputClassName(hasError, isReadOnly), "min-h-[80px] resize-y")}
+                  className={cn(getInputClassName(hasError, isReadOnly), "min-h-20 resize-y")}
                 />
               )}
 

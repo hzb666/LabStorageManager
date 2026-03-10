@@ -95,11 +95,11 @@ export const defaultReagentOrderValues: ReagentOrderFormData = {
 export const defaultConsumableOrderValues: ConsumableOrderFormData = {
   name: '',
   english_name: '',
-  brand: '',
   specification: '',
   unit: '',
   quantity: 1,
   price: 0,
+  communication: '',
   notes: '',
 }
 

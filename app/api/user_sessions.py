@@ -2,7 +2,7 @@
 User Sessions API - Device Management
 """
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlmodel import Session, select
@@ -41,8 +41,8 @@ from app.core.auth import get_current_user
 
 @router.get("/", response_model=List[SessionResponse])
 def list_sessions(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)]
 ):
     """List all sessions for current user (excluding expired)"""
     now = get_utc_now()
@@ -59,8 +59,8 @@ def list_sessions(
 @router.delete("/{session_id}")
 def delete_session(
     session_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)]
 ):
     """Delete a specific session (kick user off a device)"""
     session = db.get(UserSession, session_id)
@@ -91,9 +91,9 @@ def delete_session(
 @router.delete("/")
 def delete_all_sessions(
     request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    current_session: UserSession = Depends(get_current_session)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    current_session: Annotated[UserSession, Depends(get_current_session)]
 ):
     """Delete all sessions for current user except the current session"""
     sessions = db.exec(
@@ -117,9 +117,9 @@ def delete_all_sessions(
 
 @router.post("/refresh")
 def refresh_session(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    current: tuple[User, UserSession] = Depends(get_current_session)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    current: Annotated[tuple[User, UserSession], Depends(get_current_session)]
 ):
     """Refresh current session expiration time"""
     # 解包 tuple

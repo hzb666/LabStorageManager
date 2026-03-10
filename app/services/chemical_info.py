@@ -1,15 +1,18 @@
 """
 化学物质信息查询服务
-- 中文名：从 chemblink.com 爬取
+- 中文名：从 chemblink.com 爬取，如未获取到则翻译 PubChem 的英文名
 - 英文名：从 PubChem API 获取
 """
 import re
 import time
 import random
 import logging
+import hashlib
 import requests
 from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -197,9 +200,63 @@ def query_english_name(cas_number: str) -> Optional[str]:
             logger.warning(f"Failed to query PubChem CID for CAS {cas}: {e}")
     
     # 短暂延迟
-    time.sleep(0.05)
+    time.sleep(0.1)
     
     return english_name if english_name else None
+
+
+def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Optional[str]:
+    """
+    使用 niutrans API 翻译文本
+    """
+    if not text:
+        return None
+    
+    # 检查 API 配置
+    if not settings.niutrans_appid or not settings.niutrans_apikey:
+        logger.warning("Niutrans API credentials not configured")
+        return None
+    
+    try:
+        # 生成 authStr
+        timestamp = str(int(time.time() * 1000))
+        
+        # 构建参数字典（不包括 authStr 本身）
+        params = {
+            "appId": settings.niutrans_appid,
+            "from": from_lang,
+            "to": to_lang,
+            "srcText": text,
+            "timestamp": timestamp
+        }
+        
+        # 按参数名排序并拼接
+        sorted_params = sorted(list(params.items()) + [("apikey", settings.niutrans_apikey)], key=lambda x: x[0])
+        param_str = "&".join([f"{key}={value}" for key, value in sorted_params])
+        
+        # MD5 加密
+        auth_str = hashlib.md5(param_str.encode("utf-8")).hexdigest()
+        
+        # 添加 authStr
+        params["authStr"] = auth_str
+        
+        # 发送请求
+        url = "https://api.niutrans.com/v2/text/translate"
+        response = requests.post(url, data=params, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if "tgtText" in result:
+                return result["tgtText"]
+            elif "errorCode" in result:
+                logger.warning(f"Niutrans API error: {result.get('errorCode')} - {result.get('errorMsg')}")
+        else:
+            logger.warning(f"Niutrans API request failed with status {response.status_code}")
+    
+    except Exception as e:
+        logger.warning(f"Failed to translate text via niutrans: {e}")
+    
+    return None
 
 
 def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
@@ -237,6 +294,15 @@ def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
             english_name = future_english.result(timeout=30)
         except Exception as e:
             logger.warning(f"Failed to get English name for CAS {cas}: {e}")
+    
+    # 如果中文名为空但英文名存在，尝试翻译英文名作为备选
+    if not chinese_name and english_name:
+        logger.info(f"Chinese name not found for CAS {cas}, trying to translate English name: {english_name}")
+        translated_name = translate_text(english_name)
+        if translated_name:
+            # 翻译的中文名添加"（译）"标记
+            chinese_name = f"{translated_name}（译）"
+            logger.info(f"Translated Chinese name for CAS {cas}: {chinese_name}")
     
     # 保存到缓存
     result = {

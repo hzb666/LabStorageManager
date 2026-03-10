@@ -4,10 +4,8 @@ User API Routes - Authentication and User Management
 Critical Rule #3: All data modification endpoints must check current_user
 """
 import hashlib
-import secrets
 import time
-from datetime import timedelta
-from typing import Dict, Optional
+from typing import Optional, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile
 from fastapi.responses import JSONResponse
@@ -21,11 +19,11 @@ from app.core.auth import (
     create_access_token,
     verify_password,
     get_password_hash,
+    CurrentUser,
 )
 from app.core.config import settings
-from app.core.time_utils import get_utc_now
-from app.core.redis import cache_session, delete_cached_session, get_redis
-from app.database import get_db
+from app.core.redis import delete_cached_session, get_redis
+from app.database import get_db, DBSession
 from app.models.user import (
     User,
     UserCreate,
@@ -35,6 +33,16 @@ from app.models.user import (
 )
 from app.models.user_session import UserSession
 from app.services.image_service import save_avatar, delete_file
+from app.services.user_service import get_user_by_username, get_user_by_id
+from app.services.session_service import (
+    cleanup_expired_sessions,
+    _check_device_limit,
+    _check_ip_limit,
+    _evict_oldest_session,
+    _create_user_session,
+    LOGIN_ATTEMPTS,
+    _login_attempts_lock,
+)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -119,14 +127,6 @@ def _reset_login_attempts(client_ip: str) -> None:
     pass
 
 
-# ==================== Memory Fallback Rate Limiting ====================
-# 内存后备速率限制（Redis 不可用时使用）
-import threading
-
-LOGIN_ATTEMPTS: Dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次失败时间)
-_login_attempts_lock = threading.Lock()  # 线程锁，保护并发访问
-
-
 def _record_failed_login_memory(client_ip: str) -> None:
     """记录失败的登录尝试 (内存后备，线程安全)"""
     current_time = time.time()
@@ -139,156 +139,6 @@ def _record_failed_login_memory(client_ip: str) -> None:
                 LOGIN_ATTEMPTS[client_ip] = (1, current_time)
             else:
                 LOGIN_ATTEMPTS[client_ip] = (attempts + 1, first_attempt)
-
-
-def cleanup_expired_sessions(db: Session) -> int:
-    """清理过期的会话，返回删除的数量"""
-    now = get_utc_now()
-    result = db.exec(
-        select(UserSession).where(UserSession.expires_at < now)
-    ).all()
-
-    count = 0
-    for session in result:
-        delete_cached_session(session.token_hash)
-        db.delete(session)
-        count += 1
-
-    if count > 0:
-        db.commit()
-
-    return count
-
-
-# ==================== Device Session Management ====================
-
-def _check_device_limit(db: Session, user_id: int, device_id: str) -> bool:
-    """
-    检查设备数量限制
-    如果超过限制，返回 False 表示需要踢出旧设备
-    """
-    if not device_id:
-        return True  # 没有 device_id 不限制
-    
-    # 统计当前用户的设备数（排除当前设备）
-    count = db.exec(
-        select(func.count(UserSession.id))
-        .where(UserSession.user_id == user_id)
-        .where(UserSession.device_id != device_id)
-    ).one()
-    
-    return count < settings.max_device_per_user
-
-
-def _check_ip_limit(db: Session, user_id: int, ip_address: str) -> bool:
-    """
-    检查 IP 数量限制
-    如果超过限制，返回 False
-    """
-    if not ip_address:
-        return True
-    
-    # 统计当前用户不同 IP 数（排除当前 IP）
-    unique_ips = db.exec(
-        select(func.count(func.distinct(UserSession.ip_address)))
-        .where(UserSession.user_id == user_id)
-        .where(UserSession.ip_address != ip_address)
-    ).one()
-    
-    return unique_ips < settings.max_ip_per_user
-
-
-def _evict_oldest_session(db: Session, user_id: int) -> None:
-    """踢出最旧的会话"""
-    oldest = db.exec(
-        select(UserSession)
-        .where(UserSession.user_id == user_id)
-        .order_by(UserSession.last_active_at.asc())
-        .limit(1)
-    ).first()
-    
-    if oldest:
-        # 删除 Redis 缓存
-        delete_cached_session(oldest.token_hash)
-        # 删除数据库记录
-        db.delete(oldest)
-        db.commit()
-
-
-def _create_user_session(
-    db: Session,
-    user_id: int,
-    username: str,
-    device_id: str,
-    device_name: str,
-    ip_address: str,
-    user_agent: str,
-    token: str
-) -> UserSession:
-    """创建用户会话，如果已存在相同设备的会话则更新"""
-    # 计算 token hash
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-
-    # 计算过期时间
-    expires_at = get_utc_now() + timedelta(hours=settings.session_expire_hours)
-
-    # 检查是否已存在相同 user_id 和 device_id 的会话
-    # 如果存在则更新，而不是创建新记录
-    existing_session = db.exec(
-        select(UserSession)
-        .where(UserSession.user_id == user_id)
-        .where(UserSession.device_id == device_id)
-    ).first()
-
-    if existing_session:
-        # 更新现有会话
-        existing_session.token_hash = token_hash
-        existing_session.ip_address = ip_address
-        existing_session.last_ip_address = ip_address
-        existing_session.user_agent = user_agent
-        existing_session.expires_at = expires_at
-        existing_session.last_active_at = get_utc_now()
-        db.commit()
-        db.refresh(existing_session)
-        session = existing_session
-    else:
-        # 创建新会话
-        # 如果没有 device_id，生成唯一的匿名设备 ID，避免冲突
-        final_device_id = device_id or f"anonymous-{secrets.token_hex(8)}"
-        session = UserSession(
-            user_id=user_id,
-            device_id=final_device_id,
-            device_name=device_name or "Unknown Device",
-            ip_address=ip_address,
-            last_ip_address=ip_address,
-            user_agent=user_agent,
-            token_hash=token_hash,
-            expires_at=expires_at,
-        )
-        db.add(session)
-        db.commit()
-        db.refresh(session)
-    
-    # 缓存到 Redis（使用 session 对象中的实际值，避免 device_id 为 None）
-    cache_session(
-        token_hash,
-        {
-            "session_id": session.id,
-            "user_id": user_id,
-            "username": username,
-            "is_active": True,
-            "device_id": session.device_id,
-            "device_name": session.device_name,
-            "ip_address": ip_address,
-            "last_ip_address": ip_address,
-            "user_agent": user_agent,
-            "expires_at": expires_at.isoformat(),
-            "last_active_at": session.last_active_at.isoformat(),
-        },
-        settings.session_expire_hours * 3600
-    )
-    
-    return session
 
 
 class LoginRequest(BaseModel):
@@ -305,23 +155,11 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=6, max_length=50, description="新密码")
 
 
-def get_user_by_username(db: Session, username: str) -> Optional[User]:
-    """Get user by username"""
-    statement = select(User).where(User.username == username)
-    result = db.exec(statement).first()
-    return result
-
-
-def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
-    """Get user by ID"""
-    return db.get(User, user_id)
-
-
 @router.post("/login")
 def login(
     login_request: LoginRequest,
     http_request: Request,
-    db: Session = Depends(get_db)
+    db: DBSession,
 ):
     """
     Login endpoint - sets JWT token as httpOnly Cookie
@@ -429,7 +267,7 @@ def login(
 @router.post("/logout")
 def logout(
     http_request: Request,
-    db: Session = Depends(get_db)
+    db: DBSession,
 ):
     """Logout endpoint - clears the authentication cookie and session"""
     # 获取 token 并删除会话
@@ -462,8 +300,8 @@ def logout(
 @router.post("/change-password")
 def change_password(
     password_request: ChangePasswordRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """Change password for current user"""
     # Verify old password
@@ -490,8 +328,8 @@ def change_password(
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(
     user: UserCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ):
     """Create a new user (admin only)"""
     # Check if username exists
@@ -519,13 +357,13 @@ def create_user(
 
 @router.get("/", response_model=dict)
 def list_users(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
     skip: int = 0,
     limit: int = 50,
     username: Optional[str] = None,
     role: Optional[str] = None,
     is_active: Optional[bool] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
 ):
     """List users with optional filters (admin only)"""
     statement = select(User)
@@ -558,7 +396,7 @@ def list_users(
 
 
 @router.get("/me", response_model=UserResponse)
-def get_me(current_user: User = Depends(get_current_user)):
+def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     """Get current authenticated user"""
     return current_user
 
@@ -566,8 +404,8 @@ def get_me(current_user: User = Depends(get_current_user)):
 @router.get("/{user_id}", response_model=UserResponse)
 def get_user(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)]
 ):
     """Get user by ID"""
     user = get_user_by_id(db, user_id)
@@ -583,8 +421,8 @@ def get_user(
 def update_user(
     user_id: int,
     user_update: UserUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)]
 ):
     """Update user information (owner or admin only)"""
     # Check permission: user can only update their own profile unless admin
@@ -654,8 +492,8 @@ def update_user(
 @router.post("/{user_id}/activate", response_model=UserResponse)
 def activate_user(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)]
 ):
     """Activate a user account (admin only)"""
     user = get_user_by_id(db, user_id)
@@ -681,8 +519,8 @@ def activate_user(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)]
 ):
     """Soft delete user - deactivate account (admin only)"""
     user = get_user_by_id(db, user_id)
@@ -717,8 +555,8 @@ def delete_user(
 def update_user_role(
     user_id: int,
     role: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)]
 ):
     """Update user role (admin only)"""
     user = get_user_by_id(db, user_id)
@@ -753,8 +591,8 @@ class ResetPasswordRequest(BaseModel):
 def reset_user_password(
     user_id: int,
     password_request: ResetPasswordRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)]
 ):
     """Reset user password (admin only)
 
@@ -807,8 +645,8 @@ def reset_user_password(
 @router.delete("/{user_id}/avatar", response_model=dict)
 def delete_avatar(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)]
 ):
     """
     Delete user avatar image.
@@ -840,338 +678,12 @@ def delete_avatar(
     return {"avatar_url": None}
 
 
-# ==================== Admin User Logs ====================
-
-LOG_TOKEN_EXPIRE_HOURS = 2  # token有效期2小时
-
-# 日志 Token 生成速率限制
-LOG_TOKEN_RATE_LIMIT = 3  # 每分钟最多生成 3 次
-LOG_TOKEN_RATE_WINDOW = 30  # 30 秒窗口
-
-
-def _check_logs_token_rate_limit(admin_user_id: int) -> None:
-    """检查管理员生成日志 token 的速率限制"""
-    redis_client = get_redis()
-    
-    if redis_client is None:
-        # Redis 不可用时，跳过速率限制检查（降级处理）
-        return
-    
-    key = f"rate_limit:logs_token:{admin_user_id}"
-    
-    try:
-        current = redis_client.get(key)
-        
-        if current is not None:
-            count = int(current)
-            ttl = redis_client.ttl(key)
-            
-            if ttl > 0 and count >= LOG_TOKEN_RATE_LIMIT:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="请求过于频繁，请稍后再试"
-                )
-    except redis.RedisError:
-        # Redis 错误时，跳过速率限制（降级处理）
-        pass
-
-
-def _record_logs_token_request(admin_user_id: int) -> None:
-    """记录日志 token 生成请求"""
-    redis_client = get_redis()
-    
-    if redis_client is None:
-        return
-    
-    key = f"rate_limit:logs_token:{admin_user_id}"
-    
-    try:
-        pipe = redis_client.pipeline()
-        pipe.incr(key)
-        pipe.expire(key, LOG_TOKEN_RATE_WINDOW)
-        pipe.execute()
-    except redis.RedisError:
-        pass
-
-
-def create_log_token(user_id: int, expire_hours: int = LOG_TOKEN_EXPIRE_HOURS) -> str:
-    """创建日志访问token，格式：{user_id}_{expires_timestamp}_{random}"""
-    import time
-    expires_at = int(time.time()) + expire_hours * 3600
-    random_part = secrets.token_hex(8)
-    return f"{user_id}_{expires_at}_{random_part}"
-
-
-def parse_log_token(token: str) -> tuple[int, int] | None:
-    """解析token，返回 (user_id, expires_timestamp)，无效返回None"""
-    try:
-        parts = token.split("_")
-        if len(parts) != 3:
-            return None
-        user_id = int(parts[0])
-        expires_at = int(parts[1])
-        return (user_id, expires_at)
-    except (ValueError, IndexError):
-        return None
-
-
-def is_token_valid(token: str) -> bool:
-    """检查token是否有效（未过期）"""
-    import time
-    result = parse_log_token(token)
-    if result is None:
-        return False
-    _, expires_at = result
-    return time.time() < expires_at
-
-
-class LogsQueryParams(BaseModel):
-    """日志查询参数"""
-    keyword: Optional[str] = None  # 搜索关键词
-    log_type: Optional[str] = None  # 日志类型：reagent_order, consumable_order, inventory, borrow, session
-    skip: int = 0
-    limit: int = 20
-
-
-@router.post("/admin/users/{user_id}/logs-token")
-def generate_logs_token(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    """生成用户日志访问token（管理员专属）"""
-    # 检查速率限制
-    _check_logs_token_rate_limit(current_user.id)
-    _record_logs_token_request(current_user.id)
-    
-    # 检查用户是否存在
-    user = get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    # 生成token
-    token = create_log_token(user_id)
-    
-    return {
-        "token": token,
-        "user_id": user_id,
-        "username": user.username,
-        "expires_hours": LOG_TOKEN_EXPIRE_HOURS
-    }
-
-
-@router.get("/admin/logs/{token}", response_model=dict)
-def get_user_logs(
-    token: str,
-    keyword: Optional[str] = None,
-    log_type: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 20,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    """获取用户日志（管理员专属）"""
-    import time
-    
-    # 验证token
-    if not is_token_valid(token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token已过期，请重新生成"
-        )
-    
-    user_id, _ = parse_log_token(token)
-    
-    # 获取用户信息
-    user = get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    results = []
-    
-    # 1. 试剂订单
-    if log_type is None or log_type == "reagent_order":
-        from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
-        query = select(ReagentOrder).where(ReagentOrder.applicant_id == user_id)
-        if keyword:
-            query = query.where(ReagentOrder.name.contains(keyword))
-        orders = db.exec(query.order_by(ReagentOrder.created_at.desc()).offset(skip).limit(limit)).all()
-        for o in orders:
-            results.append({
-                "time": o.created_at.isoformat() if o.created_at else None,
-                "type": "reagent_order",
-                # 展开前显示的模板
-                "detail": f"申购 {o.name} {o.specification or ''} x{o.quantity}",
-                # 展开后的所有字段
-                "full_data": {
-                    "id": o.id,
-                    "cas_number": o.cas_number,
-                    "name": o.name,
-                    "english_name": o.english_name,
-                    "alias": o.alias,
-                    "category": o.category,
-                    "brand": o.brand,
-                    "specification": getattr(o, 'specification', None),
-                    "initial_quantity": o.initial_quantity,
-                    "unit": o.unit,
-                    "quantity": o.quantity,
-                    "price": o.price,
-                    "order_reason": o.order_reason.value if o.order_reason else None,
-                    "is_hazardous": o.is_hazardous,
-                    "image_path": o.image_path,
-                    "notes": o.notes,
-                    "status": o.status.value if o.status else None,
-                    "created_at": o.created_at.isoformat() if o.created_at else None,
-                    "updated_at": o.updated_at.isoformat() if o.updated_at else None,
-                }
-            })
-    
-    # 2. 耗材订单
-    if log_type is None or log_type == "consumable_order":
-        from app.models.consumable_order import ConsumableOrder
-        query = select(ConsumableOrder).where(ConsumableOrder.applicant_id == user_id)
-        if keyword:
-            query = query.where(ConsumableOrder.name.contains(keyword))
-        orders = db.exec(query.order_by(ConsumableOrder.created_at.desc()).offset(skip).limit(limit)).all()
-        for o in orders:
-            results.append({
-                "time": o.created_at.isoformat() if o.created_at else None,
-                "type": "consumable_order",
-                "detail": f"申购 {o.name} {o.specification or ''} x{o.quantity}",
-                "full_data": {
-                    "id": o.id,
-                    "name": o.name,
-                    "english_name": o.english_name,
-                    "alias": o.alias,
-                    "category": o.category,
-                    "brand": o.brand,
-                    "specification": o.specification,
-                    "unit": o.unit,
-                    "quantity": o.quantity,
-                    "price": o.price,
-                    "image_path": o.image_path,
-                    "notes": o.notes,
-                    "status": o.status.value if o.status else None,
-                    "created_at": o.created_at.isoformat() if o.created_at else None,
-                    "updated_at": o.updated_at.isoformat() if o.updated_at else None,
-                }
-            })
-    
-    # 3. 库存（入库）
-    if log_type is None or log_type == "inventory":
-        from app.models.inventory import Inventory, InventoryStatus
-        query = select(Inventory).where(Inventory.created_by_id == user_id)
-        if keyword:
-            query = query.where(Inventory.name.contains(keyword))
-        items = db.exec(query.order_by(Inventory.created_at.desc()).offset(skip).limit(limit)).all()
-        for i in items:
-            results.append({
-                "time": i.created_at.isoformat() if i.created_at else None,
-                "type": "inventory",
-                "detail": f"入库 {i.name} {i.initial_quantity or ''}{i.unit or ''}",
-                "full_data": {
-                    "id": i.id,
-                    "cas_number": i.cas_number,
-                    "name": i.name,
-                    "english_name": i.english_name,
-                    "alias": i.alias,
-                    "category": i.category,
-                    "brand": i.brand,
-                    "storage_location": i.storage_location,
-                    "initial_quantity": i.initial_quantity,
-                    "remaining_quantity": i.remaining_quantity,
-                    "unit": i.unit,
-                    "is_hazardous": i.is_hazardous,
-                    "image_path": i.image_path,
-                    "notes": i.notes,
-                    "internal_code": i.internal_code,
-                    "status": i.status.value if i.status else None,
-                    "created_at": i.created_at.isoformat() if i.created_at else None,
-                    "updated_at": i.updated_at.isoformat() if i.updated_at else None,
-                }
-            })
-    
-    # 4. 借用记录 - 从 BorrowLog 表查询
-    if log_type is None or log_type == "borrow":
-        from app.models.inventory import Inventory, BorrowLog
-        query = select(BorrowLog, Inventory).join(
-            Inventory, BorrowLog.inventory_id == Inventory.id
-        ).where(BorrowLog.borrower_id == user_id)
-        if keyword:
-            query = query.where(Inventory.name.contains(keyword))
-        logs = db.exec(query.order_by(BorrowLog.borrow_time.desc()).offset(skip).limit(limit)).all()
-        for log, inv in logs:
-            # 计算归还状态
-            is_returned = log.return_time is not None
-            return_status = "已归还" if is_returned else "未归还"
-            return_info = f", 已归还 {log.quantity_returned} {inv.unit or ''}" if is_returned else ", 未归还"
-            
-            results.append({
-                "time": log.borrow_time.isoformat() if log.borrow_time else None,
-                "type": "borrow",
-                # 展开前显示的模板：显示借了多少、是否已归还、归还多少
-                "detail": f"借用 {inv.name} {log.quantity_borrowed} {inv.unit or ''}{return_info}",
-                "full_data": {
-                    "id": log.id,
-                    "inventory_id": log.inventory_id,
-                    "inventory_name": inv.name,
-                    "cas_number": inv.cas_number,
-                    "borrow_time": log.borrow_time.isoformat() if log.borrow_time else None,
-                    "return_time": log.return_time.isoformat() if log.return_time else None,
-                    "quantity_borrowed": log.quantity_borrowed,
-                    "quantity_returned": log.quantity_returned,
-                    "unit": inv.unit,
-                    "notes": log.notes,
-                    "is_returned": is_returned,
-                    "created_at": log.created_at.isoformat() if log.created_at else None,
-                }
-            })
-    
-    # 5. 登录记录
-    if log_type is None or log_type == "session":
-        query = select(UserSession).where(UserSession.user_id == user_id)
-        sessions = db.exec(query.order_by(UserSession.last_active_at.desc()).offset(skip).limit(limit)).all()
-        for s in sessions:
-            results.append({
-                "time": s.last_active_at.isoformat() if s.last_active_at else None,
-                "type": "session",
-                "detail": f"登录 {s.device_name} {s.ip_address}",
-                "full_data": {
-                    "id": s.id,
-                    "device_id": s.device_id,
-                    "device_name": s.device_name,
-                    "ip_address": s.ip_address,
-                    "last_ip_address": s.last_ip_address,
-                    "user_agent": s.user_agent,
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
-                    "last_active_at": s.last_active_at.isoformat() if s.last_active_at else None,
-                    "expires_at": s.expires_at.isoformat() if s.expires_at else None,
-                }
-            })
-    
-    # 按时间排序
-    results.sort(key=lambda x: x["time"] or "", reverse=True)
-    
-    return {
-        "user_id": user_id,
-        "username": user.username,
-        "data": results[:limit],
-        "total": len(results)
-    }
-
-
 @router.post("/{user_id}/avatar", response_model=dict)
 def upload_avatar(
     user_id: int,
     file: UploadFile,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)]
 ):
     """
     Upload user avatar image.

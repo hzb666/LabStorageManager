@@ -3,15 +3,89 @@ Excel Import Service - Parse Excel files for inventory bulk import
 """
 import pandas as pd
 from datetime import datetime, date, timedelta
-from typing import List, Tuple, Optional
+from pathlib import Path
+from typing import Tuple, Optional
 from sqlalchemy.orm import Session
+from fastapi import HTTPException, status, UploadFile
 
 from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
-from app.services.internal_code import generate_internal_code
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.core.time_utils import get_utc_now
+
+
+# ==================== File Upload Security ====================
+# 允许的文件扩展名
+ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
+
+# 允许的 MIME 类型
+ALLOWED_MIME_TYPES = {
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+}
+
+# 文件魔数（文件头签名）
+FILE_MAGIC_BYTES = {
+    ".xlsx": b"PK\x03\x04",  # ZIP-based (Office Open XML)
+    ".xls": b"\xd0\xcf\x11\xe0",  # OLE2 compound document
+    ".csv": b"",  # CSV is text, no magic bytes needed
+}
+
+# 最大文件大小 (2MB)
+MAX_FILE_SIZE = 2 * 1024 * 1024
+
+
+def validate_uploaded_file(file: UploadFile) -> None:
+    """
+    验证上传的文件类型和内容
+    包括：文件扩展名、MIME类型、文件魔数、文件大小
+    """
+    # 1. 检查文件扩展名
+    ext = Path(file.filename).suffix.lower() if file.filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Only .xlsx, .xls, .csv are allowed"
+        )
+
+    # 2. 检查文件大小
+    file.file.seek(0, 2)  # Seek to end
+    file_size = file.file.tell()
+    file.file.seek(0)  # Reset to start
+
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size exceeds 2MB limit"
+        )
+
+    if file_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is empty"
+        )
+
+    # 3. 检查文件魔数
+    header = file.file.read(8)
+    file.file.seek(0)  # Reset to start
+
+    if ext == ".xlsx":
+        # XLSX is ZIP-based, check for PK\x03\x04
+        if not header.startswith(b"PK\x03\x04"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid XLSX file format"
+            )
+    elif ext == ".xls":
+        # XLS is OLE2 compound document
+        if not header.startswith(b"\xd0\xcf\x11\xe0"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid XLS file format"
+            )
+    # CSV doesn't need magic bytes check (it's plain text)
 
 
 def _parse_boolean(value, default: bool = False) -> bool:
@@ -143,7 +217,7 @@ def parse_excel_file(file_path: str) -> pd.DataFrame:
     return pd.read_excel(file_path)
 
 
-def validate_row_data(row: dict, row_num: int) -> Tuple[bool, Optional[str]]:
+def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     """
     Validate a single row of Excel data.
     Returns (is_valid, error_message).
@@ -165,7 +239,7 @@ def validate_row_data(row: dict, row_num: int) -> Tuple[bool, Optional[str]]:
     
     # Validate specification (will parse to get quantity and unit)
     try:
-        spec_value, unit = parse_specification(str(row['specification']))
+        _, _ = parse_specification(str(row['specification']))
     except ValueError as e:
         return False, f"Invalid specification format: {str(e)}"
     
@@ -244,7 +318,7 @@ def import_inventory_from_excel(
         row_num = idx + 2  # Excel row number (1-indexed, header at row 1)
         
         # Validate row
-        is_valid, error = validate_row_data(row, row_num)
+        is_valid, error = validate_row_data(row)
         if not is_valid:
             errors.append({"row": row_num, "error": error})
             continue

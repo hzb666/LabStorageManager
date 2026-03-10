@@ -5,14 +5,13 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.database import init_db
-from app.api import users, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, chemical, announcements, error_logs
+from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, chemical, announcements, error_logs
 
 # Configure logging
 logging.basicConfig(
@@ -33,8 +32,8 @@ class CachedStaticFiles(StaticFiles):
         response = await super().get_response(path, scope)
 
         # Add cache headers for static files (images, fonts, etc.)
-        # Cache for 7 days (604800 seconds)
-        response.headers["Cache-Control"] = "public, max-age=604800, immutable"
+        # Cache for 10 years (315360000 seconds)
+        response.headers["Cache-Control"] = "public, max-age=315360000, immutable"
         response.headers["X-Content-Type-Options"] = "nosniff"
 
         return response
@@ -75,6 +74,7 @@ if STATIC_DIR.exists():
 
 # Include routers
 app.include_router(users.router, prefix="/api")
+app.include_router(user_logs.router, prefix="/api")
 app.include_router(inventory.router, prefix="/api")
 app.include_router(reagent_orders.router, prefix="/api")
 app.include_router(consumable_orders.router, prefix="/api")
@@ -106,7 +106,6 @@ def health_check():
         "database": "connected",
     }
 
-
 # Import models to ensure tables are created
 # This is needed for SQLModel to register all models
-from app.models import User, Inventory, BorrowLog, ReagentOrder, ConsumableOrder, Announcement  # noqa: F401
+from app.models import User, Inventory, BorrowLog, ReagentOrder, ConsumableOrder, Announcement  # noqa: E402, F401

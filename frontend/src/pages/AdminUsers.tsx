@@ -7,7 +7,7 @@ import {
   getSortedRowModel,
   getFilteredRowModel,
 } from '@tanstack/react-table'
-import type { SortingState } from '@tanstack/react-table'
+import type { SortingState, ColumnDef } from '@tanstack/react-table'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
@@ -177,7 +177,7 @@ export function AdminUsersPage() {
 
   // 表格列定义 - 使用 tableConfigs 中的基础列 + 页面特定的操作列
   const columns = useMemo(() => {
-    const baseColumns = getAdminUsersTableColumns() as any[]
+    const baseColumns = getAdminUsersTableColumns()
 
     // 追加页面特定的操作列
     const actionColumn = columnHelper.display({
@@ -283,7 +283,7 @@ export function AdminUsersPage() {
       },
     })
 
-    return [...baseColumns, actionColumn]
+    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
   }, [currentUser, navigate])
 
   const table = useReactTable({

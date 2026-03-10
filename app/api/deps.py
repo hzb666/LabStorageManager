@@ -1,6 +1,6 @@
 import hashlib
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime
+from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 from sqlmodel import Session, select
@@ -36,7 +36,7 @@ def _update_activity_task(session_id: int, current_ip: str) -> None:
 def get_current_session(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Annotated[Session, Depends(get_db)]
 ) -> tuple[User, UserSession]:
     """
     获取当前认证用户和会话

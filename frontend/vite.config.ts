@@ -30,6 +30,21 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: {
     include: ['react', 'react-dom', 'react-router-dom', 'axios'],
   },
+  // 开发服务器配置
+  server: {
+    headers: {
+      // RDKit 文件缓存 10 年
+      'Cache-Control': 'public, max-age=315360000',
+    },
+  },
+  // 静态资源缓存配置
+  publicAssetsRetry: [
+    {
+      // RDKit 文件缓存 10 年
+      test: /\/lib\/(RDKit|.*\.wasm).*/,
+      maxAge: 60 * 60 * 24 * 365 * 10, // 10年
+    },
+  ],
   build: {
     // 目标浏览器
     target: 'es2020',

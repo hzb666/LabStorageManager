@@ -63,7 +63,6 @@ export function Layout() {
   }, []) // Only fetch on mount
 
   // Determine if user is regular user (not admin)
-  const isRegularUser = !isAdmin(user)
   const [showBugButton, setShowBugButton] = useState(() => !getBugButtonHidden())
 
   // 右键隐藏按钮后刷新状态
@@ -73,11 +72,11 @@ export function Layout() {
 
   // 退出登录处理
   const handleLogout = () => {
-    if (!logoutConfirming) {
-      setLogoutConfirming(true)
-    } else {
+    if (logoutConfirming) {
       clearBugButtonHidden() // 清除按钮隐藏状态
       logout()
+    } else {
+      setLogoutConfirming(true)
     }
   }
 
@@ -104,8 +103,8 @@ export function Layout() {
   }, [toggleSidebar])
 
   useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    globalThis.addEventListener('keydown', handleKeyDown)
+    return () => globalThis.removeEventListener('keydown', handleKeyDown)
   }, [handleKeyDown])
 
   // 移动端侧边栏打开时禁止背景滚动
@@ -170,7 +169,7 @@ export function Layout() {
                           <span
                             className={cn(
                               "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                              sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
+                              sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-50 ml-3'
                             )}
                           >
                             {item.title}
@@ -213,7 +212,7 @@ export function Layout() {
                           <span
                             className={cn(
                               "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                              sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[200px] ml-3'
+                              sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-50 ml-3'
                             )}
                           >
                             {item.title}
@@ -254,7 +253,7 @@ export function Layout() {
               <div
                 className={cn(
                   "flex-1 overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                  sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-[150px] ml-3'
+                  sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-37.5 ml-3'
                 )}
               >
                 <p className="text-base truncate text-sidebar-foreground">
@@ -278,7 +277,7 @@ export function Layout() {
                     {theme === 'dark' ? <Sun className="size-5 shrink-0" /> : <Moon className="size-5 shrink-0" />}
                     <span className={cn(
                       "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                      sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
+                      sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-50 ml-3"
                     )}>
                       {theme === 'dark' ? '切换亮色模式' : '切换暗黑模式'}
                     </span>
@@ -304,7 +303,7 @@ export function Layout() {
                     <LogOut className="size-5 shrink-0" />
                     <span className={cn(
                       "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                      sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-[200px] ml-3"
+                      sidebarCollapsed ? "opacity-0 max-w-0 ml-0" : "opacity-100 max-w-50 ml-3"
                     )}>
                       {logoutConfirming ? "确认退出" : "退出登录"}
                     </span>

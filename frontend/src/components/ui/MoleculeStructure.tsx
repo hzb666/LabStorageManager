@@ -43,10 +43,46 @@ type LoadingState = 'idle' | 'loading' | 'ready' | 'error'
 
 let rdkitLoaderPromise: Promise<any> | null = null
 
-// 全局缓存（内存级）及大小限制
-const MAX_CACHE_SIZE = 100
+// SVG缓存：内存Map（刷新丢失）
+const SVG_MAX_CACHE_SIZE = 100
 const svgCache = new Map<string, { svg: string; zoomSvg: string; naturalSize: { w: number; h: number } }>()
-const smilesCache = new Map<string, string>()
+
+// SMILES缓存：localStorage持久化，格式 {cas: smiles}
+const SMILES_STORAGE_KEY = 'molecule_smiles_cache'
+const SMILES_MAX_CACHE_SIZE = 1000
+const SMILES_EXPIRY_HOURS = 24 * 7 // 7天
+
+// 辅助函数：从localStorage获取SMILES缓存
+function getSmilesFromStorage(): Record<string, string> {
+  try {
+    const stored = localStorage.getItem(SMILES_STORAGE_KEY)
+    if (!stored) return {}
+    const data = JSON.parse(stored) as { data: Record<string, string>; timestamp: number }
+    // 检查是否过期
+    if (Date.now() - data.timestamp > SMILES_EXPIRY_HOURS * 60 * 60 * 1000) {
+      localStorage.removeItem(SMILES_STORAGE_KEY)
+      return {}
+    }
+    return data.data || {}
+  } catch {
+    return {}
+  }
+}
+
+// 辅助函数：保存SMILES到localStorage
+function saveSmilesToStorage(data: Record<string, string>) {
+  try {
+    localStorage.setItem(SMILES_STORAGE_KEY, JSON.stringify({
+      data,
+      timestamp: Date.now()
+    }))
+  } catch (e) {
+    console.warn('localStorage存储失败:', e)
+  }
+}
+
+// 初始化SMILES缓存（从localStorage加载）
+const smilesCache = new Map<string, string>(Object.entries(getSmilesFromStorage()))
 
 // --- 新增：全局并发队列与请求去重 ---
 const MAX_CONCURRENT_REQUESTS = 3; // PubChem 建议控制在 3-5 个并发以内
@@ -196,8 +232,11 @@ export function MoleculeStructure({
     // 1. LRU 缓存拦截
     if (smilesCache.has(cas)) {
       const cachedSmiles = smilesCache.get(cas)!
+      // LRU: 移到末尾
       smilesCache.delete(cas)
       smilesCache.set(cas, cachedSmiles)
+      // 保存到localStorage
+      saveSmilesToStorage(Object.fromEntries(smilesCache))
       return cachedSmiles
     }
 
@@ -219,11 +258,13 @@ export function MoleculeStructure({
         const fetchedSmiles = data?.PropertyTable?.Properties?.[0]?.SMILES || null
         
         if (fetchedSmiles) {
-          if (smilesCache.size >= MAX_CACHE_SIZE) {
+          // LRU: 容量控制
+          if (smilesCache.size >= SMILES_MAX_CACHE_SIZE) {
             const firstKey = smilesCache.keys().next().value
             if (firstKey) smilesCache.delete(firstKey)
           }
           smilesCache.set(cas, fetchedSmiles)
+          saveSmilesToStorage(Object.fromEntries(smilesCache))
         }
         return fetchedSmiles
       } catch (err) {
@@ -317,8 +358,8 @@ export function MoleculeStructure({
             naturalSize: { w: natWidth, h: natHeight } 
           }
           
-          // 容量控制：超出 MAX_CACHE_SIZE 后删除第一个（最老未使用的）元素
-          if (svgCache.size >= MAX_CACHE_SIZE) {
+          // 容量控制：超出 SVG_MAX_CACHE_SIZE 后删除第一个（最老未使用的）元素
+          if (svgCache.size >= SVG_MAX_CACHE_SIZE) {
             const firstKey = svgCache.keys().next().value
             if (firstKey) svgCache.delete(firstKey)
           }

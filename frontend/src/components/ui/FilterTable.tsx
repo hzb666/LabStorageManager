@@ -102,7 +102,7 @@ export function FilterTable({
     if (customColumns && customColumns.length > 0) {
       return customColumns
     }
-    return getInventoryTableColumns()
+    return getInventoryTableColumns() as ColumnDef<Record<string, unknown>, unknown>[]
   }, [customColumns])
 
   const table = useReactTable({
@@ -113,7 +113,7 @@ export function FilterTable({
       sortingFn: 'text',
     },
     data: filter.data as Record<string, unknown>[],
-    columns: tableColumns as any,
+    columns: tableColumns,
     // 修复 1：绝对不能用 Math.random()，改用 id，若无 id 则用稳定的 index 兜底
     getRowId: (row, index) => {
       if (row.id !== undefined && row.id !== null) return String(row.id)
