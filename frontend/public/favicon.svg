@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name="图层_1" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512">
+  <!-- Generator: Adobe Illustrator 29.1.0, SVG Export Plug-In . SVG Version: 2.1.0 Build 142)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #10b981;
+        stroke: #f8fafc;
+        stroke-width: 26.6px;
+      }
+
+      .st0, .st1, .st2 {
+        stroke-miterlimit: 20.5;
+      }
+
+      .st3, .st1, .st4, .st5, .st2 {
+        fill: none;
+      }
+
+      .st1 {
+        opacity: .6;
+      }
+
+      .st1, .st5 {
+        stroke: #fff;
+        stroke-width: 20px;
+      }
+
+      .st1, .st5, .st2 {
+        stroke-linecap: round;
+      }
+
+      .st1, .st6 {
+        isolation: isolate;
+      }
+
+      .st4, .st5 {
+        stroke-linejoin: round;
+      }
+
+      .st4, .st2 {
+        stroke: #0f172a;
+        stroke-width: 33.3px;
+      }
+
+      .st7 {
+        fill: url(#_未命名的渐变);
+      }
+
+      .st8 {
+        fill: #f8fafc;
+      }
+
+      .st6 {
+        fill: #fff;
+        opacity: .8;
+      }
+
+      .st9 {
+        clip-path: url(#clippath);
+      }
+    </style>
+    <clipPath id="clippath">
+      <path class="st3" d="M161.3,44.6h106.5v79.9l106.5,239.6c7.5,16.8,0,36.5-16.9,43.9-3.1,1.4-6.4,2.3-9.7,2.7H81.4c-18.3-2.1-31.4-18.6-29.3-36.8.4-3.4,1.3-6.7,2.7-9.7l106.5-239.6V44.6Z"/>
+    </clipPath>
+    <linearGradient id="_未命名的渐变" data-name="未命名的渐变" x1="-41.2" y1="676.2" x2="-39.9" y2="674.9" gradientTransform="translate(20951 138692.4) scale(512 -204.8)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect class="st8" x="0" y="0" width="512" height="512" rx="102.4" ry="102.4"/>
+  <g>
+    <g class="st9">
+      <g>
+        <rect class="st7" x="-118.3" y="197.7" width="665.6" height="266.2"/>
+        <path class="st6" d="M144.6,244.3h139.8c5.5,0,10,4.5,10,10h0c0,5.5-4.5,10-10,10h-139.8c-5.5,0-10-4.5-10-10h0c0-5.5,4.5-10,10-10Z"/>
+        <path class="st6" d="M118,310.8h193c5.5,0,10,4.5,10,10h0c0,5.5-4.5,10-10,10H118c-5.5,0-10-4.5-10-10h0c0-5.5,4.5-10,10-10Z"/>
+      </g>
+    </g>
+    <path class="st4" d="M161.3,44.6h106.5v79.9l106.5,239.6c7.5,16.8,0,36.5-16.9,43.9-3.1,1.4-6.4,2.3-9.7,2.7H81.4c-18.3-2.1-31.4-18.6-29.3-36.8.4-3.4,1.3-6.7,2.7-9.7l106.5-239.6V44.6Z"/>
+    <line class="st2" x1="128" y1="44.6" x2="301" y2="44.6"/>
+    <line class="st1" x1="287.7" y1="204.3" x2="321" y2="284.2"/>
+    <circle class="st0" cx="380.9" cy="377.4" r="99.8"/>
+    <path class="st5" d="M341,377.4l26.6,26.6,53.2-59.9"/>
+  </g>
+</svg>

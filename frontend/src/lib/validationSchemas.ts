@@ -66,7 +66,7 @@ export const createPositiveNumberSchema = (fieldName: string) =>
     v.transform((input) => {
       if (typeof input === 'number') return input
       const num = parseFloat(input)
-      return isNaN(num) ? input : num
+      return isNaN(num) ? NaN : num
     }),
     v.number(`${fieldName}必须是有效数字`),
     v.integer(`${fieldName}必须为整数`),
@@ -84,7 +84,7 @@ export const createQuantitySchema = (fieldName: string) =>
     v.transform((input) => {
       if (typeof input === 'number') return input
       const num = parseFloat(input)
-      return isNaN(num) ? input : num
+      return isNaN(num) ? NaN : num
     }),
     v.number(`${fieldName}必须是有效数字`),
     v.gtValue(0, `${fieldName}必须大于0`)
@@ -119,7 +119,7 @@ export const createRemainingQuantitySchema = (fieldName: string, maxValue: numbe
     v.transform((input) => {
       if (typeof input === 'number') return input
       const num = parseFloat(input)
-      return isNaN(num) ? input : num
+      return isNaN(num) ? NaN : num
     }),
     v.number(`${fieldName}必须是有效数字`),
     v.minValue(0, `${fieldName}不能为负数`),
@@ -138,7 +138,7 @@ export const createPriceSchema = (min = 0, max = 999999) =>
     v.transform((input) => {
       if (typeof input === 'number') return input
       const num = parseFloat(input)
-      return isNaN(num) ? input : num
+      return isNaN(num) ? NaN : num
     }),
     v.number('价格必须是有效数字'),
     v.minValue(min, `价格不能小于${min}`),

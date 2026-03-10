@@ -230,7 +230,7 @@ export function InventoryPage() {
   // ---------------------------------------------------------------------------
   // 数据查询 (API)
   // ---------------------------------------------------------------------------
-  const queryFn = useCallback(async ({ pageParam = 0 }: { pageParam: 0 }) => {
+  const queryFn = useCallback(async ({ pageParam = 0 }: { pageParam?: number }) => {
     const currentSorting = sorting.length > 0 ? sorting : sortingRef.current
     const sort = currentSorting[0]
 
@@ -325,7 +325,7 @@ export function InventoryPage() {
   // ---------------------------------------------------------------------------
   // 使用统一的表单验证规则（所有字段可选），在提交时根据模式做额外验证
   const form = useForm<InventoryFormData>({
-    resolver: valibotResolver(InventoryFormSchema),
+    resolver: valibotResolver(InventoryFormSchema) as any,
     defaultValues: defaultInventoryValues,
     shouldFocusError: false,
   })

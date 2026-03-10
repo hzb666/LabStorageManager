@@ -107,7 +107,7 @@ export function InventoryPage() {
   // 表单逻辑
   // ---------------------------------------------------------------------------
   const form = useForm<InventoryFormData>({
-    resolver: valibotResolver(InventoryFormSchema),
+    resolver: valibotResolver(InventoryFormSchema) as any,
     defaultValues: defaultInventoryValues,
     shouldFocusError: false,
   })
@@ -367,7 +367,7 @@ export function InventoryPage() {
           <div>入库时间：{formatDate(item.created_at)}</div>
           <div>入库用户：{item.created_by_name || '-'}</div>
           <div>上次借用：{item.borrower_name ? `${item.borrower_name} (未归还)` : (item.last_borrower_name ? `${item.last_borrower_name} (已归还)` : '-')}</div>
-          <NoteDisplay label="备注" text={item.notes} />
+          <NoteDisplay label="备注" text={item.notes ?? undefined} />
         </div>
       </div>
     )
@@ -468,8 +468,8 @@ const ActionButtons = React.memo(function ActionButtons({
   onBorrowSuccess
 }: {
   item: InventoryItem;
-  onEdit: (item: Record<string, unknown>) => void;
-  onBorrowSuccess: () => void | Promise<void>;
+  onEdit: (item: InventoryItem) => void;
+  onBorrowSuccess: () => void
 }) {
 
   const statusDisplay = useMemo(() => {
@@ -520,10 +520,10 @@ const ActionButtons = React.memo(function ActionButtons({
 
   return (
     <TableActionButtonsMemo
-      item={item}
-      actions={actions}
+      item={item as any}
+      actions={actions as any}
       showEdit={true}
-      onEdit={onEdit}
+      onEdit={onEdit as any}
       statusField="status"
       statusDisplay={statusDisplay}
     />
@@ -533,8 +533,8 @@ const ActionButtons = React.memo(function ActionButtons({
     return false;
   }
 
-  const prevItem = prevProps.item as Record<string, unknown>
-  const nextItem = nextProps.item as Record<string, unknown>
+  const prevItem = prevProps.item as unknown as Record<string, unknown>
+  const nextItem = nextProps.item as unknown as Record<string, unknown>
 
   if (prevItem === nextItem) return true
 

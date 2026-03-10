@@ -27,9 +27,9 @@ import { getInventoryTableColumns } from '@/lib/tableConfigs'
 // 扩展 TanStack Table 的 Meta 类型
 declare module '@tanstack/react-table' {
   interface TableMeta<TData extends RowData> {
-    fuzzySearch?: boolean
-    onEdit?: (item: TData) => void
-    onBorrowSuccess?: () => void
+    fuzzySearch: boolean
+    onEdit: (item: TData) => void
+    onBorrowSuccess: () => void
   }
 }
 

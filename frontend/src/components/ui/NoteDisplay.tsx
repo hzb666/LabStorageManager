@@ -8,7 +8,7 @@ export interface NoteDisplayProps {
   className?: string;
 }
 
-export const NoteDisplay: React.FC<NoteDisplayProps> = ({ label, text, className }) => {
+export const NoteDisplay: React.FC<NoteDisplayProps> = ({ label, text = '', className }) => {
   const isEmpty = !text || text === "-";
   const matchedTag = !isEmpty ? Object.keys(inputConfigs).find(tag => text.startsWith(tag)) : null;
 

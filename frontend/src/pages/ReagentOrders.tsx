@@ -26,7 +26,7 @@ import { UserRoles } from '@/lib/constants'
 import { useTableState } from '@/hooks/useTableState'
 
 // 工具与API
-import { reagentOrderAPI, chemicalAPI } from '@/api/client'
+import { reagentOrderAPI, chemicalAPI, ReagentOrderReason } from '@/api/client'
 import { processNotes } from '@/lib/utils'
 import { ReagentOrderSchema, validateCASLogic } from '@/lib/validationSchemas'
 import type { ReagentOrderFormData } from '@/lib/validationSchemas'
@@ -201,7 +201,7 @@ export function ReagentOrdersPage() {
 
   // 表单实例
   const form = useForm<ReagentOrderFormData>({
-    resolver: valibotResolver(ReagentOrderSchema),
+    resolver: valibotResolver(ReagentOrderSchema) as any,
     defaultValues: defaultReagentOrderValues,
     shouldFocusError: false,
   })
@@ -274,10 +274,17 @@ export function ReagentOrdersPage() {
           })
         } else if (dialogState === 'add') {
           await reagentOrderAPI.create({
-            ...formData,
+            name: formData.name,
+            cas_number: formData.cas_number,
+            english_name: formData.english_name || undefined,
+            alias: formData.alias || undefined,
             category: formData.category || undefined,
             brand: formData.brand || undefined,
-            price: formData.price ? parseFloat(String(formData.price)) : undefined,
+            specification: formData.specification,
+            quantity: formData.quantity,
+            price: formData.price,
+            order_reason: (formData.order_reason as ReagentOrderReason) || ReagentOrderReason.NONE,
+            is_hazardous: formData.is_hazardous,
             notes: processNotes(formData.notes)
           })
         }
@@ -423,8 +430,8 @@ export function ReagentOrdersPage() {
       {
         id: 'approve',
         label: '审批',
-        showWhen: (currItem) => isAdmin && currItem.status === 'pending',
-        onClick: async (currItem) => {
+        showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+        onClick: async (currItem: Record<string, unknown>) => {
           await reagentOrderAPI.approve(currItem.id as number)
           await filter.invalidate()
           toast.success('审批通过')
@@ -433,8 +440,8 @@ export function ReagentOrdersPage() {
       {
         id: 'reject',
         label: '驳回',
-        showWhen: (currItem) => isAdmin && currItem.status === 'pending',
-        onClick: async (currItem) => {
+        showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+        onClick: async (currItem: Record<string, unknown>) => {
           await reagentOrderAPI.reject(currItem.id as number, '管理员驳回')
           await filter.invalidate()
           toast.success('已驳回')
@@ -443,8 +450,8 @@ export function ReagentOrdersPage() {
       {
         id: 'confirmArrival',
         label: '确认到货',
-        showWhen: (currItem) => currItem.status === 'approved',
-        onClick: async (currItem) => {
+        showWhen: (currItem: Record<string, unknown>) => currItem.status === 'approved',
+        onClick: async (currItem: Record<string, unknown>) => {
           const result = await reagentOrderAPI.confirmArrival(currItem.id as number)
           await filter.invalidate()
           toast.success(result.data.message || '确认成功')

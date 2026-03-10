@@ -145,7 +145,7 @@ export function ConsumableOrdersPage() {
 
   // 表单实例
   const form = useForm<ConsumableOrderFormData>({
-    resolver: valibotResolver(ConsumableOrderSchema),
+    resolver: valibotResolver(ConsumableOrderSchema) as any,
     defaultValues: defaultConsumableOrderValues,
     shouldFocusError: false,
   })
@@ -209,7 +209,7 @@ export function ConsumableOrdersPage() {
             quantity: formData.quantity,
             category: formData.category || undefined,
             brand: formData.brand || undefined,
-            price: formData.price ? parseFloat(String(formData.price)) : undefined,
+            price: formData.price,
             notes: processNotes(formData.notes),
           })
         }
@@ -270,8 +270,8 @@ export function ConsumableOrdersPage() {
       {
         id: 'approve',
         label: '审批',
-        showWhen: (currItem) => isAdmin && currItem.status === 'pending',
-        onClick: async (currItem) => {
+        showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+        onClick: async (currItem: Record<string, unknown>) => {
           await consumableOrderAPI.approve(currItem.id as number)
           await filter.invalidate()
           toast.success('审批通过')
@@ -280,8 +280,8 @@ export function ConsumableOrdersPage() {
       {
         id: 'reject',
         label: '驳回',
-        showWhen: (currItem) => isAdmin && currItem.status === 'pending',
-        onClick: async (currItem) => {
+        showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+        onClick: async (currItem: Record<string, unknown>) => {
           await consumableOrderAPI.reject(currItem.id as number, '管理员驳回')
           await filter.invalidate()
           toast.success('已驳回')
@@ -290,8 +290,8 @@ export function ConsumableOrdersPage() {
       {
         id: 'complete',
         label: '确认完成',
-        showWhen: (currItem) => currItem.status === 'approved',
-        onClick: async (currItem) => {
+        showWhen: (currItem: Record<string, unknown>) => currItem.status === 'approved',
+        onClick: async (currItem: Record<string, unknown>) => {
           await consumableOrderAPI.complete(currItem.id as number)
           await filter.invalidate()
           toast.success('耗材订单已完成')

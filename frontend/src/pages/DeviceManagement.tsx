@@ -2,7 +2,7 @@
  * 账户管理页面
  * 用户可以查看和管理自己的账户信息、头像、密码，以及查看和管理登录设备
  */
-import React, { useState, useMemo, useCallback, useEffect } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -22,7 +22,9 @@ import { sessionAPI, authAPI, type SessionInfo } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
 import { formatDateTime } from '@/lib/utils'
 import { getDeviceId } from '@/lib/deviceId'
+import { type User } from '@/lib/constants'
 import useDialogState from '@/hooks/useDialogState'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import {
   Search,
   Laptop,
@@ -32,14 +34,15 @@ import {
   LogOut,
   Shield,
   Edit,
+  X,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
-import { UserEditDialog, type User } from '@/components/UserEditDialog'
+import { UserEditDialog } from '@/components/UserEditDialog'
+
 
 const columnHelper = createColumnHelper<SessionInfo>()
 
 export default function DeviceManagement() {
-  const { user: currentUser, setAuth } = useAuthStore()
   const logout = useAuthStore((state) => state.logout)
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
@@ -64,7 +67,7 @@ export default function DeviceManagement() {
     queryKey: ['currentUser'],
     queryFn: async () => {
       const response = await authAPI.getProfile()
-      return response.data as UserInfo
+      return response.data as User
     },
     enabled: true,
   })

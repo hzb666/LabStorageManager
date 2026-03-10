@@ -220,7 +220,8 @@ export function MoleculeStructure({
         
         if (fetchedSmiles) {
           if (smilesCache.size >= MAX_CACHE_SIZE) {
-            smilesCache.delete(smilesCache.keys().next().value)
+            const firstKey = smilesCache.keys().next().value
+            if (firstKey) smilesCache.delete(firstKey)
           }
           smilesCache.set(cas, fetchedSmiles)
         }
@@ -318,7 +319,8 @@ export function MoleculeStructure({
           
           // 容量控制：超出 MAX_CACHE_SIZE 后删除第一个（最老未使用的）元素
           if (svgCache.size >= MAX_CACHE_SIZE) {
-            svgCache.delete(svgCache.keys().next().value)
+            const firstKey = svgCache.keys().next().value
+            if (firstKey) svgCache.delete(firstKey)
           }
           svgCache.set(cacheKey, calcResult)
 
