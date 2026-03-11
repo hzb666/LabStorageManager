@@ -49,7 +49,7 @@ def _check_logs_token_rate_limit(admin_user_id: int) -> None:
             if ttl > 0 and count >= LOG_TOKEN_RATE_LIMIT:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="请求过于频繁，请稍后再试"
+                    detail="Too many requests, please try again later"
                 )
     except redis.RedisError:
         # Redis 错误时，跳过速率限制（降级处理）
@@ -158,7 +158,7 @@ def get_user_logs(
     if not is_token_valid(token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token已过期，请重新生成"
+            detail="Token expired, please regenerate"
         )
     
     user_id, _ = parse_log_token(token)
@@ -175,7 +175,7 @@ def get_user_logs(
     
     # 1. 试剂订单
     if log_type is None or log_type == "reagent_order":
-        from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
+        from app.models.reagent_order import ReagentOrder
         query = select(ReagentOrder).where(ReagentOrder.applicant_id == user_id)
         if keyword:
             query = query.where(ReagentOrder.name.contains(keyword))
@@ -202,7 +202,6 @@ def get_user_logs(
                     "price": o.price,
                     "order_reason": o.order_reason.value if o.order_reason else None,
                     "is_hazardous": o.is_hazardous,
-                    "image_path": o.image_path,
                     "notes": o.notes,
                     "status": o.status.value if o.status else None,
                     "created_at": o.created_at.isoformat() + 'Z' if o.created_at else None,
@@ -226,14 +225,11 @@ def get_user_logs(
                     "id": o.id,
                     "name": o.name,
                     "english_name": o.english_name,
-                    "alias": o.alias,
-                    "category": o.category,
-                    "brand": o.brand,
                     "specification": o.specification,
                     "unit": o.unit,
                     "quantity": o.quantity,
                     "price": o.price,
-                    "image_path": o.image_path,
+                    "communication": o.communication,
                     "notes": o.notes,
                     "status": o.status.value if o.status else None,
                     "created_at": o.created_at.isoformat() + 'Z' if o.created_at else None,
@@ -243,7 +239,7 @@ def get_user_logs(
     
     # 3. 库存（入库）
     if log_type is None or log_type == "inventory":
-        from app.models.inventory import Inventory, InventoryStatus
+        from app.models.inventory import Inventory
         query = select(Inventory).where(Inventory.created_by_id == user_id)
         if keyword:
             query = query.where(Inventory.name.contains(keyword))
@@ -266,7 +262,6 @@ def get_user_logs(
                     "remaining_quantity": i.remaining_quantity,
                     "unit": i.unit,
                     "is_hazardous": i.is_hazardous,
-                    "image_path": i.image_path,
                     "notes": i.notes,
                     "internal_code": i.internal_code,
                     "status": i.status.value if i.status else None,
@@ -332,8 +327,7 @@ def get_user_logs(
                 }
             })
     
-    # 按时间排序
-    results.sort(key=lambda x: x["time"] or "", reverse=True)
+    results.sort(key=lambda item: item["time"] or "", reverse=True)
     
     return {
         "user_id": user_id,

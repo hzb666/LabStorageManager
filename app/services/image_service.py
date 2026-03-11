@@ -3,17 +3,14 @@ Image Service - Upload and Compression
 Critical Rule #3: 
 Images are stored in filesystem, database only stores URL/path
 """
-import os
 import uuid
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import UploadFile, HTTPException
-from PIL import Image, ImageOps
+from PIL import Image
 import io
 
-from app.core.config import settings, BASE_DIR, UPLOADS_DIR, THUMBNAILS_DIR
+from app.core.config import settings, BASE_DIR, UPLOADS_DIR
 from app.core.time_utils import get_utc_now
 
 
@@ -163,49 +160,6 @@ def compress_image(
     
     output.seek(0)
     return Image.open(output)
-
-
-def process_uploaded_image(file: UploadFile, max_size_mb: float = 1.0) -> tuple[str, str]:
-    """
-    Process uploaded image: validate, compress, save.
-    
-    Critical Rule #3: Compress to <100KB, save to filesystem
-    
-    Args:
-        file: Uploaded file from FastAPI
-        max_size_mb: Maximum file size in MB (default 1MB for avatars)
-        
-    Returns:
-        Tuple of (image_url, thumbnail_url)
-    """
-    if not validate_image_type(file):
-        raise ValueError(f"Invalid image type. Allowed: {settings.allowed_image_types}")
-    
-    if not validate_image_size(file, max_size_mb):
-        raise ValueError(f"Image size exceeds {max_size_mb}MB limit")
-    
-    image = Image.open(file.file)
-    
-    thumbnail = image.copy()
-    thumbnail.thumbnail((200, 200), Image.Resampling.LANCZOS)
-    
-    timestamp = get_utc_now().strftime("%Y%m%d_%H%M%S")
-    unique_id = str(uuid.uuid4())[:8]
-    filename = f"{timestamp}_{unique_id}.jpg"
-    
-    compressed_image = compress_image(image)
-    
-    image_path = UPLOADS_DIR / filename
-    compressed_image.save(image_path, format="JPEG", quality=85, optimize=True)
-    
-    thumbnail_path = THUMBNAILS_DIR / filename
-    thumbnail_rgb = thumbnail.convert("RGB") if thumbnail.mode != "RGB" else thumbnail
-    thumbnail_rgb.save(thumbnail_path, format="JPEG", quality=75, optimize=True)
-    
-    image_url = f"/static/uploads/{filename}"
-    thumbnail_url = f"/static/thumbnails/{filename}"
-    
-    return image_url, thumbnail_url
 
 
 def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:

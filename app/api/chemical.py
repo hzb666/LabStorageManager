@@ -29,7 +29,7 @@ def get_chemical_info(
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_msg or "无效的 CAS 号"
+            detail=error_msg or "Invalid CAS number"
         )
     
     result = query_chemical_info(normalized_cas)

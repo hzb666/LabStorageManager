@@ -79,6 +79,7 @@ const getLogColumns = () => [
   columnHelper.accessor('time', {
     id: 'time',
     header: '时间',
+    enableSorting: false,
     size: 180,
     minSize: 150,
     cell: info => (
@@ -88,8 +89,9 @@ const getLogColumns = () => [
   columnHelper.accessor('type', {
     id: 'type',
     header: '类型',
-    size: 120,
-    minSize: 100,
+    enableSorting: false,
+    size: 100,
+    minSize: 80,
     cell: info => (
       <StatusBadge status={info.getValue()} />
     )
@@ -97,8 +99,9 @@ const getLogColumns = () => [
   columnHelper.accessor('detail', {
     id: 'detail',
     header: '详情',
-    size: 400,
-    minSize: 200,
+    enableSorting: false,
+    size: 500,
+    minSize: 400,
     cell: info => (
       <span>{info.getValue()}</span>
     )

@@ -44,6 +44,7 @@ export interface FieldSchema<T extends Record<string, unknown>> {
   hideLabel?: boolean  // 是否隐藏标签（用 ::before 占据位置）
   min?: number         // 数字字段的最小值
   max?: number         // 数字字段的最大值
+  maxLength?: number   // 文本字段的最大字符数
   enableTagToggle?: boolean  // 是否开启状态功能（如 [强调] 前缀）
   tag?: string        // 标签前缀（默认 [强调]），与 enableTagToggle 配合使用
   prefixButton?: PrefixButtonConfig  // 输入框左侧按钮配置

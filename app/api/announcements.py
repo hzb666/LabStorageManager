@@ -141,7 +141,7 @@ def create_announcement(
     if total_count >= MAX_TOTAL_ANNOUNCEMENTS:
         raise HTTPException(
             status_code=400,
-            detail=f"每个管理员最多创建{MAX_TOTAL_ANNOUNCEMENTS}条公告"
+            detail=f"Max {MAX_TOTAL_ANNOUNCEMENTS} announcements allowed per admin"
         )
 
     # 检查显示数量限制（如果设为显示状态）
@@ -154,7 +154,7 @@ def create_announcement(
         if visible_count >= MAX_VISIBLE_ANNOUNCEMENTS:
             raise HTTPException(
                 status_code=400,
-                detail=f"每个管理员最多显示{MAX_VISIBLE_ANNOUNCEMENTS}条公告"
+                detail=f"Max {MAX_VISIBLE_ANNOUNCEMENTS} visible announcements allowed per admin"
             )
 
     db_announcement = Announcement(

@@ -39,6 +39,15 @@ from app.services.excel_service import validate_uploaded_file
 
 logger = logging.getLogger(__name__)
 
+
+def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
+    """Compute remaining percentage for persisted sorting field."""
+    if initial is None or initial <= 0:
+        return None
+    if remaining is None:
+        return None
+    return remaining / initial
+
 def _empty_to_none(obj, fields: list[str]) -> dict:
     """将指定字段的空字符串转换为 None"""
     result = {}
@@ -279,7 +288,7 @@ def get_inventory_by_internal_code(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到该库存项",
+            detail="Inventory item not found",
         )
     response = InventoryResponse.model_validate(item).model_dump()
     return _add_specification(response)
@@ -367,12 +376,12 @@ def manual_add_inventory(
         name=item_data.name,
         category=item_data.category,
         brand=item_data.brand,
-        alias=item_data.alias,
+        storage_location=item_data.storage_location,
     )
 
     optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'notes']
     string_fields = _empty_to_none(item_data, optional_string_fields)
-
+    
     created_items = []
     for internal_code in internal_codes:
         db_inventory = Inventory(
@@ -386,6 +395,7 @@ def manual_add_inventory(
             storage_location=string_fields['storage_location'],
             initial_quantity=per_bottle_value,
             remaining_quantity=per_bottle_value,
+            remaining_percent=1,
             unit=unit,
             is_hazardous=item_data.is_hazardous,
             notes=string_fields['notes'],
@@ -456,7 +466,7 @@ def get_pending_stockin(
 ):
     """Get items pending storage_location assignment (temporary keeper = current user)."""
     statement = select(Inventory).where(
-        Inventory.storage_location is None,
+        Inventory.storage_location.is_(None),
         Inventory.temporary_keeper_id == current_user.id,
     ).order_by(Inventory.created_at.desc())
 
@@ -475,6 +485,93 @@ def get_pending_stockin(
             for item in items
         ],
         "total": len(items),
+    }
+
+
+@router.get("/common-shelf")
+def list_common_shelf(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    skip: int = 0,
+    limit: int = min(50, MAX_PAGE_SIZE),
+    status_filter: Optional[InventoryStatus] = None,
+    search: Optional[str] = None,
+    search_field: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = 'desc',
+):
+    """List common/public shelf inventory items."""
+    del current_user  # 仅用于鉴权
+
+    base = select(Inventory).where(Inventory.storage_location == "常用货架")
+
+    if status_filter:
+        base = base.where(Inventory.status == status_filter)
+
+    if search:
+        keyword = f"%{search}%"
+        field_map = {
+            'name': Inventory.name,
+            'cas_number': Inventory.cas_number,
+            'brand': Inventory.brand,
+            'category': Inventory.category,
+            'storage_location': Inventory.storage_location,
+        }
+        if search_field and search_field != 'all' and search_field in field_map:
+            base = base.where(field_map[search_field].ilike(keyword))
+        else:
+            base = base.where(
+                Inventory.name.ilike(keyword)
+                | Inventory.cas_number.ilike(keyword)
+                | Inventory.brand.ilike(keyword)
+                | Inventory.category.ilike(keyword)
+            )
+
+    count_stmt = select(func.count()).select_from(base.subquery())
+    total = db.exec(count_stmt).one()
+
+    sortable = {
+        'cas_number': Inventory.cas_number,
+        'name': Inventory.name,
+        'category': Inventory.category,
+        'brand': Inventory.brand,
+        'status': Inventory.status,
+        'created_at': Inventory.created_at,
+    }
+    order_column = sortable.get(sort_by or '', Inventory.created_at)
+    order_expr = order_column.asc() if sort_order == 'asc' else order_column.desc()
+
+    items = db.exec(
+        base.order_by(order_expr, Inventory.id.desc()).offset(skip).limit(limit)
+    ).all()
+
+    user_ids = set()
+    for item in items:
+        if item.borrower_id:
+            user_ids.add(item.borrower_id)
+        if item.last_borrower_id:
+            user_ids.add(item.last_borrower_id)
+        if item.created_by_id:
+            user_ids.add(item.created_by_id)
+        if item.temporary_keeper_id:
+            user_ids.add(item.temporary_keeper_id)
+    users_map = batch_get_user_names(db, user_ids)
+
+    result_data = []
+    for item in items:
+        item_dict = InventoryResponse.model_validate(item).model_dump()
+        item_dict = _add_specification(item_dict)
+        item_dict["borrower_name"] = users_map.get(item.borrower_id)
+        item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
+        item_dict["created_by_name"] = users_map.get(item.created_by_id)
+        item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
+        result_data.append(item_dict)
+
+    return {
+        "data": result_data,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
     }
 
 
@@ -646,20 +743,12 @@ def list_inventory(
     
     # 构建排序表达式
     # 支持的排序字段映射
-    # 使用 CASE 表达式处理 initial_quantity 为 0 的情况，避免除零错误
-    # 计算剩余百分比（处理除零情况）
-    # 保留原始 NULL 值，不转为 0，这样可以在排序时区分 NULL 和 0
-    # 预先计算 CASE 表达式，避免在排序时重复创建
-    remaining_percent_case = case(
-        (Inventory.initial_quantity > 0, Inventory.remaining_quantity * 1.0 / Inventory.initial_quantity),
-        else_=None  # 保留 NULL，不转为 0
-    )
-    
     # 拼音排序字段映射（使用数据库索引加速排序）
     pinyin_sort_field_map = {
         'name': Inventory.name_pinyin,
         'category': Inventory.category_pinyin,
         'brand': Inventory.brand_pinyin,
+        'storage_location': Inventory.storage_location_pinyin,
     }
     
     sort_field_map = {
@@ -669,7 +758,7 @@ def list_inventory(
         'storage_location': Inventory.storage_location,
         'brand': Inventory.brand,
         'remaining_quantity': Inventory.remaining_quantity,
-        'remaining_percent': remaining_percent_case,
+        'remaining_percent': Inventory.remaining_percent,
         'initial_quantity': Inventory.initial_quantity,
         'status': Inventory.status,
         'created_at': Inventory.created_at,
@@ -680,18 +769,21 @@ def list_inventory(
     sort_direction = sort_order.lower() if sort_order else 'desc'
 
     # 中文拼音排序字段列表
-    pinyin_sort_fields = {'name', 'category', 'brand', 'alias'}
-    
+    pinyin_sort_fields = {'name', 'category', 'brand', 'storage_location'}
+
+    # 需要特殊处理 NULL 值的字符串字段（NULL 始终排在最后）
+    null_last_string_fields = {'storage_location', 'category', 'brand'}
+
     # 判断是否需要使用拼音排序
     use_pinyin_sort = sort_by in pinyin_sort_fields
-    
+
 
     if use_pinyin_sort:
         # 使用数据库索引排序（高效）
         order_column = pinyin_sort_field_map.get(sort_by)
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
-    
+
     # 特殊处理 remaining_percent 排序：NULL 值始终排在最后
     # 使用 SQLite 的 ifnull() 函数将 NULL 转为特殊值
     # 升序时：NULL -> 2 (大于最大1)，排在最后
@@ -699,10 +791,28 @@ def list_inventory(
     if sort_by == 'remaining_percent' and order_column is not None:
         if sort_direction == 'asc':
             # 升序：NULL 转为 2 (大于最大百分比 1)
-            order_expr = sql_func.ifnull(order_column, 2).asc()
+            order_expr = func.ifnull(order_column, 2).asc()
         else:
             # 降序：NULL 转为 -1 (最小)
-            order_expr = sql_func.ifnull(order_column, -1).desc()
+            order_expr = func.ifnull(order_column, -1).desc()
+    # 特殊处理字符串字段的 NULL 值：NULL 始终排在最后
+    elif sort_by in null_last_string_fields and order_column is not None:
+        # 使用 coalesce 将 NULL 转为空字符串前缀，确保有值的项排在前面
+        # 升序：NULL -> '\0' (最小)，排在最前面，但我们希望 NULL 排在最后
+        # 降序：同上
+        # 方案：使用 case when 判断，NULL 转为 '\xff' (最大字符)，确保排在最后
+        if sort_direction == 'asc':
+            # 升序：NULL 转为 '\xff' (最大)，排在最后
+            order_expr = case(
+                (order_column.is_(None), '\xff'),
+                else_=order_column
+            ).asc()
+        else:
+            # 降序：NULL 转为 '\x00' (最小)，排在最后
+            order_expr = case(
+                (order_column.is_(None), '\x00'),
+                else_=order_column
+            ).desc()
     else:
         if sort_direction == 'asc':
             order_expr = order_column.asc()
@@ -729,6 +839,8 @@ def list_inventory(
             user_ids.add(item.last_borrower_id)
         if item.created_by_id:
             user_ids.add(item.created_by_id)
+        if item.temporary_keeper_id:
+            user_ids.add(item.temporary_keeper_id)
 
     # 使用通用函数批量查询用户姓名
     users_map = batch_get_user_names(db, user_ids)
@@ -744,6 +856,7 @@ def list_inventory(
         item_dict["borrower_name"] = users_map.get(item.borrower_id)
         item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
         item_dict["created_by_name"] = users_map.get(item.created_by_id)
+        item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
 
         result_data.append(item_dict)
     # =========================================================================
@@ -778,7 +891,7 @@ def get_inventory(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到该库存项",
+            detail="Inventory item not found",
         )
     response = InventoryResponse.model_validate(item).model_dump()
     return _add_specification(response)
@@ -796,14 +909,14 @@ def update_inventory(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到该库存项",
+            detail="Inventory item not found",
         )
 
     # 借用状态的试剂不能被修改
     if item.status == InventoryStatus.BORROWED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="借用中的试剂无法编辑，请等待归还后再操作",
+            detail="Cannot edit item while borrowed, please return first",
         )
 
     update_data = update.model_dump(exclude_unset=True)
@@ -836,17 +949,21 @@ def update_inventory(
     if 'remaining_quantity' in update_data:
         new_remaining = update_data['remaining_quantity']
         item.remaining_quantity = new_remaining
+
+    # 同步维护数据库排序字段：remaining_percent
+    if 'specification' in update_data or 'remaining_quantity' in update_data:
+        item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
         
     for field, value in update_data.items():
         setattr(item, field, value)
 
-    # 如果更新了名称、类别、品牌或别名，自动重新计算拼音
-    if any(field in update_data for field in ['name', 'category', 'brand', 'alias']):
+    # 如果更新了名称、类别、品牌或存储位置，自动重新计算拼音
+    if any(field in update_data for field in ['name', 'category', 'brand', 'storage_location']):
         pinyin_fields = compute_pinyin_fields(
             name=item.name,
             category=item.category,
             brand=item.brand,
-            alias=item.alias,
+            storage_location=item.storage_location,
         )
         for pinyin_field, pinyin_value in pinyin_fields.items():
             setattr(item, pinyin_field, pinyin_value)
@@ -872,7 +989,7 @@ def delete_inventory(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到该库存项",
+            detail="Inventory item not found",
         )
     db.delete(item)
     db.commit()
@@ -895,7 +1012,7 @@ def borrow_item(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到该库存项",
+            detail="Inventory item not found",
         )
     
     # 使用原子化的条件更新：只有当 status = IN_STOCK 时才更新
@@ -927,12 +1044,12 @@ def borrow_item(
         if item.status == InventoryStatus.BORROWED:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="该物品已被他人借用，请刷新后重试",
+                detail="Item is borrowed by another user, please refresh and retry",
             )
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"无法借用，当前状态: {item.status}",
+                detail=f"Cannot borrow, current status: {item.status}",
             )
     
     # 创建借用记录
@@ -969,7 +1086,7 @@ def return_item(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到该库存项",
+            detail="Inventory item not found",
         )
 
     if item.status != InventoryStatus.BORROWED:
@@ -987,7 +1104,7 @@ def return_item(
     if return_data.remaining_quantity > item.initial_quantity:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"剩余量 ({return_data.remaining_quantity}) 不能超过初始量 ({item.initial_quantity})",
+            detail=f"Remaining quantity ({return_data.remaining_quantity}) cannot exceed initial quantity ({item.initial_quantity})",
         )
 
     # Update BorrowLog
@@ -1003,6 +1120,7 @@ def return_item(
 
     # Update item
     item.remaining_quantity = return_data.remaining_quantity
+    item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
     item.unit = return_data.unit if return_data.unit else item.unit
     item.last_borrower_id = item.borrower_id
     item.borrower_id = None
@@ -1039,7 +1157,7 @@ def get_borrow_history(
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到该库存项",
+            detail="Inventory item not found",
         )
 
     logs = db.exec(

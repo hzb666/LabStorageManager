@@ -20,6 +20,7 @@ import {
   PanelLeftOpen,
   FolderInput,
   Megaphone,
+  Archive,
 } from 'lucide-react'
 import { BugReportButton, getBugButtonHidden, clearBugButtonHidden } from '@/components/BugReportButton'
 import { useTheme } from '@/hooks/useTheme'
@@ -33,6 +34,7 @@ const navItems = [
   { title: '试剂订单', href: '/reagents', icon: FlaskConical, group: '功能' },
   { title: '耗材订单', href: '/consumables', icon: ShoppingCart, group: '功能' },
   { title: '库存列表', href: '/inventory', icon: Package, group: '功能' },
+  { title: '常用货架', href: '/common-shelf', icon: Archive, group: '功能' },
   { title: '导入数据', href: '/import', icon: FolderInput, group: '功能' },
   { title: '用户管理', href: '/admin/users', icon: Users, adminOnly: true, group: '管理' },
   { title: '公告管理', href: '/admin/announcements', icon: Megaphone, adminOnly: true, group: '管理' },

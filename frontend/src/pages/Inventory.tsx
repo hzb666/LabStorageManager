@@ -19,7 +19,7 @@ import { toast } from '@/lib/toast'
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
 import useDialogState from '@/hooks/useDialogState'
-import { TableActionButtonsMemo } from '@/components/ui/TableActionButtons'
+import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
 import type { FilterAPI } from '@/hooks/useTableState'
@@ -27,8 +27,15 @@ import type { FilterAPI } from '@/hooks/useTableState'
 // 工具与API
 import { inventoryAPI, chemicalAPI } from '@/api/client'
 import { formatDate, processNotes } from '@/lib/utils'
-import { InventoryFormSchema, parseSpecification, validateCASLogic, createValibotResolver } from '@/lib/validationSchemas'
-import type { InventoryFormData } from '@/lib/validationSchemas'
+import {
+  InventoryFormSchema,
+  parseSpecification,
+  createValibotResolver,
+  validateAndNormalizeCASInput,
+  toValidationErrors,
+  normalizeApiErrorMessage,
+} from '@/lib/validationSchemas'
+import type { InventoryFormData, ValidationError } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 
 // 表单配置
@@ -47,12 +54,6 @@ import {
 // 类型扩展与定义
 // ============================================================================
 
-interface ValidationError {
-  loc?: (string | number)[]
-  msg?: string
-  type?: string
-}
-
 export interface InventoryItem {
   id: number
   cas_number: string
@@ -64,6 +65,7 @@ export interface InventoryItem {
   storage_location: string | null
   initial_quantity: number
   remaining_quantity: number
+  remaining_percent?: number | null
   unit: string
   status: string
   is_hazardous: boolean
@@ -72,6 +74,8 @@ export interface InventoryItem {
   specification?: string
   created_by_id?: number | null
   created_by_name?: string | null
+  temporary_keeper_id?: number | null
+  temporary_keeper_name?: string | null
   borrower_id?: number | null
   borrower_name?: string | null
   last_borrower_id?: number | null
@@ -190,7 +194,7 @@ export function InventoryPage() {
           await loadInventory()
           toast.success('库存信息已更新')
         } else if (dialogState === 'add') {
-          const spec = formData.specification
+          const spec = formData.specification || ''
           const bottles = formData.quantity_bottles as number
           await inventoryAPI.manualAdd({
             cas_number: formData.cas_number,
@@ -214,13 +218,17 @@ export function InventoryPage() {
       } catch (err) {
         const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
         const errorDetail = error.response?.data?.detail
-        if (dialogState === 'add' && Array.isArray(errorDetail)) {
-          errorDetail.forEach((e: ValidationError) => {
-            if (e.loc?.[1]) form.setError(e.loc[1] as keyof InventoryFormData, { message: e.msg || '验证错误' })
+        const validationErrors = toValidationErrors(errorDetail)
+        if (validationErrors.length > 0) {
+          validationErrors.forEach((e: ValidationError) => {
+            if (e.loc?.[1]) {
+              form.setError(e.loc[1] as keyof InventoryFormData, { message: e.msg || '输入不合法' })
+            }
           })
-        } else {
-          toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
+          return
         }
+
+        toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
       } finally {
         setIsSubmitting(false)
       }
@@ -249,7 +257,7 @@ export function InventoryPage() {
         toast.success('库存已删除')
       } catch (error) {
         const err = error as { response?: { data?: { detail?: string } } }
-        toast.error(err.response?.data?.detail || '删除失败')
+        toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
       }
     } else {
       setDeleteConfirm(true)
@@ -276,28 +284,15 @@ export function InventoryPage() {
   // CAS 号自动识别回调
   const handleCasLookup = useCallback(async () => {
     const casValue = form.getValues('cas_number')
-    if (!casValue || casValue.trim() === '') {
-      form.setError('cas_number', { message: '请先输入 CAS 号' })
-      return
-    }
-
-    // CAS 号格式和校验码验证
-    const normalizedCas = casValue.trim().toUpperCase()
-    const casRegex = /^\d{2,7}-\d{2}-\d$/
-    if (!casRegex.test(normalizedCas)) {
-      form.setError('cas_number', { message: 'CAS号格式无效' })
-      return
-    }
-
-    // 使用统一的校验码验证逻辑
-    if (!validateCASLogic(normalizedCas)) {
-      form.setError('cas_number', { message: 'CAS号校验码错误' })
+    const casValidation = validateAndNormalizeCASInput(casValue || '')
+    if ('error' in casValidation) {
+      form.setError('cas_number', { message: casValidation.error })
       return
     }
 
     setIsCasLookupLoading(true)
     try {
-      const response = await chemicalAPI.getInfo(casValue.trim())
+      const response = await chemicalAPI.getInfo(casValidation.normalized)
       const info = response.data
       if (info.name) {
         form.setValue('name', info.name, { shouldValidate: true })
@@ -310,7 +305,7 @@ export function InventoryPage() {
       const err = error as { response?: { data?: { detail?: string } } }
       const detail = err.response?.data?.detail
       if (typeof detail === 'string') {
-        form.setError('cas_number', { message: detail })
+        form.setError('cas_number', { message: normalizeApiErrorMessage(detail, 'CAS 号识别失败') })
       } else {
         toast.error('CAS 号识别失败')
       }
@@ -474,7 +469,7 @@ const ActionButtons = React.memo(function ActionButtons({
 }) {
 
   const statusDisplay = useMemo(() => {
-    return [
+    const statusList = [
       {
         value: 'borrowed',
         label: item.borrower_name ? `${item.borrower_name}借用` : '借用中',
@@ -482,7 +477,18 @@ const ActionButtons = React.memo(function ActionButtons({
         title: item.borrower_name ? `借用者: ${item.borrower_name}` : undefined
       }
     ]
-  }, [item.borrower_name])
+
+    if (item.status === 'in_stock' && !item.storage_location && item.temporary_keeper_name) {
+      statusList.push({
+        value: 'in_stock',
+        label: `${item.temporary_keeper_name}暂存`,
+        className: 'text-orange-700 dark:text-orange-300',
+        title: `暂存人: ${item.temporary_keeper_name}`
+      })
+    }
+
+    return statusList
+  }, [item.borrower_name, item.status, item.storage_location, item.temporary_keeper_name])
 
   const actions = useMemo(() => {
     return [

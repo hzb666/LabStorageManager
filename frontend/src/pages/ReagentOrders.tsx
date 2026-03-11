@@ -14,7 +14,7 @@ import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
-import { TableActionButtonsMemo } from '@/components/ui/TableActionButtons'
+import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
@@ -26,8 +26,14 @@ import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 // 工具与API
 import { reagentOrderAPI, chemicalAPI, ReagentOrderReason } from '@/api/client'
 import { processNotes } from '@/lib/utils'
-import { ReagentOrderSchema, validateCASLogic, createValibotResolver } from '@/lib/validationSchemas'
-import type { ReagentOrderFormData } from '@/lib/validationSchemas'
+import {
+  ReagentOrderSchema,
+  createValibotResolver,
+  validateAndNormalizeCASInput,
+  toValidationErrors,
+  normalizeApiErrorMessage,
+} from '@/lib/validationSchemas'
+import type { ReagentOrderFormData, ValidationError } from '@/lib/validationSchemas'
 import { getReagentOrderTableColumns } from '@/lib/tableConfigs'
 import {
   getReagentOrderFormFields,
@@ -44,12 +50,6 @@ import {
   ScanSearch,
 } from 'lucide-react'
 
-interface ValidationError {
-  loc?: (string | number)[]
-  msg?: string
-  type?: string
-}
-
 interface ReagentOrder {
   id: number
   cas_number: string
@@ -65,7 +65,6 @@ interface ReagentOrder {
   price: number | null
   order_reason: string
   is_hazardous: boolean
-  image_path: string | null
   notes: string | null
   applicant_id: number | null
   applicant_name: string | null
@@ -115,6 +114,9 @@ export function ReagentOrdersPage() {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
 
+  // ---------------------------------------------------------------------------
+  // 状态管理
+  // ---------------------------------------------------------------------------
   // 使用 useTableState 管理表格状态
   const filter = useTableState({
     api: reagentOrderAPI,
@@ -136,6 +138,9 @@ export function ReagentOrdersPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
 
+  // ---------------------------------------------------------------------------
+  // 表单逻辑
+  // ---------------------------------------------------------------------------
   // CAS 检查（防抖）
   const checkCASWarning = useCallback(async (cas: string) => {
     if (cas.length < 5) {
@@ -214,7 +219,7 @@ export function ReagentOrdersPage() {
       specification: item.specification || '',
       quantity: item.quantity || 1,
       price: item.price || undefined,
-      order_reason: item.order_reason || 'none',
+      order_reason: (item.order_reason as ReagentOrderReason) || ReagentOrderReason.NONE,
       is_hazardous: item.is_hazardous || false,
       notes: item.notes || ''
     })
@@ -269,13 +274,17 @@ export function ReagentOrdersPage() {
       } catch (err) {
         const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
         const errorDetail = error.response?.data?.detail
-        if (dialogState === 'add' && Array.isArray(errorDetail)) {
-          errorDetail.forEach((e: ValidationError) => {
-            if (e.loc?.[1]) form.setError(e.loc[1] as keyof ReagentOrderFormData, { message: e.msg || '验证错误' })
+        const validationErrors = toValidationErrors(errorDetail)
+        if (validationErrors.length > 0) {
+          validationErrors.forEach((e: ValidationError) => {
+            if (e.loc?.[1]) {
+              form.setError(e.loc[1] as keyof ReagentOrderFormData, { message: e.msg || '输入不合法' })
+            }
           })
-        } else {
-          toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
+          return
         }
+
+        toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
       } finally {
         setIsSubmitting(false)
       }
@@ -284,12 +293,6 @@ export function ReagentOrdersPage() {
       console.log('❌ 表单验证失败:', errors)
     }
   )
-
-  // 审批操作
-
-  // 驳回操作
-
-  // 确认到货
 
   // 导出订单
   const handleExport = useCallback(async () => {
@@ -312,28 +315,15 @@ export function ReagentOrdersPage() {
   // CAS 号自动识别回调
   const handleCasLookup = useCallback(async () => {
     const casValue = form.getValues('cas_number')
-    if (!casValue || casValue.trim() === '') {
-      form.setError('cas_number', { message: '请先输入 CAS 号' })
-      return
-    }
-
-    // CAS 号格式和校验码验证
-    const normalizedCas = casValue.trim().toUpperCase()
-    const casRegex = /^\d{2,7}-\d{2}-\d$/
-    if (!casRegex.test(normalizedCas)) {
-      form.setError('cas_number', { message: 'CAS号格式无效' })
-      return
-    }
-
-    // 使用统一的校验码验证逻辑
-    if (!validateCASLogic(normalizedCas)) {
-      form.setError('cas_number', { message: 'CAS号校验码错误' })
+    const casValidation = validateAndNormalizeCASInput(casValue || '')
+    if ('error' in casValidation) {
+      form.setError('cas_number', { message: casValidation.error })
       return
     }
 
     setIsCasLookupLoading(true)
     try {
-      const response = await chemicalAPI.getInfo(normalizedCas)
+      const response = await chemicalAPI.getInfo(casValidation.normalized)
       const info = response.data
       if (info.name) {
         form.setValue('name', info.name, { shouldValidate: true })
@@ -346,7 +336,7 @@ export function ReagentOrdersPage() {
       const err = error as { response?: { data?: { detail?: string } } }
       const detail = err.response?.data?.detail
       if (typeof detail === 'string') {
-        form.setError('cas_number', { message: detail })
+        form.setError('cas_number', { message: normalizeApiErrorMessage(detail, 'CAS 号识别失败') })
       } else {
         toast.error('CAS 号识别失败')
       }
@@ -355,66 +345,9 @@ export function ReagentOrdersPage() {
     }
   }, [form])
 
-  // 表格操作按钮组件
-  const ActionButtons = React.memo(function ActionButtons({
-    item,
-    onEdit,
-  }: {
-    item: Record<string, unknown>;
-    onEdit: (item: Record<string, unknown>) => void;
-  }) {
-    const actions = useMemo(() => [
-      {
-        id: 'approve',
-        label: '审批',
-        showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
-        onClick: async (currItem: Record<string, unknown>) => {
-          await reagentOrderAPI.approve(currItem.id as number)
-          await filter.invalidate()
-          toast.success('审批通过')
-        }
-      },
-      {
-        id: 'reject',
-        label: '驳回',
-        showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
-        onClick: async (currItem: Record<string, unknown>) => {
-          await reagentOrderAPI.reject(currItem.id as number, '管理员驳回')
-          await filter.invalidate()
-          toast.success('已驳回')
-        }
-      },
-      {
-        id: 'confirmArrival',
-        label: '确认到货',
-        showWhen: (currItem: Record<string, unknown>) => currItem.status === 'approved',
-        onClick: async (currItem: Record<string, unknown>) => {
-          const result = await reagentOrderAPI.confirmArrival(currItem.id as number)
-          await filter.invalidate()
-          toast.success(result.data.message || '确认成功')
-        }
-      }
-    ], [isAdmin, filter])
-
-    return (
-      <TableActionButtonsMemo
-        item={item}
-        actions={actions}
-        showEdit={true}
-        onEdit={onEdit}
-      />
-    )
-  }, (prevProps, nextProps) => {
-    if (prevProps.onEdit !== nextProps.onEdit) return false
-    const prevItem = prevProps.item
-    const nextItem = nextProps.item
-    if (prevItem === nextItem) return true
-    const prevKeys = Object.keys(prevItem)
-    const nextKeys = Object.keys(nextItem)
-    if (prevKeys.length !== nextKeys.length) return false
-    return prevKeys.every((key) => prevItem[key] === nextItem[key])
-  })
-
+  // ---------------------------------------------------------------------------
+  // 表格列配置
+  // ---------------------------------------------------------------------------
   // 表格列配置
   const columns = useMemo(() => {
     const baseColumns = getReagentOrderTableColumns()
@@ -431,14 +364,19 @@ export function ReagentOrdersPage() {
           <ActionButtons
             item={info.row.original as unknown as Record<string, unknown>}
             onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
+            isAdmin={isAdmin}
+            onRefresh={filter.invalidate}
           />
         )
       },
     })
 
     return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
-  }, [])
+  }, [isAdmin, filter.invalidate])
 
+  // ---------------------------------------------------------------------------
+  // 渲染相关回调
+  // ---------------------------------------------------------------------------
   // 展开行渲染
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ReagentOrder
@@ -546,3 +484,79 @@ export function ReagentOrdersPage() {
     </div>
   )
 }
+
+// ============================================================================
+// 表格操作按钮组件
+// ============================================================================
+
+const ActionButtons = React.memo(function ActionButtons({
+  item,
+  onEdit,
+  isAdmin,
+  onRefresh,
+}: {
+  item: Record<string, unknown>
+  onEdit: (item: Record<string, unknown>) => void
+  isAdmin: boolean
+  onRefresh: () => void | Promise<void>
+}) {
+  const actions = useMemo(() => [
+    {
+      id: 'approve',
+      label: '审批',
+      showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+      onClick: async (currItem: Record<string, unknown>) => {
+        await reagentOrderAPI.approve(currItem.id as number)
+        await onRefresh()
+        toast.success('审批通过')
+      }
+    },
+    {
+      id: 'reject',
+      label: '驳回',
+      showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+      onClick: async (currItem: Record<string, unknown>) => {
+        await reagentOrderAPI.reject(currItem.id as number, '管理员驳回')
+        await onRefresh()
+        toast.success('已驳回')
+      }
+    },
+    {
+      id: 'confirmArrival',
+      label: '确认到货',
+      showWhen: (currItem: Record<string, unknown>) => currItem.status === 'approved',
+      onClick: async (currItem: Record<string, unknown>) => {
+        const result = await reagentOrderAPI.confirmArrival(currItem.id as number)
+        await onRefresh()
+        toast.success(result.data.message || '确认成功')
+      }
+    }
+  ], [isAdmin, onRefresh])
+
+  return (
+    <TableActionButtonsMemo
+      item={item}
+      actions={actions}
+      showEdit={true}
+      onEdit={onEdit}
+    />
+  )
+}, (prevProps, nextProps) => {
+  if (
+    prevProps.onEdit !== nextProps.onEdit
+    || prevProps.isAdmin !== nextProps.isAdmin
+    || prevProps.onRefresh !== nextProps.onRefresh
+  ) {
+    return false
+  }
+
+  const prevItem = prevProps.item
+  const nextItem = nextProps.item
+  if (prevItem === nextItem) return true
+
+  const prevKeys = Object.keys(prevItem)
+  const nextKeys = Object.keys(nextItem)
+  if (prevKeys.length !== nextKeys.length) return false
+
+  return prevKeys.every((key) => prevItem[key] === nextItem[key])
+})

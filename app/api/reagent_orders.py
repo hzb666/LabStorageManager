@@ -7,7 +7,7 @@ import csv
 from datetime import datetime
 from typing import Optional, Dict, Any, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select, func
@@ -26,13 +26,84 @@ from app.models.reagent_order import (
 from app.models.user import User
 from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
-from app.services.image_service import process_uploaded_image
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.internal_code import generate_internal_code
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
+
+
+def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
+    """Compute remaining percentage for persisted sorting field."""
+    if initial is None or initial <= 0:
+        return None
+    if remaining is None:
+        return None
+    return remaining / initial
+
+
+def _create_inventory_items_from_order(
+    db: Session,
+    order: ReagentOrder,
+    *,
+    created_by_id: Optional[int],
+    temporary_keeper_id: Optional[int],
+    storage_location: Optional[str],
+    note_suffix: Optional[str] = None,
+) -> list[Inventory]:
+    """Create inventory items by copying order data (not moving)."""
+    if order.quantity is None or order.quantity <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid order quantity",
+        )
+
+    if order.initial_quantity is None or order.unit is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order missing initial_quantity or unit. Please update the order.",
+        )
+
+    internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
+    pinyin_fields = compute_pinyin_fields(
+        name=order.name,
+        category=order.category,
+        brand=order.brand,
+        alias=order.alias,
+        storage_location=storage_location,
+    )
+
+    notes = order.notes
+    if note_suffix:
+        notes = f"{notes}\n{note_suffix}" if notes else note_suffix
+
+    inventory_items: list[Inventory] = []
+    for internal_code in internal_codes:
+        inv = Inventory(
+            internal_code=internal_code,
+            cas_number=order.cas_number,
+            name=order.name,
+            english_name=order.english_name,
+            alias=order.alias,
+            category=order.category,
+            brand=order.brand,
+            storage_location=storage_location,
+            initial_quantity=order.initial_quantity,
+            remaining_quantity=order.initial_quantity,
+            remaining_percent=_compute_remaining_percent(order.initial_quantity, order.initial_quantity),
+            unit=order.unit,
+            is_hazardous=order.is_hazardous,
+            status=InventoryStatus.IN_STOCK,
+            temporary_keeper_id=temporary_keeper_id,
+            created_by_id=created_by_id,
+            notes=notes,
+            **pinyin_fields,
+        )
+        db.add(inv)
+        inventory_items.append(inv)
+
+    return inventory_items
 
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
@@ -147,40 +218,6 @@ def create_reagent_order(
     db.refresh(db_order)
     
     return db_order
-
-
-@router.post("/{order_id}/upload-image")
-async def upload_reagent_order_image(
-    order_id: int,
-    file: Annotated[UploadFile, File(...)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
-):
-    """Upload and compress image for a reagent order"""
-    order = get_reagent_order_by_id(db, order_id)
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
-        )
-    
-    try:
-        image_url, thumbnail_url = process_uploaded_image(file)
-        
-        order.image_path = thumbnail_url
-        db.commit()
-        db.refresh(order)
-        
-        return {
-            "message": "Image uploaded successfully",
-            "image_url": image_url,
-            "thumbnail_url": thumbnail_url
-        }
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
 
 
 # 分页限制常量
@@ -544,25 +581,46 @@ def confirm_reagent_arrival(
             detail=f"Cannot confirm arrival for order with status: {order.status}. Order must be APPROVED first."
         )
     
-    # Handle based on order reason
-    if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
-        order.status = ReagentOrderStatus.STOCKED
-        message = "常用/公用试剂已入库，无需通知"
-    else:
-        order.status = ReagentOrderStatus.ARRIVED
-        message = "已到货待入库，请及时完成入库操作"
-    
     if body.arrival_notes:
         order.notes = body.arrival_notes
+
+    # 手动确认到货时，立即创建库存：
+    # - common_public: 进入常用货架
+    # - 其他原因: 进入个人暂存区（待补全位置信息）
+    if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
+        inventory_items = _create_inventory_items_from_order(
+            db,
+            order,
+            created_by_id=current_user.id,
+            temporary_keeper_id=None,
+            storage_location="常用货架",
+        )
+        message = "已到货并加入常用货架"
+    else:
+        keeper_name = current_user.full_name or current_user.username or "当前用户"
+        inventory_items = _create_inventory_items_from_order(
+            db,
+            order,
+            created_by_id=current_user.id,
+            temporary_keeper_id=current_user.id,
+            storage_location=None,
+            note_suffix=f"{keeper_name}暂存",
+        )
+        message = "已到货并进入暂存区，请及时补全入库信息"
+
+    # 按需求：确认后状态统一进入 ARRIVED
+    order.status = ReagentOrderStatus.ARRIVED
     
     db.commit()
     db.refresh(order)
+    _clear_reagent_order_cache()
     
     return {
         "message": message,
         "order_id": order.id,
         "status": order.status,
-        "notes": order.notes
+        "notes": order.notes,
+        "items_created": len(inventory_items),
     }
 
 
@@ -773,9 +831,9 @@ def stock_in_reagent_order(
             storage_location=None,  # No storage_location in new design
             initial_quantity=per_bottle_value,
             remaining_quantity=per_bottle_value,
+            remaining_percent=_compute_remaining_percent(per_bottle_value, per_bottle_value),
             unit=unit,
             is_hazardous=order.is_hazardous,
-            image_path=order.image_path,
             status=InventoryStatus.IN_STOCK,
             notes=order.notes,
             **pinyin_fields,

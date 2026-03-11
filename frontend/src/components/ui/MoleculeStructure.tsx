@@ -12,24 +12,21 @@ import {
   useTransitionStyles
 } from '@floating-ui/react'
 
+type RDKitModule = {
+  get_mol: (smiles: string) => Mol
+  version: string
+}
+
 // RDKit 模块类型定义扩展
 declare global {
-  interface Window {
-    RDKit?: {
-      get_mol: (smiles: string) => Mol
-      version: string
-    }
-    initRDKitModule: () => Promise<{
-      get_mol: (smiles: string) => Mol
-      version: string
-    }>
-  }
+  var RDKit: RDKitModule | undefined
+  var initRDKitModule: (() => Promise<RDKitModule>) | undefined
 }
 
 interface Mol {
   get_svg_with_highlights: (details: string) => string
   is_valid: () => boolean
-  delete: () => void
+  delete?: () => void
 }
 
 interface MoleculeStructureProps {
@@ -41,7 +38,7 @@ interface MoleculeStructureProps {
 
 type LoadingState = 'idle' | 'loading' | 'ready' | 'error'
 
-let rdkitLoaderPromise: Promise<any> | null = null
+let rdkitLoaderPromise: Promise<RDKitModule> | null = null
 
 // SVG缓存：内存Map（刷新丢失）
 const SVG_MAX_CACHE_SIZE = 100
@@ -50,7 +47,7 @@ const svgCache = new Map<string, { svg: string; zoomSvg: string; naturalSize: { 
 // SMILES缓存：localStorage持久化，格式 {cas: smiles}
 const SMILES_STORAGE_KEY = 'molecule_smiles_cache'
 const SMILES_MAX_CACHE_SIZE = 1000
-const SMILES_EXPIRY_HOURS = 24 * 7 // 7天
+const SMILES_EXPIRY_HOURS = 24 * 365 * 10 // 10年
 
 // 辅助函数：从localStorage获取SMILES缓存
 function getSmilesFromStorage(): Record<string, string> {
@@ -58,7 +55,6 @@ function getSmilesFromStorage(): Record<string, string> {
     const stored = localStorage.getItem(SMILES_STORAGE_KEY)
     if (!stored) return {}
     const data = JSON.parse(stored) as { data: Record<string, string>; timestamp: number }
-    // 检查是否过期
     if (Date.now() - data.timestamp > SMILES_EXPIRY_HOURS * 60 * 60 * 1000) {
       localStorage.removeItem(SMILES_STORAGE_KEY)
       return {}
@@ -84,47 +80,87 @@ function saveSmilesToStorage(data: Record<string, string>) {
 // 初始化SMILES缓存（从localStorage加载）
 const smilesCache = new Map<string, string>(Object.entries(getSmilesFromStorage()))
 
-// --- 新增：全局并发队列与请求去重 ---
-const MAX_CONCURRENT_REQUESTS = 3; // PubChem 建议控制在 3-5 个并发以内
-let activeRequests = 0;
-const requestQueue: (() => void)[] = [];
-const pendingRequests = new Map<string, Promise<string | null>>();
+// 全局并发队列与请求去重
+const MAX_CONCURRENT_REQUESTS = 3
+let activeRequests = 0
+const requestQueue: (() => void)[] = []
+const pendingRequests = new Map<string, Promise<string | null>>()
 
-// 简易并发控制器
 const enqueueRequest = <T,>(task: () => Promise<T>): Promise<T> => {
   return new Promise((resolve, reject) => {
     const execute = async () => {
-      activeRequests++;
+      activeRequests++
       try {
-        // 可选：增加 200ms 的硬性延迟，进一步保护 PubChem API 防御 503
-        await new Promise(res => setTimeout(res, 200)); 
-        resolve(await task());
+        await new Promise(res => setTimeout(res, 200)) 
+        resolve(await task())
       } catch (error) {
-        reject(error);
+        reject(error)
       } finally {
-        activeRequests--;
+        activeRequests--
         if (requestQueue.length > 0) {
-          const nextTask = requestQueue.shift();
-          if (nextTask) nextTask();
+          const nextTask = requestQueue.shift()
+          if (nextTask) nextTask()
         }
       }
-    };
+    }
 
     if (activeRequests < MAX_CONCURRENT_REQUESTS) {
-      execute();
+      execute()
     } else {
-      requestQueue.push(execute);
+      requestQueue.push(execute)
     }
-  });
-};
-// ------------------------------------
+  })
+}
+
+// 提取工具函数以降低 Cognitive Complexity
+const processSvgId = (str: string, id: string) => 
+  str.replaceAll(/id=['"](.+?)['"]/g, `id="${id}_$1"`)
+     .replaceAll(/url\(#(.+?)\)/g, `url(#${id}_$1)`)
+
+const extractNaturalSize = (svgString: string) => {
+  const widthMatch = new RegExp(/width='([\d.]+)px'/).exec(svgString)
+  const heightMatch = new RegExp(/height='([\d.]+)px'/).exec(svgString)
+  return {
+    w: widthMatch ? Number.parseFloat(widthMatch[1]) : 0,
+    h: heightMatch ? Number.parseFloat(heightMatch[1]) : 0
+  }
+}
+
+const loadRDKitScript = async (): Promise<void> => {
+  if (document.querySelector('#rdkit-script')) return
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script')
+    script.id = 'rdkit-script'
+    script.src = '/lib/RDKit_minimal.js'
+    script.async = true
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('RDKit 脚本加载失败'))
+    document.head.appendChild(script)
+  })
+}
+
+const initRDKit = async (): Promise<RDKitModule> => {
+  await loadRDKitScript()
+
+  let retries = 0
+  while (!globalThis.initRDKitModule && retries < 50) {
+    await new Promise(r => setTimeout(r, 100))
+    retries++
+  }
+
+  if (!globalThis.initRDKitModule) throw new Error('RDKit 模块未初始化')
+
+  const RDKit = await globalThis.initRDKitModule()
+  globalThis.RDKit = RDKit
+  return RDKit
+}
 
 export function MoleculeStructure({ 
   casNumber, 
   width = 300, 
   height = 200, 
   isDark 
-}: MoleculeStructureProps) {
+}: Readonly<MoleculeStructureProps>) {
   const [svg, setSvg] = useState<string>('')
   const [zoomSvg, setZoomSvg] = useState<string>('')
   const [smiles, setSmiles] = useState<string>('')
@@ -132,9 +168,8 @@ export function MoleculeStructure({
   const [error, setError] = useState<string>('')
   
   const [canZoom, setCanZoom] = useState(false)
-  const componentId = useId().replace(/:/g, '') 
+  const componentId = useId().replaceAll(':', '') 
 
-  // --- Floating UI 配置 ---
   const [isOpen, setIsOpen] = useState(false)
   
   const { refs, floatingStyles, context } = useFloating({
@@ -147,27 +182,22 @@ export function MoleculeStructure({
         mainAxis: -rects.reference.height,
         crossAxis: 0,
       })),
-      // 1. 限制 flip：只允许在上下方向翻转，绝对不尝试其他方向，确保 left 永远贴合
       flip({ 
         padding: 16,
         fallbackPlacements: ['top-start'], 
       }),
-      // 2. 控制 shift：关闭水平平移，允许垂直平移
       shift({ 
         padding: 16,
-        mainAxis: false, // <- 核心修复 1：禁止在水平方向滑动，死死锁住左侧对齐线
-        crossAxis: true, // 允许在垂直方向滑动（上下装不下时可以盖住原图）
+        mainAxis: false, 
+        crossAxis: true, 
       }),
-      // 3. 计算 size：动态挤压宽度
       size({
         padding: 16,
         apply({ availableWidth, elements }) {
           Object.assign(elements.floating.style, {
-            // <- 核心修复 2：availableWidth 会自动计算出“从左侧对齐线到屏幕右边缘”的剩余可用宽度
-            // 配合之前写的 [&>svg]:!max-w-full，弹窗一旦碰到屏幕右侧，就不会左移，而是乖乖让内容等比缩小
             maxWidth: `${availableWidth}px`, 
             maxHeight: `calc(100vh - 32px)`,
-          });
+          })
         },
       })
     ],
@@ -187,65 +217,32 @@ export function MoleculeStructure({
     open: { transform: 'scale(1)', opacity: 1 },
     close: { transform: 'scale(0.9)', opacity: 0 },
   })
-  // -----------------------
 
   const loadRDKit = useCallback(() => {
-    if (window.RDKit) return Promise.resolve(window.RDKit)
+    if (globalThis.RDKit) return Promise.resolve(globalThis.RDKit)
     if (rdkitLoaderPromise) return rdkitLoaderPromise
 
-    rdkitLoaderPromise = new Promise(async (resolve, reject) => {
-      try {
-        if (!document.querySelector('#rdkit-script')) {
-          const script = document.createElement('script')
-          script.id = 'rdkit-script'
-          script.src = '/lib/RDKit_minimal.js'
-          script.async = true
-          document.head.appendChild(script)
-
-          await new Promise<void>((res, rej) => {
-            script.onload = () => res()
-            script.onerror = () => rej(new Error('RDKit 脚本加载失败'))
-          })
-        }
-
-        let retries = 0
-        while (!window.initRDKitModule && retries < 50) {
-          await new Promise(r => setTimeout(r, 100))
-          retries++
-        }
-
-        if (!window.initRDKitModule) throw new Error('RDKit 模块未初始化')
-
-        const RDKit = await window.initRDKitModule()
-        window.RDKit = RDKit
-        resolve(RDKit)
-      } catch (err) {
-        rdkitLoaderPromise = null 
-        reject(err)
-      }
+    rdkitLoaderPromise = initRDKit().catch(err => {
+      rdkitLoaderPromise = null 
+      throw err
     })
 
     return rdkitLoaderPromise
   }, [])
 
   const fetchSmiles = useCallback(async (cas: string): Promise<string | null> => {
-    // 1. LRU 缓存拦截
     if (smilesCache.has(cas)) {
       const cachedSmiles = smilesCache.get(cas)!
-      // LRU: 移到末尾
       smilesCache.delete(cas)
       smilesCache.set(cas, cachedSmiles)
-      // 保存到localStorage
       saveSmilesToStorage(Object.fromEntries(smilesCache))
       return cachedSmiles
     }
 
-    // 2. 请求去重：如果该 CAS 正在请求中，直接返回同一个 Promise，不重复发请求
     if (pendingRequests.has(cas)) {
-      return pendingRequests.get(cas)!;
+      return pendingRequests.get(cas)!
     }
 
-    // 3. 包装核心请求逻辑进入并发队列
     const fetchTask = enqueueRequest(async () => {
       try {
         const response = await fetch(
@@ -258,7 +255,6 @@ export function MoleculeStructure({
         const fetchedSmiles = data?.PropertyTable?.Properties?.[0]?.SMILES || null
         
         if (fetchedSmiles) {
-          // LRU: 容量控制
           if (smilesCache.size >= SMILES_MAX_CACHE_SIZE) {
             const firstKey = smilesCache.keys().next().value
             if (firstKey) smilesCache.delete(firstKey)
@@ -271,15 +267,14 @@ export function MoleculeStructure({
         console.error('获取 SMILES 失败:', err)
         return null
       }
-    });
+    })
 
-    // 4. 将本次 Promise 存入 pending 字典，并在结束后清理
-    pendingRequests.set(cas, fetchTask);
+    pendingRequests.set(cas, fetchTask)
     
     try {
-      return await fetchTask;
+      return await fetchTask
     } finally {
-      pendingRequests.delete(cas);
+      pendingRequests.delete(cas)
     }
   }, [])
 
@@ -307,17 +302,11 @@ export function MoleculeStructure({
     const renderMolecule = async () => {
       if (svgCache.has(cacheKey)) {
         const cached = svgCache.get(cacheKey)!
-        
-        // LRU 逻辑：命中后先删后加，保持活跃状态在队尾
         svgCache.delete(cacheKey)
         svgCache.set(cacheKey, cached)
 
-        const processSvgId = (str: string) => 
-          str.replace(/id=['"](.+?)['"]/g, `id="${componentId}_$1"`)
-             .replace(/url\(#(.+?)\)/g, `url(#${componentId}_$1)`)
-
-        setSvg(processSvgId(cached.svg))
-        setZoomSvg(processSvgId(cached.zoomSvg))
+        setSvg(processSvgId(cached.svg, componentId))
+        setZoomSvg(processSvgId(cached.zoomSvg, componentId))
         setCanZoom(cached.naturalSize.w > width || cached.naturalSize.h > height)
         setLoadingState('ready')
         return
@@ -325,13 +314,7 @@ export function MoleculeStructure({
 
       try {
         const RDKit = await loadRDKit()
-
-        let delay = 100
-        if (smiles.length > 45) {
-          delay = 250 
-        } else if (smiles.length > 20) {
-          delay = 180
-        }
+        const delay = smiles.length > 45 ? 250 : smiles.length > 20 ? 180 : 100
         
         await new Promise(resolve => setTimeout(resolve, delay))
         if (!isActive) return 
@@ -339,7 +322,7 @@ export function MoleculeStructure({
         let mol: Mol | undefined
         try {
           mol = RDKit.get_mol(smiles)
-          if (!mol || !mol.is_valid()) throw new Error('无效的分子结构')
+          if (!mol?.is_valid()) throw new Error('无效的分子结构')
 
           const renderOptions = { width, height, bondLineWidth: 1.5, addStereoAnnotation: true }
           const rawSvgString = mol.get_svg_with_highlights(JSON.stringify(renderOptions))
@@ -347,18 +330,14 @@ export function MoleculeStructure({
           const zoomOptions = { width: -1, height: -1, bondLineWidth: 1.5, addStereoAnnotation: true }
           const rawZoomSvgString = mol.get_svg_with_highlights(JSON.stringify(zoomOptions))
           
-          const widthMatch = rawZoomSvgString.match(/width='([\d.]+)px'/)
-          const heightMatch = rawZoomSvgString.match(/height='([\d.]+)px'/)
-          const natWidth = widthMatch ? parseFloat(widthMatch[1]) : 0
-          const natHeight = heightMatch ? parseFloat(heightMatch[1]) : 0
+          const sizeInfo = extractNaturalSize(rawZoomSvgString)
 
           const calcResult = { 
             svg: rawSvgString, 
             zoomSvg: rawZoomSvgString, 
-            naturalSize: { w: natWidth, h: natHeight } 
+            naturalSize: sizeInfo 
           }
           
-          // 容量控制：超出 SVG_MAX_CACHE_SIZE 后删除第一个（最老未使用的）元素
           if (svgCache.size >= SVG_MAX_CACHE_SIZE) {
             const firstKey = svgCache.keys().next().value
             if (firstKey) svgCache.delete(firstKey)
@@ -366,19 +345,13 @@ export function MoleculeStructure({
           svgCache.set(cacheKey, calcResult)
 
           if (isActive) {
-            const processSvgId = (str: string) => 
-              str.replace(/id=['"](.+?)['"]/g, `id="${componentId}_$1"`)
-                 .replace(/url\(#(.+?)\)/g, `url(#${componentId}_$1)`)
-
-            setSvg(processSvgId(calcResult.svg))
-            setZoomSvg(processSvgId(calcResult.zoomSvg))
-            setCanZoom(natWidth > width || natHeight > height)
+            setSvg(processSvgId(calcResult.svg, componentId))
+            setZoomSvg(processSvgId(calcResult.zoomSvg, componentId))
+            setCanZoom(sizeInfo.w > width || sizeInfo.h > height)
             setLoadingState('ready')
           }
         } finally {
-          if (mol && typeof mol.delete === 'function') {
-            mol.delete()
-          }
+          mol?.delete?.()
         }
       } catch (err) {
         if (isActive) {
@@ -434,7 +407,7 @@ export function MoleculeStructure({
         <div 
           ref={refs.setFloating}
           {...getFloatingProps()}
-          className="pointer-events-none z-[9999]"
+          className="pointer-events-none z-9999"
           style={{
             ...floatingStyles, 
             width: 'max-content', 
@@ -442,15 +415,14 @@ export function MoleculeStructure({
             willChange: 'transform' 
           }}
         >
-          {/* 1. 外层容器：锁定背景色与 SVG 反色后一致，仅优化阴影与边框的弥散感 */}
           <div
             className={`
               flex items-center justify-center p-4 rounded-xl 
               bg-white dark:bg-[#121212] 
               border border-black/5 dark:border-white/10 
               shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_10px_40px_rgba(0,0,0,0.6)]
-              ${isDark === true ? '!bg-[#121212] !border-white/10 !shadow-[0_10px_40px_rgba(0,0,0,0.6)]' : ''}
-              ${isDark === false ? '!bg-white !border-black/5 !shadow-[0_8px_30px_rgb(0,0,0,0.08)]' : ''}
+              ${isDark === true ? 'bg-[#121212]! border-white/10! shadow-[0_10px_40px_rgba(0,0,0,0.6)]!' : ''}
+              ${isDark === false ? 'bg-white! border-black/5! shadow-[0_8px_30px_rgb(0,0,0,0.08)]!' : ''}
             `}
             style={{
               ...transitionStyles,
@@ -463,11 +435,10 @@ export function MoleculeStructure({
               willChange: 'transform, opacity'
             }}
           >
-            {/* 2. 内层容器：专职处理反色，确保 SVG 背景与外层完美融合 */}
             <div 
               className={`
                 w-full h-full flex items-center justify-center 
-                [&>svg]:!max-w-full [&>svg]:!h-auto 
+                [&>svg]:max-w-full! [&>svg]:h-auto! 
                 ${filterClass}
               `}
               dangerouslySetInnerHTML={{ __html: zoomSvg }}

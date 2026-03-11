@@ -59,8 +59,6 @@ class ReagentOrderBase(SQLModel):
     order_reason: ReagentOrderReason = ReagentOrderReason.NONE
     # Hazardous flag
     is_hazardous: bool = False
-    # Image path (thumbnail in filesystem)
-    image_path: Optional[str] = None
     # Notes
     notes: Optional[str] = Field(None, max_length=500)
 
@@ -82,8 +80,8 @@ class ReagentOrder(ReagentOrderBase, table=True):
     )
     
     # 拼音排序字段（预计算，使用数据库索引加速排序）
-    name_pinyin: Optional[str] = Field(default=None, index=True)
-    brand_pinyin: Optional[str] = Field(default=None, index=True)
+    name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    brand_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
 
 
 class ReagentOrderCreate(SQLModel):
@@ -138,12 +136,8 @@ class ReagentOrderResponse(BaseResponse):
     price: Optional[float]
     order_reason: ReagentOrderReason
     is_hazardous: bool
-    image_path: Optional[str]
     notes: Optional[str]
     applicant_id: Optional[int]
     status: ReagentOrderStatus
     created_at: datetime
     updated_at: datetime
-    # 拼音排序字段
-    name_pinyin: Optional[str] = None
-    brand_pinyin: Optional[str] = None

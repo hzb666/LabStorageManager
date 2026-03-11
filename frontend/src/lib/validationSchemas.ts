@@ -22,8 +22,14 @@ import { valibotResolver } from '@hookform/resolvers/valibot'
 // 类型化 resolver - 解决类型推断问题
 // 使用方法: resolver: createValibotResolver(InventoryFormSchema)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createValibotResolver(_schema: any): any {
-  return valibotResolver(_schema)
+export function createValibotResolver(schema: any): any {
+  return valibotResolver(schema)
+}
+
+const parseNumberOrNaN = (input: string | number): number => {
+  if (typeof input === 'number') return input
+  const parsed = Number.parseFloat(input)
+  return Number.isNaN(parsed) ? Number.NaN : parsed
 }
 
 
@@ -61,6 +67,21 @@ export const createStringLengthSchema = (
   )
 
 /**
+ * 字符串最大长度验证 - 仅验证最大长度，不限制最小值
+ * @param fieldName 字段中文名称
+ * @param max 最大长度
+ */
+export const createMaxLengthSchema = (
+  fieldName: string,
+  max: number
+) =>
+  v.pipe(
+    v.string(),
+    v.trim(),
+    v.maxLength(max, `${fieldName}最多${max}个字符`)
+  )
+
+/**
  * 正整数验证 (>=1) - 用于瓶数等必须为整数的字段
  * 支持字符串和数字输入，在 handleSubmit 中手动转换
  * @param fieldName 字段中文名称
@@ -68,11 +89,7 @@ export const createStringLengthSchema = (
 export const createPositiveNumberSchema = (fieldName: string) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
-    v.transform((input) => {
-      if (typeof input === 'number') return input
-      const num = Number.parseFloat(input)
-      return Number.isNaN(num) ? Number.NaN : num
-    }),
+    v.transform(parseNumberOrNaN),
     v.number(`${fieldName}必须是有效数字`),
     v.integer(`${fieldName}必须为整数`),
     v.minValue(1, `${fieldName}必须为大于等于1的整数`)
@@ -86,11 +103,7 @@ export const createPositiveNumberSchema = (fieldName: string) =>
 export const createQuantitySchema = (fieldName: string) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
-    v.transform((input) => {
-      if (typeof input === 'number') return input
-      const num = Number.parseFloat(input)
-      return Number.isNaN(num) ? Number.NaN : num
-    }),
+    v.transform(parseNumberOrNaN),
     v.number(`${fieldName}必须是有效数字`),
     v.gtValue(0, `${fieldName}必须大于0`)
   )
@@ -103,11 +116,7 @@ export const createQuantitySchema = (fieldName: string) =>
 export const createNonNegativeNumberSchema = (fieldName: string) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
-    v.transform((input) => {
-      if (typeof input === 'number') return input
-      const num = Number.parseFloat(input)
-      return Number.isNaN(num) ? undefined : num
-    }),
+    v.transform(parseNumberOrNaN),
     v.number(`${fieldName}必须是有效数字`),
     v.minValue(0, `${fieldName}不能为负数`)
   )
@@ -121,11 +130,7 @@ export const createNonNegativeNumberSchema = (fieldName: string) =>
 export const createRemainingQuantitySchema = (fieldName: string, maxValue: number) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
-    v.transform((input) => {
-      if (typeof input === 'number') return input
-      const num = Number.parseFloat(input)
-      return Number.isNaN(num) ? Number.NaN : num
-    }),
+    v.transform(parseNumberOrNaN),
     v.number(`${fieldName}必须是有效数字`),
     v.minValue(0, `${fieldName}不能为负数`),
     v.maxValue(maxValue, `${fieldName}不能超过初始量 (${maxValue})`)
@@ -140,11 +145,7 @@ export const createRemainingQuantitySchema = (fieldName: string, maxValue: numbe
 export const createPriceSchema = (min = 0, max = 999999) =>
   v.pipe(
     v.union([v.string(), v.number()], '价格必须是有效数字'),
-    v.transform((input) => {
-      if (typeof input === 'number') return input
-      const num = Number.parseFloat(input)
-      return Number.isNaN(num) ? Number.NaN : num
-    }),
+    v.transform(parseNumberOrNaN),
     v.number('价格必须是有效数字'),
     v.minValue(min, `价格不能小于${min}`),
     v.maxValue(max, `价格不能大于${max}`)
@@ -232,6 +233,28 @@ export const CasNumberSchema = v.pipe(
   v.check((input) => validateCASLogic(input), 'CAS号校验码错误')
 )
 
+/**
+ * CAS 输入预校验（用于自动识别按钮）
+ */
+export const validateAndNormalizeCASInput = (
+  casValue: string
+): { normalized: string } | { error: string } => {
+  const normalized = casValue.trim().toUpperCase()
+  if (!normalized) {
+    return { error: '请先输入 CAS 号' }
+  }
+
+  if (!/^\d{2,7}-\d{2}-\d$/.test(normalized)) {
+    return { error: 'CAS号格式无效' }
+  }
+
+  if (!validateCASLogic(normalized)) {
+    return { error: 'CAS号校验码错误' }
+  }
+
+  return { normalized }
+}
+
 // ==========================================
 // 4. 库存模块 Schema
 // ==========================================
@@ -240,7 +263,18 @@ export const CasNumberSchema = v.pipe(
  * 订单原因 Schema - 用于试剂和耗材订单
  * 支持预选选项和自定义输入
  */
-export const OrderReasonSchema = v.optional(v.string())
+const ORDER_REASON_VALUES = [
+  'none',
+  'running_out',
+  'not_stocked',
+  'common_public',
+  'not_found',
+  'reorder',
+  'high_usage',
+  'degraded',
+] as const
+
+export const OrderReasonSchema = v.optional(v.picklist(ORDER_REASON_VALUES))
 
 /**
  * 剩余量验证（非负数，允许0，但不能是null/undefined/空字符串）
@@ -252,12 +286,7 @@ const RemainingQuantitySchema = v.pipe(
     v.pipe(v.string(), v.trim(), v.minLength(1, '剩余数量不能为空')),
     v.number()
   ], '剩余数量必须是有效数字'),
-  v.transform((input) => {
-    if (typeof input === 'number') return input
-    const num = Number.parseFloat(input)
-    if (Number.isNaN(num)) return undefined  // 无效数字返回 undefined，后续验证会失败
-    return num
-  }),
+  v.transform(parseNumberOrNaN),
   v.number('剩余数量必须是有效数字'),
   v.minValue(0, '剩余数量不能为负数')
 )
@@ -271,15 +300,15 @@ const RemainingQuantitySchema = v.pipe(
  */
 export const InventoryFormSchema = v.object({
   // 基础字段
-  name: createRequiredStringSchema('名称'),
+  name: createStringLengthSchema('名称', 1, 200),
   cas_number: CasNumberSchema,
-  english_name: v.optional(v.string()),
-  alias: v.optional(v.string()),
-  category: v.optional(v.string()),
-  brand: v.optional(v.string()),
-  specification: SpecificationSchema,
-  storage_location: v.optional(v.string()),
-  notes: v.optional(v.string()),
+  english_name: createMaxLengthSchema('英文名称', 200),
+  alias: createMaxLengthSchema('别名', 200),
+  category: createMaxLengthSchema('分类', 100),
+  brand: createMaxLengthSchema('品牌', 100),
+  specification: v.optional(SpecificationSchema),
+  storage_location: createMaxLengthSchema('存储位置', 200),
+  notes: createMaxLengthSchema('备注', 500),
 
   // 数量相关
   quantity_bottles: v.optional(createPositiveNumberSchema('瓶数')),
@@ -306,18 +335,18 @@ export type InventoryFormData = v.InferOutput<typeof InventoryFormSchema>
  * 后端处理: 拆分为 initial_quantity 和 unit
  */
 export const ReagentOrderSchema = v.object({
-  name: createRequiredStringSchema('名称'),
+  name: createStringLengthSchema('名称', 1, 200),
   cas_number: CasNumberSchema,
-  english_name: v.optional(v.string()),
-  alias: v.optional(v.string()),
-  category: v.optional(v.string()),
-  brand: v.optional(v.string()),
-  specification: SpecificationSchema, // 必填，格式如 500ml
+  english_name: createMaxLengthSchema('英文名称', 200),
+  alias: createMaxLengthSchema('别名', 200),
+  category: createMaxLengthSchema('分类', 100),
+  brand: createMaxLengthSchema('品牌', 100),
+  specification: SpecificationSchema, // 后端必填
   quantity: createPositiveNumberSchema('数量'),
   price: createPriceSchema(0.01), // 必填，必须大于0
   order_reason: OrderReasonSchema,
   is_hazardous: v.boolean('危险品必须是布尔值'),
-  notes: v.optional(v.string())
+  notes: createMaxLengthSchema('备注', 500)
 })
 
 /**
@@ -329,17 +358,17 @@ export const ReagentOrderSchema = v.object({
  * - 移除了 alias, category, brand, image_path
  */
 export const ConsumableOrderSchema = v.object({
-  name: createRequiredStringSchema('名称'),
-  english_name: v.optional(v.string()),
-  specification: createRequiredStringSchema('规格'),  // 后端必填
-  unit: v.optional(v.string()),  // 后端新增可选字段
+  name: createStringLengthSchema('名称', 1, 200),
+  english_name: createMaxLengthSchema('英文名称', 200),
+  specification: createStringLengthSchema('规格', 1, 100),  // 后端必填
+  unit: createMaxLengthSchema('单位', 20),  // 后端新增可选字段
   quantity: createPositiveNumberSchema('数量'),
   price: v.optional(createPriceSchema()),
-  communication: v.optional(v.string()),
+  communication: v.optional(createMaxLengthSchema('沟通信息', 100)),
   // 移除了 order_reason (后端已移除)
   // 移除了 is_hazardous (后端已移除)
   // 移除了 alias, category, brand (用户要求删除)
-  notes: v.optional(v.string())
+  notes: createMaxLengthSchema('备注', 500)
 })
 
 /**
@@ -356,15 +385,15 @@ export type ConsumableOrderFormData = v.InferOutput<typeof ConsumableOrderSchema
  * 登录 Schema
  */
 export const LoginSchema = v.object({
-  username: createRequiredStringSchema('用户名'),
-  password: createRequiredStringSchema('密码')
+  username: UsernameSchema,
+  password: createStringLengthSchema('密码', 6, 50)
 })
 
 /**
  * 锁屏模式 Schema（只需密码）
  */
 export const LockScreenSchema = v.object({
-  password: createRequiredStringSchema('密码')
+  password: createStringLengthSchema('密码', 6, 50)
 })
 
 /**
@@ -384,9 +413,10 @@ export const UserCreateSchema = v.object({
   username: UsernameSchema,
   password: v.pipe(
     v.string('密码不能为空'),
-    v.minLength(6, '密码至少6个字符')
+    v.minLength(6, '密码至少6个字符'),
+    v.maxLength(50, '密码最多50个字符')
   ),
-  full_name: createRequiredStringSchema('姓名'),
+  full_name: createStringLengthSchema('姓名', 1, 100),
   role: v.optional(v.picklist(['admin', 'user']))
 })
 
@@ -396,20 +426,105 @@ export const UserCreateSchema = v.object({
  */
 export const UserUpdateSchema = v.object({
   username: UsernameSchema,  // 用户名必填
-  full_name: createRequiredStringSchema('姓名'),  // 必填
+  full_name: createStringLengthSchema('姓名', 1, 100),  // 必填
   role: v.optional(v.picklist(['admin', 'user']))
 })
+
+export interface ValidationError {
+  loc?: (string | number)[]
+  msg?: string
+  type?: string
+}
+
+export const toValidationErrors = (detail: unknown): ValidationError[] => {
+  if (!Array.isArray(detail)) return []
+  return detail.filter((item): item is ValidationError => typeof item === 'object' && item !== null)
+}
+
+export const normalizeApiErrorMessage = (detail: unknown, fallback = '操作失败'): string => {
+  if (typeof detail !== 'string' || !detail.trim()) return fallback
+
+  if (detail.includes('Invalid credentials') || detail.includes('incorrect')) {
+    return '用户名或密码错误'
+  }
+  if (detail.includes('User account is disabled')) {
+    return '账号已被禁用'
+  }
+  if (detail.includes('Invalid CAS format')) {
+    return 'CAS号格式无效'
+  }
+  if (detail.includes('Invalid specification format')) {
+    return '规格格式无效'
+  }
+  if (detail.includes('Order not found')) {
+    return '未找到订单'
+  }
+  if (detail.includes('Inventory item not found')) {
+    return '未找到该库存项'
+  }
+  if (detail.includes('Cannot edit item while borrowed')) {
+    return '借用中的试剂无法编辑，请等待归还后再操作'
+  }
+  if (detail.includes('Item is borrowed by another user')) {
+    return '该物品已被他人借用，请刷新后重试'
+  }
+  if (detail.includes('Cart is empty')) {
+    return '购物车不能为空'
+  }
+  if (detail.includes('Admin permission required')) {
+    return '需要管理员权限才能访问错误日志'
+  }
+  if (detail.includes('Too many login attempts')) {
+    return '登录尝试过多，请 5 分钟后重试'
+  }
+  if (detail.includes('Incorrect old password')) {
+    return '原密码错误'
+  }
+  if (detail.includes('New password cannot be the same as old password')) {
+    return '新密码不能与原密码相同'
+  }
+  if (detail.includes('Old password required to modify admin password')) {
+    return '修改管理员密码需要提供原密码'
+  }
+  if (detail.includes('Too many requests')) {
+    return '请求过于频繁，请稍后再试'
+  }
+  if (detail.includes('Token expired')) {
+    return 'Token已过期，请重新生成'
+  }
+  if (detail.includes('Invalid CAS number')) {
+    return '无效的 CAS 号'
+  }
+  if (detail.includes('Max announcements allowed')) {
+    return '每个管理员最多创建10条公告'
+  }
+  if (detail.includes('Max visible announcements allowed')) {
+    return '每个管理员最多显示5条公告'
+  }
+  if (detail.includes('Cannot borrow, current status')) {
+    return '无法借用，当前状态'
+  }
+  if (detail.includes('Remaining quantity') && detail.includes('cannot exceed initial quantity')) {
+    return '剩余量不能超过初始量'
+  }
+  if (detail.includes('IP limit reached')) {
+    return 'IP 数量已达上限，请先移除其他设备'
+  }
+
+  return detail
+}
 
 /**
  * 修改密码 Schema
  */
 export const ChangePasswordSchema = v.object({
-  old_password: createRequiredStringSchema('原密码'),
+  old_password: createStringLengthSchema('原密码', 6, 50),
   new_password: v.pipe(
     v.string('新密码不能为空'),
-    v.minLength(6, '新密码至少6个字符')
+    v.minLength(6, '新密码至少6个字符'),
+    v.maxLength(50, '新密码最多50个字符')
   ),
-  confirm_password: v.string('请再次输入新密码')
+  confirm_password: createStringLengthSchema('确认密码', 6, 50)
 })
 
 /**
@@ -457,5 +572,3 @@ export const safeString = (value: unknown, fallback = '-'): string => {
   // 对象类型，返回 fallback 而不是 [object Object]
   return fallback
 }
-
-export {valibotResolver} from '@hookform/resolvers/valibot'

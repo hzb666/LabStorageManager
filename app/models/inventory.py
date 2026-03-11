@@ -3,17 +3,12 @@ Inventory Model - Laboratory Reagents and Consumables Tracking
 Critical Rule #2: CAS Number must be normalized (uppercase, no spaces)
 """
 from datetime import datetime
-
-from app.core.time_utils import get_utc_now
-from app.models import BaseResponse
 from enum import Enum
 from typing import Optional
 
-from sqlmodel import Field, ForeignKey, SQLModel, Relationship
-from typing import Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from app.models.user import User
+from app.core.time_utils import get_utc_now
+from app.models import BaseResponse
+from sqlmodel import Field, SQLModel
 
 
 class InventoryStatus(str, Enum):
@@ -37,9 +32,10 @@ class InventoryBase(SQLModel):
     # 数据库模型：允许 NULL 以兼容旧数据
     initial_quantity: Optional[float] = Field(default=None)
     remaining_quantity: Optional[float] = Field(default=None)
+    # 剩余百分比：remaining_quantity / initial_quantity，存储到数据库用于排序
+    remaining_percent: Optional[float] = Field(default=None, index=True)
     unit: Optional[str] = Field(default=None, max_length=20)  # Case-insensitive storage
     is_hazardous: bool = False
-    image_path: Optional[str] = None  # Copied from Order
     notes: Optional[str] = Field(None, max_length=500)  # User custom notes
 
 
@@ -79,9 +75,10 @@ class Inventory(InventoryBase, table=True):
     )
     
     # 拼音排序字段（预计算，使用数据库索引加速排序）
-    name_pinyin: Optional[str] = Field(default=None, index=True)
-    category_pinyin: Optional[str] = Field(default=None, index=True)
-    brand_pinyin: Optional[str] = Field(default=None, index=True)
+    name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    category_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    brand_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    storage_location_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
 
 
 class InventoryCreate(SQLModel):
@@ -97,9 +94,10 @@ class InventoryCreate(SQLModel):
     # 数据库模型：允许 NULL 以兼容旧数据
     initial_quantity: Optional[float] = None
     remaining_quantity: Optional[float] = None
+    # 可选：允许显式传入，默认由后端根据数量自动计算
+    remaining_percent: Optional[float] = None
     unit: Optional[str] = Field(default=None, max_length=20)
     is_hazardous: bool = False
-    image_path: Optional[str] = None
     temporary_keeper_id: Optional[int] = None
     notes: Optional[str] = None
 
@@ -110,6 +108,8 @@ class InventoryUpdate(SQLModel):
     cas_number: Optional[str] = None
     storage_location: Optional[str] = None
     remaining_quantity: Optional[float] = None
+    # 可选：通常由后端根据 remaining_quantity / initial_quantity 自动维护
+    remaining_percent: Optional[float] = None
     status: Optional[InventoryStatus] = None
     temporary_keeper_id: Optional[int] = None
     notes: Optional[str] = None
@@ -141,12 +141,12 @@ class InventoryResponse(BaseResponse):
     # 允许 NULL 以兼容旧数据
     initial_quantity: Optional[float]
     remaining_quantity: Optional[float]
+    remaining_percent: Optional[float]
     unit: Optional[str]
     status: InventoryStatus
     borrower_id: Optional[int]
     last_borrower_id: Optional[int]
     is_hazardous: bool
-    image_path: Optional[str]
     temporary_keeper_id: Optional[int]
     created_by_id: Optional[int]
     notes: Optional[str]
@@ -158,6 +158,7 @@ class InventoryResponse(BaseResponse):
     borrower_name: Optional[str] = None
     last_borrower_name: Optional[str] = None
     created_by_name: Optional[str] = None
+    temporary_keeper_name: Optional[str] = None
 
 
 class BorrowLog(SQLModel, table=True):

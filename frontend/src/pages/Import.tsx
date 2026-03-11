@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { inventoryAPI } from '@/api/client'
 import { toast } from '@/lib/toast'
+import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
 import { cn } from '@/lib/utils'
 import { IMPORT_TEMPLATE_COLUMNS } from '@/lib/constants'
 import { 
@@ -104,7 +105,7 @@ export function ImportPage() {
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '导入失败')
+      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '导入失败'))
     } finally {
       setImporting(false)
     }

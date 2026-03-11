@@ -118,7 +118,7 @@ async def sync_cart(
 ):
     """同步购物车数据并匹配现有订单"""
     if not request.items:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="购物车不能为空")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cart is empty")
 
     matched_items = []
     unmatched_count = 0
@@ -151,7 +151,7 @@ async def import_cart(
 ):
     """导入购物车商品到系统"""
     if not request.items:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="购物车不能为空")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cart is empty")
 
     created_count = 0
     errors = []
@@ -165,14 +165,10 @@ async def import_cart(
                 db_order = ConsumableOrder(
                     name=item.name,
                     specification=item.specification or "未知",
-                    initial_quantity=parsed.get("initial_quantity"),
                     unit=parsed.get("unit"),
                     quantity=item.quantity,
                     price=item.price,
-                    brand=item.brand,
                     english_name=item.english_name or None,
-                    alias=item.alias or item.cas_number or None,
-                    category=None,
                     applicant_id=current_user.id,
                     status=ConsumableOrderStatus.PENDING,
                 )

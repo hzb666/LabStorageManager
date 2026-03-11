@@ -18,7 +18,12 @@ import {
   CardTitle,
 } from '@/components/ui/Card'
 import { toast } from '@/lib/toast'
-import { LoginSchema, LockScreenSchema, type LoginFormData } from '@/lib/validationSchemas'
+import {
+  LoginSchema,
+  LockScreenSchema,
+  normalizeApiErrorMessage,
+  type LoginFormData,
+} from '@/lib/validationSchemas'
 import { BaseForm, type FieldSchema } from '@/components/BaseForm'
 
 // 获取完整的图片URL，处理相对路径和绝对路径
@@ -47,6 +52,7 @@ const normalLoginFields: FieldSchema<NormalLoginForm>[] = [
     placeholder: '请输入用户名',
     autoComplete: 'username',
     required: true,
+    maxLength: 20,
   },
   {
     name: 'password',
@@ -55,6 +61,7 @@ const normalLoginFields: FieldSchema<NormalLoginForm>[] = [
     placeholder: '请输入密码',
     autoComplete: 'current-password',
     required: true,
+    maxLength: 50,
   },
 ]
 
@@ -67,6 +74,7 @@ const lockScreenFields: FieldSchema<LockScreenForm>[] = [
     placeholder: '请输入密码',
     autoComplete: 'current-password',
     required: true,
+    maxLength: 50,
   },
 ]
 
@@ -90,14 +98,14 @@ export function Login() {
   const formNormal = useForm<NormalLoginForm>({
     resolver: valibotResolver(LoginSchema),
   })
-  const { handleSubmit: handleNormalSubmit, formState: { errors: normalErrors } } = formNormal
+  const { handleSubmit: handleNormalSubmit } = formNormal
 
   // 锁屏模式表单
   const formLock = useForm<LockScreenForm>({
     resolver: valibotResolver(lockScreenSchema),
   })
-  const { handleSubmit: handleLockSubmit, formState: { errors: lockErrors } } = formLock
-
+  const { handleSubmit: handleLockSubmit } = formLock
+  
   // 处理普通登录
   const onNormalSubmit = async (data: NormalLoginForm) => {
     setLoading(true)
@@ -130,12 +138,12 @@ export function Login() {
       const error = err as { response?: { data?: { detail?: string } } }
       const detail = error.response?.data?.detail || ''
       // 将英文错误信息转换为中文
-      if (detail.includes('Invalid credentials') || detail.includes('incorrect')) {
+      if (normalizeApiErrorMessage(detail) === '用户名或密码错误') {
         formNormal.setError('username', { message: '' })
         formNormal.setError('password', { message: '用户名或密码错误' })
         setError('')
       } else {
-        setError(detail || '登录失败，请检查用户名和密码')
+        setError(normalizeApiErrorMessage(detail, '登录失败，请检查用户名和密码'))
       }
     } finally {
       setLoading(false)
@@ -183,12 +191,12 @@ export function Login() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } }
       const detail = error.response?.data?.detail || ''
-      if (detail.includes('Invalid credentials') || detail.includes('incorrect')) {
+      if (normalizeApiErrorMessage(detail) === '用户名或密码错误') {
         // 密码错误显示在输入框下方
         formLock.setError('password', { message: '密码错误' })
       } else {
         // 其他错误显示在页面顶部
-        setError(detail || '登录失败，请检查密码')
+        setError(normalizeApiErrorMessage(detail, '登录失败，请检查密码'))
       }
     } finally {
       setLoading(false)

@@ -13,6 +13,7 @@ import { authAPI } from '@/api/client'
 // 懒加载页面组件 - 使用默认导出
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
 const InventoryPage = lazy(() => import('@/pages/Inventory').then(m => ({ default: m.InventoryPage })))
+const CommonShelfPage = lazy(() => import('@/pages/CommonShelf').then(m => ({ default: m.CommonShelfPage })))
 const ImportPage = lazy(() => import('@/pages/Import').then(m => ({ default: m.ImportPage })))
 const AdminUsersPage = lazy(() => import('@/pages/AdminUsers').then(m => ({ default: m.AdminUsersPage })))
 const ReagentOrdersPage = lazy(() => import('@/pages/ReagentOrders').then(m => ({ default: m.ReagentOrdersPage })))
@@ -82,6 +83,7 @@ function AppContent() {
               <Route path="reagents" element={<ReagentOrdersPage />} />
               <Route path="consumables" element={<ConsumableOrdersPage />} />
               <Route path="inventory" element={<InventoryPage />} />
+              <Route path="common-shelf" element={<CommonShelfPage />} />
               <Route path="import" element={<ImportPage />} />
               <Route
                 path="admin/users"

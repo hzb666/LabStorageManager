@@ -7,12 +7,20 @@ from pathlib import Path
 from typing import Tuple, Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
-
 from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.core.time_utils import get_utc_now
+
+
+def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
+    """Compute remaining percentage for persisted sorting field."""
+    if initial is None or initial <= 0:
+        return None
+    if remaining is None:
+        return None
+    return remaining / initial
 
 
 # ==================== File Upload Security ====================
@@ -390,7 +398,7 @@ def import_inventory_from_excel(
                 name=name,
                 category=category,
                 brand=brand,
-                alias=alias,
+                storage_location=storage_location,
             )
             
             # Create inventory item
@@ -405,6 +413,7 @@ def import_inventory_from_excel(
                 storage_location=storage_location,
                 initial_quantity=initial_quantity,
                 remaining_quantity=remaining_qty,
+                remaining_percent=_compute_remaining_percent(remaining_qty, initial_quantity),
                 unit=unit,
                 is_hazardous=is_hazardous,
                 status=InventoryStatus.IN_STOCK,
@@ -445,7 +454,7 @@ def generate_import_template() -> dict:
                 "name": "cas_number",
                 "label": "CAS号",
                 "required": True,
-                "description": "格式: XXXXX-XX-X，去除空格，例如 64-17-5"
+                "description": "格式: XXXXX-XX-X，例如 64-17-5"
             },
             {
                 "name": "name",

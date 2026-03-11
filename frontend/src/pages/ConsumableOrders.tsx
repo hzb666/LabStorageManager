@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
-import { TableActionButtonsMemo } from '@/components/ui/TableActionButtons'
+import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
@@ -25,8 +25,13 @@ import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
 import { formatDate, processNotes } from '@/lib/utils'
-import { ConsumableOrderSchema, createValibotResolver } from '@/lib/validationSchemas'
-import type { ConsumableOrderFormData } from '@/lib/validationSchemas'
+import {
+  ConsumableOrderSchema,
+  createValibotResolver,
+  toValidationErrors,
+  normalizeApiErrorMessage,
+} from '@/lib/validationSchemas'
+import type { ConsumableOrderFormData, ValidationError } from '@/lib/validationSchemas'
 import { getConsumableOrderTableColumns } from '@/lib/tableConfigs'
 import {
   getConsumableOrderFormFields,
@@ -40,24 +45,15 @@ import {
   ArrowUpFromLine,
 } from 'lucide-react'
 
-interface ValidationError {
-  loc?: (string | number)[]
-  msg?: string
-  type?: string
-}
-
 interface ConsumableOrder {
   id: number
   name: string
   english_name: string | null
-  alias: string | null
-  category: string | null
-  brand: string | null
   specification: string
   unit: string | null
   quantity: number
   price: number | null
-  image_path: string | null
+  communication: string | null
   notes: string | null
   applicant_id: number | null
   applicant_name: string | null
@@ -81,8 +77,7 @@ const CONSUMABLE_ORDER_STATUS_OPTIONS = [
 const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
-  { value: 'category', label: '分类' },
-  { value: 'brand', label: '品牌' },
+  { value: 'specification', label: '规格' },
 ]
 
 // ============================================================================
@@ -93,6 +88,9 @@ export function ConsumableOrdersPage() {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
 
+  // ---------------------------------------------------------------------------
+  // 状态管理
+  // ---------------------------------------------------------------------------
   // 使用 useTableState 管理表格状态
   const filter = useTableState({
     api: consumableOrderAPI,
@@ -111,6 +109,9 @@ export function ConsumableOrdersPage() {
   const [editingItem, setEditingItem] = useState<ConsumableOrder | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // ---------------------------------------------------------------------------
+  // 表单逻辑
+  // ---------------------------------------------------------------------------
   // 表单实例
   const form = useForm<ConsumableOrderFormData>({
     resolver: createValibotResolver(ConsumableOrderSchema),
@@ -137,19 +138,16 @@ export function ConsumableOrdersPage() {
     form.reset({
       name: item.name || '',
       english_name: item.english_name || '',
-      alias: item.alias || '',
-      category: item.category || '',
-      brand: item.brand || '',
       specification: item.specification || '',
       unit: item.unit || '',
       quantity: item.quantity || 1,
       price: item.price || undefined,
+      communication: item.communication || '',
       notes: item.notes || ''
     })
     setDialogState('edit')
   }, [form, setDialogState])
 
-  // 表单提交
   const handleFormSubmit = form.handleSubmit(
     async (formData) => {
       console.log('✅ 耗材订单表单验证通过:', formData)
@@ -160,24 +158,22 @@ export function ConsumableOrdersPage() {
           await consumableOrderAPI.update(editingItem.id, {
             name: formData.name,
             english_name: formData.english_name || '',
-            alias: formData.alias || '',
-            category: formData.category || '',
-            brand: formData.brand || '',
             specification: formData.specification || '',
             unit: formData.unit || '',
             quantity: formData.quantity,
             price: formData.price,
+            communication: formData.communication || '',
             notes: processNotes(formData.notes)
           })
         } else if (dialogState === 'add') {
           await consumableOrderAPI.create({
             name: formData.name,
+            english_name: formData.english_name || undefined,
             specification: formData.specification,
             unit: formData.unit || undefined,
             quantity: formData.quantity,
-            category: formData.category || undefined,
-            brand: formData.brand || undefined,
             price: formData.price,
+            communication: formData.communication || undefined,
             notes: processNotes(formData.notes),
           })
         }
@@ -192,13 +188,17 @@ export function ConsumableOrdersPage() {
       } catch (err) {
         const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
         const errorDetail = error.response?.data?.detail
-        if (dialogState === 'add' && Array.isArray(errorDetail)) {
-          errorDetail.forEach((e: ValidationError) => {
-            if (e.loc && e.loc[1]) form.setError(e.loc[1] as keyof ConsumableOrderFormData, { message: e.msg || '验证错误' })
+        const validationErrors = toValidationErrors(errorDetail)
+        if (validationErrors.length > 0) {
+          validationErrors.forEach((e: ValidationError) => {
+            if (e.loc?.[1]) {
+              form.setError(e.loc[1] as keyof ConsumableOrderFormData, { message: e.msg || '输入不合法' })
+            }
           })
-        } else {
-          toast.error(typeof errorDetail === 'string' ? errorDetail : '操作失败')
+          return
         }
+
+        toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
       } finally {
         setIsSubmitting(false)
       }
@@ -208,7 +208,6 @@ export function ConsumableOrdersPage() {
     }
   )
 
-  // 导出功能
   const handleExport = useCallback(async () => {
     try {
       const response = await consumableOrderAPI.exportOrders()
@@ -219,73 +218,16 @@ export function ConsumableOrdersPage() {
       link.download = `consumable_orders_export_${new Date().toISOString().slice(0, 10)}.csv`
       document.body.appendChild(link)
       link.click()
-      document.body.removeChild(link)
+      link.remove()
       URL.revokeObjectURL(url)
     } catch {
       toast.error('导出失败')
     }
   }, [])
 
-  // 表格操作按钮组件
-  const ActionButtons = React.memo(function ActionButtons({
-    item,
-    onEdit,
-  }: {
-    item: Record<string, unknown>;
-    onEdit: (item: Record<string, unknown>) => void;
-  }) {
-    const actions = useMemo(() => [
-      {
-        id: 'approve',
-        label: '审批',
-        showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
-        onClick: async (currItem: Record<string, unknown>) => {
-          await consumableOrderAPI.approve(currItem.id as number)
-          await filter.invalidate()
-          toast.success('审批通过')
-        }
-      },
-      {
-        id: 'reject',
-        label: '驳回',
-        showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
-        onClick: async (currItem: Record<string, unknown>) => {
-          await consumableOrderAPI.reject(currItem.id as number, '管理员驳回')
-          await filter.invalidate()
-          toast.success('已驳回')
-        }
-      },
-      {
-        id: 'complete',
-        label: '确认完成',
-        showWhen: (currItem: Record<string, unknown>) => currItem.status === 'approved',
-        onClick: async (currItem: Record<string, unknown>) => {
-          await consumableOrderAPI.complete(currItem.id as number)
-          await filter.invalidate()
-          toast.success('耗材订单已完成')
-        }
-      }
-    ], [isAdmin, filter])
-
-    return (
-      <TableActionButtonsMemo
-        item={item}
-        actions={actions}
-        showEdit={true}
-        onEdit={onEdit}
-      />
-    )
-  }, (prevProps, nextProps) => {
-    if (prevProps.onEdit !== nextProps.onEdit) return false
-    const prevItem = prevProps.item
-    const nextItem = nextProps.item
-    if (prevItem === nextItem) return true
-    const prevKeys = Object.keys(prevItem)
-    const nextKeys = Object.keys(nextItem)
-    if (prevKeys.length !== nextKeys.length) return false
-    return prevKeys.every((key) => prevItem[key] === nextItem[key])
-  })
-
+  // ---------------------------------------------------------------------------
+  // 表格列配置
+  // ---------------------------------------------------------------------------
   // 表格列配置
   const columns = useMemo(() => {
     const baseColumns = getConsumableOrderTableColumns()
@@ -302,24 +244,28 @@ export function ConsumableOrdersPage() {
           <ActionButtons
             item={info.row.original as unknown as Record<string, unknown>}
             onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
+            isAdmin={isAdmin}
+            onRefresh={filter.invalidate}
           />
         )
       },
     })
 
     return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
-  }, [])
+  }, [isAdmin, filter.invalidate])
 
+  // ---------------------------------------------------------------------------
+  // 渲染相关回调
+  // ---------------------------------------------------------------------------
   // 展开行渲染
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
     return (
-      <div className="p-3 flex flex-col md:flex-row gap-4 border-b-1 border-border">
+      <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
           <div><span>英文名称：</span>{item.english_name || '-'}</div>
-          <div><span>别名：</span>{item.alias || '-'}</div>
-          <div><span>品牌：</span>{item.brand || '-'}</div>
           <div><span>单位：</span>{item.unit || '-'}</div>
+          <div><span>沟通信息：</span>{item.communication || '-'}</div>
           <div><span>申购时间：</span>{formatDate(item.created_at)}</div>
           <div><span>申请人：</span>{item.applicant_name || '-'}</div>
           <div className="col-span-2"><span>备注：</span>{item.notes || '-'}</div>
@@ -392,3 +338,79 @@ export function ConsumableOrdersPage() {
     </div>
   )
 }
+
+// ============================================================================
+// 表格操作按钮组件
+// ============================================================================
+
+const ActionButtons = React.memo(function ActionButtons({
+  item,
+  onEdit,
+  isAdmin,
+  onRefresh,
+}: {
+  item: Record<string, unknown>
+  onEdit: (item: Record<string, unknown>) => void
+  isAdmin: boolean
+  onRefresh: () => void | Promise<void>
+}) {
+  const actions = useMemo(() => [
+    {
+      id: 'approve',
+      label: '审批',
+      showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+      onClick: async (currItem: Record<string, unknown>) => {
+        await consumableOrderAPI.approve(currItem.id as number)
+        await onRefresh()
+        toast.success('审批通过')
+      }
+    },
+    {
+      id: 'reject',
+      label: '驳回',
+      showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+      onClick: async (currItem: Record<string, unknown>) => {
+        await consumableOrderAPI.reject(currItem.id as number, '管理员驳回')
+        await onRefresh()
+        toast.success('已驳回')
+      }
+    },
+    {
+      id: 'complete',
+      label: '确认完成',
+      showWhen: (currItem: Record<string, unknown>) => currItem.status === 'approved',
+      onClick: async (currItem: Record<string, unknown>) => {
+        await consumableOrderAPI.complete(currItem.id as number)
+        await onRefresh()
+        toast.success('耗材订单已完成')
+      }
+    }
+  ], [isAdmin, onRefresh])
+
+  return (
+    <TableActionButtonsMemo
+      item={item}
+      actions={actions}
+      showEdit={true}
+      onEdit={onEdit}
+    />
+  )
+}, (prevProps, nextProps) => {
+  if (
+    prevProps.onEdit !== nextProps.onEdit
+    || prevProps.isAdmin !== nextProps.isAdmin
+    || prevProps.onRefresh !== nextProps.onRefresh
+  ) {
+    return false
+  }
+
+  const prevItem = prevProps.item
+  const nextItem = nextProps.item
+  if (prevItem === nextItem) return true
+
+  const prevKeys = Object.keys(prevItem)
+  const nextKeys = Object.keys(nextItem)
+  if (prevKeys.length !== nextKeys.length) return false
+
+  return prevKeys.every((key) => prevItem[key] === nextItem[key])
+})

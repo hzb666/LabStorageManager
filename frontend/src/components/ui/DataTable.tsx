@@ -163,7 +163,7 @@ const InnerRow = memo(InnerRowComponent, (prevProps, nextProps) => {
     prevProps.row.original === nextProps.row.original && 
     prevProps.isExpanded === nextProps.isExpanded &&
     prevProps.renderExpandedRow === nextProps.renderExpandedRow &&
-    prevProps.getProportionalStyles === nextProps.getProportionalStyles &&
+    prevProps.getProportionalStyles === nextProps.getProportionalStyles && // 只有当列宽/列配置真实改变时才重新渲染
     prevProps.noteField === nextProps.noteField &&
     prevProps.onRowClick === nextProps.onRowClick
   )
@@ -236,7 +236,10 @@ export function DataTable<TData>({
 
     updateScrollbar()
     // 监听容器大小变化以实时更新滚动条宽度补偿
-    const observer = new ResizeObserver(() => updateScrollbar())
+    const observer = new ResizeObserver(() => {
+      // 通过 requestAnimationFrame 防止 ResizeObserver loop limit exceeded 警告
+      requestAnimationFrame(updateScrollbar)
+    })
     observer.observe(el)
 
     return () => observer.disconnect()
@@ -254,13 +257,16 @@ export function DataTable<TData>({
   const visibleColumns = table.getVisibleLeafColumns()
   const columnSizing = table.getState().columnSizing
 
+  // 🚀 降维打击：提取列 ID 字符串作为依赖，避免 visibleColumns 数组每次渲染返回新引用时击穿 useMemo 缓存
+  const visibleColIds = useMemo(() => visibleColumns.map(c => c.id).join(','), [visibleColumns])
+
   // 计算表格的总权重和最小宽度，用于列宽的 flex 动态分配
   const { totalWeight, minTableWidth } = useMemo(() => {
     return {
       totalWeight: visibleColumns.reduce((sum, col) => sum + col.getSize(), 0),
       minTableWidth: visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
     }
-  }, [visibleColumns, columnSizing])
+  }, [visibleColIds, columnSizing]) // 依赖项使用 visibleColIds 和 columnSizing
 
   // 预先生成每一列的 CSS 样式对象，利用 Flex-grow 实现完美等比自适应
   const columnStyles = useMemo(() => {
@@ -283,9 +289,10 @@ export function DataTable<TData>({
       }
     })
     return styles
-  }, [visibleColumns, columnSizing])
+  }, [visibleColIds, columnSizing]) // 同上，仅在列配置或列宽尺寸变化时重新计算
 
-  // 获取特定列样式的方法，应用优化：使用稳定引用的 EMPTY_STYLE
+  // 获取特定列样式的方法
+  // 此时无需 useRef Hack，只要 columnStyles 变化（拖拽列宽时），函数引用更新，就能触发 InnerRow 的重新渲染
   const getProportionalStyles = useCallback((column: Column<TData, unknown>): React.CSSProperties => {
     return columnStyles[column.id] || EMPTY_STYLE
   }, [columnStyles])
@@ -600,21 +607,22 @@ export function DataTable<TData>({
             return (
               <div
                 key={virtualRow.key}
-                data-index={virtualRow.index} 
-                ref={rowVirtualizer.measureElement} // 挂载 ref 以让虚拟滚动器动态测量真实渲染高度
                 className="absolute top-0 left-0 w-full"
                 style={{
-                  transform: `translateY(${virtualRow.start}px)`, // 绝对定位，仅通过 Translate 移动到虚拟视口中的应处位置
+                  transform: `translateY(${virtualRow.start}px)`, //绝对定位，仅通过 Translate 移动到虚拟视口中的应处位置
                 }}
               >
-                <InnerRow
-                  row={row}
-                  isExpanded={row.getIsExpanded()} 
-                  renderExpandedRow={renderExpandedRow}
-                  getProportionalStyles={getProportionalStyles}
-                  noteField={noteField}
-                  onRowClick={handleRowClick}
-                />
+                {/* 🚀 修复核心：必须将 data-index 挂载到拥有 measureElement 的节点上，虚拟滚动器才能正确对应测量高度 */}
+                <div ref={rowVirtualizer.measureElement} data-index={virtualRow.index}>
+                  <InnerRow
+                    row={row}
+                    isExpanded={row.getIsExpanded()} 
+                    renderExpandedRow={renderExpandedRow}
+                    getProportionalStyles={getProportionalStyles}
+                    noteField={noteField}
+                    onRowClick={handleRowClick}
+                  />
+                </div>
               </div>
             )
           })}

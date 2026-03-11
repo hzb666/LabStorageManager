@@ -48,7 +48,7 @@ def get_error_logs(
     if current_user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要管理员权限才能访问错误日志"
+            detail="Admin permission required"
         )
     
     # 获取日志

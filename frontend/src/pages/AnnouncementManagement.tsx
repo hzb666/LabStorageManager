@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { announcementAPI, type Announcement } from '@/api/client'
 import { toast } from '@/lib/toast'
+import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
 import { formatDate, cn, getFullImageUrl } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
 import { AxiosError } from 'axios'
@@ -98,7 +99,7 @@ export function AnnouncementManagement() {
       toast.success('置顶状态已更新')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
     }
   }
 
@@ -110,7 +111,7 @@ export function AnnouncementManagement() {
       toast.success('显示状态已更新')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
     }
   }
 
@@ -375,7 +376,7 @@ export function AnnouncementManagement() {
       refetchAnnouncements()
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
     } finally {
       setFormLoading(false)
     }
@@ -394,7 +395,7 @@ export function AnnouncementManagement() {
       toast.success('公告删除成功')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '删除失败')
+      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '删除失败'))
     } finally {
       setDeleteLoading(false)
     }

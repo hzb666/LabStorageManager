@@ -50,6 +50,11 @@ DBSession = Annotated[Session, Depends(get_db)]
 
 def init_db() -> None:
     """Initialize database and create all tables"""
+    # Ensure all SQLModel tables are registered before create_all.
+    # This guarantees fresh database initialization includes the latest columns
+    # such as inventory.remaining_percent.
+    import app.models  # noqa: F401
+
     SQLModel.metadata.create_all(engine)
     logger.info("Database tables created / verified")
     

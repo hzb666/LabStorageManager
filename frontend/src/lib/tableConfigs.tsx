@@ -7,6 +7,7 @@
  * const columns = getInventoryTableColumns()
  */
 import { createColumnHelper } from '@tanstack/react-table'
+import { safeString } from '@/lib/validationSchemas'
 import type { ColumnDef } from '@tanstack/react-table'
 import { HighlightText } from '@/components/ui/HighlightText'
 import { StatusBadge, ORDER_REASON_LABELS } from '@/components/ui/StatusBadge'
@@ -38,7 +39,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       cell: info => (
         <span className="break-all">
           <HighlightText
-            text={String(info.getValue() ?? '')}
+            text={safeString(info.getValue(), '')}
             highlight={info.table.getState().globalFilter}
             fuzzy={info.table.options.meta?.fuzzySearch}
           />
@@ -55,7 +56,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
           <HazardousIcon isHazardous={Boolean(info.row.original.is_hazardous)} />
           <span>
             <HighlightText
-              text={String(info.getValue() ?? '')}
+              text={safeString(info.getValue(), '')}
               highlight={info.table.getState().globalFilter}
               fuzzy={info.table.options.meta?.fuzzySearch}
             />
@@ -74,7 +75,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       cell: info => (
         <span className="break-all">
           <HighlightText
-            text={String(info.row.original.storage_location ?? '-')}
+            text={safeString(info.row.original.storage_location, '-')}
             highlight={info.table.getState().globalFilter}
             fuzzy={info.table.options.meta?.fuzzySearch}
           />
@@ -89,7 +90,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       cell: info => (
         <span className="break-all">
           <HighlightText
-            text={String(info.getValue() ?? '-')}
+            text={safeString(info.getValue(), '-')}
             highlight={info.table.getState().globalFilter}
             fuzzy={info.table.options.meta?.fuzzySearch}
           />
@@ -104,14 +105,14 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       cell: info => (
         <span className="break-all">
           <HighlightText
-            text={String(info.getValue() ?? '-')}
+            text={safeString(info.getValue(), '-')}
             highlight={info.table.getState().globalFilter}
             fuzzy={info.table.options.meta?.fuzzySearch}
           />
         </span>
       ),
     }),
-    columnHelper.accessor('remaining_quantity', {
+    columnHelper.accessor('remaining_percent', {
       id: 'remaining_percent',
       header: '剩余/规格',
       size: 120,
@@ -119,9 +120,9 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       maxSize: 150,
       cell: info => (
         <QuantityIndicator
-          remaining={Number(info.getValue() ?? 0)}
+          remaining={Number(info.row.original.remaining_quantity ?? 0)}
           initial={Number(info.row.original.initial_quantity ?? 0)}
-          specification={String(info.row.original.specification ?? '')}
+          specification={safeString(info.row.original.specification, '')}
         />
       ),
     }),
@@ -130,7 +131,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       size: 80,
       minSize: 80,
       maxSize: 120,
-      cell: info => <StatusBadge status={String(info.getValue() ?? '')} />,
+      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
     }),
   ]
 }
@@ -149,7 +150,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       cell: info => (
         <span className="break-all">
           <HighlightText
-            text={String(info.getValue() ?? '')}
+            text={safeString(info.getValue(), '')}
             highlight={info.table.getState().globalFilter}
             fuzzy={info.table.options.meta?.fuzzySearch}
           />
@@ -166,7 +167,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
           <HazardousIcon isHazardous={Boolean(info.row.original.is_hazardous)} />
           <span>
             <HighlightText
-              text={String(info.getValue() ?? '')}
+              text={safeString(info.getValue(), '')}
               highlight={info.table.getState().globalFilter}
               fuzzy={info.table.options.meta?.fuzzySearch}
             />
@@ -181,7 +182,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       maxSize: 150,
       cell: info => {
         const value = info.getValue()
-        return <span>{value == null ? '-' : String(value)}</span>
+        return <span>{safeString(value, '-')}</span>
       },
     }),
     columnHelper.accessor('specification', {
@@ -192,9 +193,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       cell: info => {
         const order = info.row.original
         const specification = info.getValue() as string | null
-        const displayText = specification
-          ? specification
-          : (order.unit ? `${order.initial_quantity} ${order.unit}` : `${order.initial_quantity}`)
+        const displayText = specification || (order.unit ? `${order.initial_quantity} ${safeString(order.unit, '')}` : `${order.initial_quantity}`)
         const qty = Number(order.quantity)
         if (qty > 1) {
           return <span className="break-all">{qty} × {displayText}</span>
@@ -226,7 +225,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       maxSize: 100,
       cell: info => {
         const value = info.getValue()
-        return <span>{value == null ? '-' : String(value)}</span>
+        return <span>{safeString(value, '-')}</span>
       },
     }),
     columnHelper.accessor('created_at', {
@@ -241,7 +240,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 60,
       minSize: 50,
       maxSize: 80,
-      cell: info => <StatusBadge status={String(info.getValue() ?? '')} />,
+      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
     }),
   ]
 }
@@ -260,7 +259,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       cell: info => (
         <span className="break-all">
           <HighlightText
-            text={String(info.getValue() ?? '')}
+            text={safeString(info.getValue(), '')}
             highlight={info.table.getState().globalFilter}
             fuzzy={info.table.options.meta?.fuzzySearch}
           />
@@ -274,7 +273,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       maxSize: 150,
       cell: info => {
         const value = info.getValue()
-        return <span className="break-all">{value == null ? '-' : String(value)}</span>
+        return <span className="break-all">{safeString(value, '-')}</span>
       },
     }),
     columnHelper.accessor('brand', {
@@ -284,7 +283,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       maxSize: 150,
       cell: info => {
         const value = info.getValue()
-        return <span className="break-all">{value == null ? '-' : String(value)}</span>
+        return <span className="break-all">{safeString(value, '-')}</span>
       },
     }),
     columnHelper.accessor('specification', {
@@ -294,7 +293,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       maxSize: 150,
       cell: info => {
         const value = info.getValue()
-        return <span className="break-all">{value == null ? '-' : String(value)}</span>
+        return <span className="break-all">{safeString(value, '-')}</span>
       },
     }),
     columnHelper.accessor('quantity', {
@@ -304,7 +303,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       maxSize: 100,
       cell: info => {
         const value = info.getValue()
-        return <span>{value == null ? '' : String(value)}</span>
+        return <span>{safeString(value, '')}</span>
       },
     }),
     columnHelper.accessor('price', {
@@ -320,8 +319,8 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       minSize: 60,
       maxSize: 120,
       cell: info => {
-        const value = info.getValue()
-        return <span>{value == null ? '-' : String(value)}</span>
+        const value = safeString(info.getValue(), '-')
+        return <span>{value}</span>
       },
     }),
     columnHelper.accessor('status', {
@@ -329,14 +328,14 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       size: 80,
       minSize: 60,
       maxSize: 120,
-      cell: info => <StatusBadge status={String(info.getValue() ?? '')} />,
+      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
     }),
   ]
 }
 
 /**
  * 用户管理表格列配置
- * 包含：用户名、姓名、角色、状态、创建时间
+ * 包含：用户名、姓名、角色、状态、创建时间、最后活跃时间
  */
 export function getAdminUsersTableColumns(): ColumnDef<TableRowData, unknown>[] {
   return [
@@ -356,21 +355,34 @@ export function getAdminUsersTableColumns(): ColumnDef<TableRowData, unknown>[] 
     }),
     columnHelper.accessor('username', {
       header: '用户名',
-      size: 120,
-      cell: info => {
-        const value = info.getValue()
-        return <span>{value == null ? '' : String(value)}</span>
-      },
+      size: 150,
+      cell: info => (
+        <span>
+          <HighlightText
+            text={safeString(info.getValue(), '')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('full_name', {
       header: '姓名',
-      size: 120,
-      cell: info => info.getValue() || '-',
+      size: 100,
+      cell: info => (
+        <span>
+          <HighlightText
+            text={safeString(info.getValue(), '')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('role', {
       header: '角色',
       size: 80,
-      cell: info => <StatusBadge status={String(info.getValue() ?? '')} />,
+      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
     }),
     columnHelper.accessor('is_active', {
       header: '状态',
@@ -380,9 +392,18 @@ export function getAdminUsersTableColumns(): ColumnDef<TableRowData, unknown>[] 
         return <StatusBadge status={isActive ? 'active' : 'inactive'} />
       },
     }),
+    columnHelper.accessor('last_active_at', {
+      header: '最后活跃',
+      size: 160,
+      cell: info => {
+        const value = info.getValue() as string | null
+        if (!value) return <span>从未登录</span>
+        return formatDateTime(value)
+      },
+    }),
     columnHelper.accessor('created_at', {
       header: '创建时间',
-      size: 150,
+      size: 120,
       cell: info => formatDate(info.getValue() as string),
     }),
   ]
@@ -402,7 +423,7 @@ export function getDeviceManagementTableColumns(): ColumnDef<TableRowData, unkno
         return (
           <div className="flex items-center gap-2">
             <Laptop className="w-4 h-4 text-muted-foreground" />
-            <span>{value == null ? '' : String(value)}</span>
+            <span>{safeString(value, '')}</span>
           </div>
         )
       },
@@ -412,7 +433,7 @@ export function getDeviceManagementTableColumns(): ColumnDef<TableRowData, unkno
       size: 130,
       cell: info => {
         const value = info.getValue()
-        return <span className="text-base">{value == null ? '' : String(value)}</span>
+        return <span className="text-base">{safeString(value, '')}</span>
       },
     }),
     columnHelper.accessor('last_active_at', {

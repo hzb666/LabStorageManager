@@ -48,7 +48,7 @@ function ToastItem({ toast, onRemove }: Readonly<{ toast: ToastData; onRemove: (
       className={cn(
         'grid transition-all duration-300 ease-in-out opacity-100 mb-2',
         'grid-rows-[1fr]',
-        isExiting && 'grid-rows-[0fr] !mb-0 !opacity-0 pointer-events-none'
+        isExiting && 'grid-rows-[0fr] mb-0! opacity-0! pointer-events-none'
       )}
       onMouseEnter={clearTimer}
       onMouseLeave={startTimer}
@@ -94,7 +94,7 @@ export function ToastContainer() {
   if (toasts.length === 0) return null
 
   return (
-    <div className="fixed top-4 right-4 z-[100] flex flex-col max-w-sm">
+    <div className="fixed top-4 right-4 z-100 flex flex-col max-w-sm">
       {toasts.map((t) => (
         <ToastItem key={t.id} toast={t} onRemove={handleRemove} />
       ))}

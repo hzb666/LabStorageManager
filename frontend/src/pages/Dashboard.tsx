@@ -1,25 +1,45 @@
-﻿import React, { useEffect, useState, useMemo } from 'react'
-import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from '@tanstack/react-table'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
-import { Label } from '@/components/ui/Label'
-import { reagentOrderAPI, inventoryAPI, consumableOrderAPI } from '@/api/client'
-import { toast } from '@/lib/toast'
-import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
-import { formatDateTime, cn } from '@/lib/utils'
-import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
-// 移除 Loader2，因为 LoadingButton 内部已经包含了
-import { Package, ShoppingCart, ArrowRightLeft, X, PackagePlus, CheckCircle } from 'lucide-react'
+﻿import React, { useMemo, useState, useCallback } from 'react'
+import { createColumnHelper } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
+import { useQueryClient } from '@tanstack/react-query'
+import { useForm } from 'react-hook-form'
 import { AxiosError } from 'axios'
+import { Package, ShoppingCart, ArrowRightLeft, FlaskConical } from 'lucide-react'
+
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
 import { LoadingButton } from '@/components/ui/LoadingButton'
+import { FilterTable } from '@/components/ui/FilterTable'
+import { TableActionButtonsMemo } from '@/components/TableActionButtons'
+import { BaseForm } from '@/components/BaseForm'
+import { toast } from '@/lib/toast'
+import { cn, formatDateTime, processNotes } from '@/lib/utils'
+import { LABEL_STYLES, INPUT_STYLES, UserRoles } from '@/lib/constants'
+import { useAuthStore } from '@/store/useStore'
+
+import { reagentOrderAPI, consumableOrderAPI, inventoryAPI } from '@/api/client'
+import type { FilterAPI } from '@/hooks/useTableState'
+import { getReagentOrderTableColumns, getConsumableOrderTableColumns } from '@/lib/tableConfigs'
+import {
+  ReagentOrderSchema,
+  ConsumableOrderSchema,
+  createValibotResolver,
+  toValidationErrors,
+  normalizeApiErrorMessage,
+} from '@/lib/validationSchemas'
+import type {
+  ReagentOrderFormData,
+  ConsumableOrderFormData,
+  ValidationError,
+} from '@/lib/validationSchemas'
+import {
+  getReagentOrderFormFields,
+  getConsumableOrderFormFields,
+  defaultReagentOrderValues,
+  defaultConsumableOrderValues,
+} from '@/lib/formConfigs'
 
 interface MyBorrowItem {
   inventory_id: number
@@ -39,993 +59,805 @@ interface PendingStockinItem {
   stockin_time: string
 }
 
-interface MyOrder {
+interface DashboardOrderBase {
   id: number
   name: string
-  cas_number?: string
   status: string
   created_at: string
-  orderType?: 'reagent' | 'consumable'
-  order_reason?: string
-}
-
-interface OrderItem {
-  order_id?: number
-  id?: number
+  applicant_id?: number | null
+  applicant_name?: string | null
   [key: string]: unknown
 }
 
-interface ReagentOrdersByStatus {
-  pending: { orders: OrderItem[] }
-  approved: { orders: OrderItem[] }
-  arrived: { orders: OrderItem[] }
+interface DashboardReagentOrder extends DashboardOrderBase {
+  cas_number: string
+  english_name?: string | null
+  alias?: string | null
+  category?: string | null
+  brand?: string | null
+  specification?: string
+  quantity: number
+  price?: number | null
+  order_reason?: string
+  is_hazardous?: boolean
+  notes?: string | null
 }
 
-interface ConsumableOrdersByStatus {
-  pending: { orders: OrderItem[] }
-  approved: { orders: OrderItem[] }
+interface DashboardConsumableOrder extends DashboardOrderBase {
+  english_name?: string | null
+  specification?: string
+  quantity: number
+  price?: number | null
+  communication?: string | null
+  notes?: string | null
 }
 
-// 状态样式映射
-const CONSUMABLE_STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-  approved: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+type DashboardParams = {
+  skip?: number
+  limit?: number
+  status_filter?: string
+  search?: string
+  search_field?: string
+  sort_by?: string
+  sort_order?: string
+  fuzzy?: boolean
 }
 
-// columnHelper 定义
-const consumableOrderHelper = createColumnHelper<MyOrder>()
-const borrowHelper = createColumnHelper<MyBorrowItem>()
-const stockinHelper = createColumnHelper<PendingStockinItem>()
+const reagentColumnHelper = createColumnHelper<DashboardReagentOrder>()
+const consumableColumnHelper = createColumnHelper<DashboardConsumableOrder>()
+const borrowColumnHelper = createColumnHelper<MyBorrowItem>()
+const pendingStockinColumnHelper = createColumnHelper<PendingStockinItem>()
 
-// 骨架屏组件 - 空白占位
-function SkeletonCard({ className }: { className?: string }) {
-  return (
-    <div className={cn("h-8", className)} />
-  )
+type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
+
+const REAGENT_STATUS_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'pending', label: '待审批' },
+  { value: 'approved', label: '已审批' },
+  { value: 'arrived', label: '已到货' },
+]
+
+const CONSUMABLE_STATUS_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'pending', label: '待审批' },
+  { value: 'approved', label: '已审批' },
+]
+
+const SEARCH_FIELD_OPTIONS = [
+  { value: 'all', label: '全部' },
+  { value: 'name', label: '名称' },
+  { value: 'cas_number', label: 'CAS号' },
+  { value: 'brand', label: '品牌' },
+]
+
+const BORROW_SEARCH_FIELDS = [
+  { value: 'all', label: '全部' },
+  { value: 'name', label: '名称' },
+  { value: 'cas_number', label: 'CAS号' },
+]
+
+function normalizeValue(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).toLowerCase()
+  }
+  return ''
 }
 
-function SkeletonList({ lines = 3 }: { lines?: number }) {
-  return (
-    <div className="space-y-3">
-      {Array.from({ length: lines }).map((_, i) => (
-        <div key={i} className="h-16" />
-      ))}
-    </div>
-  )
+function toText(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  return ''
 }
 
-// 统计卡片组件 - 可点击切换Tab
+function sortLocally<T extends Record<string, unknown>>(rows: T[], sortBy?: string, sortOrder?: string): T[] {
+  if (!sortBy) return rows
+  const factor = sortOrder === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const aVal = a[sortBy]
+    const bVal = b[sortBy]
+
+    if (typeof aVal === 'number' && typeof bVal === 'number') {
+      return (aVal - bVal) * factor
+    }
+
+    if (Date.parse(String(aVal)) && Date.parse(String(bVal))) {
+      return (Date.parse(String(aVal)) - Date.parse(String(bVal))) * factor
+    }
+
+    return toText(aVal).localeCompare(toText(bVal)) * factor
+  })
+}
+
+function buildLocalListData<T extends Record<string, unknown>>(
+  rows: T[],
+  params: DashboardParams,
+  defaultSearchFields: string[]
+): { data: T[]; total: number } {
+  const {
+    skip = 0,
+    limit = 50,
+    status_filter,
+    search,
+    search_field,
+    sort_by,
+    sort_order,
+  } = params
+
+  let filtered = rows
+
+  if (status_filter && status_filter !== 'all') {
+    filtered = filtered.filter((row) => String(row.status) === status_filter)
+  }
+
+  if (search) {
+    const keyword = search.toLowerCase()
+    filtered = filtered.filter((row) => {
+      const fields = search_field && search_field !== 'all' ? [search_field] : defaultSearchFields
+      return fields.some((field) => normalizeValue(row[field]).includes(keyword))
+    })
+  }
+
+  filtered = sortLocally(filtered, sort_by, sort_order)
+
+  const paged = filtered.slice(skip, skip + limit)
+  return { data: paged, total: filtered.length }
+}
+
+function flattenGroupedOrders<T extends DashboardOrderBase>(
+  grouped: Record<string, { orders: Record<string, unknown>[] }>,
+  currentUserId?: number
+): T[] {
+  return Object.entries(grouped).flatMap(([status, payload]) => {
+    const orders = payload?.orders ?? []
+    return orders.map((raw) => ({
+      ...raw,
+      id: Number(raw.order_id ?? raw.id ?? 0),
+      status,
+      applicant_id: currentUserId ?? null,
+    })) as T[]
+  })
+}
+
 function StatCard({
   title,
   icon: Icon,
   value,
-  loading,
   onClick,
-  isActive
-}: {
+  isActive,
+}: Readonly<{
   title: string
   icon: React.ElementType
-  value?: number
-  loading?: boolean
-  onClick?: () => void
-  isActive?: boolean
-}) {
+  value: number
+  onClick: () => void
+  isActive: boolean
+}>) {
   return (
     <Card
-      className={cn(
-        "transition-all cursor-pointer",
-        onClick && "hover:bg-accent",
-        isActive && "border bg-accent/50 dark:border-primary"
-      )}
+      className={cn('transition-all cursor-pointer hover:bg-accent', isActive && 'border bg-accent/50 dark:border-primary')}
       onClick={onClick}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-base">{title}</CardTitle>
-        <Icon className={cn("h-4 w-4", isActive ? "text-primary" : "text-muted-foreground")} />
+        <Icon className={cn('h-4 w-4', isActive ? 'text-primary' : 'text-muted-foreground')} />
       </CardHeader>
       <CardContent>
-        <div className="h-8 transition-opacity">
-          {loading ? (
-            <SkeletonCard />
-          ) : (
-            <div className={cn("text-2xl font-bold", isActive && "text-primary")}>{value ?? 0}</div>
-          )}
-        </div>
+        <div className={cn('text-2xl font-bold', isActive && 'text-primary')}>{value}</div>
       </CardContent>
     </Card>
   )
 }
 
 export function Dashboard() {
-  const [myReagentOrders, setMyReagentOrders] = useState<MyOrder[]>([])
-  const [myConsumableOrders, setMyConsumableOrders] = useState<MyOrder[]>([])
-  const [myBorrows, setMyBorrows] = useState<MyBorrowItem[]>([])
-  const [pendingStockin, setPendingStockin] = useState<PendingStockinItem[]>([])
+  const currentUser = useAuthStore((state) => state.user)
+  const isAdmin = currentUser?.role === UserRoles.ADMIN
+  const queryClient = useQueryClient()
 
-  const [loadingReagentOrders, setLoadingReagentOrders] = useState(true)
-  const [loadingConsumableOrders, setLoadingConsumableOrders] = useState(true)
-  const [loadingBorrows, setLoadingBorrows] = useState(true)
-  const [loadingStockin, setLoadingStockin] = useState(true)
+  const [activeTab, setActiveTab] = useState<DashboardTab>('reagents')
 
-  const [reagentPage, setReagentPage] = useState(1)
-  const [reagentPageSize] = useState(5)
-  const [consumablePage, setConsumablePage] = useState(1)
-  const [consumablePageSize] = useState(5)
-  const [borrowPage, setBorrowPage] = useState(1)
-  const [borrowPageSize] = useState(5)
-
-  const [showReturnModal, setShowReturnModal] = useState(false)
-  const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
-  const [returnQuantity, setReturnQuantity] = useState('0')
-  const [usedQuantity, setUsedQuantity] = useState('0')
-  const [returnUnit, setReturnUnit] = useState('')
-  const [returnMode, setReturnMode] = useState<'remaining' | 'used'>('used')
-  const [returnLoading, setReturnLoading] = useState(false)
-  const [returnError, setReturnError] = useState('')
+  const [editingReagent, setEditingReagent] = useState<DashboardReagentOrder | null>(null)
+  const [editingConsumable, setEditingConsumable] = useState<DashboardConsumableOrder | null>(null)
+  const [isSubmittingReagent, setIsSubmittingReagent] = useState(false)
+  const [isSubmittingConsumable, setIsSubmittingConsumable] = useState(false)
 
   const [showStockinModal, setShowStockinModal] = useState(false)
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
   const [stockinLocation, setStockinLocation] = useState('')
   const [stockinLoading, setStockinLoading] = useState(false)
 
-  // 耗材订单表格列定义
-  const consumableColumns = useMemo(() => [
-    consumableOrderHelper.accessor('name', {
-      header: '名称',
-      size: 180,
-      cell: info => <span>{info.getValue()}</span>,
-    }),
-    consumableOrderHelper.accessor('status', {
-      header: '状态',
-      size: 100,
-      cell: info => {
-        const status = info.getValue()
-        return (
-          <span className={cn(
-            'px-2.5 py-1 text-sm rounded-full whitespace-nowrap',
-            CONSUMABLE_STATUS_STYLES[status] || 'bg-muted'
-          )}>
-            {status === 'pending' ? '待审批' : status === 'approved' ? '已审批' : status}
-          </span>
-        )
-      },
-    }),
-    consumableOrderHelper.accessor('created_at', {
-      header: '时间',
-      size: 150,
-      cell: info => formatDateTime(info.getValue()),
-    }),
-    consumableOrderHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 120,
-      cell: info => {
-        const order = info.row.original
-        return (
-          order.status === 'approved' && (
-            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleConfirmReceive(order.id)}>
-              <CheckCircle className="w-3 h-3 mr-1" />确认收货
-            </Button>
-          )
-        )
-      },
-    }),
-  ], [])
-
-  // 借用记录表格列定义
-  const borrowColumns = useMemo(() => [
-    borrowHelper.accessor('name', {
-      header: '名称',
-      size: 150,
-      cell: info => <span>{info.getValue()}</span>,
-    }),
-    borrowHelper.accessor('cas_number', {
-      header: 'CAS号',
-      size: 100,
-      cell: info => info.getValue(),
-    }),
-    borrowHelper.accessor('remaining_quantity', {
-      header: '剩余量',
-      size: 100,
-      cell: info => `${info.getValue()} ${info.row.original.unit}`,
-    }),
-    borrowHelper.accessor('borrow_time', {
-      header: '借用时间',
-      size: 150,
-      cell: info => formatDateTime(info.getValue()),
-    }),
-    borrowHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 80,
-      cell: info => {
-        const item = info.row.original
-        return (
-          <Button onClick={() => openReturnModal(item)} size="sm" className="h-8 text-sm/4 px-3 bg-primary hover:bg-primary/80 border-0">
-            归还
-          </Button>
-        )
-      },
-    }),
-  ], [])
-
-  // 入库记录表格列定义
-  const stockinColumns = useMemo(() => [
-    stockinHelper.accessor('name', {
-      header: '名称',
-      size: 150,
-      cell: info => <span>{info.getValue()}</span>,
-    }),
-    stockinHelper.accessor('cas_number', {
-      header: 'CAS号',
-      size: 100,
-      cell: info => info.getValue(),
-    }),
-    stockinHelper.accessor('initial_quantity', {
-      header: '数量',
-      size: 100,
-      cell: info => `${info.getValue()} ${info.row.original.unit}`,
-    }),
-    stockinHelper.accessor('stockin_time', {
-      header: '入库时间',
-      size: 150,
-      cell: info => formatDateTime(info.getValue()),
-    }),
-    stockinHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 100,
-      cell: info => {
-        const item = info.row.original
-        return (
-          <Button variant="outline" onClick={() => openStockinModal(item)} size="sm">
-            分配位置
-          </Button>
-        )
-      },
-    }),
-  ], [])
-
-  // ✅ 缓存耗材表格数据
-  const consumableData = useMemo(() => {
-    return myConsumableOrders.slice(
-      (consumablePage - 1) * consumablePageSize,
-      consumablePage * consumablePageSize
-    )
-  }, [myConsumableOrders, consumablePage, consumablePageSize])
-
-  // ✅ 缓存借用表格数据
-  const borrowData = useMemo(() => {
-    return myBorrows.slice(
-      (borrowPage - 1) * borrowPageSize,
-      borrowPage * borrowPageSize
-    )
-  }, [myBorrows, borrowPage, borrowPageSize])
-
-  // ✅ 缓存待入库表格数据
-  const stockinData = useMemo(() => pendingStockin, [pendingStockin])
-
-  // 创建表格实例
-  const consumableTable = useReactTable({
-    data: consumableData,
-    columns: consumableColumns,
-    getCoreRowModel: getCoreRowModel(),
+  const reagentForm = useForm<ReagentOrderFormData>({
+    resolver: createValibotResolver(ReagentOrderSchema),
+    defaultValues: defaultReagentOrderValues,
+    shouldFocusError: false,
   })
 
-  const borrowTable = useReactTable({
-    data: borrowData,
-    columns: borrowColumns,
-    getCoreRowModel: getCoreRowModel(),
+  const consumableForm = useForm<ConsumableOrderFormData>({
+    resolver: createValibotResolver(ConsumableOrderSchema),
+    defaultValues: defaultConsumableOrderValues,
+    shouldFocusError: false,
   })
 
-  const stockinTable = useReactTable({
-    data: stockinData,
-    columns: stockinColumns,
-    getCoreRowModel: getCoreRowModel(),
+  const refreshDashboardTables = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'reagents'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'consumables'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'borrows'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'stockin'] }),
+      queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+    ])
+  }, [queryClient])
+
+  const reagentDashboardAPI: FilterAPI = useMemo(() => ({
+    list: async (params) => {
+      const response = await reagentOrderAPI.getMyOrders()
+      const grouped = (response.data?.data ?? {}) as Record<string, { orders: Record<string, unknown>[] }>
+      const rows = flattenGroupedOrders<DashboardReagentOrder>(grouped, currentUser?.id)
+      const local = buildLocalListData(rows, params as DashboardParams, ['name', 'cas_number', 'brand', 'specification'])
+      return { data: local }
+    },
+  }), [currentUser?.id])
+
+  const consumableDashboardAPI: FilterAPI = useMemo(() => ({
+    list: async (params) => {
+      const response = await consumableOrderAPI.getMyOrders()
+      const grouped = (response.data?.data ?? {}) as Record<string, { orders: Record<string, unknown>[] }>
+      const rows = flattenGroupedOrders<DashboardConsumableOrder>(grouped, currentUser?.id)
+      const local = buildLocalListData(rows, params as DashboardParams, ['name', 'specification'])
+      return { data: local }
+    },
+  }), [currentUser?.id])
+
+  const borrowDashboardAPI: FilterAPI = useMemo(() => ({
+    list: async (params) => {
+      const response = await inventoryAPI.getMyBorrows()
+      const rows = (response.data?.data ?? []) as MyBorrowItem[]
+      const local = buildLocalListData(rows as unknown as Record<string, unknown>[], params as DashboardParams, ['name', 'cas_number'])
+      return { data: local as { data: unknown[]; total: number } }
+    },
+  }), [])
+
+  const pendingStockinDashboardAPI: FilterAPI = useMemo(() => ({
+    list: async (params) => {
+      const response = await inventoryAPI.getPendingStockin()
+      const rows = (response.data?.data ?? []) as PendingStockinItem[]
+      const local = buildLocalListData(rows as unknown as Record<string, unknown>[], params as DashboardParams, ['name', 'cas_number'])
+      return { data: local as { data: unknown[]; total: number } }
+    },
+  }), [])
+
+  const countAPI = useMemo(() => ({
+    list: async () => {
+      const [reagentRes, consumableRes, borrowRes, stockinRes] = await Promise.all([
+        reagentOrderAPI.getMyOrders(),
+        consumableOrderAPI.getMyOrders(),
+        inventoryAPI.getMyBorrows(),
+        inventoryAPI.getPendingStockin(),
+      ])
+
+      const reagentGrouped = (reagentRes.data?.data ?? {}) as Record<string, { orders: unknown[] }>
+      const consumableGrouped = (consumableRes.data?.data ?? {}) as Record<string, { orders: unknown[] }>
+
+      const reagentCount = Object.values(reagentGrouped).reduce((sum, item) => sum + (item.orders?.length ?? 0), 0)
+      const consumableCount = Object.values(consumableGrouped).reduce((sum, item) => sum + (item.orders?.length ?? 0), 0)
+      const borrowCount = (borrowRes.data?.data ?? []).length
+      const stockinCount = (stockinRes.data?.data ?? []).length
+
+      return {
+        data: {
+          data: [{ reagentCount, consumableCount, borrowCount, stockinCount }],
+          total: 1,
+        },
+      }
+    },
+  }), [])
+
+  const [counts, setCounts] = useState({ reagentCount: 0, consumableCount: 0, borrowCount: 0, stockinCount: 0 })
+
+  React.useEffect(() => {
+    countAPI.list().then((res) => {
+      const payload = res.data.data[0] as { reagentCount: number; consumableCount: number; borrowCount: number; stockinCount: number }
+      setCounts(payload)
+    }).catch(() => {
+      setCounts({ reagentCount: 0, consumableCount: 0, borrowCount: 0, stockinCount: 0 })
+    })
+  }, [countAPI, activeTab])
+
+  const handleReagentEdit = useCallback((itemRaw: Record<string, unknown>) => {
+    const item = itemRaw as unknown as DashboardReagentOrder
+    if (!isAdmin && item.applicant_id !== currentUser?.id) {
+      toast.warning('只能编辑自己创建的订单')
+      return
+    }
+
+    setEditingReagent(item)
+    reagentForm.reset({
+      name: String(item.name ?? ''),
+      cas_number: String(item.cas_number ?? ''),
+      english_name: String(item.english_name ?? ''),
+      alias: String(item.alias ?? ''),
+      category: String(item.category ?? ''),
+      brand: String(item.brand ?? ''),
+      specification: String(item.specification ?? ''),
+      quantity: Number(item.quantity ?? 1),
+      price: (item.price as number | undefined) ?? undefined,
+      order_reason: String(item.order_reason ?? 'none') as ReagentOrderFormData['order_reason'],
+      is_hazardous: Boolean(item.is_hazardous),
+      notes: String(item.notes ?? ''),
+    })
+  }, [isAdmin, currentUser?.id, reagentForm])
+
+  const handleConsumableEdit = useCallback((itemRaw: Record<string, unknown>) => {
+    const item = itemRaw as unknown as DashboardConsumableOrder
+    if (!isAdmin && item.applicant_id !== currentUser?.id) {
+      toast.warning('只能编辑自己创建的订单')
+      return
+    }
+
+    setEditingConsumable(item)
+    consumableForm.reset({
+      name: String(item.name ?? ''),
+      english_name: String(item.english_name ?? ''),
+      specification: String(item.specification ?? ''),
+      unit: toText(item.unit),
+      quantity: Number(item.quantity ?? 1),
+      price: (item.price as number | undefined) ?? undefined,
+      communication: String(item.communication ?? ''),
+      notes: String(item.notes ?? ''),
+    })
+  }, [isAdmin, currentUser?.id, consumableForm])
+
+  const submitReagentEdit = reagentForm.handleSubmit(async (formData) => {
+    if (!editingReagent) return
+    setIsSubmittingReagent(true)
+    try {
+      await reagentOrderAPI.update(editingReagent.id, {
+        name: formData.name,
+        english_name: formData.english_name || '',
+        alias: formData.alias || '',
+        category: formData.category || '',
+        brand: formData.brand || '',
+        specification: formData.specification || '',
+        quantity: formData.quantity,
+        price: formData.price,
+        order_reason: formData.order_reason,
+        is_hazardous: formData.is_hazardous,
+        notes: processNotes(formData.notes),
+      })
+      setEditingReagent(null)
+      await refreshDashboardTables()
+      toast.success('试剂订单已更新')
+    } catch (err) {
+      const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
+      const detail = error.response?.data?.detail
+      const validationErrors = toValidationErrors(detail)
+      if (validationErrors.length > 0) {
+        validationErrors.forEach((e) => {
+          if (e.loc?.[1]) {
+            reagentForm.setError(e.loc[1] as keyof ReagentOrderFormData, { message: e.msg || '输入不合法' })
+          }
+        })
+        return
+      }
+      toast.error(normalizeApiErrorMessage(detail, '更新失败'))
+    } finally {
+      setIsSubmittingReagent(false)
+    }
   })
 
-  useEffect(() => {
-    loadDashboardData()
+  const submitConsumableEdit = consumableForm.handleSubmit(async (formData) => {
+    if (!editingConsumable) return
+    setIsSubmittingConsumable(true)
+    try {
+      await consumableOrderAPI.update(editingConsumable.id, {
+        name: formData.name,
+        english_name: formData.english_name || '',
+        specification: formData.specification || '',
+        unit: formData.unit || '',
+        quantity: formData.quantity,
+        price: formData.price,
+        communication: formData.communication || '',
+        notes: processNotes(formData.notes),
+      })
+      setEditingConsumable(null)
+      await refreshDashboardTables()
+      toast.success('耗材订单已更新')
+    } catch (err) {
+      const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
+      const detail = error.response?.data?.detail
+      const validationErrors = toValidationErrors(detail)
+      if (validationErrors.length > 0) {
+        validationErrors.forEach((e) => {
+          if (e.loc?.[1]) {
+            consumableForm.setError(e.loc[1] as keyof ConsumableOrderFormData, { message: e.msg || '输入不合法' })
+          }
+        })
+        return
+      }
+      toast.error(normalizeApiErrorMessage(detail, '更新失败'))
+    } finally {
+      setIsSubmittingConsumable(false)
+    }
+  })
+
+  const openStockinModal = useCallback((item: PendingStockinItem) => {
+    setSelectedStockin(item)
+    setStockinLocation('')
+    setShowStockinModal(true)
   }, [])
 
-  const loadDashboardData = async () => {
-    const loadReagentOrders = async () => {
-      try {
-        const res = await reagentOrderAPI.getMyOrders()
-        const reagentOrdersData = res.data as { data?: ReagentOrdersByStatus } | undefined
-        const reagentOrders = reagentOrdersData?.data
-        if (reagentOrders && typeof reagentOrders === 'object') {
-          const allReagentOrders: MyOrder[] = []
-          if (reagentOrders.pending?.orders) {
-            reagentOrders.pending.orders.forEach((o: OrderItem) => {
-              allReagentOrders.push({ ...o, status: 'pending', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
-            })
-          }
-          if (reagentOrders.approved?.orders) {
-            reagentOrders.approved.orders.forEach((o: OrderItem) => {
-              allReagentOrders.push({ ...o, status: 'approved', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
-            })
-          }
-          if (reagentOrders.arrived?.orders) {
-            reagentOrders.arrived.orders.forEach((o: OrderItem) => {
-              allReagentOrders.push({ ...o, status: 'arrived', id: o.order_id || o.id || 0, orderType: 'reagent' } as MyOrder)
-            })
-          }
-          setMyReagentOrders(allReagentOrders)
-        } else {
-          setMyReagentOrders([])
-        }
-      } catch (error) {
-        console.error('Failed to load reagent orders:', error)
-        setMyReagentOrders([])
-      } finally {
-        setLoadingReagentOrders(false)
-      }
-    }
-
-    const loadConsumableOrders = async () => {
-      try {
-        const res = await consumableOrderAPI.getMyOrders()
-        const consumableOrdersData = res.data as { data?: ConsumableOrdersByStatus } | undefined
-        const consumableOrders = consumableOrdersData?.data
-        if (consumableOrders && typeof consumableOrders === 'object') {
-          const allConsumableOrders: MyOrder[] = []
-          if (consumableOrders.pending?.orders) {
-            consumableOrders.pending.orders.forEach((o: OrderItem) => {
-              allConsumableOrders.push({ ...o, status: 'pending', id: o.order_id || o.id || 0, orderType: 'consumable' } as MyOrder)
-            })
-          }
-          if (consumableOrders.approved?.orders) {
-            consumableOrders.approved.orders.forEach((o: OrderItem) => {
-              allConsumableOrders.push({ ...o, status: 'approved', id: o.order_id || o.id || 0, orderType: 'consumable' } as MyOrder)
-            })
-          }
-          setMyConsumableOrders(allConsumableOrders)
-        } else {
-          setMyConsumableOrders([])
-        }
-      } catch (error) {
-        console.error('Failed to load consumable orders:', error)
-        setMyConsumableOrders([])
-      } finally {
-        setLoadingConsumableOrders(false)
-      }
-    }
-
-    const loadBorrows = async () => {
-      try {
-        const res = await inventoryAPI.getMyBorrows()
-        const borrowsData = res.data as { data?: MyBorrowItem[] } | undefined
-        setMyBorrows(Array.isArray(borrowsData?.data) ? borrowsData.data : [])
-      } catch (error) {
-        console.error('Failed to load borrows:', error)
-        setMyBorrows([])
-      } finally {
-        setLoadingBorrows(false)
-      }
-    }
-
-    const loadStockin = async () => {
-      try {
-        const res = await inventoryAPI.getPendingStockin()
-        const stockinData = res.data as { data?: PendingStockinItem[] } | undefined
-        setPendingStockin(Array.isArray(stockinData?.data) ? stockinData.data : [])
-      } catch (error) {
-        console.error('Failed to load stockin:', error)
-        setPendingStockin([])
-      } finally {
-        setLoadingStockin(false)
-      }
-    }
-
-    await Promise.all([
-      loadReagentOrders(),
-      loadConsumableOrders(),
-      loadBorrows(),
-      loadStockin()
-    ])
-  }
-
-  const openReturnModal = (item: MyBorrowItem) => {
-    setSelectedBorrow(item)
-    setReturnQuantity(String(item.remaining_quantity))
-    setUsedQuantity('0')
-    setReturnUnit(item.unit)
-    setReturnMode('used')
-    setReturnError('')
-    setShowReturnModal(true)
-  }
-
-  const handleReturn = async () => {
-    if (!selectedBorrow) return
-
-    setReturnError('')
-    let qty: number
-    if (returnMode === 'used') {
-      const used = parseFloat(usedQuantity)
-      if (isNaN(used) || used < 0) {
-        setReturnError('请输入有效的使用量（需大于等于0）')
-        return
-      }
-      if (used > selectedBorrow.remaining_quantity) {
-        setReturnError('使用量不能超过借用时剩余量')
-        return
-      }
-      qty = selectedBorrow.remaining_quantity - used
-    } else {
-      qty = parseFloat(returnQuantity)
-      if (isNaN(qty) || qty < 0) {
-        setReturnError('请输入有效的剩余量（需大于等于0）')
-        return
-      }
-      if (qty > selectedBorrow.remaining_quantity) {
-        setReturnError('剩余量不能超过借用时剩余量')
-        return
-      }
-    }
-
-    setReturnLoading(true)
-    try {
-      await inventoryAPI.return(selectedBorrow.inventory_id, { remaining_quantity: qty, unit: returnUnit })
-      setShowReturnModal(false)
-      setSelectedBorrow(null)
-      // 先刷新数据，再弹出 toast
-      await loadDashboardData()
-      toast.success('归还成功')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '归还失败')
-    } finally {
-      setReturnLoading(false)
-    }
-  }
-
-  const handleStockin = async () => {
+  const handleStockin = useCallback(async () => {
     if (!selectedStockin) return
     if (!stockinLocation.trim()) {
       toast.warning('请输入存放位置')
       return
     }
+
     setStockinLoading(true)
     try {
       await inventoryAPI.update(selectedStockin.inventory_id, { storage_location: stockinLocation })
       setShowStockinModal(false)
       setSelectedStockin(null)
       setStockinLocation('')
-      // 先刷新数据，再弹出 toast
-      await loadDashboardData()
-      toast.success('位置分配成功')
+      await refreshDashboardTables()
+      toast.success('入库成功')
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
+      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '入库失败'))
     } finally {
       setStockinLoading(false)
     }
-  }
+  }, [selectedStockin, stockinLocation, refreshDashboardTables])
 
-  const handleConfirmArrival = async (orderId: number) => {
-    try {
-      await reagentOrderAPI.confirmArrival(orderId)
-      // 先刷新数据，再弹出 toast
-      await loadDashboardData()
-      toast.warning('试剂已到货，请及时完成入库操作！')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '操作失败')
-    }
-  }
+  const reagentColumns = useMemo(() => {
+    const baseColumns = getReagentOrderTableColumns()
+    const actionColumn = reagentColumnHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 180,
+      cell: (info) => {
+        const item = info.row.original
+        const actions = [
+          {
+            id: 'confirm-arrival',
+            label: '确认到货',
+            confirm: true,
+            confirmLabel: '确认',
+            showWhen: (currItem: DashboardReagentOrder) => currItem.status === 'approved',
+            onClick: async (currItem: DashboardReagentOrder) => {
+              const result = await reagentOrderAPI.confirmArrival(currItem.id)
+              await refreshDashboardTables()
+              toast.success(result.data.message || '确认到货成功')
+            },
+          },
+        ]
 
-  const handleQuickStockIn = async (orderId: number) => {
-    try {
-      await reagentOrderAPI.stockIn(orderId)
-      // 先刷新数据，再弹出 toast
-      await loadDashboardData()
-      toast.success('入库成功！')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '入库失败')
-    }
-  }
+        const disableEdit = !isAdmin && item.applicant_id !== currentUser?.id
 
-  const handleConfirmReceive = async (orderId: number) => {
-    try {
-      await consumableOrderAPI.complete(orderId)
-      // 先刷新数据，再弹出 toast
-      await loadDashboardData()
-      toast.success('已确认收货')
-    } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '确认收货失败')
-    }
-  }
+        return (
+          <TableActionButtonsMemo
+            item={item}
+            actions={actions}
+            showEdit={true}
+            disableEdit={disableEdit}
+            onEdit={(target) => handleReagentEdit(target as Record<string, unknown>)}
+            isAdmin={isAdmin}
+          />
+        )
+      },
+    })
+    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
+  }, [currentUser?.id, handleReagentEdit, isAdmin, refreshDashboardTables])
 
-  const openStockinModal = (item: PendingStockinItem) => {
-    setSelectedStockin(item)
-    setStockinLocation('')
-    setShowStockinModal(true)
-  }
+  const consumableColumns = useMemo(() => {
+    const baseColumns = getConsumableOrderTableColumns()
+    const actionColumn = consumableColumnHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 180,
+      cell: (info) => {
+        const item = info.row.original
+        const actions = [
+          {
+            id: 'confirm-complete',
+            label: '确认收货',
+            confirm: true,
+            confirmLabel: '确认',
+            showWhen: (currItem: DashboardConsumableOrder) => currItem.status === 'approved',
+            onClick: async (currItem: DashboardConsumableOrder) => {
+              await consumableOrderAPI.complete(currItem.id)
+              await refreshDashboardTables()
+              toast.success('已确认收货')
+            },
+          },
+        ]
 
-  const getInitialTab = () => {
-    const cached = localStorage.getItem('dashboard_active_tab')
-    if (cached) {
-      const { value, timestamp } = JSON.parse(cached)
-      const now = Date.now()
-      const threeDays = 3 * 24 * 60 * 60 * 1000
-      if (now - timestamp < threeDays) {
-        return value
-      }
-    }
-    return 'reagents'
-  }
+        const disableEdit = !isAdmin && item.applicant_id !== currentUser?.id
 
-  const [activeTab, setActiveTab] = useState<string>(getInitialTab)
+        return (
+          <TableActionButtonsMemo
+            item={item}
+            actions={actions}
+            showEdit={true}
+            disableEdit={disableEdit}
+            onEdit={(target) => handleConsumableEdit(target as Record<string, unknown>)}
+            isAdmin={isAdmin}
+          />
+        )
+      },
+    })
+    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
+  }, [currentUser?.id, handleConsumableEdit, isAdmin, refreshDashboardTables])
 
-  const handleTabChange = (value: string) => {
-    setActiveTab(value)
-    localStorage.setItem('dashboard_active_tab', JSON.stringify({ value, timestamp: Date.now() }))
-  }
+  const borrowColumns = useMemo(() => [
+    borrowColumnHelper.accessor('name', {
+      header: '名称',
+      size: 160,
+      cell: (info) => <span>{info.getValue()}</span>,
+    }),
+    borrowColumnHelper.accessor('cas_number', {
+      header: 'CAS号',
+      size: 120,
+    }),
+    borrowColumnHelper.accessor('remaining_quantity', {
+      header: '借用时剩余量',
+      size: 120,
+      cell: (info) => `${info.getValue()} ${info.row.original.unit}`,
+    }),
+    borrowColumnHelper.accessor('borrow_time', {
+      header: '借用时间',
+      size: 180,
+      cell: (info) => formatDateTime(info.getValue()),
+    }),
+  ] as ColumnDef<Record<string, unknown>, unknown>[], [])
+
+  const stockinColumns = useMemo(() => [
+    pendingStockinColumnHelper.accessor('name', {
+      header: '名称',
+      size: 180,
+      cell: (info) => <span>{info.getValue()}</span>,
+    }),
+    pendingStockinColumnHelper.accessor('cas_number', {
+      header: 'CAS号',
+      size: 120,
+    }),
+    pendingStockinColumnHelper.accessor('initial_quantity', {
+      header: '数量',
+      size: 120,
+      cell: (info) => `${info.getValue()} ${info.row.original.unit}`,
+    }),
+    pendingStockinColumnHelper.accessor('stockin_time', {
+      header: '暂存时间',
+      size: 180,
+      cell: (info) => formatDateTime(info.getValue()),
+    }),
+    pendingStockinColumnHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 140,
+      cell: (info) => (
+        <Button size="sm" onClick={() => openStockinModal(info.row.original)}>
+          一键入库
+        </Button>
+      ),
+    }),
+  ] as ColumnDef<Record<string, unknown>, unknown>[], [openStockinModal])
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary card-title-placeholder">仪表盘</h1>
+        <h1 className="text-3xl font-bold text-primary">仪表盘</h1>
       </div>
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="试剂订单"
           icon={ShoppingCart}
-          value={myReagentOrders.length}
-          loading={loadingReagentOrders}
-          onClick={() => handleTabChange('reagents')}
+          value={counts.reagentCount}
+          onClick={() => setActiveTab('reagents')}
           isActive={activeTab === 'reagents'}
         />
         <StatCard
           title="耗材订单"
           icon={ShoppingCart}
-          value={myConsumableOrders.length}
-          loading={loadingConsumableOrders}
-          onClick={() => handleTabChange('consumables')}
+          value={counts.consumableCount}
+          onClick={() => setActiveTab('consumables')}
           isActive={activeTab === 'consumables'}
         />
         <StatCard
           title="当前借用"
           icon={Package}
-          value={myBorrows.length}
-          loading={loadingBorrows}
-          onClick={() => handleTabChange('borrows')}
+          value={counts.borrowCount}
+          onClick={() => setActiveTab('borrows')}
           isActive={activeTab === 'borrows'}
         />
         <StatCard
           title="待入库"
           icon={ArrowRightLeft}
-          value={pendingStockin.length}
-          loading={loadingStockin}
-          onClick={() => handleTabChange('stockin')}
+          value={counts.stockinCount}
+          onClick={() => setActiveTab('stockin')}
           isActive={activeTab === 'stockin'}
         />
       </div>
 
-      {/* 试剂订单内容区域 */}
       {activeTab === 'reagents' && (
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle>试剂订单</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loadingReagentOrders ? (
-              <SkeletonList lines={3} />
-            ) : myReagentOrders.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">暂无试剂订单</p>
-            ) : (
-              <div className="space-y-4">
-                {myReagentOrders.slice((reagentPage - 1) * reagentPageSize, reagentPage * reagentPageSize).map((order) => (
-                  <div
-                    key={order.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted transition-all"
-                  >
-                    <div>
-                      <p>{order.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        CAS: {order.cas_number || '-'} • {formatDateTime(order.created_at)}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          'px-3 py-1 text-sm rounded-full',
-                          order.status === 'pending'
-                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                            : order.status === 'approved'
-                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                              : order.status === 'arrived'
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                : 'bg-muted text-foreground'
-                        )}
-                      >
-                        {order.status === 'pending'
-                          ? '待审批'
-                          : order.status === 'approved'
-                            ? '已审批'
-                            : order.status === 'arrived'
-                              ? '已到货'
-                              : order.status}
-                      </span>
-                      {order.status === 'approved' && (
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleConfirmArrival(order.id)}
-                          >
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                            确认到货
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="bg-green-600 hover:bg-green-700"
-                            disabled={order.order_reason === 'common_public'}
-                            title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
-                            onClick={() => handleQuickStockIn(order.id)}
-                          >
-                            <PackagePlus className="w-3 h-3 mr-1" />
-                            一键入库
-                          </Button>
-                        </div>
-                      )}
-                      {order.status === 'arrived' && (
-                        <Button
-                          size="sm"
-                          className="bg-green-600 hover:bg-green-700"
-                          disabled={order.order_reason === 'common_public'}
-                          title={order.order_reason === 'common_public' ? '常用/公用试剂无需入库，请使用确认到货' : undefined}
-                          onClick={() => handleQuickStockIn(order.id)}
-                        >
-                          <PackagePlus className="w-3 h-3 mr-1" />
-                          入库
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {Math.ceil(myReagentOrders.length / reagentPageSize) > 1 && (
-                  <div className="flex items-center justify-between pt-4">
-                    <PaginationInfo currentPage={reagentPage} pageSize={reagentPageSize} total={myReagentOrders.length} />
-                    <Pagination
-                      currentPage={reagentPage}
-                      totalPages={Math.ceil(myReagentOrders.length / reagentPageSize)}
-                      pageSize={reagentPageSize}
-                      onPageChange={setReagentPage}
-                      onPageSizeChange={() => { }}
-                    />
-                  </div>
-                )}
+        <FilterTable
+          api={reagentDashboardAPI}
+          queryKey={['dashboard', 'reagents']}
+          tableId="dashboard-reagent-orders"
+          customColumns={reagentColumns}
+          statusOptions={REAGENT_STATUS_OPTIONS}
+          searchFieldOptions={SEARCH_FIELD_OPTIONS}
+          searchPlaceholder="搜索名称、CAS号、品牌..."
+          title={<><FlaskConical className="w-5 h-5" /> 我的试剂订单</>}
+          noteField="notes"
+          enableExpandAll={false}
+          renderExpandedRow={(itemRaw) => {
+            const item = itemRaw as unknown as DashboardReagentOrder
+            return (
+              <div className="p-3 border-b border-border text-sm text-muted-foreground">
+                备注：{item.notes || '-'}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            )
+          }}
+        />
       )}
 
-      {/* 耗材订单内容区域 */}
       {activeTab === 'consumables' && (
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle>耗材订单</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {loadingConsumableOrders ? (
-              <SkeletonList lines={3} />
-            ) : myConsumableOrders.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">暂无耗材订单</p>
-            ) : (
-              <>
-                <div className="px-6 rounded-md overflow-auto">
-                  <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                    <thead>
-                      {consumableTable.getHeaderGroups().map(headerGroup => (
-                        <tr key={headerGroup.id} className="border-b-2 border-border">
-                          {headerGroup.headers.map(header => (
-                            <th
-                              key={header.id}
-                              className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
-                            >
-                              {header.isPlaceholder
-                                ? null
-                                : flexRender(header.column.columnDef.header, header.getContext())}
-                            </th>
-                          ))}
-                        </tr>
-                      ))}
-                    </thead>
-                    <tbody>
-                      {consumableTable.getRowModel().rows.map(row => (
-                        <tr key={row.id} className="border-b border-border hover:bg-muted/30 transition-all">
-                          {row.getVisibleCells().map(cell => (
-                            <td
-                              key={cell.id}
-                              className="p-3 align-middle text-base"
-                              style={{ width: cell.column.getSize() }}
-                            >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {Math.ceil(myConsumableOrders.length / consumablePageSize) > 1 && (
-                  <div className="px-6 flex items-center justify-between pt-4 pb-4">
-                    <PaginationInfo currentPage={consumablePage} pageSize={consumablePageSize} total={myConsumableOrders.length} />
-                    <Pagination currentPage={consumablePage} totalPages={Math.ceil(myConsumableOrders.length / consumablePageSize)} pageSize={consumablePageSize} onPageChange={setConsumablePage} onPageSizeChange={() => { }} />
-                  </div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* 当前借用内容区域 */}
-      {activeTab === 'borrows' && (
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle>当前借用</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {loadingBorrows ? (
-              <SkeletonList lines={3} />
-            ) : myBorrows.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">暂无借用</p>
-            ) : (
-              <>
-                <div className="px-6 rounded-md overflow-auto">
-                  <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                    <thead>
-                      {borrowTable.getHeaderGroups().map(headerGroup => (
-                        <tr key={headerGroup.id} className="border-b-2 border-border">
-                          {headerGroup.headers.map(header => (
-                            <th
-                              key={header.id}
-                              className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
-                            >
-                              {header.isPlaceholder
-                                ? null
-                                : flexRender(header.column.columnDef.header, header.getContext())}
-                            </th>
-                          ))}
-                        </tr>
-                      ))}
-                    </thead>
-                    <tbody>
-                      {borrowTable.getRowModel().rows.map(row => (
-                        <tr key={row.id} className="border-b border-border hover:bg-muted/30 transition-all">
-                          {row.getVisibleCells().map(cell => (
-                            <td
-                              key={cell.id}
-                              className="p-3 align-middle text-base"
-                              style={{ width: cell.column.getSize() }}
-                            >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {Math.ceil(myBorrows.length / borrowPageSize) > 1 && (
-                  <div className="px-6 flex items-center justify-between pt-4 pb-4">
-                    <PaginationInfo currentPage={borrowPage} pageSize={borrowPageSize} total={myBorrows.length} />
-                    <Pagination currentPage={borrowPage} totalPages={Math.ceil(myBorrows.length / borrowPageSize)} pageSize={borrowPageSize} onPageChange={setBorrowPage} onPageSizeChange={() => { }} />
-                  </div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* 待入库内容区域 */}
-      {activeTab === 'stockin' && (
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle>待入库位置分配</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {loadingStockin ? (
-              <SkeletonList lines={3} />
-            ) : pendingStockin.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">无待入库物品</p>
-            ) : (
-              <div className="px-6 rounded-md overflow-auto">
-                <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                  <thead>
-                    {stockinTable.getHeaderGroups().map(headerGroup => (
-                      <tr key={headerGroup.id} className="border-b-2 border-border">
-                        {headerGroup.headers.map(header => (
-                          <th
-                            key={header.id}
-                            className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
-                          >
-                            {header.isPlaceholder
-                              ? null
-                              : flexRender(header.column.columnDef.header, header.getContext())}
-                          </th>
-                        ))}
-                      </tr>
-                    ))}
-                  </thead>
-                  <tbody>
-                    {stockinTable.getRowModel().rows.map(row => (
-                      <tr key={row.id} className="border-b border-border hover:bg-muted/30 transition-all">
-                        {row.getVisibleCells().map(cell => (
-                          <td
-                            key={cell.id}
-                            className="p-3 align-middle text-base"
-                            style={{ width: cell.column.getSize() }}
-                          >
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        <FilterTable
+          api={consumableDashboardAPI}
+          queryKey={['dashboard', 'consumables']}
+          tableId="dashboard-consumable-orders"
+          customColumns={consumableColumns}
+          statusOptions={CONSUMABLE_STATUS_OPTIONS}
+          searchFieldOptions={SEARCH_FIELD_OPTIONS}
+          searchPlaceholder="搜索名称、规格..."
+          title={<><ShoppingCart className="w-5 h-5" /> 我的耗材订单</>}
+          noteField="notes"
+          enableExpandAll={false}
+          renderExpandedRow={(itemRaw) => {
+            const item = itemRaw as unknown as DashboardConsumableOrder
+            return (
+              <div className="p-3 border-b border-border text-sm text-muted-foreground">
+                备注：{item.notes || '-'}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            )
+          }}
+        />
       )}
 
-      {/* Return Modal (已替换 LoadingButton) */}
-      <Dialog open={showReturnModal} onOpenChange={setShowReturnModal}>
+      {activeTab === 'borrows' && (
+        <FilterTable
+          api={borrowDashboardAPI}
+          queryKey={['dashboard', 'borrows']}
+          tableId="dashboard-borrows"
+          customColumns={borrowColumns}
+          statusOptions={[{ value: 'all', label: '全部' }]}
+          searchFieldOptions={BORROW_SEARCH_FIELDS}
+          searchPlaceholder="搜索名称、CAS号..."
+          title={<><Package className="w-5 h-5" /> 我的借用记录</>}
+          enableExpandAll={false}
+        />
+      )}
+
+      {activeTab === 'stockin' && (
+        <FilterTable
+          api={pendingStockinDashboardAPI}
+          queryKey={['dashboard', 'stockin']}
+          tableId="dashboard-stockin"
+          customColumns={stockinColumns}
+          statusOptions={[{ value: 'all', label: '全部' }]}
+          searchFieldOptions={BORROW_SEARCH_FIELDS}
+          searchPlaceholder="搜索名称、CAS号..."
+          title={<><ArrowRightLeft className="w-5 h-5" /> 待入库（暂存）</>}
+          enableExpandAll={false}
+        />
+      )}
+
+      <Dialog
+        open={editingReagent !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingReagent(null)
+            reagentForm.reset(defaultReagentOrderValues)
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>编辑试剂订单</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={submitReagentEdit}>
+            <BaseForm form={reagentForm} fields={getReagentOrderFormFields(true)} />
+            <div className="flex justify-end gap-2 mt-8">
+              <Button variant="morden" size="lg" type="button" onClick={() => setEditingReagent(null)}>
+                取消
+              </Button>
+              <LoadingButton type="submit" size="lg" isLoading={isSubmittingReagent}>
+                保存
+              </LoadingButton>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editingConsumable !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingConsumable(null)
+            consumableForm.reset(defaultConsumableOrderValues)
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>编辑耗材订单</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={submitConsumableEdit}>
+            <BaseForm form={consumableForm} fields={getConsumableOrderFormFields(true)} />
+            <div className="flex justify-end gap-2 mt-8">
+              <Button variant="morden" size="lg" type="button" onClick={() => setEditingConsumable(null)}>
+                取消
+              </Button>
+              <LoadingButton type="submit" size="lg" isLoading={isSubmittingConsumable}>
+                保存
+              </LoadingButton>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showStockinModal} onOpenChange={setShowStockinModal}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>归还物品</DialogTitle>
+            <DialogTitle>一键入库</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
             <div>
-              <p>{selectedBorrow?.name}</p>
+              <p>{selectedStockin?.name}</p>
               <p className="text-sm text-muted-foreground">
-                CAS: {selectedBorrow?.cas_number}
+                CAS: {selectedStockin?.cas_number} • {selectedStockin?.initial_quantity} {selectedStockin?.unit}
               </p>
             </div>
 
-            <RadioGroup
-              value={returnMode}
-              onValueChange={(value) => setReturnMode(value as 'used' | 'remaining')}
-              className="flex flex-row gap-4"
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="used" id="returnMode-used" />
-                <Label htmlFor="returnMode-used" className="cursor-pointer text-base">填写使用量</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="remaining" id="returnMode-remaining" />
-                <Label htmlFor="returnMode-remaining" className="cursor-pointer text-base">填写剩余量</Label>
-              </div>
-            </RadioGroup>
-
             <div>
-              <label className={LABEL_STYLES.base}>
-                {returnMode === 'remaining' ? '剩余量' : '使用量'}
-                <span className="text-destructive"> *</span>
+              <label htmlFor="dashboard-stockin-location" className={LABEL_STYLES.base}>
+                存放位置 <span className="text-destructive">*</span>
               </label>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={returnMode === 'remaining' ? returnQuantity : usedQuantity}
-                  onChange={(e) => {
-                    setReturnError('')
-                    if (returnMode === 'remaining') {
-                      setReturnQuantity(e.target.value)
-                    } else {
-                      setUsedQuantity(e.target.value)
-                    }
-                  }}
-                  placeholder={returnMode === 'remaining' ? '输入剩余量' : '输入使用量'}
-                  className={cn(INPUT_STYLES.base, "flex-1", returnError && "border-destructive")}
-                />
-                <span className="text-muted-foreground text-sm min-w-10">{returnUnit}</span>
-              </div>
-              {returnError && (
-                <p className="text-sm text-destructive mt-1">{returnError}</p>
-              )}
-              {returnMode === 'used' && usedQuantity && !returnError && selectedBorrow && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  归还后剩余: {Math.max(0, selectedBorrow.remaining_quantity - (parseFloat(usedQuantity) || 0)).toFixed(2)} {returnUnit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {returnUnit})
-                </p>
-              )}
-              {returnMode === 'remaining' && returnQuantity && !returnError && selectedBorrow && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  归还后剩余: {(parseFloat(returnQuantity) || 0).toFixed(2)} {returnUnit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {returnUnit})
-                </p>
-              )}
+              <Input
+                id="dashboard-stockin-location"
+                value={stockinLocation}
+                onChange={(e) => setStockinLocation(e.target.value)}
+                placeholder="如: A-1-1 柜"
+                className={cn(INPUT_STYLES.base)}
+              />
             </div>
 
-            {/* 👇 归还弹窗的按钮区 */}
             <div className="flex gap-3 mt-8">
               <Button
                 variant="morden"
-                onClick={() => setShowReturnModal(false)}
+                onClick={() => setShowStockinModal(false)}
                 className="flex-1"
                 size="lg"
               >
                 取消
               </Button>
               <LoadingButton
-                onClick={handleReturn}
-                isLoading={returnLoading}
+                onClick={handleStockin}
+                isLoading={stockinLoading}
                 loadingText="处理中..."
                 className="flex-1"
                 size="lg"
               >
-                确认归还
+                确认入库
               </LoadingButton>
             </div>
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Stockin Location Modal (已替换 LoadingButton) */}
-      {showStockinModal && selectedStockin && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">分配存放位置</h2>
-              <button
-                onClick={() => setShowStockinModal(false)}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="p-4 bg-muted rounded-lg">
-                <p>{selectedStockin.name}</p>
-                <p className="text-sm text-muted-foreground">
-                  CAS: {selectedStockin.cas_number} • {selectedStockin.initial_quantity} {selectedStockin.unit}
-                </p>
-              </div>
-
-              <div>
-                <label className={LABEL_STYLES.base}>
-                  存放位置 <span className="text-destructive"> *</span>
-                </label>
-                <Input
-                  value={stockinLocation}
-                  onChange={(e) => setStockinLocation(e.target.value)}
-                  placeholder="如: A-1-1 柜"
-                  className={INPUT_STYLES.base}
-                />
-              </div>
-
-              {/* 👇 入库弹窗的按钮区 */}
-              <div className="flex gap-3 t-1">
-                <LoadingButton
-                  onClick={handleStockin}
-                  isLoading={stockinLoading}
-                  loadingText="处理中..."
-                  className="flex-1"
-                  size="lg"
-                >
-                  确认分配
-                </LoadingButton>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowStockinModal(false)}
-                  className="flex-1"
-                  size="lg"
-                >
-                  取消
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -122,7 +122,7 @@ export const IMPORT_TEMPLATE_COLUMNS: ImportColumn[] = [
   {
     name: 'cas_number',
     required: true,
-    description: '格式: XXXXX-XX-X，去除空格，例如 64-17-5',
+    description: '格式: XXXXX-XX-X，例如 64-17-5',
   },
   {
     name: 'name',

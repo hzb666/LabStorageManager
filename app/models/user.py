@@ -54,7 +54,7 @@ class User(UserBase, table=True):
 class UserCreate(SQLModel):
     """DTO for creating a new user"""
     username: str = Field(min_length=3, max_length=20)
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=6, max_length=50)
     full_name: str = Field(min_length=1, max_length=100)  # 必填
     role: UserRole = UserRole.USER
 

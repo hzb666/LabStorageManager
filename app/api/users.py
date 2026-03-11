@@ -10,7 +10,7 @@ from typing import Optional, Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, or_
 import redis
 
 from app.core.auth import (
@@ -88,7 +88,7 @@ def _check_rate_limit(client_ip: str) -> None:
             if ttl > 0 and attempts >= MAX_LOGIN_ATTEMPTS:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="登录尝试过多，请 5 分钟后重试"
+                    detail="Too many login attempts, please try again in 5 minutes"
                 )
     except redis.RedisError:
         # Redis 错误时，跳过速率限制（降级处理）
@@ -143,15 +143,15 @@ def _record_failed_login_memory(client_ip: str) -> None:
 
 class LoginRequest(BaseModel):
     """Login request body"""
-    username: str
-    password: str
+    username: str = Field(min_length=3, max_length=20)
+    password: str = Field(min_length=6, max_length=50)
     device_id: Optional[str] = None  # Client device ID
     device_name: Optional[str] = "Unknown Device"  # Client device name
 
 
 class ChangePasswordRequest(BaseModel):
     """Change password request body"""
-    old_password: str = Field(min_length=1, description="原密码")
+    old_password: str = Field(min_length=6, max_length=50, description="原密码")
     new_password: str = Field(min_length=6, max_length=50, description="新密码")
 
 
@@ -207,7 +207,7 @@ def login(
     if not _check_ip_limit(db, user.id, client_ip):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"IP 数量已达上限 ({settings.max_ip_per_user}个)，请先移除其他设备"
+            detail=f"IP limit reached ({settings.max_ip_per_user} IPs), please remove other devices first"
         )
     
     # 检查设备限制，如果超限则踢出旧设备
@@ -308,14 +308,14 @@ def change_password(
     if not verify_password(password_request.old_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="原密码错误"
+            detail="Incorrect old password"
         )
     
     # Verify new password is different from old password
     if verify_password(password_request.new_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密码不能与原密码相同"
+            detail="New password cannot be the same as old password"
         )
     
     # Update password
@@ -362,15 +362,28 @@ def list_users(
     skip: int = 0,
     limit: int = 50,
     username: Optional[str] = None,
+    full_name: Optional[str] = None,
     role: Optional[str] = None,
     is_active: Optional[bool] = None,
 ):
-    """List users with optional filters (admin only)"""
+    """List users with optional filters (admin only)
+    
+    排序规则：
+    1. 当前用户置顶
+    2. 启用的在前 (is_active DESC)
+    3. 管理员在前 (role DESC, admin > user)
+    4. 创建时间倒序 (created_at DESC)
+    """
     statement = select(User)
     
-    # Apply filters if provided
-    if username:
-        statement = statement.where(User.username.contains(username))
+    # Apply filters if provided - username 和 full_name 使用 OR 关系
+    if username or full_name:
+        conditions = []
+        if username:
+            conditions.append(User.username.contains(username))
+        if full_name:
+            conditions.append(User.full_name.contains(full_name))
+        statement = statement.where(or_(*conditions))
     if role:
         try:
             statement = statement.where(User.role == UserRole(role))
@@ -382,14 +395,54 @@ def list_users(
     if is_active is not None:
         statement = statement.where(User.is_active == is_active)
     
+    # 获取带筛选条件的总数
     total = db.exec(select(func.count()).select_from(statement.subquery())).one()
     
-    statement = statement.offset(skip).limit(limit).order_by(User.created_at.desc())
+    # 获取不带筛选条件的总数
+    total_without_filter = db.exec(select(func.count()).select_from(User)).one()
+    
+    # 排序逻辑：当前用户置顶 > 启用状态 > 管理员 > 创建时间倒序
+    # 使用 CASE 表达式实现当前用户置顶
+    current_user_id = current_user.id
+    
+    # 构建排序：当前用户 first, is_active DESC, role DESC (admin=1 > user=0), created_at DESC
+    statement = statement.order_by(
+        # 当前用户置顶 (1 表示当前用户，0 表示其他)
+        (User.id == current_user_id).desc(),
+        # 启用的在前
+        User.is_active.desc(),
+        # 管理员在前 (将 role 转换为数值进行比较)
+        # 注意：需要使用 cast 来进行正确的比较
+        # 这里使用字符串比较，'admin' > 'user'
+        User.role.desc(),
+        # 创建时间倒序
+        User.created_at.desc()
+    )
+    
+    statement = statement.offset(skip).limit(limit)
     users = db.exec(statement).all()
     
+    # Get last active time from UserSession for each user
+    user_responses = []
+    for user in users:
+        # Get the latest session's last_active_at
+        latest_session = db.exec(
+            select(UserSession)
+            .where(UserSession.user_id == user.id)
+            .order_by(UserSession.last_active_at.desc())
+            .limit(1)
+        ).first()
+        
+        last_active_at = latest_session.last_active_at if latest_session else None
+        
+        user_dict = UserResponse.model_validate(user).model_dump(mode='json')
+        user_dict['last_active_at'] = last_active_at.isoformat() + 'Z' if last_active_at else None
+        user_responses.append(user_dict)
+    
     return {
-        "data": [UserResponse.model_validate(user).model_dump(mode='json') for user in users],
+        "data": user_responses,
         "total": total,
+        "total_without_filter": total_without_filter,
         "skip": skip,
         "limit": limit,
     }
@@ -611,26 +664,26 @@ def reset_user_password(
         if not password_request.old_password:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="修改管理员密码需要提供原密码"
+                detail="Old password required to modify admin password"
             )
         # Verify old password
         if not verify_password(password_request.old_password, user.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="原密码错误"
+                detail="Incorrect old password"
             )
         # Verify new password is different from old password
         if verify_password(password_request.new_password, user.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="新密码不能与原密码相同"
+                detail="New password cannot be the same as old password"
             )
     else:
         # For non-admin users, also check if new password is same as old
         if verify_password(password_request.new_password, user.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="新密码不能与原密码相同"
+                detail="New password cannot be the same as old password"
             )
 
     # Update password

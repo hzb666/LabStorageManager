@@ -35,8 +35,8 @@ api.interceptors.response.use(
       // 获取错误详情
       const errorDetail = error.response?.data?.detail
       // 如果是会话失效错误，先显示提示再跳转
-      if (errorDetail === '会话失效，请重新登录') {
-        toast.error('会话失效，请重新登录')
+      if (errorDetail === 'Session expired, please login again') {
+        toast.error('会话已失效，请重新登录')
       }
       useAuthStore.getState().logout()
       globalThis.location.href = '/login'
@@ -213,13 +213,11 @@ export const consumableOrderAPI = {
   create: (data: {
     name: string
     english_name?: string
-    alias?: string
-    category?: string
-    brand?: string
     specification: string
     unit?: string
     quantity: number
     price?: number
+    communication?: string
     notes?: string
   }) => api.post('/consumable-orders', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/consumable-orders/${id}`, data),
@@ -266,6 +264,16 @@ export const inventoryAPI = {
     notes?: string
   }) => api.post('/inventory/manual-add', data),
   exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
+}
+
+export const commonShelfAPI = {
+  list: (params?: PaginationParams & {
+    status_filter?: string
+    search?: string
+    search_field?: string
+    sort_by?: string
+    sort_order?: string
+  }) => api.get('/inventory/common-shelf', { params }),
 }
 
 // Chemical Info APIs
