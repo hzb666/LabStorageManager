@@ -26,6 +26,8 @@ class ConsumableOrderBase(SQLModel):
     name: str = Field(index=True, max_length=200)
     # English name
     english_name: Optional[str] = Field(None, max_length=200)
+    # Product number (货号)
+    product_number: Optional[str] = Field(None, max_length=200)
     # Specification (规格型号，如 "500ml"、M码)
     specification: str = Field(max_length=100)
     # Unit (单位，如 "箱"、"个") - 选填
@@ -66,6 +68,7 @@ class ConsumableOrderCreate(SQLModel):
     """
     name: str = Field(max_length=200)
     english_name: Optional[str] = None
+    product_number: Optional[str] = None  # 货号，选填
     specification: str = Field(max_length=100)  # 规格型号，必填
     unit: Optional[str] = None  # 单位，选填
     quantity: int = Field(gt=0)  # 数量，必填，大于0
@@ -78,6 +81,7 @@ class ConsumableOrderUpdate(SQLModel):
     """DTO for updating consumable order information"""
     name: Optional[str] = None
     english_name: Optional[str] = None
+    product_number: Optional[str] = None
     specification: Optional[str] = None
     unit: Optional[str] = None
     quantity: Optional[int] = None
@@ -92,6 +96,7 @@ class ConsumableOrderResponse(BaseResponse):
     id: int
     name: str
     english_name: Optional[str]
+    product_number: Optional[str]
     specification: str
     unit: Optional[str]
     quantity: int

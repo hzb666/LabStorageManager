@@ -52,7 +52,7 @@ const checkAnnouncementRead = (id: number, currentUpdatedAt: string): boolean =>
   return true
 }
 
-export function AnnouncementButton({ announcements }: AnnouncementButtonProps) {
+export function AnnouncementButton({ announcements }: Readonly<AnnouncementButtonProps>) {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
@@ -93,7 +93,7 @@ export function AnnouncementButton({ announcements }: AnnouncementButtonProps) {
           >
             <Bell className="size-5" />
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] text-sm font-bold text-destructive-foreground bg-destructive rounded-full px-1">
+              <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-4.5 h-4.5 text-sm font-bold text-destructive-foreground bg-destructive rounded-full px-1">
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
@@ -148,7 +148,7 @@ export function AnnouncementButton({ announcements }: AnnouncementButtonProps) {
                           </span>
                         </div>
                         <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
-                          {announcement.content.replace(/<[^>]*>/g, '')}
+                          {announcement.content.replaceAll(/<[^>]*>/g, '')}
                         </p>
                       </div>
                     </div>

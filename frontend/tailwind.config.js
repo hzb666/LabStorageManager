@@ -6,6 +6,21 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  plugins: [
+    // 自定义工具类：hide-scrollbar
+    function ({ addUtilities }) {
+      addUtilities({
+        '.hide-scrollbar': {
+          /* Chrome, Safari, Edge */
+          '-ms-overflow-style': 'none',
+          'scrollbar-width': 'none', /* Firefox */
+          '&::-webkit-scrollbar': {
+            display: 'none', /* Chrome/Safari/Edge 隐藏滚动条 */
+          },
+        },
+      });
+    },
+  ],
   theme: {
     container: {
       center: true,

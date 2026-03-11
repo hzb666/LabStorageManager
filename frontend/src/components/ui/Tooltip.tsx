@@ -5,7 +5,9 @@ import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { cn } from '@/lib/utils'
 
 function TooltipProvider({
-  delayDuration = 0,
+  // 给 tooltip 加入一个小的延迟，避免在侧边栏折叠/动画过程中
+  // 因短暂经过触发区域而打开大量 tooltip
+  delayDuration = 200,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (

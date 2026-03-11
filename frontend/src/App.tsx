@@ -62,57 +62,85 @@ function AppContent() {
     <TooltipProvider>
       <BrowserRouter>
         <ToastContainer />
-        <Suspense fallback={
-          <div className="flex items-center justify-center h-screen">
-            <div className="animate-pulse bg-gray-200 rounded-lg h-32 w-96" />
-          </div>
-        }>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/test-error" element={<TestErrorPage />} />
-            <Route path="*" element={<NotFoundPage />} />
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/test-error" element={<TestErrorPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={
+              <Suspense>
+                <Dashboard />
+              </Suspense>
+            } />
+            <Route path="reagents" element={
+              <Suspense>
+                <ReagentOrdersPage />
+              </Suspense>
+            } />
+            <Route path="consumables" element={
+              <Suspense>
+                <ConsumableOrdersPage />
+              </Suspense>
+            } />
+            <Route path="inventory" element={
+              <Suspense>
+                <InventoryPage />
+              </Suspense>
+            } />
+            <Route path="common-shelf" element={
+              <Suspense>
+                <CommonShelfPage />
+              </Suspense>
+            } />
+            <Route path="import" element={
+              <Suspense>
+                <ImportPage />
+              </Suspense>
+            } />
             <Route
-              path="/"
+              path="admin/users"
               element={
-                <ProtectedRoute>
-                  <Layout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Dashboard />} />
-              <Route path="reagents" element={<ReagentOrdersPage />} />
-              <Route path="consumables" element={<ConsumableOrdersPage />} />
-              <Route path="inventory" element={<InventoryPage />} />
-              <Route path="common-shelf" element={<CommonShelfPage />} />
-              <Route path="import" element={<ImportPage />} />
-              <Route
-                path="admin/users"
-                element={
-                  <AdminRoute>
+                <AdminRoute>
+                  <Suspense>
                     <AdminUsersPage />
-                  </AdminRoute>
-                }
-              />
-              <Route
-                path="admin/announcements"
-                element={
-                  <AdminRoute>
+                  </Suspense>
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="admin/announcements"
+              element={
+                <AdminRoute>
+                  <Suspense>
                     <AnnouncementManagement />
-                  </AdminRoute>
-                }
-              />
-              <Route path="devices" element={<DeviceManagement />} />
-              <Route
-                path="admin/logs/:token"
-                element={
-                  <AdminRoute>
+                  </Suspense>
+                </AdminRoute>
+              }
+            />
+            <Route path="devices" element={
+              <Suspense>
+                <DeviceManagement />
+              </Suspense>
+            } />
+            <Route
+              path="admin/logs/:token"
+              element={
+                <AdminRoute>
+                  <Suspense>
                     <OperationLogsPage />
-                  </AdminRoute>
-                }
-              />
-            </Route>
-          </Routes>
-        </Suspense>
+                  </Suspense>
+                </AdminRoute>
+              }
+            />
+          </Route>
+        </Routes>
       </BrowserRouter>
     </TooltipProvider>
   )

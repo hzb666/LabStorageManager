@@ -39,7 +39,6 @@ export interface FilterTableProps {
   queryKey?: string[]
   tableId: string
   customColumns?: ColumnDef<Record<string, unknown>, unknown>[]
-  renderActions?: (item: Record<string, unknown>) => React.ReactNode
   onEdit?: (item: Record<string, unknown>) => void
   onBorrowSuccess?: () => void
   statusOptions?: FilterOption[]
@@ -55,7 +54,7 @@ export interface FilterTableProps {
   enableExpandAll?: boolean
   renderExpandedRow?: (item: Record<string, unknown>) => React.ReactNode
   noteField?: string
-  scrollHeight?: string
+  scrollHeight?: number | string
   className?: string
   emptyText?: string
 }
@@ -65,7 +64,6 @@ export function FilterTable({
   queryKey = ['list'],
   tableId,
   customColumns,
-  renderActions,
   onEdit,
   onBorrowSuccess,
   statusOptions = DEFAULT_STATUS_OPTIONS,
@@ -81,10 +79,10 @@ export function FilterTable({
   enableExpandAll = true,
   renderExpandedRow,
   noteField,
-  scrollHeight = 'calc(100vh - 112px - 16px)',
+  scrollHeight,
   className = '',
   emptyText = '暂无数据'
-}: FilterTableProps) {
+}: Readonly<FilterTableProps>) {
   const filter = useTableState({
     api,
     queryKey,
@@ -105,6 +103,7 @@ export function FilterTable({
     return getInventoryTableColumns() as ColumnDef<Record<string, unknown>, unknown>[]
   }, [customColumns])
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     defaultColumn: {
       // 1. 强制点击循环为：无 -> 升序 (asc) -> 降序 (desc) -> 无
@@ -184,6 +183,32 @@ export function FilterTable({
     table
   ])
 
+  // 根据数据条数动态计算表格高度
+  const calculatedScrollHeight = useMemo(() => {
+    // 如果外部传入了 scrollHeight，优先使用外部值
+    if (scrollHeight !== undefined) {
+      return scrollHeight
+    }
+    
+    const rowCount = filter.data.length
+    
+    // 表格相关尺寸配置
+    const estimatedRowHeight = 60 // 每行约60px
+    const headerHeight = 60 // 表头约60px
+    const minDisplayRows = 5 // 最少显示5行
+    
+    // 如果没有数据或数据行数小于等于阈值，根据行数计算高度 (自动适应小数据量)
+    if (rowCount <= 10) {
+      return Math.max(
+        (rowCount || 1) * estimatedRowHeight + headerHeight + 20,
+        minDisplayRows * estimatedRowHeight + headerHeight + 20
+      )
+    }
+    
+    // 数据多时使用默认的大高度
+    return 'calc(100vh - 112px - 16px)'
+  }, [filter.data.length, scrollHeight])
+
   return (
     <div className={`space-y-6 ${className}`}>
       {/* 搜索与筛选区域 - 卡片外 */}
@@ -246,7 +271,7 @@ export function FilterTable({
               <DataTable
                 table={table}
                 renderExpandedRow={renderExpandedRow}
-                scrollHeight={scrollHeight}
+                scrollHeight={calculatedScrollHeight}
                 enableExpandAll={enableExpandAll}
                 expandAllStorageKey={`${tableId}-expand-all`}
                 noteField={noteField}

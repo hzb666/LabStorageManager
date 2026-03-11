@@ -360,6 +360,7 @@ export const ReagentOrderSchema = v.object({
 export const ConsumableOrderSchema = v.object({
   name: createStringLengthSchema('名称', 1, 200),
   english_name: createMaxLengthSchema('英文名称', 200),
+  product_number: createMaxLengthSchema('货号', 200),  // 选填，最多200字符
   specification: createStringLengthSchema('规格', 1, 100),  // 后端必填
   unit: createMaxLengthSchema('单位', 20),  // 后端新增可选字段
   quantity: createPositiveNumberSchema('数量'),

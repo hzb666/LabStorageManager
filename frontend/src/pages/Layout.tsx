@@ -50,7 +50,6 @@ export function Layout() {
   const [logoutConfirming, setLogoutConfirming] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
 
-  // Fetch public announcements on mount only (not on every route change)
   useEffect(() => {
     const fetchAnnouncements = async () => {
       try {
@@ -60,29 +59,24 @@ export function Layout() {
         console.error('Failed to fetch announcements:', error)
       }
     }
-
     fetchAnnouncements()
-  }, []) // Only fetch on mount
+  }, [])
 
-  // Determine if user is regular user (not admin)
   const [showBugButton, setShowBugButton] = useState(() => !getBugButtonHidden())
 
-  // 右键隐藏按钮后刷新状态
   const handleBugButtonRightClick = useCallback(() => {
     setShowBugButton(false)
   }, [])
 
-  // 退出登录处理
   const handleLogout = () => {
     if (logoutConfirming) {
-      clearBugButtonHidden() // 清除按钮隐藏状态
+      clearBugButtonHidden()
       logout()
     } else {
       setLogoutConfirming(true)
     }
   }
 
-  // 失去焦点时重置确认状态
   const handleLogoutBlur = () => {
     if (logoutConfirming) {
       setLogoutConfirming(false)
@@ -93,10 +87,8 @@ export function Layout() {
     (item) => !item.adminOnly || isAdmin(user)
   )
 
-  // 判断当前是否在设备管理页面
   const isDevicesActive = location.pathname.startsWith('/devices')
 
-  // 键盘快捷键支持 Ctrl+B / Cmd+B
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
       e.preventDefault()
@@ -109,7 +101,6 @@ export function Layout() {
     return () => globalThis.removeEventListener('keydown', handleKeyDown)
   }, [handleKeyDown])
 
-  // 移动端侧边栏打开时禁止背景滚动
   useEffect(() => {
     if (mobileMenuOpen) {
       document.body.style.overflow = 'hidden'
@@ -121,7 +112,6 @@ export function Layout() {
     }
   }, [mobileMenuOpen])
 
-  // 桌面端始终显示侧边栏（不隐藏）
   const showDesktopSidebar = !isMobile
 
   return (
@@ -135,7 +125,7 @@ export function Layout() {
           )}
         >
           {/* 标题区域 */}
-          <div className="flex items-center justify-center h-20 pt-16 pb-8 overflow-hidden whitespace-nowrap">
+          <div className="flex items-center justify-center h-20 pt-16 pb-8 overflow-hidden whitespace-nowrap shrink-0">
             <h1 className={cn(
               "text-2xl font-bold text-primary transition-opacity duration-300 w-64 text-center pl-2",
               sidebarCollapsed ? 'opacity-0' : 'opacity-100'
@@ -144,103 +134,107 @@ export function Layout() {
             </h1>
           </div>
 
-          {/* 导航区域 */}
-          <nav className="flex-1 overflow-y-auto pl-4 pr-1 custom-scrollbar ">
-            {/* 功能组 */}
-            <div className="mb-2">
-              <div className="px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 max-h-10 mt-4 mb-2">
-                功能
-              </div>
-              <div className="space-y-1">
-                {filteredNavItems.filter(item => item.group === '功能').map((item) => {
-                  const isActive = location.pathname === item.href
-                  const Icon = item.icon
-                  return (
-                    <Tooltip key={item.href}>
-                      <TooltipTrigger asChild>
-                        <Link
-                          to={item.href}
-                          className={cn(
-                            'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
-                            isActive
-                              ? 'bg-primary text-primary-foreground'
-                              : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
-                          )}
-                        >
-                          <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
-                          <span
-                            className={cn(
-                              "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                              sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-50 ml-3'
+          {/* 导航区域 - 使用宽度解耦方案实现完美的悬浮滚动条 */}
+          <div className="flex-1 relative overflow-hidden -mr-2">
+            <div className="absolute inset-0 overflow-y-auto overflow-x-hidden">
+              <nav className={cn("flex flex-col pb-2 transition-[width] duration-300", sidebarCollapsed ? "w-16" : "w-64")}>
+                <div className="pl-4 pr-1">
+                  {/* 功能组 */}
+                  <div className="mb-2">
+                    <div className="px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 max-h-10 mt-4 mb-2">
+                      功能
+                    </div>
+                    <div className="space-y-1">
+                      {filteredNavItems.filter(item => item.group === '功能').map((item) => {
+                        const isActive = location.pathname === item.href
+                        const Icon = item.icon
+                        return (
+                          <Tooltip key={item.href}>
+                            <TooltipTrigger asChild>
+                              <Link
+                                to={item.href}
+                                className={cn(
+                                  'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
+                                  isActive
+                                    ? 'bg-primary text-primary-foreground'
+                                    : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                                )}
+                              >
+                                <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
+                                <span
+                                  className={cn(
+                                    "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
+                                    sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-50 ml-3'
+                                  )}
+                                >
+                                  {item.title}
+                                </span>
+                              </Link>
+                            </TooltipTrigger>
+                            {sidebarCollapsed && (
+                              <TooltipContent side="right">
+                                <p>{item.title}</p>
+                              </TooltipContent>
                             )}
-                          >
-                            {item.title}
-                          </span>
-                        </Link>
-                      </TooltipTrigger>
-                      {sidebarCollapsed && (
-                        <TooltipContent side="right">
-                          <p>{item.title}</p>
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                  )
-                })}
-              </div>
-            </div>
+                          </Tooltip>
+                        )
+                      })}
+                    </div>
+                  </div>
 
-            {/* 管理组 */}
-            <div>
-              <div className="px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 max-h-10 mt-6 mb-2">
-                管理
-              </div>
-              <div className="space-y-1">
-                {filteredNavItems.filter(item => item.group === '管理').map((item) => {
-                  const isActive = location.pathname === item.href
-                  const Icon = item.icon
-                  return (
-                    <Tooltip key={item.href}>
-                      <TooltipTrigger asChild>
-                        <Link
-                          to={item.href}
-                          className={cn(
-                            'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
-                            isActive
-                              ? 'bg-primary text-primary-foreground'
-                              : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
-                          )}
-                        >
-                          <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
-                          <span
-                            className={cn(
-                              "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                              sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-50 ml-3'
+                  {/* 管理组 */}
+                  <div>
+                    <div className="px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 max-h-10 mt-6 mb-2">
+                      管理
+                    </div>
+                    <div className="space-y-1">
+                      {filteredNavItems.filter(item => item.group === '管理').map((item) => {
+                        const isActive = location.pathname === item.href
+                        const Icon = item.icon
+                        return (
+                          <Tooltip key={item.href}>
+                            <TooltipTrigger asChild>
+                              <Link
+                                to={item.href}
+                                className={cn(
+                                  'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
+                                  isActive
+                                    ? 'bg-primary text-primary-foreground'
+                                    : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                                )}
+                              >
+                                <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
+                                <span
+                                  className={cn(
+                                    "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
+                                    sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-50 ml-3'
+                                  )}
+                                >
+                                  {item.title}
+                                </span>
+                              </Link>
+                            </TooltipTrigger>
+                            {sidebarCollapsed && (
+                              <TooltipContent side="right">
+                                <p>{item.title}</p>
+                              </TooltipContent>
                             )}
-                          >
-                            {item.title}
-                          </span>
-                        </Link>
-                      </TooltipTrigger>
-                      {sidebarCollapsed && (
-                        <TooltipContent side="right">
-                          <p>{item.title}</p>
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                  )
-                })}
-              </div>
+                          </Tooltip>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </nav>
             </div>
-          </nav>
+          </div>
 
           {/* 用户与设置区域 */}
-          <div className="pl-4 py-4 pr-1">
-            {/* 头像信息 - 点击进入设备管理 */}
+          <div className="pl-4 py-4 pr-1 shrink-0">
             <Link
               to="/devices"
               className="flex items-center overflow-hidden hover:bg-muted rounded-lg p-1 -mx-1 transition-colors relative"
             >
-              {/* 核心：Active 状态的右侧小竖条 */}
               <div className={cn("absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md transition-all duration-300 ease-in-out origin-center",
                 isDevicesActive 
                 ? "opacity-100 scale-y-100"
@@ -267,7 +261,6 @@ export function Layout() {
               </div>
             </Link>
 
-            {/* 统一化的垂直功能按钮区 */}
             <div className="flex flex-col gap-1 overflow-hidden pt-4">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -337,72 +330,74 @@ export function Layout() {
           )}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex flex-col items-center justify-center pt-8 pb-4">
+          <div className="flex flex-col items-center justify-center pt-8 pb-4 shrink-0">
             <h1 className="text-2xl font-bold text-primary px-2">实验室库存管理</h1>
           </div>
 
-          <nav className="flex-1 space-y-4 p-4 overflow-y-auto">
-            <div>
-              <p className="px-2 mb-2 text-sm text-muted-foreground uppercase tracking-wider">功能</p>
-              <div className="space-y-1">
-                {filteredNavItems.filter(item => item.group === '功能').map((item) => {
-                  const isActive = location.pathname === item.href
-                  const Icon = item.icon
-                  return (
-                    <Link
-                      key={item.href}
-                      to={item.href}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={cn(
-                        'flex items-center rounded-lg pl-3 py-2 text-base relative isolate',
-                        isActive
-                          ? 'bg-primary text-primary-foreground'
-                          : "text-sidebar-foreground hover:text-foreground transition-[color] duration-200 before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
-                      )}
-                    >
-                      <Icon className="h-5 w-5 shrink-0 mr-3" />
-                      {item.title}
-                    </Link>
-                  )
-                })}
-              </div>
-            </div>
+          <div className="flex-1 relative overflow-hidden">
+            <div className="absolute inset-0 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-sidebar-foreground/20">
+              <nav className="flex flex-col space-y-4 p-4 w-64 pb-2">
+                <div>
+                  <p className="px-2 mb-2 text-sm text-muted-foreground uppercase tracking-wider">功能</p>
+                  <div className="space-y-1">
+                    {filteredNavItems.filter(item => item.group === '功能').map((item) => {
+                      const isActive = location.pathname === item.href
+                      const Icon = item.icon
+                      return (
+                        <Link
+                          key={item.href}
+                          to={item.href}
+                          onClick={() => setMobileMenuOpen(false)}
+                          className={cn(
+                            'flex items-center rounded-lg pl-3 py-2 text-base relative isolate',
+                            isActive
+                              ? 'bg-primary text-primary-foreground'
+                              : "text-sidebar-foreground hover:text-foreground transition-[color] duration-200 before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                          )}
+                        >
+                          <Icon className="h-5 w-5 shrink-0 mr-3" />
+                          {item.title}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </div>
 
-            <div>
-              <p className="px-2 mb-2 text-sm text-muted-foreground uppercase tracking-wider">管理</p>
-              <div className="space-y-1">
-                {filteredNavItems.filter(item => item.group === '管理').map((item) => {
-                  const isActive = location.pathname === item.href
-                  const Icon = item.icon
-                  return (
-                    <Link
-                      key={item.href}
-                      to={item.href}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={cn(
-                        'flex items-center rounded-lg pl-3 py-2 text-base relative isolate',
-                        isActive
-                          ? 'bg-primary text-primary-foreground'
-                          : "text-sidebar-foreground hover:text-foreground transition-[color] duration-200 before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
-                      )}
-                    >
-                      <Icon className="h-5 w-5 shrink-0 mr-3" />
-                      {item.title}
-                    </Link>
-                  )
-                })}
-              </div>
+                <div>
+                  <p className="px-2 mb-2 text-sm text-muted-foreground uppercase tracking-wider">管理</p>
+                  <div className="space-y-1">
+                    {filteredNavItems.filter(item => item.group === '管理').map((item) => {
+                      const isActive = location.pathname === item.href
+                      const Icon = item.icon
+                      return (
+                        <Link
+                          key={item.href}
+                          to={item.href}
+                          onClick={() => setMobileMenuOpen(false)}
+                          className={cn(
+                            'flex items-center rounded-lg pl-3 py-2 text-base relative isolate',
+                            isActive
+                              ? 'bg-primary text-primary-foreground'
+                              : "text-sidebar-foreground hover:text-foreground transition-[color] duration-200 before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                          )}
+                        >
+                          <Icon className="h-5 w-5 shrink-0 mr-3" />
+                          {item.title}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </div>
+              </nav>
             </div>
-          </nav>
+          </div>
 
-          <div className="mt-auto p-4 border-t border-border/50">
-            {/* 头像信息 - 点击进入设备管理 */}
+          <div className="mt-auto p-4 border-t border-border/50 shrink-0">
             <Link
               to="/devices"
               onClick={() => setMobileMenuOpen(false)}
               className="flex items-center gap-3 mb-2 hover:bg-muted rounded-lg p-2 -mx-2 transition-colors relative"
             >
-              {/* 核心：Active 状态的右侧小竖条 */}
               {isDevicesActive && (
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md" />
               )}
@@ -456,7 +451,7 @@ export function Layout() {
           showDesktopSidebar ? (sidebarCollapsed ? "md:ml-16" : "md:ml-64") : ""
         )}
       >
-        <main className="flex-1 py-2 md:py-3 lg:py-4 pl-2 pr-2 md:pl-3 md:pr-3 lg:pl-3 lg:pr-4">
+        <main className="flex-1 py-2 md:py-3 lg:py-4 ml-2 pr-2 md:ml-3 md:pr-3 lg:ml-3 lg:pr-4">
           <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
             <header
               className="sticky top-0 z-40 flex h-16 items-center gap-1 px-4 bg-page-card border-b border-border rounded-tl-lg rounded-tr-lg"
@@ -501,13 +496,11 @@ export function Layout() {
                 </Button>
               )}
 
-              {/* 桌面端：Banner + 公告按钮 */}
               <AnnouncementBanner announcements={announcements} />
               <div className="hidden md:block">
                 <AnnouncementButton announcements={announcements} />
               </div>
 
-              {/* 移动端：暗黑按钮 + 公告按钮（右侧） */}
               <div className="flex items-center gap-1 md:hidden ml-auto">
                 <Button
                   variant="ghost"

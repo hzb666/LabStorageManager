@@ -40,13 +40,13 @@ export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number
   // 编辑模式下显示：剩余量 + 规格；添加模式下显示：瓶数 + 规格
   const quantityFields = isEdit && initialQuantity !== undefined
     ? [
-        { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 100', min: 0 },
-        { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
-      ]
+      { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 100', min: 0 },
+      { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
+    ]
     : [
-        { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 1', min: 1 },
-        { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
-      ]
+      { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 1', min: 1 },
+      { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
+    ]
 
   return [
     { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇', maxLength: 200 },
@@ -96,10 +96,11 @@ export const defaultReagentOrderValues: ReagentOrderFormData = {
 export const defaultConsumableOrderValues: ConsumableOrderFormData = {
   name: '',
   english_name: '',
+  product_number: '',
   specification: '',
   unit: '',
   quantity: 1,
-  price: 0,
+  price: undefined,
   communication: '',
   notes: '',
 }
@@ -116,14 +117,14 @@ export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentO
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精', maxLength: 200 },
     { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称', maxLength: 100 },
     { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml', maxLength: 100 },
-    { 
-      name: 'quantity' as const, 
-      label: '数量', 
-      type: 'input' as const, 
+    {
+      name: 'quantity' as const,
+      label: '数量',
+      type: 'input' as const,
       inputType: 'number' as const,
-      required: true, 
+      required: true,
       min: 1,
-      placeholder: '如: 1' 
+      placeholder: '如: 1'
     },
     { name: 'price' as const, label: '单价(元)', type: 'input' as const, required: true, inputType: 'number' as const, placeholder: '如: 100' },
     {
@@ -198,20 +199,22 @@ export function getUserEditFormFields(): FieldSchema<{ username: string; full_na
 export function getConsumableOrderFormFields(_isEdit: boolean): FieldSchema<ConsumableOrderFormData>[] {
   return [
     { name: 'name' as const, label: '耗材名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 一次性手套', maxLength: 200 },
-    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Disposable Gloves', maxLength: 200 },
-    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: M码', maxLength: 100 },
-    { name: 'unit' as const, label: '单位', type: 'input' as const, placeholder: '如: 箱、盒、个', maxLength: 20 },
-    { 
-      name: 'quantity' as const, 
-      label: '数量', 
-      type: 'input' as const, 
+    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 1, placeholder: '如: Disposable Gloves', maxLength: 200 },
+    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: M码', maxLength: 100 },
+    { name: 'product_number' as const, label: '货号', type: 'input' as const, placeholder: '如: SKU-12345', maxLength: 200 },
+    {
+      name: 'quantity' as const,
+      label: '数量',
+      type: 'input' as const,
       inputType: 'number' as const,
-      required: true, 
+      required: true,
       min: 1,
-      placeholder: '如: 1' 
+      placeholder: '如: 1'
     },
-    { name: 'price' as const, label: '单价(元)', type: 'input' as const, inputType: 'number' as const, placeholder: '如: 50' },
-    { name: 'communication' as const, label: '沟通信息', type: 'input' as const, colSpan: 2, placeholder: '如: 供应商联系记录', maxLength: 100 },
+
+    { name: 'unit' as const, label: '单位', type: 'input' as const, placeholder: '如: 箱、盒、个', maxLength: 20 },
+    { name: 'price' as const, label: '单价(元)', type: 'input' as const, inputType: 'number' as const, placeholder: '选填' },
+    { name: 'communication' as const, label: '订购信息', type: 'input' as const, colSpan: 3, placeholder: '如: 已加购物车、定制', maxLength: 100 },
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调', maxLength: 500 },
   ]
 }

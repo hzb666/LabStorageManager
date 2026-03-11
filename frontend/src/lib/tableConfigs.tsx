@@ -253,9 +253,9 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
   return [
     columnHelper.accessor('name', {
       header: '名称',
-      size: 180,
-      minSize: 150,
-      maxSize: 300,
+      size: 150,
+      minSize: 120,
+      maxSize: 200,
       cell: info => (
         <span className="break-all">
           <HighlightText
@@ -266,31 +266,12 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
         </span>
       ),
     }),
-    columnHelper.accessor('category', {
-      header: '分类',
-      size: 100,
-      minSize: 80,
-      maxSize: 150,
-      cell: info => {
-        const value = info.getValue()
-        return <span className="break-all">{safeString(value, '-')}</span>
-      },
-    }),
-    columnHelper.accessor('brand', {
-      header: '品牌',
-      size: 100,
-      minSize: 80,
-      maxSize: 150,
-      cell: info => {
-        const value = info.getValue()
-        return <span className="break-all">{safeString(value, '-')}</span>
-      },
-    }),
     columnHelper.accessor('specification', {
       header: '规格',
       size: 100,
       minSize: 80,
       maxSize: 150,
+      enableSorting: false,
       cell: info => {
         const value = info.getValue()
         return <span className="break-all">{safeString(value, '-')}</span>
@@ -298,30 +279,46 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
     }),
     columnHelper.accessor('quantity', {
       header: '数量',
-      size: 60,
-      minSize: 50,
-      maxSize: 100,
+      size: 50,
+      minSize: 40,
+      maxSize: 60,
+      enableSorting: false,
       cell: info => {
         const value = info.getValue()
-        return <span>{safeString(value, '')}</span>
+        const unit = info.row.original.unit as string | undefined
+        return <span>{safeString(value, '')} {safeString(unit, '')}</span>
       },
-    }),
-    columnHelper.accessor('price', {
-      header: '价格',
-      size: 80,
-      minSize: 60,
-      maxSize: 120,
-      cell: info => info.getValue() ? `¥${info.getValue()}` : '-',
     }),
     columnHelper.accessor('applicant_name', {
       header: '申请人',
       size: 80,
-      minSize: 60,
-      maxSize: 120,
+      minSize: 80,
+      maxSize: 100,
       cell: info => {
         const value = safeString(info.getValue(), '-')
         return <span>{value}</span>
       },
+    }),
+    columnHelper.accessor('communication', {
+      header: '订购信息',
+      size: 120,
+      minSize: 100,
+      maxSize: 200,
+      enableSorting: false,
+      cell: info => {
+        const value = info.getValue()
+        return <span className="break-all">{safeString(value, '-')}</span>
+      },
+    }),
+        columnHelper.accessor('created_at',{
+      header:'申购时间',
+      size: 100,
+      minSize: 80,
+      maxSize: 150,
+      cell: info => {
+        const value = info.getValue() as string
+        return <span>{formatDate(value)}</span>
+      }
     }),
     columnHelper.accessor('status', {
       header: '状态',

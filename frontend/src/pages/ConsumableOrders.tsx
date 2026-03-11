@@ -49,6 +49,7 @@ interface ConsumableOrder {
   id: number
   name: string
   english_name: string | null
+  product_number: string | null
   specification: string
   unit: string | null
   quantity: number
@@ -141,6 +142,7 @@ export function ConsumableOrdersPage() {
       specification: item.specification || '',
       unit: item.unit || '',
       quantity: item.quantity || 1,
+      product_number: item.product_number || '',
       price: item.price || undefined,
       communication: item.communication || '',
       notes: item.notes || ''
@@ -158,6 +160,7 @@ export function ConsumableOrdersPage() {
           await consumableOrderAPI.update(editingItem.id, {
             name: formData.name,
             english_name: formData.english_name || '',
+            product_number: formData.product_number || '',
             specification: formData.specification || '',
             unit: formData.unit || '',
             quantity: formData.quantity,
@@ -169,6 +172,7 @@ export function ConsumableOrdersPage() {
           await consumableOrderAPI.create({
             name: formData.name,
             english_name: formData.english_name || undefined,
+            product_number: formData.product_number || undefined,
             specification: formData.specification,
             unit: formData.unit || undefined,
             quantity: formData.quantity,
@@ -262,13 +266,13 @@ export function ConsumableOrdersPage() {
     const item = itemRaw as unknown as ConsumableOrder
     return (
       <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 flex-1">
           <div><span>英文名称：</span>{item.english_name || '-'}</div>
-          <div><span>单位：</span>{item.unit || '-'}</div>
-          <div><span>沟通信息：</span>{item.communication || '-'}</div>
+          <div><span>货号：</span>{item.product_number || '-'}</div>
+          <div><span>价格：</span>{item.price || '-'}</div>
           <div><span>申购时间：</span>{formatDate(item.created_at)}</div>
           <div><span>申请人：</span>{item.applicant_name || '-'}</div>
-          <div className="col-span-2"><span>备注：</span>{item.notes || '-'}</div>
+          <div><span>备注：</span>{item.notes || '-'}</div>
         </div>
       </div>
     )

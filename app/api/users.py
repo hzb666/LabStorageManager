@@ -4,7 +4,9 @@ User API Routes - Authentication and User Management
 Critical Rule #3: All data modification endpoints must check current_user
 """
 import hashlib
+import logging
 import time
+import traceback
 from typing import Optional, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile
@@ -43,6 +45,8 @@ from app.services.session_service import (
     LOGIN_ATTEMPTS,
     _login_attempts_lock,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -174,94 +178,105 @@ def login(
     Returns:
         User info (token is set as httpOnly Cookie)
     """
-    # 清理过期会话
-    cleanup_expired_sessions(db)
+    try:
+        # 清理过期会话
+        cleanup_expired_sessions(db)
 
-    client_ip = _get_client_ip(http_request)
-    user_agent = http_request.headers.get("User-Agent", "Unknown")
-    
-    # 检查速率限制
-    _check_rate_limit(client_ip)
-    
-    user = get_user_by_username(db, login_request.username)
+        client_ip = _get_client_ip(http_request)
+        user_agent = http_request.headers.get("User-Agent", "Unknown")
+        
+        # 检查速率限制
+        _check_rate_limit(client_ip)
+        
+        user = get_user_by_username(db, login_request.username)
 
-    if not user or not verify_password(login_request.password, user.password_hash):
-        # 记录失败尝试
-        _record_failed_login(client_ip)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
+        if not user or not verify_password(login_request.password, user.password_hash):
+            # 记录失败尝试
+            _record_failed_login(client_ip)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is disabled"
+            )
+        
+        # 登录成功，重置速率限制（已优化：跳过 Redis delete，依赖 TTL 自动过期）
+        _reset_login_attempts(client_ip)
+        
+        # 检查 IP 限制
+        if not _check_ip_limit(db, user.id, client_ip):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"IP limit reached ({settings.max_ip_per_user} IPs), please remove other devices first"
+            )
+        
+        # 检查设备限制，如果超限则踢出旧设备
+        if not _check_device_limit(db, user.id, login_request.device_id):
+            _evict_oldest_session(db, user.id)
+        
+        # Create JWT token (include username_version for session invalidation)
+        access_token = create_access_token(
+            user_id=user.id,
+            username=user.username,
+            role=user.role.value,
+            username_version=user.username_version or 1
         )
-    
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled"
+        
+        # 创建用户会话（如果 device_id 为空，会在函数内生成唯一的匿名 ID）
+        _create_user_session(
+            db=db,
+            user_id=user.id,
+            username=user.username,
+            device_id=login_request.device_id,
+            device_name=login_request.device_name or "Unknown Device",
+            ip_address=client_ip,
+            user_agent=user_agent,
+            token=access_token
         )
-    
-    # 登录成功，重置速率限制（已优化：跳过 Redis delete，依赖 TTL 自动过期）
-    _reset_login_attempts(client_ip)
-    
-    # 检查 IP 限制
-    if not _check_ip_limit(db, user.id, client_ip):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"IP limit reached ({settings.max_ip_per_user} IPs), please remove other devices first"
+        
+        # 设置 httpOnly Cookie
+        response = {
+            "token_type": "bearer",
+            "user": UserResponse.model_validate(user).model_dump(mode='json'),
+            "redis_warning": None
+        }
+        
+        # 返回 Response 对象以设置 Cookie
+        json_response = JSONResponse(content=response)
+        
+        # 检查 Redis 是否可用，如果不可用则添加警告
+        redis_client = get_redis()
+        if redis_client is None:
+            # Redis 不可用，添加警告头
+            json_response.headers["X-Redis-Status"] = "unavailable"
+        
+        # 设置 httpOnly Cookie (有效期与 session_expire_hours 一致)
+        json_response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=settings.env != "development",  # 生产环境启用 HTTPS cookie
+            samesite="lax",
+            max_age=settings.session_expire_hours * 3600,
+            path="/",
         )
-    
-    # 检查设备限制，如果超限则踢出旧设备
-    if not _check_device_limit(db, user.id, login_request.device_id):
-        _evict_oldest_session(db, user.id)
-    
-    # Create JWT token (include username_version for session invalidation)
-    access_token = create_access_token(
-        user_id=user.id,
-        username=user.username,
-        role=user.role.value,
-        username_version=user.username_version or 1
-    )
-    
-    # 创建用户会话（如果 device_id 为空，会在函数内生成唯一的匿名 ID）
-    _create_user_session(
-        db=db,
-        user_id=user.id,
-        username=user.username,
-        device_id=login_request.device_id,
-        device_name=login_request.device_name or "Unknown Device",
-        ip_address=client_ip,
-        user_agent=user_agent,
-        token=access_token
-    )
-    
-    # 设置 httpOnly Cookie
-    response = {
-        "token_type": "bearer",
-        "user": UserResponse.model_validate(user).model_dump(mode='json'),
-        "redis_warning": None
-    }
-    
-    # 返回 Response 对象以设置 Cookie
-    json_response = JSONResponse(content=response)
-    
-    # 检查 Redis 是否可用，如果不可用则添加警告
-    redis_client = get_redis()
-    if redis_client is None:
-        # Redis 不可用，添加警告头
-        json_response.headers["X-Redis-Status"] = "unavailable"
-    
-    # 设置 httpOnly Cookie (有效期与 session_expire_hours 一致)
-    json_response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=settings.env != "development",  # 生产环境启用 HTTPS cookie
-        samesite="lax",
-        max_age=settings.session_expire_hours * 3600,
-        path="/",
-    )
-    
-    return json_response
+        
+        return json_response
+    except HTTPException:
+        # 重新抛出 HTTP 异常
+        raise
+    except Exception as e:
+        # 记录其他所有异常
+        logger.error(f"Login error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {str(e)}"
+        )
 
 
 @router.post("/logout")

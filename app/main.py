@@ -2,14 +2,17 @@
 Lab Storage Manager - Main FastAPI Application
 """
 import logging
+import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.banner import print_banner
 from app.database import init_db
 from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, chemical, announcements, error_logs
 
@@ -45,6 +48,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
     init_db()
     logger.info("Database initialized (WAL mode enabled)")
+    print_banner()
     yield
     logger.info("Shutting down...")
 
@@ -57,7 +61,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# CORS middleware - must be added AFTER exception handlers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -65,6 +69,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler for logging 500 errors - must be added BEFORE routes
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler to log all unhandled errors"""
+    error_trace = traceback.format_exc()
+    logger.error(f"Unhandled exception: {exc}\nTraceback: {error_trace}")
+    # 生产环境只返回通用错误信息，避免泄露内部细节
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"}
+    )
 
 # Mount static files with caching
 STATIC_DIR = Path(__file__).parent.parent / "static"

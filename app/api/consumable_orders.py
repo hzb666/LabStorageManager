@@ -5,14 +5,14 @@ Separated from Reagent orders (no stock-in needed)
 import io
 import csv
 from datetime import datetime
-from typing import Optional, Dict, Any, Annotated
+from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func
 
-from app.database import get_db
-from app.core.auth import get_current_user, require_admin
+from app.database import DBSession
+from app.core.auth import CurrentUser, AdminUser
 from app.core.time_utils import get_utc_now
 from app.models.consumable_order import (
     ConsumableOrder,
@@ -21,48 +21,24 @@ from app.models.consumable_order import (
     ConsumableOrderResponse,
     ConsumableOrderStatus,
 )
-from app.models.user import User
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.api_utils import (
+    clear_cache_by_prefix,
+    empty_to_none,
+    get_cached_result,
+    set_cached_result,
+)
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
-REAGENT_ORDER_CACHE: Dict[str, tuple[Any, datetime]] = {}
+SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
-
-
-def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
-    """从缓存获取结果"""
-    if cache_key in REAGENT_ORDER_CACHE:
-        cached_result, cached_time = REAGENT_ORDER_CACHE[cache_key]
-        if (get_utc_now() - cached_time).total_seconds() < CACHE_TTL_SECONDS:
-            return cached_result
-        else:
-            # 缓存过期，删除
-            del REAGENT_ORDER_CACHE[cache_key]
-    return None
-
-
-def _set_cached_result(cache_key: str, result: Dict[str, Any]) -> None:
-    """设置缓存结果"""
-    REAGENT_ORDER_CACHE[cache_key] = (result, get_utc_now())
-    # 简单清理：只保留最近100个缓存项
-    if len(REAGENT_ORDER_CACHE) > 100:
-        # 删除最旧的10个
-        oldest_keys = sorted(REAGENT_ORDER_CACHE.keys(), key=lambda k: REAGENT_ORDER_CACHE[k][1])[:10]
-        for key in oldest_keys:
-            del REAGENT_ORDER_CACHE[key]
-
-
-def _clear_reagent_order_cache() -> None:
-    """清除所有列表缓存（当订单数据发生变化时调用）"""
-    # 清除所有以 "list:" 开头的缓存键
-    keys_to_delete = [key for key in REAGENT_ORDER_CACHE.keys() if key.startswith("list:")]
-    for key in keys_to_delete:
-        del REAGENT_ORDER_CACHE[key]
-
+LIST_CACHE_PREFIX = "list:"
+ORDER_NOT_FOUND = "Order not found"
 
 def _add_specification(item_dict: dict) -> dict:
     """Add specification field to order response dict
@@ -80,22 +56,17 @@ def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[Consumabl
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
 def create_consumable_order(
     order: ConsumableOrderCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """Create a new consumable order"""
-    # specification 是用户直接输入的完整规格字符串（如 "500个"、"1箱"）
-    # 不需要从中解析任何内容，直接存储即可
-    
-    # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(name=order.name)
 
-    # Create order
     db_order = ConsumableOrder(
         name=order.name,
         english_name=order.english_name,
-        specification=order.specification,  # 规格字符串直接存储
-        unit=order.unit,  # 单位，选填
+        specification=order.specification,
+        unit=order.unit,
         quantity=order.quantity,
         price=order.price,
         communication=order.communication,
@@ -106,17 +77,17 @@ def create_consumable_order(
     db.add(db_order)
     db.commit()
     db.refresh(db_order)
+    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     
     return db_order
 
 
 # 分页限制常量
 MAX_PAGE_SIZE = 100
-
 @router.get("/")
 def list_consumable_orders(
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
+    db: DBSession,
     skip: int = 0,
     limit: int = min(50, MAX_PAGE_SIZE),
     status_filter: Optional[ConsumableOrderStatus] = None,
@@ -127,8 +98,10 @@ def list_consumable_orders(
     sort_order: Optional[str] = 'desc',
 ):
     """List consumable orders with optional filters, pagination, search, sort and applicant name"""
+    del current_user  # 仅用于鉴权
+
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
-    cache_key = f"list:{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
+    cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
 
     # 尝试从缓存获取（仅当是第一页且无搜索条件时）
     is_first_page = skip == 0
@@ -136,7 +109,12 @@ def list_consumable_orders(
     should_use_cache = is_first_page and not has_search
 
     if should_use_cache:
-        cached = _get_cached_result(cache_key)
+        cached = get_cached_result(
+            SEARCH_CACHE,
+            cache_key,
+            now=get_utc_now,
+            ttl_seconds=CACHE_TTL_SECONDS,
+        )
         if cached is not None:
             return {
                 **cached,
@@ -152,25 +130,11 @@ def list_consumable_orders(
     # 搜索处理
     if search:
         if fuzzy:
-            # 模糊搜索：标准化搜索词
-            search_normalized = search.strip().replace(" ", "").replace("-", "").replace("_", "")
-
-            from sqlmodel import func as sql_func
-
-            def norm_field(field):
-                f = sql_func.replace(field, '-', '')
-                f = sql_func.replace(f, ' ', '')
-                f = sql_func.replace(f, '\u00A0', '')
-                f = sql_func.replace(f, '\u2002', '')
-                f = sql_func.replace(f, '\u2003', '')
-                f = sql_func.replace(f, '\u2009', '')
-                f = sql_func.replace(f, '\u200C', '')
-                f = sql_func.replace(f, '\u200D', '')
-                f = sql_func.replace(f, '_', '')
-                return f
+            # 模糊搜索：标准化搜索词（移除特殊空格字符和常见分隔符）
+            search_normalized = normalize_search_term(search.strip())
 
             base = base.where(
-                (norm_field(ConsumableOrder.name).ilike(f"%{search_normalized}%"))
+                (normalize_field_sql(ConsumableOrder.name).ilike(f"%{search_normalized}%"))
             )
         else:
             search_pattern = f"%{search}%"
@@ -182,6 +146,7 @@ def list_consumable_orders(
                 if search_field in field_map:
                     base = base.where(field_map[search_field].ilike(search_pattern))
                 else:
+                    # 未知字段，回退到搜索所有字段
                     base = base.where(
                         (ConsumableOrder.name.ilike(search_pattern))
                     )
@@ -216,7 +181,10 @@ def list_consumable_orders(
     # 第三级排序：按ID降序（确保排序完全稳定）
     tertiary_order = ConsumableOrder.id.desc()
 
-    orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+    if limit > 0:
+        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+    else:
+        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order)).all()
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
@@ -238,8 +206,7 @@ def list_consumable_orders(
             "data": result["data"],
             "total": result["total"],
         }
-        _set_cached_result(cache_key, cache_data)
-
+        set_cached_result(SEARCH_CACHE, cache_key, cache_data, now=get_utc_now)
     return result
 
 
@@ -247,8 +214,8 @@ def list_consumable_orders(
 
 @router.get("/export")
 def export_consumable_orders(
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
+    db: DBSession,
+    current_user: AdminUser,
 ):
     """Export consumable orders as a downloadable CSV file."""
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
@@ -295,15 +262,15 @@ def export_consumable_orders(
 @router.get("/{order_id}", response_model=ConsumableOrderResponse)
 def get_consumable_order(
     order_id: int,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """Get consumable order by ID"""
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
+            detail=ORDER_NOT_FOUND
         )
     return order
 
@@ -312,15 +279,15 @@ def get_consumable_order(
 def update_consumable_order(
     order_id: int,
     order_update: ConsumableOrderUpdate,
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    db: DBSession,
+    current_user: CurrentUser,
 ):
     """Update consumable order information"""
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
+            detail=ORDER_NOT_FOUND
         )
 
     # 检查权限：只有申请人和管理员可以更新
@@ -333,18 +300,28 @@ def update_consumable_order(
 
     update_data = order_update.model_dump(exclude_unset=True)
     
-    # 如果更新了 name，重新计算拼音字段
+    optional_string_fields = [
+        'english_name', 'product_number', 'unit', 'communication', 'notes',
+    ]
+    normalized_strings = empty_to_none(update_data, optional_string_fields)
+    for field in optional_string_fields:
+        if field in update_data:
+            update_data[field] = normalized_strings[field]
+    
+    # 如果更新了 name，重新计算拼音字段（只保留 name_pinyin）
     if "name" in update_data:
         name = update_data.get("name")
         pinyin_fields = compute_pinyin_fields(name=name)
-        update_data.update(pinyin_fields)
+        # ConsumableOrder 只有 name_pinyin 字段
+        update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
     
     for field, value in update_data.items():
         setattr(order, field, value)
     
-    
     db.commit()
     db.refresh(order)
+    
+    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     
     return order
 
@@ -352,15 +329,15 @@ def update_consumable_order(
 @router.post("/{order_id}/approve")
 def approve_consumable_order(
     order_id: int,
-    admin_user: Annotated[User, Depends(require_admin)],
-    db: Annotated[Session, Depends(get_db)]
+    admin_user: AdminUser,
+    db: DBSession,
 ):
     """Approve a consumable order (Admin only)"""
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
+            detail=ORDER_NOT_FOUND
         )
     
     if order.status != ConsumableOrderStatus.PENDING:
@@ -373,6 +350,7 @@ def approve_consumable_order(
     
     db.commit()
     db.refresh(order)
+    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     
     return order
 
@@ -380,21 +358,22 @@ def approve_consumable_order(
 @router.post("/{order_id}/reject")
 def reject_consumable_order(
     order_id: int,
-    admin_user: Annotated[User, Depends(require_admin)],
-    db: Annotated[Session, Depends(get_db)],
+    admin_user: AdminUser,
+    db: DBSession,
 ):
     """Reject a consumable order (Admin only). Does not modify notes."""
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
+            detail=ORDER_NOT_FOUND
         )
     
     order.status = ConsumableOrderStatus.REJECTED
     
     db.commit()
     db.refresh(order)
+    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     
     return order
 
@@ -402,8 +381,8 @@ def reject_consumable_order(
 @router.post("/{order_id}/complete")
 def complete_consumable_order(
     order_id: int,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """
     Complete consumable order (consumables don't need stock-in)
@@ -413,7 +392,7 @@ def complete_consumable_order(
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
+            detail=ORDER_NOT_FOUND
         )
     
     # Check if user is the applicant or admin
@@ -435,6 +414,7 @@ def complete_consumable_order(
     
     db.commit()
     db.refresh(order)
+    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     
     return {
         "message": "耗材订单已完成",
@@ -445,8 +425,8 @@ def complete_consumable_order(
 
 @router.get("/dashboard/my-orders")
 def get_my_consumable_orders(
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """Get current user's consumable order progress"""
     statement = select(ConsumableOrder).where(
@@ -498,15 +478,15 @@ def get_my_consumable_orders(
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_consumable_order(
     order_id: int,
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    db: DBSession,
+    current_user: CurrentUser,
 ):
     """Delete a consumable order (only applicant or admin can delete)"""
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
+            detail=ORDER_NOT_FOUND
         )
     
     # Check if user is the applicant or admin
@@ -519,3 +499,4 @@ def delete_consumable_order(
     
     db.delete(order)
     db.commit()
+    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)

@@ -213,6 +213,7 @@ export const consumableOrderAPI = {
   create: (data: {
     name: string
     english_name?: string
+    product_number?: string
     specification: string
     unit?: string
     quantity: number
