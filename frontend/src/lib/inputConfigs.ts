@@ -76,7 +76,7 @@ export const defaultInputStyles: InputStyles = {
   // 美化后的 prefixButton：大小与动画一致，增加了悬浮背景，体验更好
   prefixButton: {
     base: "group inline-flex h-7 w-7 items-center justify-center rounded outline-none p-0 transition-all duration-300 ease-out",
-    loading: "text-muted-foreground/50 cursor-wait",
+    loading: "text-muted-foreground/50 cursor-default",
     default: "text-muted-foreground/50 hover:text-foreground hover:bg-muted/50",
     icon: "w-4 h-4 shrink-0 transition-all duration-300 ease-out group-hover:scale-110 group-active:scale-90",
   },

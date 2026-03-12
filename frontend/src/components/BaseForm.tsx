@@ -49,6 +49,7 @@ export interface FieldSchema<T extends Record<string, unknown>> {
   tag?: string        // 标签前缀（默认 [强调]），与 enableTagToggle 配合使用
   prefixButton?: PrefixButtonConfig  // 输入框左侧按钮配置
   autoComplete?: string  // 自动完成属性（如 "username", "current-password" 等）
+  onBlur?: (value: unknown) => void // 输入框失焦回调（用于按需触发查询）
 }
 
 /**
@@ -236,7 +237,7 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
                   onValueChange={controllerField.onChange}
                   disabled={isDisabled}
                 >
-                  <SelectTrigger id={`field-${field.name as string}`} className={cn(getInputClassName(hasError, isReadOnly), "w-full")}>
+                  <SelectTrigger id={`field-${field.name as string}`} className={cn(getInputClassName(hasError, isReadOnly), "w-full min-h-10")}>
                     <SelectValue placeholder={field.placeholder || '请选择'} />
                   </SelectTrigger>
                   <SelectContent>
@@ -276,6 +277,10 @@ function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
                   enableTagToggle={field.enableTagToggle}
                   prefixButton={field.prefixButton}
                   tag={field.tag}
+                  onBlur={(e) => {
+                    controllerField.onBlur()
+                    field.onBlur?.(e.target.value)
+                  }}
                 />
               )}
 

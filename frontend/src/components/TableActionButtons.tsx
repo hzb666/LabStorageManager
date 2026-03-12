@@ -159,6 +159,46 @@ function ActionButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T
     config.onClick(item)
   }
 
+  // 同时有 icon 和 confirm 时，显示带图标的确认按钮
+  if (config.icon && config.confirm) {
+    // 根据按钮 id 确定确认状态的背景色；确认态图标与常规态保持一致
+    const isApprove = config.id === 'approve'
+    const confirmStateClass = isApprove
+      ? 'bg-green-600 text-white [&_svg]:text-white hover:bg-green-600/70 dark:bg-green-600 dark:hover:bg-green-600/70'
+      : 'bg-destructive text-white [&_svg]:text-white hover:bg-destructive/70 dark:bg-destructive dark:hover:bg-destructive/70'
+    
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <LoadingButton
+            size="sm"
+            disabled={isDisabled}
+            variant="morden"
+            className={cn(
+              config.className,
+              'h-8 w-8 p-0',
+              isConfirming
+                ? cn(
+                  'transition-none [&_svg]:transition-none',
+                  confirmStateClass,
+                  isLoading && 'opacity-100 cursor-wait'
+                )
+                : ''
+            )}
+            onClick={handleClick}
+            onBlur={() => { if (isConfirming && !isLoading) setIsConfirming(false) }}
+            isLoading={isLoading}
+          >
+            {config.icon}
+          </LoadingButton>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>{isConfirming ? (config.confirmLabel || '确认') : config.label}</p>
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
   if (config.confirm) {
     return (
       <LoadingButton

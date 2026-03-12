@@ -264,7 +264,6 @@ export const validateAndNormalizeCASInput = (
  * 支持预选选项和自定义输入
  */
 const ORDER_REASON_VALUES = [
-  'none',
   'running_out',
   'not_stocked',
   'common_public',
@@ -272,9 +271,10 @@ const ORDER_REASON_VALUES = [
   'reorder',
   'high_usage',
   'degraded',
+  'others',
 ] as const
 
-export const OrderReasonSchema = v.optional(v.picklist(ORDER_REASON_VALUES))
+export const OrderReasonSchema = v.picklist(ORDER_REASON_VALUES, '申购原因不能为空')
 
 /**
  * 剩余量验证（非负数，允许0，但不能是null/undefined/空字符串）
@@ -343,8 +343,8 @@ export const ReagentOrderSchema = v.object({
   brand: createMaxLengthSchema('品牌', 100),
   specification: SpecificationSchema, // 后端必填
   quantity: createPositiveNumberSchema('数量'),
-  price: createPriceSchema(0.01), // 必填，必须大于0
-  order_reason: OrderReasonSchema,
+  price: createPriceSchema(0.01),  // 必填
+  order_reason: OrderReasonSchema,   // 必填
   is_hazardous: v.boolean('危险品必须是布尔值'),
   notes: createMaxLengthSchema('备注', 500)
 })

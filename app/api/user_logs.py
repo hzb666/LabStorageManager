@@ -185,7 +185,7 @@ def get_user_logs(
                 "time": o.created_at.isoformat() + 'Z' if o.created_at else None,
                 "type": "reagent_order",
                 # 展开前显示的模板
-                "detail": f"申购 {o.name} {o.specification or ''} x{o.quantity}",
+                "detail": f"申购 {o.name} {o.initial_quantity or ''}{o.unit or ''} x{o.quantity}",
                 # 展开后的所有字段
                 "full_data": {
                     "id": o.id,
@@ -195,7 +195,6 @@ def get_user_logs(
                     "alias": o.alias,
                     "category": o.category,
                     "brand": o.brand,
-                    "specification": getattr(o, 'specification', None),
                     "initial_quantity": o.initial_quantity,
                     "unit": o.unit,
                     "quantity": o.quantity,

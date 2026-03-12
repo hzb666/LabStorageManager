@@ -389,6 +389,9 @@ export function DataTable<TData>({
     document.addEventListener('touchend', onUp)
   }, [visibleColumns, totalWeight, minTableWidth, table])
 
+  // 判断是否使用虚拟滚动：scrollHeight='auto' 时无法正确计算容器高度，需要禁用虚拟滚动
+  const shouldUseVirtualization = scrollHeight !== 'auto'
+
   // 配置虚拟滚动：利用 @tanstack/react-virtual 仅渲染视窗内的元素，极大提升长列表性能
   // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
@@ -595,37 +598,56 @@ export function DataTable<TData>({
         {/* 承载虚拟元素的定高大容器 */}
         <div
           style={{
-            height: `${rowVirtualizer.getTotalSize()}px`,
+            height: shouldUseVirtualization ? `${rowVirtualizer.getTotalSize()}px` : 'auto',
             width: "100%",
             minWidth: `${minTableWidth}px`,
-            position: 'relative'
+            position: shouldUseVirtualization ? 'relative' : 'static'
           }}
         >
-          {/* 只映射渲染当前处于视口内的节点 */}
-          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-            const row = rows[virtualRow.index]
-            return (
-              <div
-                key={virtualRow.key}
-                className="absolute top-0 left-0 w-full"
-                style={{
-                  transform: `translateY(${virtualRow.start}px)`, //绝对定位，仅通过 Translate 移动到虚拟视口中的应处位置
-                }}
-              >
-                {/* 🚀 修复核心：必须将 data-index 挂载到拥有 measureElement 的节点上，虚拟滚动器才能正确对应测量高度 */}
-                <div ref={rowVirtualizer.measureElement} data-index={virtualRow.index}>
-                  <InnerRow
-                    row={row}
-                    isExpanded={row.getIsExpanded()} 
-                    renderExpandedRow={renderExpandedRow}
-                    getProportionalStyles={getProportionalStyles}
-                    noteField={noteField}
-                    onRowClick={handleRowClick}
-                  />
+          {/* 根据 scrollHeight 是否为 'auto' 选择渲染方式 */}
+          {shouldUseVirtualization ? (
+            // 虚拟滚动模式
+            rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const row = rows[virtualRow.index]
+              return (
+                <div
+                  key={virtualRow.key}
+                  className="absolute top-0 left-0 w-full"
+                  style={{
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <div ref={rowVirtualizer.measureElement} data-index={virtualRow.index}>
+                    <InnerRow
+                      row={row}
+                      isExpanded={row.getIsExpanded()} 
+                      renderExpandedRow={renderExpandedRow}
+                      getProportionalStyles={getProportionalStyles}
+                      noteField={noteField}
+                      onRowClick={handleRowClick}
+                    />
+                  </div>
                 </div>
+              )
+            })
+          ) : (
+            // 直接渲染模式：scrollHeight='auto' 时使用，直接渲染所有行
+            rows.map((row, index) => (
+              <div
+                key={row.id ?? index}
+                className="w-full"
+              >
+                <InnerRow
+                  row={row}
+                  isExpanded={row.getIsExpanded()} 
+                  renderExpandedRow={renderExpandedRow}
+                  getProportionalStyles={getProportionalStyles}
+                  noteField={noteField}
+                  onRowClick={handleRowClick}
+                />
               </div>
-            )
-          })}
+            ))
+          )}
         </div>
         
         {/* 底部加载更多状态提示 */}

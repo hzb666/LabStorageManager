@@ -13,7 +13,7 @@ from sqlmodel import Session, select, func
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
-from app.core.time_utils import get_utc_now
+from app.core.time_utils import get_utc_now, to_china_time
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
@@ -21,6 +21,7 @@ from app.models.consumable_order import (
     ConsumableOrderResponse,
     ConsumableOrderStatus,
 )
+from app.models.user import User
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.sql_utils import normalize_field_sql, normalize_search_term
@@ -39,6 +40,8 @@ SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
 LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
+APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
+APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
 
 def _add_specification(item_dict: dict) -> dict:
     """Add specification field to order response dict
@@ -51,6 +54,58 @@ def _add_specification(item_dict: dict) -> dict:
 def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[ConsumableOrder]:
     """Get consumable order by ID"""
     return db.get(ConsumableOrder, order_id)
+
+
+def _apply_consumable_order_filters(
+    base,
+    status_filter: Optional[ConsumableOrderStatus],
+    search: Optional[str],
+    search_field: Optional[str],
+    fuzzy: bool,
+):
+    """Apply shared list filters for consumable order listing."""
+    if status_filter:
+        base = base.where(ConsumableOrder.status == status_filter)
+
+    if not search:
+        return base
+
+    if fuzzy:
+        # 模糊搜索：标准化搜索词（移除特殊空格字符和常见分隔符）
+        search_normalized = normalize_search_term(search.strip())
+        applicant_id_subquery = select(User.id).where(
+            normalize_field_sql(User.full_name).ilike(f"%{search_normalized}%")
+        )
+        return base.where(
+            (normalize_field_sql(ConsumableOrder.name).ilike(f"%{search_normalized}%")) |
+            (normalize_field_sql(ConsumableOrder.specification).ilike(f"%{search_normalized}%")) |
+            (normalize_field_sql(ConsumableOrder.communication).ilike(f"%{search_normalized}%")) |
+            (ConsumableOrder.applicant_id.in_(applicant_id_subquery))
+        )
+
+    search_pattern = f"%{search}%"
+    applicant_id_subquery = select(User.id).where(
+        User.full_name.ilike(search_pattern)
+    )
+
+    if search_field and search_field != 'all':
+        field_map = {
+            'name': ConsumableOrder.name,
+            'specification': ConsumableOrder.specification,
+            'communication': ConsumableOrder.communication,
+        }
+        if search_field in APPLICANT_SEARCH_KEYS:
+            return base.where(ConsumableOrder.applicant_id.in_(applicant_id_subquery))
+        if search_field in field_map:
+            return base.where(field_map[search_field].ilike(search_pattern))
+
+    # 未知字段或 all，回退到搜索常用字段 + 订购人
+    return base.where(
+        (ConsumableOrder.name.ilike(search_pattern)) |
+        (ConsumableOrder.specification.ilike(search_pattern)) |
+        (ConsumableOrder.communication.ilike(search_pattern)) |
+        (ConsumableOrder.applicant_id.in_(applicant_id_subquery))
+    )
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -124,39 +179,6 @@ def list_consumable_orders(
 
     base = select(ConsumableOrder)
 
-    if status_filter:
-        base = base.where(ConsumableOrder.status == status_filter)
-
-    # 搜索处理
-    if search:
-        if fuzzy:
-            # 模糊搜索：标准化搜索词（移除特殊空格字符和常见分隔符）
-            search_normalized = normalize_search_term(search.strip())
-
-            base = base.where(
-                (normalize_field_sql(ConsumableOrder.name).ilike(f"%{search_normalized}%"))
-            )
-        else:
-            search_pattern = f"%{search}%"
-
-            if search_field and search_field != 'all':
-                field_map = {
-                    'name': ConsumableOrder.name,
-                }
-                if search_field in field_map:
-                    base = base.where(field_map[search_field].ilike(search_pattern))
-                else:
-                    # 未知字段，回退到搜索所有字段
-                    base = base.where(
-                        (ConsumableOrder.name.ilike(search_pattern))
-                    )
-            else:
-                base = base.where(
-                    (ConsumableOrder.name.ilike(search_pattern))
-                )
-
-    total = db.exec(select(func.count()).select_from(base.subquery())).one()
-
     # 排序处理
     sort_field_map = {
         'name': ConsumableOrder.name,
@@ -168,8 +190,27 @@ def list_consumable_orders(
         'updated_at': ConsumableOrder.updated_at,
     }
 
+    # 处理申请人排序（需要 JOIN User 表）
+    use_applicant_join = sort_by in APPLICANT_SORT_KEYS
+
+    if use_applicant_join:
+        # 需要 JOIN User 表来按申请人姓名拼音排序
+        from sqlmodel import join as sqljoin
+
+        # 重新构建 base 查询，包含 JOIN
+        base = select(ConsumableOrder).select_from(
+            sqljoin(ConsumableOrder, User, ConsumableOrder.applicant_id == User.id)
+        )
+        base = _apply_consumable_order_filters(base, status_filter, search, search_field, fuzzy)
+
+        order_column = func.coalesce(User.full_name_pinyin, User.full_name)
+    else:
+        base = _apply_consumable_order_filters(base, status_filter, search, search_field, fuzzy)
+        order_column = sort_field_map.get(sort_by, ConsumableOrder.created_at)
+
+    total = db.exec(select(func.count()).select_from(base.subquery())).one()
+
     order_direction = sort_order.lower() if sort_order else 'desc'
-    order_column = sort_field_map.get(sort_by, ConsumableOrder.created_at)
 
     if order_direction == 'asc':
         order_expr = order_column.asc()
@@ -221,7 +262,7 @@ def export_consumable_orders(
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
     orders = db.exec(statement).all()
 
-    # 查询所有申请人ID用于导出
+    # 查询所有订购人ID用于导出
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids)
 
@@ -231,7 +272,7 @@ def export_consumable_orders(
 
     writer.writerow([
         "名称", "英文名", "规格", "数量", "单价", "状态",
-        "申请人", "申购时间", "备注",
+        "订购人", "申购时间", "备注",
     ])
 
     for order in orders:
@@ -245,7 +286,7 @@ def export_consumable_orders(
             order.price or "",
             order.status.value if hasattr(order.status, "value") else order.status,
             all_users_map.get(order.applicant_id, "") if order.applicant_id else "",
-            order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
+            to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
             order.notes or "",
         ])
 
@@ -290,7 +331,7 @@ def update_consumable_order(
             detail=ORDER_NOT_FOUND
         )
 
-    # 检查权限：只有申请人和管理员可以更新
+    # 检查权限：只有订购人和管理员可以更新
     from app.models.user import UserRole
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(

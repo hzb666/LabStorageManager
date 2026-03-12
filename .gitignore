@@ -37,6 +37,7 @@ env/
 *.sw?
 *.sw
 CLAUDE.md
+AGENTS.md
 
 # Database
 *.db

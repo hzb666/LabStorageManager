@@ -81,6 +81,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             {prefixButton ? (
               <button
                 type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={prefixButton.onClick}
                 title={prefixButton.title || "点击操作"}
                 disabled={prefixButton.loading}

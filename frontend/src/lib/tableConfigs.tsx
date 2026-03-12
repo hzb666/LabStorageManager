@@ -10,7 +10,7 @@ import { createColumnHelper } from '@tanstack/react-table'
 import { safeString } from '@/lib/validationSchemas'
 import type { ColumnDef } from '@tanstack/react-table'
 import { HighlightText } from '@/components/ui/HighlightText'
-import { StatusBadge, ORDER_REASON_LABELS } from '@/components/ui/StatusBadge'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
 import { formatDate, formatDateTime, getFullImageUrl } from '@/lib/utils'
@@ -159,8 +159,8 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
     }),
     columnHelper.accessor('name', {
       header: '名称',
-      size: 180,
-      minSize: 150,
+      size: 200,
+      minSize: 160,
       maxSize: 300,
       cell: info => (
         <div className="flex items-center gap-1.5">
@@ -187,9 +187,10 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
     }),
     columnHelper.accessor('specification', {
       header: '规格',
-      size: 120,
+      size: 100,
       minSize: 80,
-      maxSize: 200,
+      maxSize: 120,
+      enableSorting: false,
       cell: info => {
         const order = info.row.original
         const specification = info.getValue() as string | null
@@ -208,17 +209,8 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       maxSize: 100,
       cell: info => info.getValue() ? `¥${info.getValue()}` : '-',
     }),
-    columnHelper.accessor('order_reason', {
-      header: '原因',
-      size: 60,
-      minSize: 50,
-      maxSize: 80,
-      cell: info => {
-        const reason = info.getValue() as string
-        return <span>{ORDER_REASON_LABELS[reason] || reason}</span>
-      },
-    }),
     columnHelper.accessor('applicant_name', {
+      id: 'applicant',
       header: '订购人',
       size: 70,
       minSize: 60,
@@ -235,6 +227,16 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       maxSize: 120,
       cell: info => <span>{formatDate(info.getValue() as string).split(' ')[0]}</span>,
     }),
+    columnHelper.accessor('order_reason', {
+      header: '原因',
+      size: 60,
+      minSize: 50,
+      maxSize: 80,
+      cell: info => {
+        const reason = info.getValue() as string
+        return <StatusBadge status={reason} />
+      },
+    }),
     columnHelper.accessor('status', {
       header: '状态',
       size: 60,
@@ -247,7 +249,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
 
 /**
  * 耗材订单表格列配置
- * 包含：名称、分类、品牌、规格、数量、价格、申请人、状态
+ * 包含：名称、分类、品牌、规格、数量、价格、订购人、状态
  */
 export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknown>[] {
   return [
@@ -290,7 +292,8 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       },
     }),
     columnHelper.accessor('applicant_name', {
-      header: '申请人',
+      id: 'applicant',
+      header: '订购人',
       size: 80,
       minSize: 80,
       maxSize: 100,

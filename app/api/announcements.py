@@ -55,7 +55,7 @@ def get_public_announcements(
     """
     statement = (
         select(Announcement)
-        .where(Announcement.is_visible == True)
+        .where(Announcement.is_visible)
         .order_by(Announcement.is_pinned.desc())
         .order_by(Announcement.created_at.desc())
     )

@@ -1,12 +1,13 @@
 // 申购原因选项
 export const ORDER_REASON_OPTIONS = [
-  { label: '库存用完', value: 'running_out' },
   { label: '没有', value: 'not_stocked' },
+  { label: '库存用完', value: 'running_out' },
   { label: '公用常用', value: 'common_public' },
   { label: '没找到', value: 'not_found' },
   { label: '追加订购', value: 'reorder' },
   { label: '大量使用', value: 'high_usage' },
   { label: '变质', value: 'degraded' },
+  { label: '其他', value: 'others' },
 ]
 
 export const REAGENT_CATEGORY_OPTIONS = [

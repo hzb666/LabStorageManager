@@ -13,12 +13,15 @@ from sqlmodel import Session, select, func
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
-from app.core.time_utils import get_utc_now
+from app.core.time_utils import get_utc_now, to_china_time
+from app.models.user import User
+from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import (
     ReagentOrder,
     ReagentOrderCreate,
     ReagentOrderUpdate,
     ReagentOrderResponse,
+    ReagentOrderReason,
     ReagentOrderStatus,
 )
 from app.services.cas_utils import normalize_cas, validate_cas_format
@@ -41,6 +44,35 @@ router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
 LIST_CACHE_PREFIX = "list:"
+VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
+APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
+APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
+
+
+def _validate_order_reason(reason: Optional[str], required: bool = False) -> Optional[ReagentOrderReason]:
+    """Validate order reason in API layer and convert to enum for model persistence."""
+    if reason is None:
+        if required:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="order_reason is required"
+            )
+        return None
+
+    normalized_reason = reason.strip().lower()
+    if not normalized_reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="order_reason is required"
+        )
+
+    if normalized_reason not in VALID_REAGENT_ORDER_REASONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid order_reason"
+        )
+
+    return ReagentOrderReason(normalized_reason)
 
 def _add_specification(item_dict: dict) -> dict:
     """Add computed specification field to order response dict"""
@@ -52,6 +84,63 @@ def _add_specification(item_dict: dict) -> dict:
 def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
     """Get reagent order by ID"""
     return db.get(ReagentOrder, order_id)
+
+
+def _apply_reagent_order_filters(
+    base,
+    status_filter: Optional[ReagentOrderStatus],
+    search: Optional[str],
+    search_field: Optional[str],
+    fuzzy: bool,
+):
+    """Apply shared list filters for reagent order listing."""
+    if status_filter:
+        base = base.where(ReagentOrder.status == status_filter)
+
+    if not search:
+        return base
+
+    if fuzzy:
+        # 模糊搜索：标准化搜索词（移除特殊空格字符和常见分隔符）
+        search_normalized = normalize_search_term(search.strip())
+        applicant_id_subquery = select(User.id).where(
+            normalize_field_sql(User.full_name).ilike(f"%{search_normalized}%")
+        )
+
+        return base.where(
+            (normalize_field_sql(ReagentOrder.cas_number).ilike(f"%{search_normalized}%")) |
+            (normalize_field_sql(ReagentOrder.name).ilike(f"%{search_normalized}%")) |
+            (normalize_field_sql(ReagentOrder.brand).ilike(f"%{search_normalized}%")) |
+            (normalize_field_sql(ReagentOrder.category).ilike(f"%{search_normalized}%")) |
+            (ReagentOrder.applicant_id.in_(applicant_id_subquery))
+        )
+
+    search_pattern = f"%{search}%"
+    applicant_id_subquery = select(User.id).where(
+        User.full_name.ilike(search_pattern)
+    )
+
+    if search_field and search_field != 'all':
+        field_map = {
+            'name': ReagentOrder.name,
+            'cas': ReagentOrder.cas_number,
+            'cas_number': ReagentOrder.cas_number,
+            'brand': ReagentOrder.brand,
+            'category': ReagentOrder.category,
+        }
+        if search_field in APPLICANT_SEARCH_KEYS:
+            return base.where(ReagentOrder.applicant_id.in_(applicant_id_subquery))
+        if search_field in field_map:
+            return base.where(field_map[search_field].ilike(search_pattern))
+
+    # 未知字段或 all，回退到搜索所有字段
+    return base.where(
+        (ReagentOrder.name.ilike(search_pattern)) |
+        (ReagentOrder.cas_number.ilike(search_pattern)) |
+        (ReagentOrder.brand.ilike(search_pattern)) |
+        (ReagentOrder.category.ilike(search_pattern)) |
+        (ReagentOrder.applicant_id.in_(applicant_id_subquery))
+    )
 
 
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -82,6 +171,8 @@ def create_reagent_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid specification format: {e}"
         )
+
+    # order_reason 已在模型层验证（枚举类型），直接使用
     
     # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(
@@ -158,51 +249,6 @@ def list_reagent_orders(
 
     base = select(ReagentOrder)
 
-    if status_filter:
-        base = base.where(ReagentOrder.status == status_filter)
-
-    # 搜索处理
-    if search:
-        if fuzzy:
-            # 模糊搜索：标准化搜索词（移除特殊空格字符和常见分隔符）
-            search_normalized = normalize_search_term(search.strip())
-
-            base = base.where(
-                (normalize_field_sql(ReagentOrder.cas_number).ilike(f"%{search_normalized}%")) |
-                (normalize_field_sql(ReagentOrder.name).ilike(f"%{search_normalized}%")) |
-                (normalize_field_sql(ReagentOrder.brand).ilike(f"%{search_normalized}%")) |
-                (normalize_field_sql(ReagentOrder.category).ilike(f"%{search_normalized}%"))
-            )
-        else:
-            search_pattern = f"%{search}%"
-
-            if search_field and search_field != 'all':
-                field_map = {
-                    'name': ReagentOrder.name,
-                    'cas_number': ReagentOrder.cas_number,
-                    'brand': ReagentOrder.brand,
-                    'category': ReagentOrder.category,
-                }
-                if search_field in field_map:
-                    base = base.where(field_map[search_field].ilike(search_pattern))
-                else:
-                    # 未知字段，回退到搜索所有字段
-                    base = base.where(
-                        (ReagentOrder.name.ilike(search_pattern)) |
-                        (ReagentOrder.cas_number.ilike(search_pattern)) |
-                        (ReagentOrder.brand.ilike(search_pattern)) |
-                        (ReagentOrder.category.ilike(search_pattern))
-                    )
-            else:
-                base = base.where(
-                    (ReagentOrder.name.ilike(search_pattern)) |
-                    (ReagentOrder.cas_number.ilike(search_pattern)) |
-                    (ReagentOrder.brand.ilike(search_pattern)) |
-                    (ReagentOrder.category.ilike(search_pattern))
-                )
-
-    total = db.exec(select(func.count()).select_from(base.subquery())).one()
-
     # 排序处理
     sort_field_map = {
         'cas_number': ReagentOrder.cas_number,
@@ -219,8 +265,27 @@ def list_reagent_orders(
         'updated_at': ReagentOrder.updated_at,
     }
 
+    # 处理申请人排序（需要 JOIN User 表）
+    use_applicant_join = sort_by in APPLICANT_SORT_KEYS
+
+    if use_applicant_join:
+        # 需要 JOIN User 表来按申请人姓名拼音排序
+        from sqlmodel import join as sqljoin
+
+        # 重新构建 base 查询，包含 JOIN
+        base = select(ReagentOrder).select_from(
+            sqljoin(ReagentOrder, User, ReagentOrder.applicant_id == User.id)
+        )
+        base = _apply_reagent_order_filters(base, status_filter, search, search_field, fuzzy)
+
+        order_column = func.coalesce(User.full_name_pinyin, User.full_name)
+    else:
+        base = _apply_reagent_order_filters(base, status_filter, search, search_field, fuzzy)
+        order_column = sort_field_map.get(sort_by, ReagentOrder.created_at)
+
+    total = db.exec(select(func.count()).select_from(base.subquery())).one()
+
     order_direction = sort_order.lower() if sort_order else 'desc'
-    order_column = sort_field_map.get(sort_by, ReagentOrder.created_at)
 
     if order_direction == 'asc':
         order_expr = order_column.asc()
@@ -273,7 +338,7 @@ def export_reagent_orders(
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
     orders = db.exec(statement).all()
 
-    # 查询所有申请人ID用于导出
+    # 查询所有订购人ID用于导出
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids)
 
@@ -284,7 +349,7 @@ def export_reagent_orders(
     writer.writerow([
         "CAS号", "名称", "英文名", "别名", "分类", "品牌",
         "规格", "数量", "单价", "申购原因", "状态",
-        "是否危险品", "申请人", "申购时间", "备注",
+        "是否危险品", "订购人", "申购时间", "备注",
     ])
 
     for order in orders:
@@ -304,7 +369,7 @@ def export_reagent_orders(
             order.status.value if hasattr(order.status, "value") else order.status,
             "是" if order.is_hazardous else "否",
             all_users_map.get(order.applicant_id, "") if order.applicant_id else "",
-            order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
+            to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
             order.notes or "",
         ])
 
@@ -316,6 +381,103 @@ def export_reagent_orders(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.get("/cas-overview/{cas_number}")
+def get_cas_overview(
+    cas_number: str,
+    current_user: CurrentUser,
+    db: DBSession,
+):
+    """Get CAS overview for duplicate-check hints in forms and expanded rows."""
+    del current_user  # 仅用于鉴权
+
+    normalized_cas = normalize_cas(cas_number)
+    is_valid, error = validate_cas_format(normalized_cas)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid CAS format: {error}",
+        )
+
+    # 订单：匹配同 CAS 的所有订单，排除已到货（已进入库存暂存区无需再提醒），取最近一条 + 总数
+    orders_base = select(ReagentOrder).where(
+        ReagentOrder.cas_number == normalized_cas,
+        ReagentOrder.status != ReagentOrderStatus.ARRIVED,
+    )
+    orders_count = db.exec(select(func.count()).select_from(orders_base.subquery())).one()
+    latest_order = db.exec(
+        orders_base.order_by(ReagentOrder.created_at.desc(), ReagentOrder.id.desc()).limit(1)
+    ).first()
+
+    # 库存：过滤掉已消耗或剩余量为 0 的库存，取最近一条 + 总数
+    inventory_base = select(Inventory).where(
+        Inventory.cas_number == normalized_cas,
+        Inventory.status != InventoryStatus.CONSUMED,
+        (Inventory.remaining_quantity.is_(None)) | (Inventory.remaining_quantity > 0),
+    )
+    inventory_count = db.exec(select(func.count()).select_from(inventory_base.subquery())).one()
+    latest_inventory = db.exec(
+        inventory_base.order_by(Inventory.created_at.desc(), Inventory.id.desc()).limit(1)
+    ).first()
+
+    # 补齐涉及人员姓名
+    user_ids: set[int] = set()
+    if latest_order and latest_order.applicant_id:
+        user_ids.add(latest_order.applicant_id)
+    if latest_inventory and latest_inventory.borrower_id:
+        user_ids.add(latest_inventory.borrower_id)
+    users_map = batch_get_user_names(db, user_ids)
+
+    latest_order_payload = None
+    if latest_order:
+        latest_order_payload = {
+            "id": latest_order.id,
+            "name": latest_order.name,
+            "applicant_name": users_map.get(latest_order.applicant_id),
+            "specification": format_specification(latest_order.initial_quantity, latest_order.unit) or "-",
+            "created_at": latest_order.created_at,
+            "status": latest_order.status.value
+            if hasattr(latest_order.status, "value")
+            else latest_order.status,
+        }
+
+    latest_inventory_payload = None
+    if latest_inventory:
+        latest_inventory_payload = {
+            "id": latest_inventory.id,
+            "remaining_quantity": latest_inventory.remaining_quantity,
+            "specification": format_specification(
+                latest_inventory.initial_quantity,
+                latest_inventory.unit,
+            ) or "-",
+            "storage_location": latest_inventory.storage_location,
+            "created_at": latest_inventory.created_at,
+            "status": latest_inventory.status.value
+            if hasattr(latest_inventory.status, "value")
+            else latest_inventory.status,
+            "borrower_name": users_map.get(latest_inventory.borrower_id),
+        }
+
+    display_name = None
+    if latest_order and latest_order.name:
+        display_name = latest_order.name
+    elif latest_inventory and latest_inventory.name:
+        display_name = latest_inventory.name
+
+    return {
+        "cas_number": normalized_cas,
+        "display_name": display_name,
+        "has_warning": orders_count > 0 or inventory_count > 0,
+        "orders": {
+            "total_count": orders_count,
+            "latest": latest_order_payload,
+        },
+        "inventory": {
+            "total_count": inventory_count,
+            "latest": latest_inventory_payload,
+        },
+    }
 
 
 @router.get("/{order_id}", response_model=ReagentOrderResponse)
@@ -377,7 +539,8 @@ def update_reagent_order(
                 detail=f"Invalid CAS format: {error}"
             )
         update_data["cas_number"] = normalized_cas
-    
+
+    # order_reason 已在模型层验证（枚举类型），直接使用
     # 如果更新了 name 或 brand，重新计算拼音字段（只保留 name_pinyin 和 brand_pinyin）
     if "name" in update_data or "brand" in update_data:
         name = update_data.get("name", order.name)

@@ -72,7 +72,7 @@ export function CommonShelfPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-primary">常用货架</h1>
+        <h1 className="text-3xl font-bold text-primary card-title-placeholder">常用货架</h1>
       </div>
 
       <FilterTable

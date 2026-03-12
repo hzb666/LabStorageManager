@@ -382,7 +382,7 @@ export function Dashboard() {
       specification: String(item.specification ?? ''),
       quantity: Number(item.quantity ?? 1),
       price: (item.price as number | undefined) ?? undefined,
-      order_reason: String(item.order_reason ?? 'none') as ReagentOrderFormData['order_reason'],
+      order_reason: String(item.order_reason ?? '') as ReagentOrderFormData['order_reason'],
       is_hazardous: Boolean(item.is_hazardous),
       notes: String(item.notes ?? ''),
     })
@@ -647,7 +647,7 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary">仪表盘</h1>
+        <h1 className="text-3xl font-bold text-primary card-title-placeholder">仪表盘</h1>
       </div>
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">

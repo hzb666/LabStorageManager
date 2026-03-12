@@ -105,7 +105,7 @@ def _register_approval_routes(
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
 
-        if order.status != ReagentOrderStatus.PENDING:
+        if order.status not in (ReagentOrderStatus.PENDING, ReagentOrderStatus.REJECTED):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot approve order with status: {order.status}",
@@ -124,6 +124,12 @@ def _register_approval_routes(
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+
+        if order.status not in (ReagentOrderStatus.PENDING, ReagentOrderStatus.APPROVED):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot reject order with status: {order.status}",
+            )
 
         order.status = ReagentOrderStatus.REJECTED
 

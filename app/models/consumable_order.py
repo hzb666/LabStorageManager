@@ -9,7 +9,7 @@ from app.models import BaseResponse
 from enum import Enum
 from typing import Optional
 
-from sqlmodel import Field, ForeignKey, SQLModel
+from sqlmodel import Field, SQLModel
 
 
 class ConsumableOrderStatus(str, Enum):

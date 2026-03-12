@@ -483,11 +483,11 @@ export function AdminUsersPage() {
           <DialogHeader>
             <DialogTitle>确认禁用用户</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
+          <div className="pb-4">
             <p>确定要禁用用户 <strong>{deleteUser?.username}</strong> 吗？</p>
             <p className="text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex mt-4 gap-2">
             <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg">
               {deleteLoading ? '处理中...' : '确认禁用'}
             </Button>

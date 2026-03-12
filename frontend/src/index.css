@@ -45,6 +45,8 @@
 
 :root {
   --radius: 0.625rem;
+  --app-font-family-fallback: 'Arial', 'Helvetica Neue', 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif;
+  --app-font-family-web: 'Arial', 'Helvetica Neue', 'SourceHanSansSC-CJK', '思源黑体', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   /* 页面主背景 - 浅灰色 */
   --background: oklch(0.97 0 0);
   --foreground: oklch(0.129 0.042 264.695);
@@ -138,10 +140,18 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: 'Arial', 'Helvetica Neue', 'SourceHanSansSC-CJK', '思源黑体', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    font-family: var(--app-font-family-fallback);
     /* 防止布局变化导致的内容宽度抖动 */
     min-height: 100%;
     width: 100%;
+  }
+
+  html[data-font-state='loading'] body {
+    visibility: hidden;
+  }
+
+  html.web-fonts-ready body {
+    font-family: var(--app-font-family-web);
   }
 
   button:not(:disabled),

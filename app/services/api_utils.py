@@ -62,3 +62,15 @@ def clear_cache_by_prefix(cache_store: CacheStore, prefix: str = "list:") -> int
     for key in keys_to_delete:
         del cache_store[key]
     return len(keys_to_delete)
+
+
+def empty_to_none(obj: Any, fields: list[str]) -> dict:
+    """将指定字段中的空字符串统一转换为 None。"""
+    result = {}
+    for field in fields:
+        if isinstance(obj, dict):
+            value = obj.get(field)
+        else:
+            value = getattr(obj, field, None)
+        result[field] = None if value == '' else value
+    return result

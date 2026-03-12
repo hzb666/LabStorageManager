@@ -9,6 +9,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import type { RowData, ColumnDef } from '@tanstack/react-table'
+import { useLocation } from 'react-router-dom'
 
 // UI 组件
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -83,6 +84,20 @@ export function FilterTable({
   className = '',
   emptyText = '暂无数据'
 }: Readonly<FilterTableProps>) {
+  const location = useLocation()
+  const initialUrlSearchState = useMemo(() => {
+    const query = new URLSearchParams(location.search)
+    const nextSearch = query.get('search')?.trim() ?? ''
+    const nextField = query.get('field')?.trim() ?? ''
+    const hasValidField = searchFieldOptions.some((option) => option.value === nextField)
+
+    return {
+      search: nextSearch,
+      field: hasValidField ? nextField : defaultSearchField,
+      hasQuery: query.has('search') || query.has('field'),
+    }
+  }, [defaultSearchField, location.search, searchFieldOptions])
+
   const filter = useTableState({
     api,
     queryKey,
@@ -94,6 +109,8 @@ export function FilterTable({
     pageSize,
     debounceMs,
     extraParams,
+    initialSearch: initialUrlSearchState.search,
+    initialSearchField: initialUrlSearchState.field,
   })
 
   const tableColumns = useMemo(() => {
@@ -102,6 +119,33 @@ export function FilterTable({
     }
     return getInventoryTableColumns() as ColumnDef<Record<string, unknown>, unknown>[]
   }, [customColumns])
+
+  const lastAppliedSearchRef = useRef<string>(location.search)
+
+  useEffect(() => {
+    if (location.search === lastAppliedSearchRef.current) {
+      return
+    }
+
+    if (!location.search) {
+      filter.applySearchImmediate('', defaultSearchField)
+      lastAppliedSearchRef.current = location.search
+      return
+    }
+
+    if (!initialUrlSearchState.hasQuery) {
+      return
+    }
+
+    filter.applySearchImmediate(initialUrlSearchState.search, initialUrlSearchState.field)
+    lastAppliedSearchRef.current = location.search
+  }, [
+    filter.applySearchImmediate,
+    initialUrlSearchState.field,
+    initialUrlSearchState.hasQuery,
+    initialUrlSearchState.search,
+    location.search,
+  ])
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
@@ -184,6 +228,7 @@ export function FilterTable({
   ])
 
   // 根据数据条数动态计算表格高度
+  // 数据少时使用 'auto' 让内容自然撑开，展开行时也能自适应
   const calculatedScrollHeight = useMemo(() => {
     // 如果外部传入了 scrollHeight，优先使用外部值
     if (scrollHeight !== undefined) {
@@ -192,17 +237,10 @@ export function FilterTable({
     
     const rowCount = filter.data.length
     
-    // 表格相关尺寸配置
-    const estimatedRowHeight = 60 // 每行约60px
-    const headerHeight = 60 // 表头约60px
-    const minDisplayRows = 5 // 最少显示5行
-    
-    // 如果没有数据或数据行数小于等于阈值，根据行数计算高度 (自动适应小数据量)
+    // 数据少时（<=10行）使用 'auto' 让内容自然撑开
+    // 这样展开行时高度也会自适应，无需手动计算
     if (rowCount <= 10) {
-      return Math.max(
-        (rowCount || 1) * estimatedRowHeight + headerHeight + 20,
-        minDisplayRows * estimatedRowHeight + headerHeight + 20
-      )
+      return 'auto'
     }
     
     // 数据多时使用默认的大高度

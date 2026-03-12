@@ -4,9 +4,7 @@ Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-01")
 Sequence: Auto-increment per CAS number group
 """
 import re
-from datetime import datetime
-from typing import Optional
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select
 
 from app.models.inventory import Inventory
 from app.core.time_utils import get_utc_now

@@ -1,7 +1,7 @@
 """
 User Sessions API - Device Management
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import List, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -15,11 +15,13 @@ from app.models import BaseResponse
 from app.models.user import User
 from app.models.user_session import UserSession
 
-
-router = APIRouter(prefix="/sessions", tags=["Sessions"])
-
 # 导入 get_current_session 用于获取当前会话
 from app.api.deps import get_current_session
+
+# 直接使用 auth 模块的 get_current_user
+from app.core.auth import get_current_user
+
+router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 
 class SessionResponse(BaseResponse):
@@ -33,10 +35,6 @@ class SessionResponse(BaseResponse):
     created_at: datetime
     last_active_at: datetime
     expires_at: datetime
-
-
-# 直接使用 auth 模块的 get_current_user
-from app.core.auth import get_current_user
 
 
 @router.get("/", response_model=List[SessionResponse])

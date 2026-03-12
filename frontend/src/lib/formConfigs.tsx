@@ -77,7 +77,8 @@ export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number
 // ============================================================================
 
 // 试剂订单默认值
-export const defaultReagentOrderValues: ReagentOrderFormData = {
+// 注意：price 和 order_reason 验证为必填，但默认值允许为空（用户必须手动选择/输入）
+export const defaultReagentOrderValues = {
   name: '',
   cas_number: '',
   english_name: '',
@@ -86,8 +87,8 @@ export const defaultReagentOrderValues: ReagentOrderFormData = {
   brand: '',
   specification: '',
   quantity: 1,
-  price: 0,
-  order_reason: undefined,
+  price: undefined as unknown as number,
+  order_reason: '' as unknown as 'running_out' | 'not_stocked' | 'common_public' | 'not_found' | 'reorder' | 'high_usage' | 'degraded' | 'others',
   is_hazardous: false,
   notes: '',
 }
@@ -129,10 +130,11 @@ export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentO
     { name: 'price' as const, label: '单价(元)', type: 'input' as const, required: true, inputType: 'number' as const, placeholder: '如: 100' },
     {
       name: 'order_reason' as const,
-      label: '申购原因',
-      type: 'autocomplete' as const,
+      label: '订购原因',
+      type: 'select' as const,
       options: ORDER_REASON_OPTIONS,
-      placeholder: '输入或选择申购原因'
+      required: true,
+      placeholder: '请选择订购原因'
     },
     {
       name: 'is_hazardous' as const,

@@ -79,6 +79,7 @@ const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
   { value: 'specification', label: '规格' },
+  { value: 'applicant', label: '订购人' },
 ]
 
 // ============================================================================
@@ -271,7 +272,7 @@ export function ConsumableOrdersPage() {
           <div><span>货号：</span>{item.product_number || '-'}</div>
           <div><span>价格：</span>{item.price || '-'}</div>
           <div><span>申购时间：</span>{formatDate(item.created_at)}</div>
-          <div><span>申请人：</span>{item.applicant_name || '-'}</div>
+          <div><span>订购人：</span>{item.applicant_name || '-'}</div>
           <div><span>备注：</span>{item.notes || '-'}</div>
         </div>
       </div>

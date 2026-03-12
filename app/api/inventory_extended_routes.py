@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func
 
 from app.core.auth import AdminUser, CurrentUser, get_current_user, require_admin
-from app.core.time_utils import get_utc_now
+from app.core.time_utils import get_utc_now, to_china_time
 from app.database import DBSession, get_db
 from app.models.inventory import (
     BorrowLog,
@@ -159,7 +159,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
                     item.unit,
                     item.status.value if hasattr(item.status, "value") else item.status,
                     "是" if item.is_hazardous else "否",
-                    item.created_at.strftime("%Y-%m-%d %H:%M:%S") if item.created_at else "",
+                    to_china_time(item.created_at).strftime("%Y-%m-%d %H:%M:%S") if item.created_at else "",
                     item.notes or "",
                 ]
             )

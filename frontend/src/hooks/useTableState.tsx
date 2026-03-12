@@ -73,6 +73,10 @@ export interface UseTableStateOptions {
   columnSizingDebounceMs?: number
   // 额外的查询参数
   extraParams?: Record<string, unknown>
+  // 初始化搜索关键词（用于 URL 直达，绕过首次防抖）
+  initialSearch?: string
+  // 初始化搜索字段
+  initialSearchField?: string
   // localStorage 键名前缀
   storageKeyPrefix?: string
   // 展开状态 localStorage 键名
@@ -87,6 +91,8 @@ export interface UseTableStateReturn {
   // 搜索输入（未防抖）
   searchInput: string
   setSearchInput: (value: string) => void
+  // 立即应用搜索（同步更新输入框和查询条件）
+  applySearchImmediate: (value: string, field?: string) => void
   // 防抖后的搜索关键词
   globalFilter: string
   // 状态筛选值
@@ -174,6 +180,8 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     debounceMs = 300,
     columnSizingDebounceMs = 500,
     extraParams = {},
+    initialSearch = '',
+    initialSearchField,
     storageKeyPrefix = 'table-col-sizes',
     expandStorageKey,
     defaultExpanded = false,
@@ -188,12 +196,28 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   const grandTotalRef = useRef(0)
 
   // ========== 筛选状态 ==========
-  const [searchInput, setSearchInput] = useState('')
-  const [globalFilter, setGlobalFilter] = useState('')
+  const normalizedInitialSearch = initialSearch.trim()
+  const normalizedInitialSearchField = initialSearchField ?? defaultSearchField
+
+  const [searchInput, setSearchInputState] = useState(normalizedInitialSearch)
+  const [globalFilter, setGlobalFilter] = useState(normalizedInitialSearch)
   const [statusFilter, setStatusFilter] = useState(defaultStatus)
-  const [searchField, setSearchField] = useState(defaultSearchField)
+  const [searchField, setSearchField] = useState(normalizedInitialSearchField)
   const [fuzzySearch, setFuzzySearch] = useState(false)
   const [sorting, setSorting] = useState<SortingState>([])
+
+  const setSearchInput = useCallback((value: string) => {
+    setSearchInputState(value)
+  }, [])
+
+  const applySearchImmediate = useCallback((value: string, field?: string) => {
+    const nextValue = value.trim()
+    setSearchInputState(nextValue)
+    setGlobalFilter(nextValue)
+    if (field !== undefined) {
+      setSearchField(field)
+    }
+  }, [])
 
   // ========== 列宽状态 ==========
   const columnSizingStorageKey = `${storageKeyPrefix}-${tableId}`
@@ -376,6 +400,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     // 筛选状态
     searchInput,
     setSearchInput,
+    applySearchImmediate,
     globalFilter,
     statusFilter,
     setStatusFilter,

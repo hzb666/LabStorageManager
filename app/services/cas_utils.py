@@ -6,7 +6,6 @@ This is the foundation for deduplication in the system.
 import re
 from typing import Optional
 
-from app.core.config import settings
 
 
 def normalize_cas(cas: str) -> str:

@@ -12,8 +12,8 @@ from sqlmodel import Session, select
 from app.database import get_db
 from app.core.auth import get_current_user
 from app.models.user import User
-from app.models.consumable_order import ConsumableOrder, ConsumableOrderCreate, ConsumableOrderStatus
-from app.models.reagent_order import ReagentOrder, ReagentOrderCreate, ReagentOrderStatus
+from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
+from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.spec_utils import parse_specification
 

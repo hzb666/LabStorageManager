@@ -9,7 +9,7 @@ from app.models import BaseResponse
 from enum import Enum
 from typing import Optional
 
-from sqlmodel import Field, ForeignKey, SQLModel
+from sqlmodel import Field, SQLModel
 
 
 class ReagentOrderStatus(str, Enum):
@@ -23,7 +23,6 @@ class ReagentOrderStatus(str, Enum):
 
 class ReagentOrderReason(str, Enum):
     """Order reason enumeration"""
-    NONE = "none"
     RUNNING_OUT = "running_out"      # 库存用完
     NOT_STOCKED = "not_stocked"    # 库里没有
     COMMON_PUBLIC = "common_public"  # 公用常用
@@ -31,6 +30,7 @@ class ReagentOrderReason(str, Enum):
     REORDER = "reorder"              # 追加订购
     HIGH_USAGE = "high_usage"        # 大量使用
     DEGRADED = "degraded"            # 变质
+    OTHERS = "others"                # 其他
 
 
 class ReagentOrderBase(SQLModel):
@@ -56,7 +56,8 @@ class ReagentOrderBase(SQLModel):
     # Price
     price: float = Field(ge=0)
     # Order reason
-    order_reason: ReagentOrderReason = ReagentOrderReason.NONE
+    # Order reason (optional, frontend must provide when creating)
+    order_reason: Optional[ReagentOrderReason] = None
     # Hazardous flag
     is_hazardous: bool = False
     # Notes
@@ -98,7 +99,7 @@ class ReagentOrderCreate(SQLModel):
     specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500ml"
     quantity: int = Field(gt=0)
     price: float = Field(gt=0)  # 价格必填，必须大于0
-    order_reason: ReagentOrderReason = ReagentOrderReason.NONE
+    order_reason: ReagentOrderReason  # 必填，前端只能选择枚举值
     is_hazardous: bool = False
     notes: Optional[str] = None
 
@@ -134,7 +135,7 @@ class ReagentOrderResponse(BaseResponse):
     unit: Optional[str]
     quantity: int
     price: Optional[float]
-    order_reason: ReagentOrderReason
+    order_reason: Optional[ReagentOrderReason]
     is_hazardous: bool
     notes: Optional[str]
     applicant_id: Optional[int]

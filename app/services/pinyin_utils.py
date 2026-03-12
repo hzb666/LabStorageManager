@@ -24,6 +24,7 @@ def to_pinyin(text: str) -> str:
 def compute_pinyin_fields(name: str = None, category: str = None,
                           brand: str = None, alias: str = None,
                           storage_location: str = None,
+                          full_name: str = None,
                           max_length: int = 200) -> dict:
     """
     计算多个字段的拼音
@@ -34,6 +35,7 @@ def compute_pinyin_fields(name: str = None, category: str = None,
         brand: 品牌
         alias: 别名
         storage_location: 位置
+        full_name: 姓名（用于用户排序）
         max_length: 拼音字段的最大长度，超出部分会被截断
 
     Returns:
@@ -43,9 +45,15 @@ def compute_pinyin_fields(name: str = None, category: str = None,
         """截断超长文本"""
         return text[:max_length] if len(text) > max_length else text
 
-    return {
+    result = {
         'name_pinyin': truncate(to_pinyin(name)) if name else None,
         'category_pinyin': truncate(to_pinyin(category)) if category else None,
         'brand_pinyin': truncate(to_pinyin(brand)) if brand else None,
         'storage_location_pinyin': truncate(to_pinyin(storage_location)) if storage_location else None,
     }
+
+    # 添加 full_name_pinyin（用于用户排序）
+    if full_name:
+        result['full_name_pinyin'] = truncate(to_pinyin(full_name))
+
+    return result

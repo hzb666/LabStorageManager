@@ -9,12 +9,19 @@ import random
 import logging
 import hashlib
 import requests
-from typing import Optional, Dict, Any
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Dict, Any, Annotated
+from concurrent.futures import ThreadPoolExecutor
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.config import settings
+from app.core.auth import get_current_user
+from app.models.user import User
+from app.services.cas_utils import validate_and_normalize_cas
 
 logger = logging.getLogger(__name__)
+PUBCHEM_PRIMARY_TIMEOUT_SECONDS = 3
+PUBCHEM_FALLBACK_BUDGET_SECONDS = 1
+router = APIRouter(prefix="/chemical-info", tags=["Chemical Info"])
 
 # 随机 User-Agent 池
 USER_AGENTS = [
@@ -74,6 +81,14 @@ def _set_cached(cas_number: str, data: Dict[str, Any]) -> None:
     # 添加新条目
     _CACHE[cas_number] = (data, time.time())
     _CACHE_ORDER.append(cas_number)
+
+
+def _remaining_timeout(deadline: float) -> Optional[float]:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+    # requests 要求 timeout > 0
+    return max(0.1, remaining)
 
 
 def query_chinese_name(cas_number: str) -> Optional[str]:
@@ -149,26 +164,31 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
     return chinese_name if chinese_name else None
 
 
-def query_english_name(cas_number: str) -> Optional[str]:
+def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
     """
     从 PubChem API 获取英文名
     """
     cas = str(cas_number).strip()
     if not cas:
-        return None
+        return None, None
     
     # 检查缓存
     cached = _get_cached(cas)
     if cached and cached.get('english_name'):
-        return cached['english_name']
+        return cached['english_name'], None
     
     english_name = ""
+    warning_message: Optional[str] = None
     
     # 使用 PubChem REST API
     url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{cas}/property/IUPACName/JSON"
     
     try:
-        response = requests.get(url, headers=_get_headers(), timeout=15)
+        response = requests.get(
+            url,
+            headers=_get_headers(),
+            timeout=PUBCHEM_PRIMARY_TIMEOUT_SECONDS,
+        )
         if response.status_code == 200:
             data = response.json()
             properties = data.get('PropertyTable', {}).get('Properties', [])
@@ -176,12 +196,23 @@ def query_english_name(cas_number: str) -> Optional[str]:
                 english_name = properties[0]['IUPACName']
     except Exception as e:
         logger.warning(f"Failed to query PubChem for CAS {cas}: {e}")
+        warning_message = (
+            f"PubChem 响应异常，英文名未获取（首次查询最多 {PUBCHEM_PRIMARY_TIMEOUT_SECONDS} 秒）"
+        )
     
-    # 如果 IUPACName 失败，尝试用 CID 获取英文名
+    # 如果 IUPACName 失败，尝试在 1 秒总预算内 fallback
     if not english_name:
+        deadline = time.monotonic() + PUBCHEM_FALLBACK_BUDGET_SECONDS
         url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{cas}/cids/JSON"
         try:
-            response = requests.get(url, headers=_get_headers(), timeout=15)
+            fallback_timeout = _remaining_timeout(deadline)
+            if fallback_timeout is None:
+                warning_message = (
+                    f"PubChem fallback 超时，英文名未获取（补充查询最多 {PUBCHEM_FALLBACK_BUDGET_SECONDS} 秒）"
+                )
+                return None, warning_message
+
+            response = requests.get(url, headers=_get_headers(), timeout=fallback_timeout)
             if response.status_code == 200:
                 data = response.json()
                 identifier_list = data.get('IdentifierList', {})
@@ -190,7 +221,14 @@ def query_english_name(cas_number: str) -> Optional[str]:
                     cid = cids[0]
                     # 用 CID 获取英文名
                     url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/IUPACName/JSON"
-                    response = requests.get(url, headers=_get_headers(), timeout=15)
+                    property_timeout = _remaining_timeout(deadline)
+                    if property_timeout is None:
+                        warning_message = (
+                            f"PubChem fallback 超时，英文名未获取（补充查询最多 {PUBCHEM_FALLBACK_BUDGET_SECONDS} 秒）"
+                        )
+                        return None, warning_message
+
+                    response = requests.get(url, headers=_get_headers(), timeout=property_timeout)
                     if response.status_code == 200:
                         data = response.json()
                         properties = data.get('PropertyTable', {}).get('Properties', [])
@@ -198,11 +236,14 @@ def query_english_name(cas_number: str) -> Optional[str]:
                             english_name = properties[0]['IUPACName']
         except Exception as e:
             logger.warning(f"Failed to query PubChem CID for CAS {cas}: {e}")
+            warning_message = (
+                f"PubChem fallback 异常，英文名未获取（补充查询最多 {PUBCHEM_FALLBACK_BUDGET_SECONDS} 秒）"
+            )
     
     # 短暂延迟
     time.sleep(0.1)
     
-    return english_name if english_name else None
+    return (english_name if english_name else None), warning_message
 
 
 def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Optional[str]:
@@ -273,12 +314,14 @@ def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
     if cached:
         return {
             "name": cached.get('chinese_name'),
-            "english_name": cached.get('english_name')
+            "english_name": cached.get('english_name'),
+            "warning": cached.get('warning'),
         }
     
     # 并行查询中文名和英文名
     chinese_name = None
     english_name = None
+    warning_message: Optional[str] = None
     
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_chinese = executor.submit(query_chinese_name, cas)
@@ -291,9 +334,10 @@ def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
             logger.warning(f"Failed to get Chinese name for CAS {cas}: {e}")
         
         try:
-            english_name = future_english.result(timeout=30)
+            english_name, warning_message = future_english.result(timeout=10)
         except Exception as e:
             logger.warning(f"Failed to get English name for CAS {cas}: {e}")
+            warning_message = "英文名查询超时，已跳过 PubChem 补充识别"
     
     # 如果中文名为空但英文名存在，尝试翻译英文名作为备选
     if not chinese_name and english_name:
@@ -307,13 +351,48 @@ def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
     # 保存到缓存
     result = {
         "name": chinese_name,
-        "english_name": english_name
+        "english_name": english_name,
+        "warning": warning_message,
     }
     _set_cached(cas, {
         "chinese_name": chinese_name,
-        "english_name": english_name
+        "english_name": english_name,
+        "warning": warning_message,
     })
     
-    logger.info(f"Chemical info for CAS {cas}: name={chinese_name}, english_name={english_name}")
+    logger.info(
+        f"Chemical info for CAS {cas}: name={chinese_name}, english_name={english_name}, warning={warning_message}"
+    )
     
     return result
+
+
+@router.get("/{cas_number}")
+def get_chemical_info(
+    cas_number: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """
+    根据 CAS 号查询化学物质信息
+    
+    返回:
+    - name: 中文名（从 chemblink.com 获取）
+    - english_name: 英文名（从 PubChem API 获取）
+    """
+    del current_user
+
+    is_valid, error_msg, normalized_cas = validate_and_normalize_cas(cas_number)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg or "Invalid CAS number"
+        )
+
+    result = query_chemical_info(normalized_cas)
+
+    return {
+        "cas_number": normalized_cas,
+        "name": result["name"],
+        "english_name": result["english_name"],
+        "warning": result.get("warning"),
+    }

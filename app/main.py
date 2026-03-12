@@ -14,7 +14,8 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.banner import print_banner
 from app.database import init_db
-from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, chemical, announcements, error_logs
+from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, announcements, error_logs
+from app.services import chemical_info
 
 # Configure logging
 logging.basicConfig(
@@ -76,7 +77,6 @@ async def global_exception_handler(request, exc):
     """Global exception handler to log all unhandled errors"""
     error_trace = traceback.format_exc()
     logger.error(f"Unhandled exception: {exc}\nTraceback: {error_trace}")
-    # 生产环境只返回通用错误信息，避免泄露内部细节
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"}
@@ -96,7 +96,7 @@ app.include_router(reagent_orders.router, prefix="/api")
 app.include_router(consumable_orders.router, prefix="/api")
 app.include_router(user_sessions.router, prefix="/api/users/me")
 app.include_router(cart_sync.router, prefix="/api")
-app.include_router(chemical.router, prefix="/api")
+app.include_router(chemical_info.router, prefix="/api")
 app.include_router(announcements.router, prefix="/api")
 app.include_router(error_logs.router, prefix="/api")
 

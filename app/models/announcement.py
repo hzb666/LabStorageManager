@@ -4,7 +4,6 @@ Announcement Model - System Announcements Management
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import ConfigDict
 from sqlmodel import Field, SQLModel, JSON
 
 from app.core.time_utils import get_utc_now

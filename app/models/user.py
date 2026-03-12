@@ -10,7 +10,7 @@ from typing import Optional
 
 import re
 
-from pydantic import ConfigDict, field_validator
+from pydantic import field_validator
 from sqlmodel import Field, SQLModel
 
 
@@ -40,10 +40,12 @@ class UserBase(SQLModel):
 class User(UserBase, table=True):
     """User database model"""
     __tablename__ = "users"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True)
     password_hash: str
     username_version: int = Field(default=1, description="用户名版本号，每次修改用户名时+1")
+    # 姓名拼音，用于按姓名排序
+    full_name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
@@ -83,6 +85,7 @@ class UserResponse(BaseResponse):
     id: int
     username: str
     full_name: Optional[str]
+    full_name_pinyin: Optional[str] = None
     role: UserRole
     is_active: bool
     created_at: datetime

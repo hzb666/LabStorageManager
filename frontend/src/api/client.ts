@@ -70,7 +70,6 @@ export enum ReagentOrderStatus {
 
 // Reagent Order Reason Enum
 export enum ReagentOrderReason {
-  NONE = "none",
   RUNNING_OUT = "running_out",
   NOT_STOCKED = "not_stocked",
   COMMON_PUBLIC = "common_public",
@@ -78,6 +77,7 @@ export enum ReagentOrderReason {
   REORDER = "reorder",
   HIGH_USAGE = "high_usage",
   DEGRADED = "degraded",
+  OTHERS = "others",
 }
 
 // Consumable Order Status Enum
@@ -168,6 +168,39 @@ export const userAdminAPI = {
 }
 
 // Reagent Order APIs
+export interface CASOverviewOrder {
+  id: number
+  name: string
+  applicant_name: string | null
+  specification: string
+  created_at: string
+  status: string
+}
+
+export interface CASOverviewInventory {
+  id: number
+  remaining_quantity: number | null
+  specification: string
+  storage_location: string | null
+  created_at: string
+  status: string
+  borrower_name: string | null
+}
+
+export interface CASOverviewResponse {
+  cas_number: string
+  display_name: string | null
+  has_warning: boolean
+  orders: {
+    total_count: number
+    latest: CASOverviewOrder | null
+  }
+  inventory: {
+    total_count: number
+    latest: CASOverviewInventory | null
+  }
+}
+
 export const reagentOrderAPI = {
   list: (params?: PaginationParams & {
     status_filter?: ReagentOrderStatus
@@ -200,6 +233,8 @@ export const reagentOrderAPI = {
   confirmArrival: (id: number, notes?: string) =>
     api.post(`/reagent-orders/${id}/confirm-arrival`, { arrival_notes: notes }),
   stockIn: (id: number) => api.post(`/reagent-orders/${id}/stock-in`),
+  getCASOverview: (casNumber: string) =>
+    api.get<CASOverviewResponse>(`/reagent-orders/cas-overview/${casNumber}`),
   getMyOrders: () => api.get('/reagent-orders/dashboard/my-orders'),
   getArrivedOrders: () => api.get('/reagent-orders/dashboard/arrived-orders'),
   exportOrders: () => api.get('/reagent-orders/export', { responseType: 'blob' }),
@@ -282,6 +317,7 @@ export interface ChemicalInfo {
   cas_number: string
   name: string | null
   english_name: string | null
+  warning?: string | null
 }
 
 export const chemicalAPI = {

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-font-state="loading">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -7,13 +7,10 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
-    <!-- Google Fonts 思源黑体切片 - 中英文分离 (中科大镜像) -->
-    <link rel="preconnect" href="https://fonts.proxy.ustclug.org" />
-    <link rel="preconnect" href="https://fonts-gstatic.proxy.ustclug.org" crossorigin />
-    <link
-      href="https://fonts.proxy.ustclug.org/css2?family=Noto+Sans+SC:wght@400;700&display=swap"
-      rel="stylesheet"
-    />
+
+    <!-- Google Fonts 思源黑体 - 异步加载，避免阻塞首屏 -->
+    <link rel="preconnect" href="https://fonts.googleapis.cn" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <style>
       /* 英文字体 */
       @font-face {
@@ -35,6 +32,7 @@
   </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="/src/fontLoader.ts"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

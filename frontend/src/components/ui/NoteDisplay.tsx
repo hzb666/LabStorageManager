@@ -17,7 +17,7 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({ label, text = '', clas
   const content = matchedTag ? text.slice(matchedTag.length) : text;
 
   return (
-    <div className={cn("text-base break-words leading-relaxed text-foreground", className)}>
+    <div className={cn("text-base wrap-break-word leading-relaxed text-foreground", className)}>
       {label && <span>{label}：</span>}
       {isEmpty && <span>-</span>}
 

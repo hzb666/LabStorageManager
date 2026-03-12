@@ -36,6 +36,7 @@ from app.models.user import (
 from app.models.user_session import UserSession
 from app.services.image_service import save_avatar, delete_file
 from app.services.user_service import get_user_by_username, get_user_by_id
+from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.session_service import (
     cleanup_expired_sessions,
     _check_device_limit,
@@ -354,19 +355,23 @@ def create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered"
         )
-    
+
+    # 计算姓名拼音
+    pinyin_fields = compute_pinyin_fields(full_name=user.full_name)
+
     # Create user
     db_user = User(
         username=user.username,
         password_hash=get_password_hash(user.password),
         full_name=user.full_name,
         role=user.role,
+        **pinyin_fields,
     )
-    
+
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    
+
     return db_user
 
 
@@ -539,7 +544,12 @@ def update_user(
     
     for field, value in update_data.items():
         setattr(user, field, value)
-    
+
+    # 如果 full_name 更改了，重新计算拼音
+    if "full_name" in update_data and update_data["full_name"]:
+        pinyin_fields = compute_pinyin_fields(full_name=update_data["full_name"])
+        user.full_name_pinyin = pinyin_fields.get("full_name_pinyin")
+
     # If username changed, increment version and invalidate all sessions
     if username_changed:
         user.username_version = (user.username_version or 0) + 1
