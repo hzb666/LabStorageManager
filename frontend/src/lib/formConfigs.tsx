@@ -222,3 +222,37 @@ export function getConsumableOrderFormFields(isEdit: boolean): FieldSchema<Consu
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调', maxLength: 500 },
   ]
 }
+
+// ============================================================================
+// 归还表单配置
+// ============================================================================
+
+/** 归还表单默认值 */
+export const defaultReturnValues = {
+  return_mode: 'remaining' as const,
+  return_quantity: '',
+}
+
+/**
+ * 获取归还表单字段配置
+ * @param mode 归还模式（remaining 或 used）
+ * @param maxQuantity 最大数量（原借用时的剩余量）
+ */
+export function getReturnFormFields(
+  mode: 'remaining' | 'used',
+  maxQuantity: number
+): FieldSchema<typeof defaultReturnValues>[] {
+  const label = mode === 'remaining' ? '剩余量' : '使用量'
+  return [
+    {
+      name: 'return_quantity' as const,
+      label,
+      type: 'input' as const,
+      inputType: 'number' as const,
+      required: true,
+      placeholder: mode === 'remaining' ? `如: ${maxQuantity}` : `如: 0`,
+      min: 0,
+      max: maxQuantity,
+    },
+  ]
+}

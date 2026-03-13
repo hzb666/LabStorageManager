@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '@/store/useStore'
 import { cn, getFullImageUrl } from '@/lib/utils'
@@ -29,6 +29,7 @@ import { useIsMobile } from '@/hooks/useMobile'
 import { isAdmin, USER_ROLE_MAP } from '@/lib/constants'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
+import { SidebarLogo } from '@/components/SidebarLogo'
 
 const navItems = [
   { title: '仪表盘', href: '/', icon: LayoutDashboard, group: '功能' },
@@ -126,13 +127,18 @@ export function Layout() {
           )}
         >
           {/* 标题区域 */}
-          <div className="flex items-center justify-center h-20 pt-16 pb-8 overflow-hidden whitespace-nowrap shrink-0">
-            <h1 className={cn(
-              "text-2xl font-bold text-primary transition-opacity duration-300 w-64 text-center pl-2",
-              sidebarCollapsed ? 'opacity-0' : 'opacity-100'
+          <div className="flex items-center justify-center h-20 pt-16 pb-8 overflow-hidden whitespace-nowrap shrink-0 relative">
+            {sidebarCollapsed ? (
+              <SidebarLogo className="size-9 pl-3" />
+            ) : null}
+            <div className={cn(
+              "absolute inset-0 flex items-center justify-center pt-16 pb-8 pointer-events-none",
+              sidebarCollapsed ? "opacity-0 transition-none" : "opacity-100 transition-opacity duration-200 ease-in delay-50"
             )}>
-              实验室库存管理
-            </h1>
+              <h1 className="text-2xl font-bold text-primary w-64 text-center pl-2 pointer-events-auto">
+                实验室库存管理
+              </h1>
+            </div>
           </div>
 
           {/* 导航区域 - 使用宽度解耦方案实现完美的悬浮滚动条 */}
@@ -191,41 +197,41 @@ export function Layout() {
                       </div>
                       <div className="space-y-1">
                         {filteredNavItems.filter(item => item.group === '管理').map((item) => {
-                        const isActive = location.pathname === item.href
-                        const Icon = item.icon
-                        return (
-                          <Tooltip key={item.href}>
-                            <TooltipTrigger asChild>
-                              <Link
-                                to={item.href}
-                                className={cn(
-                                  'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
-                                  isActive
-                                    ? 'bg-primary text-primary-foreground'
-                                    : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
-                                )}
-                              >
-                                <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
-                                <span
+                          const isActive = location.pathname === item.href
+                          const Icon = item.icon
+                          return (
+                            <Tooltip key={item.href}>
+                              <TooltipTrigger asChild>
+                                <Link
+                                  to={item.href}
                                   className={cn(
-                                    "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
-                                    sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-50 ml-3'
+                                    'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
+                                    isActive
+                                      ? 'bg-primary text-primary-foreground'
+                                      : "text-sidebar-foreground before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
                                   )}
                                 >
-                                  {item.title}
-                                </span>
-                              </Link>
-                            </TooltipTrigger>
-                            {sidebarCollapsed && (
-                              <TooltipContent side="right">
-                                <p>{item.title}</p>
-                              </TooltipContent>
-                            )}
-                          </Tooltip>
-                        )
-                      })}
-                    </div>
-                  </div>)}
+                                  <Icon className={cn("h-5 w-5 shrink-0", isActive ? '' : 'text-sidebar-foreground')} />
+                                  <span
+                                    className={cn(
+                                      "whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300",
+                                      sidebarCollapsed ? 'opacity-0 max-w-0 ml-0' : 'opacity-100 max-w-50 ml-3'
+                                    )}
+                                  >
+                                    {item.title}
+                                  </span>
+                                </Link>
+                              </TooltipTrigger>
+                              {sidebarCollapsed && (
+                                <TooltipContent side="right">
+                                  <p>{item.title}</p>
+                                </TooltipContent>
+                              )}
+                            </Tooltip>
+                          )
+                        })}
+                      </div>
+                    </div>)}
                 </div>
               </nav>
             </div>
@@ -238,9 +244,9 @@ export function Layout() {
               className="flex items-center overflow-hidden hover:bg-muted rounded-lg p-1 -mx-1 transition-colors relative"
             >
               <div className={cn("absolute right-0 top-1/2 -translate-y-1/2 h-3/4 w-1 bg-primary rounded-md transition-all duration-300 ease-in-out origin-center",
-                isDevicesActive 
-                ? "opacity-100 scale-y-100"
-                : "opacity-0 scale-y-0"
+                isDevicesActive
+                  ? "opacity-100 scale-y-100"
+                  : "opacity-0 scale-y-0"
               )} />
               <Avatar className="h-10 w-10 shrink-0 mx-auto md:mx-0">
                 <AvatarImage src={user?.avatar_url ? getFullImageUrl(user.avatar_url) : undefined} alt={user?.username} />

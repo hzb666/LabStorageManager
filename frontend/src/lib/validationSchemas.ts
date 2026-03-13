@@ -555,7 +555,41 @@ export type UserUpdateFormData = v.InferOutput<typeof UserUpdateSchema>
 export type ChangePasswordFormData = v.InferOutput<typeof ChangePasswordWithConfirmSchema>
 
 // ==========================================
-// 8. 通用工具函数
+// 9. 归还模块 Schema
+// ==========================================
+
+/**
+ * 归还数量验证 Schema - 用于验证归还时的剩余量或使用量
+ * 支持字符串和数字输入
+ * @param fieldName 字段中文名称（如"剩余量"或"使用量"）
+ * @param maxValue 最大值（原借用时的剩余量）
+ */
+export const createReturnQuantitySchema = (fieldName: string, maxValue: number) =>
+  v.pipe(
+    v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
+    v.transform(parseNumberOrNaN),
+    v.number(`${fieldName}必须是有效数字`),
+    v.minValue(0, `${fieldName}不能为负数`),
+    v.maxValue(maxValue, `${fieldName}不能超过原借用时剩余量 (${maxValue})`)
+  )
+
+/**
+ * 归还表单 Schema
+ */
+export const ReturnFormSchema = v.object({
+  return_mode: v.picklist(['used', 'remaining'], '归还模式不能为空'),
+  return_quantity: v.pipe(
+    v.union([v.string(), v.number()], '数量必须是有效数字'),
+    v.transform(parseNumberOrNaN),
+    v.number('数量必须是有效数字'),
+    v.minValue(0, '数量不能为负数')
+  ),
+})
+
+export type ReturnFormData = v.InferOutput<typeof ReturnFormSchema>
+
+// ==========================================
+// 通用工具函数
 // ==========================================
 
 /**

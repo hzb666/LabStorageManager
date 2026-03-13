@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 耗材订单页面
  * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、完成
  * 参考 Inventory 页面实现，使用 FilterTable 组件
@@ -24,7 +24,8 @@ import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
-import { formatDate, processNotes } from '@/lib/utils'
+import { processNotes } from '@/lib/utils'
+import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import {
   ConsumableOrderSchema,
   createValibotResolver,
@@ -265,18 +266,7 @@ export function ConsumableOrdersPage() {
   // 展开行渲染
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
-    return (
-      <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 flex-1">
-          <div><span>英文名称：</span>{item.english_name || '-'}</div>
-          <div><span>货号：</span>{item.product_number || '-'}</div>
-          <div><span>价格：</span>{item.price || '-'}</div>
-          <div><span>申购时间：</span>{formatDate(item.created_at)}</div>
-          <div><span>订购人：</span>{item.applicant_name || '-'}</div>
-          <div><span>备注：</span>{item.notes || '-'}</div>
-        </div>
-      </div>
-    )
+    return <ConsumableOrderExpandedRow item={item} showExtraFields={true} />
   }, [])
 
   // ============================================================================

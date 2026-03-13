@@ -1,4 +1,4 @@
-﻿import { type ClassValue, clsx } from "clsx"
+import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { inputConfigs } from "./inputConfigs"
 
@@ -54,6 +54,32 @@ export function processNotes(notes: string | undefined): string {
     }
   }
   return notes
+}
+
+/**
+ * 库存借用状态标签
+ * 用于试剂订单展开行和仪表盘中显示库存借用状态
+ */
+export function getInventoryBorrowLabel(
+  status: string,
+  borrowerName: string | null | undefined
+): string {
+  if (status === 'borrowed') {
+    return borrowerName ? `借用中（${borrowerName}）` : '借用中'
+  }
+  return '未借用'
+}
+
+/**
+ * 安全地将 unknown 值转换为字符串
+ * 用于处理 API 返回的可能为 null/undefined/非字符串的值
+ */
+export function toText(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  return ''
 }
 
 export function getFullImageUrl(url: string): string {
