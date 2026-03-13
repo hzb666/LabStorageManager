@@ -12,6 +12,7 @@ import { Bug, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useErrorLogger, fetchBackendErrorLogs } from '@/hooks/useErrorLogger'
 import { useAuthStore } from '@/store/useStore'
+import { setBugButtonHidden } from '@/components/bugReportButtonStorage'
 import {
   Tooltip,
   TooltipContent,
@@ -29,24 +30,6 @@ interface BugReportButtonProps {
   className?: string
   title?: string
   onRightClick?: () => void
-}
-
-// 存储key
-const BUG_BUTTON_HIDDEN_KEY = 'bug_button_hidden_until'
-
-export function getBugButtonHidden(): boolean {
-  const hiddenUntil = localStorage.getItem(BUG_BUTTON_HIDDEN_KEY)
-  if (!hiddenUntil) return false
-  return Date.now() < parseInt(hiddenUntil, 10)
-}
-
-export function setBugButtonHidden(days: number = 1): void {
-  const hiddenUntil = Date.now() + days * 24 * 60 * 60 * 1000
-  localStorage.setItem(BUG_BUTTON_HIDDEN_KEY, hiddenUntil.toString())
-}
-
-export function clearBugButtonHidden(): void {
-  localStorage.removeItem(BUG_BUTTON_HIDDEN_KEY)
 }
 
 export function BugReportButton({ 

@@ -1,6 +1,6 @@
 ﻿import React, { useState, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/Button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { inventoryAPI } from '@/api/client'
 import { toast } from '@/lib/toast'
 import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import { AxiosError } from 'axios'
 
+const MAX_FILE_SIZE = 2 * 1024 * 1024
+
 interface ImportResult {
   success: boolean
   total_rows: number
@@ -33,9 +35,6 @@ export function ImportPage() {
   const [result, setResult] = useState<ImportResult | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // 最大文件大小 (2MB)
-  const MAX_FILE_SIZE = 2 * 1024 * 1024
 
   const validateFile = useCallback((selectedFile: File): boolean => {
     const validExtensions = ['.csv', '.xlsx', '.xls']
@@ -176,14 +175,14 @@ export function ImportPage() {
               <div className="space-y-3 text-sm">
                 {IMPORT_TEMPLATE_COLUMNS.map(col => (
                   <div key={col.name} className="flex items-start gap-3">
-                    <span className="w-3 flex-shrink-0">
+                    <span className="w-3 shrink-0">
                       {col.required ? (
                         <span className="text-destructive">*</span>
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}
                     </span>
-                    <span className="w-28 flex-shrink-0 text-sm mr-10">{col.name}</span>
+                    <span className="w-28 shrink-0 text-sm mr-10">{col.name}</span>
                     <span className="text-muted-foreground text-sm">{col.description}</span>
                   </div>
                 ))}
@@ -289,12 +288,7 @@ export function ImportPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="mt-4">
-            {!result ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-                <FileSpreadsheet className="w-12 h-12 mb-3 opacity-50" />
-                <p className="text-sm">上传文件并导入后查看结果</p>
-              </div>
-            ) : (
+            {result ? (
               <div className="space-y-4">
                 {/* Summary Stats */}
                 <div className={cn(
@@ -372,6 +366,11 @@ export function ImportPage() {
                     所有数据已成功导入到库存系统
                   </div>
                 )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <FileSpreadsheet className="w-12 h-12 mb-3 opacity-50" />
+                <p className="text-sm">上传文件并导入后查看结果</p>
               </div>
             )}
           </CardContent>

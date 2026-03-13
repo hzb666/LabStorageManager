@@ -1,29 +1,10 @@
 /**
  * 表格状态综合 Hook
  * 整合 useFilterList、useTableSettings、useTableExpand 的功能
- * 
- * 使用方式：
- * const {
- *   // 筛选状态
- *   searchInput, setSearchInput,
- *   globalFilter,
- *   statusFilter, setStatusFilter,
- *   searchField, setSearchField,
- *   fuzzySearch, setFuzzySearch,
- *   sorting, setSorting,
- *   hasFilter, displayCount,
- *   
- *   // 表格状态
- *   columnSizing, setColumnSizing,
- *   isAllExpanded, toggleExpandAll, resetExpanded,
- *   
- *   // 数据
- *   data, total, isLoading, 
- *   hasNextPage, fetchNextPage, refetch, invalidate,
- * } = useTableState({ api, tableId, ... })
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
+import type { InfiniteData } from '@tanstack/react-query'
 import type { SortingState, ColumnSizingState } from '@tanstack/react-table'
 
 // API 响应数据类型
@@ -172,8 +153,6 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     api,
     queryKey = ['list'],
     tableId,
-    statusOptions: statusOptionsProp,
-    searchFieldOptions: searchFieldOptionsProp,
     defaultStatus = 'all',
     defaultSearchField = 'all',
     pageSize = 50,
@@ -187,13 +166,8 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     defaultExpanded = false,
   } = options
 
-  // 导出选项供 UI 组件使用
-  const statusOptions = statusOptionsProp ?? DEFAULT_STATUS_OPTIONS
-  const searchFieldOptions = searchFieldOptionsProp ?? DEFAULT_SEARCH_FIELD_OPTIONS
-
   const queryClient = useQueryClient()
   const sortingRef = useRef<SortingState>([])
-  const grandTotalRef = useRef(0)
 
   // ========== 筛选状态 ==========
   const normalizedInitialSearch = initialSearch.trim()
@@ -222,7 +196,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   // ========== 列宽状态 ==========
   const columnSizingStorageKey = `${storageKeyPrefix}-${tableId}`
   const [columnSizing, setColumnSizingState] = useState<ColumnSizingState>(() => {
-    if (typeof window === 'undefined') return {}
+    if (typeof globalThis.window === 'undefined') return {}
     try {
       const stored = localStorage.getItem(columnSizingStorageKey)
       if (stored) {
@@ -263,7 +237,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   // ========== 展开状态 ==========
   const expandKey = expandStorageKey || `${tableId}-expand-all`
   const [isAllExpanded, setIsAllExpanded] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return defaultExpanded
+    if (typeof globalThis.window === 'undefined') return defaultExpanded
     try {
       const stored = localStorage.getItem(expandKey)
       if (stored !== null) {
@@ -367,19 +341,18 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   const data = useMemo(() => allData?.pages.flatMap(page => page.data) ?? [], [allData])
   // 总数
   const total = allData?.pages[0]?.total ?? 0
-
-  // 记录无筛选时的总数
-  const isNoFilter = !globalFilter && (!statusFilter || statusFilter === 'all' || statusFilter === defaultStatus)
-  useEffect(() => {
-    if (isNoFilter && total > 0) {
-      grandTotalRef.current = total
-    }
-  }, [total, isNoFilter])
-
   // 是否有筛选条件
   const hasFilter = Boolean(globalFilter || (statusFilter && statusFilter !== 'all' && statusFilter !== defaultStatus))
+  const baseQueryKey: readonly unknown[] = useMemo(
+    () => [...queryKey, defaultStatus, '', defaultSearchField, false, []],
+    [queryKey, defaultSearchField, defaultStatus]
+  )
+  // 避免把可推导总数镜像到本地 state，直接读取基础查询缓存即可绕开 effect 中同步 setState。
+  const cachedBaseData = queryClient.getQueryData<InfiniteData<ListResponseData>>(baseQueryKey)
+  const grandTotal = cachedBaseData?.pages[0]?.total ?? total
+
   // 显示的数量
-  const displayCount = hasFilter ? `${total}/${grandTotalRef.current}` : `${total}`
+  const displayCount = hasFilter ? `${total}/${grandTotal}` : `${total}`
 
   // 重置筛选状态
   const resetFilters = useCallback(() => {

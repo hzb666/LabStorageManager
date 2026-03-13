@@ -11,11 +11,11 @@ interface HighlightTextProps {
 }
 
 // 1. 提取到组件外部，涵盖了常见的空格、全半角空白符以及连接符
-const SEPARATORS = '[\\s\\u00A0\\u2002\\u2003\\u2009\\u200C\\u200D_.-]';
+const SEPARATORS = String.raw`[\s\u00A0\u2002\u2003\u2009_.\-]`;
 const SEPARATOR_REGEX = new RegExp(`${SEPARATORS}+`, 'g');
 
 // 2. 正则转义工具，防止用户输入 .*+?^${}()|[]\ 等特殊字符导致正则崩溃
-const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = (str: string) => str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 
 // 3. 模块级缓存：解决几百个单元格渲染时，重复计算和创建正则实例的内存开销
 const regexCache = new Map<string, RegExp>();
@@ -30,7 +30,7 @@ const getRegex = (highlight: string, fuzzy: boolean): RegExp | null => {
   let regex: RegExp | null = null;
   
   if (fuzzy) {
-    const cleaned = highlight.replace(SEPARATOR_REGEX, '');
+    const cleaned = highlight.replaceAll(SEPARATOR_REGEX, '');
     if (cleaned) {
       // 将 "ab" 转换为能够跨越空格和横杠匹配的正则：a[\s_.-]*b
       const fuzzyPattern = cleaned.split('').map(escapeRegExp).join(`${SEPARATORS}*`);

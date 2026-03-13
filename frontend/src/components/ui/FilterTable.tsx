@@ -29,8 +29,8 @@ import { getInventoryTableColumns } from '@/lib/tableConfigs'
 declare module '@tanstack/react-table' {
   interface TableMeta<TData extends RowData> {
     fuzzySearch: boolean
-    onEdit: (item: TData) => void
-    onBorrowSuccess: () => void
+    onEdit?: (item: TData) => void
+    onBorrowSuccess?: () => void
   }
 }
 
@@ -180,7 +180,7 @@ export function FilterTable({
       fuzzySearch: filter.fuzzySearch,
       onEdit: onEdit ?? undefined,
       onBorrowSuccess: onBorrowSuccess ?? undefined,
-    } as any,
+    },
   })
 
   // 严格控制重置展开状态的时机，防止意外折叠单行

@@ -7,7 +7,7 @@ from typing import Optional, List
 from sqlmodel import Field, SQLModel, JSON
 
 from app.core.time_utils import get_utc_now
-from app.models import BaseResponse
+from app.models.base import BaseResponse
 
 
 class AnnouncementBase(SQLModel):

@@ -4,7 +4,7 @@ User Model - Authentication and Authorization
 from datetime import datetime
 
 from app.core.time_utils import get_utc_now
-from app.models import BaseResponse
+from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
 

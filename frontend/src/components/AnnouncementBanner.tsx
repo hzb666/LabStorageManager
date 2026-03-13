@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { type Announcement } from '@/api/client'
 import { AnnouncementDetail } from './AnnouncementDetail'
@@ -58,19 +58,24 @@ const isAnnouncementClosed = (id: number, updatedAt?: string): boolean => {
 }
 
 export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
-  const [visibleAnnouncements, setVisibleAnnouncements] = useState<Announcement[]>([])
+  const [dismissedIds, setDismissedIds] = useState<number[]>([])
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
 
   // 💡 删除了臃肿的 isDesktop 状态和 window.resize 监听器
   // 交给强大的 Tailwind CSS 处理即可！
 
-  useEffect(() => {
-    const filtered = announcements.filter(
-      (a) => a.is_pinned && a.is_visible && !isAnnouncementClosed(a.id, a.updated_at)
-    )
-    setVisibleAnnouncements(filtered)
-  }, [announcements])
+  const visibleAnnouncements = useMemo(
+    () =>
+      announcements.filter(
+        (a) =>
+          a.is_pinned &&
+          a.is_visible &&
+          !isAnnouncementClosed(a.id, a.updated_at) &&
+          !dismissedIds.includes(a.id)
+      ),
+    [announcements, dismissedIds]
+  )
 
   // 💡 移动端隐藏，PC端显示空占位
   if (visibleAnnouncements.length === 0) {
@@ -104,7 +109,7 @@ export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
               const storage = getClosedStorage()
               storage[announcement.id.toString()] = Date.now()
               localStorage.setItem(CLOSED_KEY, JSON.stringify(storage))
-              setVisibleAnnouncements(prev => prev.filter(a => a.id !== announcement.id))
+              setDismissedIds((prev) => [...prev, announcement.id])
             }}
             className="ml-3 p-0.5 rounded-full bg-destructive text-white opacity-0 group-hover/item:opacity-100 transition-opacity hover:bg-destructive/80"
           >

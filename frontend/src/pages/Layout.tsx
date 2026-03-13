@@ -22,7 +22,8 @@ import {
   Megaphone,
   Archive,
 } from 'lucide-react'
-import { BugReportButton, getBugButtonHidden, clearBugButtonHidden } from '@/components/BugReportButton'
+import { BugReportButton } from '@/components/BugReportButton'
+import { getBugButtonHidden, clearBugButtonHidden } from '@/components/bugReportButtonStorage'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
 import { isAdmin, USER_ROLE_MAP } from '@/lib/constants'
@@ -183,12 +184,13 @@ export function Layout() {
                   </div>
 
                   {/* 管理组 */}
-                  <div>
-                    <div className="px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 max-h-10 mt-6 mb-2">
-                      管理
-                    </div>
-                    <div className="space-y-1">
-                      {filteredNavItems.filter(item => item.group === '管理').map((item) => {
+                  {filteredNavItems.some(item => item.group === '管理') && (
+                    <div>
+                      <div className="px-2 text-sm text-muted-foreground tracking-wider whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 max-h-10 mt-6 mb-2">
+                        管理
+                      </div>
+                      <div className="space-y-1">
+                        {filteredNavItems.filter(item => item.group === '管理').map((item) => {
                         const isActive = location.pathname === item.href
                         const Icon = item.icon
                         return (
@@ -223,7 +225,7 @@ export function Layout() {
                         )
                       })}
                     </div>
-                  </div>
+                  </div>)}
                 </div>
               </nav>
             </div>
@@ -363,31 +365,33 @@ export function Layout() {
                   </div>
                 </div>
 
-                <div>
-                  <p className="px-2 mb-2 text-sm text-muted-foreground uppercase tracking-wider">管理</p>
-                  <div className="space-y-1">
-                    {filteredNavItems.filter(item => item.group === '管理').map((item) => {
-                      const isActive = location.pathname === item.href
-                      const Icon = item.icon
-                      return (
-                        <Link
-                          key={item.href}
-                          to={item.href}
-                          onClick={() => setMobileMenuOpen(false)}
-                          className={cn(
-                            'flex items-center rounded-lg pl-3 py-2 text-base relative isolate',
-                            isActive
-                              ? 'bg-primary text-primary-foreground'
-                              : "text-sidebar-foreground hover:text-foreground transition-[color] duration-200 before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
-                          )}
-                        >
-                          <Icon className="h-5 w-5 shrink-0 mr-3" />
-                          {item.title}
-                        </Link>
-                      )
-                    })}
+                {filteredNavItems.some(item => item.group === '管理') && (
+                  <div>
+                    <p className="px-2 mb-2 text-sm text-muted-foreground uppercase tracking-wider">管理</p>
+                    <div className="space-y-1">
+                      {filteredNavItems.filter(item => item.group === '管理').map((item) => {
+                        const isActive = location.pathname === item.href
+                        const Icon = item.icon
+                        return (
+                          <Link
+                            key={item.href}
+                            to={item.href}
+                            onClick={() => setMobileMenuOpen(false)}
+                            className={cn(
+                              'flex items-center rounded-lg pl-3 py-2 text-base relative isolate',
+                              isActive
+                                ? 'bg-primary text-primary-foreground'
+                                : "text-sidebar-foreground hover:text-foreground transition-[color] duration-200 before:content-[''] before:absolute before:inset-0 before:-z-10 before:bg-muted before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-200"
+                            )}
+                          >
+                            <Icon className="h-5 w-5 shrink-0 mr-3" />
+                            {item.title}
+                          </Link>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
+                )}
               </nav>
             </div>
           </div>

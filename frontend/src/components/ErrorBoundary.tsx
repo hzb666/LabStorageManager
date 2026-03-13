@@ -1,4 +1,4 @@
-﻿import React, { useEffect } from 'react'
+﻿import React from 'react'
 import { CircleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import {
@@ -7,23 +7,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/Card'
-
-// 初始化主题的组件 - 确保错误页面有正确的主题
-function ThemeInitializer() {
-  useEffect(() => {
-    // 读取保存的主题设置
-    const savedTheme = localStorage.getItem('theme') || 'light'
-    const root = document.documentElement
-    if (savedTheme === 'dark') {
-      root.classList.add('dark')
-      root.style.colorScheme = 'dark'
-    } else {
-      root.classList.remove('dark')
-      root.style.colorScheme = 'light'
-    }
-  }, [])
-  return null
-}
 
 interface Props {
   children: React.ReactNode
@@ -44,20 +27,33 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, error }
   }
 
+  private ensureErrorTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'light'
+    const root = document.documentElement
+    if (savedTheme === 'dark') {
+      root.classList.add('dark')
+      root.style.colorScheme = 'dark'
+    } else {
+      root.classList.remove('dark')
+      root.style.colorScheme = 'light'
+    }
+  }
+
   componentDidCatch(error: Error, info: React.ErrorInfo) {
+    this.ensureErrorTheme()
     console.error('[ErrorBoundary]', error, info.componentStack)
   }
 
   handleReload = () => {
-    window.location.reload()
+    globalThis.location.reload()
   }
 
   handleBack = () => {
-    if (window.history.length > 1) {
-      window.history.back()
+    if (globalThis.history.length > 1) {
+      globalThis.history.back()
     } else {
       // 如果没有历史记录，跳转到首页
-      window.location.href = '/'
+      globalThis.location.href = '/'
     }
   }
 
@@ -68,10 +64,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <>
-          <ThemeInitializer />
-          <div className="flex min-h-svh w-full items-center justify-center px-4">
-            <div className="absolute inset-0 -z-10 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] dark:[mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
+        <div className="flex min-h-svh w-full items-center justify-center px-4">
+            <div className="absolute inset-0 -z-10 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] bg-size-[16px_16px] mask-[radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] dark:mask-[radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
             
             <Card className="w-full max-w-sm">
               <CardHeader className="space-y-4 mb-4">
@@ -108,7 +102,6 @@ export class ErrorBoundary extends React.Component<Props, State> {
               </CardContent>
             </Card>
           </div>
-        </>
       )
     }
 
