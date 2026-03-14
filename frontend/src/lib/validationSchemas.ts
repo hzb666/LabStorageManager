@@ -1,14 +1,11 @@
 /**
  * Valibot 验证 Schemas
- * 基于 inputValidation.ts 中的验证逻辑，使用 Valibot Pipeline 模式封装
- * 参考文档: docs/plans/输入验证与状态管理.md
- * 
  * 使用方法:
  * ```tsx
  * import { useForm } from 'react-hook-form'
  * import { valibotResolver } from '@hookform/resolvers/valibot'
  * import { InventorySchema } from '@/lib/validationSchemas'
- * 
+ *
  * const form = useForm({
  *   resolver: valibotResolver(InventorySchema),
  *   defaultValues: {...}
@@ -418,7 +415,7 @@ export const UserCreateSchema = v.object({
     v.maxLength(50, '密码最多50个字符')
   ),
   full_name: createStringLengthSchema('姓名', 1, 100),
-  role: v.optional(v.picklist(['admin', 'user']))
+  role: v.optional(v.picklist(['admin', 'user', 'public']))
 })
 
 /**
@@ -428,8 +425,116 @@ export const UserCreateSchema = v.object({
 export const UserUpdateSchema = v.object({
   username: UsernameSchema,  // 用户名必填
   full_name: createStringLengthSchema('姓名', 1, 100),  // 必填
-  role: v.optional(v.picklist(['admin', 'user']))
+  role: v.optional(v.picklist(['admin', 'user', 'public']))
 })
+
+
+/**
+ * 修改密码 Schema
+ */
+export const ChangePasswordSchema = v.object({
+  old_password: createStringLengthSchema('原密码', 6, 50),
+  new_password: v.pipe(
+    v.string('新密码不能为空'),
+    v.minLength(6, '新密码至少6个字符'),
+    v.maxLength(50, '新密码最多50个字符')
+  ),
+  confirm_password: createStringLengthSchema('确认密码', 6, 50)
+})
+
+/**
+ * 带确认的密码 Schema (验证两次密码一致)
+ */
+export const ChangePasswordWithConfirmSchema = v.pipe(
+  ChangePasswordSchema,
+  v.forward(
+    v.check((input) => input.new_password === input.confirm_password, '两次输入的密码不一致'),
+    ['confirm_password']
+  )
+)
+
+/**
+ * 用户创建表单类型
+ */
+export type UserCreateFormData = v.InferOutput<typeof UserCreateSchema>
+
+/**
+ * 用户更新表单类型
+ */
+export type UserUpdateFormData = v.InferOutput<typeof UserUpdateSchema>
+
+/**
+ * 修改密码表单类型
+ */
+export type ChangePasswordFormData = v.InferOutput<typeof ChangePasswordWithConfirmSchema>
+
+// ==========================================
+// 8. 归还模块 Schema
+// ==========================================
+
+/**
+ * 归还数量验证 Schema - 用于验证归还时的剩余量或使用量
+ * 支持字符串和数字输入
+ * @param fieldName 字段中文名称（如"剩余量"或"使用量"）
+ * @param maxValue 最大值（原借用时的剩余量）
+ */
+export const createReturnQuantitySchema = (fieldName: string, maxValue: number) =>
+  v.pipe(
+    v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
+    v.transform(parseNumberOrNaN),
+    v.number(`${fieldName}必须是有效数字`),
+    v.minValue(0, `${fieldName}不能为负数`),
+    v.maxValue(maxValue, `${fieldName}不能超过原借用时剩余量 (${maxValue})`)
+  )
+
+/**
+ * 归还表单 Schema
+ */
+export const ReturnFormSchema = v.object({
+  return_mode: v.picklist(['used', 'remaining'], '归还模式不能为空'),
+  return_quantity: v.pipe(
+    v.union([v.string(), v.number()], '数量必须是有效数字'),
+    v.transform(parseNumberOrNaN),
+    v.number('数量必须是有效数字'),
+    v.minValue(0, '数量不能为负数')
+  ),
+})
+
+export type ReturnFormData = v.InferOutput<typeof ReturnFormSchema>
+
+// ==========================================
+// 9. 设备管理模块 Schema
+// ==========================================
+
+/**
+ * 设备名称验证 Schema
+ * 必填，最大长度50字符
+ */
+export const DeviceNameSchema = v.object({
+  device_name: createStringLengthSchema('设备名称', 1, 50)
+})
+
+export type DeviceNameFormData = v.InferOutput<typeof DeviceNameSchema>
+
+// ==========================================
+// 10. 通用工具函数
+// ==========================================
+
+/**
+ * 安全的值转换为字符串
+ * 避免 [object Object] 问题
+ * @param value 要转换的值
+ * @param fallback 回退值，默认为 '-'
+ * @returns 字符串值或回退值
+ */
+export const safeString = (value: unknown, fallback = '-'): string => {
+  if (value === null || value === undefined) return fallback
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  // 对象类型，返回 fallback 而不是 [object Object]
+  return fallback
+}
 
 export interface ValidationError {
   loc?: (string | number)[]
@@ -516,97 +621,4 @@ export const normalizeApiErrorMessage = (detail: unknown, fallback = '操作失�
   }
 
   return detail
-}
-
-/**
- * 修改密码 Schema
- */
-export const ChangePasswordSchema = v.object({
-  old_password: createStringLengthSchema('原密码', 6, 50),
-  new_password: v.pipe(
-    v.string('新密码不能为空'),
-    v.minLength(6, '新密码至少6个字符'),
-    v.maxLength(50, '新密码最多50个字符')
-  ),
-  confirm_password: createStringLengthSchema('确认密码', 6, 50)
-})
-
-/**
- * 带确认的密码 Schema (验证两次密码一致)
- */
-export const ChangePasswordWithConfirmSchema = v.pipe(
-  ChangePasswordSchema,
-  v.forward(
-    v.check((input) => input.new_password === input.confirm_password, '两次输入的密码不一致'),
-    ['confirm_password']
-  )
-)
-
-/**
- * 用户创建表单类型
- */
-export type UserCreateFormData = v.InferOutput<typeof UserCreateSchema>
-
-/**
- * 用户更新表单类型
- */
-export type UserUpdateFormData = v.InferOutput<typeof UserUpdateSchema>
-
-/**
- * 修改密码表单类型
- */
-export type ChangePasswordFormData = v.InferOutput<typeof ChangePasswordWithConfirmSchema>
-
-// ==========================================
-// 9. 归还模块 Schema
-// ==========================================
-
-/**
- * 归还数量验证 Schema - 用于验证归还时的剩余量或使用量
- * 支持字符串和数字输入
- * @param fieldName 字段中文名称（如"剩余量"或"使用量"）
- * @param maxValue 最大值（原借用时的剩余量）
- */
-export const createReturnQuantitySchema = (fieldName: string, maxValue: number) =>
-  v.pipe(
-    v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
-    v.transform(parseNumberOrNaN),
-    v.number(`${fieldName}必须是有效数字`),
-    v.minValue(0, `${fieldName}不能为负数`),
-    v.maxValue(maxValue, `${fieldName}不能超过原借用时剩余量 (${maxValue})`)
-  )
-
-/**
- * 归还表单 Schema
- */
-export const ReturnFormSchema = v.object({
-  return_mode: v.picklist(['used', 'remaining'], '归还模式不能为空'),
-  return_quantity: v.pipe(
-    v.union([v.string(), v.number()], '数量必须是有效数字'),
-    v.transform(parseNumberOrNaN),
-    v.number('数量必须是有效数字'),
-    v.minValue(0, '数量不能为负数')
-  ),
-})
-
-export type ReturnFormData = v.InferOutput<typeof ReturnFormSchema>
-
-// ==========================================
-// 通用工具函数
-// ==========================================
-
-/**
- * 安全的值转换为字符串
- * 避免 [object Object] 问题
- * @param value 要转换的值
- * @param fallback 回退值，默认为 '-'
- * @returns 字符串值或回退值
- */
-export const safeString = (value: unknown, fallback = '-'): string => {
-  if (value === null || value === undefined) return fallback
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return String(value)
-  }
-  // 对象类型，返回 fallback 而不是 [object Object]
-  return fallback
 }

@@ -37,6 +37,7 @@ from app.models.user_session import UserSession
 from app.services.image_service import save_avatar, delete_file
 from app.services.user_service import get_user_by_username, get_user_by_id
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.sql_utils import normalize_field_sql, normalize_search_term
 from app.services.session_service import (
     cleanup_expired_sessions,
     _check_device_limit,
@@ -158,6 +159,12 @@ class ChangePasswordRequest(BaseModel):
     """Change password request body"""
     old_password: str = Field(min_length=6, max_length=50, description="原密码")
     new_password: str = Field(min_length=6, max_length=50, description="新密码")
+
+
+class UserSearchItem(BaseModel):
+    """User search result item for autocomplete."""
+    id: int
+    full_name: str
 
 
 @router.post("/login")
@@ -410,7 +417,7 @@ def list_users(
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid role: {role}. Must be 'admin' or 'user'"
+                detail=f"Invalid role: {role}. Must be 'admin', 'user' or 'public'"
             )
     if is_active is not None:
         statement = statement.where(User.is_active == is_active)
@@ -466,6 +473,37 @@ def list_users(
         "skip": skip,
         "limit": limit,
     }
+
+
+@router.get("/search", response_model=list[UserSearchItem])
+def search_users(
+    q: str,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
+):
+    """Search users for autocomplete by username/full_name/full_name_pinyin."""
+    del current_user  # authenticated users only
+
+    keyword = normalize_search_term((q or "").strip())
+    if not keyword:
+        return []
+
+    search_pattern = f"%{keyword}%"
+
+    statement = (
+        select(User)
+        .where(User.is_active)
+        .where(User.role != UserRole.PUBLIC)
+        .where(
+            normalize_field_sql(User.username).ilike(search_pattern)
+            | normalize_field_sql(User.full_name).ilike(search_pattern)
+            | normalize_field_sql(func.coalesce(User.full_name_pinyin, "")).ilike(search_pattern)
+        )
+        .order_by(func.coalesce(User.full_name_pinyin, User.full_name).asc(), User.id.asc())
+    )
+
+    users = db.exec(statement).all()
+    return [UserSearchItem(id=user.id, full_name=user.full_name) for user in users]
 
 
 @router.get("/me", response_model=UserResponse)
@@ -650,7 +688,7 @@ def update_user_role(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role: {role}. Must be 'admin' or 'user'"
+            detail=f"Invalid role: {role}. Must be 'admin', 'user' or 'public'"
         )
     
     db.commit()

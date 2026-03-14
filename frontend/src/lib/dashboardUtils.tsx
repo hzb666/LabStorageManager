@@ -85,6 +85,18 @@ export type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
 
 export const DASHBOARD_TAB_STORAGE_KEY = 'dashboard-active-tab'
 
+/**
+ * 清除 Dashboard Tab 持久化状态
+ * 用于退出登录时清理用户特定的状态
+ */
+export function clearDashboardTab(): void {
+  try {
+    localStorage.removeItem(DASHBOARD_TAB_STORAGE_KEY)
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
 export const REAGENT_STATUS_OPTIONS = [
   { value: 'all', label: '全部状态' },
   { value: 'pending', label: '待审批' },

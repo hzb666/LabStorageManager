@@ -193,6 +193,11 @@ export function DashboardBorrowTab() {
       size: 180,
       cell: (info) => formatDateTime(info.getValue()),
     }),
+    borrowColumnHelper.accessor('borrower_name', {
+      header: '借用人',
+      size: 120,
+      cell: (info) => info.getValue() || '-',
+    }),
     borrowColumnHelper.display({
       id: 'actions',
       header: '操作',

@@ -14,7 +14,7 @@ from sqlmodel import Session, select, func
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
 from app.core.time_utils import get_utc_now, to_china_time
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import (
     ReagentOrder,
@@ -153,6 +153,9 @@ def create_reagent_order(
     Create a new reagent order.
     Critical: CAS Number is normalized automatically.
     """
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="公用账户不能创建订单")
+
     # Normalize CAS Number
     normalized_cas = normalize_cas(order.cas_number)
     is_valid, error = validate_cas_format(normalized_cas)

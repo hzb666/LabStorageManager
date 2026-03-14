@@ -502,3 +502,42 @@ net::ERR_CONNECTION_CLOSED
 
 
 - [ ]
+
+---
+
+## 2026-03-14 inventory.py 列表端点缺少权限控制 (IDOR漏洞)
+
+### 问题描述
+
+- **文件**: `app/api/inventory.py`
+- **端点**: `GET /inventory/` (`list_inventory`)
+- **问题**: 该端点没有添加 `current_user` 依赖，任何人无需登录即可访问库存列表
+- **风险**: 未认证用户可获取全部库存数据，包括 CAS号、名称、位置、数量、危险品标识等敏感信息
+
+### 审计结果
+
+对全部 11 个 API 文件中约 76 个端点进行了全面审计，确认：
+- **只有 1 个端点存在安全问题**：`list_inventory`
+- 其他端点（如公告、模板下载等）虽无认证，但是**预期行为**（业务需求）
+
+### 修复方案
+
+在 `list_inventory` 函数参数中添加 `current_user: CurrentUser` 依赖：
+
+```python
+@router.get("/")
+def list_inventory(
+    current_user: CurrentUser,  # 添加鉴权
+    db: Annotated[Session, Depends(get_db)],
+    ...
+):
+    """List inventory items with optional filters, pagination, search and sort.
+    
+    Requires authentication - users must be logged in to view inventory.
+    """
+```
+
+### 状态
+
+- [X] 已修复
+- [X] ruff check 验证通过

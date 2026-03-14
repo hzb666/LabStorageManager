@@ -18,6 +18,7 @@ import { toast } from '@/lib/toast'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
+import { BorrowDialog } from '@/components/BorrowDialog'
 import useDialogState from '@/hooks/useDialogState'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { FilterTable } from '@/components/ui/FilterTable'
@@ -37,6 +38,8 @@ import {
 } from '@/lib/validationSchemas'
 import type { InventoryFormData, ValidationError } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
+import { UserRoles } from '@/lib/constants'
+import { useAuthStore } from '@/store/useStore'
 
 // 表单配置
 import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfigs'
@@ -465,8 +468,35 @@ const ActionButtons = React.memo(function ActionButtons({
 }: {
   item: InventoryItem;
   onEdit: (item: InventoryItem) => void;
-  onBorrowSuccess: () => void
+  onBorrowSuccess: () => void | Promise<void>
 }) {
+  const currentUser = useAuthStore((state) => state.user)
+  const isPublicUser = currentUser?.role === UserRoles.PUBLIC
+  const [borrowDialogOpen, setBorrowDialogOpen] = useState(false)
+  const [pendingBorrowItem, setPendingBorrowItem] = useState<InventoryItem | null>(null)
+  const [isSubmittingBorrow, setIsSubmittingBorrow] = useState(false)
+
+  const executeBorrow = useCallback(async (inventoryId: number, actualBorrowerId?: number) => {
+    setIsSubmittingBorrow(true)
+    try {
+      await inventoryAPI.borrow(
+        inventoryId,
+        actualBorrowerId ? { actual_borrower_id: actualBorrowerId } : undefined
+      )
+      await onBorrowSuccess()
+      toast.success('借用成功')
+      setBorrowDialogOpen(false)
+      setPendingBorrowItem(null)
+    } catch (error) {
+      const err = error as { response?: { status?: number; data?: { detail?: string } } }
+      toast[err.response?.status === 409 ? 'warning' : 'error'](
+        err.response?.data?.detail || '借用失败'
+      )
+      throw error
+    } finally {
+      setIsSubmittingBorrow(false)
+    }
+  }, [onBorrowSuccess])
 
   const statusDisplay = useMemo(() => {
     const statusList = [
@@ -509,31 +539,43 @@ const ActionButtons = React.memo(function ActionButtons({
             throw new Error('剩余量未填写')
           }
 
-          try {
-            await inventoryAPI.borrow(currItem.id)
-            await onBorrowSuccess()
-            toast.success('借用成功')
-          } catch (error) {
-            const err = error as { response?: { status?: number; data?: { detail?: string } } }
-            toast[err.response?.status === 409 ? 'warning' : 'error'](
-              err.response?.data?.detail || '借用失败'
-            )
-            throw error
+          if (isPublicUser) {
+            setPendingBorrowItem(currItem)
+            setBorrowDialogOpen(true)
+            return
           }
+
+          await executeBorrow(currItem.id)
         }
       }
     ]
-  }, [onBorrowSuccess])
+  }, [isPublicUser, executeBorrow])
 
   return (
-    <TableActionButtonsMemo
-      item={item}
-      actions={actions}
-      showEdit={true}
-      onEdit={onEdit}
-      statusField="status"
-      statusDisplay={statusDisplay}
-    />
+    <>
+      <TableActionButtonsMemo
+        item={item}
+        actions={actions}
+        showEdit={true}
+        onEdit={onEdit}
+        statusField="status"
+        statusDisplay={statusDisplay}
+      />
+      <BorrowDialog
+        open={borrowDialogOpen}
+        onOpenChange={(open) => {
+          setBorrowDialogOpen(open)
+          if (!open) {
+            setPendingBorrowItem(null)
+          }
+        }}
+        isSubmitting={isSubmittingBorrow}
+        onConfirm={async (actualBorrowerId) => {
+          if (!pendingBorrowItem) return
+          await executeBorrow(pendingBorrowItem.id, actualBorrowerId)
+        }}
+      />
+    </>
   )
 }, (prevProps, nextProps) => {
   if (prevProps.onEdit !== nextProps.onEdit || prevProps.onBorrowSuccess !== nextProps.onBorrowSuccess) {

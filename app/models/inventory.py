@@ -128,6 +128,11 @@ class InventoryBorrowReturn(SQLModel):
     unit: Optional[str] = Field(default=None, max_length=20)
 
 
+class InventoryBorrowRequest(SQLModel):
+    """DTO for borrow operation."""
+    actual_borrower_id: Optional[int] = Field(default=None, ge=1)
+
+
 class InventoryResponse(BaseResponse):
     """DTO for inventory API responses"""
     id: int

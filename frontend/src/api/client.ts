@@ -133,13 +133,15 @@ export const sessionAPI = {
   delete: (id: number) => api.delete(`/users/me/sessions/${id}`),
   deleteAll: () => api.delete('/users/me/sessions'),
   refresh: () => api.post('/users/me/sessions/refresh'),
+  update: (id: number, data: { device_name: string }) =>
+    api.patch(`/users/me/sessions/${id}`, data),
 }
 
 // User Admin APIs
 export const userAdminAPI = {
   list: (params?: { skip?: number; limit?: number; username?: string; role?: string; is_active?: boolean }) =>
     api.get('/users/', { params }),
-  create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' }) =>
+  create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' | 'public' }) =>
     api.post('/users', data),
   update: (id: number, data: { username?: string; full_name?: string; role?: string; is_active?: boolean }) =>
     api.put(`/users/${id}`, data),
@@ -164,6 +166,15 @@ export const userAdminAPI = {
   // 生成日志访问令牌
   generateLogsToken: (userId: number) => 
     api.post<{ token: string }>(`/admin/users/${userId}/logs-token`),
+}
+
+export interface UserSearchItem {
+  id: number
+  full_name: string
+}
+
+export const userAPI = {
+  searchUsers: (query: string) => api.get<UserSearchItem[]>('/users/search', { params: { q: query } }),
 }
 
 // Reagent Order APIs
@@ -272,7 +283,7 @@ export const inventoryAPI = {
   get: (id: number) => api.get(`/inventory/${id}`),
   getByCode: (code: string) => api.get(`/inventory/code/${code}`),
   checkCAS: (casNumber: string) => api.get(`/inventory/cas/${casNumber}`),
-  borrow: (id: number) => api.post(`/inventory/${id}/borrow`),
+  borrow: (id: number, data?: { actual_borrower_id?: number }) => api.post(`/inventory/${id}/borrow`, data),
   return: (id: number, data: { remaining_quantity: number; unit?: string }) =>
     api.post(`/inventory/${id}/return`, data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/inventory/${id}`, data),

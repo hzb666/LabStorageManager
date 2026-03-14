@@ -34,12 +34,13 @@ import {
   UserX
 } from 'lucide-react'
 import useDialogState from '@/hooks/useDialogState'
-import { BaseForm, type FieldSchema } from '@/components/BaseForm'
+import { BaseForm } from '@/components/BaseForm'
 import { UserEditDialog, type User } from '@/components/UserEditDialog'
 import {
   UserCreateSchema,
   type UserCreateFormData,
 } from '@/lib/validationSchemas'
+import { defaultUserValues, getUserCreateFormFields, USER_ROLE_OPTIONS } from '@/lib/formConfigs'
 import { AxiosError } from 'axios'
 import type { PaginationParams } from '@/api/client'
 
@@ -165,22 +166,13 @@ export function AdminUsersPage() {
   // 创建用户表单 - 使用 useForm + BaseForm
   const createForm = useForm<UserCreateFormData>({
     resolver: valibotResolver(UserCreateSchema),
-    defaultValues: {
-      username: '',
-      password: '',
-      full_name: '',
-      role: 'user',
-    },
+    defaultValues: defaultUserValues,
   })
   const { reset: resetCreateForm } = createForm
   const [createLoading, setCreateLoading] = useState(false)
 
   // 创建用户表单字段配置
-  const createFormFields: FieldSchema<UserCreateFormData>[] = [
-    { name: 'username', label: '用户名', type: 'input', required: true, placeholder: '请输入用户名' },
-    { name: 'password', label: '密码', type: 'password', required: true, placeholder: '请输入密码' },
-    { name: 'full_name', label: '姓名', type: 'input', required: true, placeholder: '请输入姓名' },
-  ]
+  const createFormFields = getUserCreateFormFields()
 
   // Edit user modal
   const [editUser, setEditUser] = useState<User | null>(null)
@@ -285,7 +277,7 @@ export function AdminUsersPage() {
     try {
       await userAdminAPI.create(userData)
       setDialogState(null)
-      resetCreateForm({ username: '', password: '', full_name: '', role: 'user' })
+      resetCreateForm(defaultUserValues)
       refetchUsers()
       toast.success('用户创建成功')
     } catch (error) {
@@ -300,7 +292,7 @@ export function AdminUsersPage() {
   const handleCreateModalClose = (open: boolean) => {
     setDialogState(open ? 'create' : null)
     if (!open) {
-      resetCreateForm({ username: '', password: '', full_name: '', role: 'user' })
+      resetCreateForm(defaultUserValues)
     }
   }
 
@@ -342,6 +334,7 @@ export function AdminUsersPage() {
             <SelectItem value="all">全部角色</SelectItem>
             <SelectItem value="admin">管理员</SelectItem>
             <SelectItem value="user">用户</SelectItem>
+            <SelectItem value="public">公用</SelectItem>
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
@@ -438,22 +431,20 @@ export function AdminUsersPage() {
               fields={createFormFields}
               layout="stack"
             />
-            {/* 角色选择 - 使用 RadioGroup */}
+              {/* 角色选择 - 使用 RadioGroup */}
             <div>
               <Label className="text-base">角色</Label>
               <RadioGroup
                 value={createForm.watch('role')}
-                onValueChange={(value) => createForm.setValue('role', value as 'admin' | 'user')}
+                onValueChange={(value) => createForm.setValue('role', value as 'admin' | 'user' | 'public')}
                 className="flex gap-4 mt-2"
               >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="user" id="create_role_user" />
-                  <Label htmlFor="create_role_user" className="text-base cursor-pointer">用户</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="admin" id="create_role_admin" />
-                  <Label htmlFor="create_role_admin" className="text-base cursor-pointer">管理员</Label>
-                </div>
+                {USER_ROLE_OPTIONS.map((option) => (
+                  <div key={option.value} className="flex items-center space-x-2">
+                    <RadioGroupItem value={option.value} id={`create_role_${option.value}`} />
+                    <Label htmlFor={`create_role_${option.value}`} className="text-base cursor-pointer">{option.label}</Label>
+                  </div>
+                ))}
               </RadioGroup>
             </div>
           </div>

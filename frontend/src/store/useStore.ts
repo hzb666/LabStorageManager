@@ -37,7 +37,7 @@ interface User {
   id: number
   username: string
   full_name: string | null
-  role: 'admin' | 'user'
+  role: 'admin' | 'user' | 'public'
   created_at: string
   avatar_url?: string
 }

@@ -35,9 +35,16 @@ import {
   Shield,
   Edit,
   X,
+  Pencil,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { UserEditDialog } from '@/components/UserEditDialog'
+import { useForm } from 'react-hook-form'
+import { valibotResolver } from '@hookform/resolvers/valibot'
+import { DeviceNameSchema, type DeviceNameFormData } from '@/lib/validationSchemas'
+import { defaultDeviceNameValues, getDeviceNameFormFields } from '@/lib/formConfigs'
+import { LoadingButton } from '@/components/ui/LoadingButton'
+import { BaseForm } from '@/components/BaseForm'
 
 
 const columnHelper = createColumnHelper<SessionInfo>()
@@ -51,12 +58,22 @@ export default function DeviceManagement() {
   // Dialog state - 支持 kick/kickAll
   const [dialogState, setDialogState] = useDialogState<"kick" | "kickAll">()
 
-  // 编辑用户弹窗状态
-  const [editDialogOpen, setEditDialogOpen] = useState(false)
-
-  // Kick single device
+  // 编辑设备名称相关状态
+  const [editSession, setEditSession] = useState<SessionInfo | null>(null)
+  const [editDeviceDialogOpen, setEditDeviceDialogOpen] = useState(false)
   const [kickSession, setKickSession] = useState<SessionInfo | null>(null)
   const [kickLoading, setKickLoading] = useState(false)
+
+  // 编辑用户信息弹窗状态
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+
+  const [editLoading, setEditLoading] = useState(false)
+
+  // 设备名称表单
+  const editForm = useForm<DeviceNameFormData>({
+    resolver: valibotResolver(DeviceNameSchema),
+    defaultValues: defaultDeviceNameValues
+  })
 
   // Kick all devices
   const [kickAllLoading, setKickAllLoading] = useState(false)
@@ -137,13 +154,33 @@ export default function DeviceManagement() {
     columnHelper.display({
       id: 'actions',
       header: '操作',
-      size: 100,
+      size: 140,
       cell: info => {
         const session = info.row.original
         const isCurrent = session.device_id === currentDeviceId
-        
+
         return (
           <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="morden"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditSession(session)
+                    editForm.setValue('device_name', session.device_name)
+                    setEditDeviceDialogOpen(true)
+                  }}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>重命名</p>
+              </TooltipContent>
+            </Tooltip>
             {!isCurrent && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -408,6 +445,75 @@ export default function DeviceManagement() {
             <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base flex-1">
               取消
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Device Name Dialog */}
+      <Dialog
+        open={editDeviceDialogOpen}
+        onOpenChange={(open) => {
+          setEditDeviceDialogOpen(open)
+          if (!open) {
+            setEditSession(null)
+            editForm.reset()
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重命名设备</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <p className="text-base">
+                当前设备：<span className="font-medium">{editSession?.device_name}</span>
+              </p>
+              <p className="text-sm text-muted-foreground">
+                IP地址：{editSession?.ip_address}
+              </p>
+            </div>
+
+            <BaseForm
+              form={editForm}
+              fields={getDeviceNameFormFields()}
+              layout="stack"
+            />
+
+            <div className="flex gap-3 mt-8">
+              <Button
+                variant="morden"
+                onClick={() => setEditDeviceDialogOpen(false)}
+                className="flex-1"
+                size="lg"
+              >
+                取消
+              </Button>
+              <LoadingButton
+                onClick={editForm.handleSubmit(async (formData) => {
+                  if (!editSession) return
+
+                  setEditLoading(true)
+                  try {
+                    await sessionAPI.update(editSession.id, { device_name: formData.device_name })
+                    setEditDeviceDialogOpen(false)
+                    refetchSessions()
+                    toast.success('设备名称已更新')
+                  } catch {
+                    toast.error('操作失败')
+                  } finally {
+                    setEditLoading(false)
+                  }
+                })}
+                isLoading={editLoading}
+                loadingText="处理中..."
+                className="flex-1"
+                size="lg"
+              >
+                确认修改
+              </LoadingButton>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import List, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -139,3 +140,70 @@ def refresh_session(
     db.commit()
     
     return {"message": "Session refreshed", "expires_at": session.expires_at}
+
+
+class SessionUpdateRequest(BaseModel):
+    """Request model for updating session"""
+    device_name: str = Field(..., min_length=1, max_length=50)
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # 标准化：去除前后空格
+        self.device_name = self.device_name.strip()
+        # strip 后再次验证，防止全空格输入
+        if not self.device_name:
+            raise ValueError("Device name cannot be empty after trimming")
+        # XSS 过滤：移除危险字符
+        self.device_name = self._sanitize(self.device_name)
+
+    @staticmethod
+    def _sanitize(text: str) -> str:
+        """XSS 过滤：移除 HTML/JS 危险字符"""
+        import html
+        # 转义 HTML 实体
+        text = html.escape(text)
+        # 移除 script 标签（虽然 escape 已经转义了 < 和 >，但额外过滤更安全）
+        text = text.replace("<script", "").replace("</script", "")
+        text = text.replace("<iframe", "").replace("</iframe", "")
+        text = text.replace("javascript:", "")
+        text = text.replace("onerror=", "").replace("onclick=", "")
+        return text
+
+
+@router.patch("/{session_id}", response_model=SessionResponse)
+def update_session(
+    session_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    request: SessionUpdateRequest
+):
+    """Update a session's device name"""
+    session = db.get(UserSession, session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+
+    # 检查 session 是否已过期
+    if session.expires_at <= get_utc_now():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session has expired"
+        )
+
+    # 只能修改自己的会话
+    if session.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot update other user's session"
+        )
+
+    # 更新设备名称
+    session.device_name = request.device_name
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    return session

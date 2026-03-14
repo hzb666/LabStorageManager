@@ -14,7 +14,7 @@ export interface User {
   id: number
   username: string
   full_name: string | null
-  role: 'admin' | 'user'
+  role: 'admin' | 'user' | 'public'
   is_active: boolean
   created_at: string
   avatar_url?: string
@@ -25,11 +25,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/Button'
 import { Label } from '@/components/ui/Label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
-import { BaseForm, type FieldSchema } from '@/components/BaseForm'
+import { BaseForm } from '@/components/BaseForm'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { AxiosError } from 'axios'
+import { getUserEditFormFields, USER_ROLE_OPTIONS } from '@/lib/formConfigs'
 
 export interface UserEditDialogProps {
   /** 弹窗显示状态 */
@@ -47,12 +48,6 @@ export interface UserEditDialogProps {
 // 允许的图片类型
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif']
 const MAX_SIZE_MB = 5
-
-// 用户编辑表单字段配置
-const editFormFields: FieldSchema<UserUpdateFormData>[] = [
-  { name: 'username', label: '用户名', type: 'input', required: true, placeholder: '请输入用户名' },
-  { name: 'full_name', label: '姓名', type: 'input', required: true, placeholder: '请输入姓名' },
-]
 
 export function UserEditDialog({
   open,
@@ -432,7 +427,7 @@ export function UserEditDialog({
               {/* 使用 BaseForm 统一表单字段 */}
               <BaseForm
                 form={editForm}
-                fields={editFormFields}
+                fields={getUserEditFormFields()}
                 layout="stack"
               />
 
@@ -442,17 +437,15 @@ export function UserEditDialog({
                   <Label className="text-base">角色</Label>
                   <RadioGroup
                     value={editForm.watch('role')}
-                    onValueChange={(value) => editForm.setValue('role', value as 'admin' | 'user')}
+                    onValueChange={(value) => editForm.setValue('role', value as 'admin' | 'user' | 'public')}
                     className="flex gap-4 mt-2"
                   >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="user" id="edit_role_user" />
-                      <Label htmlFor="edit_role_user" className="text-base cursor-pointer">用户</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="admin" id="edit_role_admin" />
-                      <Label htmlFor="edit_role_admin" className="text-base cursor-pointer">管理员</Label>
-                    </div>
+                    {USER_ROLE_OPTIONS.map((option) => (
+                      <div key={option.value} className="flex items-center space-x-2">
+                        <RadioGroupItem value={option.value} id={`edit_role_${option.value}`} />
+                        <Label htmlFor={`edit_role_${option.value}`} className="text-base cursor-pointer">{option.label}</Label>
+                      </div>
+                    ))}
                   </RadioGroup>
                 </div>
               )}

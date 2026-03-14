@@ -15,6 +15,7 @@ from app.database import DBSession, get_db
 from app.models.inventory import (
     BorrowLog,
     Inventory,
+    InventoryBorrowRequest,
     InventoryBorrowReturn,
     InventoryResponse,
     InventoryStatus,
@@ -30,6 +31,7 @@ from app.services.spec_utils import SpecificationError, format_specification, pa
 from app.services.user_utils import batch_get_user_names
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
+ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -42,6 +44,21 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
 
 def _get_by_id(db: Session, inventory_id: int) -> Optional[Inventory]:
     return db.get(Inventory, inventory_id)
+
+
+def _encode_actual_borrower_notes(actual_borrower_id: Optional[int]) -> Optional[str]:
+    if actual_borrower_id is None:
+        return None
+    return f"{ACTUAL_BORROWER_NOTE_PREFIX}{actual_borrower_id}"
+
+
+def _parse_actual_borrower_id(notes: Optional[str]) -> Optional[int]:
+    if not notes or not notes.startswith(ACTUAL_BORROWER_NOTE_PREFIX):
+        return None
+    raw_id = notes[len(ACTUAL_BORROWER_NOTE_PREFIX):].strip()
+    if not raw_id.isdigit():
+        return None
+    return int(raw_id)
 
 
 def _find_by_code(db: Session, code: str) -> Optional[Inventory]:
@@ -257,6 +274,27 @@ def _register_manual_and_dashboard_routes(
         items = db.exec(statement).all()
         now = get_utc_now()
 
+        inventory_ids = [item.id for item in items]
+        latest_logs_by_inventory: dict[int, BorrowLog] = {}
+        actual_borrower_ids: set[int] = set()
+
+        if inventory_ids:
+            borrow_logs = db.exec(
+                select(BorrowLog)
+                .where(BorrowLog.inventory_id.in_(inventory_ids), BorrowLog.return_time.is_(None))
+                .order_by(BorrowLog.borrow_time.desc())
+            ).all()
+
+            for log in borrow_logs:
+                if log.inventory_id in latest_logs_by_inventory:
+                    continue
+                latest_logs_by_inventory[log.inventory_id] = log
+                actual_borrower_id = _parse_actual_borrower_id(log.notes)
+                if actual_borrower_id:
+                    actual_borrower_ids.add(actual_borrower_id)
+
+        users_map = batch_get_user_names(db, actual_borrower_ids)
+
         return {
             "data": [
                 {
@@ -266,6 +304,13 @@ def _register_manual_and_dashboard_routes(
                     "remaining_quantity": item.remaining_quantity,
                     "unit": item.unit,
                     "borrow_time": item.updated_at.isoformat() + 'Z' if item.updated_at else None,
+                    "borrower_name": (
+                        users_map.get(
+                            _parse_actual_borrower_id(latest_logs_by_inventory[item.id].notes)
+                        )
+                        if item.id in latest_logs_by_inventory
+                        else None
+                    ) or current_user.full_name,
                     "borrow_days": (now - item.updated_at).days if item.updated_at else 0,
                     "is_overdue": ((now - item.updated_at).days > 3) if item.updated_at else False,
                 }
@@ -392,7 +437,8 @@ def _register_common_shelf_and_import_routes(
         }
 
     @router.get("/import/template")
-    def get_import_template():
+    def get_import_template(current_user: CurrentUser):
+        """Get import template - requires login"""
         from app.services.excel_service import generate_import_template
 
         return generate_import_template()
@@ -448,10 +494,21 @@ def _register_borrow_return_routes(
         inventory_id: int,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
+        borrow_data: Optional[InventoryBorrowRequest] = None,
     ):
         item = db.get(Inventory, inventory_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+
+        actual_borrower_id: Optional[int] = None
+        if current_user.role == UserRole.PUBLIC:
+            actual_borrower_id = borrow_data.actual_borrower_id if borrow_data else None
+            if not actual_borrower_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="公用账户借用时必须选择借用人")
+
+            actual_borrower = db.get(User, actual_borrower_id)
+            if not actual_borrower or not actual_borrower.is_active or actual_borrower.role == UserRole.PUBLIC:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择有效借用人")
 
         from sqlmodel import update as sql_update
 
@@ -483,6 +540,7 @@ def _register_borrow_return_routes(
             borrower_id=current_user.id,
             borrow_time=get_utc_now(),
             quantity_borrowed=item.remaining_quantity,
+            notes=_encode_actual_borrower_notes(actual_borrower_id),
         )
         db.add(borrow_log)
         db.commit()
@@ -570,6 +628,14 @@ def _register_borrow_return_routes(
             .limit(10)
         ).all()
 
+        actual_borrower_ids = {
+            actual_borrower_id
+            for log in logs
+            for actual_borrower_id in [_parse_actual_borrower_id(log.notes)]
+            if actual_borrower_id
+        }
+        users_map = batch_get_user_names(db, actual_borrower_ids)
+
         return {
             "inventory_id": inventory_id,
             "name": item.name,
@@ -581,6 +647,8 @@ def _register_borrow_return_routes(
                     "return_time": log.return_time.isoformat() + 'Z' if log.return_time else None,
                     "quantity_borrowed": log.quantity_borrowed,
                     "quantity_returned": log.quantity_returned,
+                    "actual_borrower_id": _parse_actual_borrower_id(log.notes),
+                    "actual_borrower_name": users_map.get(_parse_actual_borrower_id(log.notes)),
                 }
                 for log in logs
             ],

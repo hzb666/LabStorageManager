@@ -1,9 +1,27 @@
-﻿import { StrictMode } from 'react'
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 // 1. 引入 TanStack Query 需要的 Provider 和 Client
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
 import App from './App.tsx'
+
+const LSM_BANNER = [
+  '╔═══════════════════════════════════════════╗',
+  '║                                           ║',
+  '║     ██╗        ███████╗   ███╗   ███╗     ║',
+  '║     ██║        ██╔════╝   ████╗ ████║     ║',
+  '║     ██║        ███████╗   ██╔████╔██║     ║',
+  '║     ██║        ╚════██║   ██║╚██╔╝██║     ║',
+  '║     ███████╗   ███████║   ██║ ╚═╝ ██║     ║',
+  '║     ╚══════╝   ╚══════╝   ╚═╝     ╚═╝     ║',
+  '║                                           ║',
+  '╚════  Lab Storage Manager - Jiao Group  ═══╝'
+].join('\n')
+
+console.log(
+  '%c' + LSM_BANNER,
+  'color: #3b82f6; font-weight: bold; font-family: "Courier New", Courier, monospace; font-size: 12px; line-height: 12px;'
+)
 
 // 2. 创建一个 QueryClient 实例
 const queryClient = new QueryClient({

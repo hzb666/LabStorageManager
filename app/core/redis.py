@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # Redis 客户端单例与断路器状态
 _redis_client: Optional[redis.Redis] = None
 _last_error_time: float = 0.0
-REDIS_COOLDOWN_SECONDS = 30.0  # 熔断冷却时间：30秒，期间不再尝试连接
+REDIS_COOLDOWN_SECONDS = 60.0  # 熔断冷却时间：60秒，期间不再尝试连接
 
 def get_redis() -> Optional[redis.Redis]:
     """获取 Redis 客户端（带简易熔断机制）"""
@@ -31,8 +31,8 @@ def get_redis() -> Optional[redis.Redis]:
             db=settings.redis_db,
             password=settings.redis_password if settings.redis_password else None,
             decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=2
+            socket_connect_timeout=1,
+            socket_timeout=1
         )
         client = redis.Redis(connection_pool=pool)
         client.ping()

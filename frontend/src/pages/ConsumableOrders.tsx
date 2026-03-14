@@ -90,6 +90,7 @@ const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
 export function ConsumableOrdersPage() {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
+  const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
 
   // ---------------------------------------------------------------------------
   // 状态管理
@@ -278,9 +279,11 @@ export function ConsumableOrdersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">耗材订购</h1>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={handleAddClick} size="lg">
-            <Plus className="w-4 h-4 mr-1.5" /> 创建订单
-          </Button>
+          {canCreateOrder && (
+            <Button onClick={handleAddClick} size="lg">
+              <Plus className="w-4 h-4 mr-1.5" /> 创建订单
+            </Button>
+          )}
           {isAdmin && (
             <Button variant="morden" size="lg" onClick={handleExport}>
               <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出

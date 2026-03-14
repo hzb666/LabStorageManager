@@ -76,12 +76,14 @@ export const ORDER_REASON_MAP: Record<string, string> = {
 export const USER_ROLE_MAP: Record<string, string> = {
   admin: '管理员',
   user: '普通用户',
+  public: '公用账户',
 }
 
 // User Role 常量 - 用于代码中的角色判断
 export const UserRoles = {
   ADMIN: 'admin',
   USER: 'user',
+  PUBLIC: 'public',
 } as const
 
 export type UserRole = typeof UserRoles[keyof typeof UserRoles]

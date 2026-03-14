@@ -21,7 +21,7 @@ from app.models.consumable_order import (
     ConsumableOrderResponse,
     ConsumableOrderStatus,
 )
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.sql_utils import normalize_field_sql, normalize_search_term
@@ -115,6 +115,9 @@ def create_consumable_order(
     db: DBSession,
 ):
     """Create a new consumable order"""
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="公用账户不能创建订单")
+
     pinyin_fields = compute_pinyin_fields(name=order.name)
 
     db_order = ConsumableOrder(

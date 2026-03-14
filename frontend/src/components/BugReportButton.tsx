@@ -12,7 +12,7 @@ import { Bug, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useErrorLogger, fetchBackendErrorLogs } from '@/hooks/useErrorLogger'
 import { useAuthStore } from '@/store/useStore'
-import { setBugButtonHidden } from '@/components/bugReportButtonStorage'
+import { setBugButtonHidden } from '@/lib/bugReportButtonStorage'
 import {
   Tooltip,
   TooltipContent,

@@ -23,7 +23,8 @@ import {
   Archive,
 } from 'lucide-react'
 import { BugReportButton } from '@/components/BugReportButton'
-import { getBugButtonHidden, clearBugButtonHidden } from '@/components/bugReportButtonStorage'
+import { getBugButtonHidden, clearBugButtonHidden } from '@/lib/bugReportButtonStorage'
+import { clearDashboardTab } from '@/lib/dashboardUtils'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
 import { isAdmin, USER_ROLE_MAP } from '@/lib/constants'
@@ -73,6 +74,7 @@ export function Layout() {
   const handleLogout = () => {
     if (logoutConfirming) {
       clearBugButtonHidden()
+      clearDashboardTab()
       logout()
     } else {
       setLogoutConfirming(true)

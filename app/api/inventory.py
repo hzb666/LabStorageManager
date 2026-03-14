@@ -205,6 +205,7 @@ register_inventory_extended_routes(router, SEARCH_CACHE, MAX_PAGE_SIZE, LIST_CAC
 
 @router.get("/")
 def list_inventory(
+    current_user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = min(50, MAX_PAGE_SIZE),
@@ -217,6 +218,10 @@ def list_inventory(
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = 'desc',
 ):
+    """List inventory items with optional filters, pagination, search and sort.
+    
+    Requires authentication - users must be logged in to view inventory.
+    """
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
 
     is_first_page = skip == 0

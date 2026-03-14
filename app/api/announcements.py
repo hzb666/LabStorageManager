@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlmodel import Session, select, func
 
-from app.core.auth import require_admin
+from app.core.auth import CurrentUser, require_admin
 from app.core.config import settings
 from app.core.time_utils import get_utc_now
 from app.database import get_db
@@ -47,10 +47,11 @@ def enrich_with_creator_name(announcement: Announcement, db: Session) -> Announc
 
 @router.get("/public", response_model=List[AnnouncementResponse])
 def get_public_announcements(
+    current_user: CurrentUser,  # 添加鉴权：要求登录
     db: Annotated[Session, Depends(get_db)],
 ):
     """
-    Get public announcements - no login required
+    Get public announcements - requires login
     Returns all visible announcements (both pinned and unpinned), sorted by pin status and creation date
     """
     statement = (

@@ -27,7 +27,6 @@ env/
 .vscode
 .idea/
 .cursor/
-.github/
 .history/
 .claude/
 .kilocode/
@@ -65,7 +64,6 @@ dist/
 # Template/External projects (do not commit)
 shadcn-admin/
 
-
 # Local library files
 frontend/public/lib/
 
@@ -83,3 +81,4 @@ scripts/
 plans/
 
 static/
+report/

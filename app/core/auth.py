@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.time_utils import get_utc_now
-from app.core.redis import get_cached_session, cache_session
+from app.core.redis import get_cached_session, cache_session, delete_cached_session
 from app.database import get_db, engine
 from app.models.user import User, UserRole
 from app.models.user_session import UserSession
@@ -294,6 +294,26 @@ def get_current_user(
 
         # Check if session still exists in database (for kicked devices)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+        # 优先从 Redis 缓存检查 Session 过期（性能优化 + 安全）
+        cached_data = get_cached_session(token_hash)
+        if cached_data:
+            # 缓存命中：检查 expires_at 是否过期
+            cached_expires_at = cached_data.get("expires_at")
+            if cached_expires_at:
+                try:
+                    expires_at = datetime.fromisoformat(cached_expires_at)
+                    if expires_at < get_utc_now():
+                        delete_cached_session(token_hash)
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Session expired",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                except (ValueError, TypeError):
+                    pass  # 格式异常则跳过，继续查 DB
+
+        # 缓存未命中或 Redis 不可用：查询数据库
         session = db.exec(
             select(UserSession).where(UserSession.token_hash == token_hash)
         ).first()
