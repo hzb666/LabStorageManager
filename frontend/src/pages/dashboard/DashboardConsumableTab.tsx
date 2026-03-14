@@ -41,7 +41,7 @@ import {
   buildLocalListData,
   flattenGroupedOrders,
   removeApplicantColumn,
-} from './dashboardUtils'
+} from '../../lib/dashboardUtils'
 
 const consumableColumnHelper = createColumnHelper<DashboardConsumableOrder>()
 
@@ -67,7 +67,7 @@ export function DashboardConsumableTab() {
 
   const consumableDashboardAPI: FilterAPI = useMemo(() => ({
     list: async (params) => {
-      const response = await consumableOrderAPI.getMyOrders()
+      const response = await consumableOrderAPI.getMyConsumableOrders()
       const grouped = (response.data?.data ?? {}) as Record<string, { orders: Record<string, unknown>[] }>
       const rows = flattenGroupedOrders<DashboardConsumableOrder>(grouped, currentUser?.id)
       const local = buildLocalListData(rows, params as DashboardParams, ['name', 'specification'])

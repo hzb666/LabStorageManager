@@ -464,7 +464,7 @@ def complete_consumable_order(
     }
 
 
-@router.get("/dashboard/my-orders")
+@router.get("/dashboard/my-consumable-orders")
 def get_my_consumable_orders(
     current_user: CurrentUser,
     db: DBSession,

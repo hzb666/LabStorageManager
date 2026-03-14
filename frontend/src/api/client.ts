@@ -2,6 +2,7 @@
 import { useAuthStore } from '@/store/useStore'
 import { getDeviceId, getDeviceName } from '@/lib/deviceId'
 import { toast } from '@/lib/toast'
+import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
@@ -32,12 +33,10 @@ api.interceptors.response.use(
     // 排除登录接口的 401 错误，避免页面刷新导致登录页错误信息丢失
     const isLoginRequest = error.config?.url?.includes('/users/login')
     if (error.response?.status === 401 && !isLoginRequest) {
-      // 获取错误详情
+      // 获取错误详情并转换为中文
       const errorDetail = error.response?.data?.detail
-      // 如果是会话失效错误，先显示提示再跳转
-      if (errorDetail === 'Session expired, please login again') {
-        toast.error('会话已失效，请重新登录')
-      }
+      const message = normalizeApiErrorMessage(errorDetail, '会话已失效，请重新登录')
+      toast.error(message)
       useAuthStore.getState().logout()
       globalThis.location.href = '/login'
     }
@@ -235,7 +234,7 @@ export const reagentOrderAPI = {
   stockIn: (id: number) => api.post(`/reagent-orders/${id}/stock-in`),
   getCASOverview: (casNumber: string) =>
     api.get<CASOverviewResponse>(`/reagent-orders/cas-overview/${casNumber}`),
-  getMyOrders: () => api.get('/reagent-orders/dashboard/my-orders'),
+  getMyReagentOrders: () => api.get('/reagent-orders/dashboard/my-reagent-orders'),
   getArrivedOrders: () => api.get('/reagent-orders/dashboard/arrived-orders'),
   exportOrders: () => api.get('/reagent-orders/export', { responseType: 'blob' }),
 }
@@ -262,7 +261,7 @@ export const consumableOrderAPI = {
   reject: (id: number, reason: string) =>
     api.post(`/consumable-orders/${id}/reject`, { reason }),
   complete: (id: number) => api.post(`/consumable-orders/${id}/complete`),
-  getMyOrders: () => api.get('/consumable-orders/dashboard/my-orders'),
+  getMyConsumableOrders: () => api.get('/consumable-orders/dashboard/my-consumable-orders'),
   exportOrders: () => api.get('/consumable-orders/export', { responseType: 'blob' as const }),
 }
 

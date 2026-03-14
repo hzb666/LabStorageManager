@@ -170,8 +170,16 @@ export default function DeviceManagement() {
     }),
   ], [currentDeviceId])
 
+  // 排序数据：当前设备置顶
+  const sortedData = useMemo((): SessionInfo[] => {
+    if (!data || data.length === 0) return []
+    const current = data.filter((d: SessionInfo) => d.device_id === currentDeviceId)
+    const others = data.filter((d: SessionInfo) => d.device_id !== currentDeviceId)
+    return [...current, ...others]
+  }, [data, currentDeviceId])
+
   const table = useReactTable({
-    data,
+    data: sortedData,
     columns,
     columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),

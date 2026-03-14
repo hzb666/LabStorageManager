@@ -38,7 +38,7 @@ import {
   type DashboardParams,
   BORROW_SEARCH_FIELDS,
   buildLocalListData,
-} from './dashboardUtils'
+} from '../../lib/dashboardUtils'
 
 const borrowColumnHelper = createColumnHelper<MyBorrowItem>()
 
@@ -100,7 +100,7 @@ export function DashboardBorrowTab() {
 
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
-  const [returnMode, setReturnMode] = useState<'used' | 'remaining'>('remaining')
+  const [returnMode, setReturnMode] = useState<'used' | 'remaining'>('used')
   const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
 
   const returnForm = useForm({
@@ -127,8 +127,8 @@ export function DashboardBorrowTab() {
 
   const openReturnModal = useCallback((item: MyBorrowItem) => {
     setSelectedBorrow(item)
-    setReturnMode('remaining')
-    returnForm.reset({ return_mode: 'remaining', return_quantity: '' })
+    setReturnMode('used')
+    returnForm.reset({ return_mode: 'used', return_quantity: '' })
     setShowReturnModal(true)
   }, [returnForm])
 
@@ -198,7 +198,14 @@ export function DashboardBorrowTab() {
       header: '操作',
       size: 120,
       cell: (info) => (
-        <Button size="sm" onClick={() => openReturnModal(info.row.original)}>
+        <Button
+          size="sm"
+          className="h-8 text-sm leading-4"
+          onClick={(e) => {
+            e.stopPropagation()
+            openReturnModal(info.row.original)
+          }}
+        >
           归还
         </Button>
       ),
@@ -229,7 +236,7 @@ export function DashboardBorrowTab() {
           setShowReturnModal(open)
           if (!open) {
             setSelectedBorrow(null)
-            setReturnMode('remaining')
+            setReturnMode('used')
             returnForm.reset(defaultReturnValues)
           }
         }}
@@ -242,7 +249,7 @@ export function DashboardBorrowTab() {
           <div className="space-y-4">
             <div>
               <p>{selectedBorrow?.name}</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-muted-foreground">
                 CAS: {selectedBorrow?.cas_number} • 当前剩余 {selectedBorrow?.remaining_quantity} {selectedBorrow?.unit}
               </p>
             </div>

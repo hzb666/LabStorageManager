@@ -27,7 +27,7 @@ import {
   type DashboardParams,
   BORROW_SEARCH_FIELDS,
   buildLocalListData,
-} from './dashboardUtils'
+} from '../../lib/dashboardUtils'
 
 const pendingStockinColumnHelper = createColumnHelper<PendingStockinItem>()
 

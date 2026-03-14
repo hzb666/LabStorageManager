@@ -41,7 +41,7 @@ import {
   buildLocalListData,
   flattenGroupedOrders,
   removeApplicantColumn,
-} from './dashboardUtils'
+} from '../../lib/dashboardUtils'
 
 const reagentColumnHelper = createColumnHelper<DashboardReagentOrder>()
 
@@ -68,7 +68,7 @@ export function DashboardReagentTab() {
 
   const reagentDashboardAPI: FilterAPI = useMemo(() => ({
     list: async (params) => {
-      const response = await reagentOrderAPI.getMyOrders()
+      const response = await reagentOrderAPI.getMyReagentOrders()
       const grouped = (response.data?.data ?? {}) as Record<string, { orders: Record<string, unknown>[] }>
       const rows = flattenGroupedOrders<DashboardReagentOrder>(grouped, currentUser?.id)
       const local = buildLocalListData(rows, params as DashboardParams, ['name', 'cas_number', 'brand', 'specification'])
@@ -149,7 +149,7 @@ export function DashboardReagentTab() {
         const actions = [
           {
             id: 'confirm-arrival',
-            label: '确认到货',
+            label: '到货',
             confirm: true,
             confirmLabel: '确认',
             showWhen: (currItem: DashboardReagentOrder) => currItem.status === 'approved',

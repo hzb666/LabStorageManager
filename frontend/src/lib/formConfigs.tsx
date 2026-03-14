@@ -229,7 +229,7 @@ export function getConsumableOrderFormFields(isEdit: boolean): FieldSchema<Consu
 
 /** 归还表单默认值 */
 export const defaultReturnValues = {
-  return_mode: 'remaining' as const,
+  return_mode: 'used' as const,
   return_quantity: '',
 }
 

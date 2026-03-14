@@ -236,7 +236,7 @@ def _register_dashboard_routes(router: APIRouter) -> None:
             "total": len(orders),
         }
 
-    @router.get("/dashboard/my-orders")
+    @router.get("/dashboard/my-reagent-orders")
     def get_my_reagent_orders(current_user: CurrentUser, db: DBSession):
         statement = select(ReagentOrder).where(
             ReagentOrder.applicant_id == current_user.id,

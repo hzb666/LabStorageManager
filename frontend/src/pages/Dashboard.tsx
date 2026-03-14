@@ -4,7 +4,7 @@
  * activeTab 通过 localStorage 持久化
  */
 import { useState, useCallback, useEffect } from 'react'
-import { ShoppingCart, Package, ArrowRightLeft } from 'lucide-react'
+import { ShoppingCart, Package, ArrowRightLeft, Loader2 } from 'lucide-react'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { cn } from '@/lib/utils'
@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils'
 import {
   type DashboardTab,
   DASHBOARD_TAB_STORAGE_KEY,
-} from './dashboard/dashboardUtils'
+} from '../lib/dashboardUtils'
 import { DashboardReagentTab } from './dashboard/DashboardReagentTab'
 import { DashboardConsumableTab } from './dashboard/DashboardConsumableTab'
 import { DashboardBorrowTab } from './dashboard/DashboardBorrowTab'
@@ -29,7 +29,7 @@ function StatCard({
 }: Readonly<{
   title: string
   icon: React.ElementType
-  value: number
+  value: React.ReactNode
   onClick: () => void
   isActive: boolean
 }>) {
@@ -46,7 +46,7 @@ function StatCard({
         <Icon className={cn('h-4 w-4', isActive ? 'text-primary' : 'text-muted-foreground')} />
       </CardHeader>
       <CardContent>
-        <div className={cn('text-2xl font-bold', isActive && 'text-primary')}>{value}</div>
+        <div className={cn('text-2xl font-bold flex h-8 items-center', isActive && 'text-primary')}>{value}</div>
       </CardContent>
     </Card>
   )
@@ -76,6 +76,7 @@ function saveTab(tab: DashboardTab) {
 
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState<DashboardTab>(getSavedTab)
+  const [isLoading, setIsLoading] = useState(true)
   const [counts, setCounts] = useState({
     reagentCount: 0,
     consumableCount: 0,
@@ -88,15 +89,15 @@ export function Dashboard() {
     saveTab(tab)
   }, [])
 
-  // 加载统计数量（所有卡片同时显示，需要一次性请求）
+  // 加载统计数量：每次切换 Tab 时在后台静默刷新，只有数据变化时才重新渲染数字
   useEffect(() => {
     let cancelled = false
 
     const loadCounts = async () => {
       try {
         const [reagentRes, consumableRes, borrowRes, stockinRes] = await Promise.all([
-          reagentOrderAPI.getMyOrders(),
-          consumableOrderAPI.getMyOrders(),
+          reagentOrderAPI.getMyReagentOrders(),
+          consumableOrderAPI.getMyConsumableOrders(),
           inventoryAPI.getMyBorrows(),
           inventoryAPI.getPendingStockin(),
         ])
@@ -115,10 +116,29 @@ export function Dashboard() {
         const borrowCount = (borrowRes.data?.data ?? []).length
         const stockinCount = (stockinRes.data?.data ?? []).length
 
-        setCounts({ reagentCount, consumableCount, borrowCount, stockinCount })
+        setCounts((prev) => {
+          if (
+            prev.reagentCount === reagentCount &&
+            prev.consumableCount === consumableCount &&
+            prev.borrowCount === borrowCount &&
+            prev.stockinCount === stockinCount
+          ) {
+            return prev // 数据无变化，不触发重新渲染
+          }
+          return { reagentCount, consumableCount, borrowCount, stockinCount }
+        })
       } catch {
         if (!cancelled) {
-          setCounts({ reagentCount: 0, consumableCount: 0, borrowCount: 0, stockinCount: 0 })
+          setCounts((prev) => {
+            if (prev.reagentCount === 0 && prev.consumableCount === 0 && prev.borrowCount === 0 && prev.stockinCount === 0) {
+               return prev
+            }
+            return { reagentCount: 0, consumableCount: 0, borrowCount: 0, stockinCount: 0 }
+          })
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
         }
       }
     }
@@ -137,28 +157,28 @@ export function Dashboard() {
         <StatCard
           title="试剂订单"
           icon={ShoppingCart}
-          value={counts.reagentCount}
+          value={isLoading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : counts.reagentCount}
           onClick={() => handleTabChange('reagents')}
           isActive={activeTab === 'reagents'}
         />
         <StatCard
           title="耗材订单"
           icon={ShoppingCart}
-          value={counts.consumableCount}
+          value={isLoading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : counts.consumableCount}
           onClick={() => handleTabChange('consumables')}
           isActive={activeTab === 'consumables'}
         />
         <StatCard
           title="当前借用"
           icon={Package}
-          value={counts.borrowCount}
+          value={isLoading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : counts.borrowCount}
           onClick={() => handleTabChange('borrows')}
           isActive={activeTab === 'borrows'}
         />
         <StatCard
           title="待入库"
           icon={ArrowRightLeft}
-          value={counts.stockinCount}
+          value={isLoading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : counts.stockinCount}
           onClick={() => handleTabChange('stockin')}
           isActive={activeTab === 'stockin'}
         />

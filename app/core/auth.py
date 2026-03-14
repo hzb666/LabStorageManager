@@ -292,9 +292,21 @@ def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 添加后台任务：更新用户活跃时间（前置防抖检查）
-        client_ip = request.client.host if request.client else "unknown"
+        # Check if session still exists in database (for kicked devices)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
+        session = db.exec(
+            select(UserSession).where(UserSession.token_hash == token_hash)
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked, please login again",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Add background task: update user activity time (with debounce check)
+        client_ip = request.client.host if request.client else "unknown"
         if not _should_skip_activity_update(token_hash, client_ip):
             background_tasks.add_task(_update_user_activity_task, token_hash, client_ip)
 

@@ -24,9 +24,7 @@ env/
 .venv/
 
 # IDE
-.vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
+.vscode
 .idea/
 .cursor/
 .github/

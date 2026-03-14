@@ -511,6 +511,9 @@ export const normalizeApiErrorMessage = (detail: unknown, fallback = '操作失�
   if (detail.includes('IP limit reached')) {
     return 'IP 数量已达上限，请先移除其他设备'
   }
+  if (detail.includes('Session has been revoked') || detail.includes('session expired')) {
+    return '会话已失效，请重新登录'
+  }
 
   return detail
 }
