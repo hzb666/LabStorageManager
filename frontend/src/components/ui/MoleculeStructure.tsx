@@ -126,6 +126,8 @@ const extractNaturalSize = (svgString: string) => {
   }
 }
 
+const svgToDataUri = (svgString: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgString)}`
+
 const loadRDKitScript = async (): Promise<void> => {
   if (document.querySelector('#rdkit-script')) return
   return new Promise((resolve, reject) => {
@@ -400,8 +402,14 @@ export function MoleculeStructure({
         {...getReferenceProps()}
         className={`flex items-center justify-center p-2 rounded-md overflow-hidden bg-white transition-none ${filterClass} ${canZoom ? 'cursor-zoom-in' : ''}`}
         style={{ width, height }}
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
+      >
+        <img
+          src={svgToDataUri(svg)}
+          alt="分子结构"
+          className="max-w-full max-h-full"
+          draggable={false}
+        />
+      </div>
 
       {isMounted && canZoom && createPortal(
         <div 
@@ -441,8 +449,14 @@ export function MoleculeStructure({
                 [&>svg]:max-w-full! [&>svg]:h-auto! 
                 ${filterClass}
               `}
-              dangerouslySetInnerHTML={{ __html: zoomSvg }}
-            />
+            >
+              <img
+                src={svgToDataUri(zoomSvg)}
+                alt="分子结构放大图"
+                className="max-w-full h-auto"
+                draggable={false}
+              />
+            </div>
           </div>
         </div>,
         document.body

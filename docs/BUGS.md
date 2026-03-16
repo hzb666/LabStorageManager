@@ -1,5 +1,63 @@
 # BUGS.md - 问题记录
 
+## 安全加固审计 (2026-03-16)
+
+### 已修复问题
+
+#### 1. 前端 SVG 渲染存在 HTML 注入风险 [SECURITY][FIXED]
+
+- **文件**: `frontend/src/components/ui/MoleculeStructure.tsx`
+- **问题**: 使用 `dangerouslySetInnerHTML` 直接渲染 SVG 字符串，属于 XSS 高风险 sink
+- **修复**: 改为 `data:image/svg+xml` 的 `img` 渲染路径，移除 `dangerouslySetInnerHTML`
+
+#### 2. 全局安全响应头不完整 [SECURITY][FIXED]
+
+- **文件**: `app/main.py`
+- **问题**: 仅返回 `X-Content-Type-Options`，缺少 CSP、HSTS、Referrer-Policy、X-Frame-Options
+- **修复**: 新增统一安全头函数和全局 middleware，补齐关键安全响应头
+
+#### 3. JWT 错误信息泄露内部细节 [SECURITY][FIXED]
+
+- **文件**: `app/core/auth.py`
+- **问题**: `decode_token` 返回 `Invalid token: {异常细节}`
+- **修复**: 改为通用错误信息 `Invalid or expired token`
+
+#### 4. 文件删除存在路径逃逸风险 [SECURITY][FIXED]
+
+- **文件**: `app/services/image_service.py`
+- **问题**: 删除逻辑直接拼接路径后 unlink，缺少 static 根目录约束
+- **修复**: 增加 `_resolve_static_path`，仅允许 `static` 目录内文件且必须为普通文件
+
+#### 5. 外链请求未限制重定向 [SECURITY][FIXED]
+
+- **文件**: `app/services/chemical_info.py`
+- **问题**: 多处 `requests.get/post` 默认允许重定向，增加 SSRF 利用面
+- **修复**: 统一改为 `_safe_get/_safe_post`，显式 `allow_redirects=False`
+
+#### 6. Cookie 会话写操作缺少 CSRF 校验 [SECURITY][FIXED]
+
+- **文件**: `app/main.py`
+- **问题**: 使用 Cookie 鉴权时，写操作未统一校验 `Origin/Referer`
+- **修复**: 新增 `csrf_origin_check_middleware`，对 `/api` 下写请求在生产环境强制校验来源
+
+#### 7. 生产环境 HTTP 未自动升级 HTTPS [SECURITY][FIXED]
+
+- **文件**: `app/main.py`
+- **问题**: 缺少应用层 HTTP->HTTPS 跳转能力，无法形成默认强制升级
+- **修复**: 新增 `https_redirect_middleware`，在非开发环境执行 307 跳转到 HTTPS
+
+#### 8. 登录异常向前端泄露内部错误细节 [SECURITY][FIXED]
+
+- **文件**: `app/api/users.py`
+- **问题**: 登录异常返回 `Login failed: {str(e)}`，可能泄露内部状态
+- **修复**: 改为通用文案 `Login failed`，内部仅记录异常日志
+
+#### 9. 外联请求缺少主机/IP 安全边界 [SECURITY][FIXED]
+
+- **文件**: `app/services/chemical_info.py`
+- **问题**: 外联仅禁重定向，仍缺协议/域名/IP 级安全边界
+- **修复**: 增加协议白名单、域名白名单、DNS 解析后私网/回环/保留地址拦截
+
 ## 代码审查修复 (2026-02-14)
 
 ### 已修复问题

@@ -349,13 +349,32 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const body = document.createElement('div');
       body.className = 'item-body';
-      body.innerHTML = `
-        <div class="item-row"><span class="item-label">规格:</span><span class="item-value">${item.specification || '-'}</span></div>
-        <div class="item-row"><span class="item-label">数量:</span><span class="item-value">${item.quantity}</span></div>
-        <div class="item-row"><span class="item-label">单价:</span><span class="item-value">${item.price ? '¥' + item.price : '-'}</span></div>
-        <div class="item-row"><span class="item-label">品牌:</span><span class="item-value">${item.brand || '-'}</span></div>
-        ${item.product_id ? `<div class="item-row"><span class="item-label">产品ID:</span><span class="item-value">${item.product_id}</span></div>` : ''}
-      `;
+
+      // 使用安全的 DOM 创建方式代替 innerHTML，避免 HTML 注入风险
+      function addRow(labelText, valueText) {
+        const row = document.createElement('div');
+        row.className = 'item-row';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'item-label';
+        labelSpan.textContent = labelText;
+
+        const valueSpan = document.createElement('span');
+        valueSpan.className = 'item-value';
+        valueSpan.textContent = valueText;
+
+        row.appendChild(labelSpan);
+        row.appendChild(valueSpan);
+        body.appendChild(row);
+      }
+
+      addRow('规格:', item.specification || '-');
+      addRow('数量:', String(item.quantity));
+      addRow('单价:', item.price ? '¥' + item.price : '-');
+      addRow('品牌:', item.brand || '-');
+      if (item.product_id) {
+        addRow('产品ID:', String(item.product_id));
+      }
 
       card.appendChild(header);
       card.appendChild(body);

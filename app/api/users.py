@@ -6,7 +6,6 @@ Critical Rule #3: All data modification endpoints must check current_user
 import hashlib
 import logging
 import time
-import traceback
 from typing import Optional, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile
@@ -278,12 +277,12 @@ def login(
     except HTTPException:
         # 重新抛出 HTTP 异常
         raise
-    except Exception as e:
+    except Exception:
         # 记录其他所有异常
-        logger.error(f"Login error: {e}\n{traceback.format_exc()}")
+        logger.exception("Login error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Login failed: {str(e)}"
+            detail="Login failed"
         )
 
 

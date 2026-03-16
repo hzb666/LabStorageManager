@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import List, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -146,15 +146,19 @@ class SessionUpdateRequest(BaseModel):
     """Request model for updating session"""
     device_name: str = Field(..., min_length=1, max_length=50)
 
-    def __init__(self, **data):
-        super().__init__(**data)
+    @field_validator("device_name", mode="before")
+    @classmethod
+    def normalize_device_name(cls, value: str) -> str:
+        """标准化并清洗设备名称：strip + 非空校验 + XSS 过滤"""
+        if value is None:
+            raise ValueError("Device name is required")
         # 标准化：去除前后空格
-        self.device_name = self.device_name.strip()
+        value = value.strip()
         # strip 后再次验证，防止全空格输入
-        if not self.device_name:
+        if not value:
             raise ValueError("Device name cannot be empty after trimming")
         # XSS 过滤：移除危险字符
-        self.device_name = self._sanitize(self.device_name)
+        return cls._sanitize(value)
 
     @staticmethod
     def _sanitize(text: str) -> str:

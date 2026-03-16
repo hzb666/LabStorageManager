@@ -8,6 +8,9 @@ import time
 import random
 import logging
 import hashlib
+import ipaddress
+import socket
+from urllib.parse import urlparse
 import requests
 from typing import Optional, Dict, Any, Annotated
 from concurrent.futures import ThreadPoolExecutor
@@ -36,6 +39,12 @@ _CACHE: Dict[str, Dict[str, Any]] = {}
 _CACHE_ORDER: list = []  # 记录访问顺序
 _CACHE_MAX_SIZE = 1000   # 最大缓存条目数
 _CACHE_TTL_SECONDS = 3600  # 缓存1小时
+_ALLOWED_OUTBOUND_HOSTS = {
+    "www.chemblink.com",
+    "chemblink.com",
+    "pubchem.ncbi.nlm.nih.gov",
+    "api.niutrans.com",
+}
 
 
 def _get_headers() -> Dict[str, str]:
@@ -46,6 +55,62 @@ def _get_headers() -> Dict[str, str]:
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Connection': 'keep-alive',
     }
+
+
+def _safe_get(url: str, timeout: float):
+    """Outbound GET with redirect disabled to reduce SSRF abuse surface."""
+    if not _is_safe_outbound_url(url):
+        raise requests.RequestException("Unsafe outbound URL blocked")
+    return requests.get(url, headers=_get_headers(), timeout=timeout, allow_redirects=False)
+
+
+def _safe_post(url: str, data: Dict[str, str], timeout: float):
+    """Outbound POST with redirect disabled to reduce SSRF abuse surface."""
+    if not _is_safe_outbound_url(url):
+        raise requests.RequestException("Unsafe outbound URL blocked")
+    return requests.post(url, data=data, timeout=timeout, allow_redirects=False)
+
+
+def _is_private_or_local_ip(ip: str) -> bool:
+    """Check whether IP belongs to local or private ranges."""
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+        return (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_multicast
+            or ip_obj.is_reserved
+            or ip_obj.is_unspecified
+        )
+    except ValueError:
+        return True
+
+
+def _is_safe_outbound_url(url: str) -> bool:
+    """Validate outbound URL against protocol/host/IP restrictions."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return False
+
+        hostname = (parsed.hostname or "").lower()
+        if not hostname or hostname not in _ALLOWED_OUTBOUND_HOSTS:
+            return False
+
+        # Resolve DNS and block local/private target IPs.
+        addr_info = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+        if not addr_info:
+            return False
+
+        for info in addr_info:
+            target_ip = info[4][0]
+            if _is_private_or_local_ip(target_ip):
+                return False
+
+        return True
+    except Exception:
+        return False
 
 
 def _get_cached(cas_number: str) -> Optional[Dict[str, Any]]:
@@ -61,7 +126,8 @@ def _get_cached(cas_number: str) -> Optional[Dict[str, Any]]:
         else:
             # 缓存过期，删除
             del _CACHE[cas_number]
-            _CACHE_ORDER.remove(cas_number)
+            if cas_number in _CACHE_ORDER:
+                _CACHE_ORDER.remove(cas_number)
     return None
 
 
@@ -70,7 +136,8 @@ def _set_cached(cas_number: str, data: Dict[str, Any]) -> None:
     # 如果已存在，先删除（更新）
     if cas_number in _CACHE:
         del _CACHE[cas_number]
-        _CACHE_ORDER.remove(cas_number)
+        if cas_number in _CACHE_ORDER:
+            _CACHE_ORDER.remove(cas_number)
 
     # 如果缓存已满，删除最旧的条目
     while len(_CACHE) >= _CACHE_MAX_SIZE and _CACHE_ORDER:
@@ -109,7 +176,7 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
     # 尝试主站
     url = f"https://www.chemblink.com/products/{cas}C.htm"
     try:
-        response = requests.get(url, headers=_get_headers(), timeout=15)
+        response = _safe_get(url, timeout=15)
         if response.status_code == 200:
             content = response.content.decode('utf-8', errors='ignore')
             
@@ -137,7 +204,7 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
     if not chinese_name:
         url = f"https://www.chemblink.com/moreProducts/more{cas}C.htm"
         try:
-            response = requests.get(url, headers=_get_headers(), timeout=15)
+            response = _safe_get(url, timeout=15)
             if response.status_code == 200:
                 content = response.content.decode('utf-8', errors='ignore')
                 
@@ -184,11 +251,7 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
     url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{cas}/property/IUPACName/JSON"
     
     try:
-        response = requests.get(
-            url,
-            headers=_get_headers(),
-            timeout=PUBCHEM_PRIMARY_TIMEOUT_SECONDS,
-        )
+        response = _safe_get(url, timeout=PUBCHEM_PRIMARY_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
             properties = data.get('PropertyTable', {}).get('Properties', [])
@@ -212,7 +275,7 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
                 )
                 return None, warning_message
 
-            response = requests.get(url, headers=_get_headers(), timeout=fallback_timeout)
+            response = _safe_get(url, timeout=fallback_timeout)
             if response.status_code == 200:
                 data = response.json()
                 identifier_list = data.get('IdentifierList', {})
@@ -228,7 +291,7 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
                         )
                         return None, warning_message
 
-                    response = requests.get(url, headers=_get_headers(), timeout=property_timeout)
+                    response = _safe_get(url, timeout=property_timeout)
                     if response.status_code == 200:
                         data = response.json()
                         properties = data.get('PropertyTable', {}).get('Properties', [])
@@ -283,7 +346,7 @@ def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Opt
         
         # 发送请求
         url = "https://api.niutrans.com/v2/text/translate"
-        response = requests.post(url, data=params, timeout=10)
+        response = _safe_post(url, data=params, timeout=10)
         
         if response.status_code == 200:
             result = response.json()

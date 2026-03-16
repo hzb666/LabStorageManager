@@ -14,6 +14,20 @@ from app.core.config import settings, BASE_DIR, UPLOADS_DIR
 from app.core.time_utils import get_utc_now
 
 
+def _resolve_static_path(file_path: str) -> Path | None:
+    """Resolve user-supplied file path safely under static directory only."""
+    raw_path = (file_path or "").strip()
+    if not raw_path:
+        return None
+
+    candidate = (BASE_DIR / raw_path.lstrip("/\\")).resolve()
+    static_root = (BASE_DIR / "static").resolve()
+
+    if candidate == static_root or static_root in candidate.parents:
+        return candidate
+    return None
+
+
 def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
     """
     Validate uploaded file is an allowed image type and return file content.
@@ -28,7 +42,10 @@ def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
     if file.content_type not in settings.allowed_image_types:
         return False, b''
     
+    # Ensure we read from the beginning and restore the pointer afterwards
+    file.file.seek(0)
     content = file.file.read()
+    file.file.seek(0)
     
     header = content[:16]
     is_valid = False
@@ -199,9 +216,11 @@ def delete_file(file_path: str) -> bool:
     Returns:
         True if deleted successfully, False otherwise
     """
-    full_path = BASE_DIR / file_path.lstrip("/")
-    
-    if full_path.exists():
+    full_path = _resolve_static_path(file_path)
+    if full_path is None:
+        return False
+
+    if full_path.exists() and full_path.is_file():
         full_path.unlink()
         return True
     return False
@@ -217,7 +236,9 @@ def get_file_size_kb(file_path: str) -> float:
     Returns:
         File size in KB
     """
-    full_path = BASE_DIR / file_path.lstrip("/")
+    full_path = _resolve_static_path(file_path)
+    if full_path is None:
+        return 0.0
 
     if full_path.exists():
         return full_path.stat().st_size / 1024
