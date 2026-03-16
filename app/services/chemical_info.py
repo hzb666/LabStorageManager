@@ -61,7 +61,8 @@ def _get_cached(cas_number: str) -> Optional[Dict[str, Any]]:
         else:
             # 缓存过期，删除
             del _CACHE[cas_number]
-            _CACHE_ORDER.remove(cas_number)
+            if cas_number in _CACHE_ORDER:
+                _CACHE_ORDER.remove(cas_number)
     return None
 
 
@@ -70,7 +71,8 @@ def _set_cached(cas_number: str, data: Dict[str, Any]) -> None:
     # 如果已存在，先删除（更新）
     if cas_number in _CACHE:
         del _CACHE[cas_number]
-        _CACHE_ORDER.remove(cas_number)
+        if cas_number in _CACHE_ORDER:
+            _CACHE_ORDER.remove(cas_number)
 
     # 如果缓存已满，删除最旧的条目
     while len(_CACHE) >= _CACHE_MAX_SIZE and _CACHE_ORDER:

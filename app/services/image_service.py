@@ -28,7 +28,10 @@ def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
     if file.content_type not in settings.allowed_image_types:
         return False, b''
     
+    # Ensure we read from the beginning and restore the pointer afterwards
+    file.file.seek(0)
     content = file.file.read()
+    file.file.seek(0)
     
     header = content[:16]
     is_valid = False

@@ -21,28 +21,26 @@ def _get_max_sequence_for_prefix(session: Session, prefix: str) -> int:
     Returns:
         Maximum sequence number found, or 0 if none exist
     """
-    # Query items with the given prefix using ORM
-    statement = select(Inventory).where(
-        Inventory.internal_code.like(f"{prefix}%")
+    # Only select the internal_code column, order by it descending, and limit to 1
+    statement = (
+        select(Inventory.internal_code)
+        .where(Inventory.internal_code.like(f"{prefix}%"))
+        .order_by(Inventory.internal_code.desc())
+        .limit(1)
     )
-    results = session.exec(statement).all()
-    
-    if not results:
+    last_code = session.exec(statement).first()
+
+    if not last_code:
         return 0
-    
-    # Extract sequence numbers from internal codes
-    max_seq = 0
+
+    # Extract sequence number from the last internal code
     prefix_len = len(prefix)
-    for item in results:
-        code_part = item.internal_code[prefix_len:]
-        try:
-            seq = int(code_part)
-            if seq > max_seq:
-                max_seq = seq
-        except ValueError:
-            continue
-    
-    return max_seq
+    code_part = last_code[prefix_len:]
+    try:
+        return int(code_part)
+    except ValueError:
+        # If parsing fails, treat as no existing sequence
+        return 0
 
 
 def generate_internal_code(
@@ -105,23 +103,24 @@ def get_next_sequence(
     # Validate CAS number to prevent SQL injection
     if not re.match(r"^[0-9-]+$", cas_number):
         raise ValueError(f"Invalid CAS number format: {cas_number}")
-    
-    # Query items with this CAS number using ORM
-    statement = select(Inventory).where(Inventory.cas_number == cas_number)
-    results = session.exec(statement).all()
-    
-    if not results:
+
+    # Only select internal_code for this CAS number, order by it descending, and limit to 1
+    statement = (
+        select(Inventory.internal_code)
+        .where(Inventory.cas_number == cas_number)
+        .order_by(Inventory.internal_code.desc())
+        .limit(1)
+    )
+    last_code = session.exec(statement).first()
+
+    if not last_code:
         return 1
-    
-    # Extract and find maximum sequence number
-    max_seq = 0
-    for item in results:
-        # Parse the sequence from internal_code (last 2 digits)
-        try:
-            seq = int(item.internal_code[-2:])
-            if seq > max_seq:
-                max_seq = seq
-        except ValueError:
-            continue
-    
-    return max_seq + 1
+
+    # Parse the sequence from internal_code (last 2 digits)
+    try:
+        seq = int(last_code[-2:])
+    except ValueError:
+        # If parsing fails, start from 1
+        return 1
+
+    return seq + 1
