@@ -74,7 +74,7 @@ class UserUpdate(SQLModel):
             raise ValueError('用户名只能包含字母，数字和下划线')
         return v
     
-    full_name: str = Field(min_length=1, max_length=100)  # 必填，不允许为空
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     avatar_url: Optional[str] = None
