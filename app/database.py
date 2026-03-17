@@ -10,6 +10,7 @@ from sqlalchemy import event
 from sqlmodel import SQLModel, Session, create_engine, select
 from fastapi import Depends
 
+from app.services import pinyin_utils
 from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def init_db() -> None:
 
     SQLModel.metadata.create_all(engine)
     logger.info("Database tables created / verified")
-    
+
     # Create default admin user if no users exist
     _create_default_admin()
 
@@ -94,7 +95,8 @@ def _create_default_admin() -> None:
                 password_hash=get_password_hash(default_password),
                 full_name=default_full_name,
                 role=UserRole.ADMIN,
-                is_active=True
+                is_active=True,
+                full_name_pinyin=pinyin_utils.to_pinyin(default_full_name)
             )
             session.add(admin)
             session.commit()

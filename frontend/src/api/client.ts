@@ -292,6 +292,7 @@ export const inventoryAPI = {
   getPendingStockin: () => api.get('/inventory/dashboard/pending-stockin'),
   getBorrowHistory: (id: number) => api.get(`/inventory/${id}/borrow-history`),
   getImportTemplate: () => api.get('/inventory/import/template'),
+  downloadTemplate: () => api.get('/inventory/import/template', { responseType: 'blob' }),
   importExcel: (file: FormData) =>
     api.post('/inventory/import', file, {
       headers: { 'Content-Type': 'multipart/form-data' },

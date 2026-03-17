@@ -440,10 +440,17 @@ def _register_common_shelf_and_import_routes(
 
     @router.get("/import/template")
     def get_import_template(current_user: CurrentUser):
-        """Get import template - requires login"""
-        from app.services.excel_service import generate_import_template
+        """Download Excel import template with text format for CAS column"""
+        from app.services.excel_service import generate_excel_template
 
-        return generate_import_template()
+        excel_content = generate_excel_template()
+        filename = "inventory_import_template.xlsx"
+
+        return StreamingResponse(
+            iter([excel_content]),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
 
     @router.post("/import")
     def import_inventory(

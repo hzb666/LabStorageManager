@@ -455,6 +455,69 @@ def import_inventory_from_excel(
     }
 
 
+def generate_excel_template() -> bytes:
+    """
+    Generate Excel import template with text format for all columns.
+    This prevents Excel from auto-converting CAS numbers like '64-17-5' to dates.
+    
+    Returns:
+        Excel file content as bytes
+    """
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+    from openpyxl.styles.numbers import FORMAT_TEXT
+    from openpyxl.styles.colors import Color
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "库存导入模板"
+
+    # 定义列: (列键, 中文标签, 示例值)
+    columns = [
+        ("cas_number", "CAS号（必填）", "64-17-5"),
+        ("name", "名称（必填）", "乙醇"),
+        ("english_name", "英文名", "Ethanol"),
+        ("alias", "别名", "酒精"),
+        ("category", "分类", "有机溶剂"),
+        ("brand", "品牌", "Sigma"),
+        ("specification", "规格（必填）", "500ml"),
+        ("remaining_quantity", "剩余量", ""),
+        ("storage_location", "存放位置", "2-6-6-1"),
+        ("is_hazardous", "是否危险品", ""),
+        ("notes", "备注", "请删除示例数据"),
+    ]
+
+    # 定义表头字体样式
+    header_font = Font(bold=True)
+    
+    # 示例数据使用红色字体
+    example_font = Font(color="FF0000")  # 红色
+    
+    # 写入表头和示例数据，同时设置列格式和列宽（单次遍历优化性能）
+    for col_idx, (key, label, example) in enumerate(columns, 1):
+        col_letter = get_column_letter(col_idx)
+        
+        # 设置表头
+        header_cell = ws.cell(row=1, column=col_idx, value=label)
+        header_cell.font = header_font
+        header_cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # 写入示例数据（红色字体）
+        example_cell = ws.cell(row=2, column=col_idx, value=example)
+        example_cell.font = example_font
+        
+        # 设置列的文本格式和宽度（只在列级别设置一次）
+        ws.column_dimensions[col_letter].number_format = FORMAT_TEXT
+        ws.column_dimensions[col_letter].width = 15 if key == "cas_number" else 12
+
+    # 保存到字节流
+    output = BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
 def generate_import_template() -> dict:
     """
     Generate Excel import template structure.
@@ -506,9 +569,9 @@ def generate_import_template() -> dict:
             },
             {
                 "name": "remaining_quantity",
-                "label": "剩余数量",
+                "label": "剩余量",
                 "required": False,
-                "description": "剩余数量（可选），不填则默认等于规格中的数量"
+                "description": "剩余量（可选），不填则默认等于规格中的数量"
             },
             {
                 "name": "storage_location",

@@ -11,6 +11,7 @@ import {
   useInteractions, 
   useTransitionStyles
 } from '@floating-ui/react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
 import { querySmiles } from '@/lib/chemicalProperties'
 
 type RDKitModule = {
@@ -257,6 +258,12 @@ export function MoleculeStructure({
   if (isDark === true) filterClass = '[filter:invert(0.93)_hue-rotate(180deg)]'
   if (isDark === false) filterClass = ''
 
+  const handleClick = () => {
+    if (casNumber) {
+      window.open(`https://www.chemicalbook.com/CAS_${casNumber}.htm`, '_blank')
+    }
+  }
+
   if (!casNumber) return null
 
   if (loadingState === 'loading') {
@@ -282,19 +289,27 @@ export function MoleculeStructure({
 
   return (
     <>
-      <div
-        ref={refs.setReference}
-        {...getReferenceProps()}
-        className={`flex items-center justify-center p-2 rounded-md overflow-hidden bg-white transition-none ${filterClass} ${canZoom ? 'cursor-zoom-in' : ''}`}
-        style={{ width, height }}
-      >
-        <img
-          src={svgToDataUri(svg)}
-          alt="分子结构"
-          className="max-w-full max-h-full"
-          draggable={false}
-        />
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            ref={refs.setReference}
+            {...getReferenceProps()}
+            onClick={handleClick}
+            className={`flex items-center justify-center p-2 rounded-md overflow-hidden bg-white transition-none ${filterClass} ${canZoom ? 'cursor-zoom-in' : 'cursor-pointer'}`}
+            style={{ width, height }}
+          >
+            <img
+              src={svgToDataUri(svg)}
+              alt="分子结构"
+              className="max-w-full max-h-full"
+              draggable={false}
+            />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          点击查看详情
+        </TooltipContent>
+      </Tooltip>
 
       {isMounted && canZoom && createPortal(
         <div 

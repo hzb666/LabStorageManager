@@ -110,34 +110,27 @@ export function ImportPage() {
     }
   }
 
-  const downloadTemplate = useCallback(() => {
-    // Create a simple template CSV for download (with UTF-8 BOM for Excel compatibility)
-    const headers = IMPORT_TEMPLATE_COLUMNS.map(c => c.name).join(',')
-    const example = IMPORT_TEMPLATE_COLUMNS.map(c => {
-      if (c.name === 'cas_number') return '64-17-5'
-      if (c.name === 'name') return '乙醇'
-      if (c.name === 'english_name') return 'Ethanol'
-      if (c.name === 'alias') return '酒精'
-      if (c.name === 'category') return '有机溶剂'
-      if (c.name === 'brand') return 'Sigma'
-      if (c.name === 'specification') return '500ml'
-      if (c.name === 'remaining_quantity') return ''  // optional
-      if (c.name === 'storage_location') return '2-6-6-1'
-      if (c.name === 'is_hazardous') return ''  // 空白让用户选择填写 true/false/0/1
-      if (c.name === 'notes') return ''
-      return ''
-    }).join(',')
-    
-    // Add UTF-8 BOM for Excel to recognize Chinese characters
-    const BOM = '\uFEFF'
-    const csv = BOM + headers + '\n' + example
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'inventory_template.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+  const downloadTemplate = useCallback(async () => {
+    try {
+      // 调用后端API下载带文本格式的Excel模板
+      const response = await inventoryAPI.downloadTemplate()
+      
+      // 创建Blob并下载
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'inventory_import_template.xlsx'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (error) {
+      const axiosError = error as AxiosError<{ detail?: string }>
+      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '下载模板失败'))
+    }
   }, [])
 
   // Get file icon based on extension
