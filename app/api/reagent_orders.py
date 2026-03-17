@@ -176,21 +176,25 @@ def create_reagent_order(
         )
 
     # order_reason 已在模型层验证（枚举类型），直接使用
-    
+
+    # 处理可选字段：空字符串和纯空格转为 None
+    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'notes']
+    normalized = empty_to_none(order.model_dump(), optional_string_fields)
+
     # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(
-        name=order.name,
-        brand=order.brand,
+        name=normalized.get('name', order.name),
+        brand=normalized.get('brand'),
     )
-    
+
     # Create order
     db_order = ReagentOrder(
         cas_number=normalized_cas,
-        name=order.name,
-        english_name=order.english_name,
-        alias=order.alias,
-        category=order.category,
-        brand=order.brand,
+        name=normalized.get('name', order.name),
+        english_name=normalized.get('english_name'),
+        alias=normalized.get('alias'),
+        category=normalized.get('category'),
+        brand=normalized.get('brand'),
         initial_quantity=initial_quantity,
         unit=unit,
         quantity=order.quantity,
@@ -291,9 +295,9 @@ def list_reagent_orders(
     order_direction = sort_order.lower() if sort_order else 'desc'
 
     if order_direction == 'asc':
-        order_expr = order_column.asc()
+        order_expr = order_column.asc().nulls_last()
     else:
-        order_expr = order_column.desc()
+        order_expr = order_column.desc().nulls_last()
 
     secondary_order = ReagentOrder.created_at.desc()
 

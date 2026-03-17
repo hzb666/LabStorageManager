@@ -118,16 +118,20 @@ def create_consumable_order(
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="公用账户不能创建订单")
 
-    pinyin_fields = compute_pinyin_fields(name=order.name)
+    # 处理可选字段：空字符串和纯空格转为 None
+    optional_string_fields = ['english_name', 'product_number', 'unit', 'communication', 'notes']
+    normalized = empty_to_none(order.model_dump(), optional_string_fields)
+
+    pinyin_fields = compute_pinyin_fields(name=normalized.get('name', order.name))
 
     db_order = ConsumableOrder(
-        name=order.name,
-        english_name=order.english_name,
+        name=normalized.get('name', order.name),
+        english_name=normalized.get('english_name'),
         specification=order.specification,
-        unit=order.unit,
+        unit=normalized.get('unit'),
         quantity=order.quantity,
         price=order.price,
-        communication=order.communication,
+        communication=normalized.get('communication'),
         applicant_id=current_user.id,
         **pinyin_fields,
     )
@@ -216,9 +220,9 @@ def list_consumable_orders(
     order_direction = sort_order.lower() if sort_order else 'desc'
 
     if order_direction == 'asc':
-        order_expr = order_column.asc()
+        order_expr = order_column.asc().nulls_last()
     else:
-        order_expr = order_column.desc()
+        order_expr = order_column.desc().nulls_last()
 
     secondary_order = ConsumableOrder.created_at.desc()
 

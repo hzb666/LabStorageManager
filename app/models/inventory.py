@@ -208,7 +208,7 @@ class ManualInventoryCreate(SQLModel):
     alias: Optional[str] = None
     specification: str = Field(max_length=50)  # e.g., "500ml"
     initial_quantity: Optional[float] = None  # Optional - derived from specification
-    quantity_bottles: int = Field(default=1, ge=1)  # Number of bottles
+    quantity_bottles: int = Field(default=1, ge=1, le=99)  # Number of bottles: 1-99
     storage_location: Optional[str] = None
     is_hazardous: bool = False
     category: Optional[str] = None

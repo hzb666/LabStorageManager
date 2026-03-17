@@ -81,6 +81,7 @@ export const createMaxLengthSchema = (
 /**
  * 正整数验证 (>=1) - 用于瓶数等必须为整数的字段
  * 支持字符串和数字输入，在 handleSubmit 中手动转换
+ * 注意：不包含上限限制，具体上限由使用处单独定义
  * @param fieldName 字段中文名称
  */
 export const createPositiveNumberSchema = (fieldName: string) =>
@@ -308,7 +309,7 @@ export const InventoryFormSchema = v.object({
   notes: createMaxLengthSchema('备注', 500),
 
   // 数量相关
-  quantity_bottles: v.optional(createPositiveNumberSchema('瓶数')),
+  quantity_bottles: v.optional(v.pipe(createPositiveNumberSchema('瓶数'), v.maxValue(99, '瓶数不能超过99'))),
   initial_quantity: v.optional(createQuantitySchema('初始数量')),
   unit: v.optional(createRequiredStringSchema('单位')),
   remaining_quantity: v.optional(RemainingQuantitySchema),
@@ -339,7 +340,7 @@ export const ReagentOrderSchema = v.object({
   category: createMaxLengthSchema('分类', 100),
   brand: createMaxLengthSchema('品牌', 100),
   specification: SpecificationSchema, // 后端必填
-  quantity: createPositiveNumberSchema('数量'),
+  quantity: v.pipe(createPositiveNumberSchema('数量'), v.maxValue(99, '数量不能超过99')),
   price: createPriceSchema(0.01),  // 必填
   order_reason: OrderReasonSchema,   // 必填
   is_hazardous: v.boolean('危险品必须是布尔值'),

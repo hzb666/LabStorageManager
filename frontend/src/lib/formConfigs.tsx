@@ -40,11 +40,11 @@ export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number
   // 编辑模式下显示：剩余量 + 规格；添加模式下显示：瓶数 + 规格
   const quantityFields = isEdit && initialQuantity !== undefined
     ? [
-      { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 100', min: 0 },
+      { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 100' },
       { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
     ]
     : [
-      { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 1', min: 1 },
+      { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 1' },
       { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
     ]
 
@@ -125,7 +125,6 @@ export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentO
       type: 'input' as const,
       inputType: 'number' as const,
       required: true,
-      min: 1,
       placeholder: '如: 1'
     },
     { name: 'price' as const, label: '单价(元)', type: 'input' as const, required: true, inputType: 'number' as const, placeholder: '如: 100' },
@@ -213,7 +212,6 @@ export function getConsumableOrderFormFields(isEdit: boolean): FieldSchema<Consu
       type: 'input' as const,
       inputType: 'number' as const,
       required: true,
-      min: 1,
       placeholder: '如: 1'
     },
 
@@ -253,8 +251,6 @@ export function getReturnFormFields(
       inputType: 'number' as const,
       required: true,
       placeholder: mode === 'remaining' ? `如: ${maxQuantity}` : `如: 0`,
-      min: 0,
-      max: maxQuantity,
     },
   ]
 }

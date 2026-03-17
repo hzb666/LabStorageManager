@@ -68,8 +68,6 @@ export default defineConfig(({ mode }) => ({
           'vendor-form': ['react-hook-form', '@hookform/resolvers', 'valibot'],
           // 工具库
           'vendor-utils': ['axios', 'dayjs', 'zustand'],
-          // Excel 处理库（很大，单独分离）
-          'vendor-xlsx': ['xlsx'],
           // 化学结构库（非常大，必须单独分离）
           'vendor-rdkit': ['@rdkit/rdkit'],
           // Radix UI 组件

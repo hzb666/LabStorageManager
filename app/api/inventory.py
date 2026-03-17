@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import Session, select, func, case
+from sqlmodel import Session, select, func
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
@@ -137,22 +137,13 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
 
     sort_direction = sort_order.lower() if sort_order else 'desc'
     pinyin_sort_fields = {'name', 'category', 'brand', 'storage_location'}
-    null_last_string_fields = {'storage_location', 'category', 'brand'}
 
     if sort_by in pinyin_sort_fields:
         order_column = pinyin_sort_field_map.get(sort_by)
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
 
-    if sort_by == 'remaining_percent' and order_column is not None:
-        return func.ifnull(order_column, 2).asc() if sort_direction == 'asc' else func.ifnull(order_column, -1).desc()
-    if sort_by in null_last_string_fields and order_column is not None:
-        return (
-            case((order_column.is_(None), '\\xff'), else_=order_column).asc()
-            if sort_direction == 'asc'
-            else case((order_column.is_(None), '\\x00'), else_=order_column).desc()
-        )
-    return order_column.asc() if sort_direction == 'asc' else order_column.desc()
+    return order_column.asc().nulls_last() if sort_direction == 'asc' else order_column.desc().nulls_last()
 
 
 def _attach_user_names(db: Session, items: list[Inventory]) -> list[dict]:

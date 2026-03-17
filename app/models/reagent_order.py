@@ -97,7 +97,7 @@ class ReagentOrderCreate(SQLModel):
     category: Optional[str] = None
     brand: Optional[str] = None
     specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500ml"
-    quantity: int = Field(gt=0)
+    quantity: int = Field(gt=0, le=99)  # 数量限制：1-99
     price: float = Field(gt=0)  # 价格必填，必须大于0
     order_reason: ReagentOrderReason  # 必填，前端只能选择枚举值
     is_hazardous: bool = False

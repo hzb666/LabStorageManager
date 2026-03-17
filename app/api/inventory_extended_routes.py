@@ -351,6 +351,8 @@ def _register_manual_and_dashboard_routes(
 def _register_common_shelf_and_import_routes(
     router: APIRouter,
     max_page_size: int,
+    search_cache: Dict[str, tuple[Any, Any]],
+    list_cache_prefix: str,
 ) -> None:
 
     @router.get("/common-shelf")
@@ -481,6 +483,9 @@ def _register_common_shelf_and_import_routes(
         finally:
             if os.path.exists(tmp_file_path):
                 os.remove(tmp_file_path)
+
+        # 导入成功后清理列表缓存，确保前端获取最新数据
+        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
 
 
 def _register_borrow_return_routes(
@@ -663,5 +668,5 @@ def register_inventory_extended_routes(
 ) -> None:
     _register_cas_and_export_routes(router)
     _register_manual_and_dashboard_routes(router, search_cache, list_cache_prefix)
-    _register_common_shelf_and_import_routes(router, max_page_size)
+    _register_common_shelf_and_import_routes(router, max_page_size, search_cache, list_cache_prefix)
     _register_borrow_return_routes(router, search_cache, list_cache_prefix)

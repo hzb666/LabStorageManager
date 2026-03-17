@@ -8,6 +8,7 @@ from typing import Tuple, Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
 from app.models.inventory import Inventory, InventoryStatus
+from app.services.api_utils import empty_to_none
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
 from app.services.pinyin_utils import compute_pinyin_fields
@@ -351,13 +352,24 @@ def import_inventory_from_excel(
                     remaining_qty = initial_quantity
             
             # Get or use default values
-            storage_location = str(row.get('storage_location', '')).strip() if pd.notna(row.get('storage_location')) else default_storage_location
-            alias = str(row.get('alias', '')).strip() if pd.notna(row.get('alias')) else None
-            english_name = str(row.get('english_name', '')).strip() if pd.notna(row.get('english_name')) else None
-            category = str(row.get('category', '')).strip() if pd.notna(row.get('category')) else None
-            brand = str(row.get('brand', '')).strip() if pd.notna(row.get('brand')) else None
+            # Use empty_to_none to convert empty/whitespace strings to None
+            all_optional_fields = {
+                'storage_location': row.get('storage_location'),
+                'alias': row.get('alias'),
+                'english_name': row.get('english_name'),
+                'category': row.get('category'),
+                'brand': row.get('brand'),
+                'notes': row.get('notes'),
+            }
+            normalized_optional = empty_to_none(all_optional_fields, list(all_optional_fields.keys()))
+            storage_location = normalized_optional['storage_location'] or default_storage_location
+            alias = normalized_optional['alias']
+            english_name = normalized_optional['english_name']
+            category = normalized_optional['category']
+            brand = normalized_optional['brand']
+            notes = normalized_optional['notes']
+            
             is_hazardous = _parse_boolean(row.get('is_hazardous'), default_is_hazardous)
-            notes = str(row.get('notes', '')).strip() if pd.notna(row.get('notes')) else None
             
             # Parse created_at (custom stock-in date)
             created_at = None
