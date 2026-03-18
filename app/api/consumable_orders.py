@@ -24,7 +24,7 @@ from app.models.consumable_order import (
 from app.models.user import User, UserRole
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
@@ -219,10 +219,7 @@ def list_consumable_orders(
 
     order_direction = sort_order.lower() if sort_order else 'desc'
 
-    if order_direction == 'asc':
-        order_expr = order_column.asc().nulls_last()
-    else:
-        order_expr = order_column.desc().nulls_last()
+    order_expr = order_with_nulls_last(order_column, order_direction)
 
     secondary_order = ConsumableOrder.created_at.desc()
 
@@ -230,9 +227,9 @@ def list_consumable_orders(
     tertiary_order = ConsumableOrder.id.desc()
 
     if limit > 0:
-        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
     else:
-        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order)).all()
+        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order)).all()
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}

@@ -20,7 +20,7 @@ from app.core.time_utils import get_utc_now
 from app.services.cas_utils import normalize_cas
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
 from app.services.api_utils import clear_cache_by_prefix, get_cached_result, set_cached_result
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.api.inventory_extended_routes import register_inventory_extended_routes
@@ -143,7 +143,7 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
 
-    return order_column.asc().nulls_last() if sort_direction == 'asc' else order_column.desc().nulls_last()
+    return order_with_nulls_last(order_column, sort_direction)
 
 
 def _attach_user_names(db: Session, items: list[Inventory]) -> list[dict]:
@@ -251,9 +251,9 @@ def list_inventory(
     tertiary_order = Inventory.id.desc()
 
     if limit > 0:
-        items = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+        items = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
     else:
-        items = db.exec(base.order_by(order_expr, secondary_order, tertiary_order)).all()
+        items = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order)).all()
 
     result_data = _attach_user_names(db, items)
 

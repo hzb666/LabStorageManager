@@ -28,7 +28,7 @@ from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
@@ -294,10 +294,7 @@ def list_reagent_orders(
 
     order_direction = sort_order.lower() if sort_order else 'desc'
 
-    if order_direction == 'asc':
-        order_expr = order_column.asc().nulls_last()
-    else:
-        order_expr = order_column.desc().nulls_last()
+    order_expr = order_with_nulls_last(order_column, order_direction)
 
     secondary_order = ReagentOrder.created_at.desc()
 
@@ -305,9 +302,9 @@ def list_reagent_orders(
     tertiary_order = ReagentOrder.id.desc()
 
     if limit > 0:
-        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
     else:
-        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order)).all()
+        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order)).all()
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
