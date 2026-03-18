@@ -245,15 +245,15 @@ export function DataTable<TData>({
   const totalWeight = visibleColumns.reduce((sum, col) => sum + col.getSize(), 0)
   const minTableWidth = visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
 
-  const cssVariableStyles: React.CSSProperties = {}
+  const cssVariableStyles: React.CSSProperties & Record<string, string> = {}
   visibleColumns.forEach((column) => {
     const size = column.getSize()
     const minSize = column.columnDef.minSize ?? 50
 
-    cssVariableStyles[`--col-${column.id}-flex` as keyof React.CSSProperties] =
+    cssVariableStyles[`--col-${column.id}-flex`] =
       size === 0 ? 'none' : `${size} 0 0%`
-    cssVariableStyles[`--col-${column.id}-min` as keyof React.CSSProperties] = `${minSize}px`
-    cssVariableStyles[`--col-${column.id}-display` as keyof React.CSSProperties] =
+    cssVariableStyles[`--col-${column.id}-min`] = `${minSize}px`
+    cssVariableStyles[`--col-${column.id}-display`] =
       size === 0 ? 'none' : 'flex'
   })
 
