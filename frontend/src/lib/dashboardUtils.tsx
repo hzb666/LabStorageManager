@@ -110,11 +110,19 @@ export const CONSUMABLE_STATUS_OPTIONS = [
   { value: 'approved', label: '已审批' },
 ]
 
-export const SEARCH_FIELD_OPTIONS = [
+export const DASHBOARD_REAGENT_SEARCH_FIELDS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
   { value: 'cas_number', label: 'CAS号' },
   { value: 'brand', label: '品牌' },
+  { value: 'created_at', label: '订购时间' },
+]
+
+export const DASHBOARD_CONSUMABLE_SEARCH_FIELDS = [
+  { value: 'all', label: '全部' },
+  { value: 'name', label: '名称' },
+  { value: 'specification', label: '规格' },
+  { value: 'created_at', label: '订购时间' },
 ]
 
 export const BORROW_SEARCH_FIELDS = [

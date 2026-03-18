@@ -257,7 +257,7 @@ export default function OperationLogsPage() {
     return (
       <div className="p-6 max-w-6xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <Button variant="morden" className="h-10" onClick={() => navigate('/admin/users')}>
+          <Button variant="modern" className="h-10" onClick={() => navigate('/admin/users')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回
           </Button>
@@ -273,7 +273,7 @@ export default function OperationLogsPage() {
     return (
       <div className="p-6 max-w-6xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <Button variant="morden" className="h-10" onClick={() => navigate('/admin/users')}>
+          <Button variant="modern" className="h-10" onClick={() => navigate('/admin/users')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回
           </Button>
@@ -287,7 +287,7 @@ export default function OperationLogsPage() {
       {/* 头部区域 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="morden" className="h-10" onClick={() => navigate('/admin/users')}>
+          <Button variant="modern" className="h-10" onClick={() => navigate('/admin/users')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回
           </Button>

@@ -384,7 +384,7 @@ export function InventoryPage() {
           <Button onClick={handleAddClick} size="lg">
             <Plus className="w-4 h-4 mr-1.5" /> 手动入库
           </Button>
-          <Button variant="morden" size="lg" onClick={handleExport}>
+          <Button variant="modern" size="lg" onClick={handleExport}>
             <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
           </Button>
         </div>
@@ -428,7 +428,7 @@ export function InventoryPage() {
                 </div>
               )}
               <div className="flex gap-2 order-2 ml-auto">
-                <Button variant="morden" size="lg" type="button" onClick={() => setDialogState(null)}>
+                <Button variant="modern" size="lg" type="button" onClick={() => setDialogState(null)}>
                   取消
                 </Button>
                 <LoadingButton type="submit" size="lg" isLoading={isSubmitting}>

@@ -1,5 +1,5 @@
 // DataTable.tsx
-import React, { useRef, useCallback, useState, useEffect, memo, useMemo } from 'react'
+import React, { useRef, useCallback, useState, useEffect, memo } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import type { Table as TableType, Row, Cell, Header } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -201,6 +201,7 @@ export function DataTable<TData>({
   })
 
   const isAllExpanded = isControlled ? externalIsAllExpanded : internalIsAllExpanded
+  const sortingState = table.getState().sorting
 
   useEffect(() => {
     if (enableExpandAll && expandAllStorageKey) {
@@ -226,7 +227,7 @@ export function DataTable<TData>({
 
   useEffect(() => {
     if (bodyScrollRef.current) bodyScrollRef.current.scrollTop = 0
-  }, [table.getState().sorting])
+  }, [sortingState])
 
   useEffect(() => {
     return () => {
@@ -240,29 +241,21 @@ export function DataTable<TData>({
   const isMobile = useIsMobile()
   const { rows } = table.getRowModel()
   const visibleColumns = table.getVisibleLeafColumns()
-  const columnSizing = table.getState().columnSizing
 
-  const visibleColIds = useMemo(() => visibleColumns.map((c) => c.id).join(','), [visibleColumns])
+  const totalWeight = visibleColumns.reduce((sum, col) => sum + col.getSize(), 0)
+  const minTableWidth = visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
 
-  const { totalWeight, minTableWidth } = useMemo(() => {
-    return {
-      totalWeight: visibleColumns.reduce((sum, col) => sum + col.getSize(), 0),
-      minTableWidth: visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0),
-    }
-  }, [visibleColIds, columnSizing])
+  const cssVariableStyles: React.CSSProperties = {}
+  visibleColumns.forEach((column) => {
+    const size = column.getSize()
+    const minSize = column.columnDef.minSize ?? 50
 
-  const cssVariableStyles = useMemo(() => {
-    const styles: Record<string, string> = {}
-    visibleColumns.forEach((column) => {
-      const size = column.getSize()
-      const minSize = column.columnDef.minSize ?? 50
-
-      styles[`--col-${column.id}-flex`] = size === 0 ? 'none' : `${size} 0 0%`
-      styles[`--col-${column.id}-min`] = `${minSize}px`
-      styles[`--col-${column.id}-display`] = size === 0 ? 'none' : 'flex'
-    })
-    return styles as React.CSSProperties
-  }, [visibleColIds, columnSizing])
+    cssVariableStyles[`--col-${column.id}-flex` as keyof React.CSSProperties] =
+      size === 0 ? 'none' : `${size} 0 0%`
+    cssVariableStyles[`--col-${column.id}-min` as keyof React.CSSProperties] = `${minSize}px`
+    cssVariableStyles[`--col-${column.id}-display` as keyof React.CSSProperties] =
+      size === 0 ? 'none' : 'flex'
+  })
 
   const handleCustomResize = useCallback((e: React.MouseEvent | React.TouchEvent, header: Header<TData, unknown>) => {
     e.preventDefault()
@@ -349,24 +342,29 @@ export function DataTable<TData>({
 
   const shouldUseVirtualization = scrollHeight !== 'auto'
 
+  const estimateRowSize = useCallback((index: number) => {
+    const row = rows[index]
+    if (!row) return estimatedRowHeight
+
+    const expandedEstimate = estimatedRowHeight + 124.8
+    const snapshot = bulkExpandedSnapshotRef.current
+
+    if (isBulkAnimating && snapshot) {
+      return snapshot.has(row.id) ? expandedEstimate : estimatedRowHeight
+    }
+
+    return row.getIsExpanded() ? expandedEstimate : estimatedRowHeight
+  }, [rows, estimatedRowHeight, isBulkAnimating])
+
+  const getRowItemKey = useCallback((index: number) => rows[index]?.id ?? index, [rows])
+
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
-    estimateSize: useCallback((index: number) => {
-      const row = rows[index]
-      if (!row) return estimatedRowHeight
-
-      const expandedEstimate = estimatedRowHeight + 124.8
-      const snapshot = bulkExpandedSnapshotRef.current
-
-      if (isBulkAnimating && snapshot) {
-        return snapshot.has(row.id) ? expandedEstimate : estimatedRowHeight
-      }
-
-      return row.getIsExpanded() ? expandedEstimate : estimatedRowHeight
-    }, [rows, estimatedRowHeight, isBulkAnimating]),
+    estimateSize: estimateRowSize,
     overscan: isBulkAnimating ? 4 : (isAllExpanded ? 5 : 10),
     getScrollElement: () => bodyScrollRef.current,
-    getItemKey: useCallback((index: number) => rows[index]?.id ?? index, [rows]),
+    getItemKey: getRowItemKey,
   })
 
   const virtualizerRef = useRef(rowVirtualizer)

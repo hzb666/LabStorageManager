@@ -6,6 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN groupadd --system appuser \
+    && useradd --system --gid appuser --create-home --home-dir /home/appuser appuser
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
@@ -21,9 +24,12 @@ COPY app ./app
 COPY docker/backend/entrypoint.sh /entrypoint.sh
 
 RUN mkdir -p /app/static /app/.keys /data \
-    && chmod +x /entrypoint.sh
+    && chmod +x /entrypoint.sh \
+    && chown -R appuser:appuser /app /data /entrypoint.sh
 
 EXPOSE 8000
 
+USER appuser
+
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -268,7 +268,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   // 实际的重置逻辑在 FilterTable 或页面中处理
   const resetExpanded = useCallback(() => {
     // 这个回调供外部调用，用于重置展开状态
-  }, [isAllExpanded])
+  }, [])
 
   // 搜索防抖
   useEffect(() => {
@@ -362,7 +362,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     setSearchField(defaultSearchField)
     setFuzzySearch(false)
     setSorting([])
-  }, [defaultStatus, defaultSearchField])
+  }, [defaultStatus, defaultSearchField, setSearchInput])
 
   // 手动使缓存失效
   const invalidate = useCallback(() => {

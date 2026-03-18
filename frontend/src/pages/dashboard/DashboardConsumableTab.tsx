@@ -37,7 +37,7 @@ import {
   type DashboardConsumableOrder,
   type DashboardParams,
   CONSUMABLE_STATUS_OPTIONS,
-  SEARCH_FIELD_OPTIONS,
+  DASHBOARD_CONSUMABLE_SEARCH_FIELDS,
   buildLocalListData,
   flattenGroupedOrders,
   removeApplicantColumn,
@@ -70,7 +70,7 @@ export function DashboardConsumableTab() {
       const response = await consumableOrderAPI.getMyConsumableOrders()
       const grouped = (response.data?.data ?? {}) as Record<string, { orders: Record<string, unknown>[] }>
       const rows = flattenGroupedOrders<DashboardConsumableOrder>(grouped, currentUser?.id)
-      const local = buildLocalListData(rows, params as DashboardParams, ['name', 'specification'])
+      const local = buildLocalListData(rows, params as DashboardParams, ['name', 'specification', 'created_at'])
       return { data: local }
     },
   }), [currentUser?.id])
@@ -178,8 +178,8 @@ export function DashboardConsumableTab() {
         tableId="dashboard-consumable-orders"
         customColumns={consumableColumns}
         statusOptions={CONSUMABLE_STATUS_OPTIONS}
-        searchFieldOptions={SEARCH_FIELD_OPTIONS}
-        searchPlaceholder="搜索名称、规格..."
+        searchFieldOptions={DASHBOARD_CONSUMABLE_SEARCH_FIELDS}
+        searchPlaceholder="搜索名称、规格、订购时间..."
         title={<><ShoppingCart className="w-5 h-5" /> 我的耗材订单</>}
         noteField="notes"
         enableExpandAll={true}
@@ -205,7 +205,7 @@ export function DashboardConsumableTab() {
           <form onSubmit={submitConsumableEdit}>
             <BaseForm form={consumableForm} fields={getConsumableOrderFormFields(true)} />
             <div className="flex justify-end gap-2 mt-8">
-              <Button variant="morden" size="lg" type="button" onClick={() => setEditingConsumable(null)}>
+              <Button variant="modern" size="lg" type="button" onClick={() => setEditingConsumable(null)}>
                 取消
               </Button>
               <LoadingButton type="submit" size="lg" isLoading={isSubmittingConsumable}>

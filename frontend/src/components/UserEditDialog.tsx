@@ -357,7 +357,7 @@ export function UserEditDialog({
                 />
             </div>
             <div key="password-actions" className="flex gap-3 mt-8">
-              <Button variant="morden" onClick={() => setIsEditingPassword(false)} size="lg" className="flex-1">
+              <Button variant="modern" onClick={() => setIsEditingPassword(false)} size="lg" className="flex-1">
                 返回
               </Button>
               <Button onClick={handleChangePassword} disabled={changePasswordLoading} size="lg" className="flex-1">
@@ -453,7 +453,7 @@ export function UserEditDialog({
 
             <div key="edit-actions" className="flex gap-2 mt-6">
               <Button
-                variant="morden"
+                variant="modern"
                 onClick={() => {
                   setIsEditingPassword(true)
                   passwordForm.reset({ old_password: '', new_password: '', confirm_password: '' })
@@ -464,7 +464,7 @@ export function UserEditDialog({
                 <Lock className="w-4 h-4 mr-1.5" />
                 修改密码
               </Button>
-              <Button variant="morden" onClick={handleClose} size="lg" className="flex-1">
+              <Button variant="modern" onClick={handleClose} size="lg" className="flex-1">
                 取消
               </Button>
               <LoadingButton onClick={handleSave} isLoading={editLoading} size="lg" className="flex-1">

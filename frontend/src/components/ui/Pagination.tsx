@@ -72,7 +72,7 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
         {/* 翻页按钮组 */}
         <div className="flex items-center gap-1">
           <Button
-            variant="morden"
+            variant="modern"
             size="sm"
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage <= 1}
@@ -92,7 +92,7 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
                 <Button
                   // 【核心魔法】将 active 状态绑定到 key 上。状态切换时强制组件重新挂载，实现 0 延迟变色
                   key={`page-${page}-${page === currentPage ? 'active' : 'inactive'}`}
-                  variant={page === currentPage ? 'default' : 'morden'}
+                  variant={page === currentPage ? 'default' : 'modern'}
                   onClick={() => onPageChange(page)}
                   // 移除基础过渡动画，仅在 hover 时施加过渡类名
                   className="h-9 w-9 p-0"
@@ -104,7 +104,7 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
           </div>
 
           <Button
-            variant="morden"
+            variant="modern"
             size="sm"
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage >= totalPages}

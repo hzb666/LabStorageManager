@@ -18,7 +18,7 @@ import { Pencil } from 'lucide-react'
 export interface ActionButtonConfig<T> {
   id: string
   label: string
-  variant?: 'default' | 'morden' | 'destructive' | 'secondary' | 'ghost'
+  variant?: 'default' | 'modern' | 'destructive' | 'secondary' | 'ghost'
   size?: 'default' | 'sm' | 'lg' | 'icon'
   className?: string
   icon?: React.ReactNode
@@ -98,7 +98,7 @@ export function TableActionButtons<T>({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="morden"
+              variant="modern"
               size="sm"
               className="h-8 w-8 p-0"
               disabled={disableEdit}
@@ -173,7 +173,7 @@ function ActionButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T
           <LoadingButton
             size="sm"
             disabled={isDisabled}
-            variant="morden"
+            variant="modern"
             className={cn(
               config.className,
               'h-8 w-8 p-0',
@@ -227,7 +227,7 @@ function ActionButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            variant={config.variant || 'morden'}
+            variant={config.variant || 'modern'}
             size="sm"
             className={cn('h-8 w-8 p-0', config.className)}
             disabled={isDisabled}

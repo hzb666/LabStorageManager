@@ -160,7 +160,7 @@ export function ImportPage() {
             <div className="rounded-lg my-4">
               <div className="flex items-center justify-between mb-4">
                 <h4>模板字段说明（标 <span className="text-destructive">*</span> 为必填项）</h4>
-                <Button variant="morden" size="lg" onClick={downloadTemplate}>
+                <Button variant="modern" size="lg" onClick={downloadTemplate}>
                   <Download className="w-4 h-4 mr-2" />
                   下载模板
                 </Button>

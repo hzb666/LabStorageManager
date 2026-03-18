@@ -159,7 +159,7 @@ export function DashboardStockinTab() {
 
             <div className="flex gap-3 mt-8">
               <Button
-                variant="morden"
+                variant="modern"
                 onClick={() => setShowStockinModal(false)}
                 className="flex-1"
                 size="lg"

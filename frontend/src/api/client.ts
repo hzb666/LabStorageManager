@@ -253,7 +253,14 @@ export const reagentOrderAPI = {
 
 // Consumable Order APIs (new)
 export const consumableOrderAPI = {
-  list: (params?: PaginationParams & { status_filter?: ConsumableOrderStatus }) =>
+  list: (params?: PaginationParams & {
+    status_filter?: ConsumableOrderStatus
+    search?: string
+    search_field?: string
+    fuzzy?: boolean
+    sort_by?: string
+    sort_order?: string
+  }) =>
     api.get('/consumable-orders/', { params }),
   get: (id: number) => api.get(`/consumable-orders/${id}`),
   create: (data: {
@@ -279,7 +286,16 @@ export const consumableOrderAPI = {
 
 // Inventory APIs
 export const inventoryAPI = {
-  list: (params?: PaginationParams & { status_filter?: string; cas_filter?: string; hazardous_only?: boolean }) =>
+  list: (params?: PaginationParams & {
+    status_filter?: string
+    cas_filter?: string
+    hazardous_only?: boolean
+    search?: string
+    search_field?: string
+    fuzzy?: boolean
+    sort_by?: string
+    sort_order?: string
+  }) =>
     api.get('/inventory/', { params }),
   get: (id: number) => api.get(`/inventory/${id}`),
   getByCode: (code: string) => api.get(`/inventory/code/${code}`),
@@ -319,6 +335,7 @@ export const commonShelfAPI = {
     status_filter?: string
     search?: string
     search_field?: string
+    fuzzy?: boolean
     sort_by?: string
     sort_order?: string
   }) => api.get('/inventory/common-shelf', { params }),

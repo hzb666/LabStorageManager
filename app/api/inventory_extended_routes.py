@@ -5,11 +5,13 @@ import os
 import tempfile
 from typing import Any, Annotated, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func
 
 from app.core.auth import AdminUser, CurrentUser, get_current_user, require_admin
+from app.core.config import settings
+from app.core.request_utils import get_client_ip
 from app.core.time_utils import get_utc_now, to_china_time
 from app.database import DBSession, get_db
 from app.models.inventory import (
@@ -24,14 +26,31 @@ from app.models.inventory import (
 from app.models.user import User, UserRole
 from app.services.api_utils import clear_cache_by_prefix, empty_to_none
 from app.services.cas_utils import normalize_cas
+from app.services.csv_utils import escape_csv_formula
 from app.services.excel_service import validate_uploaded_file
 from app.services.internal_code import generate_internal_code
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.rate_limit import enforce_rate_limit
 from app.services.spec_utils import SpecificationError, format_specification, parse_specification
+from app.services.sql_utils import normalize_field_sql, normalize_search_term
 from app.services.user_utils import batch_get_user_names
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
+
+
+def _build_search_clause(field, pattern: str, *, fuzzy: bool):
+    column = func.coalesce(field, "")
+    if fuzzy:
+        return normalize_field_sql(column).ilike(pattern)
+    return column.ilike(pattern)
+
+
+def _combine_search_clauses(clauses: list[Any]):
+    expr = clauses[0]
+    for clause in clauses[1:]:
+        expr = expr | clause
+    return expr
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -164,21 +183,21 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         for item in items:
             writer.writerow(
                 [
-                    item.cas_number,
-                    item.name,
-                    item.english_name or "",
-                    item.alias or "",
-                    item.category or "",
-                    item.brand or "",
-                    item.storage_location or "",
+                escape_csv_formula(item.cas_number),
+                escape_csv_formula(item.name),
+                escape_csv_formula(item.english_name or ""),
+                escape_csv_formula(item.alias or ""),
+                escape_csv_formula(item.category or ""),
+                escape_csv_formula(item.brand or ""),
+                escape_csv_formula(item.storage_location or ""),
                     item.initial_quantity,
                     item.remaining_quantity,
                     item.unit,
                     item.status.value if hasattr(item.status, "value") else item.status,
                     "是" if item.is_hazardous else "否",
                     to_china_time(item.created_at).strftime("%Y-%m-%d %H:%M:%S") if item.created_at else "",
-                    item.notes or "",
-                ]
+                escape_csv_formula(item.notes or ""),
+            ]
             )
 
         output.seek(0)
@@ -364,6 +383,7 @@ def _register_common_shelf_and_import_routes(
         status_filter: Optional[InventoryStatus] = None,
         search: Optional[str] = None,
         search_field: Optional[str] = None,
+        fuzzy: bool = False,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = 'desc',
     ):
@@ -375,23 +395,39 @@ def _register_common_shelf_and_import_routes(
             base = base.where(Inventory.status == status_filter)
 
         if search:
-            keyword = f"%{search}%"
-            field_map = {
-                'name': Inventory.name,
-                'cas_number': Inventory.cas_number,
-                'brand': Inventory.brand,
-                'category': Inventory.category,
-                'storage_location': Inventory.storage_location,
-            }
-            if search_field and search_field != 'all' and search_field in field_map:
-                base = base.where(field_map[search_field].ilike(keyword))
-            else:
-                base = base.where(
-                    Inventory.name.ilike(keyword)
-                    | Inventory.cas_number.ilike(keyword)
-                    | Inventory.brand.ilike(keyword)
-                    | Inventory.category.ilike(keyword)
-                )
+            search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
+            if search_value:
+                keyword = f"%{search_value}%"
+                field_map = {
+                    'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
+                    'cas_number': [Inventory.cas_number],
+                    'brand': [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
+                    'category': [
+                        Inventory.category,
+                        Inventory.category_pinyin,
+                        Inventory.category_pinyin_initials,
+                    ],
+                    'storage_location': [
+                        Inventory.storage_location,
+                        Inventory.storage_location_pinyin,
+                        Inventory.storage_location_pinyin_initials,
+                    ],
+                }
+                if search_field and search_field != 'all' and search_field in field_map:
+                    base = base.where(
+                        _combine_search_clauses([
+                            _build_search_clause(field, keyword, fuzzy=fuzzy)
+                            for field in field_map[search_field]
+                        ])
+                    )
+                else:
+                    all_clauses = []
+                    for fields in field_map.values():
+                        all_clauses.extend(
+                            _build_search_clause(field, keyword, fuzzy=fuzzy)
+                            for field in fields
+                        )
+                    base = base.where(_combine_search_clauses(all_clauses))
 
         count_stmt = select(func.count()).select_from(base.subquery())
         total = db.exec(count_stmt).one()
@@ -455,12 +491,21 @@ def _register_common_shelf_and_import_routes(
     @router.post("/import")
     def import_inventory(
         file: Annotated[UploadFile, File(...)],
+        request: Request,
         admin_user: Annotated[User, Depends(require_admin)],
         db: Annotated[Session, Depends(get_db)],
         default_storage_location: Optional[str] = None,
         default_is_hazardous: bool = False,
     ):
         from app.services.excel_service import import_inventory_from_excel
+
+        client_ip = get_client_ip(request)
+        enforce_rate_limit(
+            scope="import_inventory",
+            identifier=client_ip,
+            limit=max(3, settings.upload_rate_limit_count // 2),
+            window_seconds=settings.upload_rate_limit_window_seconds,
+        )
 
         validate_uploaded_file(file)
 

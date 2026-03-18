@@ -61,6 +61,40 @@ LEGACY_ENUM_COLUMNS: tuple[tuple[str, str, type[Enum]], ...] = (
     ("users", "role", UserRole),
 )
 
+SQLITE_SEARCH_COLUMN_UPGRADES: dict[str, tuple[tuple[str, str], ...]] = {
+    "inventory": (
+        ("name_pinyin_initials", "VARCHAR(200)"),
+        ("category_pinyin_initials", "VARCHAR(200)"),
+        ("brand_pinyin_initials", "VARCHAR(200)"),
+        ("storage_location_pinyin_initials", "VARCHAR(200)"),
+    ),
+    "reagentorder": (
+        ("name_pinyin_initials", "VARCHAR(200)"),
+        ("category_pinyin", "VARCHAR(200)"),
+        ("category_pinyin_initials", "VARCHAR(200)"),
+        ("brand_pinyin_initials", "VARCHAR(200)"),
+    ),
+    "consumableorder": (
+        ("name_pinyin_initials", "VARCHAR(200)"),
+    ),
+    "users": (
+        ("full_name_pinyin_initials", "VARCHAR(200)"),
+    ),
+}
+
+SQLITE_SEARCH_INDEX_UPGRADES: tuple[tuple[str, str, str], ...] = (
+    ("ix_inventory_name_pinyin_initials", "inventory", "name_pinyin_initials"),
+    ("ix_inventory_category_pinyin_initials", "inventory", "category_pinyin_initials"),
+    ("ix_inventory_brand_pinyin_initials", "inventory", "brand_pinyin_initials"),
+    ("ix_inventory_storage_location_pinyin_initials", "inventory", "storage_location_pinyin_initials"),
+    ("ix_reagentorder_name_pinyin_initials", "reagentorder", "name_pinyin_initials"),
+    ("ix_reagentorder_category_pinyin", "reagentorder", "category_pinyin"),
+    ("ix_reagentorder_category_pinyin_initials", "reagentorder", "category_pinyin_initials"),
+    ("ix_reagentorder_brand_pinyin_initials", "reagentorder", "brand_pinyin_initials"),
+    ("ix_consumableorder_name_pinyin_initials", "consumableorder", "name_pinyin_initials"),
+    ("ix_users_full_name_pinyin_initials", "users", "full_name_pinyin_initials"),
+)
+
 
 def normalize_legacy_enum_storage(connection: Connection) -> int:
     """
@@ -98,6 +132,34 @@ def normalize_legacy_enum_storage(connection: Connection) -> int:
     return updated_rows
 
 
+def ensure_sqlite_search_columns(connection: Connection) -> int:
+    """Add newly introduced search columns/indexes for existing SQLite databases."""
+    added_columns = 0
+
+    for table_name, columns in SQLITE_SEARCH_COLUMN_UPGRADES.items():
+        existing_columns = {
+            row[1]
+            for row in connection.execute(text(f"PRAGMA table_info({table_name})"))
+        }
+
+        for column_name, column_type in columns:
+            if column_name in existing_columns:
+                continue
+
+            connection.execute(
+                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+            )
+            added_columns += 1
+            logger.info("Added SQLite search column %s.%s", table_name, column_name)
+
+    for index_name, table_name, column_name in SQLITE_SEARCH_INDEX_UPGRADES:
+        connection.execute(
+            text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})")
+        )
+
+    return added_columns
+
+
 def init_db() -> None:
     """Initialize database and create all tables"""
     # Ensure all SQLModel tables are registered before create_all.
@@ -107,6 +169,10 @@ def init_db() -> None:
 
     SQLModel.metadata.create_all(engine)
     logger.info("Database tables created / verified")
+
+    with engine.begin() as connection:
+        normalize_legacy_enum_storage(connection)
+        ensure_sqlite_search_columns(connection)
 
     # Create default admin user if no users exist
     _create_default_admin()
@@ -138,6 +204,7 @@ def _create_default_admin() -> None:
         admin_exists = session.exec(statement).first()
         
         if admin_exists is None:
+            pinyin_fields = pinyin_utils.compute_pinyin_fields(full_name=default_full_name)
             # Create default admin user
             admin = User(
                 username=default_username,
@@ -145,7 +212,7 @@ def _create_default_admin() -> None:
                 full_name=default_full_name,
                 role=UserRole.ADMIN,
                 is_active=True,
-                full_name_pinyin=pinyin_utils.to_pinyin(default_full_name)
+                **pinyin_fields,
             )
             session.add(admin)
             session.commit()

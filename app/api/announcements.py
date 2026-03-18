@@ -5,11 +5,12 @@ Announcement API Routes - System Announcements Management
 from typing import List, Optional, Annotated
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlmodel import Session, select, func
 
 from app.core.auth import CurrentUser, require_admin
 from app.core.config import settings
+from app.core.request_utils import get_client_ip
 from app.core.time_utils import get_utc_now
 from app.database import get_db
 from app.models.announcement import (
@@ -20,6 +21,7 @@ from app.models.announcement import (
 )
 from app.models.user import User
 from app.services.image_service import save_announcement_image, delete_file, get_directory_storage_info
+from app.services.rate_limit import enforce_rate_limit
 from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/announcements", tags=["Announcements"])
@@ -305,12 +307,21 @@ def toggle_visibility_announcement(
 @router.post("/upload-image")
 async def upload_announcement_image(
     file: UploadFile,
+    request: Request,
     current_user: Annotated[User, Depends(require_admin)],
 ):
     """
     Upload announcement image (admin only)
     Returns the URL of the uploaded image
     """
+    client_ip = get_client_ip(request)
+    enforce_rate_limit(
+        scope="upload_announcement_image",
+        identifier=client_ip,
+        limit=settings.upload_rate_limit_count,
+        window_seconds=settings.upload_rate_limit_window_seconds,
+    )
+
     # 检查存储容量配额
     storage_info = get_directory_storage_info("announcements")
     if storage_info["used_bytes"] >= storage_info["max_bytes"]:

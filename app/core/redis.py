@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 import redis
 
@@ -97,3 +97,18 @@ def delete_cached_session(token_hash: str) -> None:
         redis_client.delete(key)
     except redis.RedisError as e:
         _handle_redis_error(e, "删除 Session 缓存", key)
+
+
+def delete_cached_sessions(token_hashes: Iterable[str]) -> None:
+    redis_client = get_redis()
+    if redis_client is None:
+        return
+
+    keys = [session_key(token_hash) for token_hash in token_hashes]
+    if not keys:
+        return
+
+    try:
+        redis_client.delete(*keys)
+    except redis.RedisError as e:
+        _handle_redis_error(e, "批量删除 Session 缓存", ",".join(keys))

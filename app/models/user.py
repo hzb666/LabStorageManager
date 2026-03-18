@@ -47,6 +47,7 @@ class User(UserBase, table=True):
     username_version: int = Field(default=1, description="用户名版本号，每次修改用户名时+1")
     # 姓名拼音，用于按姓名排序
     full_name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    full_name_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
@@ -77,6 +78,13 @@ class UserUpdate(SQLModel):
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+
+
+class PublicUserResponse(BaseResponse):
+    """Public user profile payload for authenticated non-admin access."""
+
+    id: int
+    full_name: Optional[str]
     avatar_url: Optional[str] = None
 
 
@@ -87,6 +95,7 @@ class UserResponse(BaseResponse):
     username: str
     full_name: Optional[str]
     full_name_pinyin: Optional[str] = None
+    full_name_pinyin_initials: Optional[str] = None
     role: UserRole
     is_active: bool
     created_at: datetime

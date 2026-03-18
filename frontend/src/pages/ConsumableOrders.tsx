@@ -81,6 +81,7 @@ const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
   { value: 'name', label: '名称' },
   { value: 'specification', label: '规格' },
   { value: 'applicant', label: '订购人' },
+  { value: 'created_at', label: '订购时间' },
 ]
 
 // ============================================================================
@@ -289,7 +290,7 @@ export function ConsumableOrdersPage() {
             </Button>
           )}
           {isAdmin && (
-            <Button variant="morden" size="lg" onClick={handleExport}>
+            <Button variant="modern" size="lg" onClick={handleExport}>
               <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
             </Button>
           )}
@@ -314,7 +315,7 @@ export function ConsumableOrdersPage() {
               fields={getConsumableOrderFormFields(dialogState === 'edit')}
             />
             <div className="flex justify-end gap-2 mt-8">
-              <Button variant="morden" size="lg" type="button" onClick={() => setDialogState(null)}>
+              <Button variant="modern" size="lg" type="button" onClick={() => setDialogState(null)}>
                 取消
               </Button>
               <LoadingButton type="submit" size="lg" isLoading={isSubmitting}>
@@ -330,10 +331,12 @@ export function ConsumableOrdersPage() {
         api={consumableOrderAPI as FilterAPI}
         queryKey={['consumable-orders']}
         tableId="consumable-orders-table"
+        statusOptions={CONSUMABLE_ORDER_STATUS_OPTIONS}
+        searchFieldOptions={CONSUMABLE_SEARCH_FIELD_OPTIONS}
         customColumns={columns}
         onEdit={handleEditClick}
         title={<><ShoppingCart className="w-5 h-5" /> 耗材订单列表</>}
-        searchPlaceholder="搜索名称、分类、品牌..."
+        searchPlaceholder="搜索名称、规格、订购人、订购时间..."
         renderExpandedRow={renderExpandedRow}
         noteField="notes"
       />

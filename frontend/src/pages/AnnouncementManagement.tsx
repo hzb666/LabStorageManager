@@ -92,7 +92,7 @@ export function AnnouncementManagement() {
   }, [queryClient])
 
   // 处理置顶切换
-  const handleTogglePin = async (id: number) => {
+  const handleTogglePin = useCallback(async (id: number) => {
     try {
       await announcementAPI.togglePin(id)
       refetchAnnouncements()
@@ -101,10 +101,10 @@ export function AnnouncementManagement() {
       const axiosError = error as AxiosError<{ detail?: string }>
       toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
     }
-  }
+  }, [refetchAnnouncements])
 
   // 处理显示/隐藏切换
-  const handleToggleVisibility = async (id: number) => {
+  const handleToggleVisibility = useCallback(async (id: number) => {
     try {
       await announcementAPI.toggleVisibility(id)
       refetchAnnouncements()
@@ -113,10 +113,10 @@ export function AnnouncementManagement() {
       const axiosError = error as AxiosError<{ detail?: string }>
       toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
     }
-  }
+  }, [refetchAnnouncements])
 
   // 打开编辑弹窗
-  const openEditModal = (announcement: Announcement) => {
+  const openEditModal = useCallback((announcement: Announcement) => {
     setEditingId(announcement.id)
     setFormData({
       title: announcement.title,
@@ -127,13 +127,13 @@ export function AnnouncementManagement() {
     })
     setFormErrors({})
     setDialogState('edit')
-  }
+  }, [setDialogState])
 
   // 打开删除弹窗
-  const openDeleteModal = (announcement: Announcement) => {
+  const openDeleteModal = useCallback((announcement: Announcement) => {
     setDeleteId(announcement.id)
     setDialogState('delete')
-  }
+  }, [setDialogState])
 
   // 重置表单
   const resetForm = () => {
@@ -212,7 +212,7 @@ export function AnnouncementManagement() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="morden"
+                  variant="modern"
                   size="sm"
                   className="h-8 w-8 p-0"
                   onClick={(e) => {
@@ -236,7 +236,7 @@ export function AnnouncementManagement() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="morden"
+                  variant="modern"
                   size="sm"
                   className="h-8 w-8 p-0"
                   onClick={(e) => {
@@ -260,7 +260,7 @@ export function AnnouncementManagement() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="morden"
+                  variant="modern"
                   size="sm"
                   className="h-8 w-8 p-0"
                   onClick={(e) => {
@@ -280,7 +280,7 @@ export function AnnouncementManagement() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="morden"
+                  variant="modern"
                   size="sm"
                   className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                   onClick={(e) => {
@@ -299,7 +299,7 @@ export function AnnouncementManagement() {
         )
       },
     }),
-  ], [])
+  ], [handleTogglePin, handleToggleVisibility, openDeleteModal, openEditModal])
 
   // 筛选后的公告数据（必须在 table 定义之前）
   const filteredAnnouncements = useMemo(() => {
@@ -581,7 +581,7 @@ export function AnnouncementManagement() {
             <SelectValue placeholder="显示状态" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="all">全部状态</SelectItem>
             <SelectItem value="visible">显示</SelectItem>
             <SelectItem value="hidden">隐藏</SelectItem>
           </SelectContent>
@@ -592,7 +592,7 @@ export function AnnouncementManagement() {
             <SelectValue placeholder="置顶状态" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="all">全部状态</SelectItem>
             <SelectItem value="pinned">置顶</SelectItem>
             <SelectItem value="unpinned">未置顶</SelectItem>
           </SelectContent>
@@ -752,7 +752,7 @@ export function AnnouncementManagement() {
             </div>
           </div>
           <div className="flex gap-3 mt-6">
-            <Button variant="morden" onClick={() => handleModalClose(false)} size="lg" className="flex-1">
+            <Button variant="modern" onClick={() => handleModalClose(false)} size="lg" className="flex-1">
               取消
             </Button>
             <Button onClick={handleSubmit} disabled={formLoading} size="lg" className="flex-1">
@@ -776,7 +776,7 @@ export function AnnouncementManagement() {
             <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg" className="flex-1">
               {deleteLoading ? '处理中...' : '确认删除'}
             </Button>
-            <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="flex-1">
+            <Button variant="modern" onClick={() => setDialogState(null)} size="lg" className="flex-1">
               取消
             </Button>
           </div>

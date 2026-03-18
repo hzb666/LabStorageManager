@@ -37,6 +37,20 @@ SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 CACHE_TTL_SECONDS = 10
 
 
+def _build_search_clause(field, pattern: str, *, fuzzy: bool):
+    column = func.coalesce(field, "")
+    if fuzzy:
+        return normalize_field_sql(column).ilike(pattern)
+    return column.ilike(pattern)
+
+
+def _combine_search_clauses(clauses: list[Any]):
+    expr = clauses[0]
+    for clause in clauses[1:]:
+        expr = expr | clause
+    return expr
+
+
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
     if initial is None or initial <= 0:
         return None
@@ -80,37 +94,41 @@ def _apply_inventory_filters(
     if not search:
         return base
 
-    if fuzzy:
-        search_normalized = normalize_search_term(search.strip())
-        return base.where(
-            (normalize_field_sql(Inventory.cas_number).ilike(f"%{search_normalized}%"))
-            | (normalize_field_sql(Inventory.name).ilike(f"%{search_normalized}%"))
-            | (normalize_field_sql(Inventory.storage_location).ilike(f"%{search_normalized}%"))
-            | (normalize_field_sql(Inventory.brand).ilike(f"%{search_normalized}%"))
-            | (normalize_field_sql(Inventory.category).ilike(f"%{search_normalized}%"))
+    search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
+    if not search_value:
+        return base
+
+    search_pattern = f"%{search_value}%"
+    field_map = {
+        'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
+        'cas_number': [Inventory.cas_number],
+        'storage_location': [
+            Inventory.storage_location,
+            Inventory.storage_location_pinyin,
+            Inventory.storage_location_pinyin_initials,
+        ],
+        'brand': [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
+        'category': [
+            Inventory.category,
+            Inventory.category_pinyin,
+            Inventory.category_pinyin_initials,
+        ],
+    }
+
+    if search_field and search_field != 'all' and search_field in field_map:
+        clauses = [
+            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            for field in field_map[search_field]
+        ]
+        return base.where(_combine_search_clauses(clauses))
+
+    all_clauses = []
+    for fields in field_map.values():
+        all_clauses.extend(
+            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            for field in fields
         )
-
-    search_pattern = f"%{search}%"
-    default_expr = (
-        (Inventory.name.ilike(search_pattern))
-        | (Inventory.cas_number.ilike(search_pattern))
-        | (Inventory.storage_location.ilike(search_pattern))
-        | (Inventory.brand.ilike(search_pattern))
-        | (Inventory.category.ilike(search_pattern))
-    )
-
-    if search_field and search_field != 'all':
-        field_map = {
-            'name': Inventory.name,
-            'cas_number': Inventory.cas_number,
-            'storage_location': Inventory.storage_location,
-            'brand': Inventory.brand,
-            'category': Inventory.category,
-        }
-        if search_field in field_map:
-            return base.where(field_map[search_field].ilike(search_pattern))
-
-    return base.where(default_expr)
+    return base.where(_combine_search_clauses(all_clauses))
 
 
 def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str]):

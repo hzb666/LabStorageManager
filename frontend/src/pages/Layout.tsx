@@ -54,15 +54,26 @@ export function Layout() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
 
   useEffect(() => {
+    let cancelled = false
+
     const fetchAnnouncements = async () => {
       try {
         const response = await announcementAPI.getPublic()
-        setAnnouncements(response.data)
+        if (!cancelled) {
+          setAnnouncements(response.data)
+        }
       } catch (error) {
-        console.error('Failed to fetch announcements:', error)
+        if (!cancelled) {
+          console.error('Failed to fetch announcements:', error)
+        }
       }
     }
+
     fetchAnnouncements()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const [showBugButton, setShowBugButton] = useState(() => !getBugButtonHidden())

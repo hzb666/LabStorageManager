@@ -25,6 +25,7 @@ from app.models.reagent_order import (
     ReagentOrderStatus,
 )
 from app.services.cas_utils import normalize_cas, validate_cas_format
+from app.services.csv_utils import escape_csv_formula
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
@@ -47,6 +48,20 @@ LIST_CACHE_PREFIX = "list:"
 VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
+
+
+def _build_search_clause(field, pattern: str, *, fuzzy: bool):
+    column = func.coalesce(field, "")
+    if fuzzy:
+        return normalize_field_sql(column).ilike(pattern)
+    return column.ilike(pattern)
+
+
+def _combine_search_clauses(clauses: list[Any]):
+    expr = clauses[0]
+    for clause in clauses[1:]:
+        expr = expr | clause
+    return expr
 
 
 def _validate_order_reason(reason: Optional[str], required: bool = False) -> Optional[ReagentOrderReason]:
@@ -100,47 +115,56 @@ def _apply_reagent_order_filters(
     if not search:
         return base
 
-    if fuzzy:
-        # 模糊搜索：标准化搜索词（移除特殊空格字符和常见分隔符）
-        search_normalized = normalize_search_term(search.strip())
-        applicant_id_subquery = select(User.id).where(
-            normalize_field_sql(User.full_name).ilike(f"%{search_normalized}%")
-        )
+    search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
+    if not search_value:
+        return base
 
-        return base.where(
-            (normalize_field_sql(ReagentOrder.cas_number).ilike(f"%{search_normalized}%")) |
-            (normalize_field_sql(ReagentOrder.name).ilike(f"%{search_normalized}%")) |
-            (normalize_field_sql(ReagentOrder.brand).ilike(f"%{search_normalized}%")) |
-            (normalize_field_sql(ReagentOrder.category).ilike(f"%{search_normalized}%")) |
-            (ReagentOrder.applicant_id.in_(applicant_id_subquery))
-        )
-
-    search_pattern = f"%{search}%"
-    applicant_id_subquery = select(User.id).where(
-        User.full_name.ilike(search_pattern)
-    )
+    search_pattern = f"%{search_value}%"
+    field_map = {
+        'name': [
+            ReagentOrder.name,
+            ReagentOrder.name_pinyin,
+            ReagentOrder.name_pinyin_initials,
+        ],
+        'cas': [ReagentOrder.cas_number],
+        'cas_number': [ReagentOrder.cas_number],
+        'brand': [
+            ReagentOrder.brand,
+            ReagentOrder.brand_pinyin,
+            ReagentOrder.brand_pinyin_initials,
+        ],
+        'created_at': [func.strftime('%Y-%m-%d %H:%M:%S', ReagentOrder.created_at)],
+        'category': [
+            ReagentOrder.category,
+            ReagentOrder.category_pinyin,
+            ReagentOrder.category_pinyin_initials,
+        ],
+    }
+    applicant_match = _combine_search_clauses([
+        _build_search_clause(User.full_name, search_pattern, fuzzy=fuzzy),
+        _build_search_clause(User.full_name_pinyin, search_pattern, fuzzy=fuzzy),
+        _build_search_clause(User.full_name_pinyin_initials, search_pattern, fuzzy=fuzzy),
+    ])
+    applicant_id_subquery = select(User.id).where(applicant_match)
 
     if search_field and search_field != 'all':
-        field_map = {
-            'name': ReagentOrder.name,
-            'cas': ReagentOrder.cas_number,
-            'cas_number': ReagentOrder.cas_number,
-            'brand': ReagentOrder.brand,
-            'category': ReagentOrder.category,
-        }
         if search_field in APPLICANT_SEARCH_KEYS:
             return base.where(ReagentOrder.applicant_id.in_(applicant_id_subquery))
         if search_field in field_map:
-            return base.where(field_map[search_field].ilike(search_pattern))
+            clauses = [
+                _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+                for field in field_map[search_field]
+            ]
+            return base.where(_combine_search_clauses(clauses))
 
-    # 未知字段或 all，回退到搜索所有字段
-    return base.where(
-        (ReagentOrder.name.ilike(search_pattern)) |
-        (ReagentOrder.cas_number.ilike(search_pattern)) |
-        (ReagentOrder.brand.ilike(search_pattern)) |
-        (ReagentOrder.category.ilike(search_pattern)) |
-        (ReagentOrder.applicant_id.in_(applicant_id_subquery))
-    )
+    all_clauses = []
+    for fields in field_map.values():
+        all_clauses.extend(
+            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            for field in fields
+        )
+    all_clauses.append(ReagentOrder.applicant_id.in_(applicant_id_subquery))
+    return base.where(_combine_search_clauses(all_clauses))
 
 
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -184,6 +208,7 @@ def create_reagent_order(
     # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(
         name=normalized.get('name', order.name),
+        category=normalized.get('category'),
         brand=normalized.get('brand'),
     )
 
@@ -360,21 +385,21 @@ def export_reagent_orders(
         # 使用公共函数格式化规格
         spec = format_specification(order.initial_quantity, order.unit)
         writer.writerow([
-            order.cas_number,
-            order.name,
-            order.english_name or "",
-            order.alias or "",
-            order.category or "",
-            order.brand or "",
-            spec or "",
+            escape_csv_formula(order.cas_number),
+            escape_csv_formula(order.name),
+            escape_csv_formula(order.english_name or ""),
+            escape_csv_formula(order.alias or ""),
+            escape_csv_formula(order.category or ""),
+            escape_csv_formula(order.brand or ""),
+            escape_csv_formula(spec or ""),
             order.quantity,
             order.price or "",
             order.order_reason.value if hasattr(order.order_reason, "value") else order.order_reason,
             order.status.value if hasattr(order.status, "value") else order.status,
             "是" if order.is_hazardous else "否",
-            all_users_map.get(order.applicant_id, "") if order.applicant_id else "",
+            escape_csv_formula(all_users_map.get(order.applicant_id, "") if order.applicant_id else ""),
             to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
-            order.notes or "",
+            escape_csv_formula(order.notes or ""),
         ])
 
     output.seek(0)
@@ -524,6 +549,11 @@ def update_reagent_order(
         )
     
     update_data = order_update.model_dump(exclude_unset=True)
+    if "status" in update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be changed via workflow endpoints",
+        )
     
     optional_string_fields = [
         'english_name', 'alias', 'category', 'brand', 'unit', 'notes',
@@ -546,13 +576,18 @@ def update_reagent_order(
 
     # order_reason 已在模型层验证（枚举类型），直接使用
     # 如果更新了 name 或 brand，重新计算拼音字段（只保留 name_pinyin 和 brand_pinyin）
-    if "name" in update_data or "brand" in update_data:
+    if "name" in update_data or "category" in update_data or "brand" in update_data:
         name = update_data.get("name", order.name)
+        category = update_data.get("category", order.category)
         brand = update_data.get("brand", order.brand)
-        pinyin_fields = compute_pinyin_fields(name=name, brand=brand)
-        # ReagentOrder 有 name_pinyin 和 brand_pinyin 字段
+        pinyin_fields = compute_pinyin_fields(name=name, category=category, brand=brand)
+        # ReagentOrder 保留搜索/排序需要的拼音字段
         update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
+        update_data['name_pinyin_initials'] = pinyin_fields.get('name_pinyin_initials')
+        update_data['category_pinyin'] = pinyin_fields.get('category_pinyin')
+        update_data['category_pinyin_initials'] = pinyin_fields.get('category_pinyin_initials')
         update_data['brand_pinyin'] = pinyin_fields.get('brand_pinyin')
+        update_data['brand_pinyin_initials'] = pinyin_fields.get('brand_pinyin_initials')
     
     for field, value in update_data.items():
         setattr(order, field, value)

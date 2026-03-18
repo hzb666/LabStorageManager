@@ -171,9 +171,8 @@ async def import_cart(
                     english_name=item.english_name or None,
                     applicant_id=current_user.id,
                     status=ConsumableOrderStatus.PENDING,
+                    **compute_pinyin_fields(name=item.name),
                 )
-                pinyin_fields = compute_pinyin_fields(db_order.name)
-                db_order.name_pinyin = pinyin_fields["name_pinyin"]
             else:
                 # 创建试剂订单
                 db_order = ReagentOrder(
@@ -189,6 +188,7 @@ async def import_cart(
                     alias=item.alias or None,
                     applicant_id=current_user.id,
                     status=ReagentOrderStatus.PENDING,
+                    **compute_pinyin_fields(name=item.name, brand=item.brand),
                 )
 
             db.add(db_order)

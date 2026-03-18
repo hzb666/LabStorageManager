@@ -116,38 +116,32 @@ export function Dashboard() {
     [isPublicUser]
   )
 
-  const [activeTab, setActiveTab] = useState<DashboardTab>(() => getSavedTab(allowedTabs))
-  const [isLoading, setIsLoading] = useState(() => cachedCountsForUser === null)
-  const [counts, setCounts] = useState<DashboardCounts>(() => cachedCountsForUser ?? EMPTY_COUNTS)
+  const [selectedTab, setSelectedTab] = useState<DashboardTab>(() => getSavedTab(allowedTabs))
+  const [countsState, setCountsState] = useState<DashboardCountsCache | null>(() =>
+    cachedCountsForUser ? { userKey, counts: cachedCountsForUser } : null
+  )
+  const activeTab = useMemo(
+    () => (allowedTabs.includes(selectedTab) ? selectedTab : getSavedTab(allowedTabs)),
+    [allowedTabs, selectedTab]
+  )
+  const counts = countsState?.userKey === userKey ? countsState.counts : cachedCountsForUser ?? EMPTY_COUNTS
+  const isLoading = cachedCountsForUser === null && countsState?.userKey !== userKey
 
   const handleTabChange = useCallback((tab: DashboardTab) => {
     if (!allowedTabs.includes(tab)) {
       return
     }
-    setActiveTab(tab)
-    saveTab(tab)
+    setSelectedTab(tab)
   }, [allowedTabs])
 
   useEffect(() => {
-    if (!allowedTabs.includes(activeTab)) {
-      const fallback = getSavedTab(allowedTabs)
-      setActiveTab(fallback)
-      saveTab(fallback)
-    }
-  }, [activeTab, allowedTabs])
+    saveTab(activeTab)
+  }, [activeTab])
 
   // 加载统计数量：返回页面时优先复用缓存，只有首次或数据变化时才显示 loading
   useEffect(() => {
     let cancelled = false
     const cachedCounts = dashboardCountsCache?.userKey === userKey ? dashboardCountsCache.counts : null
-    const hasCachedCounts = cachedCounts !== null
-
-    if (cachedCounts) {
-      setCounts((prev) => (isCountsEqual(prev, cachedCounts) ? prev : cachedCounts))
-      setIsLoading(false)
-    } else {
-      setIsLoading(true)
-    }
 
     const applyCounts = (nextCounts: DashboardCounts) => {
       if (cancelled) return
@@ -157,24 +151,12 @@ export function Dashboard() {
         counts: nextCounts,
       }
 
-      if (!hasCachedCounts) {
-        setCounts((prev) => (isCountsEqual(prev, nextCounts) ? prev : nextCounts))
-        setIsLoading(false)
-        return
-      }
-
-      if (cachedCounts && isCountsEqual(cachedCounts, nextCounts)) {
-        setCounts((prev) => (isCountsEqual(prev, nextCounts) ? prev : nextCounts))
-        setIsLoading(false)
-        return
-      }
-
-      setIsLoading(true)
-      window.setTimeout(() => {
-        if (cancelled) return
-        setCounts(nextCounts)
-        setIsLoading(false)
-      }, 0)
+      setCountsState((prev) => {
+        if (prev?.userKey === userKey && isCountsEqual(prev.counts, nextCounts)) {
+          return prev
+        }
+        return { userKey, counts: nextCounts }
+      })
     }
 
     const loadCounts = async () => {
@@ -218,8 +200,7 @@ export function Dashboard() {
       } catch {
         if (cancelled) return
 
-        if (hasCachedCounts) {
-          setIsLoading(false)
+        if (cachedCounts !== null) {
           return
         }
 

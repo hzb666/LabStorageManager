@@ -37,7 +37,7 @@ import {
   type DashboardReagentOrder,
   type DashboardParams,
   REAGENT_STATUS_OPTIONS,
-  SEARCH_FIELD_OPTIONS,
+  DASHBOARD_REAGENT_SEARCH_FIELDS,
   buildLocalListData,
   flattenGroupedOrders,
   removeApplicantColumn,
@@ -71,7 +71,7 @@ export function DashboardReagentTab() {
       const response = await reagentOrderAPI.getMyReagentOrders()
       const grouped = (response.data?.data ?? {}) as Record<string, { orders: Record<string, unknown>[] }>
       const rows = flattenGroupedOrders<DashboardReagentOrder>(grouped, currentUser?.id)
-      const local = buildLocalListData(rows, params as DashboardParams, ['name', 'cas_number', 'brand', 'specification'])
+      const local = buildLocalListData(rows, params as DashboardParams, ['name', 'cas_number', 'brand', 'specification', 'created_at'])
       return { data: local }
     },
   }), [currentUser?.id])
@@ -186,8 +186,8 @@ export function DashboardReagentTab() {
         tableId="dashboard-reagent-orders"
         customColumns={reagentColumns}
         statusOptions={REAGENT_STATUS_OPTIONS}
-        searchFieldOptions={SEARCH_FIELD_OPTIONS}
-        searchPlaceholder="搜索名称、CAS号、品牌..."
+        searchFieldOptions={DASHBOARD_REAGENT_SEARCH_FIELDS}
+        searchPlaceholder="搜索名称、CAS号、品牌、订购时间..."
         title={<><FlaskConical className="w-5 h-5" /> 我的试剂订单</>}
         noteField="notes"
         enableExpandAll={true}
@@ -213,7 +213,7 @@ export function DashboardReagentTab() {
           <form onSubmit={submitReagentEdit}>
             <BaseForm form={reagentForm} fields={getReagentOrderFormFields(true)} />
             <div className="flex justify-end gap-2 mt-8">
-              <Button variant="morden" size="lg" type="button" onClick={() => setEditingReagent(null)}>
+              <Button variant="modern" size="lg" type="button" onClick={() => setEditingReagent(null)}>
                 取消
               </Button>
               <LoadingButton type="submit" size="lg" isLoading={isSubmittingReagent}>

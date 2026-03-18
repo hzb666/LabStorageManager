@@ -41,7 +41,7 @@ export function BugReportButton({
   onRightClick
 }: BugReportButtonProps) {
   const [isLoading, setIsLoading] = useState(false)
-  const { errorLogs, getLogsContent } = useErrorLogger()
+  const { getLogsContent } = useErrorLogger()
   const user = useAuthStore((state) => state.user)
   
   // 格式化时间
@@ -159,7 +159,7 @@ export function BugReportButton({
     } finally {
       setIsLoading(false)
     }
-  }, [errorLogs, getLogsContent, user])
+  }, [getLogsContent, user])
   
   return (
     <Tooltip>

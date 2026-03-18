@@ -24,23 +24,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_UPLOAD_PATHS = (
+    "/api/announcements/upload-image",
+    "/api/inventory/import",
+)
+_HTTPS_REDIRECT_EXEMPT_PATHS = {
+    "/health",
+}
 
-def _apply_security_headers(response) -> None:
-    """Apply baseline security headers for all responses."""
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    # Keep CSP practical to avoid breaking common admin/docs usage.
-    response.headers["Content-Security-Policy"] = (
+
+def _build_content_security_policy(path: str | None) -> str:
+    """Build a route-aware CSP so API responses stay strict without breaking docs UI."""
+    normalized_path = path or ""
+    if normalized_path in {"/docs", "/redoc"} or normalized_path.startswith("/docs/"):
+        return (
+            "default-src 'self'; "
+            "base-uri 'self'; "
+            "object-src 'none'; "
+            "frame-ancestors 'none'; "
+            "img-src 'self' data: https:; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'"
+        )
+
+    return (
         "default-src 'self'; "
         "base-uri 'self'; "
         "object-src 'none'; "
         "frame-ancestors 'none'; "
         "img-src 'self' data: https:; "
         "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self' 'unsafe-inline'"
+        "script-src 'self'"
     )
-    if settings.env != "development":
+
+
+def _apply_security_headers(response, path: str | None = None) -> None:
+    """Apply baseline security headers for all responses."""
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = _build_content_security_policy(path)
+    if settings.use_secure_runtime():
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
 
@@ -59,6 +83,21 @@ def _is_trusted_web_origin(origin: str | None, fallback_origin: str) -> bool:
     return normalized in trusted
 
 
+def _is_upload_request(path: str) -> bool:
+    return path in _UPLOAD_PATHS or (path.startswith("/api/users/") and path.endswith("/avatar"))
+
+
+def _get_forwarded_proto(request) -> str:
+    """Read proxy scheme only when proxy headers are explicitly trusted."""
+    if not settings.trust_proxy_headers:
+        return ""
+    return request.headers.get("x-forwarded-proto", "").lower()
+
+
+def _should_skip_https_redirect(path: str) -> bool:
+    return path in _HTTPS_REDIRECT_EXEMPT_PATHS
+
+
 class CachedStaticFiles(StaticFiles):
     """Custom static files with caching headers for images"""
 
@@ -72,7 +111,7 @@ class CachedStaticFiles(StaticFiles):
         # Add cache headers for static files (images, fonts, etc.)
         # Cache for 10 years (315360000 seconds)
         response.headers["Cache-Control"] = "public, max-age=315360000, immutable"
-        _apply_security_headers(response)
+        _apply_security_headers(response, scope.get("path"))
 
         return response
 
@@ -101,16 +140,41 @@ app = FastAPI(
 async def security_headers_middleware(request, call_next):
     """Attach security headers to every response."""
     response = await call_next(request)
-    _apply_security_headers(response)
+    _apply_security_headers(response, request.url.path)
     return response
+
+
+@app.middleware("http")
+async def upload_request_size_middleware(request, call_next):
+    """Reject clearly oversized upload requests before route handling."""
+    if request.method == "POST" and _is_upload_request(request.url.path):
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                size = int(content_length)
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
+
+            max_bytes = settings.max_upload_request_size_mb * 1024 * 1024
+            if size > max_bytes:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"Upload request exceeds {settings.max_upload_request_size_mb}MB limit"},
+                )
+
+    return await call_next(request)
 
 
 @app.middleware("http")
 async def https_redirect_middleware(request, call_next):
     """Redirect plain HTTP to HTTPS in non-development environments."""
-    if settings.env != "development":
-        forwarded_proto = request.headers.get("x-forwarded-proto", "")
-        if request.url.scheme == "http" and forwarded_proto.lower() != "https":
+    if settings.use_secure_runtime():
+        forwarded_proto = _get_forwarded_proto(request)
+        if (
+            request.url.scheme == "http"
+            and forwarded_proto != "https"
+            and not _should_skip_https_redirect(request.url.path)
+        ):
             https_url = request.url.replace(scheme="https")
             return RedirectResponse(url=str(https_url), status_code=307)
     return await call_next(request)
@@ -130,7 +194,7 @@ async def csrf_origin_check_middleware(request, call_next):
             origin_ok = _is_trusted_web_origin(origin, fallback_origin)
             referer_ok = _is_trusted_web_origin(referer, fallback_origin)
 
-            if settings.env == "production" and not (origin_ok or referer_ok):
+            if settings.use_secure_runtime() and not (origin_ok or referer_ok):
                 return JSONResponse(
                     status_code=403,
                     content={"detail": "CSRF validation failed"},

@@ -10,10 +10,10 @@ import threading
 from datetime import timedelta
 from typing import Dict
 
-from sqlmodel import Session, select, func
+from sqlmodel import Session, delete, func, select
 
 from app.core.config import settings
-from app.core.redis import cache_session, delete_cached_session
+from app.core.redis import cache_session, delete_cached_session, delete_cached_sessions
 from app.core.time_utils import get_utc_now
 from app.models.user_session import UserSession
 
@@ -27,20 +27,18 @@ _login_attempts_lock = threading.Lock()  # 线程锁，保护并发访问
 def cleanup_expired_sessions(db: Session) -> int:
     """清理过期的会话，返回删除的数量"""
     now = get_utc_now()
-    result = db.exec(
-        select(UserSession).where(UserSession.expires_at < now)
+    expired_token_hashes = db.exec(
+        select(UserSession.token_hash).where(UserSession.expires_at < now)
     ).all()
 
-    count = 0
-    for session in result:
-        delete_cached_session(session.token_hash)
-        db.delete(session)
-        count += 1
+    if not expired_token_hashes:
+        return 0
 
-    if count > 0:
-        db.commit()
+    delete_cached_sessions(expired_token_hashes)
+    db.exec(delete(UserSession).where(UserSession.expires_at < now))
+    db.commit()
 
-    return count
+    return len(expired_token_hashes)
 
 
 # ==================== Device Session Management ====================

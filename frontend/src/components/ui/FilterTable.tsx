@@ -118,6 +118,7 @@ export function FilterTable({
     initialSearch: initialUrlSearchState.search,
     initialSearchField: initialUrlSearchState.field,
   })
+  const applySearchImmediate = filter.applySearchImmediate
 
   // 🚀 此处需要父组件配合，若使用 customColumns 需确保是稳定的引用，不过组件内已做尽可能的降级兼容
   const tableColumns = useMemo(() => {
@@ -133,17 +134,17 @@ export function FilterTable({
     if (location.search === lastAppliedSearchRef.current) return
 
     if (!location.search) {
-      filter.applySearchImmediate('', defaultSearchField)
+      applySearchImmediate('', defaultSearchField)
       lastAppliedSearchRef.current = location.search
       return
     }
 
     if (!initialUrlSearchState.hasQuery) return
 
-    filter.applySearchImmediate(initialUrlSearchState.search, initialUrlSearchState.field)
+    applySearchImmediate(initialUrlSearchState.search, initialUrlSearchState.field)
     lastAppliedSearchRef.current = location.search
   }, [
-    filter.applySearchImmediate,
+    applySearchImmediate,
     initialUrlSearchState.field,
     initialUrlSearchState.hasQuery,
     initialUrlSearchState.search,
@@ -265,7 +266,7 @@ export function FilterTable({
               </span>
               {enableExpandAll && (
                 <Button
-                  variant="morden"
+                  variant="modern"
                   size="lg"
                   onClick={filter.toggleExpandAll}
                   disabled={disableExpandAll}

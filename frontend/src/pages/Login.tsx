@@ -243,7 +243,7 @@ export function Login() {
             <TooltipTrigger asChild>
               <Button
                 type="button"
-                variant="morden"
+                variant="modern"
                 size="lg"
                 onClick={handleSwitchUser}
                 className="shrink-0 h-10 w-10"

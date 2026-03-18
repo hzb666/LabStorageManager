@@ -1,102 +1,261 @@
-// src/components/ui/HighlightText.tsx
-import React from 'react';
+import React from 'react'
+import { pinyin as toPinyin } from 'pinyin-pro'
 
 interface HighlightTextProps {
   /** 要展示和匹配的文本，支持传入数字或可空类型 */
-  text?: string | number | null;
+  text?: string | number | null
   /** 当前的搜索高亮词 */
-  highlight?: string;
+  highlight?: string
   /** 是否开启模糊匹配 */
-  fuzzy?: boolean;
+  fuzzy?: boolean
 }
 
-// 1. 提取到组件外部，涵盖了常见的空格、全半角空白符以及连接符
-const SEPARATORS = String.raw`[\s\u00A0\u2002\u2003\u2009_.\-]`;
-const SEPARATOR_REGEX = new RegExp(`${SEPARATORS}+`, 'g');
+interface TextToken {
+  text: string
+  type: 'hanzi' | 'latin' | 'separator'
+}
 
-// 2. 正则转义工具，防止用户输入 .*+?^${}()|[]\ 等特殊字符导致正则崩溃
-const escapeRegExp = (str: string) => str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+interface LatinMatch {
+  consumed: number
+  start: number
+  end: number
+}
 
-// 3. 模块级缓存：解决几百个单元格渲染时，重复计算和创建正则实例的内存开销
-const regexCache = new Map<string, RegExp>();
+const HIGHLIGHT_CLASS = 'bg-amber-200 dark:bg-amber-800/50'
+const SEPARATORS = String.raw`[\s\u00A0\u2002\u2003\u2009_.\-]`
+const SEPARATOR_REGEX = new RegExp(`${SEPARATORS}+`, 'g')
+const HANZI_REGEX = /[\u3400-\u9fff]/
+const LATIN_OR_DIGIT_REGEX = /[A-Za-z0-9]/
 
-const getRegex = (highlight: string, fuzzy: boolean): RegExp | null => {
-  const cacheKey = `${fuzzy ? 'f' : 'e'}_${highlight}`;
-  
-  if (regexCache.has(cacheKey)) {
-    return regexCache.get(cacheKey)!;
-  }
+const escapeRegExp = (str: string) => str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
 
-  let regex: RegExp | null = null;
-  
-  if (fuzzy) {
-    const cleaned = highlight.replaceAll(SEPARATOR_REGEX, '');
-    if (cleaned) {
-      // 将 "ab" 转换为能够跨越空格和横杠匹配的正则：a[\s_.-]*b
-      const fuzzyPattern = cleaned.split('').map(escapeRegExp).join(`${SEPARATORS}*`);
-      regex = new RegExp(fuzzyPattern, 'i');
+const regexCache = new Map<string, RegExp>()
+const tokenCache = new Map<string, TextToken[]>()
+const hanziPinyinCache = new Map<string, string>()
+
+const normalizeFuzzyText = (value: string) => value.replaceAll(SEPARATOR_REGEX, '').toLowerCase()
+
+const getExactRegex = (highlight: string): RegExp => {
+  const cacheKey = `e_${highlight}`
+  const cached = regexCache.get(cacheKey)
+  if (cached) return cached
+
+  const regex = new RegExp(`(${escapeRegExp(highlight)})`, 'gi')
+  regexCache.set(cacheKey, regex)
+  if (regexCache.size > 50) regexCache.clear()
+  return regex
+}
+
+const getHanziPinyin = (char: string): string => {
+  const cached = hanziPinyinCache.get(char)
+  if (cached !== undefined) return cached
+
+  const result = toPinyin(char, { toneType: 'none', type: 'array' })
+  const pinyinValue = Array.isArray(result)
+    ? String(result[0] ?? '').replaceAll(/\s+/g, '').toLowerCase()
+    : String(result ?? '').replaceAll(/\s+/g, '').toLowerCase()
+
+  hanziPinyinCache.set(char, pinyinValue)
+  return pinyinValue
+}
+
+const tokenizeText = (text: string): TextToken[] => {
+  const cached = tokenCache.get(text)
+  if (cached) return cached
+
+  const tokens: TextToken[] = []
+  let index = 0
+
+  while (index < text.length) {
+    const char = text[index]
+
+    if (HANZI_REGEX.test(char)) {
+      tokens.push({ text: char, type: 'hanzi' })
+      index += 1
+      continue
     }
-  } else {
-    // 精确匹配：包裹捕获组 ()，使得后续 split 拆分后的数组保留匹配项
-    regex = new RegExp(`(${escapeRegExp(highlight)})`, 'gi');
+
+    if (LATIN_OR_DIGIT_REGEX.test(char)) {
+      let end = index + 1
+      while (end < text.length && LATIN_OR_DIGIT_REGEX.test(text[end])) {
+        end += 1
+      }
+      tokens.push({ text: text.slice(index, end), type: 'latin' })
+      index = end
+      continue
+    }
+
+    let end = index + 1
+    while (end < text.length && !HANZI_REGEX.test(text[end]) && !LATIN_OR_DIGIT_REGEX.test(text[end])) {
+      end += 1
+    }
+    tokens.push({ text: text.slice(index, end), type: 'separator' })
+    index = end
   }
 
-  if (regex) {
-    regexCache.set(cacheKey, regex);
-    // 简单的防止内存泄漏策略：当搜索词变化超过 50 种时，清空缓存
-    if (regexCache.size > 50) regexCache.clear();
+  tokenCache.set(text, tokens)
+  if (tokenCache.size > 200) tokenCache.clear()
+  return tokens
+}
+
+const findHanziPrefixMatch = (char: string, remainingQuery: string): number => {
+  if (!remainingQuery) return 0
+
+  if (remainingQuery.startsWith(char.toLowerCase())) {
+    return char.length
   }
 
-  return regex;
-};
+  const pinyinValue = getHanziPinyin(char)
+  const maxLength = Math.min(remainingQuery.length, pinyinValue.length)
+  for (let length = maxLength; length >= 1; length -= 1) {
+    if (pinyinValue.startsWith(remainingQuery.slice(0, length))) {
+      return length
+    }
+  }
+
+  return 0
+}
+
+const findLatinSubstringMatch = (tokenText: string, remainingQuery: string): LatinMatch | null => {
+  const normalizedToken = tokenText.toLowerCase()
+  const maxLength = Math.min(normalizedToken.length, remainingQuery.length)
+
+  for (let length = maxLength; length >= 1; length -= 1) {
+    const candidate = remainingQuery.slice(0, length)
+    const start = normalizedToken.indexOf(candidate)
+    if (start !== -1) {
+      return {
+        consumed: length,
+        start,
+        end: start + length,
+      }
+    }
+  }
+
+  return null
+}
+
+const buildHighlightedTokens = (
+  tokens: TextToken[],
+  highlightedRanges: Map<number, { start: number; end: number } | 'full'>
+) => {
+  return tokens.map((token, index) => {
+    const match = highlightedRanges.get(index)
+    if (!match) {
+      return <span key={index}>{token.text}</span>
+    }
+
+    if (match === 'full') {
+      return (
+        <span key={index} className={HIGHLIGHT_CLASS}>
+          {token.text}
+        </span>
+      )
+    }
+
+    const before = token.text.slice(0, match.start)
+    const middle = token.text.slice(match.start, match.end)
+    const after = token.text.slice(match.end)
+
+    return (
+      <span key={index}>
+        {before}
+        <span className={HIGHLIGHT_CLASS}>{middle}</span>
+        {after}
+      </span>
+    )
+  })
+}
+
+const getFuzzyHighlightedNodes = (text: string, highlight: string): React.ReactNode => {
+  const normalizedQuery = normalizeFuzzyText(highlight)
+  if (!normalizedQuery) return text
+
+  const tokens = tokenizeText(text)
+
+  for (let startIndex = 0; startIndex < tokens.length; startIndex += 1) {
+    let queryIndex = 0
+    let matched = false
+    const highlightedRanges = new Map<number, { start: number; end: number } | 'full'>()
+
+    for (let tokenIndex = startIndex; tokenIndex < tokens.length && queryIndex < normalizedQuery.length; tokenIndex += 1) {
+      const token = tokens[tokenIndex]
+
+      if (token.type === 'separator') {
+        continue
+      }
+
+      const remainingQuery = normalizedQuery.slice(queryIndex)
+
+      if (token.type === 'hanzi') {
+        const consumed = findHanziPrefixMatch(token.text, remainingQuery)
+        if (consumed === 0) {
+          matched = false
+          break
+        }
+
+        highlightedRanges.set(tokenIndex, 'full')
+        queryIndex += consumed
+        matched = true
+        continue
+      }
+
+      const latinMatch = findLatinSubstringMatch(token.text, remainingQuery)
+      if (!latinMatch) {
+        matched = false
+        break
+      }
+
+      highlightedRanges.set(tokenIndex, {
+        start: latinMatch.start,
+        end: latinMatch.end,
+      })
+      queryIndex += latinMatch.consumed
+      matched = true
+    }
+
+    if (matched && queryIndex === normalizedQuery.length) {
+      return <>{buildHighlightedTokens(tokens, highlightedRanges)}</>
+    }
+  }
+
+  return text
+}
 
 export const HighlightText = React.memo(function HighlightText({
   text,
   highlight,
   fuzzy = false,
 }: HighlightTextProps) {
-  // [极速阻断 1]：如果没有文本，直接不渲染
-  if (text === null || text === undefined || text === '') return null;
-  const strText = String(text);
+  if (text === null || text === undefined || text === '') return null
+  const strText = String(text)
 
-  // [极速阻断 2]：如果没有搜索词，直接原样渲染
   if (!highlight || highlight.trim() === '') {
-    return <>{strText}</>;
+    return <>{strText}</>
   }
 
-  const trimmedHighlight = highlight.trim();
-  const regex = getRegex(trimmedHighlight, fuzzy);
-
-  if (!regex) return <>{strText}</>;
+  const trimmedHighlight = highlight.trim()
 
   if (fuzzy) {
-    // 模糊匹配逻辑：使用原生 RegExp.test 代替 String.replace，避免反复分配内存
-    if (regex.test(strText)) {
-      return <span className="bg-amber-200 dark:bg-amber-800/50">{strText}</span>;
-    }
-    return <>{strText}</>;
+    return <>{getFuzzyHighlightedNodes(strText, trimmedHighlight)}</>
   }
 
-  // 精确匹配逻辑：由于使用了带捕获组的正则 /(keyword)/gi，
-  // 拆分后的数组永远是：[普通文本, 匹配文本, 普通文本, 匹配文本...] 
-  const parts = strText.split(regex);
+  const regex = getExactRegex(trimmedHighlight)
+  const parts = strText.split(regex)
 
-  // 如果长度为1，说明没匹配到内容
-  if (parts.length === 1) return <>{strText}</>;
+  if (parts.length === 1) return <>{strText}</>
 
   return (
     <>
-      {parts.map((part, i) =>
-        // 索引为奇数的必然是我们通过正则匹配到的高亮文本项
-        // 完全不需要调用 part.toLowerCase() === highlight.toLowerCase() 来判断
-        i % 2 === 1 ? (
-          <span key={i} className="bg-amber-200 dark:bg-amber-800/50">
+      {parts.map((part, index) =>
+        index % 2 === 1 ? (
+          <span key={index} className={HIGHLIGHT_CLASS}>
             {part}
           </span>
         ) : (
-          <span key={i}>{part}</span>
+          <span key={index}>{part}</span>
         )
       )}
     </>
-  );
-});
+  )
+})

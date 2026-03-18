@@ -76,9 +76,13 @@ class Inventory(InventoryBase, table=True):
     
     # 拼音排序字段（预计算，使用数据库索引加速排序）
     name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    name_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
     category_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    category_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
     brand_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    brand_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
     storage_location_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    storage_location_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
 
 
 class InventoryCreate(SQLModel):

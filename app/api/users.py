@@ -23,9 +23,11 @@ from app.core.auth import (
     CurrentUser,
 )
 from app.core.config import settings
+from app.core.request_utils import get_client_ip
 from app.core.redis import delete_cached_session, get_redis
 from app.database import get_db, DBSession
 from app.models.user import (
+    PublicUserResponse,
     User,
     UserCreate,
     UserUpdate,
@@ -34,6 +36,7 @@ from app.models.user import (
 )
 from app.models.user_session import UserSession
 from app.services.image_service import save_avatar, delete_file
+from app.services.rate_limit import enforce_rate_limit
 from app.services.user_service import get_user_by_username, get_user_by_id
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.sql_utils import normalize_field_sql, normalize_search_term
@@ -50,6 +53,7 @@ from app.services.session_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["Users"])
+DUMMY_PASSWORD_HASH = get_password_hash("constant-timing-placeholder")
 
 # ==================== Rate Limiting ====================
 # 基于 Redis 的速率限制：记录每个 IP 的登录失败次数
@@ -63,20 +67,12 @@ def _rate_limit_key(client_ip: str) -> str:
     return f"rate_limit:login:{client_ip}"
 
 
-def _get_client_ip(request: Request) -> str:
-    """获取客户端 IP 地址"""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
 def _check_rate_limit(client_ip: str) -> None:
     """检查 IP 登录速率限制 (Redis 实现)"""
     redis_client = get_redis()
     
     if redis_client is None:
-        # Redis 不可用时，跳过速率限制检查（降级处理）
+        _check_rate_limit_memory(client_ip)
         return
     
     key = _rate_limit_key(client_ip)
@@ -96,8 +92,7 @@ def _check_rate_limit(client_ip: str) -> None:
                     detail="Too many login attempts, please try again in 5 minutes"
                 )
     except redis.RedisError:
-        # Redis 错误时，跳过速率限制（降级处理）
-        pass
+        _check_rate_limit_memory(client_ip)
 
 
 def _record_failed_login(client_ip: str) -> None:
@@ -129,7 +124,28 @@ def _reset_login_attempts(client_ip: str) -> None:
     直接跳过删除，依赖 Redis key 的 5 分钟 TTL 自动过期。
     这是工程化最优解：减少一次 Redis 操作，同时保持速率限制有效性。
     """
-    pass
+    with _login_attempts_lock:
+        LOGIN_ATTEMPTS.pop(client_ip, None)
+
+
+def _check_rate_limit_memory(client_ip: str) -> None:
+    """检查内存后备中的登录失败次数。"""
+    current_time = time.time()
+    with _login_attempts_lock:
+        attempts_data = LOGIN_ATTEMPTS.get(client_ip)
+        if attempts_data is None:
+            return
+
+        attempts, first_attempt = attempts_data
+        if current_time - first_attempt >= LOGIN_WINDOW_SECONDS:
+            LOGIN_ATTEMPTS.pop(client_ip, None)
+            return
+
+        if attempts >= MAX_LOGIN_ATTEMPTS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts, please try again in 5 minutes",
+            )
 
 
 def _record_failed_login_memory(client_ip: str) -> None:
@@ -189,15 +205,17 @@ def login(
         # 清理过期会话
         cleanup_expired_sessions(db)
 
-        client_ip = _get_client_ip(http_request)
+        client_ip = get_client_ip(http_request)
         user_agent = http_request.headers.get("User-Agent", "Unknown")
         
         # 检查速率限制
         _check_rate_limit(client_ip)
         
         user = get_user_by_username(db, login_request.username)
+        password_hash = user.password_hash if user else DUMMY_PASSWORD_HASH
+        password_valid = verify_password(login_request.password, password_hash)
 
-        if not user or not verify_password(login_request.password, user.password_hash):
+        if not user or not password_valid:
             # 记录失败尝试
             _record_failed_login(client_ip)
             raise HTTPException(
@@ -267,7 +285,7 @@ def login(
             key="access_token",
             value=access_token,
             httponly=True,
-            secure=settings.env != "development",  # 生产环境启用 HTTPS cookie
+            secure=settings.use_secure_runtime(),  # 非开发环境启用 HTTPS cookie
             samesite="lax",
             max_age=settings.session_expire_hours * 3600,
             path="/",
@@ -447,19 +465,25 @@ def list_users(
     
     statement = statement.offset(skip).limit(limit)
     users = db.exec(statement).all()
+    user_ids = [user.id for user in users]
+    last_active_map: dict[int, object] = {}
+
+    if user_ids:
+        last_active_rows = db.exec(
+            select(UserSession.user_id, func.max(UserSession.last_active_at))
+            .where(UserSession.user_id.in_(user_ids))
+            .group_by(UserSession.user_id)
+        ).all()
+        last_active_map = {
+            user_id: last_active_at
+            for user_id, last_active_at in last_active_rows
+            if last_active_at is not None
+        }
     
     # Get last active time from UserSession for each user
     user_responses = []
     for user in users:
-        # Get the latest session's last_active_at
-        latest_session = db.exec(
-            select(UserSession)
-            .where(UserSession.user_id == user.id)
-            .order_by(UserSession.last_active_at.desc())
-            .limit(1)
-        ).first()
-        
-        last_active_at = latest_session.last_active_at if latest_session else None
+        last_active_at = last_active_map.get(user.id)
         
         user_dict = UserResponse.model_validate(user).model_dump(mode='json')
         user_dict['last_active_at'] = last_active_at.isoformat() + 'Z' if last_active_at else None
@@ -480,7 +504,7 @@ def search_users(
     db: Annotated[Session, Depends(get_db)],
     current_user: CurrentUser,
 ):
-    """Search users for autocomplete by username/full_name/full_name_pinyin."""
+    """Search users for autocomplete by username/full_name/full_name_pinyin/full_name initials."""
     del current_user  # authenticated users only
 
     keyword = normalize_search_term((q or "").strip())
@@ -497,6 +521,7 @@ def search_users(
             normalize_field_sql(User.username).ilike(search_pattern)
             | normalize_field_sql(User.full_name).ilike(search_pattern)
             | normalize_field_sql(func.coalesce(User.full_name_pinyin, "")).ilike(search_pattern)
+            | normalize_field_sql(func.coalesce(User.full_name_pinyin_initials, "")).ilike(search_pattern)
         )
         .order_by(func.coalesce(User.full_name_pinyin, User.full_name).asc(), User.id.asc())
     )
@@ -511,7 +536,7 @@ def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     return current_user
 
 
-@router.get("/{user_id}", response_model=UserResponse)
+@router.get("/{user_id}", response_model=PublicUserResponse)
 def get_user(
     user_id: int,
     db: Annotated[Session, Depends(get_db)],
@@ -524,7 +549,7 @@ def get_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    return user
+    return PublicUserResponse.model_validate(user)
 
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -551,6 +576,7 @@ def update_user(
     
     # Update fields
     update_data = user_update.model_dump(exclude_unset=True)
+    update_data.pop("avatar_url", None)
     
     # Prevent non-admin users from changing role
     if "role" in update_data and current_user.role != UserRole.ADMIN:
@@ -586,6 +612,7 @@ def update_user(
     if "full_name" in update_data and update_data["full_name"]:
         pinyin_fields = compute_pinyin_fields(full_name=update_data["full_name"])
         user.full_name_pinyin = pinyin_fields.get("full_name_pinyin")
+        user.full_name_pinyin_initials = pinyin_fields.get("full_name_pinyin_initials")
 
     # If username changed, increment version and invalidate all sessions
     if username_changed:
@@ -797,6 +824,7 @@ def delete_avatar(
 def upload_avatar(
     user_id: int,
     file: UploadFile,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
@@ -818,6 +846,14 @@ def upload_avatar(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
+
+    client_ip = get_client_ip(request)
+    enforce_rate_limit(
+        scope="upload_avatar",
+        identifier=client_ip,
+        limit=settings.upload_rate_limit_count,
+        window_seconds=settings.upload_rate_limit_window_seconds,
+    )
 
     # 删除旧头像文件（如果存在）
     if user.avatar_url:

@@ -102,6 +102,7 @@ const REAGENT_SEARCH_FIELD_OPTIONS = [
   { value: 'name', label: '名称' },
   { value: 'brand', label: '品牌' },
   { value: 'applicant', label: '订购人' },
+  { value: 'created_at', label: '订购时间' },
 ]
 
 function truncateDisplayName(name: string | null | undefined, maxLength = 10): string | null {
@@ -451,7 +452,7 @@ export function ReagentOrdersPage() {
             </Button>
           )}
           {isAdmin && (
-            <Button variant="morden" size="lg" onClick={handleExport}>
+            <Button variant="modern" size="lg" onClick={handleExport}>
               <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
             </Button>
           )}
@@ -561,7 +562,7 @@ export function ReagentOrdersPage() {
                   检查CAS号中
                 </div>
               )}
-              <Button variant="morden" size="lg" type="button" onClick={() => setDialogState(null)}>
+              <Button variant="modern" size="lg" type="button" onClick={() => setDialogState(null)}>
                 取消
               </Button>
               <LoadingButton type="submit" size="lg" isLoading={isSubmitting}>
@@ -582,7 +583,7 @@ export function ReagentOrdersPage() {
         customColumns={columns}
         onEdit={handleEditClick}
         title={<><FlaskConical className="w-5 h-5" /> 试剂订单列表</>}
-        searchPlaceholder="搜索名称、CAS号、订购人..."
+        searchPlaceholder="搜索名称、CAS号、订购人、订购时间..."
         renderExpandedRow={renderExpandedRow}
         noteField="notes"
       />
@@ -608,7 +609,7 @@ const ActionButtons = React.memo(function ActionButtons({
       id: 'approve',
       label: '审批',
       icon: <Check className="size-4.5" />,
-      variant: 'morden' as const,
+      variant: 'modern' as const,
       className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
       confirm: true,
       confirmLabel: '确认审批',
@@ -623,7 +624,7 @@ const ActionButtons = React.memo(function ActionButtons({
       id: 'reject',
       label: '驳回',
       icon: <X className="size-4.5" />,
-      variant: 'morden' as const,
+      variant: 'modern' as const,
       className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
       confirm: true,
       confirmLabel: '确认驳回',

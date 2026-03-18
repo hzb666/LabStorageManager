@@ -303,7 +303,7 @@ export function DashboardBorrowTab() {
             </div>
             <div className="flex gap-3 mt-8">
               <Button
-                variant="morden"
+                variant="modern"
                 onClick={() => setShowReturnModal(false)}
                 className="flex-1"
                 size="lg"
