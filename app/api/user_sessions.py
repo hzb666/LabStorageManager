@@ -4,7 +4,7 @@ User Sessions API - Device Management
 from datetime import datetime, timedelta
 from typing import List, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
@@ -89,12 +89,13 @@ def delete_session(
 
 @router.delete("/")
 def delete_all_sessions(
-    request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    current_session: Annotated[UserSession, Depends(get_current_session)]
+    current: Annotated[tuple[User, UserSession], Depends(get_current_session)]
 ):
     """Delete all sessions for current user except the current session"""
+    _, current_session = current
+
     sessions = db.exec(
         select(UserSession)
         .where(UserSession.user_id == current_user.id)

@@ -239,12 +239,16 @@ export function ConsumableOrdersPage() {
   const columns = useMemo(() => {
     const baseColumns = getConsumableOrderTableColumns()
 
+    if (!isAdmin) {
+      return baseColumns as ColumnDef<Record<string, unknown>, unknown>[]
+    }
+
     const actionColumn = columnHelper.display({
       id: 'actions',
       header: '操作',
-      size: 160,
-      minSize: 120,
-      maxSize: 200,
+      size: 80,
+      minSize: 80,
+      maxSize: 80,
       cell: info => {
         const meta = info.table.options.meta
         return (

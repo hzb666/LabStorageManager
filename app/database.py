@@ -4,13 +4,17 @@ Critical Rule #1: SQLite must enable WAL Mode for concurrency
 """
 import logging
 import os
+from enum import Enum
 from typing import Annotated, Generator
 
-from sqlalchemy import event
+from sqlalchemy import Connection, event, text
 from sqlmodel import SQLModel, Session, create_engine, select
 from fastapi import Depends
 
 from app.services import pinyin_utils
+from app.models.consumable_order import ConsumableOrderStatus
+from app.models.inventory import InventoryStatus
+from app.models.reagent_order import ReagentOrderReason, ReagentOrderStatus
 from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
@@ -47,6 +51,51 @@ def get_db() -> Generator[Session, None, None]:
 # Annotated type alias for database session dependency
 # Usage: def endpoint(db: DBSession): ...
 DBSession = Annotated[Session, Depends(get_db)]
+
+
+LEGACY_ENUM_COLUMNS: tuple[tuple[str, str, type[Enum]], ...] = (
+    ("reagentorder", "status", ReagentOrderStatus),
+    ("reagentorder", "order_reason", ReagentOrderReason),
+    ("consumableorder", "status", ConsumableOrderStatus),
+    ("inventory", "status", InventoryStatus),
+    ("users", "role", UserRole),
+)
+
+
+def normalize_legacy_enum_storage(connection: Connection) -> int:
+    """
+    Normalize legacy enum values stored as enum.value to the current enum.name format.
+
+    Older data may contain lowercase enum values like "pending", while SQLAlchemy now
+    reads enum columns using member names such as "PENDING". Startup normalization keeps
+    historical data readable without manual SQL fixes.
+    """
+    updated_rows = 0
+
+    for table_name, column_name, enum_cls in LEGACY_ENUM_COLUMNS:
+        for member in enum_cls:
+            legacy_value = str(member.value)
+            canonical_value = member.name
+
+            if legacy_value == canonical_value:
+                continue
+
+            result = connection.execute(
+                text(
+                    f"""
+                    UPDATE {table_name}
+                    SET {column_name} = :canonical_value
+                    WHERE {column_name} = :legacy_value
+                    """
+                ),
+                {
+                    "canonical_value": canonical_value,
+                    "legacy_value": legacy_value,
+                },
+            )
+            updated_rows += result.rowcount or 0
+
+    return updated_rows
 
 
 def init_db() -> None:

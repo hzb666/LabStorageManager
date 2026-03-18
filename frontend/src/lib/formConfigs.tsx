@@ -240,9 +240,11 @@ export const defaultReturnValues = {
  */
 export function getReturnFormFields(
   mode: 'remaining' | 'used',
-  maxQuantity: number
+  maxQuantity: number,
+  unit?: string
 ): FieldSchema<typeof defaultReturnValues>[] {
-  const label = mode === 'remaining' ? '剩余量' : '使用量'
+  const baseLabel = mode === 'remaining' ? '剩余量' : '使用量'
+  const label = unit ? `${baseLabel} (${unit})` : baseLabel
   return [
     {
       name: 'return_quantity' as const,

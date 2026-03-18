@@ -446,19 +446,26 @@ export function DataTable<TData>({
                         }}
                       >
                         <div
-                          className={cn("flex items-center gap-1.5 w-full", canSort && "cursor-pointer")}
+                          className={cn("flex items-center gap-1 w-full min-w-0", canSort && "cursor-pointer")}
                           onClick={header.column.getToggleSortingHandler()}
                         >
-                          <span className="truncate">
+                          <span className="min-w-0 flex-1 truncate">
                             {header.isPlaceholder
                               ? null
                               : flexRender(header.column.columnDef.header, header.getContext())}
                           </span>
                           {canSort && (
-                            <span className="w-4 h-4 shrink-0 flex items-center justify-center text-muted-foreground">
+                            <span
+                              className={cn(
+                                "h-4 shrink-0 overflow-hidden flex items-center justify-center text-muted-foreground transition-[width,margin,opacity] duration-200",
+                                isSorted
+                                  ? "w-4 ml-1.5 opacity-100"
+                                  : "w-0 ml-0 opacity-0 group-hover:w-4 group-hover:ml-1.5 group-hover:opacity-50"
+                              )}
+                            >
                               {isSorted === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : 
                                isSorted === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : 
-                               <ArrowUpDown className="w-3.5 h-3.5 opacity-0 group-hover:opacity-50 transition-opacity" />}
+                               <ArrowUpDown className="w-3.5 h-3.5" />}
                             </span>
                           )}
                         </div>

@@ -736,67 +736,75 @@ npm run lint
 
 ## 部署指南
 
-### 生产环境部署
+### 推荐：Docker 一键部署（服务器）
 
-#### 1. 构建前端
+项目已提供以下 Docker 文件：
+
+- `docker-compose.yml`
+- `docker/backend/Dockerfile`
+- `docker/frontend/Dockerfile`
+- `docker/nginx/default.conf`
+
+#### 1. 拉取代码并准备环境变量
 
 ```bash
-cd frontend
-npm run build
+git clone <your-repo-url> LabStorageManager
+cd LabStorageManager
+cp .env.example .env
 ```
 
-#### 2. 配置环境变量
+请至少在 `.env` 中修改：
+
+- `DEFAULT_ADMIN_PASSWORD`（必须）
+- `ENV`（无 HTTPS 时建议 `development`，有 HTTPS 再设为 `production`）
+- `CORS_ORIGINS`（按你的域名配置）
+
+说明：
+
+- 当 `ALGORITHM=RS256` 时，容器会在持久化卷中自动生成 `.keys/private.pem` 与 `.keys/public.pem`。
+- 如果你当前只有 HTTP（未配置 TLS），请不要把 `ENV` 设为 `production`，否则登录 Cookie 的 `secure` 属性会导致浏览器不发送 Cookie。
+
+#### 2. 一键构建并启动
 
 ```bash
-# 生产环境变量
-SECRET_KEY=生成随机密钥
-DEBUG=false
-ENV=production
-DEFAULT_ADMIN_PASSWORD=your-secure-password
+# 80 端口发布（可改为 8080 等）
+APP_PORT=80 docker compose up -d --build
 ```
 
-#### 3. 启动后端
+#### 3. 检查服务状态
 
 ```bash
+docker compose ps
+docker compose logs -f backend
+docker compose logs -f frontend
+curl http://127.0.0.1:${APP_PORT:-80}/health
+```
+
+#### 4. 日常更新部署
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+#### 5. 备份与恢复（SQLite）
+
+```bash
+# 备份（在容器内复制到持久化卷）
+docker compose exec backend sh -c 'cp /data/lab_inventory.db /data/lab_inventory_backup_$(date +%Y%m%d_%H%M%S).db'
+
+# 恢复示例（先停后端，再恢复，再启动）
+docker compose stop backend
+docker compose exec backend sh -c 'cp /data/lab_inventory_backup_YYYYmmdd_HHMMSS.db /data/lab_inventory.db'
+docker compose start backend
+```
+
+### 传统方式部署（可选）
+
+```bash
+cd frontend && npm run build
 pip install gunicorn
-
-gunicorn app.main:app \
-    --workers 4 \
-    --worker-class uvicorn.workers.UvicornWorker \
-    --bind 0.0.0.0:8000
-```
-
-#### 4. Nginx 配置（可选）
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    location / {
-        root /path/to/frontend/dist;
-        index index.html;
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api {
-        proxy_pass http://127.0.0.1:8000;
-    }
-
-    location /static {
-        alias /path/to/LabStorageManager/static;
-    }
-}
-```
-
-### 数据库备份
-
-```bash
-# 备份
-cp lab_inventory.db lab_inventory_backup.db
-
-# 压缩备份
-tar -czvf lab_inventory_backup.tar.gz lab_inventory.db
+gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
 ---
@@ -840,4 +848,4 @@ tar -czvf lab_inventory_backup.tar.gz lab_inventory.db
 ---
 
 **版本**: 0.1.0  
-**最后更新**: 2026-03-14
+**最后更新**: 2026-03-18

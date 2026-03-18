@@ -279,24 +279,28 @@ export function DashboardBorrowTab() {
                 </div>
               </RadioGroup>
             </div>
+            <div className="space-y-1">
+              <BaseForm
+                form={returnForm}
+                fields={getReturnFormFields(
+                  returnMode,
+                  selectedBorrow?.remaining_quantity ?? 0,
+                  selectedBorrow?.unit
+                )}
+                layout="stack"
+              />
 
-            <BaseForm
-              form={returnForm}
-              fields={getReturnFormFields(returnMode, selectedBorrow?.remaining_quantity ?? 0)}
-              layout="stack"
-            />
-
-            {returnMode === 'used' && returnForm.watch('return_quantity') && selectedBorrow && (
-              <p className="text-sm text-muted-foreground mt-1">
-                归还后剩余: {Math.max(0, selectedBorrow.remaining_quantity - (parseFloat(returnForm.watch('return_quantity') as string) || 0)).toFixed(2)} {selectedBorrow.unit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {selectedBorrow.unit})
-              </p>
-            )}
-            {returnMode === 'remaining' && returnForm.watch('return_quantity') && selectedBorrow && (
-              <p className="text-sm text-muted-foreground mt-1">
-                归还后剩余: {(parseFloat(returnForm.watch('return_quantity') as string) || 0).toFixed(2)} {selectedBorrow.unit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {selectedBorrow.unit})
-              </p>
-            )}
-
+              {returnMode === 'used' && returnForm.watch('return_quantity') && selectedBorrow && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  归还后剩余: {Math.max(0, selectedBorrow.remaining_quantity - (parseFloat(returnForm.watch('return_quantity') as string) || 0)).toFixed(2)} {selectedBorrow.unit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {selectedBorrow.unit})
+                </p>
+              )}
+              {returnMode === 'remaining' && returnForm.watch('return_quantity') && selectedBorrow && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  归还后剩余: {(parseFloat(returnForm.watch('return_quantity') as string) || 0).toFixed(2)} {selectedBorrow.unit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {selectedBorrow.unit})
+                </p>
+              )}
+            </div>
             <div className="flex gap-3 mt-8">
               <Button
                 variant="morden"

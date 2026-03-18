@@ -467,7 +467,6 @@ def generate_excel_template() -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font
     from openpyxl.styles.numbers import FORMAT_TEXT
-    from openpyxl.styles.colors import Color
     from openpyxl.utils import get_column_letter
 
     wb = Workbook()

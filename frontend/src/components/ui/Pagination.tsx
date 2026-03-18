@@ -43,10 +43,10 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
   const pages = getPageNumbers(currentPage, totalPages)
 
   return (
-    <nav className={cn('flex flex-col sm:flex-row flex-wrap items-center sm:justify-end gap-4', className)}>
+    <nav className={cn('flex flex-row flex-wrap items-center justify-end gap-4', className)}>
 
       {/* 区域 1：每页条数 与 移动端页码信息（移动端居上/居左显示） */}
-      <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-4">
+      <div className="flex w-auto items-center justify-start gap-4">
         <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value))}>
           <SelectTrigger className="h-9 w-auto gap-2">
             <SelectValue placeholder="选择条数" />
@@ -67,7 +67,7 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
       </div>
 
       {/* 区域 2：分页按钮 与 跳转输入框（移动端居下显示） */}
-      <div className="flex w-full sm:w-auto items-center justify-between sm:justify-end gap-2 sm:gap-4">
+      <div className="flex w-auto items-center justify-end gap-4">
 
         {/* 翻页按钮组 */}
         <div className="flex items-center gap-1">

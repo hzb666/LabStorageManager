@@ -299,7 +299,7 @@ export default function DeviceManagement() {
       {/* 标题和按钮 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">个人账户</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button onClick={() => setEditDialogOpen(true)} size="lg" variant="morden">
             <Edit className="w-4 h-4 mr-1.5" />
             修改信息
@@ -310,7 +310,7 @@ export default function DeviceManagement() {
           </Button>
           <Button onClick={openKickAllModal} size="lg" variant="destructive">
             <LogOut className="w-4 h-4 mr-1.5" />
-            踢出所有其他设备
+            踢出其他设备
           </Button>
         </div>
       </div>

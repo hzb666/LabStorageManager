@@ -149,7 +149,7 @@ export function TableFilters({
         {/* 搜索字段选择 */}
         {searchFieldOptions && searchFieldOptions.length > 1 && (
           <Select value={searchField} onValueChange={(val) => { onSearchFieldChange(val) }}>
-            <SelectTrigger className="w-30 min-h-10">
+            <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
               <SelectValue placeholder="全部" />
             </SelectTrigger>
             <SelectContent>
@@ -165,7 +165,7 @@ export function TableFilters({
         {/* 状态筛选选择 */}
         {statusOptions && statusOptions.length > 0 && onStatusFilterChange && (
           <Select value={statusFilter} onValueChange={onStatusFilterChange}>
-            <SelectTrigger className="w-30 min-h-10">
+            <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
               <SelectValue placeholder="全部状态" />
             </SelectTrigger>
             <SelectContent>
