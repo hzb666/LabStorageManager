@@ -25,16 +25,7 @@ import {
   type LoginFormData,
 } from '@/lib/validationSchemas'
 import { BaseForm, type FieldSchema } from '@/components/BaseForm'
-
-// 获取完整的图片URL，处理相对路径和绝对路径
-const getFullImageUrl = (url: string): string => {
-  if (!url) return ''
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    return url
-  }
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-  return `${API_BASE_URL}${url}`
-}
+import { getFullImageUrl } from '@/lib/utils'
 
 // 锁屏模式验证模式（只需密码）
 // 锁屏模式使用单独的 schema

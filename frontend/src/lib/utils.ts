@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { buildBackendUrl } from "./apiConfig"
 import { inputConfigs } from "./inputConfigs"
 
 export function cn(...inputs: ClassValue[]) {
@@ -83,11 +84,6 @@ export function toText(value: unknown): string {
 }
 
 export function getFullImageUrl(url: string): string {
-  if (!url) return '' 
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    return url
-  }
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-  return `${API_BASE_URL}${url}`
+  return buildBackendUrl(url)
 }
 
