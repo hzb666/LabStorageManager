@@ -1,0 +1,1068 @@
+\documentclass[12pt,a4paper]{ctexart}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{setspace}
+\usepackage{lastpage}
+\usepackage{float}
+\usepackage{parskip}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\setstretch{1.25}
+\setlist[itemize]{itemsep=0.35em,topsep=0.35em,leftmargin=2em}
+\setlist[enumerate]{itemsep=0.35em,topsep=0.35em,leftmargin=2.2em}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{实验室库存管理系统用户操作手册}
+\fancyhead[R]{\today}
+\fancyfoot[C]{第 \thepage\ 页 / 共 \pageref{LastPage} 页}
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.8em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{\thesubsubsection}{0.8em}{}
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{2.5cm}
+  {\Huge\bfseries 实验室库存管理系统\\[0.6cm]用户操作手册\par}
+  \vspace{1.5cm}
+  {\Large 面向网站使用者的中文使用指南\par}
+  \vspace{1.2cm}
+  {\large 适用对象：管理员、普通用户、公用账户使用者\par}
+  \vspace{0.8cm}
+  {\large 文档形式：A4 纸电子版 PDF\par}
+  \vfill
+  \begin{tabular}{>{\raggedright\arraybackslash}p{4cm} p{8cm}}
+    文档名称： & 实验室库存管理系统用户操作手册 \\
+    文档语言： & 中文 \\
+    建议阅读方式： & 先阅读“快速上手”和“角色说明”，再按页面查阅 \\
+    内容重点： & 功能介绍、操作步骤、状态说明、常见问题 \\
+    编制说明： & 根据当前代码库中的网站页面与业务流程整理 \\
+  \end{tabular}
+  \vfill
+  {\large 生成日期：\today\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{手册说明}
+
+\subsection{这份手册适合谁阅读}
+本手册面向实验室库存管理网站的\textbf{日常使用者}，不是写给开发人员或运维人员的技术说明。无论你是负责申购试剂的老师、需要借用库存的同学、协助入库的管理员，还是只用于查看公用库存的账号使用者，都可以通过这份手册快速了解系统可以做什么、每个页面怎么用、常见状态是什么意思，以及遇到问题时如何判断下一步该怎么做。
+
+\subsection{手册覆盖的内容范围}
+本手册重点讲解以下内容：
+\begin{itemize}
+  \item 如何登录、退出、切换主题以及查看公告。
+  \item 仪表盘、试剂订单、耗材订单、库存列表、常用货架、批量导入、个人账户等页面的主要用途。
+  \item 订单从“创建、审批、到货、入库”到“借用、归还”的完整业务链路。
+  \item 管理员专用页面，包括用户管理、公告管理和用户操作日志。
+  \item 常见错误场景、使用建议和高频问题解答。
+\end{itemize}
+
+\subsection{阅读建议}
+如果你是第一次使用本系统，建议按下面顺序阅读：
+\begin{enumerate}
+  \item 先阅读“快速上手”和“角色与权限”。
+  \item 再阅读与你工作最相关的页面，例如试剂订购、库存借用、导入库存等。
+  \item 最后阅读“典型业务流程”和“常见问题”，把整个系统串起来理解。
+\end{enumerate}
+
+\newpage
+\section{系统能帮你做什么}
+
+实验室库存管理系统围绕实验室常见的几类工作展开：\textbf{申购、到货、入库、库存查询、借用、归还、公告通知和账户管理}。系统把这些原本分散在 Excel、聊天记录或纸质登记表中的工作统一到了一个网站里，尽量减少重复登记和信息不一致。
+
+\subsection{系统核心能力}
+\begin{itemize}
+  \item \textbf{试剂与耗材分开管理}：试剂有更严格的信息要求，包含 CAS 号、规格、危险属性等；耗材管理则更注重名称、规格、数量和沟通信息。
+  \item \textbf{订单全流程跟踪}：用户能看到订单是否已经提交、是否获批、是否到货、是否已入库或已完成。
+  \item \textbf{库存借还可追溯}：借用了什么、借用多少、何时归还，系统都能记录。
+  \item \textbf{常用货架集中查看}：适合查看公用或共享试剂，减少重复采购。
+  \item \textbf{批量导入}：管理员可以一次性导入多条库存，适合初始化数据或集中补录。
+  \item \textbf{公告通知}：全站登录用户都可以收到公告提醒，重要公告还能置顶展示。
+  \item \textbf{设备与会话管理}：每位用户可以查看自己的登录设备，给设备重命名、刷新会话或踢出其他设备。
+\end{itemize}
+
+\subsection{本系统中的三个核心对象}
+\begin{enumerate}
+  \item \textbf{试剂订单}：表示“我要申请购买某种试剂”。
+  \item \textbf{耗材订单}：表示“我要申请购买某种耗材”。
+  \item \textbf{库存记录}：表示“这个物品已经在库里，可被查询、借用或归还”。
+\end{enumerate}
+
+理解这三个对象后，很多操作就会变得清晰：你先申请订单，订单获批并到货后，才可能真正进入库存。库存中的物品又可以继续被借用和归还。
+
+\newpage
+\section{角色与权限}
+
+系统中主要有三种角色：\textbf{管理员、普通用户、公用账户}。不同角色看到的页面相似，但可执行的操作并不完全相同。
+
+\subsection{管理员}
+管理员拥有最完整的权限，通常承担以下工作：
+\begin{itemize}
+  \item 审批试剂订单和耗材订单。
+  \item 导出订单数据。
+  \item 管理用户账户，包括创建用户、启用或停用用户、查看用户日志。
+  \item 管理站内公告。
+  \item 批量导入库存。
+  \item 参与库存编辑、删除、借用、归还以及试剂一键入库等操作。
+\end{itemize}
+
+\subsection{普通用户}
+普通用户适合日常实验室成员，通常可以：
+\begin{itemize}
+  \item 创建试剂订单和耗材订单。
+  \item 查看自己的订单进度。
+  \item 在仪表盘中确认自己订单的到货或收货状态。
+  \item 查询库存、借用库存并归还。
+  \item 查看常用货架上的共享试剂。
+  \item 管理自己的账户信息和登录设备。
+\end{itemize}
+
+\subsection{公用账户}
+公用账户一般用于公共终端、共享查询场景或只读式使用。它的特点是：
+\begin{itemize}
+  \item \textbf{不能创建订单}。
+  \item 可以查看借用信息、库存信息和公告。
+  \item 仪表盘功能会更简化，通常只保留与借用记录相关的内容。
+\end{itemize}
+
+\subsection{权限理解小贴士}
+\begin{itemize}
+  \item 看得见某个页面，不一定代表你能做页面里的所有操作。
+  \item 某些按钮只有管理员才会出现，例如审批、导出、用户管理、公告管理。
+  \item 如果你发现别人提到的按钮自己看不到，通常先确认是不是账号角色不同。
+\end{itemize}
+
+\newpage
+\section{快速上手：第一次使用的建议流程}
+
+如果你第一次接触本系统，可以按下面的顺序完成一次完整体验。
+
+\subsection{步骤一：登录系统}
+打开网站后，首先进入登录页。输入用户名和密码后点击“登录”。如果你之前在同一台设备上登录过，系统可能会进入简化的锁屏登录模式，这时只需要输入密码即可。
+
+\subsection{步骤二：查看首页布局}
+登录后你会看到左侧导航和顶部/页面中的主要内容区域。建议先了解以下入口：
+\begin{itemize}
+  \item 仪表盘：查看自己的订单、借用、待入库情况。
+  \item 试剂订单：申请和查看试剂。
+  \item 耗材订单：申请和查看耗材。
+  \item 库存列表：查找现有库存、借用和归还。
+  \item 常用货架：查看共享试剂。
+  \item 个人账户：修改个人资料、查看登录设备。
+\end{itemize}
+
+\subsection{步骤三：先查看公告}
+右上角的公告按钮会显示未读公告数量。如果有红点或数字，建议先打开阅读，尤其是涉及采购流程、库存盘点、节假日安排或危险品管理的通知。被置顶的重要公告在桌面端还有横向滚动展示。
+
+\subsection{步骤四：根据任务进入页面}
+\begin{itemize}
+  \item 需要申请购买试剂：进入“试剂订单”。
+  \item 需要申请购买耗材：进入“耗材订单”。
+  \item 需要查库存或借用物品：进入“库存列表”。
+  \item 需要看共享试剂：进入“常用货架”。
+  \item 需要管理自己当前登录的设备：进入“个人账户”。
+\end{itemize}
+
+\subsection{步骤五：形成自己的使用习惯}
+建议在日常使用中形成以下习惯：
+\begin{enumerate}
+  \item 先搜库存，再下单，避免重复采购。
+  \item 试剂到货后及时确认，避免“已到货但无人继续入库”。
+  \item 借用后尽快归还，并准确填写使用量或剩余量。
+  \item 定期查看自己的设备列表，清理不再使用的登录设备。
+\end{enumerate}
+
+\newpage
+\section{登录页：进入系统的第一步}
+
+\subsection{页面作用}
+登录页用于身份验证。系统支持普通登录，也支持在同一设备上的“记住上次登录用户”体验。
+
+\subsection{普通登录怎么用}
+在普通登录模式下，需要填写：
+\begin{itemize}
+  \item 用户名
+  \item 密码
+\end{itemize}
+点击“登录”后，系统会验证你的身份，并自动记录当前设备信息，便于后续在“个人账户”中查看该设备。
+
+\subsection{锁屏式登录怎么理解}
+如果系统记住了你上次登录的用户信息，再次访问时可能只显示头像、姓名和一个密码输入框。这种模式的优点是操作更快，但它并不适合换人使用的场景。如果你要换账号登录，请点击“切换用户”。
+
+\subsection{登录时可能看到的提示}
+\begin{itemize}
+  \item \textbf{用户名或密码错误}：请重新核对输入内容。
+  \item \textbf{账号已停用}：说明管理员已禁用该账号，需要联系管理员。
+  \item \textbf{尝试次数过多}：短时间内失败次数过多时，系统会暂时限制登录。
+  \item \textbf{Redis 服务未连接}：这是系统内部服务提示，一般不影响继续登录，但可能影响部分会话或限流体验。
+\end{itemize}
+
+\subsection{页面上的辅助功能}
+\begin{itemize}
+  \item 支持深色/浅色主题切换。
+  \item 登录成功后会自动进入首页仪表盘。
+  \item 登录过程会自动记录设备名称和设备标识，便于后续设备管理。
+\end{itemize}
+
+\newpage
+\section{整体布局：你会长期使用的导航框架}
+
+\subsection{左侧导航栏}
+左侧导航是进入各个主要页面的入口。常见菜单包括：
+\begin{itemize}
+  \item 仪表盘
+  \item 试剂订单
+  \item 耗材订单
+  \item 库存列表
+  \item 常用货架
+  \item 导入数据
+  \item 用户管理（管理员）
+  \item 公告管理（管理员）
+\end{itemize}
+
+桌面端支持收起侧边栏，收起后仍然可以通过图标和悬浮提示快速识别页面。系统还支持快捷键 \texttt{Ctrl+B}（或在部分设备上使用 \texttt{Cmd+B}）切换侧边栏展开状态。
+
+\subsection{右上角和底部区域}
+在布局的上方或用户区附近，你通常会看到以下入口：
+\begin{itemize}
+  \item 公告按钮
+  \item 主题切换
+  \item 当前用户头像、姓名、角色信息
+  \item 个人账户入口
+  \item 退出登录按钮
+\end{itemize}
+
+\subsection{退出登录的小提示}
+退出登录按钮采用“二次确认”的思路：第一次点击相当于进入确认状态，第二次才真正退出。这样可以减少误触带来的麻烦。
+
+\subsection{公告横幅如何理解}
+被置顶且可见的公告，会在桌面端以横向滚动条形式显示。你可以：
+\begin{itemize}
+  \item 直接点击查看公告详情；
+  \item 点击关闭按钮临时隐藏某条公告；
+  \item 24 小时后或公告被更新后，它可能重新出现。
+\end{itemize}
+
+\newpage
+\section{仪表盘：先看全局，再决定去哪里操作}
+
+\subsection{页面作用}
+仪表盘是登录后的首页。它并不是一个大而全的数据看板，而是偏向“个人工作台”的入口页，用于帮助你快速看到：
+\begin{itemize}
+  \item 我有多少试剂订单正在处理中。
+  \item 我有多少耗材订单正在处理中。
+  \item 我当前借用了哪些库存。
+  \item 我还有哪些试剂待完成入库。
+\end{itemize}
+
+\subsection{统计卡片怎么用}
+页面上方的卡片本身就是切换入口，点击卡片即可切换下方内容。
+
+常见卡片包括：
+\begin{itemize}
+  \item \textbf{试剂订单}
+  \item \textbf{耗材订单}
+  \item \textbf{当前借用}
+  \item \textbf{待入库}
+\end{itemize}
+
+公用账户通常只保留“当前借用”相关内容，因此看到的卡片数量会更少。
+
+\subsection{仪表盘的优势}
+对于普通用户来说，仪表盘最大的价值不是“看全站情况”，而是“快速找回自己还没处理完的事情”。如果你只想完成当天工作，很多时候不需要从左侧菜单逐个页面翻找，直接在仪表盘点击对应卡片更快。
+
+\subsection{系统会记住你上次看的标签}
+系统会记录你在仪表盘停留的标签页。也就是说，你下次回来时，大概率还能继续看到自己上次正在看的那个模块，适合反复处理中间状态的订单。
+
+\newpage
+\section{仪表盘子页一：我的试剂订单}
+
+\subsection{你可以在这里做什么}
+“我的试剂订单”主要用于查看和处理\textbf{你自己}的试剂订单。它和“试剂订单”页面的区别在于：前者更偏向个人工作跟进，后者更偏向完整列表管理。
+
+\subsection{常见可执行操作}
+\begin{itemize}
+  \item 查看自己尚未结束的试剂订单。
+  \item 编辑自己创建的订单内容。
+  \item 在订单已审批后，确认“到货”。
+\end{itemize}
+
+\subsection{什么叫“确认到货”}
+当试剂已经采购回来后，申请人或管理员可以在这里点击“到货”操作。这个动作不是简单打标记，它会触发后续库存流转：
+\begin{itemize}
+  \item 如果该订单属于“常用或公用”用途，系统会直接把它加入常用货架。
+  \item 如果是普通用途，系统会先把物品放入“暂存/待入库”状态，等待后续补充存放位置并正式入库。
+\end{itemize}
+
+\subsection{什么时候不能编辑}
+如果你不是管理员，而且订单不是你本人创建的，那么你无法编辑它。系统会直接阻止这种操作。
+
+\subsection{使用建议}
+\begin{enumerate}
+  \item 试剂真正送达后再点击“到货”，不要提前点击。
+  \item 如果你是申请人，尽量及时确认，避免到货信息滞后。
+  \item 对于需要放入具体柜位的物品，到货后还要继续关注“待入库”标签。
+\end{enumerate}
+
+\newpage
+\section{仪表盘子页二：我的耗材订单}
+
+\subsection{这个页面的定位}
+“我的耗材订单”与试剂订单子页类似，但它服务的是耗材。耗材通常不需要走像试剂那样的“到货后再入库”链路，而是更适合用“确认收货/完成”来表示流程结束。
+
+\subsection{你可以做什么}
+\begin{itemize}
+  \item 查看自己发起的耗材订单。
+  \item 编辑自己尚在处理中、且允许编辑的订单。
+  \item 对已审批的耗材执行“确认收货”。
+\end{itemize}
+
+\subsection{确认收货后会发生什么}
+确认收货后，订单状态会从“已审批”变为“已完成”。与试剂不同，耗材在这个流程中通常不会自动生成库存记录，因此它更像一个采购闭环管理工具，而不是库存入库工具。
+
+\subsection{适合什么使用场景}
+\begin{itemize}
+  \item 一次性实验耗材。
+  \item 低值易耗品。
+  \item 不需要按瓶、按库存条目进行长期跟踪的采购物品。
+\end{itemize}
+
+\newpage
+\section{仪表盘子页三：当前借用}
+
+\subsection{页面作用}
+这个子页用于集中查看你当前借用中的库存。对于普通用户和公用账户来说，这是非常高频的页面。
+
+\subsection{你能看到哪些信息}
+通常可以看到：
+\begin{itemize}
+  \item 物品名称
+  \item CAS 号或相关识别信息
+  \item 当前剩余量
+  \item 借用时间
+  \item 备注
+  \item 展开后查看更多细节，例如英文名、别名、入库用户、上次借用人等
+\end{itemize}
+
+\subsection{归还有两种录入思路}
+系统支持两种归还方式：
+\begin{enumerate}
+  \item \textbf{按使用量归还}：你填写这次用了多少，系统自动反推出剩余量。
+  \item \textbf{按剩余量归还}：你直接填写当前还剩多少，系统据此更新库存。
+\end{enumerate}
+
+\subsection{如何选择更合适的方式}
+\begin{itemize}
+  \item 如果你清楚本次使用量，建议按使用量填写。
+  \item 如果你只知道瓶中大概还剩多少，更适合按剩余量填写。
+\end{itemize}
+
+\subsection{归还时的注意事项}
+\begin{itemize}
+  \item 填写的数值不能超过借出前的合理范围。
+  \item 如果录错，库存剩余量会被直接影响，所以建议归还前再次核对。
+  \item 对多人共享使用的物品，建议借用人及时归还，避免后续责任不清。
+\end{itemize}
+
+\newpage
+\section{仪表盘子页四：待入库}
+
+\subsection{这个页面为什么重要}
+试剂确认到货后，并不一定立刻具备完整库存信息。例如存放位置还没确认、需要先暂存。这时系统会把相关条目放入“待入库”。管理员或相关责任人需要在这里补齐最后一步。
+
+\subsection{主要操作：一键入库}
+点击“一键入库”后，系统会要求填写\textbf{存放位置}。例如：
+\begin{itemize}
+  \item A-1-1 柜
+  \item 302 冰箱第二层
+  \item 危险品柜左侧上层
+\end{itemize}
+
+填写后确认，系统就会把该条暂存记录正式转入库存列表。
+
+\subsection{什么时候会出现在这里}
+通常是在以下情况下：
+\begin{itemize}
+  \item 某个试剂订单已审批；
+  \item 申请人或管理员确认了到货；
+  \item 该试剂不是直接进入常用货架的公用物品。
+\end{itemize}
+
+\subsection{使用建议}
+\begin{enumerate}
+  \item 到货后尽快入库，避免物品长期处于“暂存但无人定位”的状态。
+  \item 存放位置写得尽量规范统一，便于后续搜索和盘点。
+  \item 若实验室有命名规则，建议保持与线下标签一致。
+\end{enumerate}
+
+\newpage
+\section{试剂订单页面：试剂采购申请的主战场}
+
+\subsection{页面作用}
+“试剂订单”是试剂采购申请和管理的主页面。相比仪表盘中的个人视图，这里更完整，适合查阅历史、筛选状态、进行审批或导出。
+
+\subsection{页面上的常见功能}
+\begin{itemize}
+  \item 创建订单
+  \item 编辑订单
+  \item 根据状态筛选
+  \item 按名称、CAS 号、品牌、申请人、时间等搜索
+  \item 展开查看详情
+  \item 管理员审批、驳回、导出
+\end{itemize}
+
+\subsection{创建试剂订单时要填写什么}
+通常包括以下信息：
+\begin{itemize}
+  \item 名称
+  \item CAS 号
+  \item 英文名
+  \item 别名
+  \item 分类
+  \item 品牌
+  \item 规格
+  \item 数量
+  \item 价格
+  \item 申购原因
+  \item 是否危险品
+  \item 备注
+\end{itemize}
+
+\subsection{CAS 提示很有价值}
+当你输入 CAS 号后，系统可以进行查询提醒，帮助你判断：
+\begin{itemize}
+  \item 是否已有相同 CAS 号的在途订单；
+  \item 是否库存中已经有同类试剂；
+  \item 是否可能存在重复申购。
+\end{itemize}
+
+这一步非常重要，建议在提交前认真查看，能有效减少“已经有库存却又重复买”的情况。
+
+\subsection{试剂订单状态怎么理解}
+\begin{longtable}{p{3cm} p{10cm}}
+\toprule
+状态 & 含义 \\
+\midrule
+已申购 & 订单已提交，等待管理员处理。 \\
+已审批 & 管理员已同意采购，等待到货。 \\
+已到货 & 已确认到货，正在进入常用货架或待入库流程。 \\
+已入库 & 试剂已正式进入库存。 \\
+未通过 & 订单被驳回，需要根据实际情况调整或重新提交。 \\
+\bottomrule
+\end{longtable}
+
+\subsection{管理员常见操作}
+管理员在这个页面通常要做三件事：
+\begin{enumerate}
+  \item 审批待处理订单。
+  \item 驳回不合理或重复的订单。
+  \item 导出订单数据，用于财务、采购或留档。
+\end{enumerate}
+
+\subsection{普通用户的使用建议}
+\begin{itemize}
+  \item 提交前尽量把信息写完整，尤其是 CAS 号和规格。
+  \item 价格不清楚时可以先留空或填写预估，但建议在备注里写明情况。
+  \item 订单已审批后，记得跟进到货和入库，不要只停留在“提交成功”。
+\end{itemize}
+
+\newpage
+\section{耗材订单页面：适合快速采购闭环}
+
+\subsection{页面定位}
+耗材订单页面与试剂订单页面结构相似，但业务更轻量，适合管理一次性耗材、常用实验用品等采购需求。
+
+\subsection{创建耗材订单时常见字段}
+\begin{itemize}
+  \item 名称
+  \item 英文名
+  \item 货号
+  \item 规格
+  \item 单位
+  \item 数量
+  \item 价格
+  \item 沟通信息
+  \item 备注
+\end{itemize}
+
+\subsection{状态说明}
+\begin{longtable}{p{3cm} p{10cm}}
+\toprule
+状态 & 含义 \\
+\midrule
+已申购 & 已提交，等待管理员审批。 \\
+已审批 & 采购通过，等待收货。 \\
+已完成 & 已确认收货，本次采购流程结束。 \\
+未通过 & 订单未获通过。 \\
+没有（找不到） & 管理场景下可用于表示无法采购或找不到对应耗材。 \\
+\bottomrule
+\end{longtable}
+
+\subsection{这个页面适合怎么用}
+\begin{itemize}
+  \item 需要经常买耗材的实验室成员，可以把它当作采购清单与进度表。
+  \item 管理员可以统一查看哪些订单仍待审批，哪些已完成。
+  \item 当物流到货后，申请人可在仪表盘里快速完成“确认收货”。
+\end{itemize}
+
+\subsection{与试剂订单最大的区别}
+\begin{itemize}
+  \item 一般不要求 CAS 号。
+  \item 通常不直接生成库存条目。
+  \item 更偏采购闭环而非库存生命周期管理。
+\end{itemize}
+
+\newpage
+\section{库存列表页面：查库存、借用、编辑、归还的核心页面}
+
+\subsection{页面作用}
+库存列表是整个系统最核心的使用页面之一。你可以把它理解为“当前实验室真实在管物品”的目录。无论是想确认物品是否存在、借用一瓶试剂、查看剩余量，还是管理员补充信息，基本都离不开这里。
+
+\subsection{页面上能做哪些事}
+\begin{itemize}
+  \item 按名称、CAS 号、品牌、分类、位置等查找库存。
+  \item 查看物品状态：在库、借出、已耗尽。
+  \item 展开查看更多详情，包括英文名、别名、备注、分子结构等。
+  \item 手动新增库存。
+  \item 编辑库存信息。
+  \item 删除库存记录。
+  \item 借用库存。
+  \item 管理员导出库存数据。
+\end{itemize}
+
+\subsection{新增库存适合什么场景}
+手动新增库存适合以下情况：
+\begin{itemize}
+  \item 某个物品不是通过订单流转过来的，但需要纳入管理。
+  \item 需要补录历史库存。
+  \item 临时新增共享库存条目。
+\end{itemize}
+
+\subsection{借用流程怎么走}
+当你在表格中找到需要的物品后，可以发起借用。系统会要求选择\textbf{真实借用人}，且必须从用户候选列表中选择，不支持随意输入。
+
+这样设计的好处是：
+\begin{itemize}
+  \item 避免登记错别字。
+  \item 保证借用记录能准确关联到系统用户。
+  \item 方便后续在仪表盘或日志中追踪。
+\end{itemize}
+
+\subsection{库存状态怎么理解}
+\begin{longtable}{p{3cm} p{10cm}}
+\toprule
+状态 & 含义 \\
+\midrule
+在库 & 当前可用，尚未借出或尚有可管理剩余量。 \\
+已借出 & 当前已有借用关系，需通过归还流程更新。 \\
+已耗尽 & 该条库存已无剩余量，不再可借用。 \\
+\bottomrule
+\end{longtable}
+
+\subsection{使用中的注意事项}
+\begin{itemize}
+  \item 借用前先确认存放位置和剩余量，避免拿错。 
+  \item 编辑库存时，尤其要谨慎修改剩余量和规格。
+  \item 如果某条记录重复或错误，再考虑删除；已经参与借用记录的物品，建议先确认影响范围。
+\end{itemize}
+
+\newpage
+\section{常用货架页面：共享试剂的快速查询入口}
+
+\subsection{页面定位}
+“常用货架”专门用于展示\textbf{常用/公用试剂}。这类试剂通常不对应个人长期占有，而更像实验室共享资源。系统把它们集中展示，方便所有人快速查找。
+
+\subsection{它与普通库存列表有什么不同}
+\begin{itemize}
+  \item 更聚焦于共享试剂，而不是所有库存。
+  \item 通常用于“先看能不能直接拿共用试剂”，从而减少重复申购。
+  \item 页面搜索项更偏向名称、CAS 号、品牌、分类和状态。
+\end{itemize}
+
+\subsection{推荐使用方式}
+每次准备新建试剂订单前，建议先在常用货架搜索：
+\begin{enumerate}
+  \item 搜中文名称或 CAS 号。
+  \item 查看是否已有可用共用库存。
+  \item 如有，则优先线下确认能否直接使用；如无，再进入试剂订单页面申购。
+\end{enumerate}
+
+\subsection{页面中的展开信息}
+常用货架也支持展开查看详情，例如：
+\begin{itemize}
+  \item 英文名
+  \item 别名
+  \item 分类
+  \item 品牌
+  \item 创建人
+  \item 入库时间
+  \item 备注
+\end{itemize}
+
+这让它不仅是“共享目录”，也是一个比较完整的查询入口。
+
+\newpage
+\section{批量导入页面：一次导入多条库存}
+
+\subsection{适合哪些场景}
+批量导入适合以下工作：
+\begin{itemize}
+  \item 系统刚启用时做初始库存录入。
+  \item 线下盘点后集中补录。
+  \item 从旧表格迁移库存数据。
+\end{itemize}
+
+\subsection{导入前先做两件事}
+\begin{enumerate}
+  \item 点击“下载模板”，使用系统提供的模板字段格式。
+  \item 按模板说明整理数据，避免自己随意增减列名。
+\end{enumerate}
+
+\subsection{支持的文件格式和限制}
+\begin{itemize}
+  \item 支持 \texttt{.csv}、\texttt{.xlsx}、\texttt{.xls}。
+  \item 文件大小上限为 2MB。
+\end{itemize}
+
+\subsection{模板中的关键字段}
+导入模板通常重点包含：
+\begin{itemize}
+  \item \texttt{cas\_number}
+  \item \texttt{name}
+  \item \texttt{specification}
+  \item \texttt{remaining\_quantity}
+  \item \texttt{storage\_location}
+  \item \texttt{is\_hazardous}
+  \item \texttt{notes}
+\end{itemize}
+
+其中，CAS 号、名称、规格通常最关键。规格需要按“数值+单位”的形式填写，例如 \texttt{500ml}、\texttt{100g}、\texttt{1L}。
+
+\subsection{导入步骤}
+\begin{enumerate}
+  \item 下载模板。
+  \item 按要求填写数据。
+  \item 上传文件。
+  \item 点击“开始导入”。
+  \item 查看导入结果统计。
+\end{enumerate}
+
+\subsection{导入结果怎么看}
+系统会告诉你：
+\begin{itemize}
+  \item 总行数
+  \item 成功创建多少条
+  \item 错误多少条
+  \item 如果有错误，还会列出错误所在行和原因
+\end{itemize}
+
+\subsection{导入建议}
+\begin{itemize}
+  \item 先用少量样例测试一遍，再导入大文件。
+  \item 如果错误很多，不建议反复上传原文件，最好先修正源表格。
+  \item 规格、CAS 号和数量格式是最容易出错的三个地方。
+\end{itemize}
+
+\newpage
+\section{个人账户页面：管理自己，而不是管理别人}
+
+\subsection{页面作用}
+“个人账户”页面用于管理\textbf{你自己的账号信息和登录设备}。这是一个很实用但容易被忽略的页面，建议每位用户至少熟悉其中三个操作：修改信息、刷新会话、踢出其他设备。
+
+\subsection{你可以做什么}
+\begin{itemize}
+  \item 修改个人资料。
+  \item 查看当前登录设备列表。
+  \item 搜索设备名称或 IP 地址。
+  \item 给设备重命名。
+  \item 刷新当前会话的有效期。
+  \item 踢出其他设备，只保留当前设备继续登录。
+\end{itemize}
+
+\subsection{设备列表怎么看}
+设备列表通常会显示：
+\begin{itemize}
+  \item 设备名称
+  \item IP 地址
+  \item 最近活跃时间
+  \item 首次登录时间
+  \item 当前设备/其他设备状态
+\end{itemize}
+
+当前正在使用的设备会被特别标记，并通常排在最前面。
+
+\subsection{什么时候需要踢出其他设备}
+\begin{itemize}
+  \item 你怀疑自己在公共电脑上忘记退出登录。
+  \item 某个旧设备不再使用。
+  \item 账号存在共享风险，希望立即清理其他登录状态。
+\end{itemize}
+
+\subsection{什么时候需要刷新会话}
+如果你长时间保持登录，或者希望延长当前设备的有效期，可以使用“刷新会话”。这在长期开着实验室终端时尤其有用。
+
+\subsection{设备重命名的建议}
+建议把设备名称改成自己能一眼识别的形式，例如：
+\begin{itemize}
+  \item 305 实验室台式机
+  \item 个人笔记本
+  \item 化学室公共终端
+\end{itemize}
+
+这样以后要清理设备时会方便很多。
+
+\newpage
+\section{公告功能：让通知真正被看见}
+
+\subsection{普通用户如何查看公告}
+普通用户主要通过两种方式接触公告：
+\begin{enumerate}
+  \item 顶部的公告按钮：显示未读数量，点开后可浏览公告列表。
+  \item 页面上的置顶横幅：用于展示重要公告。
+\end{enumerate}
+
+\subsection{未读机制怎么理解}
+系统会在你的浏览器本地记录公告已读状态。通常情况下：
+\begin{itemize}
+  \item 你点击查看过的公告会被标记为已读；
+  \item 如果公告被管理员更新过，系统可能重新把它视为未读；
+  \item 未读数量会显示在公告按钮右上角。
+\end{itemize}
+
+\subsection{公告详情页里能看到什么}
+公告详情页除了标题和正文外，还可能包含：
+\begin{itemize}
+  \item 发布时间
+  \item 置顶标识
+  \item 附件图片
+  \item 图片放大预览
+\end{itemize}
+
+\subsection{作为使用者的建议}
+\begin{itemize}
+  \item 每次登录后先看未读公告，尤其是采购和盘点相关通知。
+  \item 对于附图公告，建议打开详情完整查看，而不是只看列表摘要。
+  \item 看到置顶公告时，不建议立刻关闭，先确认是否涉及当前工作安排。
+\end{itemize}
+
+\newpage
+\section{管理员页面一：用户管理}
+
+\subsection{页面作用}
+用户管理页面是管理员管理账号的核心页面。它不仅仅是“创建用户”的地方，也是处理权限、账号状态、日志入口的重要枢纽。
+
+\subsection{页面常见功能}
+\begin{itemize}
+  \item 查看用户列表。
+  \item 按用户名、姓名、角色、状态筛选。
+  \item 创建新用户。
+  \item 编辑用户信息。
+  \item 启用被停用的用户。
+  \item 删除用户。
+  \item 进入用户操作日志。
+\end{itemize}
+
+\subsection{创建用户时通常要考虑什么}
+\begin{itemize}
+  \item 用户名是否规范。
+  \item 真实姓名是否便于借用登记和日志追溯。
+  \item 角色要不要给管理员权限。
+  \item 初始密码是否需要用户首次登录后自行修改。
+\end{itemize}
+
+\subsection{角色分配建议}
+\begin{itemize}
+  \item 管理员账号数量不宜过多。
+  \item 普通实验成员通常用普通用户即可。
+  \item 公共场所查询终端适合使用公用账户。
+\end{itemize}
+
+\subsection{查看用户日志有什么用}
+用户日志可以帮助管理员了解某位用户的关键操作轨迹，例如：
+\begin{itemize}
+  \item 登录记录
+  \item 订单操作
+  \item 入库与借用相关记录
+\end{itemize}
+
+适合用于排查问题、追溯责任或核对流程。
+
+\newpage
+\section{管理员页面二：公告管理}
+
+\subsection{页面作用}
+公告管理页面用于创建、编辑、删除、置顶和显示/隐藏公告。它直接影响所有登录用户看到的通知内容。
+
+\subsection{管理员在这里能做什么}
+\begin{itemize}
+  \item 创建公告。
+  \item 上传公告图片。
+  \item 编辑标题、正文和附件。
+  \item 设置是否置顶。
+  \item 设置是否显示。
+  \item 删除公告。
+  \item 查看公告图片占用的存储空间。
+\end{itemize}
+
+\subsection{置顶与显示是两个不同概念}
+\begin{itemize}
+  \item \textbf{显示/隐藏}：决定用户是否看得到这条公告。
+  \item \textbf{置顶/取消置顶}：决定公告是否以更高优先级展示。
+\end{itemize}
+
+一条公告可以显示但不置顶，也可以置顶且显示。若隐藏，则普通用户不会在公告列表中看到它。
+
+\subsection{发公告的建议}
+\begin{enumerate}
+  \item 标题简洁明确，便于快速判断重要性。
+  \item 正文按段落分行，避免一大段连续文字。
+  \item 图片适合用于张贴流程图、时间安排、实物照片或平面图。
+  \item 真正影响大家日常操作的公告再使用置顶，避免“全是重点，等于没有重点”。
+\end{enumerate}
+
+\subsection{数量控制}
+系统会限制每位管理员可创建的公告数量以及可见公告数量，因此不建议把公告当作长期档案库。过时内容应及时隐藏或删除。
+
+\newpage
+\section{管理员页面三：用户操作日志}
+
+\subsection{页面作用}
+用户操作日志用于查看某个用户的关键历史行为。它是排查问题和复盘流程的重要工具，但同时也适合做合规留痕。
+
+\subsection{常见日志类型}
+\begin{itemize}
+  \item 试剂订单
+  \item 耗材订单
+  \item 入库记录
+  \item 借用记录
+  \item 登录记录
+\end{itemize}
+
+\subsection{页面怎么看}
+每条日志通常会显示：
+\begin{itemize}
+  \item 时间
+  \item 类型
+  \item 简要详情
+\end{itemize}
+
+展开后还能看到更完整的字段。例如：
+\begin{itemize}
+  \item 借用了什么、借用量、是否归还。
+  \item 某个订单的规格、数量、价格、状态。
+  \item 某次登录使用的设备、IP、最后活跃时间。
+\end{itemize}
+
+\subsection{适合哪些管理场景}
+\begin{itemize}
+  \item 核对某次订单是由谁发起、何时变更。
+  \item 追踪某瓶试剂借用后是否归还。
+  \item 判断某个用户是否仍在某些设备上活跃。
+  \item 在数据异常时辅助定位问题来源。
+\end{itemize}
+
+\newpage
+\section{典型业务流程一：从想买试剂到真正入库}
+
+\subsection{完整流程}
+下面是一条典型的试剂业务链路：
+\begin{enumerate}
+  \item 普通用户先在常用货架或库存列表中搜索，确认是否已有可用物品。
+  \item 若没有合适库存，进入“试剂订单”页面创建订单。
+  \item 系统根据 CAS 号给出可能的重复申购提醒。
+  \item 管理员审核并审批或驳回。
+  \item 物品采购到货后，申请人或管理员在仪表盘中确认“到货”。
+  \item 如果属于公用试剂，系统直接加入常用货架；否则进入“待入库”。
+  \item 在“待入库”中填写存放位置并执行一键入库。
+  \item 试剂正式出现在库存列表中，可供后续查询和借用。
+\end{enumerate}
+
+\subsection{这条流程里最容易卡住的节点}
+\begin{itemize}
+  \item CAS 号填写错误，导致订单信息不规范。
+  \item 订单审批后无人继续跟进到货。
+  \item 到货后未及时填写存放位置，导致长期停留在待入库。
+\end{itemize}
+
+\subsection{提高效率的建议}
+\begin{itemize}
+  \item 创建订单时尽量一次写完整。
+  \item 审批人定期清理待审批订单。
+  \item 到货确认与入库定位尽量不要分隔太久。
+\end{itemize}
+
+\newpage
+\section{典型业务流程二：从查库存到归还}
+
+\subsection{完整流程}
+\begin{enumerate}
+  \item 进入库存列表搜索目标试剂。
+  \item 打开对应条目，确认名称、CAS 号、品牌、位置和剩余量。
+  \item 点击借用，选择真实借用人。
+  \item 线下取走物品并投入实验使用。
+  \item 使用结束后，在仪表盘“当前借用”或相关借用记录中发起归还。
+  \item 选择按使用量或按剩余量更新库存。
+  \item 提交后，库存状态和剩余量被同步更新。
+\end{enumerate}
+
+\subsection{为什么必须选择真实借用人}
+这是为了保证：
+\begin{itemize}
+  \item 日后知道谁在使用该物品。
+  \item 归还责任明确。
+  \item 管理员查看日志时能精确追踪。
+\end{itemize}
+
+\subsection{减少库存混乱的建议}
+\begin{itemize}
+  \item 借用时不要图省事随便选人。
+  \item 归还时不要凭感觉写很夸张的数字。
+  \item 如果已经耗尽，建议尽快完成归还登记，让状态及时同步。
+\end{itemize}
+
+\newpage
+\section{典型业务流程三：批量补录库存}
+
+\subsection{适用场景}
+当实验室已有一批现成库存，但系统里还没有记录时，可以使用批量导入功能集中补录。
+
+\subsection{推荐做法}
+\begin{enumerate}
+  \item 先下载模板。
+  \item 选取 5--10 条样例做试导入。
+  \item 确认格式正确后，再整理完整数据。
+  \item 导入完成后，到库存列表抽查关键物品。
+\end{enumerate}
+
+\subsection{抽查时重点看什么}
+\begin{itemize}
+  \item CAS 号是否正确。
+  \item 名称和规格是否匹配。
+  \item 剩余量是否正确。
+  \item 存放位置是否符合实际。
+  \item 危险品标识是否正确。
+\end{itemize}
+
+\newpage
+\section{搜索、筛选与展开详情的使用技巧}
+
+\subsection{为什么要学会筛选}
+系统里很多页面都采用了表格形式。随着数据变多，如果只靠肉眼翻页会很慢，因此掌握筛选和展开是提高效率的关键。
+
+\subsection{常见筛选方式}
+\begin{itemize}
+  \item 按状态筛选，如待审批、已审批、已入库、已完成等。
+  \item 按字段搜索，如名称、CAS 号、品牌、申请人、时间。
+  \item 在管理员页面中按角色、启用状态等条件筛选用户。
+\end{itemize}
+
+\subsection{什么时候要用展开详情}
+列表表格通常只展示最核心的信息。若要进一步确认，建议使用展开详情查看：
+\begin{itemize}
+  \item 备注
+  \item 英文名称或别名
+  \item 分子结构
+  \item 借用和创建相关补充信息
+  \item 订单完整参数
+\end{itemize}
+
+\subsection{提高搜索成功率的小技巧}
+\begin{itemize}
+  \item 试剂优先搜 CAS 号，准确率最高。
+  \item 若中文名称有多个叫法，可尝试别名或英文名。
+  \item 存放位置建议按实验室统一命名规范填写，否则后续很难搜准。
+\end{itemize}
+
+\newpage
+\section{常见问题与处理建议}
+
+\subsection{为什么我看不到“创建订单”按钮}
+最常见的原因是你当前登录的是\textbf{公用账户}。公用账户只能查询，不能创建订单。
+
+\subsection{为什么有的试剂已经到货，却还没在库存列表里看到}
+可能原因有两个：
+\begin{itemize}
+  \item 只是确认了“到货”，但还没有完成“一键入库”。
+  \item 它被系统直接放进了常用货架，而不是普通库存视图中的目标位置。
+\end{itemize}
+
+\subsection{为什么公告看过了还会再次显示未读}
+如果管理员更新过公告内容，系统会重新把它视为新的未读内容。
+
+\subsection{为什么借用时不能手动输入借用人}
+系统要求必须从现有用户中选择真实借用人，这是为了保证记录可追踪、避免错别字和无效姓名。
+
+\subsection{为什么登录会被限制}
+短时间内多次密码错误会触发登录限流。建议稍后再试，并确认自己输入的是正确账号和密码。
+
+\subsection{为什么我只能看到自己的部分订单}
+在仪表盘里显示的是“我的订单”和“我的借用”。如果要查看更完整的列表，应进入左侧菜单对应的完整页面；而有些全局视图本身就只对管理员开放。
+
+\newpage
+\section{良好使用习惯建议}
+
+\subsection{给普通用户的建议}
+\begin{itemize}
+  \item 下单前先查库存和常用货架。
+  \item 订单信息尽量一次写准，减少来回修改。
+  \item 到货后及时确认，借用后及时归还。
+  \item 定期清理自己的旧设备登录。
+\end{itemize}
+
+\subsection{给管理员的建议}
+\begin{itemize}
+  \item 固定时间清理待审批订单，避免堆积。
+  \item 对存放位置建立统一命名规则。
+  \item 公告只置顶真正关键的信息。
+  \item 定期检查停用账号、公共终端账号和异常设备登录。
+  \item 使用日志页面做必要的追溯，但避免依赖线下口头说明代替系统记录。
+\end{itemize}
+
+\subsection{给实验室整体管理的建议}
+\begin{itemize}
+  \item 线上命名与线下标签保持一致。
+  \item 共享试剂优先走常用货架思路。
+  \item 对危险品、冷藏品和高值品形成统一录入标准。
+  \item 把系统记录作为实验室正式台账的一部分，而不是可有可无的补充工具。
+\end{itemize}
+
+\newpage
+\section{页面速查表}
+
+\begin{longtable}{p{3cm} p{4cm} p{7cm}}
+\toprule
+页面 & 主要适用人群 & 你通常会在这里做什么 \\
+\midrule
+登录页 & 所有用户 & 输入账号密码进入系统，或在同设备上快速解锁登录。 \\
+仪表盘 & 所有用户 & 看自己的订单、借用和待处理事项。 \\
+试剂订单 & 普通用户、管理员 & 创建、查看、审批和导出试剂采购订单。 \\
+耗材订单 & 普通用户、管理员 & 创建、查看、审批和完成耗材采购订单。 \\
+库存列表 & 普通用户、管理员 & 查库存、借用、归还、编辑和导出库存。 \\
+常用货架 & 所有用户 & 查询共享试剂，减少重复申购。 \\
+批量导入 & 管理员 & 使用模板一次导入多条库存。 \\
+个人账户 & 所有用户 & 修改个人信息、管理设备和会话。 \\
+用户管理 & 管理员 & 创建用户、调整状态、查看日志。 \\
+公告管理 & 管理员 & 发布、编辑、置顶和隐藏公告。 \\
+用户操作日志 & 管理员 & 追踪用户的关键操作与登录记录。 \\
+\bottomrule
+\end{longtable}
+
+\section{结语}
+
+实验室库存管理系统并不是单纯的“库存表格网站”，而是一套把采购、入库、借用、归还和通知协同起来的工作平台。对于使用者来说，最重要的不是把所有功能都记住，而是知道：\textbf{在什么场景下进入哪个页面、完成哪一步操作、看到哪个状态意味着下一步该做什么}。
+
+如果你已经理解了本手册中的页面分工和业务流程，那么你基本上就可以顺利完成日常使用。建议把这份手册作为实验室成员培训材料的一部分，尤其适用于新成员入组、管理员交接和共享终端场景。
+
+\end{document}
