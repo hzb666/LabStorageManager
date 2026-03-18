@@ -2,7 +2,7 @@
  * 通用筛选表格组件
  * 集成搜索/筛选、分页、表格列配置、展开/收起等功能
  */
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react' // <--- 新增 useState
 import {
   getCoreRowModel,
   getExpandedRowModel,
@@ -79,7 +79,7 @@ export function FilterTable({
   emptyText = '暂无数据'
 }: Readonly<FilterTableProps>) {
   const location = useLocation()
-  
+
   // 🚀 防御性引用：防止父组件传内联函数引起 Meta 频繁更新导致子树重新渲染
   const onEditRef = useRef(onEdit)
   const onBorrowSuccessRef = useRef(onBorrowSuccess)
@@ -87,6 +87,9 @@ export function FilterTable({
     onEditRef.current = onEdit
     onBorrowSuccessRef.current = onBorrowSuccess
   }, [onEdit, onBorrowSuccess])
+
+  // 新增：用于跟踪表格是否滚动在顶部
+  const [isTableAtTop, setIsTableAtTop] = useState(true)
 
   const initialUrlSearchState = useMemo(() => {
     const query = new URLSearchParams(location.search)
@@ -231,6 +234,10 @@ export function FilterTable({
     return 'calc(100vh - 112px - 16px)'
   }, [filter.data.length, scrollHeight])
 
+  // 计算展开全部按钮是否应该被禁用
+  // 规则：如果没有全展开 且 表格没有滚动到顶部，则禁用展开操作
+  const disableExpandAll = !filter.isAllExpanded && !isTableAtTop
+
   return (
     <div className={`space-y-6 ${className}`}>
       <TableFilters
@@ -261,12 +268,14 @@ export function FilterTable({
                   variant="morden"
                   size="lg"
                   onClick={filter.toggleExpandAll}
-                  className="ml-auto flex font-normal"
+                  disabled={disableExpandAll}
+                  className={`ml-auto flex font-normal transition-all ${disableExpandAll ? 'text-muted-foreground opacity-60' : ''
+                    }`}
                 >
                   {filter.isAllExpanded ? (
-                    <><ChevronsDownUp className="size-4 mr-1.5" />收起全部</>
+                    <><ChevronsDownUp className="size-4 -ml-0.5 mr-1.5" />收起全部</>
                   ) : (
-                    <><ChevronsUpDown className="size-4 mr-1.5" />展开全部</>
+                    <><ChevronsUpDown className="size-4 -ml-0.5 mr-1.5" />展开全部</>
                   )}
                 </Button>
               )}
@@ -301,6 +310,7 @@ export function FilterTable({
                 fetchNextPage={filter.fetchNextPage}
                 total={filter.total}
                 searchKeyword={filter.globalFilter}
+                onIsAtTopChange={setIsTableAtTop} // 新增：接收子组件的滚动状态
               />
             </div>
           )}
