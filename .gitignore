@@ -67,11 +67,8 @@ shadcn-admin/
 # Local library files
 frontend/public/lib/
 
-# Docs subdirectories (keep root docs)
-docs/done/
-docs/exp/
-docs/plans/
-docs/prompt/
+# Docs subdirectories
+docs/
 
 # Tests
 tests/
