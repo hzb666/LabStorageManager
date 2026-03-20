@@ -2,6 +2,7 @@
 import { useAuthStore } from '@/store/useStore'
 import { getDeviceId, getDeviceName } from '@/lib/deviceId'
 import { getApiBaseUrl } from '@/lib/apiConfig'
+import { AUTH_NOTICE_KEY } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
 
@@ -37,7 +38,11 @@ api.interceptors.response.use(
       // 获取错误详情并转换为中文
       const errorDetail = error.response?.data?.detail
       const message = normalizeApiErrorMessage(errorDetail, '会话已失效，请重新登录')
-      toast.error(message)
+      try {
+        sessionStorage.setItem(AUTH_NOTICE_KEY, message)
+      } catch {
+        toast.error(message)
+      }
       useAuthStore.getState().logout()
       globalThis.location.href = '/login'
     }
@@ -244,8 +249,10 @@ export const reagentOrderAPI = {
   confirmArrival: (id: number, notes?: string) =>
     api.post(`/reagent-orders/${id}/confirm-arrival`, { arrival_notes: notes }),
   stockIn: (id: number) => api.post(`/reagent-orders/${id}/stock-in`),
-  getCASOverview: (casNumber: string) =>
-    api.get<CASOverviewResponse>(`/reagent-orders/cas-overview/${casNumber}`),
+  getCASOverview: (
+    casNumber: string,
+    params?: { exclude_order_id?: number }
+  ) => api.get<CASOverviewResponse>(`/reagent-orders/cas-overview/${casNumber}`, { params }),
   getMyReagentOrders: () => api.get('/reagent-orders/dashboard/my-reagent-orders'),
   getArrivedOrders: () => api.get('/reagent-orders/dashboard/arrived-orders'),
   exportOrders: () => api.get('/reagent-orders/export', { responseType: 'blob' }),

@@ -16,6 +16,9 @@ export const INPUT_STYLES = {
   lg: "h-10 text-base inline-flex leading-none",
 } as const
 
+// === Session Storage Keys ===
+export const AUTH_NOTICE_KEY = 'auth_notice'
+
 // === Order Status (Reagent) ===
 export const REAGENT_STATUS_MAP: Record<string, string> = {
   pending: '已申购',

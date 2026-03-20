@@ -6,6 +6,12 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
 import type { SortingState, ColumnSizingState } from '@tanstack/react-table'
+import {
+  getExpandAllState,
+  getFuzzySearchState,
+  setExpandAllState,
+  setFuzzySearchState,
+} from '@/lib/tableExpandStorage'
 
 // API 响应数据类型
 export interface ListResponseData {
@@ -60,7 +66,7 @@ export interface UseTableStateOptions {
   initialSearchField?: string
   // localStorage 键名前缀
   storageKeyPrefix?: string
-  // 展开状态 localStorage 键名
+  // 展开状态 localStorage 标识（统一存储到单个 key 的 JSON 中）
   expandStorageKey?: string
   // 默认是否展开全部
   defaultExpanded?: boolean
@@ -172,12 +178,15 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   // ========== 筛选状态 ==========
   const normalizedInitialSearch = initialSearch.trim()
   const normalizedInitialSearchField = initialSearchField ?? defaultSearchField
+  const expandStorageId = expandStorageKey || tableId
 
   const [searchInput, setSearchInputState] = useState(normalizedInitialSearch)
   const [globalFilter, setGlobalFilter] = useState(normalizedInitialSearch)
   const [statusFilter, setStatusFilter] = useState(defaultStatus)
   const [searchField, setSearchField] = useState(normalizedInitialSearchField)
-  const [fuzzySearch, setFuzzySearch] = useState(false)
+  const [fuzzySearch, setFuzzySearch] = useState<boolean>(() => {
+    return getFuzzySearchState(expandStorageId, false)
+  })
   const [sorting, setSorting] = useState<SortingState>([])
 
   const setSearchInput = useCallback((value: string) => {
@@ -235,28 +244,19 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   )
 
   // ========== 展开状态 ==========
-  const expandKey = expandStorageKey || `${tableId}-expand-all`
   const [isAllExpanded, setIsAllExpanded] = useState<boolean>(() => {
-    if (typeof globalThis.window === 'undefined') return defaultExpanded
-    try {
-      const stored = localStorage.getItem(expandKey)
-      if (stored !== null) {
-        return stored === 'expanded' || stored === 'true'
-      }
-    } catch {
-      // 忽略 localStorage 错误
-    }
-    return defaultExpanded
+    return getExpandAllState(expandStorageId, defaultExpanded)
   })
 
   // 展开状态持久化
   useEffect(() => {
-    try {
-      localStorage.setItem(expandKey, isAllExpanded ? 'expanded' : 'collapsed')
-    } catch {
-      // 忽略 localStorage 错误
-    }
-  }, [isAllExpanded, expandKey])
+    setExpandAllState(expandStorageId, isAllExpanded)
+  }, [isAllExpanded, expandStorageId])
+
+  // 模糊搜索持久化（与展开状态合并到同一个 localStorage key）
+  useEffect(() => {
+    setFuzzySearchState(expandStorageId, fuzzySearch)
+  }, [fuzzySearch, expandStorageId])
 
   // 切换展开全部
   const toggleExpandAll = useCallback(() => {

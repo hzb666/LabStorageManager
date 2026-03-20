@@ -24,12 +24,18 @@ from app.models.reagent_order import (
     ReagentOrderReason,
     ReagentOrderStatus,
 )
-from app.services.cas_utils import normalize_cas, validate_cas_format
+from app.services.cas_utils import (
+    normalize_cas,
+    validate_cas_format,
+    is_special_cas_value,
+    BIOLOGICAL_REAGENT_CAS,
+)
 from app.services.csv_utils import escape_csv_formula
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
+from app.services.sql_utils import order_with_special_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
@@ -319,7 +325,10 @@ def list_reagent_orders(
 
     order_direction = sort_order.lower() if sort_order else 'desc'
 
-    order_expr = order_with_nulls_last(order_column, order_direction)
+    if sort_by == 'cas_number':
+        order_expr = order_with_special_last(order_column, BIOLOGICAL_REAGENT_CAS, order_direction)
+    else:
+        order_expr = order_with_nulls_last(order_column, order_direction)
 
     secondary_order = ReagentOrder.created_at.desc()
 
@@ -417,11 +426,19 @@ def get_cas_overview(
     cas_number: str,
     current_user: CurrentUser,
     db: DBSession,
+    exclude_order_id: Optional[int] = None,
 ):
     """Get CAS overview for duplicate-check hints in forms and expanded rows."""
     del current_user  # 仅用于鉴权
 
     normalized_cas = normalize_cas(cas_number)
+
+    if is_special_cas_value(normalized_cas):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="生物试剂不支持 CAS 查询",
+        )
+
     is_valid, error = validate_cas_format(normalized_cas)
     if not is_valid:
         raise HTTPException(
@@ -429,11 +446,19 @@ def get_cas_overview(
             detail=f"Invalid CAS format: {error}",
         )
 
-    # 订单：匹配同 CAS 的所有订单，排除已到货（已进入库存暂存区无需再提醒），取最近一条 + 总数
-    orders_base = select(ReagentOrder).where(
-        ReagentOrder.cas_number == normalized_cas,
-        ReagentOrder.status != ReagentOrderStatus.ARRIVED,
+    # 订单：匹配同 CAS 的所有订单。
+    # 统一排除已到货/已入库（避免与库存重复），
+    # 供“新建查重”和“展开行”复用同一口径。
+    order_filters = [ReagentOrder.cas_number == normalized_cas]
+    order_filters.append(
+        ReagentOrder.status.notin_([
+            ReagentOrderStatus.ARRIVED,
+            ReagentOrderStatus.STOCKED,
+        ])
     )
+    if exclude_order_id is not None:
+        order_filters.append(ReagentOrder.id != exclude_order_id)
+    orders_base = select(ReagentOrder).where(*order_filters)
     orders_count = db.exec(select(func.count()).select_from(orders_base.subquery())).one()
     latest_order = db.exec(
         orders_base.order_by(ReagentOrder.created_at.desc(), ReagentOrder.id.desc()).limit(1)
@@ -542,6 +567,11 @@ def update_reagent_order(
     
     # 检查权限：普通用户只能编辑自己的订单，管理员可以编辑所有人的订单
     from app.models.user import UserRole
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="公用账户不能编辑订单"
+        )
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -219,6 +219,12 @@ export const validateCASLogic = (input: string): boolean => {
   return calculatedCheckDigit === actualCheckDigit
 }
 
+export const SPECIAL_CAS_VALUE = '生物试剂'
+
+export const isSpecialCasValue = (input: string): boolean => {
+  return input.trim().toUpperCase() === SPECIAL_CAS_VALUE
+}
+
 /**
  * CAS号验证 - 替代 validateCASNumber & normalizeCASNumber
  * 自动标准化：大写 + 去除空格
@@ -227,8 +233,8 @@ export const CasNumberSchema = v.pipe(
   v.string('CAS号不能为空'),
   v.trim(),
   v.toUpperCase(),
-  v.regex(/^\d{2,7}-\d{2}-\d$/, 'CAS号格式无效'),
-  v.check((input) => validateCASLogic(input), 'CAS号校验码错误')
+  v.check((input) => isSpecialCasValue(input) || /^\d{2,7}-\d{2}-\d$/.test(input), 'CAS号格式无效'),
+  v.check((input) => isSpecialCasValue(input) || validateCASLogic(input), 'CAS号校验码错误')
 )
 
 /**
@@ -240,6 +246,10 @@ export const validateAndNormalizeCASInput = (
   const normalized = casValue.trim().toUpperCase()
   if (!normalized) {
     return { error: '请先输入 CAS 号' }
+  }
+
+  if (isSpecialCasValue(normalized)) {
+    return { normalized: SPECIAL_CAS_VALUE }
   }
 
   if (!/^\d{2,7}-\d{2}-\d$/.test(normalized)) {

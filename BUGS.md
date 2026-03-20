@@ -1,5 +1,47 @@
 # BUGS
 
+## 2026-03-20 Inventory 更新接口存在 remaining_quantity 重复分支
+
+- 现象: `app/api/inventory.py` 的更新逻辑里出现两个 `if 'remaining_quantity' in update_data`，一个做校验、一个做赋值，且剩余百分比计算分散在后续独立条件中
+- 根因: 同一字段的校验与状态更新没有放在同一个分支，导致条件重复、逻辑分散，可维护性下降
+- 处理方式: 合并为单一 `remaining_quantity` 分支，统一完成“校验 + 赋值 + remaining_percent 重算”；同时保留 `specification` 更新时的百分比重算分支
+- 预防: 对同一输入字段的“校验-赋值-派生字段更新”应尽量收敛在同一条件块，避免出现重复条件和分散副作用
+
+## 2026-03-20 DataTable 列宽 CSS 变量触发 TS2322 类型错误
+
+- 现象: `frontend/src/components/ui/DataTable.tsx` 中给 `cssVariableStyles` 写入 `--col-*-flex/min/display` 时，TypeScript 报 `TS2322`，提示赋值类型不兼容
+- 根因: 代码把自定义 CSS 变量键强制断言为 `keyof React.CSSProperties`，导致值类型被按标准 CSS 属性收窄，`'none'`、``${number}px`` 等值无法通过类型检查
+- 处理方式: 新增 `ColumnCssVariableKey/ColumnCssVariables` 类型，并将 `cssVariableStyles` 声明为 `React.CSSProperties & ColumnCssVariables`，去除错误的 `keyof React.CSSProperties` 断言
+- 预防: 后续在 React `style` 中使用自定义 CSS 变量时，统一用 `Record<\`--*\`, string>`（或更精确模板字面量类型）扩展类型，避免把自定义变量误当成内置样式属性
+
+## 2026-03-19 非模糊搜索命中拼音首字母时未高亮对应汉字
+
+- 现象: 关闭“模糊搜索”后，输入拼音首字母（如 `wsyc`）可以搜到中文记录，但表格中的中文文本没有高亮对应汉字
+- 根因: `frontend/src/components/ui/HighlightText.tsx` 的非模糊分支只做了精确正则匹配；当命中来自后端拼音字段（如 `*_pinyin_initials`）时，前端没有拼音到汉字的回退高亮逻辑
+- 处理方式: 非模糊分支改为“先精确正则高亮，未命中时回退到拼音映射高亮”，复用现有拼音匹配算法标记对应汉字
+- 预防: 以后搜索与高亮分离设计时，若后端支持拼音/别名字段命中，前端高亮必须提供一致的回退策略，避免“能搜到但不高亮”的体验断层
+
+## 2026-03-19 CAS 自动识别始终提示 PubChem fallback 异常
+
+- 现象: 输入合法 CAS 后，接口频繁返回“PubChem fallback 异常，英文名未获取（补充查询最多 1 秒）”，难以区分是主查询失败、补充查询失败还是网络解析问题
+- 根因: `app/services/chemical_info.py` 在主查询失败后会被 fallback 错误文案覆盖；同时出站校验先做 DNS 预解析，解析失败会被统一折叠为 `Unsafe outbound URL blocked`，导致真实异常原因被吞掉
+- 处理方式: 调整 PubChem 英文名查询逻辑，保留并返回主查询与 fallback 的真实失败原因（含异常类型或 HTTP 状态）；出站安全校验改为协议 + 域名白名单，不再使用 DNS 预解析作为拦截条件
+- 预防: 对外部 API 的主/补充分支应分别记录失败原因并在最终 warning 中聚合，避免后续分支覆盖前序根因；白名单可信域名场景下优先保留网络层原始错误以便排障
+
+## 2026-03-19 订单编辑弹窗缺少删除入口且公用账户仍可编辑/删除历史订单
+
+- 现象: 试剂订单、耗材订单及仪表盘中的订单编辑弹窗没有删除入口；同时后端订单 `update/delete` 接口只校验“申请人或管理员”，若存在历史 `PUBLIC` 账户订单，公用账户仍可能编辑或删除自己的旧订单
+- 根因: 订单编辑弹窗没有复用库存编辑弹窗的删除区样式与交互；后端鉴权缺少对 `UserRole.PUBLIC` 的显式拒绝
+- 处理方式: 抽出共享的 `EditDialogActions` 组件并接入库存、试剂订单、耗材订单及仪表盘两个订单编辑弹窗；后端在试剂/耗材订单的 `update/delete` 接口中显式禁止 `PUBLIC` 账户，继续保留“管理员可操作任意订单、普通用户仅可操作自己的订单”的规则
+- 预防: 以后新增“编辑弹窗 + 删除动作”时优先复用同一组件，避免样式漂移；权限接口除了 owner/admin 规则外，还要单独检查 `PUBLIC` 这类受限角色
+
+## 2026-03-19 耗材订单页审批/驳回按钮与订单页不一致
+
+- 现象: `frontend/src/pages/ConsumableOrders.tsx` 中审批和驳回按钮仍是旧的文本按钮，只在 `pending` 状态显示，和订单页的图标按钮、二次确认、禁用态流转规则不一致
+- 根因: 耗材订单页的 `ActionButtons` 没有复用订单页同一套 action 配置模式，缺少 `icon`、`variant`、`confirm`、`confirmLabel`、`disableWhen` 等配置，且仍依赖 `showWhen` 直接隐藏按钮
+- 处理方式: 将耗材订单页审批/驳回 action 改为与订单页一致的图标按钮和二次确认交互，并把状态控制从“按状态隐藏”改成“始终显示但按状态禁用”；同时移除不再需要的 `isAdmin` 透传，并把操作列宽度调整到与订单页一致
+- 预防: 后续如果同类页面存在相同审批流，优先对齐同一套 `TableActionButtons` 配置结构；新增 action 时先检查样式、确认态和状态流转规则是否已和基准页保持一致
+
 ## 2026-03-19 “踢出其他设备”会把当前页面一并登出
 
 - 现象: 在个人账户页点击“踢出其他设备”后，其他设备会被下线，但当前页面也会立即跳回登录页，表现上像是把自己也踢掉了

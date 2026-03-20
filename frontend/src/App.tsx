@@ -1,4 +1,4 @@
-﻿import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
@@ -26,8 +26,15 @@ const OperationLogsPage = lazy(() => import('@/pages/OperationLogs').then(m => (
 
 function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const location = useLocation()
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ authNotice: '登录状态已失效，请重新登录', from: location.pathname }}
+      />
+    )
   }
   return <>{children}</>
 }
@@ -155,3 +162,4 @@ function App() {
 }
 
 export default App
+

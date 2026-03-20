@@ -248,9 +248,26 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     
     # Validate specification (will parse to get quantity and unit)
     try:
-        _, _ = parse_specification(str(row['specification']))
+        spec_value, _ = parse_specification(str(row['specification']))
     except ValueError as e:
         return False, f"Invalid specification format: {str(e)}"
+
+    # Validate remaining_quantity when provided:
+    # remaining_quantity must be numeric and cannot exceed specification value
+    remaining_raw = row.get('remaining_quantity')
+    if pd.notna(remaining_raw):
+        remaining_text = str(remaining_raw).strip()
+        if remaining_text:
+            try:
+                remaining_value = float(remaining_text)
+            except (ValueError, TypeError):
+                return False, "Invalid remaining_quantity: must be a number"
+
+            if remaining_value > spec_value:
+                return (
+                    False,
+                    f"Invalid remaining_quantity: {remaining_value} cannot exceed initial_quantity {spec_value}",
+                )
     
     return True, None
 
@@ -346,10 +363,9 @@ def import_inventory_from_excel(
             # Get remaining_quantity: use row value if provided, otherwise default to initial_quantity
             remaining_qty = initial_quantity
             if pd.notna(row.get('remaining_quantity')):
-                try:
-                    remaining_qty = float(row.get('remaining_quantity'))
-                except (ValueError, TypeError):
-                    remaining_qty = initial_quantity
+                remaining_text = str(row.get('remaining_quantity')).strip()
+                if remaining_text:
+                    remaining_qty = float(remaining_text)
             
             # Get or use default values
             # Use empty_to_none to convert empty/whitespace strings to None
@@ -440,6 +456,17 @@ def import_inventory_from_excel(
             
         except Exception as e:
             errors.append({"row": row_num, "error": str(e)})
+
+    # All-or-nothing import:
+    # if any row has validation/import error, rollback the whole batch and do not import valid rows.
+    if errors:
+        db.rollback()
+        return {
+            "success": False,
+            "total_rows": len(normalized_df),
+            "created": 0,
+            "errors": errors,
+        }
     
     try:
         db.commit()

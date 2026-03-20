@@ -17,10 +17,16 @@ from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, 
 from app.models.user import User
 from app.core.auth import get_current_user, require_admin, CurrentUser
 from app.core.time_utils import get_utc_now
-from app.services.cas_utils import normalize_cas
+from app.services.cas_utils import normalize_cas, validate_cas_format
+from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
-from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
+from app.services.sql_utils import (
+    normalize_field_sql,
+    normalize_search_term,
+    order_with_nulls_last,
+    order_with_special_last,
+)
 from app.services.api_utils import clear_cache_by_prefix, get_cached_result, set_cached_result
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.api.inventory_extended_routes import register_inventory_extended_routes
@@ -160,6 +166,9 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
         order_column = pinyin_sort_field_map.get(sort_by)
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
+
+    if sort_by == 'cas_number':
+        return order_with_special_last(order_column, BIOLOGICAL_REAGENT_CAS, sort_direction)
 
     return order_with_nulls_last(order_column, sort_direction)
 
@@ -318,7 +327,13 @@ def update_inventory(
             detail="Cannot edit item while borrowed, please return first",
         )
 
+    # Validate CAS check digit if being updated
     update_data = update.model_dump(exclude_unset=True)
+    if 'cas_number' in update_data and update_data['cas_number']:
+        normalized_cas = normalize_cas(update_data['cas_number'])
+        is_valid, error_msg = validate_cas_format(normalized_cas)
+        if not is_valid:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CAS number: {error_msg}")
 
     try:
         _normalize_update_payload(item, update_data)
@@ -327,9 +342,22 @@ def update_inventory(
 
     if 'remaining_quantity' in update_data:
         new_remaining = update_data['remaining_quantity']
+        initial_quantity = item.initial_quantity
+        if (
+            new_remaining is not None
+            and initial_quantity is not None
+            and new_remaining > initial_quantity
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Invalid remaining quantity: {new_remaining} cannot exceed "
+                    f"initial quantity {initial_quantity}"
+                ),
+            )
         item.remaining_quantity = new_remaining
-
-    if 'specification' in update_data or 'remaining_quantity' in update_data:
+        item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
+    elif 'specification' in update_data:
         item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
 
     for field, value in update_data.items():

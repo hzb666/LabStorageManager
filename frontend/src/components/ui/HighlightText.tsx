@@ -222,6 +222,27 @@ const getFuzzyHighlightedNodes = (text: string, highlight: string): React.ReactN
   return text
 }
 
+const getExactHighlightedNodes = (text: string, highlight: string): React.ReactNode | null => {
+  const regex = getExactRegex(highlight)
+  const parts = text.split(regex)
+
+  if (parts.length === 1) return null
+
+  return (
+    <>
+      {parts.map((part, index) =>
+        index % 2 === 1 ? (
+          <span key={index} className={HIGHLIGHT_CLASS}>
+            {part}
+          </span>
+        ) : (
+          <span key={index}>{part}</span>
+        )
+      )}
+    </>
+  )
+}
+
 export const HighlightText = React.memo(function HighlightText({
   text,
   highlight,
@@ -240,22 +261,9 @@ export const HighlightText = React.memo(function HighlightText({
     return <>{getFuzzyHighlightedNodes(strText, trimmedHighlight)}</>
   }
 
-  const regex = getExactRegex(trimmedHighlight)
-  const parts = strText.split(regex)
+  const exactHighlightedNodes = getExactHighlightedNodes(strText, trimmedHighlight)
+  if (exactHighlightedNodes) return <>{exactHighlightedNodes}</>
 
-  if (parts.length === 1) return <>{strText}</>
-
-  return (
-    <>
-      {parts.map((part, index) =>
-        index % 2 === 1 ? (
-          <span key={index} className={HIGHLIGHT_CLASS}>
-            {part}
-          </span>
-        ) : (
-          <span key={index}>{part}</span>
-        )
-      )}
-    </>
-  )
+  // 非模糊搜索下，如果命中了拼音字段（如首字母），回退到拼音映射高亮。
+  return <>{getFuzzyHighlightedNodes(strText, trimmedHighlight)}</>
 })

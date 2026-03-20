@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, ArrowUp, ArrowUpDown, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useMobile'
+import { getExpandAllState, setExpandAllState } from '@/lib/tableExpandStorage'
 import {
   Tooltip,
   TooltipContent,
@@ -41,6 +42,13 @@ interface BulkAnchor {
   rowId: string
   offsetInRow: number
 }
+
+type ColumnCssVariableKey =
+  | `--col-${string}-flex`
+  | `--col-${string}-min`
+  | `--col-${string}-display`
+
+type ColumnCssVariables = Partial<Record<ColumnCssVariableKey, string>>
 
 const MemoizedExpandedRow = memo(
   <TData,>({ original, renderExpandedRow }: MemoizedExpandedRowProps<TData>) => {
@@ -193,21 +201,17 @@ export function DataTable<TData>({
   const isControlled = externalIsAllExpanded !== undefined && onToggleExpandAll !== undefined
   const [internalIsAllExpanded] = useState<boolean>(() => {
     if (!enableExpandAll || !expandAllStorageKey) return false
-    try {
-      return localStorage.getItem(expandAllStorageKey) === 'expanded'
-    } catch {
-      return false
-    }
+    return getExpandAllState(expandAllStorageKey, false)
   })
 
   const isAllExpanded = isControlled ? externalIsAllExpanded : internalIsAllExpanded
   const sortingState = table.getState().sorting
 
   useEffect(() => {
-    if (enableExpandAll && expandAllStorageKey) {
-      localStorage.setItem(expandAllStorageKey, isAllExpanded ? 'expanded' : 'collapsed')
+    if (!isControlled && enableExpandAll && expandAllStorageKey) {
+      setExpandAllState(expandAllStorageKey, isAllExpanded)
     }
-  }, [isAllExpanded, enableExpandAll, expandAllStorageKey])
+  }, [isAllExpanded, enableExpandAll, expandAllStorageKey, isControlled])
 
   useEffect(() => {
     const el = bodyScrollRef.current
@@ -245,15 +249,15 @@ export function DataTable<TData>({
   const totalWeight = visibleColumns.reduce((sum, col) => sum + col.getSize(), 0)
   const minTableWidth = visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
 
-  const cssVariableStyles: React.CSSProperties = {}
+  const cssVariableStyles: React.CSSProperties & ColumnCssVariables = {}
   visibleColumns.forEach((column) => {
     const size = column.getSize()
     const minSize = column.columnDef.minSize ?? 50
 
-    cssVariableStyles[`--col-${column.id}-flex` as keyof React.CSSProperties] =
+    cssVariableStyles[`--col-${column.id}-flex`] =
       size === 0 ? 'none' : `${size} 0 0%`
-    cssVariableStyles[`--col-${column.id}-min` as keyof React.CSSProperties] = `${minSize}px`
-    cssVariableStyles[`--col-${column.id}-display` as keyof React.CSSProperties] =
+    cssVariableStyles[`--col-${column.id}-min`] = `${minSize}px`
+    cssVariableStyles[`--col-${column.id}-display`] =
       size === 0 ? 'none' : 'flex'
   })
 

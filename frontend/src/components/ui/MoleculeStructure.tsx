@@ -13,6 +13,7 @@ import {
 } from '@floating-ui/react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
 import { querySmiles } from '@/lib/chemicalProperties'
+import { isSpecialCasValue } from '@/lib/validationSchemas'
 
 type RDKitModule = {
   get_mol: (smiles: string) => Mol
@@ -168,9 +169,28 @@ export function MoleculeStructure({
   // 使用 querySmiles 获取 SMILES（会缓存到 localStorage）
   useEffect(() => {
     if (!casNumber) return
+
+    if (isSpecialCasValue(casNumber)) {
+      setSmiles('')
+      setSvg('')
+      setZoomSvg('')
+      setCanZoom(false)
+      setError('生物试剂不适用')
+      setLoadingState('error')
+      return
+    }
+
+    let cancelled = false
+
     const initFetch = async () => {
+      setError('')
+      setSmiles('')
+      setSvg('')
+      setZoomSvg('')
+      setCanZoom(false)
       setLoadingState('loading')
       const fetchedSmiles = await querySmiles(casNumber)
+      if (cancelled) return
       if (!fetchedSmiles) {
         setError('未找到对应的化合物')
         setLoadingState('error')
@@ -178,7 +198,11 @@ export function MoleculeStructure({
       }
       setSmiles(fetchedSmiles)
     }
-    initFetch()
+
+    void initFetch()
+    return () => {
+      cancelled = true
+    }
   }, [casNumber])
 
   useEffect(() => {

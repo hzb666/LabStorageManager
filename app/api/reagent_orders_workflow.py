@@ -296,6 +296,12 @@ def _register_delete_stock_routes(
 
         from app.models.user import UserRole
 
+        if current_user.role == UserRole.PUBLIC:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="公用账户不能删除订单",
+            )
+
         if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

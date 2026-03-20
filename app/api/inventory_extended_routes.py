@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func
 
-from app.core.auth import AdminUser, CurrentUser, get_current_user, require_admin
+from app.core.auth import CurrentUser, get_current_user
 from app.core.config import settings
 from app.core.request_utils import get_client_ip
 from app.core.time_utils import get_utc_now, to_china_time
@@ -25,7 +25,7 @@ from app.models.inventory import (
 )
 from app.models.user import User, UserRole
 from app.services.api_utils import clear_cache_by_prefix, empty_to_none
-from app.services.cas_utils import normalize_cas
+from app.services.cas_utils import normalize_cas, validate_cas_format, is_special_cas_value
 from app.services.csv_utils import escape_csv_formula
 from app.services.excel_service import validate_uploaded_file
 from app.services.internal_code import generate_internal_code
@@ -97,6 +97,12 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
     def check_cas_inventory(cas_number: str, current_user: CurrentUser, db: DBSession):
         normalized_cas = normalize_cas(cas_number)
 
+        if is_special_cas_value(normalized_cas):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="生物试剂不支持 CAS 查询",
+            )
+
         statement = select(Inventory).where(
             Inventory.cas_number == normalized_cas,
             Inventory.status != InventoryStatus.CONSUMED,
@@ -132,6 +138,12 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
     def get_cas_total_quantity(cas_number: str, current_user: CurrentUser, db: DBSession):
         normalized_cas = normalize_cas(cas_number)
 
+        if is_special_cas_value(normalized_cas):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="生物试剂不支持 CAS 查询",
+            )
+
         statement = select(func.sum(Inventory.remaining_quantity)).where(
             Inventory.cas_number == normalized_cas,
             Inventory.status != InventoryStatus.CONSUMED,
@@ -153,7 +165,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         return _add_specification(response)
 
     @router.get("/export")
-    def export_inventory(current_user: AdminUser, db: DBSession):
+    def export_inventory(current_user: CurrentUser, db: DBSession):
         statement = select(Inventory).order_by(Inventory.created_at.desc())
         items = db.exec(statement).all()
 
@@ -224,8 +236,12 @@ def _register_manual_and_dashboard_routes(
     ):
         normalized_cas = normalize_cas(item_data.cas_number)
 
-        if not normalized_cas or len(normalized_cas.split("-")) < 2:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid CAS format")
+        if not normalized_cas:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CAS number is required")
+
+        is_valid, error_msg = validate_cas_format(normalized_cas)
+        if not is_valid:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CAS number: {error_msg}")
 
         try:
             per_bottle_value, unit = parse_specification(item_data.specification)
@@ -492,7 +508,7 @@ def _register_common_shelf_and_import_routes(
     def import_inventory(
         file: Annotated[UploadFile, File(...)],
         request: Request,
-        admin_user: Annotated[User, Depends(require_admin)],
+        current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
         default_storage_location: Optional[str] = None,
         default_is_hazardous: bool = False,
@@ -519,7 +535,7 @@ def _register_common_shelf_and_import_routes(
                 file_path=tmp_file_path,
                 default_storage_location=default_storage_location,
                 default_is_hazardous=default_is_hazardous,
-                user_id=admin_user.id,
+                user_id=current_user.id,
             )
 
             return {

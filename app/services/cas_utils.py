@@ -7,6 +7,14 @@ import re
 from typing import Optional
 
 
+BIOLOGICAL_REAGENT_CAS = "生物试剂"
+
+
+def is_special_cas_value(cas: str) -> bool:
+    """Return True when value is the special non-CAS token allowed by business rules."""
+    return normalize_cas(cas) == BIOLOGICAL_REAGENT_CAS
+
+
 
 def normalize_cas(cas: str) -> str:
     """
@@ -70,6 +78,11 @@ def validate_cas_format(cas: str) -> tuple[bool, Optional[str]]:
     """
     if not cas:
         return False, "CAS number is required"
+
+    # `validate_and_normalize_cas` passes normalized input, so compare directly
+    # here to avoid a second normalize pass via `is_special_cas_value`.
+    if cas == BIOLOGICAL_REAGENT_CAS:
+        return True, None
     
     # Check basic pattern
     pattern = r"^\d{2,7}-\d{2}-\d$"

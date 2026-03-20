@@ -1,6 +1,8 @@
 // 化学属性查询工具 - 使用 PubChem PUG REST 获取基础属性
 // 缓存: localStorage，10年有效期
 
+import { isSpecialCasValue } from './validationSchemas'
+
 // ============ 类型定义 ============
 
 export interface ChemicalProperties {
@@ -114,6 +116,7 @@ storageCache.forEach((value, key) => memoryCache.set(key, value))
  */
 export async function queryCompoundData(casNumber: string): Promise<ChemicalProperties | null> {
   if (!casNumber) return null
+  if (isSpecialCasValue(casNumber)) return null
 
   // 检查内存缓存
   if (memoryCache.has(casNumber)) {
@@ -143,13 +146,15 @@ export async function queryCompoundData(casNumber: string): Promise<ChemicalProp
         iupacName: props.IUPACName
       }
 
-      // 保存到缓存
-      if (memoryCache.size >= MAX_CACHE_SIZE) {
-        const firstKey = memoryCache.keys().next().value
-        if (firstKey) memoryCache.delete(firstKey)
+      // 只有两个属性都获取成功时才缓存
+      if (result.smiles && result.molecularWeight) {
+        if (memoryCache.size >= MAX_CACHE_SIZE) {
+          const firstKey = memoryCache.keys().next().value
+          if (firstKey) memoryCache.delete(firstKey)
+        }
+        memoryCache.set(casNumber, result)
+        saveToStorage(memoryCache)
       }
-      memoryCache.set(casNumber, result)
-      saveToStorage(memoryCache)
 
       return result
     } catch (err) {

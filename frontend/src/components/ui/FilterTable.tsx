@@ -294,6 +294,7 @@ export function FilterTable({
               statusFilter={filter.statusFilter}
               hasFilter={filter.hasFilter}
               emptyText={emptyText}
+              statusOptions={statusOptions}
             />
           ) : (
             <div className="px-6">
@@ -302,7 +303,7 @@ export function FilterTable({
                 renderExpandedRow={renderExpandedRow}
                 scrollHeight={calculatedScrollHeight}
                 enableExpandAll={enableExpandAll}
-                expandAllStorageKey={`${tableId}-expand-all`}
+                expandAllStorageKey={tableId}
                 noteField={noteField}
                 isAllExpanded={filter.isAllExpanded}
                 onToggleExpandAll={filter.toggleExpandAll}

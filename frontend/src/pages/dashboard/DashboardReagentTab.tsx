@@ -10,11 +10,10 @@ import { useForm } from 'react-hook-form'
 import { FlaskConical } from 'lucide-react'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { Button } from '@/components/ui/Button'
-import { LoadingButton } from '@/components/ui/LoadingButton'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { BaseForm } from '@/components/BaseForm'
+import { EditDialogActions } from '@/components/EditDialogActions'
 import { ReagentOrderExpandedRow } from '@/components/ReagentOrderExpandedRow'
 import { toast } from '@/lib/toast'
 import { processNotes } from '@/lib/utils'
@@ -51,6 +50,7 @@ export function DashboardReagentTab() {
   const queryClient = useQueryClient()
 
   const [editingReagent, setEditingReagent] = useState<DashboardReagentOrder | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [isSubmittingReagent, setIsSubmittingReagent] = useState(false)
 
   const reagentForm = useForm<ReagentOrderFormData>({
@@ -62,6 +62,7 @@ export function DashboardReagentTab() {
   const refreshTables = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'reagents'] }),
+      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
     ])
   }, [queryClient])
@@ -78,12 +79,17 @@ export function DashboardReagentTab() {
 
   const handleReagentEdit = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as DashboardReagentOrder
+    if (currentUser?.role === UserRoles.PUBLIC) {
+      toast.warning('公用账户不能编辑订单')
+      return
+    }
     if (!isAdmin && item.applicant_id !== currentUser?.id) {
       toast.warning('只能编辑自己创建的订单')
       return
     }
 
     setEditingReagent(item)
+    setDeleteConfirm(false)
     reagentForm.reset({
       name: String(item.name ?? ''),
       cas_number: String(item.cas_number ?? ''),
@@ -98,7 +104,7 @@ export function DashboardReagentTab() {
       is_hazardous: Boolean(item.is_hazardous),
       notes: String(item.notes ?? ''),
     })
-  }, [isAdmin, currentUser?.id, reagentForm])
+  }, [isAdmin, currentUser?.id, currentUser?.role, reagentForm])
 
   const submitReagentEdit = reagentForm.handleSubmit(async (formData) => {
     if (!editingReagent) return
@@ -117,6 +123,7 @@ export function DashboardReagentTab() {
         is_hazardous: formData.is_hazardous,
         notes: processNotes(formData.notes),
       })
+      setDeleteConfirm(false)
       setEditingReagent(null)
       await refreshTables()
       toast.success('试剂订单已更新')
@@ -137,6 +144,27 @@ export function DashboardReagentTab() {
       setIsSubmittingReagent(false)
     }
   })
+
+  const handleDeleteReagent = useCallback(async () => {
+    if (!editingReagent) return
+
+    if (!deleteConfirm) {
+      setDeleteConfirm(true)
+      return
+    }
+
+    try {
+      await reagentOrderAPI.delete(editingReagent.id)
+      setDeleteConfirm(false)
+      setEditingReagent(null)
+      reagentForm.reset(defaultReagentOrderValues)
+      await refreshTables()
+      toast.success('试剂订单已删除')
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+    }
+  }, [deleteConfirm, editingReagent, reagentForm, refreshTables])
 
   const reagentColumns = useMemo(() => {
     const baseColumns = removeApplicantColumn(getReagentOrderTableColumns() as ColumnDef<Record<string, unknown>, unknown>[])
@@ -161,7 +189,7 @@ export function DashboardReagentTab() {
           },
         ]
 
-        const disableEdit = !isAdmin && item.applicant_id !== currentUser?.id
+        const disableEdit = currentUser?.role === UserRoles.PUBLIC || (!isAdmin && item.applicant_id !== currentUser?.id)
 
         return (
           <TableActionButtonsMemo
@@ -176,7 +204,7 @@ export function DashboardReagentTab() {
       },
     })
     return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
-  }, [currentUser?.id, handleReagentEdit, isAdmin, refreshTables])
+  }, [currentUser?.id, currentUser?.role, handleReagentEdit, isAdmin, refreshTables])
 
   return (
     <>
@@ -202,6 +230,7 @@ export function DashboardReagentTab() {
         onOpenChange={(open) => {
           if (!open) {
             setEditingReagent(null)
+            setDeleteConfirm(false)
             reagentForm.reset(defaultReagentOrderValues)
           }
         }}
@@ -212,14 +241,15 @@ export function DashboardReagentTab() {
           </DialogHeader>
           <form onSubmit={submitReagentEdit}>
             <BaseForm form={reagentForm} fields={getReagentOrderFormFields(true)} />
-            <div className="flex justify-end gap-2 mt-8">
-              <Button variant="modern" size="lg" type="button" onClick={() => setEditingReagent(null)}>
-                取消
-              </Button>
-              <LoadingButton type="submit" size="lg" isLoading={isSubmittingReagent}>
-                保存
-              </LoadingButton>
-            </div>
+            <EditDialogActions
+              mode="edit"
+              onCancel={() => setEditingReagent(null)}
+              onDelete={handleDeleteReagent}
+              deleteConfirm={deleteConfirm}
+              submitLabelEdit="保存"
+              submitLabelAdd="保存"
+              isSubmitting={isSubmittingReagent}
+            />
           </form>
         </DialogContent>
       </Dialog>

@@ -1,5 +1,5 @@
-﻿import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { valibotResolver } from '@hookform/resolvers/valibot'
 import { Loader2, LogIn, Sun, Moon, ArrowLeft } from 'lucide-react'
@@ -24,6 +24,7 @@ import {
   normalizeApiErrorMessage,
   type LoginFormData,
 } from '@/lib/validationSchemas'
+import { AUTH_NOTICE_KEY } from '@/lib/constants'
 import { BaseForm, type FieldSchema } from '@/components/BaseForm'
 import { getFullImageUrl } from '@/lib/utils'
 
@@ -71,6 +72,7 @@ const lockScreenFields: FieldSchema<LockScreenForm>[] = [
 
 export function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
   const setAuth = useAuthStore((state) => state.setAuth)
   const { theme, toggleTheme } = useTheme()
   const { rememberedUser, saveRememberedUser, clearRememberedUser, updateRememberedUser } = useRememberedUser()
@@ -80,6 +82,7 @@ export function Login() {
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   // [FIXME] 追踪是否正在等待导航完成，避免登录成功后闪烁显示锁屏
   const [isNavigating, setIsNavigating] = useState(false)
+  const hasShownAuthNotice = useRef(false)
 
   // 锁屏模式：是否显示锁屏界面（登录过程中不显示）
   // 修复：增加 isNavigating 检查，确保登录成功后等待导航期间不显示锁屏
@@ -96,6 +99,30 @@ export function Login() {
     resolver: valibotResolver(lockScreenSchema),
   })
   const { handleSubmit: handleLockSubmit } = formLock
+
+  useEffect(() => {
+    if (hasShownAuthNotice.current) return
+
+    const routeNotice = (location.state as { authNotice?: string } | null)?.authNotice
+    let persistedNotice = ''
+    try {
+      persistedNotice = sessionStorage.getItem(AUTH_NOTICE_KEY) || ''
+    } catch {
+      persistedNotice = ''
+    }
+
+    const notice = persistedNotice || routeNotice
+    if (!notice) return
+
+    hasShownAuthNotice.current = true
+    toast.warning(notice)
+    try {
+      sessionStorage.removeItem(AUTH_NOTICE_KEY)
+    } catch {
+      // ignore storage errors
+    }
+  }, [location.state])
+
   
   // 处理普通登录
   const onNormalSubmit = async (data: NormalLoginForm) => {
@@ -342,3 +369,4 @@ export function Login() {
 }
 
 // [FIXME]:锁屏模式头像更新
+
