@@ -44,6 +44,8 @@ class ConsumableOrderBase(SQLModel):
 
 class ConsumableOrder(ConsumableOrderBase, table=True):
     """Consumable Order database model"""
+    __tablename__ = "consumable_order"
+
     id: Optional[int] = Field(default=None, primary_key=True)
     applicant_id: Optional[int] = Field(
         default=None,

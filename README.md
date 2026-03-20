@@ -1,15 +1,17 @@
 # LabStorageManager - 实验室库存管理系统 (LIMS)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat&logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.14+-blue?style=flat&logo=python" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.135+-blue?style=flat&logo=fastapi" alt="FastAPI">
-  <img src="https://img.shields.io/badge/React-19+-blue?style=flat&logo=react" alt="React">
+  <img src="https://img.shields.io/badge/React-19.2+-blue?style=flat&logo=react" alt="React">
   <img src="https://img.shields.io/badge/TypeScript-5.9+-blue?style=flat&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Node.js-24+-blue?style=flat&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/SQLite-WAL-green?style=flat&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/License-Apache%202.0-green?style=flat" alt="License">
   <a href="https://zread.ai/hzb666/LabStorageManager" target="_blank"><img src="https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=565656&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff" alt="zread"/></a>
 <img src="https://img.shields.io/badge/Ask_Deepwiki-_.svg?style=flat&color=00b0aa&labelColor=565656&logo=data:image/svg+xml;charset=utf-8;base64,PHN2ZyBjbGFzcz0iaC03IHctNyBbJmFtcDtfcGF0aF06c3Ryb2tlLTAgWyZhbXA7X3BhdGhdOmFuaW1hdGUtW2N1c3RvbS1wdWxzZV8xLjhzX2luZmluaXRlX3ZhcigtLWRlbGF5LDBzKV0iIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMTEwIDExMCA0NjAgNTAwIj48cGF0aCBjbGFzcz0iWy0tZGVsYXk6MC42c10iIGQ9Ik00MTguNzMsMzMyLjM3YzkuODQtNS42OCwyMi4wNy01LjY4LDMxLjkxLDBsMjUuNDksMTQuNzFjLjgyLjQ4LDEuNjkuOCwyLjU4LDEuMDYuMTkuMDYuMzcuMTEuNTUuMTYuODcuMjEsMS43Ni4zNCwyLjY1LjM1LjA0LDAsLjA4LjAyLjEzLjAyLjEsMCwuMTktLjAzLjI5LS4wNC44My0uMDIsMS42NC0uMTMsMi40NS0uMzIuMTQtLjAzLjI4LS4wNS40Mi0uMDkuODctLjI0LDEuNy0uNTksMi41LTEuMDMuMDgtLjA0LjE3LS4wNi4yNS0uMWw1MC45Ny0yOS40M2MzLjY1LTIuMTEsNS45LTYuMDEsNS45LTEwLjIydi01OC44NmMwLTQuMjItMi4yNS04LjExLTUuOS0xMC4yMmwtNTAuOTctMjkuNDNjLTMuNjUtMi4xMS04LjE1LTIuMTEtMTEuODEsMGwtNTAuOTcsMjkuNDNjLS4wOC4wNC0uMTMuMTEtLjIuMTYtLjc4LjQ4LTEuNTEsMS4wMi0yLjE1LDEuNjYtLjEuMS0uMTguMjEtLjI4LjMxLS41Ny42LTEuMDgsMS4yNi0xLjUxLDEuOTctLjA3LjEyLS4xNS4yMi0uMjIuMzQtLjQ0Ljc3LS43NywxLjYtMS4wMywyLjQ3LS4wNS4xOS0uMS4zNy0uMTQuNTYtLjIyLjg5LS4zNywxLjgxLS4zNywyLjc2djI5LjQzYzAsMTEuMzYtNi4xMSwyMS45NS0xNS45NSwyNy42My05Ljg0LDUuNjgtMjIuMDYsNS42OC0zMS45MSwwbC0yNS40OS0xNC43MWMtLjgyLS40OC0xLjY5LS44LTIuNTctMS4wNi0uMTktLjA2LS4zNy0uMTEtLjU2LS4xNi0uODgtLjIxLTEuNzYtLjM0LTIuNjUtLjM0LS4xMywwLS4yNi4wMi0uNC4wMi0uODQuMDItMS42Ni4xMy0yLjQ3LjMyLS4xMy4wMy0uMjcuMDUtLjQuMDktLjg3LjI0LTEuNzEuNi0yLjUxLDEuMDQtLjA4LjA0LS4xNi4wNi0uMjQuMWwtNTAuOTcsMjkuNDNjLTMuNjUsMi4xMS01LjksNi4wMS01LjksMTAuMjJ2NTguODZjMCw0LjIyLDIuMjUsOC4xMSw1LjksMTAuMjJsNTAuOTcsMjkuNDNjLjA4LjA0LjE3LjA2LjI0LjEuOC40NCwxLjY0Ljc5LDIuNSwxLjAzLjE0LjA0LjI4LjA2LjQyLjA5LjgxLjE5LDEuNjIuMywyLjQ1LjMyLjEsMCwuMTkuMDQuMjkuMDQuMDQsMCwuMDgtLjAyLjEzLS4wMi44OSwwLDEuNzctLjEzLDIuNjUtLjM1LjE5LS4wNC4zNy0uMS41Ni0uMTYuODgtLjI2LDEuNzUtLjU5LDIuNTgtMS4wNmwyNS40OS0xNC43MWM5Ljg0LTUuNjgsMjIuMDYtNS42OCwzMS45MSwwLDkuODQsNS42OCwxNS45NSwxNi4yNywxNS45NSwyNy42M3YyOS40M2MwLC45NS4xNSwxLjg3LjM3LDIuNzYuMDUuMTkuMDkuMzcuMTQuNTYuMjUuODYuNTksMS42OSwxLjAzLDIuNDcuMDcuMTIuMTUuMjIuMjIuMzQuNDMuNzEuOTQsMS4zNywxLjUxLDEuOTcuMS4xLjE4LjIxLjI4LjMxLjY1LjYzLDEuMzcsMS4xOCwyLjE1LDEuNjYuMDcuMDQuMTMuMTEuMi4xNmw1MC45NywyOS40M2MxLjgzLDEuMDUsMy44NiwxLjU4LDUuOSwxLjU4czQuMDgtLjUzLDUuOS0xLjU4bDUwLjk3LTI5LjQzYzMuNjUtMi4xMSw1LjktNi4wMSw1LjktMTAuMjJ2LTU4Ljg2YzAtNC4yMi0yLjI1LTguMTEtNS45LTEwLjIybC01MC45Ny0yOS40M2MtLjA4LS4wNC0uMTYtLjA2LS4yNC0uMS0uOC0uNDQtMS42NC0uOC0yLjUxLTEuMDQtLjEzLS4wNC0uMjYtLjA1LS4zOS0uMDktLjgyLS4yLTEuNjUtLjMxLTIuNDktLjMzLS4xMywwLS4yNS0uMDItLjM4LS4wMi0uODksMC0xLjc4LjEzLTIuNjYuMzUtLjE4LjA0LS4zNi4xLS41NC4xNS0uODguMjYtMS43NS41OS0yLjU4LDEuMDdsLTI1LjQ5LDE0LjcyYy05Ljg0LDUuNjgtMjIuMDcsNS42OC0zMS45LDAtOS44NC01LjY4LTE1Ljk1LTE2LjI3LTE1Ljk1LTI3LjYzczYuMTEtMjEuOTUsMTUuOTUtMjcuNjNaIiBzdHlsZT0iZmlsbDogcmdiKDMzLCAxOTMsIDE1NCk7Ij48L3BhdGg+PHBhdGggZD0iTTE0MS4wOSwzMTcuNjVsNTAuOTcsMjkuNDNjMS44MywxLjA1LDMuODYsMS41OCw1LjksMS41OHM0LjA4LS41Myw1LjktMS41OGw1MC45Ny0yOS40M2MuMDgtLjA0LjEzLS4xMS4yLS4xNi43OC0uNDgsMS41MS0xLjAyLDIuMTUtMS42Ni4xLS4xLjE4LS4yMS4yOC0uMzEuNTctLjYsMS4wOC0xLjI2LDEuNTEtMS45Ny4wNy0uMTIuMTUtLjIyLjIyLS4zNC40NC0uNzcuNzctMS42LDEuMDMtMi40Ny4wNS0uMTkuMS0uMzcuMTQtLjU2LjIyLS44OS4zNy0xLjgxLjM3LTIuNzZ2LTI5LjQzYzAtMTEuMzYsNi4xMS0yMS45NSwxNS45Ni0yNy42M3MyMi4wNi01LjY4LDMxLjkxLDBsMjUuNDksMTQuNzFjLjgyLjQ4LDEuNjkuOCwyLjU3LDEuMDYuMTkuMDYuMzcuMTEuNTYuMTYuODcuMjEsMS43Ni4zNCwyLjY0LjM1LjA0LDAsLjA5LjAyLjEzLjAyLjEsMCwuMTktLjA0LjI5LS4wNC44My0uMDIsMS42NS0uMTMsMi40NS0uMzIuMTQtLjAzLjI4LS4wNS40MS0uMDkuODctLjI0LDEuNzEtLjYsMi41MS0xLjA0LjA4LS4wNC4xNi0uMDYuMjQtLjFsNTAuOTctMjkuNDNjMy42NS0yLjExLDUuOS02LjAxLDUuOS0xMC4yMnYtNTguODZjMC00LjIyLTIuMjUtOC4xMS01LjktMTAuMjJsLTUwLjk3LTI5LjQzYy0zLjY1LTIuMTEtOC4xNS0yLjExLTExLjgxLDBsLTUwLjk3LDI5LjQzYy0uMDguMDQtLjEzLjExLS4yLjE2LS43OC40OC0xLjUxLDEuMDItMi4xNSwxLjY2LS4xLjEtLjE4LjIxLS4yOC4zMS0uNTcuNi0xLjA4LDEuMjYtMS41MSwxLjk3LS4wNy4xMi0uMTUuMjItLjIyLjM0LS40NC43Ny0uNzcsMS42LTEuMDMsMi40Ny0uMDUuMTktLjEuMzctLjE0LjU2LS4yMi44OS0uMzcsMS44MS0uMzcsMi43NnYyOS40M2MwLDExLjM2LTYuMTEsMjEuOTUtMTUuOTUsMjcuNjMtOS44NCw1LjY4LTIyLjA3LDUuNjgtMzEuOTEsMGwtMjUuNDktMTQuNzFjLS44Mi0uNDgtMS42OS0uOC0yLjU4LTEuMDYtLjE5LS4wNi0uMzctLjExLS41NS0uMTYtLjg4LS4yMS0xLjc2LS4zNC0yLjY1LS4zNS0uMTMsMC0uMjYuMDItLjQuMDItLjgzLjAyLTEuNjYuMTMtMi40Ny4zMi0uMTMuMDMtLjI3LjA1LS40LjA5LS44Ny4yNC0xLjcxLjYtMi41MSwxLjA0LS4wOC4wNC0uMTYuMDYtLjI0LjFsLTUwLjk3LDI5LjQzYy0zLjY1LDIuMTEtNS45LDYuMDEtNS45LDEwLjIydjU4Ljg2YzAsNC4yMiwyLjI1LDguMTEsNS45LDEwLjIyWiIgc3R5bGU9ImZpbGw6IHJnYig1NywgMTA1LCAyMDIpOyI+PC9wYXRoPjxwYXRoIGNsYXNzPSJbLS1kZWxheToxLjJzXSIgZD0iTTM5Ni44OCw0ODQuMzVsLTUwLjk3LTI5LjQzYy0uMDgtLjA0LS4xNy0uMDYtLjI0LS4xLS44LS40NC0xLjY0LS43OS0yLjUxLTEuMDMtLjE0LS4wNC0uMjctLjA2LS40MS0uMDktLjgxLS4xOS0xLjY0LS4zLTIuNDctLjMyLS4xMywwLS4yNi0uMDItLjM5LS4wMi0uODksMC0xLjc4LjEzLTIuNjYuMzUtLjE4LjA0LS4zNi4xLS41NC4xNS0uODguMjYtMS43Ni41OS0yLjU4LDEuMDdsLTI1LjQ5LDE0LjcyYy05Ljg0LDUuNjgtMjIuMDYsNS42OC0zMS45LDAtOS44NC01LjY4LTE1Ljk2LTE2LjI3LTE1Ljk2LTI3LjYzdi0yOS40M2MwLS45NS0uMTUtMS44Ny0uMzctMi43Ni0uMDUtLjE5LS4wOS0uMzctLjE0LS41Ni0uMjUtLjg2LS41OS0xLjY5LTEuMDMtMi40Ny0uMDctLjEyLS4xNS0uMjItLjIyLS4zNC0uNDMtLjcxLS45NC0xLjM3LTEuNTEtMS45Ny0uMS0uMS0uMTgtLjIxLS4yOC0uMzEtLjY1LS42My0xLjM3LTEuMTgtMi4xNS0xLjY2LS4wNy0uMDQtLjEzLS4xMS0uMi0uMTZsLTUwLjk3LTI5LjQzYy0zLjY1LTIuMTEtOC4xNS0yLjExLTExLjgxLDBsLTUwLjk3LDI5LjQzYy0zLjY1LDIuMTEtNS45LDYuMDEtNS45LDEwLjIydjU4Ljg2YzAsNC4yMiwyLjI1LDguMTEsNS45LDEwLjIybDUwLjk3LDI5LjQzYy4wOC4wNC4xNy4wNi4yNS4xLjguNDQsMS42My43OSwyLjUsMS4wMy4xNC4wNC4yOS4wNi40My4wOS44LjE5LDEuNjEuMywyLjQzLjMyLjEsMCwuMi4wNC4zLjA0LjA0LDAsLjA5LS4wMi4xMy0uMDIuODgsMCwxLjc3LS4xMywyLjY0LS4zNC4xOS0uMDQuMzctLjEuNTYtLjE2Ljg4LS4yNiwxLjc1LS41OSwyLjU3LTEuMDZsMjUuNDktMTQuNzFjOS44NC01LjY4LDIyLjA2LTUuNjgsMzEuOTEsMCw5Ljg0LDUuNjgsMTUuOTUsMTYuMjcsMTUuOTUsMjcuNjN2MjkuNDNjMCwuOTUuMTUsMS44Ny4zNywyLjc2LjA1LjE5LjA5LjM3LjE0LjU2LjI1Ljg2LjU5LDEuNjksMS4wMywyLjQ3LjA3LjEyLjE1LjIyLjIyLjM0LjQzLjcxLjk0LDEuMzcsMS41MSwxLjk3LjEuMS4xOC4yMS4yOC4zMS42NS42MywxLjM3LDEuMTgsMi4xNSwxLjY2LjA3LjA0LjEzLjExLjIuMTZsNTAuOTcsMjkuNDNjMS44MywxLjA1LDMuODYsMS41OCw1LjksMS41OHM0LjA4LS41Myw1LjktMS41OGw1MC45Ny0yOS40M2MzLjY1LTIuMTEsNS45LTYuMDEsNS45LTEwLjIydi01OC44NmMwLTQuMjItMi4yNS04LjExLTUuOS0xMC4yMloiIHN0eWxlPSJmaWxsOiByZ2IoMiwgMTQ4LCAyMjIpOyI+PC9wYXRoPjwvc3ZnPg==" alt="License">
 </p>
+
 
 面向实验室场景的试剂/耗材全生命周期管理系统，支持试剂（有 CAS 号）和耗材的采购、入库、借用、归还等核心流程。
 
@@ -52,14 +54,13 @@
 - [功能操作指南](#功能操作指南)
   - [角色与权限](#角色与权限)
   - [试剂订购流程](#试剂订购流程)
-  - [耗材订购流程](#耗材订购流程)
   - [库存借用流程](#库存借用流程)
 - [代码规范](#代码规范)
   - [Python 规范](#python-规范)
   - [TypeScript/React 规范](#typescriptreact-规范)
 - [验证命令](#验证命令)
 - [部署指南](#部署指南)
-  - [生产环境部署](#生产环境部署)
+  - [Docker 一键部署](#docker-一键部署服务器)
   - [数据库备份](#数据库备份)
 - [故障排除](#故障排除)
 - [开发工作流](#开发工作流)
@@ -86,12 +87,12 @@ LabStorageManager 是一个面向实验室场景的库存管理系统，旨在�
 | **图片管理**   | 试剂/样品的图片自动压缩至 100KB 以下，存入文件系统，数据库仅存储 URL       |
 | **暗黑模式**   | 完整的暗色主题支持，满足不同光照环境下的使用需求                           |
 | **服务端分页** | 大数据量场景下采用服务端分页，保证界面响应速度                             |
-| **搜索缓存**   | 基于内存的搜索结果缓存（10秒 TTL），加速高频查询                           |
 | **拼音排序**   | 预计算拼音字段，支持按中文名称/分类/品牌/位置拼音排序                      |
 | **剩余百分比** | 自动计算并存储 remaining_percent = remaining_quantity / initial_quantity   |
 | **多角色支持** | 支持 admin、user、public 三种角色                                          |
 | **会话管理**   | 支持多设备登录、设备踢出、IP 限制                                          |
 | **登录限流**   | 基于 Redis 的登录限流（5 次/5 分钟）                                       |
+| **分子结构式** | 支持 RDKit 渲染化学品分子结构式                                            |
 
 ### 系统架构
 
@@ -108,7 +109,7 @@ LabStorageManager 是一个面向实验室场景的库存管理系统，旨在�
                            ┌──────▼───────┐
                            │   React 19   │
                            │ + TypeScript │
-                           │ + Shadcn/UI  │
+                           │ + Tailwind 4 │
                            └──────┬───────┘
                                   │
                            ┌──────▼───────┐
@@ -143,14 +144,14 @@ LabStorageManager 是一个面向实验室场景的库存管理系统，旨在�
 
 | 技术        | 版本    | 说明                           |
 | ----------- | ------- | ------------------------------ |
-| FastAPI     | 0.109+  | 异步高性能 Web 框架            |
+| FastAPI     | 0.135+  | 异步高性能 Web 框架            |
 | SQLModel    | 0.0.37+ | 类型安全的数据库 ORM           |
 | SQLite      | -       | 轻量级嵌入式数据库（WAL 模式） |
 | python-jose | 3.3+    | JWT 认证（RS256/HS256）        |
-| bcrypt      | 3.2+    | 密码加密                       |
-| Pillow      | 11.0+   | Python 图像处理                |
-| pandas      | 2.1+    | 数据处理                       |
-| pydantic    | 2.5+    | 数据验证                       |
+| bcrypt      | 5.0+    | 密码加密                       |
+| Pillow      | 12.1+   | Python 图像处理                |
+| pandas      | 3.0+    | 数据处理                       |
+| pydantic    | 2.12+   | 数据验证                       |
 | pypinyin    | 0.55+   | 中文转拼音                     |
 | ruff        | -       | Python Lint                    |
 
@@ -168,7 +169,8 @@ LabStorageManager 是一个面向实验室场景的库存管理系统，旨在�
 | Zustand          | 5+   | 轻量级状态管理          |
 | Radix UI         | -    | 无样式 UI 组件库        |
 | Tailwind CSS     | 4+   | 样式框架                |
-| Vite             | 7+   | 前端构建工具            |
+| RDKit            | 2025+ | 分子结构式渲染          |
+| Vite             | 8+   | 前端构建工具            |
 
 ---
 
@@ -298,44 +300,44 @@ app/
 │   ├── user_sessions.py        # 会话管理
 │   ├── user_logs.py            # 操作日志
 │   ├── reagent_orders.py       # 试剂订单
-│   ├── consumable_orders.py    # 耗材订单
-│   ├── inventory.py             # 库存管理
-│   ├── inventory_extended_routes.py # 库存扩展路由
 │   ├── reagent_orders_workflow.py # 试剂订单工作流
-│   ├── announcements.py        # 公告管理
+│   ├── consumable_orders.py    # 耗材订单
+│   ├── inventory.py            # 库存管理
+│   ├── inventory_extended_routes.py # 库存扩展路由
+│   ├── announcements.py       # 公告管理
 │   ├── error_logs.py           # 错误日志
-│   └── cart_sync.py            # 购物车同步
+│   ├── cart_sync.py            # 购物车同步
+│   └── chemical_info.py        # 化学信息查询
 ├── core/                       # 核心功能模块
 │   ├── __init__.py
 │   ├── auth.py                 # JWT 认证 + 会话管理
 │   ├── config.py               # 应用配置 (Pydantic Settings)
+│   ├── constants.py            # 全局常量
 │   ├── redis.py                # Redis 缓存客户端
 │   ├── banner.py               # 启动横幅
-│   └── time_utils.py           # 时间工具
+│   ├── time_utils.py           # 时间工具
+│   └── request_utils.py        # 请求工具
 ├── models/                     # SQLModel 数据模型
-│   ├── __init__.py             # 模型导出
+│   ├── __init__.py            # 模型导出
 │   ├── base.py                 # 基础响应模型
 │   ├── user.py                 # 用户模型 + UserRole 枚举
 │   ├── user_session.py         # 用户会话模型
 │   ├── reagent_order.py        # 试剂订单模型
 │   ├── consumable_order.py     # 耗材订单模型
-│   ├── inventory.py             # 库存模型 + BorrowLog
-│   └── announcement.py          # 公告模型
+│   ├── inventory.py            # 库存模型 + BorrowLog
+│   └── announcement.py         # 公告模型
 └── services/                   # 业务逻辑服务
     ├── __init__.py
-    ├── api_utils.py            # API 工具
-    ├── cas_utils.py            # CAS 号标准化
-    ├── chemical_info.py        # 化学信息查询
-    ├── error_logger.py         # 错误日志
-    ├── excel_service.py        # Excel 导入/导出
-    ├── image_service.py        # 图片压缩
-    ├── internal_code.py        # 内部编码生成
+    ├── session_service.py       # 会话管理服务
+    ├── user_service.py         # 用户服务
     ├── pinyin_utils.py         # 中文转拼音
-    ├── session_service.py      # 会话服务
-    ├── spec_utils.py          # 规格解析
-    ├── sql_utils.py           # SQL 工具
-    ├── user_service.py        # 用户服务
-    └── user_utils.py          # 用户工具
+    ├── cas_utils.py            # CAS 号标准化
+    ├── spec_utils.py           # 规格解析
+    ├── internal_code.py        # 内部编码生成
+    ├── excel_service.py        # Excel 导入/导出
+    ├── image_service.py         # 图片处理
+    ├── rate_limit.py           # 速率限制
+    └── chemical_info.py        # 化学信息查询
 ```
 
 ### 前端目录结构
@@ -357,73 +359,68 @@ frontend/src/
 │   ├── BaseForm.tsx             # 基础表单
 │   ├── BorrowDialog.tsx         # 借用对话框
 │   ├── BugReportButton.tsx      # Bug 反馈按钮
-│   ├── bugReportButtonStorage.ts
 │   ├── ConsumableOrderExpandedRow.tsx # 耗材订单展开行
+│   ├── EditDialogActions.tsx    # 编辑对话框操作按钮
 │   ├── ErrorBoundary.tsx        # 错误边界
 │   ├── ReagentOrderExpandedRow.tsx # 试剂订单展开行
 │   ├── SidebarLogo.tsx          # 侧边栏 Logo
 │   ├── TableActionButtons.tsx   # 表格操作按钮
 │   ├── UserEditDialog.tsx       # 用户编辑对话框
 │   └── ui/                      # UI 组件库
-│       ├── AutoComplete.tsx
-│       ├── Avatar.tsx
-│       ├── Button.tsx
-│       ├── Card.tsx
-│       ├── Checkbox.tsx
-│       ├── DataTable.tsx
-│       ├── Dialog.tsx
-│       ├── FilterTable.tsx
-│       ├── FormField.tsx
-│       ├── HazardousIcon.tsx
-│       ├── HighlightText.tsx
-│       ├── Input.tsx
-│       ├── Label.tsx
-│       ├── LoadingButton.tsx
-│       ├── MoleculeStructure.tsx
-│       ├── NoteDisplay.tsx
-│       ├── Pagination.tsx
-│       ├── PasswordInput.tsx
-│       ├── QuantityIndicator.tsx
-│       ├── RadioGroup.tsx
-│       ├── Select.tsx
-│       ├── Separator.tsx
-│       ├── StatusBadge.tsx
-│       ├── TableFilters.tsx
-│       ├── Tabs.tsx
-│       ├── Textarea.tsx
-│       ├── Toast.tsx
-│       └── Tooltip.tsx
+│       ├── AutoComplete.tsx     # 自动完成
+│       ├── Avatar.tsx          # 头像
+│       ├── Button.tsx          # 按钮
+│       ├── Card.tsx            # 卡片
+│       ├── Checkbox.tsx        # 复选框
+│       ├── DataTable.tsx        # 数据表格
+│       ├── Dialog.tsx          # 对话框
+│       ├── FilterTable.tsx      # 筛选表格
+│       ├── FormField.tsx        # 表单字段
+│       ├── HazardousIcon.tsx   # 危险品图标
+│       ├── HighlightText.tsx   # 高亮文本
+│       ├── Input.tsx            # 输入框
+│       ├── Label.tsx            # 标签
+│       ├── LoadingButton.tsx    # 加载按钮
+│       ├── MoleculeStructure.tsx # 分子结构式
+│       ├── NoteDisplay.tsx     # 备注显示
+│       ├── Pagination.tsx       # 分页
+│       ├── PasswordInput.tsx   # 密码输入
+│       ├── QuantityIndicator.tsx # 数量指示器
+│       ├── RadioGroup.tsx       # 单选组
+│       ├── Select.tsx           # 选择器
+│       ├── Separator.tsx        # 分隔线
+│       ├── StatusBadge.tsx      # 状态徽章
+│       ├── TableFilters.tsx     # 表格筛选器
+│       ├── Tabs.tsx             # 标签页
+│       ├── Textarea.tsx         # 文本域
+│       ├── Toast.tsx            # 提示
+│       └── Tooltip.tsx         # 工具提示
 ├── hooks/                       # 自定义 Hooks
-│   ├── useDialogState.tsx
-│   ├── useErrorLogger.tsx
-│   ├── useFormModal.tsx
-│   ├── useMobile.tsx
-│   ├── useRememberedUser.ts
-│   ├── useTableState.tsx
-│   ├── useTableUrlState.ts
-│   └── useTheme.ts
+│   ├── useDialogState.tsx       # 对话框状态
+│   ├── useFormModal.tsx         # 表单模态框
+│   ├── useMobile.tsx            # 响应式检测
+│   ├── useRememberedUser.ts     # 记住用户
+│   ├── useTableState.tsx        # 表格状态
+│   ├── useTableUrlState.ts     # URL 状态同步
+│   └── useTheme.ts              # 主题切换
 ├── lib/                         # 工具函数
-│   ├── badgeConstants.ts
-│   ├── constants.ts             # 常量定义（状态映射）
-│   ├── dashboardUtils.tsx
-│   ├── deviceId.ts
-│   ├── formConfigs.tsx
-│   ├── inputConfigs.ts
-│   ├── options.ts
-│   ├── tableConfigs.tsx
-│   ├── toast.ts
-│   ├── utils.ts
-│   └── validationSchemas.ts
+│   ├── apiConfig.ts             # API 配置
+│   ├── constants.ts             # 常量定义
+│   ├── formConfigs.tsx          # 表单配置
+│   ├── options.ts               # 下拉选项
+│   ├── tableConfigs.tsx         # 表格列配置
+│   ├── utils.ts                 # 工具函数
+│   └── validationSchemas.ts     # 表单验证 Schema
 ├── pages/                       # 页面组件
 │   ├── AdminUsers.tsx           # 用户管理
 │   ├── AnnouncementManagement.tsx # 公告管理
-│   ├── CommonShelf.tsx          # 常用货架
+│   ├── CommonShelf.tsx           # 常用货架
 │   ├── ConsumableOrders.tsx     # 耗材订单
-│   ├── Dashboard.tsx           # 仪表盘
+│   ├── Dashboard.tsx            # 仪表盘
 │   ├── DeviceManagement.tsx     # 设备管理
-│   ├── Import.tsx               # 数据导入
+│   ├── Import.tsx                # 数据导入
 │   ├── Inventory.tsx            # 库存管理
-│   ├── Layout.tsx              # 布局组件
+│   ├── Layout.tsx               # 布局组件
 │   ├── Login.tsx                # 登录页
 │   ├── NotFound.tsx             # 404 页面
 │   ├── OperationLogs.tsx        # 操作日志
@@ -476,19 +473,20 @@ frontend/src/
 
 #### 用户 (User)
 
-| 字段             | 类型     | 约束             | 说明                       |
-| ---------------- | -------- | ---------------- | -------------------------- |
-| id               | Integer  | PK, Auto         | 主键                       |
-| username         | String   | Unique, Not Null | 用户名                     |
-| password_hash    | String   | Not Null         | 加密后的密码               |
-| full_name        | String   | -                | 姓名                       |
-| full_name_pinyin | String   | Index            | 姓名拼音                   |
-| role             | Enum     | Not Null         | 角色 (admin/user/public)   |
-| is_active        | Boolean  | Default True     | 是否激活                   |
-| avatar_url       | String   | -                | 头像 URL                   |
-| username_version | Integer  | Default 1        | 用户名版本（用于会话失效） |
-| created_at       | DateTime | Auto             | 创建时间                   |
-| updated_at       | DateTime | Auto             | 更新时间                   |
+| 字段                   | 类型     | 约束              | 说明                     |
+| ---------------------- | -------- | ----------------- | ------------------------ |
+| id                     | Integer  | PK, Auto          | 主键                     |
+| username               | String   | Unique, Not Null  | 用户名                   |
+| password_hash          | String   | Not Null          | 加密后的密码             |
+| full_name              | String   | -                 | 姓名                     |
+| full_name_pinyin       | String   | Index             | 姓名拼音                 |
+| full_name_pinyin_initials | String | -                 | 姓名拼音首字母           |
+| role                   | Enum     | Not Null          | 角色 (admin/user/public) |
+| is_active              | Boolean  | Default True      | 是否激活                 |
+| avatar_url             | String   | -                 | 头像 URL                 |
+| username_version       | Integer  | Default 1         | 用户名版本（用于会话失效）|
+| created_at             | DateTime | Auto              | 创建时间                 |
+| updated_at             | DateTime | Auto              | 更新时间                 |
 
 #### 用户会话 (UserSession)
 
@@ -500,6 +498,7 @@ frontend/src/
 | device_id      | String   | Not Null      | 设备唯一标识      |
 | device_name    | String   | -             | 设备名称          |
 | ip_address     | String   | -             | IP 地址           |
+| last_ip_address | String   | -             | 最近一次 IP 地址  |
 | user_agent     | String   | -             | 浏览器 User-Agent |
 | created_at     | DateTime | Auto          | 创建时间          |
 | last_active_at | DateTime | Auto          | 最后活跃时间      |
@@ -507,31 +506,91 @@ frontend/src/
 
 #### 库存 (Inventory)
 
+| 字段                      | 类型     | 约束          | 说明                 |
+| ------------------------- | -------- | ------------- | -------------------- |
+| id                        | Integer  | PK, Auto      | 主键                 |
+| internal_code             | String   | Unique, Index | 内部编码             |
+| cas_number                | String   | Index         | CAS 号               |
+| name                      | String   | Index         | 物品名称             |
+| name_pinyin               | String   | Index         | 名称拼音（用于排序） |
+| english_name              | String   | -             | 英文名               |
+| alias                     | String   | -             | 别名                 |
+| category                  | String   | Index         | 分类                 |
+| category_pinyin           | String   | Index         | 分类拼音             |
+| brand                     | String   | Index         | 品牌                 |
+| brand_pinyin              | String   | Index         | 品牌拼音             |
+| storage_location          | String   | Index         | 存放位置             |
+| storage_location_pinyin   | String   | Index         | 位置拼音             |
+| initial_quantity          | Float    | -             | 初始数量             |
+| remaining_quantity         | Float    | -             | 剩余数量             |
+| remaining_percent         | Float    | Index         | 剩余百分比           |
+| unit                      | String   | -             | 单位                 |
+| status                    | Enum     | Index         | 库存状态             |
+| is_hazardous              | Boolean  | Default False | 是否危险品           |
+| borrower_id               | Integer  | FK → User.id | 当前借用人           |
+| last_borrower_id          | Integer  | FK → User.id | 上一个借用人         |
+| temporary_keeper_id       | Integer  | FK → User.id | 临时保管人           |
+| source_order_id           | Integer  | FK → ReagentOrder.id | 订单来源     |
+| created_by_id             | Integer  | FK → User.id | 创建人               |
+| notes                     | String   | -             | 备注                 |
+| created_at                | DateTime | Index         | 创建时间             |
+| updated_at                | DateTime | Auto          | 更新时间             |
+
+#### 试剂订单 (ReagentOrder)
+
 | 字段                    | 类型     | 约束          | 说明                 |
 | ----------------------- | -------- | ------------- | -------------------- |
 | id                      | Integer  | PK, Auto      | 主键                 |
-| internal_code           | String   | Unique, Index | 内部编码             |
 | cas_number              | String   | Index         | CAS 号               |
-| name                    | String   | Index         | 物品名称             |
-| name_pinyin             | String   | Index         | 名称拼音（用于排序） |
+| name                    | String   | Index         | 试剂名称             |
 | english_name            | String   | -             | 英文名               |
 | alias                   | String   | -             | 别名                 |
 | category                | String   | Index         | 分类                 |
-| category_pinyin         | String   | Index         | 分类拼音             |
 | brand                   | String   | Index         | 品牌                 |
-| brand_pinyin            | String   | Index         | 品牌拼音             |
-| storage_location        | String   | Index         | 存放位置             |
-| storage_location_pinyin | String   | Index         | 位置拼音             |
-| initial_quantity        | Float    | -             | 初始数量             |
-| remaining_quantity      | Float    | -             | 剩余数量             |
-| remaining_percent       | Float    | Index         | 剩余百分比           |
+| initial_quantity        | Float    | -             | 每瓶规格             |
 | unit                    | String   | -             | 单位                 |
-| status                  | Enum     | Index         | 库存状态             |
+| quantity                | Integer  | -             | 订购瓶数             |
+| price                   | Float    | -             | 单价                 |
+| order_reason            | Enum     | -             | 申购原因             |
 | is_hazardous            | Boolean  | Default False | 是否危险品           |
-| borrower_id             | Integer  | FK → User.id | 当前借用人           |
-| created_by_id           | Integer  | FK → User.id | 创建人               |
+| notes                   | String   | -             | 备注                 |
+| applicant_id            | Integer  | FK → User.id | 申请人               |
+| status                  | Enum     | Index         | 订单状态             |
 | created_at              | DateTime | Index         | 创建时间             |
 | updated_at              | DateTime | Auto          | 更新时间             |
+
+#### 耗材订单 (ConsumableOrder)
+
+| 字段              | 类型     | 约束          | 说明                 |
+| ----------------- | -------- | ------------- | -------------------- |
+| id                | Integer  | PK, Auto      | 主键                 |
+| name              | String   | Index         | 耗材名称             |
+| english_name      | String   | -             | 英文名               |
+| product_number    | String   | -             | 产品号               |
+| specification     | String   | -             | 规格                 |
+| unit              | String   | -             | 单位                 |
+| quantity          | Integer  | -             | 订购数量             |
+| price             | Float    | -             | 单价                 |
+| communication     | String   | -             | 沟通记录             |
+| notes             | String   | -             | 备注                 |
+| applicant_id      | Integer  | FK → User.id | 申请人               |
+| status            | Enum     | Index         | 订单状态             |
+| created_at        | DateTime | Index         | 创建时间             |
+| updated_at        | DateTime | Auto          | 更新时间             |
+
+#### 借用日志 (BorrowLog)
+
+| 字段               | 类型     | 约束          | 说明              |
+| ------------------ | -------- | ------------- | ----------------- |
+| id                 | Integer  | PK, Auto      | 主键              |
+| inventory_id       | Integer  | FK → Inventory.id | 库存 ID       |
+| borrower_id        | Integer  | FK → User.id | 借用人            |
+| borrow_time        | DateTime | -             | 借出时间          |
+| return_time        | DateTime | -             | 归还时间          |
+| quantity_borrowed  | Float    | -             | 借出数量          |
+| quantity_returned  | Float    | -             | 归还数量          |
+| notes              | String   | -             | 备注              |
+| created_at         | DateTime | Auto          | 创建时间          |
 
 ### 核心业务逻辑
 
@@ -562,6 +621,16 @@ frontend/src/
 4. **缩略图**: `static/thumbnails/` 目录
 5. **数据库**: 仅存储 URL
 
+#### 一键入库
+
+订单到库存的自动化流转：
+
+1. 订单审批通过后，可执行"确认到货"
+2. 公用常用试剂可选择直接入库到常用货架
+3. 执行"一键入库"后，系统根据 `order.quantity` 生成对应数量的 `internal_code`
+4. 创建 `Inventory` 记录，**复制**订单数据而非移动
+5. 保留 Order 记录用于审计
+
 ---
 
 ## 环境变量参考
@@ -583,7 +652,8 @@ frontend/src/
 | --------------------------- | ------ | ---------------------- | ---------------------------- |
 | ALGORITHM                   | String | JWT 算法 (HS256/RS256) | `RS256`                    |
 | ACCESS_TOKEN_EXPIRE_MINUTES | Int    | Token 过期时间（分钟） | `10080` (7天)              |
-| REDIS_URL                   | String | Redis 连接地址         | `redis://localhost:6379/0` |
+| REDIS_HOST                  | String | Redis 主机地址         | `localhost`                 |
+| REDIS_PORT                  | Int    | Redis 端口             | `6379`                     |
 | CORS_ORIGINS                | String | CORS 允许的源          | 见配置文件                   |
 | max_ip_per_user             | Int    | 每用户最大 IP 数       | `5`                        |
 | max_device_per_user         | Int    | 每用户最大设备数       | `10`                       |
@@ -620,20 +690,20 @@ frontend/src/
 
 ### 库存 API
 
-| 方法   | 端点                                    | 认证   | 说明                         |
-| ------ | --------------------------------------- | ------ | ---------------------------- |
-| GET    | `/api/inventory`                      | 是     | 库存列表（分页、筛选、排序） |
-| GET    | `/api/inventory/{id}`                 | 是     | 库存详情                     |
-| GET    | `/api/inventory/code/{code}`          | 是     | 内部编码查询                 |
-| POST   | `/api/inventory/{id}/borrow`          | 是     | 借用库存                     |
-| POST   | `/api/inventory/{id}/return`          | 是     | 归还库存                     |
-| PUT    | `/api/inventory/{id}`                 | 是     | 更新库存                     |
-| DELETE | `/api/inventory/{id}`                 | 管理员 | 删除库存                     |
-| POST   | `/api/inventory/manual-add`           | 管理员 | 手动添加                     |
-| POST   | `/api/inventory/import`               | 管理员 | Excel 导入                   |
-| GET    | `/api/inventory/export`               | 管理员 | 导出 CSV                     |
-| GET    | `/api/inventory/dashboard/my-borrows` | 是     | 我的借用                     |
-| GET    | `/api/inventory/common-shelf`         | 是     | 常用货架                     |
+| 方法   | 端点                                      | 认证   | 说明                         |
+| ------ | ----------------------------------------- | ------ | ---------------------------- |
+| GET    | `/api/inventory`                        | 是     | 库存列表（分页、筛选、排序） |
+| GET    | `/api/inventory/{id}`                   | 是     | 库存详情                     |
+| GET    | `/api/inventory/code/{code}`             | 是     | 内部编码查询                 |
+| POST   | `/api/inventory/{id}/borrow`             | 是     | 借用库存                     |
+| POST   | `/api/inventory/{id}/return`             | 是     | 归还库存                     |
+| PUT    | `/api/inventory/{id}`                   | 是     | 更新库存                     |
+| DELETE | `/api/inventory/{id}`                   | 管理员 | 删除库存                     |
+| POST   | `/api/inventory/manual-add`             | 管理员 | 手动添加                     |
+| POST   | `/api/inventory/import`                 | 管理员 | Excel 导入                   |
+| GET    | `/api/inventory/export`                 | 管理员 | 导出 CSV                     |
+| GET    | `/api/inventory/dashboard/my-borrows`    | 是     | 我的借用                     |
+| GET    | `/api/inventory/common-shelf`           | 是     | 常用货架                     |
 
 ### 试剂订单 API
 
@@ -695,6 +765,14 @@ frontend/src/
                         等待到货 → 确认到货 → 一键入库
 ```
 
+### 耗材订购流程
+
+```
+提交申请 → 等待审批 → 审批通过/驳回 → 完成订单
+```
+
+> 注意：耗材订单不需要入库流程，审批通过后直接标记为完成。
+
 ### 库存借用流程
 
 ```
@@ -703,51 +781,17 @@ frontend/src/
 
 ---
 
-## 代码规范
 
-### Python 规范
-
-- 使用 ruff lint，line-length 100
-- 类型提示 (type hints)
-- 异步优先 (async/await)
-- 所有代码修改后运行 `ruff check app/` 验证
-
-### TypeScript/React 规范
-
-- 函数式组件 + hooks
-- Tailwind CSS（非 CSS modules）
-- 导入顺序: React → 第三方 → 本地 → 类型 → 样式
-- **禁止修改** migrations/ 目录下的已有文件
-
----
-
-## 验证命令
-
-### 后端验证
-
-```bash
-ruff check app/
-```
-
-### 前端验证
-
-```bash
-cd frontend
-npm run lint
-```
-
----
 
 ## 部署指南
 
-### 推荐：Docker 一键部署（服务器）
+### Docker 一键部署（服务器）
 
 项目已提供以下 Docker 文件：
 
 - `docker-compose.yml`
 - `docker/backend/Dockerfile`
 - `docker/frontend/Dockerfile`
-- `docker/nginx/default.conf`
 
 #### 1. 拉取代码并准备环境变量
 
@@ -833,6 +877,12 @@ gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker -
 - 确认 Pillow 库正确安装
 - 检查上传文件大小是否超过限制
 
+### Redis 连接问题
+
+- 检查 Redis 服务是否启动
+- 确认 `REDIS_HOST` 和 `REDIS_PORT` 配置正确
+- 系统会自动降级到数据库模式（不影响核心功能）
+
 ---
 
 ## 许可证
@@ -842,4 +892,4 @@ gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker -
 ---
 
 **版本**: 0.1.0
-**最后更新**: 2026-03-18
+**最后更新**: 2026-03-21

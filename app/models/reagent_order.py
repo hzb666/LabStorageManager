@@ -67,6 +67,8 @@ class ReagentOrderBase(SQLModel):
 
 class ReagentOrder(ReagentOrderBase, table=True):
     """Reagent Order database model"""
+    __tablename__ = "reagent_order"
+
     id: Optional[int] = Field(default=None, primary_key=True)
     applicant_id: Optional[int] = Field(
         default=None,

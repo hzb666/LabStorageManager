@@ -67,7 +67,7 @@ class Inventory(InventoryBase, table=True):
     source_order_id: Optional[int] = Field(
         default=None,
         index=True,
-        foreign_key="reagentorder.id",
+        foreign_key="reagent_order.id",
         ondelete="SET NULL"
     )
     created_by_id: Optional[int] = Field(
