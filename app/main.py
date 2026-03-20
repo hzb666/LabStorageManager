@@ -12,6 +12,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.core.config import settings
+from app.core.constants import (
+    CSP_BASE_DIRECTIVES,
+    CSP_SCRIPT_SRC_DOCS,
+    CSP_SCRIPT_SRC_STRICT,
+    CSP_STYLE_SRC_WITH_INLINE,
+    DOCS_PATH_PREFIXES,
+    HSTS_MAX_AGE_SECONDS,
+    HTTPS_EXEMPT_PATHS,
+    STATIC_CACHE_MAX_AGE_SECONDS,
+    UPLOAD_PATHS,
+)
 from app.core.banner import print_banner
 from app.database import init_db
 from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, announcements, error_logs
@@ -24,37 +35,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_UPLOAD_PATHS = (
-    "/api/announcements/upload-image",
-    "/api/inventory/import",
-)
-_HTTPS_REDIRECT_EXEMPT_PATHS = {
-    "/health",
-}
-
-
 def _build_content_security_policy(path: str | None) -> str:
     """Build a route-aware CSP so API responses stay strict without breaking docs UI."""
     normalized_path = path or ""
-    if normalized_path in {"/docs", "/redoc"} or normalized_path.startswith("/docs/"):
+    if normalized_path in set(DOCS_PATH_PREFIXES) or normalized_path.startswith("/docs/"):
         return (
-            "default-src 'self'; "
-            "base-uri 'self'; "
-            "object-src 'none'; "
-            "frame-ancestors 'none'; "
-            "img-src 'self' data: https:; "
-            "style-src 'self' 'unsafe-inline'; "
-            "script-src 'self' 'unsafe-inline'"
+            f"default-src {CSP_BASE_DIRECTIVES['default-src']}; "
+            f"base-uri {CSP_BASE_DIRECTIVES['base-uri']}; "
+            f"object-src {CSP_BASE_DIRECTIVES['object-src']}; "
+            f"frame-ancestors {CSP_BASE_DIRECTIVES['frame-ancestors']}; "
+            f"img-src {CSP_BASE_DIRECTIVES['img-src']}; "
+            f"style-src {CSP_STYLE_SRC_WITH_INLINE}; "
+            f"script-src {CSP_SCRIPT_SRC_DOCS}"
         )
 
     return (
-        "default-src 'self'; "
-        "base-uri 'self'; "
-        "object-src 'none'; "
-        "frame-ancestors 'none'; "
-        "img-src 'self' data: https:; "
-        "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self'"
+        f"default-src {CSP_BASE_DIRECTIVES['default-src']}; "
+        f"base-uri {CSP_BASE_DIRECTIVES['base-uri']}; "
+        f"object-src {CSP_BASE_DIRECTIVES['object-src']}; "
+        f"frame-ancestors {CSP_BASE_DIRECTIVES['frame-ancestors']}; "
+        f"img-src {CSP_BASE_DIRECTIVES['img-src']}; "
+        f"style-src {CSP_STYLE_SRC_WITH_INLINE}; "
+        f"script-src {CSP_SCRIPT_SRC_STRICT}"
     )
 
 
@@ -65,7 +67,7 @@ def _apply_security_headers(response, path: str | None = None) -> None:
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Content-Security-Policy"] = _build_content_security_policy(path)
     if settings.use_secure_runtime():
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = f"max-age={HSTS_MAX_AGE_SECONDS}; includeSubDomains"
 
 
 def _is_trusted_web_origin(origin: str | None, fallback_origin: str) -> bool:
@@ -84,7 +86,7 @@ def _is_trusted_web_origin(origin: str | None, fallback_origin: str) -> bool:
 
 
 def _is_upload_request(path: str) -> bool:
-    return path in _UPLOAD_PATHS or (path.startswith("/api/users/") and path.endswith("/avatar"))
+    return path in UPLOAD_PATHS or (path.startswith("/api/users/") and path.endswith("/avatar"))
 
 
 def _get_forwarded_proto(request) -> str:
@@ -95,7 +97,7 @@ def _get_forwarded_proto(request) -> str:
 
 
 def _should_skip_https_redirect(path: str) -> bool:
-    return path in _HTTPS_REDIRECT_EXEMPT_PATHS
+    return path in HTTPS_EXEMPT_PATHS
 
 
 class CachedStaticFiles(StaticFiles):
@@ -109,8 +111,7 @@ class CachedStaticFiles(StaticFiles):
         response = await super().get_response(path, scope)
 
         # Add cache headers for static files (images, fonts, etc.)
-        # Cache for 10 years (315360000 seconds)
-        response.headers["Cache-Control"] = "public, max-age=315360000, immutable"
+        response.headers["Cache-Control"] = f"public, max-age={STATIC_CACHE_MAX_AGE_SECONDS}, immutable"
         _apply_security_headers(response, scope.get("path"))
 
         return response

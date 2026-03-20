@@ -14,6 +14,7 @@ import bcrypt
 from sqlmodel import Session, select
 
 from app.core.config import settings
+from app.core.constants import ACTIVITY_DEBOUNCE_SECONDS, BEARER_PREFIX_LEN
 from app.core.time_utils import get_utc_now
 from app.core.redis import get_cached_session, cache_session, delete_cached_session
 from app.database import get_db, engine
@@ -41,7 +42,7 @@ def _should_skip_activity_update(token_hash: str, client_ip: str) -> bool:
     
     # 检查是否在 5 分钟内已更新
     last_active = datetime.fromisoformat(last_active_str)
-    if (get_utc_now() - last_active).total_seconds() < 300:
+    if (get_utc_now() - last_active).total_seconds() < ACTIVITY_DEBOUNCE_SECONDS:
         return True  # 5 分钟内已更新，跳过
     
     # 检查 IP 是否变化
@@ -67,7 +68,7 @@ def _update_user_activity_task(token_hash: str, client_ip: str) -> None:
         last_active_str = cached_data.get("last_active_at")
         if last_active_str:
             last_active = datetime.fromisoformat(last_active_str)
-            if (now_utc - last_active).total_seconds() < 300:
+            if (now_utc - last_active).total_seconds() < ACTIVITY_DEBOUNCE_SECONDS:
                 # 5 分钟内已更新，不需要再次更新
                 return
 
@@ -91,7 +92,7 @@ def _update_user_activity_task(token_hash: str, client_ip: str) -> None:
 
         # 检查是否需要更新
         if session.last_active_at:
-            if (now_utc - session.last_active_at).total_seconds() >= 300:
+            if (now_utc - session.last_active_at).total_seconds() >= ACTIVITY_DEBOUNCE_SECONDS:
                 needs_update = True
         else:
             needs_update = True
@@ -253,7 +254,7 @@ def get_current_user(
         # 2. 从 Authorization header 获取 (Bearer token)
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]  # 去掉 "Bearer " 前缀
+            token = auth_header[BEARER_PREFIX_LEN:]  # 去掉 "Bearer " 前缀
 
     if not token:
         raise credentials_exception

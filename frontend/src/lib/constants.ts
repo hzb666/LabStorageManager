@@ -16,6 +16,95 @@ export const INPUT_STYLES = {
   lg: "h-10 text-base inline-flex leading-none",
 } as const
 
+// === Status Badge Colors ===
+export type BadgeColor = 'green' | 'blue' | 'orange' | 'gray' | 'purple' | 'red' | 'amber'
+
+export const BADGE_COLORS: Record<BadgeColor, string> = {
+  green: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 border border-green-300 dark:border-green-700',
+  blue: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border border-blue-300 dark:border-blue-700',
+  orange: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200 border border-orange-300 dark:border-orange-700',
+  gray: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700',
+  purple: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 border border-purple-300 dark:border-purple-700',
+  red: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 border border-red-300 dark:border-red-700',
+  amber: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700',
+}
+
+export const STATUS_COLORS: Record<string, BadgeColor> = {
+  in_stock: 'green',
+  not_in_stock: 'amber',
+  borrowed: 'blue',
+  consumed: 'gray',
+  active: 'green',
+  inactive: 'red',
+  admin: 'purple',
+  user: 'blue',
+  current: 'green',
+  other: 'gray',
+  pending: 'orange',
+  approved: 'blue',
+  arrived: 'purple',
+  stocked: 'green',
+  rejected: 'red',
+  completed: 'green',
+  running_out: 'orange',
+  not_stocked: 'red',
+  common_public: 'blue',
+  not_found: 'purple',
+  reorder: 'green',
+  high_usage: 'amber',
+  degraded: 'red',
+  others: 'gray',
+}
+
+export const STATUS_LABELS: Record<string, string> = {
+  in_stock: '在库',
+  not_in_stock: '没有',
+  borrowed: '借出',
+  consumed: '用完',
+  active: '启用',
+  inactive: '禁用',
+  admin: '管理员',
+  user: '用户',
+  current: '当前设备',
+  other: '其他设备',
+  pending: '待审',
+  approved: '批准',
+  arrived: '到货',
+  stocked: '入库',
+  rejected: '驳回',
+  completed: '完成',
+  running_out: '用完',
+  not_stocked: '没有',
+  common_public: '公用',
+  not_found: '未见',
+  reorder: '追加',
+  high_usage: '大量',
+  degraded: '变质',
+  others: '其他',
+}
+
+export const ORDER_REASON_LABELS: Record<string, string> = {
+  running_out: '用完',
+  not_stocked: '没有',
+  common_public: '公用',
+  not_found: '未见',
+  reorder: '追加',
+  high_usage: '大量',
+  degraded: '变质',
+  others: '其他',
+}
+
+export const ORDER_REASON_COLORS: Record<string, BadgeColor> = {
+  running_out: 'orange',
+  not_stocked: 'red',
+  common_public: 'blue',
+  not_found: 'purple',
+  reorder: 'green',
+  high_usage: 'amber',
+  degraded: 'red',
+  others: 'gray',
+}
+
 // === Session Storage Keys ===
 export const AUTH_NOTICE_KEY = 'auth_notice'
 
@@ -55,12 +144,14 @@ export const CONSUMABLE_STATUS_STYLE: Record<string, string> = {
 // === Inventory Status ===
 export const INVENTORY_STATUS_MAP: Record<string, string> = {
   in_stock: '在库',
+  common: '常用',
   borrowed: '已借出',
   consumed: '已耗尽',
 }
 
 export const INVENTORY_STATUS_STYLE: Record<string, string> = {
   in_stock: 'bg-green-100 text-green-800',
+  common: 'bg-cyan-100 text-cyan-800',
   borrowed: 'bg-blue-100 text-blue-800',
   consumed: 'bg-gray-100 text-gray-800',
 }
@@ -99,21 +190,6 @@ export interface User {
   role: UserRole
   is_active: boolean
   created_at: string
-}
-
-/**
- * 判断用户是否为管理员
- */
-export function isAdmin(user: { role: string } | null | undefined): boolean {
-  return user?.role === UserRoles.ADMIN
-}
-
-/**
- * 判断用户是否为管理员或本人（用于操作权限判断）
- */
-export function isAdminOrSelf(currentUser: { role: string; id: number } | null | undefined, targetId: number): boolean {
-  if (!currentUser) return false
-  return currentUser.role === UserRoles.ADMIN || currentUser.id === targetId
 }
 
 // === Import Template Columns ===
@@ -181,7 +257,27 @@ export const IMPORT_TEMPLATE_COLUMNS: ImportColumn[] = [
   },
 ]
 
-// === Helper to get display text ===
-export function mapStatus(value: string, mapping: Record<string, string>): string {
-  return mapping[value] ?? value
-}
+
+// ==================== 时间常量 ====================
+// 1天毫秒数
+export const ONE_DAY_MS = 24 * 60 * 60 * 1000
+
+// 公告关闭时长 (24小时)
+export const ANNOUNCEMENT_CLOSED_DURATION_MS = ONE_DAY_MS
+
+// 登录态过期时长 (3天)
+export const AUTH_STORAGE_EXPIRY_MS = 3 * ONE_DAY_MS
+
+// 字体加载超时 (1秒)
+export const FONT_TIMEOUT_MS = 1000
+
+// ==================== 缓存与限流常量 ====================
+// 化学属性缓存最大条目数
+export const CHEMICAL_PROPERTIES_CACHE_MAX_SIZE = 1000
+
+// 化学属性缓存有效期 (10年毫秒数)
+export const CHEMICAL_PROPERTIES_CACHE_EXPIRY_MS = 10 * 365 * 24 * 60 * 60 * 1000
+
+// PubChem 速率限制: 1秒最多5个请求
+export const PUBCHEM_RATE_LIMIT = 5
+export const PUBCHEM_RATE_WINDOW_MS = 1000

@@ -15,6 +15,15 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.config import settings
+from app.core.constants import (
+    CHEMICAL_INFO_FALLBACK_FUTURE_TIMEOUT_SECONDS,
+    CHEMICAL_INFO_PRIMARY_FUTURE_TIMEOUT_SECONDS,
+    CHEMICAL_INFO_RATE_LIMIT_DELAY_SECONDS,
+    CHEMICAL_INFO_CACHE_MAX_SIZE,
+    CHEMICAL_INFO_CACHE_TTL_SECONDS,
+    MIN_REQUEST_TIMEOUT_SECONDS,
+    TRANSLATED_NAME_SUFFIX,
+)
 from app.core.auth import get_current_user
 from app.models.user import User
 from app.services.cas_utils import validate_and_normalize_cas, is_special_cas_value
@@ -35,8 +44,6 @@ USER_AGENTS = [
 # 简单内存缓存（带大小限制的 LRU）
 _CACHE: Dict[str, Dict[str, Any]] = {}
 _CACHE_ORDER: list = []  # 记录访问顺序
-_CACHE_MAX_SIZE = 1000   # 最大缓存条目数
-_CACHE_TTL_SECONDS = 3600  # 缓存1小时
 _ALLOWED_OUTBOUND_HOSTS = {
     "www.chemblink.com",
     "chemblink.com",
@@ -97,7 +104,7 @@ def _get_cached(cas_number: str) -> Optional[Dict[str, Any]]:
     """从缓存获取"""
     if cas_number in _CACHE:
         cached_data, cached_time = _CACHE[cas_number]
-        if time.time() - cached_time < _CACHE_TTL_SECONDS:
+        if time.time() - cached_time < CHEMICAL_INFO_CACHE_TTL_SECONDS:
             # 更新访问顺序（移到末尾）
             if cas_number in _CACHE_ORDER:
                 _CACHE_ORDER.remove(cas_number)
@@ -120,7 +127,7 @@ def _set_cached(cas_number: str, data: Dict[str, Any]) -> None:
             _CACHE_ORDER.remove(cas_number)
 
     # 如果缓存已满，删除最旧的条目
-    while len(_CACHE) >= _CACHE_MAX_SIZE and _CACHE_ORDER:
+    while len(_CACHE) >= CHEMICAL_INFO_CACHE_MAX_SIZE and _CACHE_ORDER:
         oldest = _CACHE_ORDER.pop(0)
         if oldest in _CACHE:
             del _CACHE[oldest]
@@ -135,7 +142,7 @@ def _remaining_timeout(deadline: float) -> Optional[float]:
     if remaining <= 0:
         return None
     # requests 要求 timeout > 0
-    return max(0.1, remaining)
+    return max(MIN_REQUEST_TIMEOUT_SECONDS, remaining)
 
 
 def _parse_chinese_name(content: str) -> Optional[str]:
@@ -202,7 +209,7 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
         chinese_name = results[1]
 
     # 短暂延迟，避免请求过快
-    time.sleep(0.1)
+    time.sleep(CHEMICAL_INFO_RATE_LIMIT_DELAY_SECONDS)
 
     return chinese_name
 
@@ -293,7 +300,7 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
             fallback_failure_reason = f"补充查询异常：{_format_exception_message(e)}"
     
     # 短暂延迟
-    time.sleep(0.1)
+    time.sleep(CHEMICAL_INFO_RATE_LIMIT_DELAY_SECONDS)
 
     warning_message: Optional[str] = None
     if not english_name:
@@ -392,12 +399,12 @@ def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
         
         # 等待两个任务完成
         try:
-            chinese_name = future_chinese.result(timeout=30)
+            chinese_name = future_chinese.result(timeout=CHEMICAL_INFO_PRIMARY_FUTURE_TIMEOUT_SECONDS)
         except Exception as e:
             logger.warning(f"Failed to get Chinese name for CAS {cas}: {e}")
         
         try:
-            english_name, warning_message = future_english.result(timeout=10)
+            english_name, warning_message = future_english.result(timeout=CHEMICAL_INFO_FALLBACK_FUTURE_TIMEOUT_SECONDS)
         except Exception as e:
             logger.warning(f"Failed to get English name for CAS {cas}: {e}")
             warning_message = "英文名查询超时，已跳过 PubChem 补充识别"
@@ -407,8 +414,8 @@ def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
         logger.info(f"Chinese name not found for CAS {cas}, trying to translate English name: {english_name}")
         translated_name = translate_text(english_name)
         if translated_name:
-            # 翻译的中文名添加"（译）"标记
-            chinese_name = f"{translated_name}（译）"
+            # 翻译的中文名添加后缀标记
+            chinese_name = f"{translated_name}{TRANSLATED_NAME_SUFFIX}"
             logger.info(f"Translated Chinese name for CAS {cas}: {chinese_name}")
     
     # 保存到缓存
@@ -454,7 +461,7 @@ def get_chemical_info(
     if is_special_cas_value(normalized_cas):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="生物试剂不支持 CAS 查询",
+            detail="Biological reagents do not support CAS query",
         )
 
     result = query_chemical_info(normalized_cas)

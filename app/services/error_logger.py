@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timedelta
+from app.core.constants import DEFAULT_LOG_HOURS, DEFAULT_LOG_LINES, LOG_FILE_MAX_BYTES
 
 # 敏感关键词列表（用于日志脱敏）
 SENSITIVE_KEYWORDS = [
@@ -42,7 +43,7 @@ def get_error_logger() -> logging.Logger:
         
         file_handler = RotatingFileHandler(
             LOG_FILE,
-            maxBytes=5 * 1024 * 1024,  # 5MB
+            maxBytes=LOG_FILE_MAX_BYTES,
             encoding="utf-8"
         )
     except Exception:
@@ -99,7 +100,7 @@ def sanitize_log_content(content: str) -> str:
     return sanitized
 
 
-def get_recent_error_logs(lines: int = 100) -> List[str]:
+def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
     """
     获取最近的错误日志
     
@@ -135,7 +136,7 @@ def get_recent_error_logs(lines: int = 100) -> List[str]:
         return []
 
 
-def get_error_logs_since(hours: int = 24) -> List[str]:
+def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
     """
     获取指定时间范围内的错误日志
     

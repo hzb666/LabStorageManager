@@ -7,7 +7,7 @@ import { ToastContainer } from '@/components/ui/Toast'
 import { TooltipProvider } from '@/components/ui/Tooltip'
 import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { isAdmin } from '@/lib/constants'
+import { UserRoles } from '@/lib/constants'
 import { authAPI } from '@/api/client'
 
 // 懒加载页面组件 - 使用默认导出
@@ -41,7 +41,7 @@ function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
 
 function AdminRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = useAuthStore((state) => state.user)
-  if (!isAdmin(user)) {
+  if (user?.role !== UserRoles.ADMIN) {
     return <Navigate to="/" replace />
   }
   return <>{children}</>

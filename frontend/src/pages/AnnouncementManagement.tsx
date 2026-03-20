@@ -437,14 +437,7 @@ export function AnnouncementManagement() {
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
       const errorMsg = axiosError.response?.data?.detail || '图片上传失败'
-      // 将英文错误消息转换为中文
-      if (errorMsg.includes('Invalid image type')) {
-        toast.error('不支持该图像格式')
-      } else if (errorMsg.includes('Image size exceeds')) {
-        toast.error('图片大小超过限制')
-      } else {
-        toast.error(errorMsg)
-      }
+      toast.error(normalizeApiErrorMessage(errorMsg, '图片上传失败'))
     } finally {
       setUploading(false)
       // 清空 input 值，允许重复选择同一文件
@@ -526,14 +519,7 @@ export function AnnouncementManagement() {
       } catch (error) {
         const axiosError = error as AxiosError<{ detail?: string }>
         const errorMsg = axiosError.response?.data?.detail || '图片上传失败'
-        // 将英文错误消息转换为中文
-        if (errorMsg.includes('Invalid image type')) {
-          toast.error('不支持该图像格式')
-        } else if (errorMsg.includes('Image size exceeds')) {
-          toast.error('图片大小超过限制')
-        } else {
-          toast.error(errorMsg)
-        }
+        toast.error(normalizeApiErrorMessage(errorMsg, '图片上传失败'))
       } finally {
         setUploading(false)
       }

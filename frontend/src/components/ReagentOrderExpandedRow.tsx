@@ -60,7 +60,7 @@ export const ReagentOrderExpandedRow = React.memo(function ReagentOrderExpandedR
     return () => {
       cancelled = true
     }
-  }, [item.cas_number, isSpecialCas])
+  }, [item.cas_number, item.id, isSpecialCas])
 
   const inventoryLatest = casOverview?.inventory.latest
   const latestOrder = casOverview?.orders.latest

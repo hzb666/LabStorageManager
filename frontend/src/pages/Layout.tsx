@@ -27,7 +27,7 @@ import { getBugButtonHidden, clearBugButtonHidden } from '@/lib/bugReportButtonS
 import { clearDashboardTab } from '@/lib/dashboardUtils'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
-import { isAdmin, USER_ROLE_MAP } from '@/lib/constants'
+import { UserRoles, USER_ROLE_MAP } from '@/lib/constants'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { SidebarLogo } from '@/components/SidebarLogo'
@@ -99,7 +99,7 @@ export function Layout() {
   }
 
   const filteredNavItems = navItems.filter(
-    (item) => !item.adminOnly || isAdmin(user)
+    (item) => !item.adminOnly || user?.role === UserRoles.ADMIN
   )
 
   const isDevicesActive = location.pathname.startsWith('/devices')

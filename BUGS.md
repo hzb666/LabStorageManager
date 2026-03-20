@@ -1,5 +1,12 @@
 # BUGS
 
+## 2026-03-21 SQLite 表结构与 SQLModel 定义在旧库可能漂移
+
+- 现象: 历史 `lab_inventory.db` 可能出现“模型定义”与“实际表结构”不一致（例如 `inventory.source_order_id` 及其索引在旧库缺失）
+- 根因: 启动阶段使用 `SQLModel.metadata.create_all` 仅创建缺失表，不会为已存在表自动补新列；现有启动补齐逻辑仅覆盖拼音搜索字段/索引
+- 处理方式: 在 `app/database.py` 增加启动时 schema 一致性校验，遍历所有 SQLModel 表并比对列/索引是否一致，发现差异仅输出明确日志（不自动修改表）
+- 预防: 后续新增数据库字段时同步评估旧库迁移策略；至少提供“启动校验 + 手动迁移指引”，避免模型与实际库结构长期漂移
+
 ## 2026-03-20 Inventory 更新接口存在 remaining_quantity 重复分支
 
 - 现象: `app/api/inventory.py` 的更新逻辑里出现两个 `if 'remaining_quantity' in update_data`，一个做校验、一个做赋值，且剩余百分比计算分散在后续独立条件中

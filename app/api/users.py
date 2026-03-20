@@ -23,6 +23,17 @@ from app.core.auth import (
     CurrentUser,
 )
 from app.core.config import settings
+from app.core.constants import (
+    LOGIN_WINDOW_SECONDS,
+    MAX_LOGIN_ATTEMPTS,
+    PASSWORD_MAX_LENGTH,
+    PASSWORD_MIN_LENGTH,
+    SECONDS_PER_HOUR,
+    UNKNOWN_DEVICE,
+    USERNAME_MAX_LENGTH,
+    USERNAME_MIN_LENGTH,
+)
+from app.core.time_utils import utc_iso_str
 from app.core.request_utils import get_client_ip
 from app.core.redis import delete_cached_session, get_redis
 from app.database import get_db, DBSession
@@ -54,13 +65,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 DUMMY_PASSWORD_HASH = get_password_hash("constant-timing-placeholder")
-
-# ==================== Rate Limiting ====================
-# 基于 Redis 的速率限制：记录每个 IP 的登录失败次数
-# 使用 Redis 可以支持多实例部署
-MAX_LOGIN_ATTEMPTS = 5  # 最多失败 5 次
-LOGIN_WINDOW_SECONDS = 300  # 5 分钟内
-
 
 def _rate_limit_key(client_ip: str) -> str:
     """生成速率限制的 Redis Key"""
@@ -164,16 +168,16 @@ def _record_failed_login_memory(client_ip: str) -> None:
 
 class LoginRequest(BaseModel):
     """Login request body"""
-    username: str = Field(min_length=3, max_length=20)
-    password: str = Field(min_length=6, max_length=50)
+    username: str = Field(min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
     device_id: Optional[str] = None  # Client device ID
-    device_name: Optional[str] = "Unknown Device"  # Client device name
+    device_name: Optional[str] = UNKNOWN_DEVICE  # Client device name
 
 
 class ChangePasswordRequest(BaseModel):
     """Change password request body"""
-    old_password: str = Field(min_length=6, max_length=50, description="原密码")
-    new_password: str = Field(min_length=6, max_length=50, description="新密码")
+    old_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH, description="原密码")
+    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH, description="新密码")
 
 
 class UserSearchItem(BaseModel):
@@ -258,7 +262,7 @@ def login(
             user_id=user.id,
             username=user.username,
             device_id=login_request.device_id,
-            device_name=login_request.device_name or "Unknown Device",
+            device_name=login_request.device_name or UNKNOWN_DEVICE,
             ip_address=client_ip,
             user_agent=user_agent,
             token=access_token
@@ -287,7 +291,7 @@ def login(
             httponly=True,
             secure=settings.use_secure_runtime(),  # 非开发环境启用 HTTPS cookie
             samesite="lax",
-            max_age=settings.session_expire_hours * 3600,
+            max_age=settings.session_expire_hours * SECONDS_PER_HOUR,
             path="/",
         )
         
@@ -486,7 +490,7 @@ def list_users(
         last_active_at = last_active_map.get(user.id)
         
         user_dict = UserResponse.model_validate(user).model_dump(mode='json')
-        user_dict['last_active_at'] = last_active_at.isoformat() + 'Z' if last_active_at else None
+        user_dict['last_active_at'] = utc_iso_str(last_active_at)
         user_responses.append(user_dict)
     
     return {

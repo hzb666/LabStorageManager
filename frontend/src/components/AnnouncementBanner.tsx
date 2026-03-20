@@ -3,13 +3,13 @@ import { X } from 'lucide-react'
 import { type Announcement } from '@/api/client'
 import { AnnouncementDetail } from './AnnouncementDetail'
 import { cn } from '@/lib/utils'
+import { ANNOUNCEMENT_CLOSED_DURATION_MS } from '@/lib/constants'
 
 interface AnnouncementBannerProps {
   announcements: Announcement[]
 }
 
 const CLOSED_KEY = 'announcement_closed'
-const CLOSED_DURATION = 24 * 60 * 60 * 1000 // 24小时毫秒数
 
 // 获取关闭状态存储对象
 const getClosedStorage = (): Record<string, number> => {
@@ -32,7 +32,7 @@ const isAnnouncementClosed = (id: number, updatedAt?: string): boolean => {
   const now = Date.now()
   
   // 1. 检查是否超过 24 小时
-  if (now - timestamp > CLOSED_DURATION) {
+  if (now - timestamp > ANNOUNCEMENT_CLOSED_DURATION_MS) {
     delete storage[key]
     localStorage.setItem(CLOSED_KEY, JSON.stringify(storage))
     return false
@@ -57,7 +57,7 @@ const isAnnouncementClosed = (id: number, updatedAt?: string): boolean => {
   return true
 }
 
-export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
+export function AnnouncementBanner({ announcements }: Readonly<AnnouncementBannerProps>) {
   const [dismissedIds, setDismissedIds] = useState<number[]>([])
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
@@ -135,8 +135,8 @@ export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
           </div>
 
           {/* 边缘遮罩 */}
-          <div className="absolute left-0 top-0 bottom-0 w-16 bg-gradient-to-r from-page-card to-transparent pointer-events-none z-20" />
-          <div className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-page-card to-transparent pointer-events-none z-20" />
+          <div className="absolute left-0 top-0 bottom-0 w-16 bg-linear-to-r from-page-card to-transparent pointer-events-none z-20" />
+          <div className="absolute right-0 top-0 bottom-0 w-16 bg-linear-to-l from-page-card to-transparent pointer-events-none z-20" />
         </div>
         
       </div>

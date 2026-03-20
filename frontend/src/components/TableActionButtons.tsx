@@ -46,7 +46,6 @@ export interface TableActionButtonsProps<T> {
     className?: string
     title?: string
   }[]
-  compact?: boolean
 }
 
 interface ActionButtonProps<T> {
@@ -68,7 +67,6 @@ export function TableActionButtons<T>({
   isAdmin = false,
   statusField,
   statusDisplay,
-  compact = false,
 }: Readonly<TableActionButtonsProps<T>>) {
   const status = statusField ? (item[statusField] as string) : undefined
 
@@ -93,7 +91,7 @@ export function TableActionButtons<T>({
   })
 
   return (
-    <div className={cn('flex items-center gap-1', compact ? 'flex-wrap' : 'flex-wrap')}>
+    <div className="flex items-center gap-1 flex-wrap">
       {showEdit && onEdit && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -263,7 +261,6 @@ export const TableActionButtonsMemo = React.memo(
       prevProps.isAdmin !== nextProps.isAdmin ||
       prevProps.showEdit !== nextProps.showEdit ||
       prevProps.disableEdit !== nextProps.disableEdit ||
-      prevProps.compact !== nextProps.compact ||
       prevProps.onEdit !== nextProps.onEdit ||
       prevProps.actions !== nextProps.actions ||
       prevProps.statusDisplay !== nextProps.statusDisplay

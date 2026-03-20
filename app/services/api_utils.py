@@ -13,6 +13,7 @@ API 通用工具函数。
 
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
+from app.core.constants import CACHE_MAX_ITEMS, CACHE_PRUNE_COUNT
 
 
 CacheStore = Dict[str, tuple[Any, datetime]]
@@ -43,8 +44,8 @@ def set_cached_result(
     result: Dict[str, Any],
     *,
     now: Callable[[], datetime],
-    max_items: int = 100,
-    prune_count: int = 10,
+    max_items: int = CACHE_MAX_ITEMS,
+    prune_count: int = CACHE_PRUNE_COUNT,
 ) -> None:
     """写入缓存并在容量超过阈值时按最旧时间裁剪。"""
     cache_store[cache_key] = (result, now())

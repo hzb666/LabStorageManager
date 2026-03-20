@@ -7,7 +7,7 @@ import os
 from enum import Enum
 from typing import Annotated, Generator
 
-from sqlalchemy import Connection, event, text
+from sqlalchemy import Connection, event, inspect, text
 from sqlmodel import SQLModel, Session, create_engine, select
 from fastapi import Depends
 
@@ -96,6 +96,79 @@ SQLITE_SEARCH_INDEX_UPGRADES: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def check_sqlite_schema_consistency(connection: Connection) -> None:
+    """
+    Check whether SQLite schema matches SQLModel definitions.
+
+    This function only checks and logs; it does not mutate schema.
+    """
+    inspector = inspect(connection)
+    metadata = SQLModel.metadata
+
+    mismatch_messages: list[str] = []
+
+    for table_name, table in metadata.tables.items():
+        if not inspector.has_table(table_name):
+            mismatch_messages.append(f"table {table_name} is missing in database")
+            continue
+
+        db_columns = {column["name"] for column in inspector.get_columns(table_name)}
+        model_columns = {column.name for column in table.columns}
+
+        missing_columns = sorted(model_columns - db_columns)
+        extra_columns = sorted(db_columns - model_columns)
+        if missing_columns:
+            mismatch_messages.append(
+                f"table {table_name} missing columns: {', '.join(missing_columns)}"
+            )
+        if extra_columns:
+            mismatch_messages.append(
+                f"table {table_name} has extra columns: {', '.join(extra_columns)}"
+            )
+
+        expected_indexes = {
+            index.name: [column.name for column in index.columns]
+            for index in table.indexes
+            if index.name
+        }
+        actual_indexes = {
+            index["name"]: index.get("column_names") or []
+            for index in inspector.get_indexes(table_name)
+            if index.get("name")
+        }
+
+        missing_indexes = sorted(set(expected_indexes) - set(actual_indexes))
+        extra_indexes = sorted(set(actual_indexes) - set(expected_indexes))
+        if missing_indexes:
+            mismatch_messages.append(
+                f"table {table_name} missing indexes: {', '.join(missing_indexes)}"
+            )
+        if extra_indexes:
+            mismatch_messages.append(
+                f"table {table_name} has extra indexes: {', '.join(extra_indexes)}"
+            )
+
+        common_indexes = sorted(set(expected_indexes) & set(actual_indexes))
+        for index_name in common_indexes:
+            expected_columns = expected_indexes[index_name]
+            actual_columns = actual_indexes[index_name]
+            if expected_columns != actual_columns:
+                mismatch_messages.append(
+                    f"table {table_name} index {index_name} column mismatch: "
+                    f"model={expected_columns}, db={actual_columns}"
+                )
+
+    if mismatch_messages:
+        logger.warning(
+            "SQLite schema consistency check found mismatches (%d): %s. "
+            "Manual migration is required.",
+            len(mismatch_messages),
+            " | ".join(mismatch_messages),
+        )
+    else:
+        logger.info("SQLite schema consistency check passed for all SQLModel tables.")
+
+
 def normalize_legacy_enum_storage(connection: Connection) -> int:
     """
     Normalize legacy enum values stored as enum.value to the current enum.name format.
@@ -173,6 +246,7 @@ def init_db() -> None:
     with engine.begin() as connection:
         normalize_legacy_enum_storage(connection)
         ensure_sqlite_search_columns(connection)
+        check_sqlite_schema_consistency(connection)
 
     # Create default admin user if no users exist
     _create_default_admin()

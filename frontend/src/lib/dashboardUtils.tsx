@@ -26,6 +26,7 @@ export interface MyBorrowItem {
 
 export interface PendingStockinItem {
   inventory_id: number
+  order_id?: number | null
   name: string
   cas_number: string
   initial_quantity: number
@@ -50,6 +51,8 @@ export interface DashboardReagentOrder extends DashboardOrderBase {
   category?: string | null
   brand?: string | null
   specification?: string
+  initial_quantity?: number | null
+  unit?: string | null
   quantity: number
   price?: number | null
   order_reason?: string

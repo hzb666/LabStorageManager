@@ -246,9 +246,10 @@ export const reagentOrderAPI = {
   approve: (id: number) => api.post(`/reagent-orders/${id}/approve`),
   reject: (id: number, reason: string) =>
     api.post(`/reagent-orders/${id}/reject`, { reason }),
-  confirmArrival: (id: number, notes?: string) =>
-    api.post(`/reagent-orders/${id}/confirm-arrival`, { arrival_notes: notes }),
-  stockIn: (id: number) => api.post(`/reagent-orders/${id}/stock-in`),
+  confirmArrival: (id: number, data?: { arrival_notes?: string; storage_location?: string }) =>
+    api.post(`/reagent-orders/${id}/confirm-arrival`, data ?? {}),
+  stockIn: (id: number, data: { storage_location: string; remaining_quantity?: number }) =>
+    api.post(`/reagent-orders/${id}/stock-in`, data),
   getCASOverview: (
     casNumber: string,
     params?: { exclude_order_id?: number }

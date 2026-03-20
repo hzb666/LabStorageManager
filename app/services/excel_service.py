@@ -2,7 +2,7 @@
 Excel Import Service - Parse Excel files for inventory bulk import
 """
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Tuple, Optional
 from sqlalchemy.orm import Session
@@ -12,6 +12,12 @@ from app.services.api_utils import empty_to_none
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.core.constants import (
+    EXCEL_DATE_EPOCH,
+    EXCEL_FILE_MAX_BYTES,
+    EXCEL_RED_FONT_COLOR,
+    INTERNAL_CODE_SEQUENCE_PAD_WIDTH,
+)
 from app.core.time_utils import get_utc_now
 
 
@@ -43,7 +49,7 @@ FILE_MAGIC_BYTES = {
 }
 
 # 最大文件大小 (2MB)
-MAX_FILE_SIZE = 2 * 1024 * 1024
+MAX_FILE_SIZE = EXCEL_FILE_MAX_BYTES
 
 
 def validate_uploaded_file(file: UploadFile) -> None:
@@ -206,7 +212,7 @@ def _generate_internal_code_with_tracking(
         sequence_tracker[tracker_key] = seq + 1
     
     # Generate the internal code
-    return f"{cas_number}-{date_str}-{str(seq).zfill(2)}"
+    return f"{cas_number}-{date_str}-{str(seq).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)}"
 
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
@@ -400,7 +406,7 @@ def import_inventory_from_excel(
                     # Try parsing as numeric
                     if date_str.isdigit():
                         if len(date_str) == 5:  # Excel date serial (e.g., 45292 = 2024-01-15)
-                            excel_epoch = date(1899, 12, 30)  # Excel epoch
+                            excel_epoch = EXCEL_DATE_EPOCH  # Excel epoch
                             date_str = str(excel_epoch + timedelta(days=int(date_str)))
                         elif len(date_str) == 8:  # YYYYMMDD
                             date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
@@ -519,7 +525,7 @@ def generate_excel_template() -> bytes:
     header_font = Font(bold=True)
     
     # 示例数据使用红色字体
-    example_font = Font(color="FF0000")  # 红色
+    example_font = Font(color=EXCEL_RED_FONT_COLOR)  # 红色
     
     # 写入表头和示例数据，同时设置列格式和列宽（单次遍历优化性能）
     for col_idx, (key, label, example) in enumerate(columns, 1):

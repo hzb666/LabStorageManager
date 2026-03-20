@@ -7,6 +7,7 @@ import re
 from sqlmodel import Session, select
 
 from app.models.inventory import Inventory
+from app.core.constants import INTERNAL_CODE_SEQUENCE_PAD_WIDTH
 from app.core.time_utils import get_utc_now
 
 
@@ -80,7 +81,7 @@ def generate_internal_code(
     # Generate codes
     codes = []
     for i in range(start_seq, start_seq + quantity):
-        code = f"{prefix}{str(i).zfill(2)}"
+        code = f"{prefix}{str(i).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)}"
         codes.append(code)
     
     return codes

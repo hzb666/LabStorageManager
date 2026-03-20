@@ -10,6 +10,7 @@ from sqlmodel import Session, select, func
 
 from app.core.auth import CurrentUser, require_admin
 from app.core.config import settings
+from app.core.constants import INVALID_FILENAME_PREFIX, INVALID_FILENAME_SEGMENTS, MAX_PAGE_SIZE
 from app.core.request_utils import get_client_ip
 from app.core.time_utils import get_utc_now
 from app.database import get_db
@@ -96,7 +97,7 @@ def list_announcements(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)],
     skip: int = 0,
-    limit: int = 100,
+    limit: int = MAX_PAGE_SIZE,
 ):
     """
     Get all announcements (admin only)
@@ -344,7 +345,7 @@ def delete_announcement_image(
     Delete announcement image (admin only)
     """
     # 修复路径穿越漏洞
-    if ".." in filename or filename.startswith("/"):
+    if any(segment in filename for segment in INVALID_FILENAME_SEGMENTS) or filename.startswith(INVALID_FILENAME_PREFIX):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename")
 
     # Construct the URL path

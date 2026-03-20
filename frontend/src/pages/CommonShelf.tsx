@@ -30,6 +30,7 @@ interface CommonShelfItem {
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '全部状态' },
+  { value: 'common', label: '常用' },
   { value: 'in_stock', label: '在库' },
   { value: 'borrowed', label: '借出' },
   { value: 'consumed', label: '已用完' },

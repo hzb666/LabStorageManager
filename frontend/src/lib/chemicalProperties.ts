@@ -2,6 +2,12 @@
 // 缓存: localStorage，10年有效期
 
 import { isSpecialCasValue } from './validationSchemas'
+import {
+  CHEMICAL_PROPERTIES_CACHE_MAX_SIZE,
+  CHEMICAL_PROPERTIES_CACHE_EXPIRY_MS,
+  PUBCHEM_RATE_LIMIT,
+  PUBCHEM_RATE_WINDOW_MS,
+} from './constants'
 
 // ============ 类型定义 ============
 
@@ -21,10 +27,6 @@ interface PUGRestProperty {
 // ============ 缓存配置 ============
 
 const CACHE_KEY = 'chemical_properties_cache'
-const MAX_CACHE_SIZE = 1000
-const CACHE_EXPIRY_MS = 10 * 365 * 24 * 60 * 60 * 1000 // 10年
-const PUBCHEM_RATE_LIMIT = 5
-const PUBCHEM_RATE_WINDOW_MS = 1000
 
 // 内存缓存
 const memoryCache = new Map<string, ChemicalProperties>()
@@ -42,7 +44,7 @@ function loadFromStorage(): Map<string, ChemicalProperties> {
     if (!stored) return new Map()
 
     const { data, timestamp } = JSON.parse(stored)
-    if (Date.now() - timestamp > CACHE_EXPIRY_MS) {
+    if (Date.now() - timestamp > CHEMICAL_PROPERTIES_CACHE_EXPIRY_MS) {
       localStorage.removeItem(CACHE_KEY)
       return new Map()
     }
@@ -148,7 +150,7 @@ export async function queryCompoundData(casNumber: string): Promise<ChemicalProp
 
       // 只有两个属性都获取成功时才缓存
       if (result.smiles && result.molecularWeight) {
-        if (memoryCache.size >= MAX_CACHE_SIZE) {
+        if (memoryCache.size >= CHEMICAL_PROPERTIES_CACHE_MAX_SIZE) {
           const firstKey = memoryCache.keys().next().value
           if (firstKey) memoryCache.delete(firstKey)
         }

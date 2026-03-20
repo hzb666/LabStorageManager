@@ -11,8 +11,15 @@ from sqlmodel import Session, select, func
 
 from app.core.auth import CurrentUser, get_current_user
 from app.core.config import settings
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
+    LOW_STOCK_PERCENT,
+    MIN_IMPORT_RATE_LIMIT,
+    OVERDUE_BORROW_DAYS,
+    IMPORT_RATE_LIMIT_DIVISOR,
+)
 from app.core.request_utils import get_client_ip
-from app.core.time_utils import get_utc_now, to_china_time
+from app.core.time_utils import get_utc_now, to_china_time, utc_iso_str
 from app.database import DBSession, get_db
 from app.models.inventory import (
     BorrowLog,
@@ -100,7 +107,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         if is_special_cas_value(normalized_cas):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="生物试剂不支持 CAS 查询",
+                detail="Biological reagents do not support CAS query",
             )
 
         statement = select(Inventory).where(
@@ -141,7 +148,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         if is_special_cas_value(normalized_cas):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="生物试剂不支持 CAS 查询",
+                detail="Biological reagents do not support CAS query",
             )
 
         statement = select(func.sum(Inventory.remaining_quantity)).where(
@@ -338,7 +345,7 @@ def _register_manual_and_dashboard_routes(
                     "cas_number": item.cas_number,
                     "remaining_quantity": item.remaining_quantity,
                     "unit": item.unit,
-                    "borrow_time": item.updated_at.isoformat() + 'Z' if item.updated_at else None,
+                    "borrow_time": utc_iso_str(item.updated_at),
                     "borrower_name": (
                         users_map.get(
                             _parse_actual_borrower_id(latest_logs_by_inventory[item.id].notes)
@@ -347,12 +354,12 @@ def _register_manual_and_dashboard_routes(
                         else None
                     ) or current_user.full_name,
                     "borrow_days": (now - item.updated_at).days if item.updated_at else 0,
-                    "is_overdue": ((now - item.updated_at).days > 3) if item.updated_at else False,
+                    "is_overdue": ((now - item.updated_at).days > OVERDUE_BORROW_DAYS) if item.updated_at else False,
                 }
                 for item in items
             ],
             "total": len(items),
-            "overdue_count": sum(1 for item in items if item.updated_at and (now - item.updated_at).days > 3),
+            "overdue_count": sum(1 for item in items if item.updated_at and (now - item.updated_at).days > OVERDUE_BORROW_DAYS),
         }
 
     @router.get("/dashboard/pending-stockin")
@@ -371,11 +378,12 @@ def _register_manual_and_dashboard_routes(
             "data": [
                 {
                     "inventory_id": item.id,
+                    "order_id": item.source_order_id,
                     "name": item.name,
                     "cas_number": item.cas_number,
                     "initial_quantity": item.initial_quantity,
                     "unit": item.unit,
-                    "stockin_time": item.created_at.isoformat() + 'Z' if item.created_at else None,
+                    "stockin_time": utc_iso_str(item.created_at),
                 }
                 for item in items
             ],
@@ -395,7 +403,7 @@ def _register_common_shelf_and_import_routes(
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
         skip: int = 0,
-        limit: int = min(50, max_page_size),
+        limit: int = min(DEFAULT_PAGE_SIZE, max_page_size),
         status_filter: Optional[InventoryStatus] = None,
         search: Optional[str] = None,
         search_field: Optional[str] = None,
@@ -405,7 +413,7 @@ def _register_common_shelf_and_import_routes(
     ):
         del current_user
 
-        base = select(Inventory).where(Inventory.storage_location == "常用货架")
+        base = select(Inventory).where(Inventory.status == InventoryStatus.COMMON)
 
         if status_filter:
             base = base.where(Inventory.status == status_filter)
@@ -519,7 +527,7 @@ def _register_common_shelf_and_import_routes(
         enforce_rate_limit(
             scope="import_inventory",
             identifier=client_ip,
-            limit=max(3, settings.upload_rate_limit_count // 2),
+            limit=max(MIN_IMPORT_RATE_LIMIT, settings.upload_rate_limit_count // IMPORT_RATE_LIMIT_DIVISOR),
             window_seconds=settings.upload_rate_limit_window_seconds,
         )
 
@@ -577,11 +585,11 @@ def _register_borrow_return_routes(
         if current_user.role == UserRole.PUBLIC:
             actual_borrower_id = borrow_data.actual_borrower_id if borrow_data else None
             if not actual_borrower_id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="公用账户借用时必须选择借用人")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Public account must select a borrower when borrowing")
 
             actual_borrower = db.get(User, actual_borrower_id)
             if not actual_borrower or not actual_borrower.is_active or actual_borrower.role == UserRole.PUBLIC:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择有效借用人")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please select a valid borrower")
 
         from sqlmodel import update as sql_update
 
@@ -670,7 +678,7 @@ def _register_borrow_return_routes(
         if return_data.remaining_quantity > 0:
             item.status = InventoryStatus.IN_STOCK
             percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
-            if percentage < 20:
+            if percentage < (LOW_STOCK_PERCENT * 100):
                 low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
         else:
             item.status = InventoryStatus.CONSUMED
@@ -716,8 +724,8 @@ def _register_borrow_return_routes(
                 {
                     "id": log.id,
                     "borrower_id": log.borrower_id,
-                    "borrow_time": log.borrow_time.isoformat() + 'Z' if log.borrow_time else None,
-                    "return_time": log.return_time.isoformat() + 'Z' if log.return_time else None,
+                    "borrow_time": utc_iso_str(log.borrow_time),
+                    "return_time": utc_iso_str(log.return_time),
                     "quantity_borrowed": log.quantity_borrowed,
                     "quantity_returned": log.quantity_returned,
                     "actual_borrower_id": _parse_actual_borrower_id(log.notes),

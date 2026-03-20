@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from app.core.constants import MAX_BOTTLES_PER_IMPORT
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
 from sqlmodel import Field, SQLModel
@@ -15,6 +16,7 @@ class InventoryStatus(str, Enum):
     """Inventory status enumeration"""
     NOT_IN_STOCK = "not_in_stock"
     IN_STOCK = "in_stock"
+    COMMON = "common"
     BORROWED = "borrowed"
     CONSUMED = "consumed"
 
@@ -62,6 +64,12 @@ class Inventory(InventoryBase, table=True):
         foreign_key="users.id",
         ondelete="SET NULL"
     )
+    source_order_id: Optional[int] = Field(
+        default=None,
+        index=True,
+        foreign_key="reagentorder.id",
+        ondelete="SET NULL"
+    )
     created_by_id: Optional[int] = Field(
         default=None,
         index=True,
@@ -103,6 +111,7 @@ class InventoryCreate(SQLModel):
     unit: Optional[str] = Field(default=None, max_length=20)
     is_hazardous: bool = False
     temporary_keeper_id: Optional[int] = None
+    source_order_id: Optional[int] = None
     notes: Optional[str] = None
 
 
@@ -116,6 +125,7 @@ class InventoryUpdate(SQLModel):
     remaining_percent: Optional[float] = None
     status: Optional[InventoryStatus] = None
     temporary_keeper_id: Optional[int] = None
+    source_order_id: Optional[int] = None
     notes: Optional[str] = None
     english_name: Optional[str] = None
     alias: Optional[str] = None
@@ -157,6 +167,7 @@ class InventoryResponse(BaseResponse):
     last_borrower_id: Optional[int]
     is_hazardous: bool
     temporary_keeper_id: Optional[int]
+    source_order_id: Optional[int]
     created_by_id: Optional[int]
     notes: Optional[str]
     created_at: datetime
@@ -212,7 +223,7 @@ class ManualInventoryCreate(SQLModel):
     alias: Optional[str] = None
     specification: str = Field(max_length=50)  # e.g., "500ml"
     initial_quantity: Optional[float] = None  # Optional - derived from specification
-    quantity_bottles: int = Field(default=1, ge=1, le=99)  # Number of bottles: 1-99
+    quantity_bottles: int = Field(default=1, ge=1, le=MAX_BOTTLES_PER_IMPORT)  # Number of bottles: 1-99
     storage_location: Optional[str] = None
     is_hazardous: bool = False
     category: Optional[str] = None

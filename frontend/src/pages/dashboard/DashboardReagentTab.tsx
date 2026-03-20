@@ -3,6 +3,7 @@
  * 展示当前用户的试剂订单列表，支持编辑和确认到货
  */
 import { useMemo, useState, useCallback } from 'react'
+import * as v from 'valibot'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
@@ -10,6 +11,8 @@ import { useForm } from 'react-hook-form'
 import { FlaskConical } from 'lucide-react'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { BaseForm } from '@/components/BaseForm'
@@ -25,12 +28,21 @@ import type { FilterAPI } from '@/hooks/useTableState'
 import { getReagentOrderTableColumns } from '@/lib/tableConfigs'
 import {
   ReagentOrderSchema,
+  StockInFormSchema,
+  type StockInFormInputData,
+  type ReagentOrderFormData,
+  type ValidationError,
   createValibotResolver,
+  createRemainingQuantitySchema,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { ReagentOrderFormData, ValidationError } from '@/lib/validationSchemas'
-import { getReagentOrderFormFields, defaultReagentOrderValues } from '@/lib/formConfigs'
+import {
+  getReagentOrderFormFields,
+  defaultReagentOrderValues,
+  defaultStockInValues,
+  getStockInFormFields,
+} from '@/lib/formConfigs'
 
 import {
   type DashboardReagentOrder,
@@ -44,6 +56,8 @@ import {
 
 const reagentColumnHelper = createColumnHelper<DashboardReagentOrder>()
 
+type StockinMode = 'quick' | 'arrived'
+
 export function DashboardReagentTab() {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
@@ -52,10 +66,19 @@ export function DashboardReagentTab() {
   const [editingReagent, setEditingReagent] = useState<DashboardReagentOrder | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [isSubmittingReagent, setIsSubmittingReagent] = useState(false)
+  const [stockinTarget, setStockinTarget] = useState<DashboardReagentOrder | null>(null)
+  const [stockinMode, setStockinMode] = useState<StockinMode>('quick')
+  const [isSubmittingStockin, setIsSubmittingStockin] = useState(false)
 
   const reagentForm = useForm<ReagentOrderFormData>({
     resolver: createValibotResolver(ReagentOrderSchema),
     defaultValues: defaultReagentOrderValues,
+    shouldFocusError: false,
+  })
+
+  const stockinForm = useForm<StockInFormInputData>({
+    resolver: createValibotResolver(StockInFormSchema),
+    defaultValues: defaultStockInValues,
     shouldFocusError: false,
   })
 
@@ -166,6 +189,62 @@ export function DashboardReagentTab() {
     }
   }, [deleteConfirm, editingReagent, reagentForm, refreshTables])
 
+  const openStockinDialog = useCallback((item: DashboardReagentOrder, mode: StockinMode) => {
+    setStockinTarget(item)
+    setStockinMode(mode)
+    stockinForm.reset({
+      remaining_quantity: mode === 'quick' ? (item.initial_quantity ?? '') : '',
+      storage_location: '',
+    })
+  }, [stockinForm])
+
+  const closeStockinDialog = useCallback(() => {
+    if (isSubmittingStockin) return
+    setStockinTarget(null)
+    stockinForm.reset(defaultStockInValues)
+  }, [isSubmittingStockin, stockinForm])
+
+  const submitStockin = stockinForm.handleSubmit(async (formData) => {
+    if (!stockinTarget) return
+    const remaining = Number(formData.remaining_quantity)
+    const maxValue = stockinTarget.initial_quantity
+
+    if (typeof maxValue === 'number') {
+      const check = createRemainingQuantitySchema('剩余量', maxValue)
+      const parsed = v.safeParse(check, remaining)
+      if (!parsed.success) {
+        stockinForm.setError('remaining_quantity', { message: parsed.issues[0]?.message || '输入不合法' })
+        return
+      }
+    }
+
+    setIsSubmittingStockin(true)
+    try {
+      const result = await reagentOrderAPI.stockIn(stockinTarget.id, {
+        storage_location: formData.storage_location,
+        remaining_quantity: remaining,
+      })
+      closeStockinDialog()
+      await refreshTables()
+      toast.success(result.data?.message || '入库成功')
+    } catch (err) {
+      const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
+      const detail = error.response?.data?.detail
+      const validationErrors = toValidationErrors(detail)
+      if (validationErrors.length > 0) {
+        validationErrors.forEach((e) => {
+          if (e.loc?.[1]) {
+            stockinForm.setError(e.loc[1] as keyof StockInFormInputData, { message: e.msg || '输入不合法' })
+          }
+        })
+        return
+      }
+      toast.error(normalizeApiErrorMessage(detail, '入库失败'))
+    } finally {
+      setIsSubmittingStockin(false)
+    }
+  })
+
   const reagentColumns = useMemo(() => {
     const baseColumns = removeApplicantColumn(getReagentOrderTableColumns() as ColumnDef<Record<string, unknown>, unknown>[])
     const actionColumn = reagentColumnHelper.display({
@@ -182,9 +261,25 @@ export function DashboardReagentTab() {
             confirmLabel: '确认',
             showWhen: (currItem: DashboardReagentOrder) => currItem.status === 'approved',
             onClick: async (currItem: DashboardReagentOrder) => {
-              const result = await reagentOrderAPI.confirmArrival(currItem.id)
+              const result = await reagentOrderAPI.confirmArrival(currItem.id, {})
               await refreshTables()
               toast.success(result.data.message || '确认到货成功')
+            },
+          },
+          {
+            id: 'quick-stock-in',
+            label: '一键入库',
+            showWhen: (currItem: DashboardReagentOrder) => currItem.status === 'approved',
+            onClick: (currItem: DashboardReagentOrder) => {
+              openStockinDialog(currItem, 'quick')
+            },
+          },
+          {
+            id: 'arrived-stock-in',
+            label: '入库',
+            showWhen: (currItem: DashboardReagentOrder) => currItem.status === 'arrived',
+            onClick: (currItem: DashboardReagentOrder) => {
+              openStockinDialog(currItem, 'arrived')
             },
           },
         ]
@@ -204,7 +299,7 @@ export function DashboardReagentTab() {
       },
     })
     return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
-  }, [currentUser?.id, currentUser?.role, handleReagentEdit, isAdmin, refreshTables])
+  }, [currentUser?.id, currentUser?.role, handleReagentEdit, isAdmin, openStockinDialog, refreshTables])
 
   return (
     <>
@@ -250,6 +345,44 @@ export function DashboardReagentTab() {
               submitLabelAdd="保存"
               isSubmitting={isSubmittingReagent}
             />
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={stockinTarget !== null} onOpenChange={(open) => { if (!open) closeStockinDialog() }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{stockinMode === 'quick' ? '一键入库' : '入库'}</DialogTitle>
+          </DialogHeader>
+
+          <form className="space-y-4" onSubmit={submitStockin}>
+            <div>
+              <p>{stockinTarget?.name}</p>
+              <p className="text-sm text-muted-foreground">
+                CAS: {stockinTarget?.cas_number} • 规格: {stockinTarget?.specification || '-'}
+              </p>
+            </div>
+
+            <BaseForm
+              form={stockinForm}
+              fields={getStockInFormFields(stockinTarget?.unit ?? undefined)}
+              layout="stack"
+            />
+
+            <div className="flex gap-3 mt-8">
+              <Button type="button" variant="modern" onClick={closeStockinDialog} className="flex-1" size="lg" disabled={isSubmittingStockin}>
+                取消
+              </Button>
+              <LoadingButton
+                type="submit"
+                isLoading={isSubmittingStockin}
+                loadingText="处理中..."
+                className="flex-1"
+                size="lg"
+              >
+                确认入库
+              </LoadingButton>
+            </div>
           </form>
         </DialogContent>
       </Dialog>

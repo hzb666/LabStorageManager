@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+from app.core.constants import CAS_PATTERN, RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
 
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ class Settings(BaseSettings):
     redis_password: Optional[str] = Field(default=None, description="Redis password")
     
     # CAS Configuration
-    cas_pattern: str = r"^\d{2,7}-\d{2}-\d$"
+    cas_pattern: str = CAS_PATTERN
     
     # Niutrans Translation API
     niutrans_appid: str = Field(default="", description="Niutrans API appId")
@@ -138,8 +139,8 @@ class Settings(BaseSettings):
         from cryptography.hazmat.primitives.asymmetric import rsa
         
         private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048
+            public_exponent=RSA_PUBLIC_EXPONENT,
+            key_size=RSA_KEY_SIZE_BITS
         )
         
         # Save private key

@@ -16,6 +16,11 @@ from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
 from app.models.user import User
 from app.core.auth import get_current_user, require_admin, CurrentUser
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
+    LIST_CACHE_TTL_SECONDS,
+    MAX_PAGE_SIZE,
+)
 from app.core.time_utils import get_utc_now
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
@@ -33,14 +38,12 @@ from app.api.inventory_extended_routes import register_inventory_extended_routes
 
 logger = logging.getLogger(__name__)
 
-MAX_PAGE_SIZE = 100
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 LIST_CACHE_PREFIX = "list:"
 INVENTORY_NOT_FOUND = "Inventory item not found"
 
 # ==================== Search Cache ====================
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
-CACHE_TTL_SECONDS = 10
 
 
 def _build_search_clause(field, pattern: str, *, fuzzy: bool):
@@ -93,6 +96,8 @@ def _apply_inventory_filters(
 ):
     if status_filter:
         base = base.where(Inventory.status == status_filter)
+    else:
+        base = base.where(Inventory.status != InventoryStatus.COMMON)
     if cas_filter:
         base = base.where(Inventory.cas_number == normalize_cas(cas_filter))
     if hazardous_only:
@@ -226,7 +231,7 @@ def list_inventory(
     current_user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
-    limit: int = min(50, MAX_PAGE_SIZE),
+    limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
     status_filter: Optional[InventoryStatus] = None,
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
@@ -251,7 +256,7 @@ def list_inventory(
             SEARCH_CACHE,
             cache_key,
             now=get_utc_now,
-            ttl_seconds=CACHE_TTL_SECONDS,
+            ttl_seconds=LIST_CACHE_TTL_SECONDS,
         )
         if cached is not None:
             return {

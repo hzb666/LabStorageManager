@@ -11,6 +11,18 @@ from PIL import Image
 import io
 
 from app.core.config import settings, BASE_DIR, UPLOADS_DIR
+from app.core.constants import (
+    ANNOUNCEMENT_IMAGE_MAX_MB,
+    AVATAR_MAX_HEIGHT,
+    AVATAR_MAX_SIZE_MB,
+    AVATAR_MAX_WIDTH,
+    DEFAULT_IMAGE_MAX_MB,
+    DIRECTORY_STORAGE_MAX_MB,
+    IMAGE_QUALITY_DEFAULT,
+    IMAGE_QUALITY_MIN,
+    TIMESTAMP_FILENAME_FORMAT,
+    UPLOAD_FILENAME_UUID_PREFIX_LEN,
+)
 from app.core.time_utils import get_utc_now
 
 
@@ -62,7 +74,7 @@ def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
     return is_valid, content
 
 
-def validate_image_size_from_bytes(content: bytes, max_size_mb: float = 1.0) -> bool:
+def validate_image_size_from_bytes(content: bytes, max_size_mb: float = DEFAULT_IMAGE_MAX_MB) -> bool:
     """
     Validate file size from bytes content.
     
@@ -109,7 +121,7 @@ def validate_image_type(file: UploadFile) -> bool:
     return is_valid
 
 
-def validate_image_size(file: UploadFile, max_size_mb: float = 1.0) -> bool:
+def validate_image_size(file: UploadFile, max_size_mb: float = DEFAULT_IMAGE_MAX_MB) -> bool:
     """
     Validate uploaded file size is within limits.
     
@@ -161,8 +173,8 @@ def compress_image(
     if image.mode in ("RGBA", "P") and image.format != "JPEG":
         image = image.convert("RGB")
     
-    quality = 85
-    min_quality = 30
+    quality = IMAGE_QUALITY_DEFAULT
+    min_quality = IMAGE_QUALITY_MIN
     
     output = io.BytesIO()
     
@@ -191,8 +203,8 @@ def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:
         Relative URL path for database storage
     """
     file_ext = Path(file.filename).suffix.lower() if file.filename else ".bin"
-    unique_id = str(uuid.uuid4())[:8]
-    timestamp = get_utc_now().strftime("%Y%m%d_%H%M%S")
+    unique_id = str(uuid.uuid4())[:UPLOAD_FILENAME_UUID_PREFIX_LEN]
+    timestamp = get_utc_now().strftime(TIMESTAMP_FILENAME_FORMAT)
     filename = f"{timestamp}_{unique_id}{file_ext}"
     
     save_dir = UPLOADS_DIR / subfolder
@@ -256,7 +268,7 @@ def get_directory_storage_info(subdir: str) -> dict:
         Dictionary with used_bytes, used_mb, max_bytes, max_mb, usage_percent, image_count
     """
     static_dir = BASE_DIR / "static" / subdir
-    max_mb = 50  
+    max_mb = DIRECTORY_STORAGE_MAX_MB
     max_bytes = int(max_mb * 1024 * 1024)
 
     if not static_dir.exists():
@@ -306,7 +318,7 @@ def save_avatar(file: UploadFile, user_id: int) -> str:
             detail="Invalid image type. Allowed: JPG, PNG, GIF, WebP"
         )
 
-    if not validate_image_size_from_bytes(file_content, 5.0):
+    if not validate_image_size_from_bytes(file_content, AVATAR_MAX_SIZE_MB):
         raise HTTPException(
             status_code=400,
             detail="Image size exceeds 5MB limit"
@@ -315,15 +327,15 @@ def save_avatar(file: UploadFile, user_id: int) -> str:
     avatars_dir = BASE_DIR / "static" / "avatars"
     avatars_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = get_utc_now().strftime("%Y%m%d_%H%M%S")
-    unique_id = str(uuid.uuid4())[:8]
+    timestamp = get_utc_now().strftime(TIMESTAMP_FILENAME_FORMAT)
+    unique_id = str(uuid.uuid4())[:UPLOAD_FILENAME_UUID_PREFIX_LEN]
     filename = f"avatar_{user_id}_{timestamp}_{unique_id}.jpg"
 
     image = Image.open(io.BytesIO(file_content))
-    compressed_image = compress_image(image, max_size_kb=100, max_width=200, max_height=200)
+    compressed_image = compress_image(image, max_size_kb=settings.max_image_size_kb, max_width=AVATAR_MAX_WIDTH, max_height=AVATAR_MAX_HEIGHT)
 
     save_path = avatars_dir / filename
-    compressed_image.save(save_path, format="JPEG", quality=85, optimize=True)
+    compressed_image.save(save_path, format="JPEG", quality=IMAGE_QUALITY_DEFAULT, optimize=True)
 
     return f"/static/avatars/{filename}"
 
@@ -345,7 +357,7 @@ def save_announcement_image(file: UploadFile) -> str:
             detail="Invalid image type. Allowed: JPG, PNG, GIF, WebP"
         )
         
-    if not validate_image_size_from_bytes(content, max_size_mb=5.0):
+    if not validate_image_size_from_bytes(content, max_size_mb=ANNOUNCEMENT_IMAGE_MAX_MB):
         raise HTTPException(
             status_code=400,
             detail="Image size exceeds 5MB limit"

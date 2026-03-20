@@ -1,7 +1,7 @@
 const FONT_READY_CLASS = 'web-fonts-ready'
 const FONT_STATE_ATTRIBUTE = 'data-font-state'
 const FONT_STYLESHEET_ID = 'app-web-fonts'
-const FONT_TIMEOUT_MS = 1000
+import { FONT_TIMEOUT_MS } from './lib/constants'
 const FONT_STYLESHEET_URL =
   'https://fonts.googleapis.cn/css2?family=Noto+Sans+SC:wght@400;700&display=swap'
 

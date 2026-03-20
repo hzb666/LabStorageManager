@@ -4,6 +4,7 @@ User Model - Authentication and Authorization
 from datetime import datetime
 
 from app.core.time_utils import get_utc_now
+from app.core.constants import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH
 from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
@@ -23,12 +24,12 @@ class UserRole(str, Enum):
 
 class UserBase(SQLModel):
     """Base user model with common fields"""
-    username: str = Field(unique=True, index=True, min_length=3, max_length=20)
+    username: str = Field(unique=True, index=True, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
 
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: str) -> str:
-        if not re.match(r'^[a-zA-Z0-9_]+$', v):
+        if not re.match(r'^\w+$', v):
             raise ValueError('用户名只能包含字母、数字和下划线')
         return v
 
@@ -57,21 +58,21 @@ class User(UserBase, table=True):
 
 class UserCreate(SQLModel):
     """DTO for creating a new user"""
-    username: str = Field(min_length=3, max_length=20)
-    password: str = Field(min_length=6, max_length=50)
+    username: str = Field(min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
     full_name: str = Field(min_length=1, max_length=100)  # 必填
     role: UserRole = UserRole.USER
 
 
 class UserUpdate(SQLModel):
     """DTO for updating user information"""
-    username: Optional[str] = Field(None, min_length=3, max_length=20)
+    username: Optional[str] = Field(None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
     
     # 添加 username 格式验证
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not re.match(r'^[a-zA-Z0-9_]+$', v):
+        if v is not None and not re.match(r'^\w+$', v):
             raise ValueError('用户名只能包含字母，数字和下划线')
         return v
     

@@ -13,6 +13,12 @@ from typing import Dict
 from sqlmodel import Session, delete, func, select
 
 from app.core.config import settings
+from app.core.constants import (
+    ANONYMOUS_DEVICE_PREFIX,
+    ANONYMOUS_DEVICE_TOKEN_HEX_LENGTH,
+    SECONDS_PER_HOUR,
+    UNKNOWN_DEVICE,
+)
 from app.core.redis import cache_session, delete_cached_session, delete_cached_sessions
 from app.core.time_utils import get_utc_now
 from app.models.user_session import UserSession
@@ -135,11 +141,11 @@ def _create_user_session(
     else:
         # 创建新会话
         # 如果没有 device_id，生成唯一的匿名设备 ID，避免冲突
-        final_device_id = device_id or f"anonymous-{secrets.token_hex(8)}"
+        final_device_id = device_id or f"{ANONYMOUS_DEVICE_PREFIX}{secrets.token_hex(ANONYMOUS_DEVICE_TOKEN_HEX_LENGTH)}"
         session = UserSession(
             user_id=user_id,
             device_id=final_device_id,
-            device_name=device_name or "Unknown Device",
+            device_name=device_name or UNKNOWN_DEVICE,
             ip_address=ip_address,
             last_ip_address=ip_address,
             user_agent=user_agent,
@@ -166,7 +172,7 @@ def _create_user_session(
             "expires_at": expires_at.isoformat(),
             "last_active_at": session.last_active_at.isoformat(),
         },
-        settings.session_expire_hours * 3600
+        settings.session_expire_hours * SECONDS_PER_HOUR
     )
     
     return session

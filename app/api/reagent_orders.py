@@ -13,6 +13,11 @@ from sqlmodel import Session, select, func
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
+    LIST_CACHE_TTL_SECONDS,
+    MAX_PAGE_SIZE,
+)
 from app.core.time_utils import get_utc_now, to_china_time
 from app.models.user import User, UserRole
 from app.models.inventory import Inventory, InventoryStatus
@@ -49,7 +54,6 @@ router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
-CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
 LIST_CACHE_PREFIX = "list:"
 VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
@@ -184,7 +188,7 @@ def create_reagent_order(
     Critical: CAS Number is normalized automatically.
     """
     if current_user.role == UserRole.PUBLIC:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="公用账户不能创建订单")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
     # Normalize CAS Number
     normalized_cas = normalize_cas(order.cas_number)
@@ -244,15 +248,12 @@ def create_reagent_order(
     return db_order
 
 
-# 分页限制常量
-MAX_PAGE_SIZE = 100
-
 @router.get("/")
 def list_reagent_orders(
     current_user: CurrentUser,
     db: DBSession,
     skip: int = 0,
-    limit: int = min(50, MAX_PAGE_SIZE),
+    limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
     status_filter: Optional[ReagentOrderStatus] = None,
     search: Optional[str] = None,
     search_field: Optional[str] = None,
@@ -276,7 +277,7 @@ def list_reagent_orders(
             SEARCH_CACHE,
             cache_key,
             now=get_utc_now,
-            ttl_seconds=CACHE_TTL_SECONDS,
+            ttl_seconds=LIST_CACHE_TTL_SECONDS,
         )
         if cached is not None:
             return {
@@ -436,7 +437,7 @@ def get_cas_overview(
     if is_special_cas_value(normalized_cas):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="生物试剂不支持 CAS 查询",
+            detail="Biological reagents do not support CAS query",
         )
 
     is_valid, error = validate_cas_format(normalized_cas)
@@ -570,7 +571,7 @@ def update_reagent_order(
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="公用账户不能编辑订单"
+            detail="Public account cannot edit orders"
         )
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(

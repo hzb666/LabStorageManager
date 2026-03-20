@@ -6,7 +6,13 @@
 import React from 'react'
 import { AlertTriangle } from 'lucide-react'
 import type { FieldSchema } from '../components/BaseForm'
-import type { ReagentOrderFormData, ConsumableOrderFormData, InventoryFormData, UserUpdateFormData } from './validationSchemas'
+import type {
+  ReagentOrderFormData,
+  ConsumableOrderFormData,
+  InventoryFormData,
+  UserUpdateFormData,
+  StockInFormInputData
+} from './validationSchemas'
 import { ORDER_REASON_OPTIONS, REAGENT_CATEGORY_OPTIONS, REAGENT_BRAND_OPTIONS } from './options'
 
 // ============================================================================
@@ -253,6 +259,39 @@ export function getReturnFormFields(
       inputType: 'number' as const,
       required: true,
       placeholder: mode === 'remaining' ? `如: ${maxQuantity}` : `如: 0`,
+    },
+  ]
+}
+
+// ============================================================================
+// 入库表单配置
+// ============================================================================
+
+/** 入库表单默认值 */
+export const defaultStockInValues: StockInFormInputData = {
+  remaining_quantity: '',
+  storage_location: '',
+}
+
+/**
+ * 获取入库表单字段配置
+ */
+export function getStockInFormFields(unit?: string): FieldSchema<StockInFormInputData>[] {
+  return [
+    {
+      name: 'remaining_quantity' as const,
+      label: unit ? `剩余量 (${unit})` : '剩余量',
+      type: 'input' as const,
+      inputType: 'number' as const,
+      required: true,
+      placeholder: '请输入剩余量',
+    },
+    {
+      name: 'storage_location' as const,
+      label: '库存位置',
+      type: 'input' as const,
+      required: true,
+      placeholder: '如: A-1-1 柜',
     },
   ]
 }

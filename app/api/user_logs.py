@@ -13,19 +13,19 @@ from sqlmodel import select
 
 from app.core.redis import get_redis
 from app.core.auth import AdminUser
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
+    LOG_TOKEN_EXPIRE_HOURS,
+    LOG_TOKEN_RATE_LIMIT,
+    LOG_TOKEN_RATE_WINDOW,
+    SECONDS_PER_HOUR,
+)
+from app.core.time_utils import utc_iso_str
 from app.database import DBSession
 from app.models.user_session import UserSession
 from app.services.user_service import get_user_by_id
 
 router = APIRouter(prefix="/admin/users", tags=["User Logs"])
-
-# ==================== Constants ====================
-LOG_TOKEN_EXPIRE_HOURS = 2  # token有效期2小时
-
-# 日志 Token 生成速率限制
-LOG_TOKEN_RATE_LIMIT = 3  # 每分钟最多生成 3 次
-LOG_TOKEN_RATE_WINDOW = 30  # 30 秒窗口
-
 
 # ==================== Helper Functions ====================
 
@@ -76,7 +76,7 @@ def _record_logs_token_request(admin_user_id: int) -> None:
 
 def create_log_token(user_id: int, expire_hours: int = LOG_TOKEN_EXPIRE_HOURS) -> str:
     """创建日志访问token，格式：{user_id}_{expires_timestamp}_{random}"""
-    expires_at = int(time.time()) + expire_hours * 3600
+    expires_at = int(time.time()) + expire_hours * SECONDS_PER_HOUR
     random_part = secrets.token_hex(8)
     return f"{user_id}_{expires_at}_{random_part}"
 
@@ -108,7 +108,7 @@ class LogsQueryParams(BaseModel):
     keyword: Optional[str] = None  # 搜索关键词
     log_type: Optional[str] = None  # 日志类型：reagent_order, consumable_order, inventory, borrow, session
     skip: int = 0
-    limit: int = 20
+    limit: int = DEFAULT_PAGE_SIZE
 
 
 # ==================== Routes ====================
@@ -151,7 +151,7 @@ def get_user_logs(
     keyword: Optional[str] = None,
     log_type: Optional[str] = None,
     skip: int = 0,
-    limit: int = 20,
+    limit: int = DEFAULT_PAGE_SIZE,
 ):
     """获取用户日志（管理员专属）"""
     # 验证token
@@ -182,7 +182,7 @@ def get_user_logs(
         orders = db.exec(query.order_by(ReagentOrder.created_at.desc()).offset(skip).limit(limit)).all()
         for o in orders:
             results.append({
-                "time": o.created_at.isoformat() + 'Z' if o.created_at else None,
+                "time": utc_iso_str(o.created_at),
                 "type": "reagent_order",
                 # 展开前显示的模板
                 "detail": f"申购 {o.name} {o.initial_quantity or ''}{o.unit or ''} x{o.quantity}",
@@ -203,8 +203,8 @@ def get_user_logs(
                     "is_hazardous": o.is_hazardous,
                     "notes": o.notes,
                     "status": o.status.value if o.status else None,
-                    "created_at": o.created_at.isoformat() + 'Z' if o.created_at else None,
-                    "updated_at": o.updated_at.isoformat() + 'Z' if o.updated_at else None,
+                    "created_at": utc_iso_str(o.created_at),
+                    "updated_at": utc_iso_str(o.updated_at),
                 }
             })
     
@@ -217,7 +217,7 @@ def get_user_logs(
         orders = db.exec(query.order_by(ConsumableOrder.created_at.desc()).offset(skip).limit(limit)).all()
         for o in orders:
             results.append({
-                "time": o.created_at.isoformat() + 'Z' if o.created_at else None,
+                "time": utc_iso_str(o.created_at),
                 "type": "consumable_order",
                 "detail": f"申购 {o.name} {o.specification or ''} x{o.quantity}",
                 "full_data": {
@@ -231,8 +231,8 @@ def get_user_logs(
                     "communication": o.communication,
                     "notes": o.notes,
                     "status": o.status.value if o.status else None,
-                    "created_at": o.created_at.isoformat() + 'Z' if o.created_at else None,
-                    "updated_at": o.updated_at.isoformat() + 'Z' if o.updated_at else None,
+                    "created_at": utc_iso_str(o.created_at),
+                    "updated_at": utc_iso_str(o.updated_at),
                 }
             })
     
@@ -245,7 +245,7 @@ def get_user_logs(
         items = db.exec(query.order_by(Inventory.created_at.desc()).offset(skip).limit(limit)).all()
         for i in items:
             results.append({
-                "time": i.created_at.isoformat() + 'Z' if i.created_at else None,
+                "time": utc_iso_str(i.created_at),
                 "type": "inventory",
                 "detail": f"入库 {i.name} {i.initial_quantity or ''}{i.unit or ''}",
                 "full_data": {
@@ -264,8 +264,8 @@ def get_user_logs(
                     "notes": i.notes,
                     "internal_code": i.internal_code,
                     "status": i.status.value if i.status else None,
-                    "created_at": i.created_at.isoformat() + 'Z' if i.created_at else None,
-                    "updated_at": i.updated_at.isoformat() + 'Z' if i.updated_at else None,
+                    "created_at": utc_iso_str(i.created_at),
+                    "updated_at": utc_iso_str(i.updated_at),
                 }
             })
     
@@ -284,7 +284,7 @@ def get_user_logs(
             return_info = f", 已归还 {log.quantity_returned} {inv.unit or ''}" if is_returned else ", 未归还"
             
             results.append({
-                "time": log.borrow_time.isoformat() + 'Z' if log.borrow_time else None,
+                "time": utc_iso_str(log.borrow_time),
                 "type": "borrow",
                 # 展开前显示的模板：显示借了多少、是否已归还、归还多少
                 "detail": f"借用 {inv.name} {log.quantity_borrowed} {inv.unit or ''}{return_info}",
@@ -293,14 +293,14 @@ def get_user_logs(
                     "inventory_id": log.inventory_id,
                     "inventory_name": inv.name,
                     "cas_number": inv.cas_number,
-                    "borrow_time": log.borrow_time.isoformat() + 'Z' if log.borrow_time else None,
-                    "return_time": log.return_time.isoformat() + 'Z' if log.return_time else None,
+                    "borrow_time": utc_iso_str(log.borrow_time),
+                    "return_time": utc_iso_str(log.return_time),
                     "quantity_borrowed": log.quantity_borrowed,
                     "quantity_returned": log.quantity_returned,
                     "unit": inv.unit,
                     "notes": log.notes,
                     "is_returned": is_returned,
-                    "created_at": log.created_at.isoformat() + 'Z' if log.created_at else None,
+                    "created_at": utc_iso_str(log.created_at),
                 }
             })
     
@@ -310,7 +310,7 @@ def get_user_logs(
         sessions = db.exec(query.order_by(UserSession.last_active_at.desc()).offset(skip).limit(limit)).all()
         for s in sessions:
             results.append({
-                "time": s.last_active_at.isoformat() + 'Z' if s.last_active_at else None,
+                "time": utc_iso_str(s.last_active_at),
                 "type": "session",
                 "detail": f"登录 {s.device_name} {s.ip_address}",
                 "full_data": {
@@ -320,9 +320,9 @@ def get_user_logs(
                     "ip_address": s.ip_address,
                     "last_ip_address": s.last_ip_address,
                     "user_agent": s.user_agent,
-                    "created_at": s.created_at.isoformat() + 'Z' if s.created_at else None,
-                    "last_active_at": s.last_active_at.isoformat() + 'Z' if s.last_active_at else None,
-                    "expires_at": s.expires_at.isoformat() + 'Z' if s.expires_at else None,
+                    "created_at": utc_iso_str(s.created_at),
+                    "last_active_at": utc_iso_str(s.last_active_at),
+                    "expires_at": utc_iso_str(s.expires_at),
                 }
             })
     

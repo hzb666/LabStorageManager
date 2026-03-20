@@ -5,6 +5,7 @@ This is the foundation for deduplication in the system.
 """
 import re
 from typing import Optional
+from app.core.constants import CAS_PATTERN
 
 
 BIOLOGICAL_REAGENT_CAS = "生物试剂"
@@ -85,8 +86,7 @@ def validate_cas_format(cas: str) -> tuple[bool, Optional[str]]:
         return True, None
     
     # Check basic pattern
-    pattern = r"^\d{2,7}-\d{2}-\d$"
-    if not re.match(pattern, cas):
+    if not re.match(CAS_PATTERN, cas):
         return False, "Invalid CAS format. Expected: XXXXX-XX-X"
     
     # Split and validate structure

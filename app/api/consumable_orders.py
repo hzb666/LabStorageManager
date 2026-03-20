@@ -13,7 +13,8 @@ from sqlmodel import Session, select, func
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
-from app.core.time_utils import get_utc_now, to_china_time
+from app.core.constants import DEFAULT_PAGE_SIZE, LIST_CACHE_TTL_SECONDS, MAX_PAGE_SIZE
+from app.core.time_utils import get_utc_now, to_china_time, utc_iso_str
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
@@ -38,7 +39,6 @@ router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
-CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
 LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
@@ -135,7 +135,7 @@ def create_consumable_order(
 ):
     """Create a new consumable order"""
     if current_user.role == UserRole.PUBLIC:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="公用账户不能创建订单")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
     # 处理可选字段：空字符串和纯空格转为 None
     optional_string_fields = ['english_name', 'product_number', 'unit', 'communication', 'notes']
@@ -163,14 +163,12 @@ def create_consumable_order(
     return db_order
 
 
-# 分页限制常量
-MAX_PAGE_SIZE = 100
 @router.get("/")
 def list_consumable_orders(
     current_user: CurrentUser,
     db: DBSession,
     skip: int = 0,
-    limit: int = min(50, MAX_PAGE_SIZE),
+    limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
     status_filter: Optional[ConsumableOrderStatus] = None,
     search: Optional[str] = None,
     search_field: Optional[str] = None,
@@ -194,7 +192,7 @@ def list_consumable_orders(
             SEARCH_CACHE,
             cache_key,
             now=get_utc_now,
-            ttl_seconds=CACHE_TTL_SECONDS,
+            ttl_seconds=LIST_CACHE_TTL_SECONDS,
         )
         if cached is not None:
             return {
@@ -359,7 +357,7 @@ def update_consumable_order(
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="公用账户不能编辑订单"
+            detail="Public account cannot edit orders"
         )
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
@@ -524,8 +522,8 @@ def get_my_consumable_orders(
             "quantity": order.quantity,
             "price": order.price,
             "notes": order.notes,
-            "created_at": order.created_at.isoformat() + 'Z' if order.created_at else None,
-            "updated_at": order.updated_at.isoformat() + 'Z' if order.updated_at else None
+            "created_at": utc_iso_str(order.created_at),
+            "updated_at": utc_iso_str(order.updated_at)
         }
         
         if order.status == ConsumableOrderStatus.PENDING:
@@ -569,7 +567,7 @@ def delete_consumable_order(
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="公用账户不能删除订单"
+            detail="Public account cannot delete orders"
         )
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
