@@ -10,7 +10,13 @@ from sqlmodel import Session, select, func
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
-from app.core.constants import DEFAULT_PAGE_SIZE, LIST_CACHE_TTL_SECONDS, MAX_PAGE_SIZE
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
+    LIST_CACHE_TTL_SECONDS,
+    MAX_PAGE_SIZE,
+    SSEEventType,
+    SSERoom,
+)
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.models.consumable_order import (
     ConsumableOrder,
@@ -29,6 +35,7 @@ from app.services.api_utils import (
     get_cached_result,
     set_cached_result,
 )
+from app.services.sse_manager import sse_manager
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 
@@ -124,7 +131,7 @@ def _apply_consumable_order_filters(
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
-def create_consumable_order(
+async def create_consumable_order(
     order: ConsumableOrderCreate,
     current_user: CurrentUser,
     db: DBSession,
@@ -155,6 +162,11 @@ def create_consumable_order(
     db.commit()
     db.refresh(db_order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_CREATED,
+        {"id": db_order.id},
+    )
     
     return db_order
 
@@ -305,7 +317,7 @@ def get_consumable_order(
 
 
 @router.put("/{order_id}", response_model=ConsumableOrderResponse)
-def update_consumable_order(
+async def update_consumable_order(
     order_id: int,
     order_update: ConsumableOrderUpdate,
     db: DBSession,
@@ -361,12 +373,17 @@ def update_consumable_order(
     db.refresh(order)
     
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return order
 
 
 @router.post("/{order_id}/approve")
-def approve_consumable_order(
+async def approve_consumable_order(
     order_id: int,
     admin_user: AdminUser,
     db: DBSession,
@@ -390,12 +407,17 @@ def approve_consumable_order(
     db.commit()
     db.refresh(order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return order
 
 
 @router.post("/{order_id}/reject")
-def reject_consumable_order(
+async def reject_consumable_order(
     order_id: int,
     admin_user: AdminUser,
     db: DBSession,
@@ -413,12 +435,17 @@ def reject_consumable_order(
     db.commit()
     db.refresh(order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return order
 
 
 @router.post("/{order_id}/complete")
-def complete_consumable_order(
+async def complete_consumable_order(
     order_id: int,
     current_user: CurrentUser,
     db: DBSession,
@@ -453,6 +480,11 @@ def complete_consumable_order(
     db.commit()
     db.refresh(order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return {
         "message": "耗材订单已完成",
@@ -514,7 +546,7 @@ def get_my_consumable_orders(
 
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_consumable_order(
+async def delete_consumable_order(
     order_id: int,
     db: DBSession,
     current_user: CurrentUser,
@@ -542,3 +574,8 @@ def delete_consumable_order(
     db.delete(order)
     db.commit()
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_DELETED,
+        {"id": order_id},
+    )

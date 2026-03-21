@@ -14,10 +14,13 @@ from app.core.constants import (
     MIN_IMPORT_RATE_LIMIT,
     OVERDUE_BORROW_DAYS,
     IMPORT_RATE_LIMIT_DIVISOR,
+    SSEEventType,
+    SSERoom,
     TEMPLATE_DOWNLOAD_RATE_LIMIT,
     TEMPLATE_DOWNLOAD_RATE_LIMIT_SCOPE,
     TEMPLATE_DOWNLOAD_WINDOW_SECONDS,
 )
+from app.services.sse_manager import sse_manager
 from app.core.request_utils import get_client_ip
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.database import DBSession, get_db
@@ -180,7 +183,7 @@ def _register_manual_and_dashboard_routes(
 ) -> None:
 
     @router.post("/manual-add", response_model=dict)
-    def manual_add_inventory(
+    async def manual_add_inventory(
         item_data: ManualInventoryCreate,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
@@ -193,6 +196,12 @@ def _register_manual_and_dashboard_routes(
         )
 
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        for ci in created_items:
+            await sse_manager.broadcast(
+                SSERoom.INVENTORY,
+                SSEEventType.INVENTORY_CREATED,
+                {"id": ci.id},
+            )
 
         return {
             "message": "Manual stock-in successful",
@@ -379,7 +388,7 @@ def _register_borrow_return_routes(
 ) -> None:
 
     @router.post("/{inventory_id}/borrow", response_model=InventoryResponse)
-    def borrow_item(
+    async def borrow_item(
         inventory_id: int,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
@@ -444,10 +453,16 @@ def _register_borrow_return_routes(
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
 
         response = InventoryResponse.model_validate(item).model_dump()
-        return _add_specification(response)
+        response = _add_specification(response)
+        await sse_manager.broadcast(
+            SSERoom.INVENTORY,
+            SSEEventType.INVENTORY_BORROWED,
+            {"id": inventory_id, "item": response},
+        )
+        return response
 
     @router.post("/{inventory_id}/return", response_model=dict)
-    def return_item(
+    async def return_item(
         inventory_id: int,
         return_data: InventoryBorrowReturn,
         current_user: Annotated[User, Depends(get_current_user)],
@@ -504,6 +519,12 @@ def _register_borrow_return_routes(
         db.commit()
         db.refresh(item)
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+
+        await sse_manager.broadcast(
+            SSERoom.INVENTORY,
+            SSEEventType.INVENTORY_RETURNED,
+            {"id": inventory_id, "item": item.model_dump()},
+        )
 
         result = item.model_dump()
         if low_quantity_warning:
