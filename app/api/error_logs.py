@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.api.deps import get_current_session
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.user_session import UserSession
 from app.services.error_logger import get_error_logs_since, get_recent_error_logs
 
@@ -45,7 +45,7 @@ def get_error_logs(
     需要管理员权限
     """
     # 检查管理员权限
-    if current_user.role != "admin":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin permission required"

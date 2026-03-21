@@ -8,19 +8,29 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { AxiosError } from 'axios'
 import { ArrowRightLeft } from 'lucide-react'
+import { useForm } from 'react-hook-form'
+import * as v from 'valibot'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { FilterTable } from '@/components/ui/FilterTable'
+import { BaseForm } from '@/components/BaseForm'
 import { toast } from '@/lib/toast'
-import { cn, formatDateTime } from '@/lib/utils'
-import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
+import { formatDateTime } from '@/lib/utils'
 
-import { inventoryAPI } from '@/api/client'
+import { inventoryAPI, reagentOrderAPI } from '@/api/client'
 import type { FilterAPI } from '@/hooks/useTableState'
-import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
+import {
+  StockInFormSchema,
+  type StockInFormInputData,
+  createValibotResolver,
+  createRemainingQuantitySchema,
+  normalizeApiErrorMessage,
+  toValidationErrors,
+  type ValidationError,
+} from '@/lib/validationSchemas'
+import { defaultStockInValues, getStockInFormFields } from '@/lib/formConfigs'
 
 import {
   type PendingStockinItem,
@@ -36,8 +46,13 @@ export function DashboardStockinTab() {
 
   const [showStockinModal, setShowStockinModal] = useState(false)
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
-  const [stockinLocation, setStockinLocation] = useState('')
   const [stockinLoading, setStockinLoading] = useState(false)
+
+  const stockinForm = useForm<StockInFormInputData>({
+    resolver: createValibotResolver(StockInFormSchema),
+    defaultValues: defaultStockInValues,
+    shouldFocusError: false,
+  })
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
@@ -57,32 +72,56 @@ export function DashboardStockinTab() {
 
   const openStockinModal = useCallback((item: PendingStockinItem) => {
     setSelectedStockin(item)
-    setStockinLocation('')
+    stockinForm.reset(defaultStockInValues)
     setShowStockinModal(true)
-  }, [])
+  }, [stockinForm])
 
-  const handleStockin = useCallback(async () => {
+  const handleStockin = stockinForm.handleSubmit(async (formData) => {
     if (!selectedStockin) return
-    if (!stockinLocation.trim()) {
-      toast.warning('请输入存放位置')
+    if (!selectedStockin.order_id) {
+      toast.error('缺少订单关联信息，无法入库，请联系管理员')
       return
+    }
+
+    const remaining = Number(formData.remaining_quantity)
+    const maxValue = selectedStockin.initial_quantity
+    if (typeof maxValue === 'number') {
+      const check = createRemainingQuantitySchema('剩余量', maxValue)
+      const parsed = v.safeParse(check, remaining)
+      if (!parsed.success) {
+        stockinForm.setError('remaining_quantity', { message: parsed.issues[0]?.message || '输入不合法' })
+        return
+      }
     }
 
     setStockinLoading(true)
     try {
-      await inventoryAPI.update(selectedStockin.inventory_id, { storage_location: stockinLocation })
+      await reagentOrderAPI.stockIn(selectedStockin.order_id, {
+        storage_location: formData.storage_location,
+        remaining_quantity: remaining,
+      })
       setShowStockinModal(false)
       setSelectedStockin(null)
-      setStockinLocation('')
+      stockinForm.reset(defaultStockInValues)
       await refreshTables()
       toast.success('入库成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '入库失败'))
+      const axiosError = error as AxiosError<{ detail?: string | ValidationError[] }>
+      const detail = axiosError.response?.data?.detail
+      const validationErrors = toValidationErrors(detail)
+      if (validationErrors.length > 0) {
+        validationErrors.forEach((e) => {
+          if (e.loc?.[1]) {
+            stockinForm.setError(e.loc[1] as keyof StockInFormInputData, { message: e.msg || '输入不合法' })
+          }
+        })
+        return
+      }
+      toast.error(normalizeApiErrorMessage(detail, '入库失败'))
     } finally {
       setStockinLoading(false)
     }
-  }, [selectedStockin, stockinLocation, refreshTables])
+  })
 
   const stockinColumns = useMemo(() => [
     pendingStockinColumnHelper.accessor('name', {
@@ -110,7 +149,7 @@ export function DashboardStockinTab() {
       size: 140,
       cell: (info) => (
         <Button size="sm" onClick={() => openStockinModal(info.row.original)}>
-          一键入库
+          入库
         </Button>
       ),
     }),
@@ -130,13 +169,22 @@ export function DashboardStockinTab() {
         enableExpandAll={true}
       />
 
-      <Dialog open={showStockinModal} onOpenChange={setShowStockinModal}>
+      <Dialog
+        open={showStockinModal}
+        onOpenChange={(open) => {
+          setShowStockinModal(open)
+          if (!open) {
+            setSelectedStockin(null)
+            stockinForm.reset(defaultStockInValues)
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>一键入库</DialogTitle>
+            <DialogTitle>入库</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <form className="space-y-4" onSubmit={handleStockin}>
             <div>
               <p>{selectedStockin?.name}</p>
               <p className="text-sm text-muted-foreground">
@@ -144,22 +192,16 @@ export function DashboardStockinTab() {
               </p>
             </div>
 
-            <div>
-              <label htmlFor="dashboard-stockin-location" className={LABEL_STYLES.base}>
-                存放位置 <span className="text-destructive">*</span>
-              </label>
-              <Input
-                id="dashboard-stockin-location"
-                value={stockinLocation}
-                onChange={(e) => setStockinLocation(e.target.value)}
-                placeholder="如: A-1-1 柜"
-                className={cn(INPUT_STYLES.base)}
-              />
-            </div>
+            <BaseForm
+              form={stockinForm}
+              fields={getStockInFormFields(selectedStockin?.unit)}
+              layout="stack"
+            />
 
             <div className="flex gap-3 mt-8">
               <Button
-                variant="morden"
+                type="button"
+                variant="modern"
                 onClick={() => setShowStockinModal(false)}
                 className="flex-1"
                 size="lg"
@@ -167,7 +209,7 @@ export function DashboardStockinTab() {
                 取消
               </Button>
               <LoadingButton
-                onClick={handleStockin}
+                type="submit"
                 isLoading={stockinLoading}
                 loadingText="处理中..."
                 className="flex-1"
@@ -176,7 +218,7 @@ export function DashboardStockinTab() {
                 确认入库
               </LoadingButton>
             </div>
-          </div>
+          </form>
         </DialogContent>
       </Dialog>
     </>

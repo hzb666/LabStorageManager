@@ -34,6 +34,7 @@ const LOG_TYPE_OPTIONS = [
   { value: 'consumable_order', label: '耗材订单' },
   { value: 'inventory', label: '入库记录' },
   { value: 'borrow', label: '借用记录' },
+  { value: 'consume', label: '拿取记录' },
   { value: 'session', label: '登录记录' }
 ]
 
@@ -203,6 +204,18 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
         </div>
       )
 
+    case 'consume':
+      return (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
+          <div><span className="text-muted-foreground">物品名称：</span>{safeString(fullData.inventory_name)}</div>
+          <div><span className="text-muted-foreground">CAS号：</span>{safeString(fullData.cas_number)}</div>
+          <div><span className="text-muted-foreground">拿取数量：</span><span className="text-green-600">{safeString(fullData.quantity_consumed)} {safeString(fullData.unit)}</span></div>
+          <div><span className="text-muted-foreground">位置：</span>{safeString(fullData.storage_location)}</div>
+          <div><span className="text-muted-foreground">拿取时间：</span>{formatDateTime(fullData.consume_time as string)}</div>
+          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(fullData.notes)}</div>
+        </div>
+      )
+
     default:
       // 默认显示 JSON
       return (
@@ -257,7 +270,7 @@ export default function OperationLogsPage() {
     return (
       <div className="p-6 max-w-6xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <Button variant="morden" className="h-10" onClick={() => navigate('/admin/users')}>
+          <Button variant="modern" className="h-10" onClick={() => navigate('/admin/users')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回
           </Button>
@@ -273,7 +286,7 @@ export default function OperationLogsPage() {
     return (
       <div className="p-6 max-w-6xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <Button variant="morden" className="h-10" onClick={() => navigate('/admin/users')}>
+          <Button variant="modern" className="h-10" onClick={() => navigate('/admin/users')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回
           </Button>
@@ -287,7 +300,7 @@ export default function OperationLogsPage() {
       {/* 头部区域 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="morden" className="h-10" onClick={() => navigate('/admin/users')}>
+          <Button variant="modern" className="h-10" onClick={() => navigate('/admin/users')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回
           </Button>

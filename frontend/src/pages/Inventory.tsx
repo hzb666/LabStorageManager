@@ -12,13 +12,13 @@ import { useForm } from 'react-hook-form'
 // UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/lib/toast'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
 import { BorrowDialog } from '@/components/BorrowDialog'
+import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { FilterTable } from '@/components/ui/FilterTable'
@@ -33,6 +33,7 @@ import {
   parseSpecification,
   createValibotResolver,
   validateAndNormalizeCASInput,
+  isSpecialCasValue,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
@@ -48,7 +49,6 @@ import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfig
 import {
   ArrowUpFromLine,
   Plus,
-  Trash2,
   Package,
   ScanSearch
 } from 'lucide-react'
@@ -293,6 +293,11 @@ export function InventoryPage() {
       return
     }
 
+    if (isSpecialCasValue(casValidation.normalized)) {
+      form.setError('cas_number', { message: '生物试剂不支持 CAS 识别查询' })
+      return
+    }
+
     setIsCasLookupLoading(true)
     try {
       const response = await chemicalAPI.getInfo(casValidation.normalized)
@@ -384,7 +389,7 @@ export function InventoryPage() {
           <Button onClick={handleAddClick} size="lg">
             <Plus className="w-4 h-4 mr-1.5" /> 手动入库
           </Button>
-          <Button variant="morden" size="lg" onClick={handleExport}>
+          <Button variant="modern" size="lg" onClick={handleExport}>
             <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
           </Button>
         </div>
@@ -417,25 +422,15 @@ export function InventoryPage() {
                 return fields
               }, [dialogState, editingItem?.initial_quantity, handleCasLookup, isCasLookupLoading])}
             />
-            <div className="flex flex-wrap justify-between items-center gap-3 mt-8">
-              {dialogState === 'edit' && editingItem && (
-                <div className="flex items-center gap-2 order-1">
-                  <Button variant="destructive" size="lg" type="button" onClick={handleDeleteClick}>
-                    <Trash2 className="w-4 h-4 mr-1.5" />
-                    {deleteConfirm ? '确认删除' : '删除'}
-                  </Button>
-                  {deleteConfirm && <span className="text-sm text-destructive">再次点击确认删除</span>}
-                </div>
-              )}
-              <div className="flex gap-2 order-2 ml-auto">
-                <Button variant="morden" size="lg" type="button" onClick={() => setDialogState(null)}>
-                  取消
-                </Button>
-                <LoadingButton type="submit" size="lg" isLoading={isSubmitting}>
-                  {dialogState === 'edit' ? '保存' : '确认入库'}
-                </LoadingButton>
-              </div>
-            </div>
+            <EditDialogActions
+              mode={dialogState ?? 'add'}
+              onCancel={() => setDialogState(null)}
+              onDelete={dialogState === 'edit' && editingItem ? handleDeleteClick : undefined}
+              deleteConfirm={deleteConfirm}
+              submitLabelEdit="保存"
+              submitLabelAdd="确认入库"
+              isSubmitting={isSubmitting}
+            />
           </form>
         </DialogContent>
       </Dialog>

@@ -6,6 +6,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from sqlalchemy import Index
+from app.core.constants import MAX_BOTTLES_PER_IMPORT
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
 from sqlmodel import Field, SQLModel
@@ -41,9 +43,19 @@ class InventoryBase(SQLModel):
 
 class Inventory(InventoryBase, table=True):
     """Inventory database model - Individual item tracking"""
+    __table_args__ = (
+        Index("ix_inventory_is_common_created_at_id", "is_common", "created_at", "id"),
+        Index("ix_inventory_status_created_at_id", "status", "created_at", "id"),
+        Index("ix_inventory_borrower_status_updated_at", "borrower_id", "status", "updated_at"),
+        Index("ix_inventory_keeper_location_created_at", "temporary_keeper_id", "storage_location", "created_at"),
+        Index("ix_inventory_cas_status_created_at", "cas_number", "status", "created_at"),
+        Index("ix_inventory_created_by_created_at_id", "created_by_id", "created_at", "id"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    # Unique internal code: e.g., "64175-250113-01" (CAS-Date-Sequence)
+    # Unique internal code: e.g., "64175-250113-001" (CAS-Date-Sequence)
     internal_code: str = Field(unique=True, index=True, max_length=50)
+    is_common: bool = Field(index=True, default=False)
     status: InventoryStatus = Field(index=True, default=InventoryStatus.IN_STOCK)  # 排序/筛选常用
     borrower_id: Optional[int] = Field(
         default=None,
@@ -62,6 +74,12 @@ class Inventory(InventoryBase, table=True):
         foreign_key="users.id",
         ondelete="SET NULL"
     )
+    source_order_id: Optional[int] = Field(
+        default=None,
+        index=True,
+        foreign_key="reagent_order.id",
+        ondelete="SET NULL"
+    )
     created_by_id: Optional[int] = Field(
         default=None,
         index=True,
@@ -76,9 +94,13 @@ class Inventory(InventoryBase, table=True):
     
     # 拼音排序字段（预计算，使用数据库索引加速排序）
     name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    name_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
     category_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    category_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
     brand_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    brand_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
     storage_location_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    storage_location_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
 
 
 class InventoryCreate(SQLModel):
@@ -99,6 +121,7 @@ class InventoryCreate(SQLModel):
     unit: Optional[str] = Field(default=None, max_length=20)
     is_hazardous: bool = False
     temporary_keeper_id: Optional[int] = None
+    source_order_id: Optional[int] = None
     notes: Optional[str] = None
 
 
@@ -112,6 +135,7 @@ class InventoryUpdate(SQLModel):
     remaining_percent: Optional[float] = None
     status: Optional[InventoryStatus] = None
     temporary_keeper_id: Optional[int] = None
+    source_order_id: Optional[int] = None
     notes: Optional[str] = None
     english_name: Optional[str] = None
     alias: Optional[str] = None
@@ -148,11 +172,13 @@ class InventoryResponse(BaseResponse):
     remaining_quantity: Optional[float]
     remaining_percent: Optional[float]
     unit: Optional[str]
+    is_common: bool
     status: InventoryStatus
     borrower_id: Optional[int]
     last_borrower_id: Optional[int]
     is_hazardous: bool
     temporary_keeper_id: Optional[int]
+    source_order_id: Optional[int]
     created_by_id: Optional[int]
     notes: Optional[str]
     created_at: datetime
@@ -168,6 +194,11 @@ class InventoryResponse(BaseResponse):
 
 class BorrowLog(SQLModel, table=True):
     """Borrow Log - Track borrow/return history"""
+    __table_args__ = (
+        Index("ix_borrowlog_borrower_consume_borrow_time", "borrower_id", "is_consume", "borrow_time"),
+        Index("ix_borrowlog_inventory_consume_return_borrow", "inventory_id", "is_consume", "return_time", "borrow_time"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     inventory_id: int = Field(
         index=True,
@@ -180,6 +211,7 @@ class BorrowLog(SQLModel, table=True):
         ondelete="CASCADE"
     )
     borrow_time: datetime = Field(default_factory=get_utc_now)
+    is_consume: bool = Field(default=False)
     return_time: Optional[datetime] = None
     quantity_borrowed: float = Field(gt=0)
     quantity_returned: Optional[float] = None
@@ -193,6 +225,7 @@ class BorrowLogResponse(BaseResponse):
     inventory_id: int
     borrower_id: int
     borrow_time: datetime
+    is_consume: bool
     return_time: Optional[datetime]
     quantity_borrowed: float
     quantity_returned: Optional[float]
@@ -208,7 +241,7 @@ class ManualInventoryCreate(SQLModel):
     alias: Optional[str] = None
     specification: str = Field(max_length=50)  # e.g., "500ml"
     initial_quantity: Optional[float] = None  # Optional - derived from specification
-    quantity_bottles: int = Field(default=1, ge=1)  # Number of bottles
+    quantity_bottles: int = Field(default=1, ge=1, le=MAX_BOTTLES_PER_IMPORT)  # Number of bottles: 1-99
     storage_location: Optional[str] = None
     is_hazardous: bool = False
     category: Optional[str] = None

@@ -10,11 +10,10 @@ import { useForm } from 'react-hook-form'
 import { ShoppingCart } from 'lucide-react'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { Button } from '@/components/ui/Button'
-import { LoadingButton } from '@/components/ui/LoadingButton'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { BaseForm } from '@/components/BaseForm'
+import { EditDialogActions } from '@/components/EditDialogActions'
 import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import { toast } from '@/lib/toast'
 import { processNotes, toText } from '@/lib/utils'
@@ -37,7 +36,7 @@ import {
   type DashboardConsumableOrder,
   type DashboardParams,
   CONSUMABLE_STATUS_OPTIONS,
-  SEARCH_FIELD_OPTIONS,
+  DASHBOARD_CONSUMABLE_SEARCH_FIELDS,
   buildLocalListData,
   flattenGroupedOrders,
   removeApplicantColumn,
@@ -51,6 +50,7 @@ export function DashboardConsumableTab() {
   const queryClient = useQueryClient()
 
   const [editingConsumable, setEditingConsumable] = useState<DashboardConsumableOrder | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [isSubmittingConsumable, setIsSubmittingConsumable] = useState(false)
 
   const consumableForm = useForm<ConsumableOrderFormData>({
@@ -62,6 +62,7 @@ export function DashboardConsumableTab() {
   const refreshTables = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'consumables'] }),
+      queryClient.invalidateQueries({ queryKey: ['consumable-orders'] }),
     ])
   }, [queryClient])
 
@@ -70,19 +71,24 @@ export function DashboardConsumableTab() {
       const response = await consumableOrderAPI.getMyConsumableOrders()
       const grouped = (response.data?.data ?? {}) as Record<string, { orders: Record<string, unknown>[] }>
       const rows = flattenGroupedOrders<DashboardConsumableOrder>(grouped, currentUser?.id)
-      const local = buildLocalListData(rows, params as DashboardParams, ['name', 'specification'])
+      const local = buildLocalListData(rows, params as DashboardParams, ['name', 'specification', 'created_at'])
       return { data: local }
     },
   }), [currentUser?.id])
 
   const handleConsumableEdit = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as DashboardConsumableOrder
+    if (currentUser?.role === UserRoles.PUBLIC) {
+      toast.warning('公用账户不能编辑订单')
+      return
+    }
     if (!isAdmin && item.applicant_id !== currentUser?.id) {
       toast.warning('只能编辑自己创建的订单')
       return
     }
 
     setEditingConsumable(item)
+    setDeleteConfirm(false)
     consumableForm.reset({
       name: String(item.name ?? ''),
       english_name: String(item.english_name ?? ''),
@@ -93,7 +99,7 @@ export function DashboardConsumableTab() {
       communication: String(item.communication ?? ''),
       notes: String(item.notes ?? ''),
     })
-  }, [isAdmin, currentUser?.id, consumableForm])
+  }, [isAdmin, currentUser?.id, currentUser?.role, consumableForm])
 
   const submitConsumableEdit = consumableForm.handleSubmit(async (formData) => {
     if (!editingConsumable) return
@@ -109,6 +115,7 @@ export function DashboardConsumableTab() {
         communication: formData.communication || '',
         notes: processNotes(formData.notes),
       })
+      setDeleteConfirm(false)
       setEditingConsumable(null)
       await refreshTables()
       toast.success('耗材订单已更新')
@@ -129,6 +136,27 @@ export function DashboardConsumableTab() {
       setIsSubmittingConsumable(false)
     }
   })
+
+  const handleDeleteConsumable = useCallback(async () => {
+    if (!editingConsumable) return
+
+    if (!deleteConfirm) {
+      setDeleteConfirm(true)
+      return
+    }
+
+    try {
+      await consumableOrderAPI.delete(editingConsumable.id)
+      setDeleteConfirm(false)
+      setEditingConsumable(null)
+      consumableForm.reset(defaultConsumableOrderValues)
+      await refreshTables()
+      toast.success('耗材订单已删除')
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+    }
+  }, [consumableForm, deleteConfirm, editingConsumable, refreshTables])
 
   const consumableColumns = useMemo(() => {
     const baseColumns = removeApplicantColumn(getConsumableOrderTableColumns() as ColumnDef<Record<string, unknown>, unknown>[])
@@ -153,7 +181,7 @@ export function DashboardConsumableTab() {
           },
         ]
 
-        const disableEdit = !isAdmin && item.applicant_id !== currentUser?.id
+        const disableEdit = currentUser?.role === UserRoles.PUBLIC || (!isAdmin && item.applicant_id !== currentUser?.id)
 
         return (
           <TableActionButtonsMemo
@@ -168,7 +196,7 @@ export function DashboardConsumableTab() {
       },
     })
     return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
-  }, [currentUser?.id, handleConsumableEdit, isAdmin, refreshTables])
+  }, [currentUser?.id, currentUser?.role, handleConsumableEdit, isAdmin, refreshTables])
 
   return (
     <>
@@ -178,8 +206,8 @@ export function DashboardConsumableTab() {
         tableId="dashboard-consumable-orders"
         customColumns={consumableColumns}
         statusOptions={CONSUMABLE_STATUS_OPTIONS}
-        searchFieldOptions={SEARCH_FIELD_OPTIONS}
-        searchPlaceholder="搜索名称、规格..."
+        searchFieldOptions={DASHBOARD_CONSUMABLE_SEARCH_FIELDS}
+        searchPlaceholder="搜索名称、规格、订购时间..."
         title={<><ShoppingCart className="w-5 h-5" /> 我的耗材订单</>}
         noteField="notes"
         enableExpandAll={true}
@@ -194,6 +222,7 @@ export function DashboardConsumableTab() {
         onOpenChange={(open) => {
           if (!open) {
             setEditingConsumable(null)
+            setDeleteConfirm(false)
             consumableForm.reset(defaultConsumableOrderValues)
           }
         }}
@@ -204,14 +233,15 @@ export function DashboardConsumableTab() {
           </DialogHeader>
           <form onSubmit={submitConsumableEdit}>
             <BaseForm form={consumableForm} fields={getConsumableOrderFormFields(true)} />
-            <div className="flex justify-end gap-2 mt-8">
-              <Button variant="morden" size="lg" type="button" onClick={() => setEditingConsumable(null)}>
-                取消
-              </Button>
-              <LoadingButton type="submit" size="lg" isLoading={isSubmittingConsumable}>
-                保存
-              </LoadingButton>
-            </div>
+            <EditDialogActions
+              mode="edit"
+              onCancel={() => setEditingConsumable(null)}
+              onDelete={handleDeleteConsumable}
+              deleteConfirm={deleteConfirm}
+              submitLabelEdit="保存"
+              submitLabelAdd="保存"
+              isSubmitting={isSubmittingConsumable}
+            />
           </form>
         </DialogContent>
       </Dialog>

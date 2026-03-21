@@ -1,4 +1,4 @@
-﻿import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
@@ -7,7 +7,7 @@ import { ToastContainer } from '@/components/ui/Toast'
 import { TooltipProvider } from '@/components/ui/Tooltip'
 import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { isAdmin } from '@/lib/constants'
+import { UserRoles } from '@/lib/constants'
 import { authAPI } from '@/api/client'
 
 // 懒加载页面组件 - 使用默认导出
@@ -26,15 +26,22 @@ const OperationLogsPage = lazy(() => import('@/pages/OperationLogs').then(m => (
 
 function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const location = useLocation()
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ authNotice: '登录状态已失效，请重新登录', from: location.pathname }}
+      />
+    )
   }
   return <>{children}</>
 }
 
 function AdminRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = useAuthStore((state) => state.user)
-  if (!isAdmin(user)) {
+  if (user?.role !== UserRoles.ADMIN) {
     return <Navigate to="/" replace />
   }
   return <>{children}</>
@@ -155,3 +162,4 @@ function App() {
 }
 
 export default App
+

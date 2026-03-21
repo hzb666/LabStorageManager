@@ -43,10 +43,10 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
   const pages = getPageNumbers(currentPage, totalPages)
 
   return (
-    <nav className={cn('flex flex-col sm:flex-row flex-wrap items-center sm:justify-end gap-4', className)}>
+    <nav className={cn('flex flex-row flex-wrap items-center justify-end gap-4', className)}>
 
       {/* 区域 1：每页条数 与 移动端页码信息（移动端居上/居左显示） */}
-      <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-4">
+      <div className="flex w-auto items-center justify-start gap-4">
         <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value))}>
           <SelectTrigger className="h-9 w-auto gap-2">
             <SelectValue placeholder="选择条数" />
@@ -67,12 +67,12 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
       </div>
 
       {/* 区域 2：分页按钮 与 跳转输入框（移动端居下显示） */}
-      <div className="flex w-full sm:w-auto items-center justify-between sm:justify-end gap-2 sm:gap-4">
+      <div className="flex w-auto items-center justify-end gap-4">
 
         {/* 翻页按钮组 */}
         <div className="flex items-center gap-1">
           <Button
-            variant="morden"
+            variant="modern"
             size="sm"
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage <= 1}
@@ -92,7 +92,7 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
                 <Button
                   // 【核心魔法】将 active 状态绑定到 key 上。状态切换时强制组件重新挂载，实现 0 延迟变色
                   key={`page-${page}-${page === currentPage ? 'active' : 'inactive'}`}
-                  variant={page === currentPage ? 'default' : 'morden'}
+                  variant={page === currentPage ? 'default' : 'modern'}
                   onClick={() => onPageChange(page)}
                   // 移除基础过渡动画，仅在 hover 时施加过渡类名
                   className="h-9 w-9 p-0"
@@ -104,7 +104,7 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
           </div>
 
           <Button
-            variant="morden"
+            variant="modern"
             size="sm"
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage >= totalPages}

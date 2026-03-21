@@ -11,13 +11,14 @@ import { useNavigate } from 'react-router-dom'
 // UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { LoadingButton } from '@/components/ui/LoadingButton'
 import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
+import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
 import { REAGENT_STATUS_MAP, UserRoles } from '@/lib/constants'
@@ -36,6 +37,7 @@ import {
   ReagentOrderSchema,
   createValibotResolver,
   validateAndNormalizeCASInput,
+  isSpecialCasValue,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
@@ -102,6 +104,7 @@ const REAGENT_SEARCH_FIELD_OPTIONS = [
   { value: 'name', label: '名称' },
   { value: 'brand', label: '品牌' },
   { value: 'applicant', label: '订购人' },
+  { value: 'created_at', label: '订购时间' },
 ]
 
 function truncateDisplayName(name: string | null | undefined, maxLength = 10): string | null {
@@ -142,6 +145,7 @@ export function ReagentOrdersPage() {
   // Dialog 状态
   const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
   const [editingItem, setEditingItem] = useState<ReagentOrder | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [casWarning, setCasWarning] = useState<CASWarningInfo | null>(null)
   const [casLoading, setCasLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -162,6 +166,13 @@ export function ReagentOrdersPage() {
     }
 
     const normalizedCas = casValidation.normalized
+    if (isSpecialCasValue(normalizedCas)) {
+      setCasWarning(null)
+      setCasLoading(false)
+      lastCheckedCasRef.current = normalizedCas
+      return
+    }
+
     if (lastCheckedCasRef.current === normalizedCas) {
       return
     }
@@ -218,6 +229,7 @@ export function ReagentOrdersPage() {
   // 点击添加按钮
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
+    setDeleteConfirm(false)
     form.reset(defaultReagentOrderValues)
     setCasWarning(null)
     setCasLoading(false)
@@ -229,6 +241,7 @@ export function ReagentOrdersPage() {
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ReagentOrder
     setEditingItem(item)
+    setDeleteConfirm(false)
     form.reset({
       name: item.name || '',
       cas_number: item.cas_number || '',
@@ -290,6 +303,7 @@ export function ReagentOrdersPage() {
         } else if (dialogState === 'add') {
           toast.success('试剂订单创建成功')
         }
+        setDeleteConfirm(false)
         setDialogState(null)
       } catch (err) {
         const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
@@ -351,6 +365,13 @@ export function ReagentOrdersPage() {
       shouldValidate: false,
     })
 
+    if (isSpecialCasValue(casValidation.normalized)) {
+      form.setError('cas_number', { message: '生物试剂不支持 CAS 识别查询' })
+      setCasWarning(null)
+      setCasLoading(false)
+      return
+    }
+
     setIsCasLookupLoading(true)
     try {
       const response = await chemicalAPI.getInfo(casValidation.normalized)
@@ -377,6 +398,30 @@ export function ReagentOrdersPage() {
     }
     await checkCASWarning(casValidation.normalized)
   }, [form, checkCASWarning])
+
+  const handleDeleteClick = useCallback(async () => {
+    if (!editingItem) return
+
+    if (!deleteConfirm) {
+      setDeleteConfirm(true)
+      return
+    }
+
+    try {
+      await reagentOrderAPI.delete(editingItem.id)
+      setDeleteConfirm(false)
+      setEditingItem(null)
+      setDialogState(null)
+      setCasWarning(null)
+      setCasLoading(false)
+      lastCheckedCasRef.current = null
+      await loadOrders()
+      toast.success('试剂订单已删除')
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+    }
+  }, [deleteConfirm, editingItem, loadOrders, setDialogState])
 
   const navigateToCasSearch = useCallback((path: string, field: string) => {
     if (!casWarning?.cas_number) {
@@ -451,7 +496,7 @@ export function ReagentOrdersPage() {
             </Button>
           )}
           {isAdmin && (
-            <Button variant="morden" size="lg" onClick={handleExport}>
+            <Button variant="modern" size="lg" onClick={handleExport}>
               <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
             </Button>
           )}
@@ -464,6 +509,7 @@ export function ReagentOrdersPage() {
         onOpenChange={(open) => {
           if (!open) {
             setDialogState(null)
+            setDeleteConfirm(false)
             form.reset()
             setCasWarning(null)
             setCasLoading(false)
@@ -518,13 +564,18 @@ export function ReagentOrdersPage() {
                 <div className="mt-2 space-y-1 text-sm text-orange-800 dark:text-orange-200">
                   {casWarning.orders.total_count > 0 && casWarning.orders.latest && (
                     <p>
-                      <button
-                        type="button"
-                        className="font-bold transition-colors hover:text-orange-950 dark:hover:text-orange-100"
-                        onClick={() => navigateToCasSearch('/reagents', 'cas')}
-                      >
-                        现有订单（共 {casWarning.orders.total_count} 条）：
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="font-bold transition-colors hover:text-orange-950 dark:hover:text-orange-100"
+                            onClick={() => navigateToCasSearch('/reagents', 'cas')}
+                          >
+                            现有订单（共 {casWarning.orders.total_count} 条）：
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>点击搜索订单</TooltipContent>
+                      </Tooltip>
                       <span>订购人：{casWarning.orders.latest.applicant_name || '未知订购人'}，</span>
                       <span>状态：{getReagentOrderStatusLabel(casWarning.orders.latest.status)}，</span>
                       <span>规格：{casWarning.orders.latest.specification}，</span>
@@ -533,13 +584,18 @@ export function ReagentOrdersPage() {
                   )}
                   {casWarning.inventory.total_count > 0 && casWarning.inventory.latest && (
                     <p>
-                      <button
-                        type="button"
-                        className="font-bold transition-colors hover:text-orange-950 dark:hover:text-orange-100"
-                        onClick={() => navigateToCasSearch('/inventory', 'cas_number')}
-                      >
-                        现有库存（共 {casWarning.inventory.total_count} 条）：
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="font-bold transition-colors hover:text-orange-950 dark:hover:text-orange-100"
+                            onClick={() => navigateToCasSearch('/inventory', 'cas_number')}
+                          >
+                            现有库存（共 {casWarning.inventory.total_count} 条）：
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>点击搜索库存</TooltipContent>
+                      </Tooltip>
                       <span>{casWarning.inventory.latest.storage_location || '位置未填写'}，</span>
                       <span>{(casWarning.inventory.latest.remaining_quantity ?? '-')}</span>
                       /{casWarning.inventory.latest.specification}，
@@ -554,20 +610,21 @@ export function ReagentOrdersPage() {
               </div>
             )}
 
-            <div className="flex justify-end gap-2 mt-8">
-              {casLoading && dialogState === 'add' && (
+            <EditDialogActions
+              mode={dialogState ?? 'add'}
+              onCancel={() => setDialogState(null)}
+              onDelete={dialogState === 'edit' && editingItem ? handleDeleteClick : undefined}
+              deleteConfirm={deleteConfirm}
+              submitLabelEdit="保存"
+              submitLabelAdd="提交订单"
+              isSubmitting={isSubmitting}
+              leadingContent={casLoading && dialogState === 'add' ? (
                 <div className="text-sm text-muted-foreground flex items-center">
                   <Loader2 className="w-3 h-3 animate-spin mr-1" />
                   检查CAS号中
                 </div>
-              )}
-              <Button variant="morden" size="lg" type="button" onClick={() => setDialogState(null)}>
-                取消
-              </Button>
-              <LoadingButton type="submit" size="lg" isLoading={isSubmitting}>
-                {dialogState === 'edit' ? '保存' : '提交订单'}
-              </LoadingButton>
-            </div>
+              ) : undefined}
+            />
           </form>
         </DialogContent>
       </Dialog>
@@ -582,7 +639,7 @@ export function ReagentOrdersPage() {
         customColumns={columns}
         onEdit={handleEditClick}
         title={<><FlaskConical className="w-5 h-5" /> 试剂订单列表</>}
-        searchPlaceholder="搜索名称、CAS号、订购人..."
+        searchPlaceholder="搜索名称、CAS号、订购人、订购时间..."
         renderExpandedRow={renderExpandedRow}
         noteField="notes"
       />
@@ -608,7 +665,7 @@ const ActionButtons = React.memo(function ActionButtons({
       id: 'approve',
       label: '审批',
       icon: <Check className="size-4.5" />,
-      variant: 'morden' as const,
+      variant: 'modern' as const,
       className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
       confirm: true,
       confirmLabel: '确认审批',
@@ -623,7 +680,7 @@ const ActionButtons = React.memo(function ActionButtons({
       id: 'reject',
       label: '驳回',
       icon: <X className="size-4.5" />,
-      variant: 'morden' as const,
+      variant: 'modern' as const,
       className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
       confirm: true,
       confirmLabel: '确认驳回',

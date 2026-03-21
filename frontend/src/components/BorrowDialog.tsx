@@ -124,7 +124,7 @@ export function BorrowDialog({ open, onOpenChange, onConfirm, isSubmitting }: Re
           {!!errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
 
           <div className="flex gap-2 pt-1">
-            <Button variant="morden" className="flex-1" onClick={() => onOpenChange(false)}>
+            <Button variant="modern" className="flex-1" onClick={() => onOpenChange(false)}>
               取消
             </Button>
             <LoadingButton className="flex-1" isLoading={isSubmitting} onClick={handleConfirm}>

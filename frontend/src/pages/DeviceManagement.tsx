@@ -19,7 +19,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { sessionAPI, authAPI, type SessionInfo } from '@/api/client'
-import { useAuthStore } from '@/store/useStore'
 import { formatDateTime } from '@/lib/utils'
 import { getDeviceId } from '@/lib/deviceId'
 import { type User } from '@/lib/constants'
@@ -50,7 +49,6 @@ import { BaseForm } from '@/components/BaseForm'
 const columnHelper = createColumnHelper<SessionInfo>()
 
 export default function DeviceManagement() {
-  const logout = useAuthStore((state) => state.logout)
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
@@ -112,6 +110,11 @@ export default function DeviceManagement() {
     return getDeviceId()
   }, [])
 
+  const openKickModal = useCallback((session: SessionInfo) => {
+    setKickSession(session)
+    setDialogState('kick')
+  }, [setDialogState])
+
   // Table columns
   const columns = useMemo(() => [
     columnHelper.accessor('device_name', {
@@ -164,7 +167,7 @@ export default function DeviceManagement() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="morden"
+                  variant="modern"
                   size="sm"
                   className="h-8 w-8 p-0"
                   onClick={(e) => {
@@ -185,7 +188,7 @@ export default function DeviceManagement() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant="morden"
+                    variant="modern"
                     size="sm"
                     className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                     onClick={(e) => {
@@ -205,7 +208,7 @@ export default function DeviceManagement() {
         )
       },
     }),
-  ], [currentDeviceId])
+  ], [currentDeviceId, editForm, openKickModal])
 
   // 排序数据：当前设备置顶
   const sortedData = useMemo((): SessionInfo[] => {
@@ -232,11 +235,6 @@ export default function DeviceManagement() {
 
   // ========== 设备管理相关函数 ==========
   // Kick single device handlers
-  const openKickModal = (session: SessionInfo) => {
-    setKickSession(session)
-    setDialogState('kick')
-  }
-
   const handleKickDevice = async () => {
     if (!kickSession) return
 
@@ -265,9 +263,7 @@ export default function DeviceManagement() {
       await sessionAPI.deleteAll()
       setDialogState(null)
       refetchSessions()
-      // Redirect to login
-      logout()
-      toast.success('已踢出所有其他设备，请重新登录')
+      toast.success('已踢出所有其他设备')
     } catch {
       toast.error('操作失败')
     } finally {
@@ -299,18 +295,18 @@ export default function DeviceManagement() {
       {/* 标题和按钮 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">个人账户</h1>
-        <div className="flex gap-2">
-          <Button onClick={() => setEditDialogOpen(true)} size="lg" variant="morden">
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => setEditDialogOpen(true)} size="lg" variant="modern">
             <Edit className="w-4 h-4 mr-1.5" />
             修改信息
           </Button>
-          <Button onClick={handleRefresh} size="lg" variant="morden">
+          <Button onClick={handleRefresh} size="lg" variant="modern">
             <RefreshCw className="w-4 h-4 mr-1.5" />
             刷新会话
           </Button>
           <Button onClick={openKickAllModal} size="lg" variant="destructive">
             <LogOut className="w-4 h-4 mr-1.5" />
-            踢出所有其他设备
+            踢出其他设备
           </Button>
         </div>
       </div>
@@ -413,7 +409,7 @@ export default function DeviceManagement() {
             <Button variant="destructive" className="flex-1 border border-destructive" onClick={handleKickDevice} disabled={kickLoading} size="lg">
               {kickLoading ? '处理中...' : '确认踢出'}
             </Button>
-            <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base flex-1">
+            <Button variant="modern" onClick={() => setDialogState(null)} size="lg" className="text-base flex-1">
               取消
             </Button>
           </div>
@@ -442,7 +438,7 @@ export default function DeviceManagement() {
             <Button variant="destructive" className="flex-1 border border-destructive" onClick={handleKickAllDevices} disabled={kickAllLoading} size="lg">
               {kickAllLoading ? '处理中...' : '确认踢出'}
             </Button>
-            <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base flex-1">
+            <Button variant="modern" onClick={() => setDialogState(null)} size="lg" className="text-base flex-1">
               取消
             </Button>
           </div>
@@ -483,7 +479,7 @@ export default function DeviceManagement() {
 
             <div className="flex gap-3 mt-8">
               <Button
-                variant="morden"
+                variant="modern"
                 onClick={() => setEditDeviceDialogOpen(false)}
                 className="flex-1"
                 size="lg"

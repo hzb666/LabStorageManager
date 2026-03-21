@@ -43,3 +43,30 @@ def normalize_search_term(search_term: str) -> str:
         CHARS_TO_REMOVE,
         search_term,
     )
+
+
+def order_with_nulls_last(field: Any, direction: str = "desc") -> tuple[Any, Any]:
+    """构建兼容旧版 SQLite 的 NULLS LAST 排序表达式。
+
+    SQLite 3.30.0 之前不支持 ``NULLS LAST`` 语法，因此这里改为先按
+    ``field IS NULL`` 升序排序，再按字段本身排序，保证空值始终排在最后。
+    """
+    normalized_direction = direction.lower() if direction else "desc"
+    null_rank = field.is_(None).asc()
+    value_order = field.asc() if normalized_direction == "asc" else field.desc()
+    return null_rank, value_order
+
+
+def order_with_special_last(field: Any, special_value: str, direction: str = "desc") -> tuple[Any, Any, Any]:
+    """Build sort expression that always places one special value at the end.
+
+    Order strategy:
+    1) NULL values last
+    2) special value last
+    3) regular value sort by requested direction
+    """
+    normalized_direction = direction.lower() if direction else "desc"
+    null_rank = field.is_(None).asc()
+    special_rank = (field == special_value).asc()
+    value_order = field.asc() if normalized_direction == "asc" else field.desc()
+    return null_rank, special_rank, value_order

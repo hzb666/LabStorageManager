@@ -1,10 +1,12 @@
 ﻿import axios from 'axios'
 import { useAuthStore } from '@/store/useStore'
 import { getDeviceId, getDeviceName } from '@/lib/deviceId'
+import { getApiBaseUrl } from '@/lib/apiConfig'
+import { AUTH_NOTICE_KEY } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+const API_BASE_URL = getApiBaseUrl()
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -36,7 +38,11 @@ api.interceptors.response.use(
       // 获取错误详情并转换为中文
       const errorDetail = error.response?.data?.detail
       const message = normalizeApiErrorMessage(errorDetail, '会话已失效，请重新登录')
-      toast.error(message)
+      try {
+        sessionStorage.setItem(AUTH_NOTICE_KEY, message)
+      } catch {
+        toast.error(message)
+      }
       useAuthStore.getState().logout()
       globalThis.location.href = '/login'
     }
@@ -240,11 +246,14 @@ export const reagentOrderAPI = {
   approve: (id: number) => api.post(`/reagent-orders/${id}/approve`),
   reject: (id: number, reason: string) =>
     api.post(`/reagent-orders/${id}/reject`, { reason }),
-  confirmArrival: (id: number, notes?: string) =>
-    api.post(`/reagent-orders/${id}/confirm-arrival`, { arrival_notes: notes }),
-  stockIn: (id: number) => api.post(`/reagent-orders/${id}/stock-in`),
-  getCASOverview: (casNumber: string) =>
-    api.get<CASOverviewResponse>(`/reagent-orders/cas-overview/${casNumber}`),
+  confirmArrival: (id: number, data?: { arrival_notes?: string; storage_location?: string }) =>
+    api.post(`/reagent-orders/${id}/confirm-arrival`, data ?? {}),
+  stockIn: (id: number, data: { storage_location: string; remaining_quantity?: number }) =>
+    api.post(`/reagent-orders/${id}/stock-in`, data),
+  getCASOverview: (
+    casNumber: string,
+    params?: { exclude_order_id?: number }
+  ) => api.get<CASOverviewResponse>(`/reagent-orders/cas-overview/${casNumber}`, { params }),
   getMyReagentOrders: () => api.get('/reagent-orders/dashboard/my-reagent-orders'),
   getArrivedOrders: () => api.get('/reagent-orders/dashboard/arrived-orders'),
   exportOrders: () => api.get('/reagent-orders/export', { responseType: 'blob' }),
@@ -252,7 +261,14 @@ export const reagentOrderAPI = {
 
 // Consumable Order APIs (new)
 export const consumableOrderAPI = {
-  list: (params?: PaginationParams & { status_filter?: ConsumableOrderStatus }) =>
+  list: (params?: PaginationParams & {
+    status_filter?: ConsumableOrderStatus
+    search?: string
+    search_field?: string
+    fuzzy?: boolean
+    sort_by?: string
+    sort_order?: string
+  }) =>
     api.get('/consumable-orders/', { params }),
   get: (id: number) => api.get(`/consumable-orders/${id}`),
   create: (data: {
@@ -278,7 +294,16 @@ export const consumableOrderAPI = {
 
 // Inventory APIs
 export const inventoryAPI = {
-  list: (params?: PaginationParams & { status_filter?: string; cas_filter?: string; hazardous_only?: boolean }) =>
+  list: (params?: PaginationParams & {
+    status_filter?: string
+    cas_filter?: string
+    hazardous_only?: boolean
+    search?: string
+    search_field?: string
+    fuzzy?: boolean
+    sort_by?: string
+    sort_order?: string
+  }) =>
     api.get('/inventory/', { params }),
   get: (id: number) => api.get(`/inventory/${id}`),
   getByCode: (code: string) => api.get(`/inventory/code/${code}`),
@@ -292,6 +317,7 @@ export const inventoryAPI = {
   getPendingStockin: () => api.get('/inventory/dashboard/pending-stockin'),
   getBorrowHistory: (id: number) => api.get(`/inventory/${id}/borrow-history`),
   getImportTemplate: () => api.get('/inventory/import/template'),
+  downloadTemplate: () => api.get('/inventory/import/template', { responseType: 'blob' }),
   importExcel: (file: FormData) =>
     api.post('/inventory/import', file, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -317,9 +343,12 @@ export const commonShelfAPI = {
     status_filter?: string
     search?: string
     search_field?: string
+    fuzzy?: boolean
     sort_by?: string
     sort_order?: string
   }) => api.get('/inventory/common-shelf', { params }),
+  consumeOne: (sampleInventoryId: number) =>
+    api.post('/inventory/common-shelf/consume-one', { sample_inventory_id: sampleInventoryId }),
 }
 
 // Chemical Info APIs

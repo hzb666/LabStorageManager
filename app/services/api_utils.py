@@ -13,6 +13,7 @@ API 通用工具函数。
 
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
+from app.core.constants import CACHE_MAX_ITEMS, CACHE_PRUNE_COUNT
 
 
 CacheStore = Dict[str, tuple[Any, datetime]]
@@ -43,8 +44,8 @@ def set_cached_result(
     result: Dict[str, Any],
     *,
     now: Callable[[], datetime],
-    max_items: int = 100,
-    prune_count: int = 10,
+    max_items: int = CACHE_MAX_ITEMS,
+    prune_count: int = CACHE_PRUNE_COUNT,
 ) -> None:
     """写入缓存并在容量超过阈值时按最旧时间裁剪。"""
     cache_store[cache_key] = (result, now())
@@ -65,12 +66,27 @@ def clear_cache_by_prefix(cache_store: CacheStore, prefix: str = "list:") -> int
 
 
 def empty_to_none(obj: Any, fields: list[str]) -> dict:
-    """将指定字段中的空字符串统一转换为 None。"""
+    """将指定字段中的空字符串或纯空格字符串统一转换为 None。
+
+    Args:
+        obj: 输入对象，可以是字典或带属性的对象
+        fields: 需要处理的字段列表
+
+    Returns:
+        处理后的字典，空字符串和纯空格都会转为 None
+    """
     result = {}
     for field in fields:
         if isinstance(obj, dict):
             value = obj.get(field)
         else:
             value = getattr(obj, field, None)
-        result[field] = None if value == '' else value
+        # 空字符串或纯空格都转为 None，同时统一去掉首尾空格
+        if value is None:
+            result[field] = None
+        elif isinstance(value, str):
+            stripped = value.strip()
+            result[field] = None if not stripped else stripped
+        else:
+            result[field] = value
     return result

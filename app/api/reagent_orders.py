@@ -13,6 +13,11 @@ from sqlmodel import Session, select, func
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
+    LIST_CACHE_TTL_SECONDS,
+    MAX_PAGE_SIZE,
+)
 from app.core.time_utils import get_utc_now, to_china_time
 from app.models.user import User, UserRole
 from app.models.inventory import Inventory, InventoryStatus
@@ -24,11 +29,18 @@ from app.models.reagent_order import (
     ReagentOrderReason,
     ReagentOrderStatus,
 )
-from app.services.cas_utils import normalize_cas, validate_cas_format
+from app.services.cas_utils import (
+    normalize_cas,
+    validate_cas_format,
+    is_special_cas_value,
+    BIOLOGICAL_REAGENT_CAS,
+)
+from app.services.csv_utils import escape_csv_formula
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
+from app.services.sql_utils import order_with_special_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
@@ -42,11 +54,24 @@ router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
-CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
 LIST_CACHE_PREFIX = "list:"
 VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
+
+
+def _build_search_clause(field, pattern: str, *, fuzzy: bool):
+    column = func.coalesce(field, "")
+    if fuzzy:
+        return normalize_field_sql(column).ilike(pattern)
+    return column.ilike(pattern)
+
+
+def _combine_search_clauses(clauses: list[Any]):
+    expr = clauses[0]
+    for clause in clauses[1:]:
+        expr = expr | clause
+    return expr
 
 
 def _validate_order_reason(reason: Optional[str], required: bool = False) -> Optional[ReagentOrderReason]:
@@ -100,47 +125,56 @@ def _apply_reagent_order_filters(
     if not search:
         return base
 
-    if fuzzy:
-        # 模糊搜索：标准化搜索词（移除特殊空格字符和常见分隔符）
-        search_normalized = normalize_search_term(search.strip())
-        applicant_id_subquery = select(User.id).where(
-            normalize_field_sql(User.full_name).ilike(f"%{search_normalized}%")
-        )
+    search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
+    if not search_value:
+        return base
 
-        return base.where(
-            (normalize_field_sql(ReagentOrder.cas_number).ilike(f"%{search_normalized}%")) |
-            (normalize_field_sql(ReagentOrder.name).ilike(f"%{search_normalized}%")) |
-            (normalize_field_sql(ReagentOrder.brand).ilike(f"%{search_normalized}%")) |
-            (normalize_field_sql(ReagentOrder.category).ilike(f"%{search_normalized}%")) |
-            (ReagentOrder.applicant_id.in_(applicant_id_subquery))
-        )
-
-    search_pattern = f"%{search}%"
-    applicant_id_subquery = select(User.id).where(
-        User.full_name.ilike(search_pattern)
-    )
+    search_pattern = f"%{search_value}%"
+    field_map = {
+        'name': [
+            ReagentOrder.name,
+            ReagentOrder.name_pinyin,
+            ReagentOrder.name_pinyin_initials,
+        ],
+        'cas': [ReagentOrder.cas_number],
+        'cas_number': [ReagentOrder.cas_number],
+        'brand': [
+            ReagentOrder.brand,
+            ReagentOrder.brand_pinyin,
+            ReagentOrder.brand_pinyin_initials,
+        ],
+        'created_at': [func.strftime('%Y-%m-%d %H:%M:%S', ReagentOrder.created_at)],
+        'category': [
+            ReagentOrder.category,
+            ReagentOrder.category_pinyin,
+            ReagentOrder.category_pinyin_initials,
+        ],
+    }
+    applicant_match = _combine_search_clauses([
+        _build_search_clause(User.full_name, search_pattern, fuzzy=fuzzy),
+        _build_search_clause(User.full_name_pinyin, search_pattern, fuzzy=fuzzy),
+        _build_search_clause(User.full_name_pinyin_initials, search_pattern, fuzzy=fuzzy),
+    ])
+    applicant_id_subquery = select(User.id).where(applicant_match)
 
     if search_field and search_field != 'all':
-        field_map = {
-            'name': ReagentOrder.name,
-            'cas': ReagentOrder.cas_number,
-            'cas_number': ReagentOrder.cas_number,
-            'brand': ReagentOrder.brand,
-            'category': ReagentOrder.category,
-        }
         if search_field in APPLICANT_SEARCH_KEYS:
             return base.where(ReagentOrder.applicant_id.in_(applicant_id_subquery))
         if search_field in field_map:
-            return base.where(field_map[search_field].ilike(search_pattern))
+            clauses = [
+                _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+                for field in field_map[search_field]
+            ]
+            return base.where(_combine_search_clauses(clauses))
 
-    # 未知字段或 all，回退到搜索所有字段
-    return base.where(
-        (ReagentOrder.name.ilike(search_pattern)) |
-        (ReagentOrder.cas_number.ilike(search_pattern)) |
-        (ReagentOrder.brand.ilike(search_pattern)) |
-        (ReagentOrder.category.ilike(search_pattern)) |
-        (ReagentOrder.applicant_id.in_(applicant_id_subquery))
-    )
+    all_clauses = []
+    for fields in field_map.values():
+        all_clauses.extend(
+            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            for field in fields
+        )
+    all_clauses.append(ReagentOrder.applicant_id.in_(applicant_id_subquery))
+    return base.where(_combine_search_clauses(all_clauses))
 
 
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -154,7 +188,7 @@ def create_reagent_order(
     Critical: CAS Number is normalized automatically.
     """
     if current_user.role == UserRole.PUBLIC:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="公用账户不能创建订单")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
     # Normalize CAS Number
     normalized_cas = normalize_cas(order.cas_number)
@@ -176,21 +210,26 @@ def create_reagent_order(
         )
 
     # order_reason 已在模型层验证（枚举类型），直接使用
-    
+
+    # 处理可选字段：空字符串和纯空格转为 None
+    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'notes']
+    normalized = empty_to_none(order.model_dump(), optional_string_fields)
+
     # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(
-        name=order.name,
-        brand=order.brand,
+        name=normalized.get('name', order.name),
+        category=normalized.get('category'),
+        brand=normalized.get('brand'),
     )
-    
+
     # Create order
     db_order = ReagentOrder(
         cas_number=normalized_cas,
-        name=order.name,
-        english_name=order.english_name,
-        alias=order.alias,
-        category=order.category,
-        brand=order.brand,
+        name=normalized.get('name', order.name),
+        english_name=normalized.get('english_name'),
+        alias=normalized.get('alias'),
+        category=normalized.get('category'),
+        brand=normalized.get('brand'),
         initial_quantity=initial_quantity,
         unit=unit,
         quantity=order.quantity,
@@ -209,15 +248,12 @@ def create_reagent_order(
     return db_order
 
 
-# 分页限制常量
-MAX_PAGE_SIZE = 100
-
 @router.get("/")
 def list_reagent_orders(
     current_user: CurrentUser,
     db: DBSession,
     skip: int = 0,
-    limit: int = min(50, MAX_PAGE_SIZE),
+    limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
     status_filter: Optional[ReagentOrderStatus] = None,
     search: Optional[str] = None,
     search_field: Optional[str] = None,
@@ -241,7 +277,7 @@ def list_reagent_orders(
             SEARCH_CACHE,
             cache_key,
             now=get_utc_now,
-            ttl_seconds=CACHE_TTL_SECONDS,
+            ttl_seconds=LIST_CACHE_TTL_SECONDS,
         )
         if cached is not None:
             return {
@@ -290,10 +326,10 @@ def list_reagent_orders(
 
     order_direction = sort_order.lower() if sort_order else 'desc'
 
-    if order_direction == 'asc':
-        order_expr = order_column.asc()
+    if sort_by == 'cas_number':
+        order_expr = order_with_special_last(order_column, BIOLOGICAL_REAGENT_CAS, order_direction)
     else:
-        order_expr = order_column.desc()
+        order_expr = order_with_nulls_last(order_column, order_direction)
 
     secondary_order = ReagentOrder.created_at.desc()
 
@@ -301,9 +337,9 @@ def list_reagent_orders(
     tertiary_order = ReagentOrder.id.desc()
 
     if limit > 0:
-        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
     else:
-        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order)).all()
+        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order)).all()
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
@@ -359,21 +395,21 @@ def export_reagent_orders(
         # 使用公共函数格式化规格
         spec = format_specification(order.initial_quantity, order.unit)
         writer.writerow([
-            order.cas_number,
-            order.name,
-            order.english_name or "",
-            order.alias or "",
-            order.category or "",
-            order.brand or "",
-            spec or "",
+            escape_csv_formula(order.cas_number),
+            escape_csv_formula(order.name),
+            escape_csv_formula(order.english_name or ""),
+            escape_csv_formula(order.alias or ""),
+            escape_csv_formula(order.category or ""),
+            escape_csv_formula(order.brand or ""),
+            escape_csv_formula(spec or ""),
             order.quantity,
             order.price or "",
             order.order_reason.value if hasattr(order.order_reason, "value") else order.order_reason,
             order.status.value if hasattr(order.status, "value") else order.status,
             "是" if order.is_hazardous else "否",
-            all_users_map.get(order.applicant_id, "") if order.applicant_id else "",
+            escape_csv_formula(all_users_map.get(order.applicant_id, "") if order.applicant_id else ""),
             to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
-            order.notes or "",
+            escape_csv_formula(order.notes or ""),
         ])
 
     output.seek(0)
@@ -391,11 +427,19 @@ def get_cas_overview(
     cas_number: str,
     current_user: CurrentUser,
     db: DBSession,
+    exclude_order_id: Optional[int] = None,
 ):
     """Get CAS overview for duplicate-check hints in forms and expanded rows."""
     del current_user  # 仅用于鉴权
 
     normalized_cas = normalize_cas(cas_number)
+
+    if is_special_cas_value(normalized_cas):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Biological reagents do not support CAS query",
+        )
+
     is_valid, error = validate_cas_format(normalized_cas)
     if not is_valid:
         raise HTTPException(
@@ -403,11 +447,19 @@ def get_cas_overview(
             detail=f"Invalid CAS format: {error}",
         )
 
-    # 订单：匹配同 CAS 的所有订单，排除已到货（已进入库存暂存区无需再提醒），取最近一条 + 总数
-    orders_base = select(ReagentOrder).where(
-        ReagentOrder.cas_number == normalized_cas,
-        ReagentOrder.status != ReagentOrderStatus.ARRIVED,
+    # 订单：匹配同 CAS 的所有订单。
+    # 统一排除已到货/已入库（避免与库存重复），
+    # 供“新建查重”和“展开行”复用同一口径。
+    order_filters = [ReagentOrder.cas_number == normalized_cas]
+    order_filters.append(
+        ReagentOrder.status.notin_([
+            ReagentOrderStatus.ARRIVED,
+            ReagentOrderStatus.STOCKED,
+        ])
     )
+    if exclude_order_id is not None:
+        order_filters.append(ReagentOrder.id != exclude_order_id)
+    orders_base = select(ReagentOrder).where(*order_filters)
     orders_count = db.exec(select(func.count()).select_from(orders_base.subquery())).one()
     latest_order = db.exec(
         orders_base.order_by(ReagentOrder.created_at.desc(), ReagentOrder.id.desc()).limit(1)
@@ -515,7 +567,11 @@ def update_reagent_order(
         )
     
     # 检查权限：普通用户只能编辑自己的订单，管理员可以编辑所有人的订单
-    from app.models.user import UserRole
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public account cannot edit orders"
+        )
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -523,6 +579,11 @@ def update_reagent_order(
         )
     
     update_data = order_update.model_dump(exclude_unset=True)
+    if "status" in update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be changed via workflow endpoints",
+        )
     
     optional_string_fields = [
         'english_name', 'alias', 'category', 'brand', 'unit', 'notes',
@@ -545,13 +606,18 @@ def update_reagent_order(
 
     # order_reason 已在模型层验证（枚举类型），直接使用
     # 如果更新了 name 或 brand，重新计算拼音字段（只保留 name_pinyin 和 brand_pinyin）
-    if "name" in update_data or "brand" in update_data:
+    if "name" in update_data or "category" in update_data or "brand" in update_data:
         name = update_data.get("name", order.name)
+        category = update_data.get("category", order.category)
         brand = update_data.get("brand", order.brand)
-        pinyin_fields = compute_pinyin_fields(name=name, brand=brand)
-        # ReagentOrder 有 name_pinyin 和 brand_pinyin 字段
+        pinyin_fields = compute_pinyin_fields(name=name, category=category, brand=brand)
+        # ReagentOrder 保留搜索/排序需要的拼音字段
         update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
+        update_data['name_pinyin_initials'] = pinyin_fields.get('name_pinyin_initials')
+        update_data['category_pinyin'] = pinyin_fields.get('category_pinyin')
+        update_data['category_pinyin_initials'] = pinyin_fields.get('category_pinyin_initials')
         update_data['brand_pinyin'] = pinyin_fields.get('brand_pinyin')
+        update_data['brand_pinyin_initials'] = pinyin_fields.get('brand_pinyin_initials')
     
     for field, value in update_data.items():
         setattr(order, field, value)

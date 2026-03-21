@@ -49,7 +49,7 @@ export function NotFoundPage() {
           <CardContent className="space-y-4">
             <div className="flex gap-3">
               <Button
-                variant="morden"
+                variant="modern"
                 onClick={() => window.history.back()}
                 className="flex-1"
                 size="lg"

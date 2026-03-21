@@ -5,11 +5,13 @@ Announcement API Routes - System Announcements Management
 from typing import List, Optional, Annotated
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlmodel import Session, select, func
 
 from app.core.auth import CurrentUser, require_admin
 from app.core.config import settings
+from app.core.constants import INVALID_FILENAME_PREFIX, INVALID_FILENAME_SEGMENTS, MAX_PAGE_SIZE
+from app.core.request_utils import get_client_ip
 from app.core.time_utils import get_utc_now
 from app.database import get_db
 from app.models.announcement import (
@@ -20,6 +22,7 @@ from app.models.announcement import (
 )
 from app.models.user import User
 from app.services.image_service import save_announcement_image, delete_file, get_directory_storage_info
+from app.services.rate_limit import enforce_rate_limit
 from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/announcements", tags=["Announcements"])
@@ -94,7 +97,7 @@ def list_announcements(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)],
     skip: int = 0,
-    limit: int = 100,
+    limit: int = MAX_PAGE_SIZE,
 ):
     """
     Get all announcements (admin only)
@@ -244,7 +247,7 @@ def delete_announcement(
     if announcement.images:
         for image_url in announcement.images:
             try:
-                delete_file(image_url)
+                delete_file(image_url, required_subdir="announcements")
             except Exception as e:
                 logger.error("Failed to delete image %s: %s", image_url, e)
 
@@ -305,12 +308,21 @@ def toggle_visibility_announcement(
 @router.post("/upload-image")
 async def upload_announcement_image(
     file: UploadFile,
+    request: Request,
     current_user: Annotated[User, Depends(require_admin)],
 ):
     """
     Upload announcement image (admin only)
     Returns the URL of the uploaded image
     """
+    client_ip = get_client_ip(request)
+    enforce_rate_limit(
+        scope="upload_announcement_image",
+        identifier=client_ip,
+        limit=settings.upload_rate_limit_count,
+        window_seconds=settings.upload_rate_limit_window_seconds,
+    )
+
     # 检查存储容量配额
     storage_info = get_directory_storage_info("announcements")
     if storage_info["used_bytes"] >= storage_info["max_bytes"]:
@@ -333,13 +345,10 @@ def delete_announcement_image(
     Delete announcement image (admin only)
     """
     # 修复路径穿越漏洞
-    if ".." in filename or filename.startswith("/"):
+    if any(segment in filename for segment in INVALID_FILENAME_SEGMENTS) or filename.startswith(INVALID_FILENAME_PREFIX):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename")
 
-    # Construct the URL path
-    url_path = f"/static/announcements/{filename}"
-
-    deleted = delete_file(url_path)
+    deleted = delete_file(filename, required_subdir="announcements")
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

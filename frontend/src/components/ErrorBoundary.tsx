@@ -84,7 +84,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
                 </div>
                 <div className="flex gap-3">
                   <Button
-                    variant="morden"
+                    variant="modern"
                     onClick={this.handleBack}
                     className="flex-1"
                     size="lg"

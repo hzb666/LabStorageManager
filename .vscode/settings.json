@@ -23,7 +23,7 @@
   "less.lint.unknownAtRules": "ignore",
   "scss.validate": true,
   "scss.lint.unknownAtRules": "ignore",
-  "python-envs.defaultEnvManager": "ms-python.python:poetry",
-  "python-envs.defaultPackageManager": "ms-python.python:poetry",
+  "python-envs.defaultEnvManager": "ms-python.python:venv",
+  "python-envs.defaultPackageManager": "ms-python.python:pip",
   "svg.preview.background": "editor"
 }

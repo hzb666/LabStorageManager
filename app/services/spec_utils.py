@@ -4,6 +4,7 @@ Critical: No unit conversion, case-insensitive, reject invalid format
 """
 import re
 from typing import Tuple, Optional
+from app.core.constants import SPEC_PATTERN
 
 
 # Canonical unit form mapping (lowercase -> display form)
@@ -80,8 +81,7 @@ def parse_specification(spec: str) -> Tuple[float, str]:
     
     # Pattern: number + optional space + unit
     # Use (\d+(?:\.\d+)?) to avoid matching invalid formats like "1.5.5"
-    pattern = r'^(\d+(?:\.\d+)?)\s*([a-zA-Zμ个瓶支盒包套]+)$'
-    match = re.match(pattern, spec)
+    match = re.match(SPEC_PATTERN, spec)
     
     if not match:
         raise SpecificationError(

@@ -6,7 +6,13 @@
 import React from 'react'
 import { AlertTriangle } from 'lucide-react'
 import type { FieldSchema } from '../components/BaseForm'
-import type { ReagentOrderFormData, ConsumableOrderFormData, InventoryFormData, UserUpdateFormData } from './validationSchemas'
+import type {
+  ReagentOrderFormData,
+  ConsumableOrderFormData,
+  InventoryFormData,
+  UserUpdateFormData,
+  StockInFormInputData
+} from './validationSchemas'
 import { ORDER_REASON_OPTIONS, REAGENT_CATEGORY_OPTIONS, REAGENT_BRAND_OPTIONS } from './options'
 
 // ============================================================================
@@ -40,11 +46,11 @@ export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number
   // 编辑模式下显示：剩余量 + 规格；添加模式下显示：瓶数 + 规格
   const quantityFields = isEdit && initialQuantity !== undefined
     ? [
-      { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 100', min: 0 },
+      { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 100' },
       { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
     ]
     : [
-      { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 1', min: 1 },
+      { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 1' },
       { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
     ]
 
@@ -125,7 +131,6 @@ export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentO
       type: 'input' as const,
       inputType: 'number' as const,
       required: true,
-      min: 1,
       placeholder: '如: 1'
     },
     { name: 'price' as const, label: '单价(元)', type: 'input' as const, required: true, inputType: 'number' as const, placeholder: '如: 100' },
@@ -213,7 +218,6 @@ export function getConsumableOrderFormFields(isEdit: boolean): FieldSchema<Consu
       type: 'input' as const,
       inputType: 'number' as const,
       required: true,
-      min: 1,
       placeholder: '如: 1'
     },
 
@@ -242,9 +246,11 @@ export const defaultReturnValues = {
  */
 export function getReturnFormFields(
   mode: 'remaining' | 'used',
-  maxQuantity: number
+  maxQuantity: number,
+  unit?: string
 ): FieldSchema<typeof defaultReturnValues>[] {
-  const label = mode === 'remaining' ? '剩余量' : '使用量'
+  const baseLabel = mode === 'remaining' ? '剩余量' : '使用量'
+  const label = unit ? `${baseLabel} (${unit})` : baseLabel
   return [
     {
       name: 'return_quantity' as const,
@@ -253,8 +259,39 @@ export function getReturnFormFields(
       inputType: 'number' as const,
       required: true,
       placeholder: mode === 'remaining' ? `如: ${maxQuantity}` : `如: 0`,
-      min: 0,
-      max: maxQuantity,
+    },
+  ]
+}
+
+// ============================================================================
+// 入库表单配置
+// ============================================================================
+
+/** 入库表单默认值 */
+export const defaultStockInValues: StockInFormInputData = {
+  remaining_quantity: '',
+  storage_location: '',
+}
+
+/**
+ * 获取入库表单字段配置
+ */
+export function getStockInFormFields(unit?: string): FieldSchema<StockInFormInputData>[] {
+  return [
+    {
+      name: 'remaining_quantity' as const,
+      label: unit ? `剩余量 (${unit})` : '剩余量',
+      type: 'input' as const,
+      inputType: 'number' as const,
+      required: true,
+      placeholder: '请输入剩余量',
+    },
+    {
+      name: 'storage_location' as const,
+      label: '库存位置',
+      type: 'input' as const,
+      required: true,
+      placeholder: '如: A-1-1 柜',
     },
   ]
 }

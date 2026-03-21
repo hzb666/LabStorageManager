@@ -13,7 +13,8 @@ from sqlmodel import Session, select, func
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
-from app.core.time_utils import get_utc_now, to_china_time
+from app.core.constants import DEFAULT_PAGE_SIZE, LIST_CACHE_TTL_SECONDS, MAX_PAGE_SIZE
+from app.core.time_utils import get_utc_now, to_china_time, utc_iso_str
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
@@ -22,9 +23,10 @@ from app.models.consumable_order import (
     ConsumableOrderStatus,
 )
 from app.models.user import User, UserRole
+from app.services.csv_utils import escape_csv_formula
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
@@ -37,11 +39,24 @@ router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
-CACHE_TTL_SECONDS = 10  # 缓存有效期10秒，与前端refetchInterval匹配
 LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
+
+
+def _build_search_clause(field, pattern: str, *, fuzzy: bool):
+    column = func.coalesce(field, "")
+    if fuzzy:
+        return normalize_field_sql(column).ilike(pattern)
+    return column.ilike(pattern)
+
+
+def _combine_search_clauses(clauses: list[Any]):
+    expr = clauses[0]
+    for clause in clauses[1:]:
+        expr = expr | clause
+    return expr
 
 def _add_specification(item_dict: dict) -> dict:
     """Add specification field to order response dict
@@ -70,42 +85,46 @@ def _apply_consumable_order_filters(
     if not search:
         return base
 
-    if fuzzy:
-        # 模糊搜索：标准化搜索词（移除特殊空格字符和常见分隔符）
-        search_normalized = normalize_search_term(search.strip())
-        applicant_id_subquery = select(User.id).where(
-            normalize_field_sql(User.full_name).ilike(f"%{search_normalized}%")
-        )
-        return base.where(
-            (normalize_field_sql(ConsumableOrder.name).ilike(f"%{search_normalized}%")) |
-            (normalize_field_sql(ConsumableOrder.specification).ilike(f"%{search_normalized}%")) |
-            (normalize_field_sql(ConsumableOrder.communication).ilike(f"%{search_normalized}%")) |
-            (ConsumableOrder.applicant_id.in_(applicant_id_subquery))
-        )
+    search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
+    if not search_value:
+        return base
 
-    search_pattern = f"%{search}%"
-    applicant_id_subquery = select(User.id).where(
-        User.full_name.ilike(search_pattern)
-    )
+    search_pattern = f"%{search_value}%"
+    field_map = {
+        'name': [
+            ConsumableOrder.name,
+            ConsumableOrder.name_pinyin,
+            ConsumableOrder.name_pinyin_initials,
+        ],
+        'specification': [ConsumableOrder.specification],
+        'created_at': [func.strftime('%Y-%m-%d %H:%M:%S', ConsumableOrder.created_at)],
+        'communication': [ConsumableOrder.communication],
+    }
+    applicant_match = _combine_search_clauses([
+        _build_search_clause(User.full_name, search_pattern, fuzzy=fuzzy),
+        _build_search_clause(User.full_name_pinyin, search_pattern, fuzzy=fuzzy),
+        _build_search_clause(User.full_name_pinyin_initials, search_pattern, fuzzy=fuzzy),
+    ])
+    applicant_id_subquery = select(User.id).where(applicant_match)
 
     if search_field and search_field != 'all':
-        field_map = {
-            'name': ConsumableOrder.name,
-            'specification': ConsumableOrder.specification,
-            'communication': ConsumableOrder.communication,
-        }
         if search_field in APPLICANT_SEARCH_KEYS:
             return base.where(ConsumableOrder.applicant_id.in_(applicant_id_subquery))
         if search_field in field_map:
-            return base.where(field_map[search_field].ilike(search_pattern))
+            clauses = [
+                _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+                for field in field_map[search_field]
+            ]
+            return base.where(_combine_search_clauses(clauses))
 
-    # 未知字段或 all，回退到搜索常用字段 + 订购人
-    return base.where(
-        (ConsumableOrder.name.ilike(search_pattern)) |
-        (ConsumableOrder.specification.ilike(search_pattern)) |
-        (ConsumableOrder.communication.ilike(search_pattern)) |
-        (ConsumableOrder.applicant_id.in_(applicant_id_subquery))
-    )
+    all_clauses = []
+    for fields in field_map.values():
+        all_clauses.extend(
+            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            for field in fields
+        )
+    all_clauses.append(ConsumableOrder.applicant_id.in_(applicant_id_subquery))
+    return base.where(_combine_search_clauses(all_clauses))
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -116,18 +135,22 @@ def create_consumable_order(
 ):
     """Create a new consumable order"""
     if current_user.role == UserRole.PUBLIC:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="公用账户不能创建订单")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
-    pinyin_fields = compute_pinyin_fields(name=order.name)
+    # 处理可选字段：空字符串和纯空格转为 None
+    optional_string_fields = ['english_name', 'product_number', 'unit', 'communication', 'notes']
+    normalized = empty_to_none(order.model_dump(), optional_string_fields)
+
+    pinyin_fields = compute_pinyin_fields(name=normalized.get('name', order.name))
 
     db_order = ConsumableOrder(
-        name=order.name,
-        english_name=order.english_name,
+        name=normalized.get('name', order.name),
+        english_name=normalized.get('english_name'),
         specification=order.specification,
-        unit=order.unit,
+        unit=normalized.get('unit'),
         quantity=order.quantity,
         price=order.price,
-        communication=order.communication,
+        communication=normalized.get('communication'),
         applicant_id=current_user.id,
         **pinyin_fields,
     )
@@ -140,14 +163,12 @@ def create_consumable_order(
     return db_order
 
 
-# 分页限制常量
-MAX_PAGE_SIZE = 100
 @router.get("/")
 def list_consumable_orders(
     current_user: CurrentUser,
     db: DBSession,
     skip: int = 0,
-    limit: int = min(50, MAX_PAGE_SIZE),
+    limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
     status_filter: Optional[ConsumableOrderStatus] = None,
     search: Optional[str] = None,
     search_field: Optional[str] = None,
@@ -171,7 +192,7 @@ def list_consumable_orders(
             SEARCH_CACHE,
             cache_key,
             now=get_utc_now,
-            ttl_seconds=CACHE_TTL_SECONDS,
+            ttl_seconds=LIST_CACHE_TTL_SECONDS,
         )
         if cached is not None:
             return {
@@ -215,10 +236,7 @@ def list_consumable_orders(
 
     order_direction = sort_order.lower() if sort_order else 'desc'
 
-    if order_direction == 'asc':
-        order_expr = order_column.asc()
-    else:
-        order_expr = order_column.desc()
+    order_expr = order_with_nulls_last(order_column, order_direction)
 
     secondary_order = ConsumableOrder.created_at.desc()
 
@@ -226,9 +244,9 @@ def list_consumable_orders(
     tertiary_order = ConsumableOrder.id.desc()
 
     if limit > 0:
-        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
     else:
-        orders = db.exec(base.order_by(order_expr, secondary_order, tertiary_order)).all()
+        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order)).all()
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
@@ -282,15 +300,15 @@ def export_consumable_orders(
         # 使用直接存储的规格字符串
         spec = getattr(order, 'specification', '') or ''
         writer.writerow([
-            order.name,
-            order.english_name or "",
-            spec or "",
+            escape_csv_formula(order.name),
+            escape_csv_formula(order.english_name or ""),
+            escape_csv_formula(spec or ""),
             order.quantity,
             order.price or "",
             order.status.value if hasattr(order.status, "value") else order.status,
-            all_users_map.get(order.applicant_id, "") if order.applicant_id else "",
+            escape_csv_formula(all_users_map.get(order.applicant_id, "") if order.applicant_id else ""),
             to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
-            order.notes or "",
+            escape_csv_formula(order.notes or ""),
         ])
 
     output.seek(0)
@@ -335,7 +353,11 @@ def update_consumable_order(
         )
 
     # 检查权限：只有订购人和管理员可以更新
-    from app.models.user import UserRole
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public account cannot edit orders"
+        )
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -343,6 +365,11 @@ def update_consumable_order(
         )
 
     update_data = order_update.model_dump(exclude_unset=True)
+    if "status" in update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be changed via workflow endpoints",
+        )
     
     optional_string_fields = [
         'english_name', 'product_number', 'unit', 'communication', 'notes',
@@ -356,8 +383,9 @@ def update_consumable_order(
     if "name" in update_data:
         name = update_data.get("name")
         pinyin_fields = compute_pinyin_fields(name=name)
-        # ConsumableOrder 只有 name_pinyin 字段
+        # ConsumableOrder 保留名称的拼音搜索字段
         update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
+        update_data['name_pinyin_initials'] = pinyin_fields.get('name_pinyin_initials')
     
     for field, value in update_data.items():
         setattr(order, field, value)
@@ -440,7 +468,6 @@ def complete_consumable_order(
         )
     
     # Check if user is the applicant or admin
-    from app.models.user import UserRole
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -493,8 +520,8 @@ def get_my_consumable_orders(
             "quantity": order.quantity,
             "price": order.price,
             "notes": order.notes,
-            "created_at": order.created_at.isoformat() + 'Z' if order.created_at else None,
-            "updated_at": order.updated_at.isoformat() + 'Z' if order.updated_at else None
+            "created_at": utc_iso_str(order.created_at),
+            "updated_at": utc_iso_str(order.updated_at)
         }
         
         if order.status == ConsumableOrderStatus.PENDING:
@@ -534,7 +561,11 @@ def delete_consumable_order(
         )
     
     # Check if user is the applicant or admin
-    from app.models.user import UserRole
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public account cannot delete orders"
+        )
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

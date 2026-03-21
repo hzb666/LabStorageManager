@@ -3,14 +3,7 @@ import { Pin, X, ZoomIn } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { type Announcement } from '@/api/client'
 import { Button } from './ui/Button'
-import { formatDateTime } from '@/lib/utils'
-
-const getFullImageUrl = (url: string): string => {
-  if (!url) return ''
-  if (url.startsWith('http://') || url.startsWith('https://')) return url
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-  return `${API_BASE_URL}${url}`
-}
+import { formatDateTime, getFullImageUrl } from '@/lib/utils'
 
 interface AnnouncementDetailProps {
   announcement: Announcement | null

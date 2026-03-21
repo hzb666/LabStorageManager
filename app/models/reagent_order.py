@@ -4,11 +4,13 @@ Separated from Consumable for independent workflow
 """
 from datetime import datetime
 
+from app.core.constants import MAX_ORDER_QUANTITY
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 
@@ -66,14 +68,19 @@ class ReagentOrderBase(SQLModel):
 
 class ReagentOrder(ReagentOrderBase, table=True):
     """Reagent Order database model"""
+    __tablename__ = "reagent_order"
+    __table_args__ = (
+        Index("ix_reagent_order_status_created_at_id", "status", "created_at", "id"),
+        Index("ix_reagent_order_applicant_created_at_id", "applicant_id", "created_at", "id"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     applicant_id: Optional[int] = Field(
         default=None,
-        index=True,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    status: ReagentOrderStatus = Field(default=ReagentOrderStatus.PENDING, index=True)
+    status: ReagentOrderStatus = Field(default=ReagentOrderStatus.PENDING)
     created_at: datetime = Field(default_factory=get_utc_now, index=True)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
@@ -82,7 +89,11 @@ class ReagentOrder(ReagentOrderBase, table=True):
     
     # 拼音排序字段（预计算，使用数据库索引加速排序）
     name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    name_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
+    category_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    category_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
     brand_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
+    brand_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
 
 
 class ReagentOrderCreate(SQLModel):
@@ -97,7 +108,7 @@ class ReagentOrderCreate(SQLModel):
     category: Optional[str] = None
     brand: Optional[str] = None
     specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500ml"
-    quantity: int = Field(gt=0)
+    quantity: int = Field(gt=0, le=MAX_ORDER_QUANTITY)  # 数量限制：1-99
     price: float = Field(gt=0)  # 价格必填，必须大于0
     order_reason: ReagentOrderReason  # 必填，前端只能选择枚举值
     is_hazardous: bool = False

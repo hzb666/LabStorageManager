@@ -6,6 +6,7 @@ from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 from sqlmodel import Session, select
 
 from app.core.config import settings
+from app.core.constants import ACTIVITY_DEBOUNCE_SECONDS
 from app.core.time_utils import get_utc_now
 from app.core.redis import cache_session, delete_cached_session, get_cached_session
 from app.database import get_db, engine  # 必须引入 engine 供后台任务使用
@@ -109,7 +110,7 @@ def get_current_session(
         now_utc = get_utc_now()
         
         if session.last_active_at:
-            if (now_utc - session.last_active_at).total_seconds() >= 300:
+            if (now_utc - session.last_active_at).total_seconds() >= ACTIVITY_DEBOUNCE_SECONDS:
                 needs_update = True
         else:
             needs_update = True

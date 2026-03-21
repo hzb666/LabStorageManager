@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+from app.core.constants import CAS_PATTERN, RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
 
 
 logger = logging.getLogger(__name__)
@@ -37,13 +38,20 @@ class Settings(BaseSettings):
     
     # CORS
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    trust_proxy_headers: bool = Field(
+        default=False,
+        description="Whether to trust reverse-proxy forwarding headers such as X-Forwarded-For",
+    )
     
     # File Upload
     max_file_size_mb: int = 10
+    max_upload_request_size_mb: int = 5
     allowed_image_types: tuple = ("image/jpeg", "image/png", "image/webp")
     max_image_width: int = 800
     max_image_height: int = 800
     max_image_size_kb: int = 100  # Critical Rule #3: <100KB
+    upload_rate_limit_count: int = 10
+    upload_rate_limit_window_seconds: int = 300
     
     # Default Admin
     default_admin_username: str = Field(default="admin", description="Default admin username")
@@ -67,7 +75,7 @@ class Settings(BaseSettings):
     redis_password: Optional[str] = Field(default=None, description="Redis password")
     
     # CAS Configuration
-    cas_pattern: str = r"^\d{2,7}-\d{2}-\d$"
+    cas_pattern: str = CAS_PATTERN
     
     # Niutrans Translation API
     niutrans_appid: str = Field(default="", description="Niutrans API appId")
@@ -104,6 +112,10 @@ class Settings(BaseSettings):
     def _is_explicit_development(self) -> bool:
         """Check if environment is explicitly set to development"""
         return self.env.lower() in ("development", "dev")
+
+    def use_secure_runtime(self) -> bool:
+        """Enable production-style transport protections outside local development."""
+        return not self._is_explicit_development()
     
     def get_public_key(self) -> str:
         """Load or generate RSA public key"""
@@ -127,8 +139,8 @@ class Settings(BaseSettings):
         from cryptography.hazmat.primitives.asymmetric import rsa
         
         private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048
+            public_exponent=RSA_PUBLIC_EXPONENT,
+            key_size=RSA_KEY_SIZE_BITS
         )
         
         # Save private key
@@ -182,7 +194,7 @@ def get_settings() -> Settings:
     
     # Validate secret_key in production (needed for HS256 fallback)
     if not settings.secret_key:
-        if settings.env == "production" and settings.algorithm == "HS256":
+        if settings.use_secure_runtime() and settings.algorithm == "HS256":
             raise ValueError("SECRET_KEY must be set in production when using HS256")
         # Use a secure random key in development
         settings.secret_key = secrets.token_urlsafe(32)

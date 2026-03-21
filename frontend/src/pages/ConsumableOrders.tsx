@@ -10,13 +10,13 @@ import { useForm } from 'react-hook-form'
 // UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { LoadingButton } from '@/components/ui/LoadingButton'
 import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
+import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
 import { UserRoles } from '@/lib/constants'
@@ -44,6 +44,8 @@ import {
   Plus,
   ShoppingCart,
   ArrowUpFromLine,
+  Check,
+  X,
 } from 'lucide-react'
 
 interface ConsumableOrder {
@@ -81,6 +83,7 @@ const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
   { value: 'name', label: '名称' },
   { value: 'specification', label: '规格' },
   { value: 'applicant', label: '订购人' },
+  { value: 'created_at', label: '订购时间' },
 ]
 
 // ============================================================================
@@ -110,6 +113,7 @@ export function ConsumableOrdersPage() {
 
   // Dialog 状态
   const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<ConsumableOrder | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -131,6 +135,7 @@ export function ConsumableOrdersPage() {
   // 点击添加按钮
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
+    setDeleteConfirm(false)
     form.reset(defaultConsumableOrderValues)
     setDialogState('add')
   }, [form, setDialogState])
@@ -139,6 +144,7 @@ export function ConsumableOrdersPage() {
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
     setEditingItem(item)
+    setDeleteConfirm(false)
     form.reset({
       name: item.name || '',
       english_name: item.english_name || '',
@@ -191,6 +197,7 @@ export function ConsumableOrdersPage() {
         } else if (dialogState === 'add') {
           toast.success('耗材订单创建成功')
         }
+        setDeleteConfirm(false)
         setDialogState(null)
       } catch (err) {
         const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
@@ -232,6 +239,27 @@ export function ConsumableOrdersPage() {
     }
   }, [])
 
+  const handleDeleteClick = useCallback(async () => {
+    if (!editingItem) return
+
+    if (!deleteConfirm) {
+      setDeleteConfirm(true)
+      return
+    }
+
+    try {
+      await consumableOrderAPI.delete(editingItem.id)
+      setDeleteConfirm(false)
+      setEditingItem(null)
+      setDialogState(null)
+      await loadOrders()
+      toast.success('耗材订单已删除')
+    } catch (error) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+    }
+  }, [deleteConfirm, editingItem, loadOrders, setDialogState])
+
   // ---------------------------------------------------------------------------
   // 表格列配置
   // ---------------------------------------------------------------------------
@@ -239,19 +267,22 @@ export function ConsumableOrdersPage() {
   const columns = useMemo(() => {
     const baseColumns = getConsumableOrderTableColumns()
 
+    if (!isAdmin) {
+      return baseColumns as ColumnDef<Record<string, unknown>, unknown>[]
+    }
+
     const actionColumn = columnHelper.display({
       id: 'actions',
       header: '操作',
-      size: 160,
-      minSize: 120,
-      maxSize: 200,
+      size: 100,
+      minSize: 100,
+      maxSize: 100,
       cell: info => {
         const meta = info.table.options.meta
         return (
           <ActionButtons
             item={info.row.original as unknown as Record<string, unknown>}
             onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
-            isAdmin={isAdmin}
             onRefresh={filter.invalidate}
           />
         )
@@ -285,7 +316,7 @@ export function ConsumableOrdersPage() {
             </Button>
           )}
           {isAdmin && (
-            <Button variant="morden" size="lg" onClick={handleExport}>
+            <Button variant="modern" size="lg" onClick={handleExport}>
               <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
             </Button>
           )}
@@ -297,7 +328,7 @@ export function ConsumableOrdersPage() {
       <Dialog
         open={dialogState !== null}
         onOpenChange={(open) => {
-          if (!open) { setDialogState(null); form.reset() }
+          if (!open) { setDialogState(null); setDeleteConfirm(false); form.reset() }
         }}
       >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -309,14 +340,15 @@ export function ConsumableOrdersPage() {
               form={form}
               fields={getConsumableOrderFormFields(dialogState === 'edit')}
             />
-            <div className="flex justify-end gap-2 mt-8">
-              <Button variant="morden" size="lg" type="button" onClick={() => setDialogState(null)}>
-                取消
-              </Button>
-              <LoadingButton type="submit" size="lg" isLoading={isSubmitting}>
-                {dialogState === 'edit' ? '保存' : '提交订单'}
-              </LoadingButton>
-            </div>
+            <EditDialogActions
+              mode={dialogState ?? 'add'}
+              onCancel={() => setDialogState(null)}
+              onDelete={dialogState === 'edit' && editingItem ? handleDeleteClick : undefined}
+              deleteConfirm={deleteConfirm}
+              submitLabelEdit="保存"
+              submitLabelAdd="提交订单"
+              isSubmitting={isSubmitting}
+            />
           </form>
         </DialogContent>
       </Dialog>
@@ -326,10 +358,12 @@ export function ConsumableOrdersPage() {
         api={consumableOrderAPI as FilterAPI}
         queryKey={['consumable-orders']}
         tableId="consumable-orders-table"
+        statusOptions={CONSUMABLE_ORDER_STATUS_OPTIONS}
+        searchFieldOptions={CONSUMABLE_SEARCH_FIELD_OPTIONS}
         customColumns={columns}
         onEdit={handleEditClick}
         title={<><ShoppingCart className="w-5 h-5" /> 耗材订单列表</>}
-        searchPlaceholder="搜索名称、分类、品牌..."
+        searchPlaceholder="搜索名称、规格、订购人、订购时间..."
         renderExpandedRow={renderExpandedRow}
         noteField="notes"
       />
@@ -344,19 +378,22 @@ export function ConsumableOrdersPage() {
 const ActionButtons = React.memo(function ActionButtons({
   item,
   onEdit,
-  isAdmin,
   onRefresh,
 }: {
   item: Record<string, unknown>
   onEdit: (item: Record<string, unknown>) => void
-  isAdmin: boolean
   onRefresh: () => void | Promise<void>
 }) {
   const actions = useMemo(() => [
     {
       id: 'approve',
       label: '审批',
-      showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+      icon: <Check className="size-4.5" />,
+      variant: 'modern' as const,
+      className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
+      confirm: true,
+      confirmLabel: '确认审批',
+      disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'rejected',
       onClick: async (currItem: Record<string, unknown>) => {
         await consumableOrderAPI.approve(currItem.id as number)
         await onRefresh()
@@ -366,7 +403,12 @@ const ActionButtons = React.memo(function ActionButtons({
     {
       id: 'reject',
       label: '驳回',
-      showWhen: (currItem: Record<string, unknown>) => isAdmin && currItem.status === 'pending',
+      icon: <X className="size-4.5" />,
+      variant: 'modern' as const,
+      className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
+      confirm: true,
+      confirmLabel: '确认驳回',
+      disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'approved',
       onClick: async (currItem: Record<string, unknown>) => {
         await consumableOrderAPI.reject(currItem.id as number, '管理员驳回')
         await onRefresh()
@@ -383,7 +425,7 @@ const ActionButtons = React.memo(function ActionButtons({
         toast.success('耗材订单已完成')
       }
     }
-  ], [isAdmin, onRefresh])
+  ], [onRefresh])
 
   return (
     <TableActionButtonsMemo
@@ -396,7 +438,6 @@ const ActionButtons = React.memo(function ActionButtons({
 }, (prevProps, nextProps) => {
   if (
     prevProps.onEdit !== nextProps.onEdit
-    || prevProps.isAdmin !== nextProps.isAdmin
     || prevProps.onRefresh !== nextProps.onRefresh
   ) {
     return false

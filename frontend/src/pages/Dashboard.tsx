@@ -22,6 +22,36 @@ import { DashboardStockinTab } from './dashboard/DashboardStockinTab'
 
 import { reagentOrderAPI, consumableOrderAPI, inventoryAPI } from '@/api/client'
 
+type DashboardCounts = {
+  reagentCount: number
+  consumableCount: number
+  borrowCount: number
+  stockinCount: number
+}
+
+type DashboardCountsCache = {
+  userKey: string
+  counts: DashboardCounts
+}
+
+const EMPTY_COUNTS: DashboardCounts = {
+  reagentCount: 0,
+  consumableCount: 0,
+  borrowCount: 0,
+  stockinCount: 0,
+}
+
+let dashboardCountsCache: DashboardCountsCache | null = null
+
+function isCountsEqual(a: DashboardCounts, b: DashboardCounts): boolean {
+  return (
+    a.reagentCount === b.reagentCount &&
+    a.consumableCount === b.consumableCount &&
+    a.borrowCount === b.borrowCount &&
+    a.stockinCount === b.stockinCount
+  )
+}
+
 function StatCard({
   title,
   icon: Icon,
@@ -79,39 +109,55 @@ function saveTab(tab: DashboardTab) {
 export function Dashboard() {
   const currentUser = useAuthStore((state) => state.user)
   const isPublicUser = currentUser?.role === UserRoles.PUBLIC
+  const userKey = `${currentUser?.id ?? 'anonymous'}-${currentUser?.role ?? 'unknown'}`
+  const cachedCountsForUser = dashboardCountsCache?.userKey === userKey ? dashboardCountsCache.counts : null
   const allowedTabs = useMemo(
     () => (isPublicUser ? (['borrows'] as DashboardTab[]) : ALL_TABS),
     [isPublicUser]
   )
 
-  const [activeTab, setActiveTab] = useState<DashboardTab>(() => getSavedTab(allowedTabs))
-  const [isLoading, setIsLoading] = useState(true)
-  const [counts, setCounts] = useState({
-    reagentCount: 0,
-    consumableCount: 0,
-    borrowCount: 0,
-    stockinCount: 0,
-  })
+  const [selectedTab, setSelectedTab] = useState<DashboardTab>(() => getSavedTab(allowedTabs))
+  const [countsState, setCountsState] = useState<DashboardCountsCache | null>(() =>
+    cachedCountsForUser ? { userKey, counts: cachedCountsForUser } : null
+  )
+  const activeTab = useMemo(
+    () => (allowedTabs.includes(selectedTab) ? selectedTab : getSavedTab(allowedTabs)),
+    [allowedTabs, selectedTab]
+  )
+  const counts = countsState?.userKey === userKey ? countsState.counts : cachedCountsForUser ?? EMPTY_COUNTS
+  const isLoading = cachedCountsForUser === null && countsState?.userKey !== userKey
 
   const handleTabChange = useCallback((tab: DashboardTab) => {
     if (!allowedTabs.includes(tab)) {
       return
     }
-    setActiveTab(tab)
-    saveTab(tab)
+    setSelectedTab(tab)
   }, [allowedTabs])
 
   useEffect(() => {
-    if (!allowedTabs.includes(activeTab)) {
-      const fallback = getSavedTab(allowedTabs)
-      setActiveTab(fallback)
-      saveTab(fallback)
-    }
-  }, [activeTab, allowedTabs])
+    saveTab(activeTab)
+  }, [activeTab])
 
-  // 加载统计数量：每次切换 Tab 时在后台静默刷新，只有数据变化时才重新渲染数字
+  // 加载统计数量：返回页面时优先复用缓存，只有首次或数据变化时才显示 loading
   useEffect(() => {
     let cancelled = false
+    const cachedCounts = dashboardCountsCache?.userKey === userKey ? dashboardCountsCache.counts : null
+
+    const applyCounts = (nextCounts: DashboardCounts) => {
+      if (cancelled) return
+
+      dashboardCountsCache = {
+        userKey,
+        counts: nextCounts,
+      }
+
+      setCountsState((prev) => {
+        if (prev?.userKey === userKey && isCountsEqual(prev.counts, nextCounts)) {
+          return prev
+        }
+        return { userKey, counts: nextCounts }
+      })
+    }
 
     const loadCounts = async () => {
       try {
@@ -120,21 +166,11 @@ export function Dashboard() {
           if (cancelled) return
 
           const borrowCount = (borrowRes.data?.data ?? []).length
-          setCounts((prev) => {
-            if (
-              prev.reagentCount === 0 &&
-              prev.consumableCount === 0 &&
-              prev.borrowCount === borrowCount &&
-              prev.stockinCount === 0
-            ) {
-              return prev
-            }
-            return {
-              reagentCount: 0,
-              consumableCount: 0,
-              borrowCount,
-              stockinCount: 0,
-            }
+          applyCounts({
+            reagentCount: 0,
+            consumableCount: 0,
+            borrowCount,
+            stockinCount: 0,
           })
           return
         }
@@ -160,36 +196,21 @@ export function Dashboard() {
         const borrowCount = (borrowRes.data?.data ?? []).length
         const stockinCount = (stockinRes.data?.data ?? []).length
 
-        setCounts((prev) => {
-          if (
-            prev.reagentCount === reagentCount &&
-            prev.consumableCount === consumableCount &&
-            prev.borrowCount === borrowCount &&
-            prev.stockinCount === stockinCount
-          ) {
-            return prev // 数据无变化，不触发重新渲染
-          }
-          return { reagentCount, consumableCount, borrowCount, stockinCount }
-        })
+        applyCounts({ reagentCount, consumableCount, borrowCount, stockinCount })
       } catch {
-        if (!cancelled) {
-          setCounts((prev) => {
-            if (prev.reagentCount === 0 && prev.consumableCount === 0 && prev.borrowCount === 0 && prev.stockinCount === 0) {
-               return prev
-            }
-            return { reagentCount: 0, consumableCount: 0, borrowCount: 0, stockinCount: 0 }
-          })
+        if (cancelled) return
+
+        if (cachedCounts !== null) {
+          return
         }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false)
-        }
+
+        applyCounts(EMPTY_COUNTS)
       }
     }
 
     void loadCounts()
     return () => { cancelled = true }
-  }, [activeTab, isPublicUser])
+  }, [activeTab, isPublicUser, userKey])
 
   return (
     <div className="space-y-6">

@@ -2,7 +2,7 @@
  * 通用筛选表格组件
  * 集成搜索/筛选、分页、表格列配置、展开/收起等功能
  */
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react' // <--- 新增 useState
 import {
   getCoreRowModel,
   getExpandedRowModel,
@@ -11,21 +11,16 @@ import {
 import type { RowData, ColumnDef } from '@tanstack/react-table'
 import { useLocation } from 'react-router-dom'
 
-// UI 组件
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { DataTable } from '@/components/ui/DataTable'
 import { TableFilters, TableEmptyState } from '@/components/ui/TableFilters'
 import { Button } from '@/components/ui/Button'
 import { ChevronsDownUp, ChevronsUpDown, Loader2 } from 'lucide-react'
 
-// Hooks
 import { useTableState, DEFAULT_STATUS_OPTIONS, DEFAULT_SEARCH_FIELD_OPTIONS } from '@/hooks/useTableState'
 import type { FilterAPI, FilterOption, SearchFieldOption } from '@/hooks/useTableState'
-
-// 表格列配置
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 
-// 扩展 TanStack Table 的 Meta 类型
 declare module '@tanstack/react-table' {
   interface TableMeta<TData extends RowData> {
     fuzzySearch: boolean
@@ -34,7 +29,6 @@ declare module '@tanstack/react-table' {
   }
 }
 
-// 组件 Props
 export interface FilterTableProps {
   api: FilterAPI
   queryKey?: string[]
@@ -85,6 +79,18 @@ export function FilterTable({
   emptyText = '暂无数据'
 }: Readonly<FilterTableProps>) {
   const location = useLocation()
+
+  // 🚀 防御性引用：防止父组件传内联函数引起 Meta 频繁更新导致子树重新渲染
+  const onEditRef = useRef(onEdit)
+  const onBorrowSuccessRef = useRef(onBorrowSuccess)
+  useEffect(() => {
+    onEditRef.current = onEdit
+    onBorrowSuccessRef.current = onBorrowSuccess
+  }, [onEdit, onBorrowSuccess])
+
+  // 新增：用于跟踪表格是否滚动在顶部
+  const [isTableAtTop, setIsTableAtTop] = useState(true)
+
   const initialUrlSearchState = useMemo(() => {
     const query = new URLSearchParams(location.search)
     const nextSearch = query.get('search')?.trim() ?? ''
@@ -112,7 +118,9 @@ export function FilterTable({
     initialSearch: initialUrlSearchState.search,
     initialSearchField: initialUrlSearchState.field,
   })
+  const applySearchImmediate = filter.applySearchImmediate
 
+  // 🚀 此处需要父组件配合，若使用 customColumns 需确保是稳定的引用，不过组件内已做尽可能的降级兼容
   const tableColumns = useMemo(() => {
     if (customColumns && customColumns.length > 0) {
       return customColumns
@@ -123,41 +131,35 @@ export function FilterTable({
   const lastAppliedSearchRef = useRef<string>(location.search)
 
   useEffect(() => {
-    if (location.search === lastAppliedSearchRef.current) {
-      return
-    }
+    if (location.search === lastAppliedSearchRef.current) return
 
     if (!location.search) {
-      filter.applySearchImmediate('', defaultSearchField)
+      applySearchImmediate('', defaultSearchField)
       lastAppliedSearchRef.current = location.search
       return
     }
 
-    if (!initialUrlSearchState.hasQuery) {
-      return
-    }
+    if (!initialUrlSearchState.hasQuery) return
 
-    filter.applySearchImmediate(initialUrlSearchState.search, initialUrlSearchState.field)
+    applySearchImmediate(initialUrlSearchState.search, initialUrlSearchState.field)
     lastAppliedSearchRef.current = location.search
   }, [
-    filter.applySearchImmediate,
+    applySearchImmediate,
     initialUrlSearchState.field,
     initialUrlSearchState.hasQuery,
     initialUrlSearchState.search,
     location.search,
+    defaultSearchField
   ])
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     defaultColumn: {
-      // 1. 强制点击循环为：无 -> 升序 (asc) -> 降序 (desc) -> 无
       sortDescFirst: false,
-      // 2. 使用 alphanumeric 替代默认 text，对中英混排支持更佳
       sortingFn: 'text',
     },
     data: filter.data as Record<string, unknown>[],
     columns: tableColumns,
-    // 修复 1：绝对不能用 Math.random()，改用 id，若无 id 则用稳定的 index 兜底
     getRowId: (row, index) => {
       if (row.id !== undefined && row.id !== null) return String(row.id)
       if (row.uuid !== undefined && row.uuid !== null) return String(row.uuid)
@@ -165,7 +167,7 @@ export function FilterTable({
     },
     getCoreRowModel: getCoreRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
-    getRowCanExpand: () => true, // 允许所有行展开
+    getRowCanExpand: () => true,
     columnResizeMode: 'onChange',
     enableColumnResizing: true,
     onColumnSizingChange: filter.setColumnSizing,
@@ -178,12 +180,11 @@ export function FilterTable({
     },
     meta: {
       fuzzySearch: filter.fuzzySearch,
-      onEdit: onEdit ?? undefined,
-      onBorrowSuccess: onBorrowSuccess ?? undefined,
+      onEdit: (item) => onEditRef.current?.(item), // 🚀 使用稳定引用
+      onBorrowSuccess: () => onBorrowSuccessRef.current?.(), // 🚀 使用稳定引用
     },
   })
 
-  // 严格控制重置展开状态的时机，防止意外折叠单行
   const prevFiltersRef = useRef({
     globalFilter: filter.globalFilter,
     statusFilter: filter.statusFilter,
@@ -227,29 +228,19 @@ export function FilterTable({
     table
   ])
 
-  // 根据数据条数动态计算表格高度
-  // 数据少时使用 'auto' 让内容自然撑开，展开行时也能自适应
   const calculatedScrollHeight = useMemo(() => {
-    // 如果外部传入了 scrollHeight，优先使用外部值
-    if (scrollHeight !== undefined) {
-      return scrollHeight
-    }
-    
+    if (scrollHeight !== undefined) return scrollHeight
     const rowCount = filter.data.length
-    
-    // 数据少时（<=10行）使用 'auto' 让内容自然撑开
-    // 这样展开行时高度也会自适应，无需手动计算
-    if (rowCount <= 10) {
-      return 'auto'
-    }
-    
-    // 数据多时使用默认的大高度
+    if (rowCount <= 10) return 'auto'
     return 'calc(100vh - 112px - 16px)'
   }, [filter.data.length, scrollHeight])
 
+  // 计算展开全部按钮是否应该被禁用
+  // 规则：如果没有全展开 且 表格没有滚动到顶部，则禁用展开操作
+  const disableExpandAll = !filter.isAllExpanded && !isTableAtTop
+
   return (
     <div className={`space-y-6 ${className}`}>
-      {/* 搜索与筛选区域 - 卡片外 */}
       <TableFilters
         searchInput={filter.searchInput}
         onSearchInputChange={filter.setSearchInput}
@@ -265,7 +256,6 @@ export function FilterTable({
         showFuzzySearch={showFuzzySearch}
       />
 
-      {/* 数据表格区域 - 卡片内 */}
       <Card className="overflow-hidden">
         {title && (
           <CardHeader>
@@ -276,16 +266,17 @@ export function FilterTable({
               </span>
               {enableExpandAll && (
                 <Button
-                  variant="morden"
+                  variant="modern"
                   size="lg"
-                  // 修复 2：直接使用 filter 内部的切换逻辑，将具体表格操作交回 DataTable 组件内部处理，避免双重触发
                   onClick={filter.toggleExpandAll}
-                  className="ml-auto flex font-normal"
+                  disabled={disableExpandAll}
+                  className={`ml-auto flex font-normal transition-all ${disableExpandAll ? 'text-muted-foreground opacity-60' : ''
+                    }`}
                 >
                   {filter.isAllExpanded ? (
-                    <><ChevronsDownUp className="size-4 mr-1.5" />收起全部</>
+                    <><ChevronsDownUp className="size-4 -ml-0.5 mr-1.5" />收起全部</>
                   ) : (
-                    <><ChevronsUpDown className="size-4 mr-1.5" />展开全部</>
+                    <><ChevronsUpDown className="size-4 -ml-0.5 mr-1.5" />展开全部</>
                   )}
                 </Button>
               )}
@@ -303,6 +294,7 @@ export function FilterTable({
               statusFilter={filter.statusFilter}
               hasFilter={filter.hasFilter}
               emptyText={emptyText}
+              statusOptions={statusOptions}
             />
           ) : (
             <div className="px-6">
@@ -311,15 +303,16 @@ export function FilterTable({
                 renderExpandedRow={renderExpandedRow}
                 scrollHeight={calculatedScrollHeight}
                 enableExpandAll={enableExpandAll}
-                expandAllStorageKey={`${tableId}-expand-all`}
+                expandAllStorageKey={tableId}
                 noteField={noteField}
                 isAllExpanded={filter.isAllExpanded}
-                onToggleExpandAll={filter.toggleExpandAll} // 这里同样使用 filter 的原版 toggle
+                onToggleExpandAll={filter.toggleExpandAll}
                 hasNextPage={filter.hasNextPage}
                 isFetchingNextPage={filter.isFetchingNextPage}
                 fetchNextPage={filter.fetchNextPage}
                 total={filter.total}
                 searchKeyword={filter.globalFilter}
+                onIsAtTopChange={setIsTableAtTop} // 新增：接收子组件的滚动状态
               />
             </div>
           )}

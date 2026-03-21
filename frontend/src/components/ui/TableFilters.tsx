@@ -47,31 +47,31 @@ export function TableEmptyState({
   searchKeyword,
   statusFilter,
   hasFilter,
-  emptyText = '暂无数据'
+  emptyText = '暂无数据',
+  statusOptions = DEFAULT_STATUS_OPTIONS
 }: {
   searchKeyword?: string
   statusFilter?: string
   hasFilter?: boolean
   emptyText?: string
+  statusOptions?: FilterOption[]
 }) {
   const getMessage = () => {
     if (searchKeyword && statusFilter && statusFilter !== 'all') {
-      const statusLabel = 
-        statusFilter === 'in_stock' ? '在库' : 
-        statusFilter === 'not_in_stock' ? '没有' : 
-        statusFilter === 'borrowed' ? '借出' : 
-        statusFilter === 'consumed' ? '已用完' : statusFilter
+      // 从 statusOptions 中查找对应的中文标签
+      const statusOption = statusOptions.find(opt => opt.value === statusFilter)
+      const statusLabel = statusOption?.label || statusFilter
       return `未找到匹配"${searchKeyword}"的"${statusLabel}"记录`
     }
-    
+
     if (searchKeyword) {
       return `未找到匹配"${searchKeyword}"的记录`
     }
-    
+
     if (hasFilter) {
       return '未找到符合条件的记录'
     }
-    
+
     return emptyText
   }
 
@@ -149,7 +149,7 @@ export function TableFilters({
         {/* 搜索字段选择 */}
         {searchFieldOptions && searchFieldOptions.length > 1 && (
           <Select value={searchField} onValueChange={(val) => { onSearchFieldChange(val) }}>
-            <SelectTrigger className="w-30 min-h-10">
+            <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
               <SelectValue placeholder="全部" />
             </SelectTrigger>
             <SelectContent>
@@ -165,7 +165,7 @@ export function TableFilters({
         {/* 状态筛选选择 */}
         {statusOptions && statusOptions.length > 0 && onStatusFilterChange && (
           <Select value={statusFilter} onValueChange={onStatusFilterChange}>
-            <SelectTrigger className="w-30 min-h-10">
+            <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
               <SelectValue placeholder="全部状态" />
             </SelectTrigger>
             <SelectContent>

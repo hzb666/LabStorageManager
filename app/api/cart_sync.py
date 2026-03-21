@@ -16,6 +16,9 @@ from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.spec_utils import parse_specification
+from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
+
+MIN_CART_ITEM_PRICE = 0.01
 
 logger = logging.getLogger(__name__)
 
@@ -171,9 +174,8 @@ async def import_cart(
                     english_name=item.english_name or None,
                     applicant_id=current_user.id,
                     status=ConsumableOrderStatus.PENDING,
+                    **compute_pinyin_fields(name=item.name),
                 )
-                pinyin_fields = compute_pinyin_fields(db_order.name)
-                db_order.name_pinyin = pinyin_fields["name_pinyin"]
             else:
                 # 创建试剂订单
                 db_order = ReagentOrder(
@@ -182,13 +184,14 @@ async def import_cart(
                     initial_quantity=parsed.get("initial_quantity"),
                     unit=parsed.get("unit"),
                     quantity=item.quantity,
-                    price=item.price if item.price and item.price > 0 else 0.01,
+                    price=item.price if item.price and item.price > 0 else MIN_CART_ITEM_PRICE,
                     brand=item.brand,
                     english_name=item.english_name or None,
-                    cas_number=item.cas_number or "unknown",
+                    cas_number=item.cas_number or BIOLOGICAL_REAGENT_CAS,
                     alias=item.alias or None,
                     applicant_id=current_user.id,
                     status=ReagentOrderStatus.PENDING,
+                    **compute_pinyin_fields(name=item.name, brand=item.brand),
                 )
 
             db.add(db_order)

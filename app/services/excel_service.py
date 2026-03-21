@@ -2,15 +2,24 @@
 Excel Import Service - Parse Excel files for inventory bulk import
 """
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Tuple, Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
 from app.models.inventory import Inventory, InventoryStatus
+from app.services.api_utils import empty_to_none
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
+from app.services.shelf_utils import normalize_storage_location
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.core.constants import (
+    EXCEL_DATE_EPOCH,
+    EXCEL_FILE_MAX_BYTES,
+    EXCEL_RED_FONT_COLOR,
+    INTERNAL_CODE_MAX_SEQUENCE,
+    INTERNAL_CODE_SEQUENCE_PAD_WIDTH,
+)
 from app.core.time_utils import get_utc_now
 
 
@@ -42,7 +51,7 @@ FILE_MAGIC_BYTES = {
 }
 
 # 最大文件大小 (2MB)
-MAX_FILE_SIZE = 2 * 1024 * 1024
+MAX_FILE_SIZE = EXCEL_FILE_MAX_BYTES
 
 
 def validate_uploaded_file(file: UploadFile) -> None:
@@ -161,7 +170,7 @@ def _generate_internal_code_with_tracking(
         created_at: Optional custom created_at datetime (for backdated imports)
     
     Returns:
-        Internal code string (e.g., "10203-08-4-260224-01")
+        Internal code string (e.g., "10203084-260224-001")
     """
     from sqlmodel import select
     
@@ -171,17 +180,23 @@ def _generate_internal_code_with_tracking(
     else:
         date_str = get_utc_now().strftime("%y%m%d")
     
-    tracker_key = (cas_number, date_str)
+    cas_code = cas_number.replace("-", "")
+    tracker_key = (cas_code, date_str)
     
     # Check if we already have a sequence tracked for this CAS+date in this transaction
     if tracker_key in sequence_tracker:
         # Use the tracked sequence and increment AFTER
         seq = sequence_tracker[tracker_key]
+        if seq > INTERNAL_CODE_MAX_SEQUENCE:
+            raise ValueError(
+                f"Internal code sequence limit reached for {cas_number} on {date_str}: "
+                f"max is {INTERNAL_CODE_MAX_SEQUENCE}"
+            )
         sequence_tracker[tracker_key] = seq + 1
     else:
         # First time seeing this CAS+date combination in this transaction
         # Query database for existing max sequence using ORM
-        prefix = f"{cas_number}-{date_str}-"
+        prefix = f"{cas_code}-{date_str}-"
         
         statement = select(Inventory).where(
             Inventory.internal_code.like(f"{prefix}%")
@@ -201,11 +216,16 @@ def _generate_internal_code_with_tracking(
                 continue
         
         seq = max_seq + 1
+        if seq > INTERNAL_CODE_MAX_SEQUENCE:
+            raise ValueError(
+                f"Internal code sequence limit reached for {cas_number} on {date_str}: "
+                f"max is {INTERNAL_CODE_MAX_SEQUENCE}"
+            )
         # Store next sequence for subsequent calls
         sequence_tracker[tracker_key] = seq + 1
     
     # Generate the internal code
-    return f"{cas_number}-{date_str}-{str(seq).zfill(2)}"
+    return f"{cas_code}-{date_str}-{str(seq).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)}"
 
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
@@ -247,9 +267,26 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     
     # Validate specification (will parse to get quantity and unit)
     try:
-        _, _ = parse_specification(str(row['specification']))
+        spec_value, _ = parse_specification(str(row['specification']))
     except ValueError as e:
         return False, f"Invalid specification format: {str(e)}"
+
+    # Validate remaining_quantity when provided:
+    # remaining_quantity must be numeric and cannot exceed specification value
+    remaining_raw = row.get('remaining_quantity')
+    if pd.notna(remaining_raw):
+        remaining_text = str(remaining_raw).strip()
+        if remaining_text:
+            try:
+                remaining_value = float(remaining_text)
+            except (ValueError, TypeError):
+                return False, "Invalid remaining_quantity: must be a number"
+
+            if remaining_value > spec_value:
+                return (
+                    False,
+                    f"Invalid remaining_quantity: {remaining_value} cannot exceed initial_quantity {spec_value}",
+                )
     
     return True, None
 
@@ -345,19 +382,31 @@ def import_inventory_from_excel(
             # Get remaining_quantity: use row value if provided, otherwise default to initial_quantity
             remaining_qty = initial_quantity
             if pd.notna(row.get('remaining_quantity')):
-                try:
-                    remaining_qty = float(row.get('remaining_quantity'))
-                except (ValueError, TypeError):
-                    remaining_qty = initial_quantity
+                remaining_text = str(row.get('remaining_quantity')).strip()
+                if remaining_text:
+                    remaining_qty = float(remaining_text)
             
             # Get or use default values
-            storage_location = str(row.get('storage_location', '')).strip() if pd.notna(row.get('storage_location')) else default_storage_location
-            alias = str(row.get('alias', '')).strip() if pd.notna(row.get('alias')) else None
-            english_name = str(row.get('english_name', '')).strip() if pd.notna(row.get('english_name')) else None
-            category = str(row.get('category', '')).strip() if pd.notna(row.get('category')) else None
-            brand = str(row.get('brand', '')).strip() if pd.notna(row.get('brand')) else None
+            # Use empty_to_none to convert empty/whitespace strings to None
+            all_optional_fields = {
+                'storage_location': row.get('storage_location'),
+                'alias': row.get('alias'),
+                'english_name': row.get('english_name'),
+                'category': row.get('category'),
+                'brand': row.get('brand'),
+                'notes': row.get('notes'),
+            }
+            normalized_optional = empty_to_none(all_optional_fields, list(all_optional_fields.keys()))
+            storage_location = normalize_storage_location(
+                normalized_optional['storage_location'] or default_storage_location
+            )
+            alias = normalized_optional['alias']
+            english_name = normalized_optional['english_name']
+            category = normalized_optional['category']
+            brand = normalized_optional['brand']
+            notes = normalized_optional['notes']
+            
             is_hazardous = _parse_boolean(row.get('is_hazardous'), default_is_hazardous)
-            notes = str(row.get('notes', '')).strip() if pd.notna(row.get('notes')) else None
             
             # Parse created_at (custom stock-in date)
             created_at = None
@@ -372,7 +421,7 @@ def import_inventory_from_excel(
                     # Try parsing as numeric
                     if date_str.isdigit():
                         if len(date_str) == 5:  # Excel date serial (e.g., 45292 = 2024-01-15)
-                            excel_epoch = date(1899, 12, 30)  # Excel epoch
+                            excel_epoch = EXCEL_DATE_EPOCH  # Excel epoch
                             date_str = str(excel_epoch + timedelta(days=int(date_str)))
                         elif len(date_str) == 8:  # YYYYMMDD
                             date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
@@ -411,6 +460,7 @@ def import_inventory_from_excel(
                 category=category,
                 brand=brand,
                 storage_location=storage_location,
+                is_common=False,
                 initial_quantity=initial_quantity,
                 remaining_quantity=remaining_qty,
                 remaining_percent=_compute_remaining_percent(remaining_qty, initial_quantity),
@@ -428,6 +478,17 @@ def import_inventory_from_excel(
             
         except Exception as e:
             errors.append({"row": row_num, "error": str(e)})
+
+    # All-or-nothing import:
+    # if any row has validation/import error, rollback the whole batch and do not import valid rows.
+    if errors:
+        db.rollback()
+        return {
+            "success": False,
+            "total_rows": len(normalized_df),
+            "created": 0,
+            "errors": errors,
+        }
     
     try:
         db.commit()
@@ -441,6 +502,82 @@ def import_inventory_from_excel(
         "created": created_count,
         "errors": errors
     }
+
+
+def generate_excel_template() -> bytes:
+    """
+    Generate Excel import template with text format for all columns.
+    This prevents Excel from auto-converting CAS numbers like '64-17-5' to dates.
+    
+    Returns:
+        Excel file content as bytes
+        
+    Raises:
+        HTTPException: If openpyxl library is not installed
+    """
+    from io import BytesIO
+    
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font
+        from openpyxl.styles.numbers import FORMAT_TEXT
+        from openpyxl.utils import get_column_letter
+    except ImportError as exc:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Excel template generation requires the 'openpyxl' package. "
+                   "Please ensure openpyxl is installed in the production environment.",
+        ) from exc
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "库存导入模板"
+
+    # 定义列: (列键, 中文标签, 示例值)
+    columns = [
+        ("cas_number", "CAS号（必填）", "64-17-5"),
+        ("name", "名称（必填）", "乙醇"),
+        ("english_name", "英文名", "Ethanol"),
+        ("alias", "别名", "酒精"),
+        ("category", "分类", "有机溶剂"),
+        ("brand", "品牌", "Sigma"),
+        ("specification", "规格（必填）", "500ml"),
+        ("remaining_quantity", "剩余量", ""),
+        ("storage_location", "存放位置", "2-6-6-1"),
+        ("is_hazardous", "是否危险品", ""),
+        ("notes", "备注", "请删除示例数据"),
+    ]
+
+    # 定义表头字体样式
+    header_font = Font(bold=True)
+    
+    # 示例数据使用红色字体
+    example_font = Font(color=EXCEL_RED_FONT_COLOR)  # 红色
+    
+    # 写入表头和示例数据，同时设置列格式和列宽（单次遍历优化性能）
+    for col_idx, (key, label, example) in enumerate(columns, 1):
+        col_letter = get_column_letter(col_idx)
+        
+        # 设置表头
+        header_cell = ws.cell(row=1, column=col_idx, value=label)
+        header_cell.font = header_font
+        header_cell.alignment = Alignment(horizontal="center", vertical="center")
+        header_cell.number_format = FORMAT_TEXT
+        
+        # 写入示例数据（红色字体）
+        example_cell = ws.cell(row=2, column=col_idx, value=example)
+        example_cell.font = example_font
+        example_cell.number_format = FORMAT_TEXT
+        
+        # 列样式用于后续新建单元格，已存在的单元格需在上方显式设置
+        ws.column_dimensions[col_letter].number_format = FORMAT_TEXT
+        ws.column_dimensions[col_letter].width = 15 if key == "cas_number" else 12
+
+    # 保存到字节流
+    output = BytesIO()
+    wb.save(output)
+    return output.getvalue()
 
 
 def generate_import_template() -> dict:
@@ -494,9 +631,9 @@ def generate_import_template() -> dict:
             },
             {
                 "name": "remaining_quantity",
-                "label": "剩余数量",
+                "label": "剩余量",
                 "required": False,
-                "description": "剩余数量（可选），不填则默认等于规格中的数量"
+                "description": "剩余量（可选），不填则默认等于规格中的数量"
             },
             {
                 "name": "storage_location",

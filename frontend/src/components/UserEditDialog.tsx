@@ -4,7 +4,7 @@ import { valibotResolver } from '@hookform/resolvers/valibot'
 import { Loader2, Lock, X } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { cn, getFullImageUrl } from '@/lib/utils'
-import { UserUpdateSchema, ChangePasswordWithConfirmSchema } from '@/lib/validationSchemas'
+import { UserUpdateSchema, ChangePasswordWithConfirmSchema, normalizeApiErrorMessage } from '@/lib/validationSchemas'
 import { UserRoles } from '@/lib/constants'
 import type { UserUpdateFormData, ChangePasswordFormData } from '@/lib/validationSchemas'
 import { userAdminAPI, authAPI } from '@/api/client'
@@ -208,13 +208,7 @@ export function UserEditDialog({
         } catch (error) {
           const axiosError = error as AxiosError<{ detail?: string }>
           const errorMsg = axiosError.response?.data?.detail || '头像上传失败'
-          if (errorMsg.includes('Invalid image type')) {
-            toast.error('不支持该图像格式')
-          } else if (errorMsg.includes('Image size exceeds')) {
-            toast.error('图片大小超过限制')
-          } else {
-            toast.error(errorMsg)
-          }
+          toast.error(normalizeApiErrorMessage(errorMsg, '头像上传失败'))
           setAvatarLoading(false)
           setEditLoading(false)
           return
@@ -357,7 +351,7 @@ export function UserEditDialog({
                 />
             </div>
             <div key="password-actions" className="flex gap-3 mt-8">
-              <Button variant="morden" onClick={() => setIsEditingPassword(false)} size="lg" className="flex-1">
+              <Button variant="modern" onClick={() => setIsEditingPassword(false)} size="lg" className="flex-1">
                 返回
               </Button>
               <Button onClick={handleChangePassword} disabled={changePasswordLoading} size="lg" className="flex-1">
@@ -453,7 +447,7 @@ export function UserEditDialog({
 
             <div key="edit-actions" className="flex gap-2 mt-6">
               <Button
-                variant="morden"
+                variant="modern"
                 onClick={() => {
                   setIsEditingPassword(true)
                   passwordForm.reset({ old_password: '', new_password: '', confirm_password: '' })
@@ -464,7 +458,7 @@ export function UserEditDialog({
                 <Lock className="w-4 h-4 mr-1.5" />
                 修改密码
               </Button>
-              <Button variant="morden" onClick={handleClose} size="lg" className="flex-1">
+              <Button variant="modern" onClick={handleClose} size="lg" className="flex-1">
                 取消
               </Button>
               <LoadingButton onClick={handleSave} isLoading={editLoading} size="lg" className="flex-1">

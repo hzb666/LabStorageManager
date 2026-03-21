@@ -12,7 +12,7 @@ LSM_BANNER = r"""
 ║     ███████╗   ███████║   ██║ ╚═╝ ██║     ║
 ║     ╚══════╝   ╚══════╝   ╚═╝     ╚═╝     ║
 ║                                           ║ 
-╚════  Lab Storage Manager - Jiao Group  ═══╝
+╚══════      Lab Storage Manager      ══════╝
 """
 
 def print_banner() -> None:

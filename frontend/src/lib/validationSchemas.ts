@@ -81,6 +81,7 @@ export const createMaxLengthSchema = (
 /**
  * 正整数验证 (>=1) - 用于瓶数等必须为整数的字段
  * 支持字符串和数字输入，在 handleSubmit 中手动转换
+ * 注意：不包含上限限制，具体上限由使用处单独定义
  * @param fieldName 字段中文名称
  */
 export const createPositiveNumberSchema = (fieldName: string) =>
@@ -218,6 +219,12 @@ export const validateCASLogic = (input: string): boolean => {
   return calculatedCheckDigit === actualCheckDigit
 }
 
+export const SPECIAL_CAS_VALUE = '生物试剂'
+
+export const isSpecialCasValue = (input: string): boolean => {
+  return input.trim().toUpperCase() === SPECIAL_CAS_VALUE
+}
+
 /**
  * CAS号验证 - 替代 validateCASNumber & normalizeCASNumber
  * 自动标准化：大写 + 去除空格
@@ -226,8 +233,8 @@ export const CasNumberSchema = v.pipe(
   v.string('CAS号不能为空'),
   v.trim(),
   v.toUpperCase(),
-  v.regex(/^\d{2,7}-\d{2}-\d$/, 'CAS号格式无效'),
-  v.check((input) => validateCASLogic(input), 'CAS号校验码错误')
+  v.check((input) => isSpecialCasValue(input) || /^\d{2,7}-\d{2}-\d$/.test(input), 'CAS号格式无效'),
+  v.check((input) => isSpecialCasValue(input) || validateCASLogic(input), 'CAS号校验码错误')
 )
 
 /**
@@ -239,6 +246,10 @@ export const validateAndNormalizeCASInput = (
   const normalized = casValue.trim().toUpperCase()
   if (!normalized) {
     return { error: '请先输入 CAS 号' }
+  }
+
+  if (isSpecialCasValue(normalized)) {
+    return { normalized: SPECIAL_CAS_VALUE }
   }
 
   if (!/^\d{2,7}-\d{2}-\d$/.test(normalized)) {
@@ -288,8 +299,6 @@ const RemainingQuantitySchema = v.pipe(
   v.minValue(0, '剩余数量不能为负数')
 )
 
-
-
 /**
  * 库存表单 Schema
  * remaining_quantity 可选（后端自动计算等于 initial_quantity）
@@ -308,7 +317,7 @@ export const InventoryFormSchema = v.object({
   notes: createMaxLengthSchema('备注', 500),
 
   // 数量相关
-  quantity_bottles: v.optional(createPositiveNumberSchema('瓶数')),
+  quantity_bottles: v.optional(v.pipe(createPositiveNumberSchema('瓶数'), v.maxValue(99, '瓶数不能超过99'))),
   initial_quantity: v.optional(createQuantitySchema('初始数量')),
   unit: v.optional(createRequiredStringSchema('单位')),
   remaining_quantity: v.optional(RemainingQuantitySchema),
@@ -339,7 +348,7 @@ export const ReagentOrderSchema = v.object({
   category: createMaxLengthSchema('分类', 100),
   brand: createMaxLengthSchema('品牌', 100),
   specification: SpecificationSchema, // 后端必填
-  quantity: createPositiveNumberSchema('数量'),
+  quantity: v.pipe(createPositiveNumberSchema('数量'), v.maxValue(99, '数量不能超过99')),
   price: createPriceSchema(0.01),  // 必填
   order_reason: OrderReasonSchema,   // 必填
   is_hazardous: v.boolean('危险品必须是布尔值'),
@@ -348,11 +357,6 @@ export const ReagentOrderSchema = v.object({
 
 /**
  * 耗材订单 Schema
- * 与后端 ConsumableOrderCreate 保持一致
- * - specification: 必填
- * - unit: 可选
- * - 移除了 order_reason 和 is_hazardous
- * - 移除了 alias, category, brand, image_path
  */
 export const ConsumableOrderSchema = v.object({
   name: createStringLengthSchema('名称', 1, 200),
@@ -363,9 +367,6 @@ export const ConsumableOrderSchema = v.object({
   quantity: createPositiveNumberSchema('数量'),
   price: v.optional(createPriceSchema()),
   communication: v.optional(createMaxLengthSchema('沟通信息', 100)),
-  // 移除了 order_reason (后端已移除)
-  // 移除了 is_hazardous (后端已移除)
-  // 移除了 alias, category, brand (用户要求删除)
   notes: createMaxLengthSchema('备注', 500)
 })
 
@@ -420,7 +421,6 @@ export const UserCreateSchema = v.object({
 
 /**
  * 更新用户 Schema (AdminUsers 页面用)
- * 包含 username（必填）、full_name（必填）、role
  */
 export const UserUpdateSchema = v.object({
   username: UsernameSchema,  // 用户名必填
@@ -502,6 +502,17 @@ export const ReturnFormSchema = v.object({
 
 export type ReturnFormData = v.InferOutput<typeof ReturnFormSchema>
 
+/**
+ * 入库表单 Schema
+ */
+export const StockInFormSchema = v.object({
+  remaining_quantity: createQuantitySchema('剩余量'),
+  storage_location: createRequiredStringSchema('库存位置'),
+})
+
+export type StockInFormInputData = v.InferInput<typeof StockInFormSchema>
+export type StockInFormData = v.InferOutput<typeof StockInFormSchema>
+
 // ==========================================
 // 9. 设备管理模块 Schema
 // ==========================================
@@ -547,77 +558,119 @@ export const toValidationErrors = (detail: unknown): ValidationError[] => {
   return detail.filter((item): item is ValidationError => typeof item === 'object' && item !== null)
 }
 
+// 错误消息映射表 - 使用正则表达式模式匹配
+const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
+  // 认证相关
+  { pattern: /Invalid credentials|incorrect/i, message: '用户名或密码错误' },
+  { pattern: /User account is disabled/i, message: '账号已被禁用' },
+  { pattern: /Could not validate credentials/i, message: '认证失败，请重新登录' },
+  { pattern: /Invalid or expired token/i, message: 'Token 无效或已过期' },
+  { pattern: /Token expired/i, message: 'Token已过期，请重新生成' },
+  { pattern: /Session expired(?!.*Token)/i, message: '会话已过期，请重新登录' },
+  { pattern: /Session has been revoked|session expired/i, message: '会话已失效，请重新登录' },
+  { pattern: /Session not found/i, message: '会话不存在' },
+  { pattern: /No active session/i, message: '没有活跃的会话' },
+  { pattern: /Session has expired/i, message: '会话已过期' },
+  { pattern: /Admin privileges required|Admin permission required/i, message: '需要管理员权限' },
+  { pattern: /IP address changed/i, message: 'IP 地址已变更，请重新登录' },
+  { pattern: /IP limit reached/i, message: 'IP 数量已达上限，请先移除其他设备' },
+  { pattern: /Too many login attempts/i, message: '登录尝试过多，请 5 分钟后重试' },
+  { pattern: /Too many requests, please retry after 2 seconds/i, message: '下载过于频繁，请 2 秒后重试' },
+  { pattern: /Too many requests/i, message: '请求过于频繁，请稍后再试' },
+
+  // 密码相关
+  { pattern: /Incorrect old password/i, message: '原密码错误' },
+  { pattern: /New password cannot be the same as old password/i, message: '新密码不能与原密码相同' },
+  { pattern: /Old password required to modify admin password/i, message: '修改管理员密码需要提供原密码' },
+
+  // 用户相关
+  { pattern: /Login failed/i, message: '登录失败' },
+  { pattern: /Username already registered/i, message: '用户名已被注册' },
+  { pattern: /User not found/i, message: '用户不存在' },
+  { pattern: /User is already active/i, message: '用户已是激活状态' },
+  { pattern: /Cannot deactivate yourself/i, message: '不能停用自己' },
+  { pattern: /Cannot update other users/i, message: '不能修改其他用户的信息' },
+  { pattern: /Cannot change other users' username/i, message: '不能修改其他用户的用户名' },
+  { pattern: /Cannot delete other user'.*session/i, message: '不能删除其他用户的会话' },
+  { pattern: /Cannot update other user'.*session/i, message: '不能修改其他用户的会话' },
+  { pattern: /Cannot delete avatar for other users/i, message: '不能删除其他用户的头像' },
+  { pattern: /Cannot upload avatar for other users/i, message: '不能为其他用户上传头像' },
+  { pattern: /Invalid role:/i, message: '无效的角色' },
+
+  // 库存相关
+  { pattern: /Inventory item not found/i, message: '未找到该库存项' },
+  { pattern: /Cannot edit item while borrowed/i, message: '借用中的试剂无法编辑，请等待归还后再操作' },
+  { pattern: /Item is borrowed by another user/i, message: '该物品已被他人借用，请刷新后重试' },
+  { pattern: /Cannot borrow, current status/i, message: '无法借用，当前状态' },
+  { pattern: /Common shelf items do not support borrow workflow/i, message: '常用货架物品不支持借用流程' },
+  { pattern: /Item is not on common shelf/i, message: '该物品不在常用货架' },
+  { pattern: /No available bottle in this group/i, message: '该分组已无可用瓶数' },
+  { pattern: /Item is not borrowed, current status/i, message: '该物品未被借用' },
+  { pattern: /You are not the borrower of this item/i, message: '你不是该物品的借用人' },
+  { pattern: /Remaining quantity.*cannot exceed initial quantity/i, message: '剩余量不能超过初始量' },
+  { pattern: /CAS number is required/i, message: 'CAS 号不能为空' },
+
+  // 订单相关
+  { pattern: /Order not found/i, message: '未找到订单' },
+  { pattern: /order_reason is required/i, message: '申购原因不能为空' },
+  { pattern: /Invalid order_reason/i, message: '申购原因无效' },
+  { pattern: /Public account cannot create orders/i, message: '公用账户不能创建订单' },
+  { pattern: /Public account cannot edit orders/i, message: '公用账户不能编辑订单' },
+  { pattern: /Public account must select a borrower/i, message: '公用账户借用时必须选择借用人' },
+  { pattern: /Please select a valid borrower/i, message: '请选择有效借用人' },
+  { pattern: /Public account cannot delete orders/i, message: '公用账户不能删除订单' },
+  { pattern: /Only the order applicant or admin can/i, message: '只有申请人或管理员才能执行此操作' },
+  { pattern: /Status must be changed via workflow endpoints/i, message: '状态必须通过工作流接口变更' },
+  { pattern: /Cannot approve order with status/i, message: '当前状态不允许审批订单' },
+  { pattern: /Cannot reject order with status/i, message: '当前状态不允许拒绝订单' },
+  { pattern: /Cannot complete order with status/i, message: '当前状态不允许完成订单' },
+  { pattern: /Cannot confirm arrival for order with status/i, message: '当前状态不允许确认到货' },
+  { pattern: /Order missing initial_quantity or unit/i, message: '订单缺少数量或单位，请先编辑订单' },
+  { pattern: /remaining_quantity must be greater than 0/i, message: '剩余数量必须大于 0' },
+  { pattern: /Invalid order quantity/i, message: '订单数量无效' },
+  { pattern: /No enough pending stock items/i, message: '没有足够的待入库物品' },
+  { pattern: /Order must be in APPROVED or ARRIVED status to stock in/i, message: '订单必须处于已审批或已到货状态才能入库' },
+  { pattern: /storage_location is required/i, message: '存储位置不能为空' },
+  { pattern: /remaining_quantity is required for ARRIVED orders/i, message: '已到货订单需要填写剩余数量' },
+
+  // 购物车
+  { pattern: /Cart is empty/i, message: '购物车不能为空' },
+
+  // 公告相关
+  { pattern: /Announcement not found/i, message: '公告不存在' },
+  { pattern: /Max \d+ announcements allowed/i, message: '每个管理员最多创建10条公告' },
+  { pattern: /Max \d+ visible announcements allowed/i, message: '每个管理员最多显示5条公告' },
+  { pattern: /Invalid filename/i, message: '文件名无效' },
+  { pattern: /Image not found/i, message: '图片未找到' },
+  { pattern: /Storage limit exceeded/i, message: '存储空间已满' },
+
+  // 格式验证
+  { pattern: /Invalid CAS format|Invalid CAS number/i, message: 'CAS号格式无效' },
+  { pattern: /Invalid specification format/i, message: '规格格式无效' },
+  { pattern: /Biological reagents do not support CAS query/i, message: '生物试剂不支持 CAS 查询' },
+
+  // 文件服务相关
+  { pattern: /Invalid file type/i, message: '文件类型无效，仅支持 xlsx、xls、csv 格式' },
+  { pattern: /File size exceeds/i, message: '文件大小超过限制' },
+  { pattern: /File is empty/i, message: '文件为空' },
+  { pattern: /Invalid XLSX file format/i, message: '无效的 XLSX 文件格式' },
+  { pattern: /Invalid XLS file format/i, message: '无效的 XLS 文件格式' },
+  { pattern: /Invalid image type/i, message: '不支持该图像格式，仅支持 JPG、PNG、GIF、WebP' },
+  { pattern: /Image size exceeds/i, message: '图片大小超过限制' },
+  { pattern: /Invalid filename/i, message: '文件名无效' },
+  { pattern: /Image not found/i, message: '图片未找到' },
+  { pattern: /Storage limit exceeded/i, message: '存储空间已满' },
+  { pattern: /Import failed/i, message: '导入失败' },
+]
+
 export const normalizeApiErrorMessage = (detail: unknown, fallback = '操作失败'): string => {
   if (typeof detail !== 'string' || !detail.trim()) return fallback
 
-  if (detail.includes('Invalid credentials') || detail.includes('incorrect')) {
-    return '用户名或密码错误'
-  }
-  if (detail.includes('User account is disabled')) {
-    return '账号已被禁用'
-  }
-  if (detail.includes('Invalid CAS format')) {
-    return 'CAS号格式无效'
-  }
-  if (detail.includes('Invalid specification format')) {
-    return '规格格式无效'
-  }
-  if (detail.includes('Order not found')) {
-    return '未找到订单'
-  }
-  if (detail.includes('Inventory item not found')) {
-    return '未找到该库存项'
-  }
-  if (detail.includes('Cannot edit item while borrowed')) {
-    return '借用中的试剂无法编辑，请等待归还后再操作'
-  }
-  if (detail.includes('Item is borrowed by another user')) {
-    return '该物品已被他人借用，请刷新后重试'
-  }
-  if (detail.includes('Cart is empty')) {
-    return '购物车不能为空'
-  }
-  if (detail.includes('Admin permission required')) {
-    return '需要管理员权限才能访问错误日志'
-  }
-  if (detail.includes('Too many login attempts')) {
-    return '登录尝试过多，请 5 分钟后重试'
-  }
-  if (detail.includes('Incorrect old password')) {
-    return '原密码错误'
-  }
-  if (detail.includes('New password cannot be the same as old password')) {
-    return '新密码不能与原密码相同'
-  }
-  if (detail.includes('Old password required to modify admin password')) {
-    return '修改管理员密码需要提供原密码'
-  }
-  if (detail.includes('Too many requests')) {
-    return '请求过于频繁，请稍后再试'
-  }
-  if (detail.includes('Token expired')) {
-    return 'Token已过期，请重新生成'
-  }
-  if (detail.includes('Invalid CAS number')) {
-    return '无效的 CAS 号'
-  }
-  if (detail.includes('Max announcements allowed')) {
-    return '每个管理员最多创建10条公告'
-  }
-  if (detail.includes('Max visible announcements allowed')) {
-    return '每个管理员最多显示5条公告'
-  }
-  if (detail.includes('Cannot borrow, current status')) {
-    return '无法借用，当前状态'
-  }
-  if (detail.includes('Remaining quantity') && detail.includes('cannot exceed initial quantity')) {
-    return '剩余量不能超过初始量'
-  }
-  if (detail.includes('IP limit reached')) {
-    return 'IP 数量已达上限，请先移除其他设备'
-  }
-  if (detail.includes('Session has been revoked') || detail.includes('session expired')) {
-    return '会话已失效，请重新登录'
+  // 遍历映射表查找匹配
+  for (const { pattern, message } of ERROR_MAPPINGS) {
+    if (pattern.test(detail)) {
+      return message
+    }
   }
 
   return detail

@@ -15,7 +15,7 @@ const LSM_BANNER = [
   '║     ███████╗   ███████║   ██║ ╚═╝ ██║     ║',
   '║     ╚══════╝   ╚══════╝   ╚═╝     ╚═╝     ║',
   '║                                           ║',
-  '╚════  Lab Storage Manager - Jiao Group  ═══╝'
+  '╚══════      Lab Storage Manager      ══════╝'
 ].join('\n')
 
 console.log(

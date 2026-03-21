@@ -255,9 +255,9 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
   return [
     columnHelper.accessor('name', {
       header: '名称',
-      size: 150,
-      minSize: 120,
-      maxSize: 200,
+      size: 250,
+      minSize: 150,
+      maxSize: 300,
       cell: info => (
         <span className="break-all">
           <HighlightText
@@ -270,9 +270,9 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
     }),
     columnHelper.accessor('specification', {
       header: '规格',
-      size: 100,
-      minSize: 80,
-      maxSize: 150,
+      size: 250,
+      minSize: 150,
+      maxSize: 300,
       enableSorting: false,
       cell: info => {
         const value = info.getValue()
@@ -283,7 +283,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       header: '数量',
       size: 50,
       minSize: 40,
-      maxSize: 60,
+      maxSize: 100,
       enableSorting: false,
       cell: info => {
         const value = info.getValue()
@@ -294,9 +294,9 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
     columnHelper.accessor('applicant_name', {
       id: 'applicant',
       header: '订购人',
-      size: 80,
-      minSize: 80,
-      maxSize: 100,
+      size: 60,
+      minSize: 50,
+      maxSize: 120,
       cell: info => {
         const value = safeString(info.getValue(), '-')
         return <span>{value}</span>
@@ -304,8 +304,8 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
     }),
     columnHelper.accessor('communication', {
       header: '订购信息',
-      size: 120,
-      minSize: 100,
+      size: 100,
+      minSize: 80,
       maxSize: 200,
       enableSorting: false,
       cell: info => {
@@ -317,7 +317,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       header:'申购时间',
       size: 100,
       minSize: 80,
-      maxSize: 150,
+      maxSize: 120,
       cell: info => {
         const value = info.getValue() as string
         return <span>{formatDate(value)}</span>
@@ -325,9 +325,9 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
     }),
     columnHelper.accessor('status', {
       header: '状态',
-      size: 80,
-      minSize: 60,
-      maxSize: 120,
+      size: 60,
+      minSize: 50,
+      maxSize: 100,
       cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
     }),
   ]

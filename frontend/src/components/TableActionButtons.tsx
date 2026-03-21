@@ -18,7 +18,7 @@ import { Pencil } from 'lucide-react'
 export interface ActionButtonConfig<T> {
   id: string
   label: string
-  variant?: 'default' | 'morden' | 'destructive' | 'secondary' | 'ghost'
+  variant?: 'default' | 'modern' | 'destructive' | 'secondary' | 'ghost'
   size?: 'default' | 'sm' | 'lg' | 'icon'
   className?: string
   icon?: React.ReactNode
@@ -46,7 +46,6 @@ export interface TableActionButtonsProps<T> {
     className?: string
     title?: string
   }[]
-  compact?: boolean
 }
 
 interface ActionButtonProps<T> {
@@ -68,7 +67,6 @@ export function TableActionButtons<T>({
   isAdmin = false,
   statusField,
   statusDisplay,
-  compact = false,
 }: Readonly<TableActionButtonsProps<T>>) {
   const status = statusField ? (item[statusField] as string) : undefined
 
@@ -93,12 +91,12 @@ export function TableActionButtons<T>({
   })
 
   return (
-    <div className={cn('flex items-center gap-1', compact ? 'flex-wrap' : 'flex-wrap')}>
+    <div className="flex items-center gap-1 flex-wrap">
       {showEdit && onEdit && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="morden"
+              variant="modern"
               size="sm"
               className="h-8 w-8 p-0"
               disabled={disableEdit}
@@ -173,7 +171,7 @@ function ActionButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T
           <LoadingButton
             size="sm"
             disabled={isDisabled}
-            variant="morden"
+            variant="modern"
             className={cn(
               config.className,
               'h-8 w-8 p-0',
@@ -227,7 +225,7 @@ function ActionButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            variant={config.variant || 'morden'}
+            variant={config.variant || 'modern'}
             size="sm"
             className={cn('h-8 w-8 p-0', config.className)}
             disabled={isDisabled}
@@ -263,7 +261,6 @@ export const TableActionButtonsMemo = React.memo(
       prevProps.isAdmin !== nextProps.isAdmin ||
       prevProps.showEdit !== nextProps.showEdit ||
       prevProps.disableEdit !== nextProps.disableEdit ||
-      prevProps.compact !== nextProps.compact ||
       prevProps.onEdit !== nextProps.onEdit ||
       prevProps.actions !== nextProps.actions ||
       prevProps.statusDisplay !== nextProps.statusDisplay

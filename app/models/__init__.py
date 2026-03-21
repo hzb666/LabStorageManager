@@ -1,8 +1,14 @@
 # Models module - Database models for LIMS
 from .base import BaseResponse
 
-from .user import User, UserRole, UserResponse
-from .inventory import Inventory, InventoryStatus, BorrowLog, BorrowLogResponse, InventoryResponse
+from .user import PublicUserResponse, User, UserRole, UserResponse
+from .inventory import (
+    Inventory,
+    InventoryStatus,
+    BorrowLog,
+    BorrowLogResponse,
+    InventoryResponse,
+)
 from .reagent_order import (
     ReagentOrder,
     ReagentOrderStatus,
@@ -34,6 +40,7 @@ __all__ = [
     # User
     "User",
     "UserRole",
+    "PublicUserResponse",
     "UserResponse",
     # Session
     "UserSession",

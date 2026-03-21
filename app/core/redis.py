@@ -1,11 +1,12 @@
 import json
 import logging
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 import redis
 
 from app.core.config import settings
+from app.core.constants import REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS, REDIS_SOCKET_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,8 @@ def get_redis() -> Optional[redis.Redis]:
             db=settings.redis_db,
             password=settings.redis_password if settings.redis_password else None,
             decode_responses=True,
-            socket_connect_timeout=1,
-            socket_timeout=1
+            socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS
         )
         client = redis.Redis(connection_pool=pool)
         client.ping()
@@ -97,3 +98,18 @@ def delete_cached_session(token_hash: str) -> None:
         redis_client.delete(key)
     except redis.RedisError as e:
         _handle_redis_error(e, "删除 Session 缓存", key)
+
+
+def delete_cached_sessions(token_hashes: Iterable[str]) -> None:
+    redis_client = get_redis()
+    if redis_client is None:
+        return
+
+    keys = [session_key(token_hash) for token_hash in token_hashes]
+    if not keys:
+        return
+
+    try:
+        redis_client.delete(*keys)
+    except redis.RedisError as e:
+        _handle_redis_error(e, "批量删除 Session 缓存", ",".join(keys))

@@ -11,6 +11,9 @@ import {
   useInteractions, 
   useTransitionStyles
 } from '@floating-ui/react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
+import { querySmiles } from '@/lib/chemicalProperties'
+import { isSpecialCasValue } from '@/lib/validationSchemas'
 
 type RDKitModule = {
   get_mol: (smiles: string) => Mol
@@ -33,7 +36,7 @@ interface MoleculeStructureProps {
   casNumber: string
   width?: number
   height?: number
-  isDark?: boolean 
+  isDark?: boolean
 }
 
 type LoadingState = 'idle' | 'loading' | 'ready' | 'error'
@@ -44,75 +47,6 @@ let rdkitLoaderPromise: Promise<RDKitModule> | null = null
 const SVG_MAX_CACHE_SIZE = 100
 const svgCache = new Map<string, { svg: string; zoomSvg: string; naturalSize: { w: number; h: number } }>()
 
-// SMILES缓存：localStorage持久化，格式 {cas: smiles}
-const SMILES_STORAGE_KEY = 'molecule_smiles_cache'
-const SMILES_MAX_CACHE_SIZE = 1000
-const SMILES_EXPIRY_HOURS = 24 * 365 * 10 // 10年
-
-// 辅助函数：从localStorage获取SMILES缓存
-function getSmilesFromStorage(): Record<string, string> {
-  try {
-    const stored = localStorage.getItem(SMILES_STORAGE_KEY)
-    if (!stored) return {}
-    const data = JSON.parse(stored) as { data: Record<string, string>; timestamp: number }
-    if (Date.now() - data.timestamp > SMILES_EXPIRY_HOURS * 60 * 60 * 1000) {
-      localStorage.removeItem(SMILES_STORAGE_KEY)
-      return {}
-    }
-    return data.data || {}
-  } catch {
-    return {}
-  }
-}
-
-// 辅助函数：保存SMILES到localStorage
-function saveSmilesToStorage(data: Record<string, string>) {
-  try {
-    localStorage.setItem(SMILES_STORAGE_KEY, JSON.stringify({
-      data,
-      timestamp: Date.now()
-    }))
-  } catch (e) {
-    console.warn('localStorage存储失败:', e)
-  }
-}
-
-// 初始化SMILES缓存（从localStorage加载）
-const smilesCache = new Map<string, string>(Object.entries(getSmilesFromStorage()))
-
-// 全局并发队列与请求去重
-const MAX_CONCURRENT_REQUESTS = 3
-let activeRequests = 0
-const requestQueue: (() => void)[] = []
-const pendingRequests = new Map<string, Promise<string | null>>()
-
-const enqueueRequest = <T,>(task: () => Promise<T>): Promise<T> => {
-  return new Promise((resolve, reject) => {
-    const execute = async () => {
-      activeRequests++
-      try {
-        await new Promise(res => setTimeout(res, 200)) 
-        resolve(await task())
-      } catch (error) {
-        reject(error)
-      } finally {
-        activeRequests--
-        if (requestQueue.length > 0) {
-          const nextTask = requestQueue.shift()
-          if (nextTask) nextTask()
-        }
-      }
-    }
-
-    if (activeRequests < MAX_CONCURRENT_REQUESTS) {
-      execute()
-    } else {
-      requestQueue.push(execute)
-    }
-  })
-}
-
-// 提取工具函数以降低 Cognitive Complexity
 const processSvgId = (str: string, id: string) => 
   str.replaceAll(/id=['"](.+?)['"]/g, `id="${id}_$1"`)
      .replaceAll(/url\(#(.+?)\)/g, `url(#${id}_$1)`)
@@ -125,6 +59,8 @@ const extractNaturalSize = (svgString: string) => {
     h: heightMatch ? Number.parseFloat(heightMatch[1]) : 0
   }
 }
+
+const svgToDataUri = (svgString: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgString)}`
 
 const loadRDKitScript = async (): Promise<void> => {
   if (document.querySelector('#rdkit-script')) return
@@ -159,7 +95,7 @@ export function MoleculeStructure({
   casNumber, 
   width = 300, 
   height = 200, 
-  isDark 
+  isDark
 }: Readonly<MoleculeStructureProps>) {
   const [svg, setSvg] = useState<string>('')
   const [zoomSvg, setZoomSvg] = useState<string>('')
@@ -230,59 +166,31 @@ export function MoleculeStructure({
     return rdkitLoaderPromise
   }, [])
 
-  const fetchSmiles = useCallback(async (cas: string): Promise<string | null> => {
-    if (smilesCache.has(cas)) {
-      const cachedSmiles = smilesCache.get(cas)!
-      smilesCache.delete(cas)
-      smilesCache.set(cas, cachedSmiles)
-      saveSmilesToStorage(Object.fromEntries(smilesCache))
-      return cachedSmiles
-    }
-
-    if (pendingRequests.has(cas)) {
-      return pendingRequests.get(cas)!
-    }
-
-    const fetchTask = enqueueRequest(async () => {
-      try {
-        const response = await fetch(
-          `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(cas)}/property/SMILES/JSON`,
-          { headers: { 'Accept': 'application/json' } }
-        )
-        if (!response.ok) throw new Error('Compound not found')
-        
-        const data = await response.json()
-        const fetchedSmiles = data?.PropertyTable?.Properties?.[0]?.SMILES || null
-        
-        if (fetchedSmiles) {
-          if (smilesCache.size >= SMILES_MAX_CACHE_SIZE) {
-            const firstKey = smilesCache.keys().next().value
-            if (firstKey) smilesCache.delete(firstKey)
-          }
-          smilesCache.set(cas, fetchedSmiles)
-          saveSmilesToStorage(Object.fromEntries(smilesCache))
-        }
-        return fetchedSmiles
-      } catch (err) {
-        console.error('获取 SMILES 失败:', err)
-        return null
-      }
-    })
-
-    pendingRequests.set(cas, fetchTask)
-    
-    try {
-      return await fetchTask
-    } finally {
-      pendingRequests.delete(cas)
-    }
-  }, [])
-
+  // 使用 querySmiles 获取 SMILES（会缓存到 localStorage）
   useEffect(() => {
     if (!casNumber) return
+
+    if (isSpecialCasValue(casNumber)) {
+      setSmiles('')
+      setSvg('')
+      setZoomSvg('')
+      setCanZoom(false)
+      setError('生物试剂不适用')
+      setLoadingState('error')
+      return
+    }
+
+    let cancelled = false
+
     const initFetch = async () => {
+      setError('')
+      setSmiles('')
+      setSvg('')
+      setZoomSvg('')
+      setCanZoom(false)
       setLoadingState('loading')
-      const fetchedSmiles = await fetchSmiles(casNumber)
+      const fetchedSmiles = await querySmiles(casNumber)
+      if (cancelled) return
       if (!fetchedSmiles) {
         setError('未找到对应的化合物')
         setLoadingState('error')
@@ -290,8 +198,12 @@ export function MoleculeStructure({
       }
       setSmiles(fetchedSmiles)
     }
-    initFetch()
-  }, [casNumber, fetchSmiles])
+
+    void initFetch()
+    return () => {
+      cancelled = true
+    }
+  }, [casNumber])
 
   useEffect(() => {
     if (!smiles) return
@@ -370,6 +282,12 @@ export function MoleculeStructure({
   if (isDark === true) filterClass = '[filter:invert(0.93)_hue-rotate(180deg)]'
   if (isDark === false) filterClass = ''
 
+  const handleClick = () => {
+    if (casNumber) {
+      window.open(`https://www.chemicalbook.com/CAS_${casNumber}.htm`, '_blank')
+    }
+  }
+
   if (!casNumber) return null
 
   if (loadingState === 'loading') {
@@ -395,13 +313,27 @@ export function MoleculeStructure({
 
   return (
     <>
-      <div
-        ref={refs.setReference}
-        {...getReferenceProps()}
-        className={`flex items-center justify-center p-2 rounded-md overflow-hidden bg-white transition-none ${filterClass} ${canZoom ? 'cursor-zoom-in' : ''}`}
-        style={{ width, height }}
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            ref={refs.setReference}
+            {...getReferenceProps()}
+            onClick={handleClick}
+            className={`flex items-center justify-center p-2 rounded-md overflow-hidden bg-white transition-none ${filterClass} ${canZoom ? 'cursor-zoom-in' : 'cursor-pointer'}`}
+            style={{ width, height }}
+          >
+            <img
+              src={svgToDataUri(svg)}
+              alt="分子结构"
+              className="max-w-full max-h-full"
+              draggable={false}
+            />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          点击查看详情
+        </TooltipContent>
+      </Tooltip>
 
       {isMounted && canZoom && createPortal(
         <div 
@@ -441,8 +373,14 @@ export function MoleculeStructure({
                 [&>svg]:max-w-full! [&>svg]:h-auto! 
                 ${filterClass}
               `}
-              dangerouslySetInnerHTML={{ __html: zoomSvg }}
-            />
+            >
+              <img
+                src={svgToDataUri(zoomSvg)}
+                alt="分子结构放大图"
+                className="max-w-full h-auto"
+                draggable={false}
+              />
+            </div>
           </div>
         </div>,
         document.body

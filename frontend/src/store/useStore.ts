@@ -1,9 +1,10 @@
 ﻿import { create } from 'zustand'
 import { persist, type StorageValue, type PersistStorage } from 'zustand/middleware'
 import { authAPI } from '@/api/client'
+import { AUTH_STORAGE_EXPIRY_MS } from '@/lib/constants'
 
 // 自定义存储，带有过期时间支持 (3天)
-const createExpireStorage = <T>(expiresInDays: number): PersistStorage<T> => ({
+const createExpireStorage = <T>(expiresInMs: number): PersistStorage<T> => ({
   getItem: (name: string): StorageValue<T> | null => {
     const value = localStorage.getItem(name)
     if (!value) return null
@@ -24,7 +25,7 @@ const createExpireStorage = <T>(expiresInDays: number): PersistStorage<T> => ({
     }
   },
   setItem: (name: string, value: StorageValue<T>): void => {
-    const expiresAt = Date.now() + expiresInDays * 24 * 60 * 60 * 1000
+    const expiresAt = Date.now() + expiresInMs
     const valueWithExpiry = { ...value, expiresAt }
     localStorage.setItem(name, JSON.stringify(valueWithExpiry))
   },
@@ -89,7 +90,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'sidebar-storage',
-      storage: createExpireStorage(3), // 3天过期
+      storage: createExpireStorage(AUTH_STORAGE_EXPIRY_MS),
     }
   )
 )

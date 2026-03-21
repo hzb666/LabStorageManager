@@ -55,11 +55,14 @@ function TooltipContent({
           'data-[side=left]:slide-in-from-right-1.5',
           'data-[side=right]:slide-in-from-left-1.5',
           'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-[0.98] data-[state=closed]:duration-200',
+          'data-[side=left]:[&_svg]:invisible', 
+          
           className
         )}
         {...props}
       >
         {children}
+        {/* 保持原样即可 */}
         <TooltipPrimitive.Arrow 
           className='fill-primary' 
           width={10} 

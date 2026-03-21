@@ -36,6 +36,25 @@ export function ImportPage() {
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const parseBlobErrorDetail = useCallback(async (error: AxiosError): Promise<unknown> => {
+    const responseData = error.response?.data
+    if (!responseData) return undefined
+    if (responseData instanceof Blob) {
+      try {
+        const text = await responseData.text()
+        if (!text.trim()) return undefined
+        const parsed = JSON.parse(text) as { detail?: unknown }
+        return parsed.detail ?? text
+      } catch {
+        return undefined
+      }
+    }
+    if (typeof responseData === 'object' && responseData !== null && 'detail' in responseData) {
+      return (responseData as { detail?: unknown }).detail
+    }
+    return undefined
+  }, [])
+
   const validateFile = useCallback((selectedFile: File): boolean => {
     const validExtensions = ['.csv', '.xlsx', '.xls']
     const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase()
@@ -110,35 +129,33 @@ export function ImportPage() {
     }
   }
 
-  const downloadTemplate = useCallback(() => {
-    // Create a simple template CSV for download (with UTF-8 BOM for Excel compatibility)
-    const headers = IMPORT_TEMPLATE_COLUMNS.map(c => c.name).join(',')
-    const example = IMPORT_TEMPLATE_COLUMNS.map(c => {
-      if (c.name === 'cas_number') return '64-17-5'
-      if (c.name === 'name') return '乙醇'
-      if (c.name === 'english_name') return 'Ethanol'
-      if (c.name === 'alias') return '酒精'
-      if (c.name === 'category') return '有机溶剂'
-      if (c.name === 'brand') return 'Sigma'
-      if (c.name === 'specification') return '500ml'
-      if (c.name === 'remaining_quantity') return ''  // optional
-      if (c.name === 'storage_location') return '2-6-6-1'
-      if (c.name === 'is_hazardous') return ''  // 空白让用户选择填写 true/false/0/1
-      if (c.name === 'notes') return ''
-      return ''
-    }).join(',')
-    
-    // Add UTF-8 BOM for Excel to recognize Chinese characters
-    const BOM = '\uFEFF'
-    const csv = BOM + headers + '\n' + example
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'inventory_template.csv'
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [])
+  const downloadTemplate = useCallback(async () => {
+    try {
+      // 调用后端API下载带文本格式的Excel模板
+      const response = await inventoryAPI.downloadTemplate()
+      
+      // 创建Blob并下载
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'inventory_import_template.xlsx'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (error) {
+      const axiosError = error as AxiosError
+      if (axiosError.response?.status === 429) {
+        toast.error('下载过于频繁，请 2 秒后重试')
+        return
+      }
+      const errorDetail = await parseBlobErrorDetail(axiosError)
+      toast.error(normalizeApiErrorMessage(errorDetail, '下载模板失败'))
+    }
+  }, [parseBlobErrorDetail])
 
   // Get file icon based on extension
   const getFileIcon = (fileName: string) => {
@@ -167,7 +184,7 @@ export function ImportPage() {
             <div className="rounded-lg my-4">
               <div className="flex items-center justify-between mb-4">
                 <h4>模板字段说明（标 <span className="text-destructive">*</span> 为必填项）</h4>
-                <Button variant="morden" size="lg" onClick={downloadTemplate}>
+                <Button variant="modern" size="lg" onClick={downloadTemplate}>
                   <Download className="w-4 h-4 mr-2" />
                   下载模板
                 </Button>

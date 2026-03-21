@@ -449,7 +449,7 @@ export function AdminUsersPage() {
             </div>
           </div>
           <div className="flex gap-3 mt-8">
-            <Button variant="morden" onClick={() => handleCreateModalClose(false)} size="lg" className="flex-1">
+            <Button variant="modern" onClick={() => handleCreateModalClose(false)} size="lg" className="flex-1">
               取消
             </Button>
             <LoadingButton onClick={handleCreate} isLoading={createLoading} size="lg" className="flex-1">
@@ -482,7 +482,7 @@ export function AdminUsersPage() {
             <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg">
               {deleteLoading ? '处理中...' : '确认禁用'}
             </Button>
-            <Button variant="morden" onClick={() => setDialogState(null)} size="lg" className="text-base">
+            <Button variant="modern" onClick={() => setDialogState(null)} size="lg" className="text-base">
               取消
             </Button>
           </div>
@@ -521,7 +521,7 @@ const ActionButtons = React.memo(function ActionButtons({
         id: 'logs',
         label: '查看日志',
         icon: <FileText className="size-4" />,
-        variant: 'morden' as const,
+        variant: 'modern' as const,
         className: 'text-blue-600/90 hover:text-blue-700 dark:text-blue-400/70 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30',
         onClick: () => onViewLogs(user)
       },
@@ -529,7 +529,7 @@ const ActionButtons = React.memo(function ActionButtons({
         id: 'activate',
         label: '激活',
         icon: <UserCheck className="size-4" />,
-        variant: 'morden' as const,
+        variant: 'modern' as const,
         className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
         showWhen: (u: User) => !u.is_active, 
         disableWhen: () => isSelf,           // 是自己账号时禁用
@@ -539,7 +539,7 @@ const ActionButtons = React.memo(function ActionButtons({
         id: 'deactivate',
         label: '禁用',
         icon: <UserX className="size-4" />,
-        variant: 'morden' as const,
+        variant: 'modern' as const,
         className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
         showWhen: (u: User) => u.is_active,  
         disableWhen: () => isSelf,           // 是自己账号时禁用

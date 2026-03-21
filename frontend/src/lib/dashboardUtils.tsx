@@ -26,6 +26,7 @@ export interface MyBorrowItem {
 
 export interface PendingStockinItem {
   inventory_id: number
+  order_id?: number | null
   name: string
   cas_number: string
   initial_quantity: number
@@ -50,6 +51,8 @@ export interface DashboardReagentOrder extends DashboardOrderBase {
   category?: string | null
   brand?: string | null
   specification?: string
+  initial_quantity?: number | null
+  unit?: string | null
   quantity: number
   price?: number | null
   order_reason?: string
@@ -110,11 +113,19 @@ export const CONSUMABLE_STATUS_OPTIONS = [
   { value: 'approved', label: '已审批' },
 ]
 
-export const SEARCH_FIELD_OPTIONS = [
+export const DASHBOARD_REAGENT_SEARCH_FIELDS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
   { value: 'cas_number', label: 'CAS号' },
   { value: 'brand', label: '品牌' },
+  { value: 'created_at', label: '订购时间' },
+]
+
+export const DASHBOARD_CONSUMABLE_SEARCH_FIELDS = [
+  { value: 'all', label: '全部' },
+  { value: 'name', label: '名称' },
+  { value: 'specification', label: '规格' },
+  { value: 'created_at', label: '订购时间' },
 ]
 
 export const BORROW_SEARCH_FIELDS = [
