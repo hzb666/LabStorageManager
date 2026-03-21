@@ -132,7 +132,7 @@ class SSEManager:
 
     async def _next_seq(self, room: str) -> int:
         """Prefer Redis INCR for global room sequence; fallback to local counter."""
-        redis_seq = redis_pubsub.next_sequence(room)
+        redis_seq = await asyncio.to_thread(redis_pubsub.next_sequence, room)
         if redis_seq is not None:
             return redis_seq
 
@@ -157,7 +157,7 @@ class SSEManager:
         }
 
         local_delivered = await self._push_local(room, event_type, event)
-        redis_count = redis_pubsub.publish(f"sse:{room}", event)
+        redis_count = await asyncio.to_thread(redis_pubsub.publish, f"sse:{room}", event)
         logger.debug(
             "SSE broadcast room=%s event=%s seq=%s local=%s redis=%s",
             room,

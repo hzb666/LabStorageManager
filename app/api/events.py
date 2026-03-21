@@ -69,8 +69,8 @@ async def sse_events(
             detail="No SSE rooms are accessible for current user",
         )
 
-    # Keep accepting last_seq query for compatibility, but replay is intentionally
-    # not implemented in this project. Reconnect strategy is full refresh on stale.
+    # Replay is intentionally not implemented in this project.
+    # Reconnect strategy is full refresh on stale, so server starts with seq 0.
     last_seq = 0
 
     client_id = sse_manager.new_client_id()

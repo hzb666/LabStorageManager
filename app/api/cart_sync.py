@@ -113,10 +113,9 @@ def match_reagent_order(db: Session, item: CartItem) -> MatchedItem:
 
 
 # ==================== API Routes ====================
-@router.post("", response_model=CartSyncResponse)
+@router.post("", response_model=CartSyncResponse, dependencies=[Depends(get_current_user)])
 async def sync_cart(
     request: CartItemRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)]
 ):
     """同步购物车数据并匹配现有订单"""

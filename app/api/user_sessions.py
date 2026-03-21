@@ -90,11 +90,10 @@ def delete_session(
 @router.delete("/")
 def delete_all_sessions(
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)]
 ):
     """Delete all sessions for current user except the current session"""
-    _, current_session = current
+    current_user, current_session = current
 
     sessions = db.exec(
         select(UserSession)
@@ -118,7 +117,6 @@ def delete_all_sessions(
 @router.post("/refresh")
 def refresh_session(
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)]
 ):
     """Refresh current session expiration time"""

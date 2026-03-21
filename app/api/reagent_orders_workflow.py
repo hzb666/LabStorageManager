@@ -1,12 +1,12 @@
 """Workflow routes for reagent orders (approval, arrival, dashboard, stock-in)."""
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.database import DBSession
-from app.core.auth import CurrentUser, AdminUser
+from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.time_utils import utc_iso_str
 from app.models.user import UserRole
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus, ReagentOrderReason
@@ -124,8 +124,8 @@ def _register_approval_routes(
     router: APIRouter,
     search_cache: Dict[str, tuple[Any, Any]],
 ) -> None:
-    @router.post("/{order_id}/approve")
-    async def approve_reagent_order(order_id: int, admin_user: AdminUser, db: DBSession):
+    @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
+    async def approve_reagent_order(order_id: int, db: DBSession):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -149,8 +149,8 @@ def _register_approval_routes(
 
         return order
 
-    @router.post("/{order_id}/reject")
-    async def reject_reagent_order(order_id: int, admin_user: AdminUser, db: DBSession):
+    @router.post("/{order_id}/reject", dependencies=[Depends(require_admin)])
+    async def reject_reagent_order(order_id: int, db: DBSession):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -267,8 +267,8 @@ def _register_arrival_routes(
 
 
 def _register_dashboard_routes(router: APIRouter) -> None:
-    @router.get("/dashboard/arrived-orders")
-    def get_arrived_reagent_orders(db: DBSession, current_user: CurrentUser):
+    @router.get("/dashboard/arrived-orders", dependencies=[Depends(get_current_user)])
+    def get_arrived_reagent_orders(db: DBSession):
         statement = select(ReagentOrder).where(ReagentOrder.status == ReagentOrderStatus.ARRIVED).order_by(
             ReagentOrder.updated_at.desc()
         )

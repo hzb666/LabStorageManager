@@ -7,12 +7,12 @@ import time
 from typing import Callable, Optional
 
 import redis
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlmodel import select
 
 from app.core.redis import get_redis
-from app.core.auth import AdminUser
+from app.core.auth import AdminUser, require_admin
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LOG_TOKEN_EXPIRE_HOURS,
@@ -144,10 +144,9 @@ def generate_logs_token(
     }
 
 
-@router.get("/logs/{token}", response_model=dict)
+@router.get("/logs/{token}", response_model=dict, dependencies=[Depends(require_admin)])
 def get_user_logs(
     token: str,
-    current_user: AdminUser,
     db: DBSession,
     keyword: Optional[str] = None,
     log_type: Optional[str] = None,

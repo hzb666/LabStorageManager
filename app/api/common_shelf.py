@@ -233,9 +233,8 @@ def register_common_shelf(
 ) -> None:
     """Register common shelf routes."""
 
-    @router.get("/common-shelf")
+    @router.get("/common-shelf", dependencies=[Depends(get_current_user)])
     def list_common_shelf(
-        current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
         skip: int = 0,
         limit: int = min(DEFAULT_PAGE_SIZE, max_page_size),
@@ -246,7 +245,6 @@ def register_common_shelf(
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = 'desc',
     ):
-        del current_user
 
         base = select(Inventory).where(Inventory.is_common.is_(True))
 
@@ -441,15 +439,12 @@ def register_common_shelf(
             'item_ids': [item.id for item in created_items],
         }
 
-    @router.put('/common-shelf/group/{sample_inventory_id}', response_model=dict)
+    @router.put('/common-shelf/group/{sample_inventory_id}', response_model=dict, dependencies=[Depends(get_current_user)])
     async def update_common_shelf_group(
         sample_inventory_id: int,
         update: InventoryUpdate,
-        current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
-        del current_user
-
         sample_item = db.get(Inventory, sample_inventory_id)
         if not sample_item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
@@ -526,14 +521,11 @@ def register_common_shelf(
             'sample_inventory_id': sample_inventory_id,
         }
 
-    @router.delete('/common-shelf/group/{sample_inventory_id}', response_model=dict)
+    @router.delete('/common-shelf/group/{sample_inventory_id}', response_model=dict, dependencies=[Depends(get_current_user)])
     async def delete_common_shelf_group(
         sample_inventory_id: int,
-        current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
-        del current_user
-
         sample_item = db.get(Inventory, sample_inventory_id)
         if not sample_item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
@@ -562,14 +554,11 @@ def register_common_shelf(
             'sample_inventory_id': sample_inventory_id,
         }
 
-    @router.get("/common-shelf/export")
+    @router.get("/common-shelf/export", dependencies=[Depends(get_current_user)])
     def export_common_shelf(
-        current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
         """Export common shelf items (grouped by sample_inventory_id)."""
-        del current_user
-
         base = select(Inventory).where(Inventory.is_common.is_(True))
         items = db.exec(base.order_by(Inventory.created_at.desc(), Inventory.id.desc())).all()
         grouped = _group_common_shelf_items(items)
