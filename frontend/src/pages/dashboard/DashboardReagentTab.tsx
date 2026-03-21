@@ -335,7 +335,7 @@ export function DashboardReagentTab() {
             <DialogTitle>编辑试剂订单</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitReagentEdit}>
-            <BaseForm form={reagentForm} fields={getReagentOrderFormFields(true)} />
+            <BaseForm form={reagentForm} fields={getReagentOrderFormFields()} />
             <EditDialogActions
               mode="edit"
               onCancel={() => setEditingReagent(null)}

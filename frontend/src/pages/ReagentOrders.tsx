@@ -525,7 +525,7 @@ export function ReagentOrdersPage() {
             <BaseForm
               form={form}
               fields={useMemo(() => {
-                const fields = getReagentOrderFormFields(dialogState === 'edit')
+                const fields = getReagentOrderFormFields()
                 // 为 CAS 号字段添加自动识别按钮（仅在新增模式时显示）
                 if (dialogState === 'add') {
                   return fields.map(field =>

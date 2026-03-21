@@ -146,9 +146,8 @@ export const defaultConsumableOrderValues: ConsumableOrderFormData = {
 
 /**
  * 获取试剂订单表单字段配置
- * @param isEdit 是否为编辑模式
  */
-export function getReagentOrderFormFields(_isEdit: boolean): FieldSchema<ReagentOrderFormData>[] {
+export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormData>[] {
   return [
     { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
     { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
@@ -234,9 +233,8 @@ export function getUserEditFormFields(): FieldSchema<UserUpdateFormData>[] {
 
 /**
  * 获取耗材订单表单字段配置
- * @param isEdit 是否为编辑模式
  */
-export function getConsumableOrderFormFields(_isEdit: boolean): FieldSchema<ConsumableOrderFormData>[] {
+export function getConsumableOrderFormFields(): FieldSchema<ConsumableOrderFormData>[] {
   return [
     { name: 'name' as const, label: '耗材名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 一次性手套' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 1, placeholder: '如: Disposable Gloves' },

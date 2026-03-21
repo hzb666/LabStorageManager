@@ -338,7 +338,7 @@ export function ConsumableOrdersPage() {
           <form onSubmit={handleFormSubmit}>
             <BaseForm
               form={form}
-              fields={getConsumableOrderFormFields(dialogState === 'edit')}
+              fields={getConsumableOrderFormFields()}
             />
             <EditDialogActions
               mode={dialogState ?? 'add'}

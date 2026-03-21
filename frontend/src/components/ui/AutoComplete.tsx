@@ -124,19 +124,39 @@ export function Autocomplete({
 }: Readonly<AutocompleteProps>) {
   const [open, setOpen] = React.useState(false)
   const [inputValue, setInputValue] = React.useState(value)
+  const [debouncedInputValue, setDebouncedInputValue] = React.useState(value)
   const inputRef = React.useRef<HTMLInputElement>(null)
-  const canSearch = React.useMemo(() => shouldStartSearch(inputValue), [inputValue])
+  // 选中建议项后抑制搜索，防止下拉菜单闪烁
+  const justSelectedRef = React.useRef(false)
+  const canSearch = React.useMemo(
+    () => shouldStartSearch(debouncedInputValue),
+    [debouncedInputValue]
+  )
 
   // 监听外部 value 的变化（保证组件内部状态同步更新）
   React.useEffect(() => {
     setInputValue(value)
+    setDebouncedInputValue(value)
   }, [value])
+
+  // 搜索输入防抖，避免每次按键都触发筛选
+  React.useEffect(() => {
+    // 选中建议项后跳过防抖更新，避免触发多余的搜索导致闪烁
+    if (justSelectedRef.current) {
+      justSelectedRef.current = false
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setDebouncedInputValue(inputValue)
+    }, 100)
+    return () => window.clearTimeout(timer)
+  }, [inputValue])
 
   // 过滤建议列表 (忽略大小写)
   const filteredOptions = React.useMemo(() => {
     if (!canSearch) return []
-    return options.filter((opt) => isOptionMatched(opt, inputValue))
-  }, [options, inputValue, canSearch])
+    return options.filter((opt) => isOptionMatched(opt, debouncedInputValue))
+  }, [options, debouncedInputValue, canSearch])
 
   // 处理输入变化与双字符触发逻辑
   const handleValueChange = (val: string) => {
@@ -154,9 +174,11 @@ export function Autocomplete({
 
   // 处理选中建议
   const handleSelect = (option: AutocompleteOption) => {
-    setInputValue(option.label)
-    onChange?.(option.label)
+    justSelectedRef.current = true
     setOpen(false)
+    setInputValue(option.label)
+    setDebouncedInputValue(option.label)
+    onChange?.(option.label)
     // 选中后将焦点交还给输入框
     inputRef.current?.focus()
   }
@@ -173,7 +195,6 @@ export function Autocomplete({
           <Command.Input
             asChild
             value={inputValue}
-            onValueChange={handleValueChange}
           >
             <Input
               ref={inputRef}
@@ -190,16 +211,16 @@ export function Autocomplete({
         <PopoverContent
           onOpenAutoFocus={(e) => e.preventDefault()}
           className={cn(
-            'relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md dark:border dark:border-border bg-popover text-popover-foreground shadow-md',
+            'w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] relative z-50 max-h-72 origin-(--radix-popover-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md',
             'data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
-            'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
+            'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
             'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1'
           )}
           sideOffset={4}
           align="start"
           asChild // 将 PopoverContent 作为 Command.List 的直接容器
         >
-          <Command.List className="h-(--radix-select-trigger-height) w-full min-w-(--radix-popover-trigger-width) scroll-my-1 overflow-x-hidden overflow-y-auto p-1">
+          <Command.List className="scroll-my-1 overflow-x-hidden overflow-y-auto p-1">
             <div className="flex flex-col">
               {filteredOptions.map((option) => (
                 <Command.Item
@@ -207,16 +228,20 @@ export function Autocomplete({
                   // value 属性供 cmdk 内部追踪状态使用
                   value={option.value}
                   onSelect={() => handleSelect(option)}
+                  // 防止 mousedown 时输入框失焦
+                  onMouseDown={(e) => e.preventDefault()}
                   className={cn(
-                    'relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 ps-2 pe-8 text-base outline-hidden select-none',
-                    'focus:bg-accent focus:text-accent-foreground',
+                    'relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 px-2 text-base outline-hidden select-none',
                     'data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground',
-                    'data-disabled:pointer-events-none data-disabled:opacity-50',
-                    '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4 [&_svg:not([class*=text-])]:text-muted-foreground',
-                    '*:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2'
+                    'aria-selected:bg-accent aria-selected:text-accent-foreground',
+                    'dark:data-[selected=true]:bg-input dark:data-[selected=true]:text-accent-foreground',
+                    'dark:aria-selected:bg-input dark:aria-selected:text-accent-foreground',
+                    'data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50'
                   )}
                 >
-                  <HighlightText text={option.label} highlight={inputValue} fuzzy />
+                  <span className="min-w-0">
+                    <HighlightText text={option.label} highlight={debouncedInputValue} fuzzy />
+                  </span>
                 </Command.Item>
               ))}
             </div>
