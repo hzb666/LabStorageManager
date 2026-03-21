@@ -334,6 +334,62 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
 }
 
 /**
+ * 常用货架表格列配置（不含操作列）
+ */
+export function getCommonShelfTableColumns(): ColumnDef<TableRowData, unknown>[] {
+  return [
+    columnHelper.accessor('cas_number', {
+      header: 'CAS号',
+      size: 130,
+      minSize: 110,
+      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor('name', {
+      header: '名称',
+      size: 220,
+      minSize: 180,
+      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor('storage_location', {
+      header: '位置',
+      size: 140,
+      minSize: 110,
+      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor('brand', {
+      header: '品牌',
+      size: 100,
+      minSize: 80,
+      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor('specification', {
+      header: '规格',
+      size: 110,
+      minSize: 90,
+      cell: info => <span>{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor('available_bottles', {
+      header: '可用瓶数',
+      size: 90,
+      minSize: 80,
+      cell: info => <span className="font-medium text-green-700">{safeString(info.getValue(), '0')} 瓶</span>,
+    }),
+    columnHelper.accessor('total_bottles', {
+      header: '总瓶数',
+      size: 90,
+      minSize: 80,
+      cell: info => <span>{safeString(info.getValue(), '0')} 瓶</span>,
+    }),
+    columnHelper.accessor('status', {
+      header: '状态',
+      size: 80,
+      minSize: 70,
+      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
+    }),
+  ]
+}
+
+/**
  * 用户管理表格列配置
  * 包含：用户名、姓名、角色、状态、创建时间、最后活跃时间
  */

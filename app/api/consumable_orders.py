@@ -2,19 +2,16 @@
 Consumable Order API Routes - Consumables Purchase Order Management
 Separated from Reagent orders (no stock-in needed)
 """
-import io
-import csv
 from datetime import datetime
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
 from app.core.constants import DEFAULT_PAGE_SIZE, LIST_CACHE_TTL_SECONDS, MAX_PAGE_SIZE
-from app.core.time_utils import get_utc_now, to_china_time, utc_iso_str
+from app.core.time_utils import get_utc_now, utc_iso_str
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
@@ -23,7 +20,6 @@ from app.models.consumable_order import (
     ConsumableOrderStatus,
 )
 from app.models.user import User, UserRole
-from app.services.csv_utils import escape_csv_formula
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
@@ -280,45 +276,16 @@ def export_consumable_orders(
     current_user: AdminUser,
 ):
     """Export consumable orders as a downloadable CSV file."""
+    from app.services.csv_export import export_consumable_orders_csv
+
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
     orders = db.exec(statement).all()
 
     # 查询所有订购人ID用于导出
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
-    all_users_map = batch_get_user_names(db, all_applicant_ids)
+    all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    output = io.StringIO()
-    output.write("\ufeff")
-    writer = csv.writer(output)
-
-    writer.writerow([
-        "名称", "英文名", "规格", "数量", "单价", "状态",
-        "订购人", "申购时间", "备注",
-    ])
-
-    for order in orders:
-        # 使用直接存储的规格字符串
-        spec = getattr(order, 'specification', '') or ''
-        writer.writerow([
-            escape_csv_formula(order.name),
-            escape_csv_formula(order.english_name or ""),
-            escape_csv_formula(spec or ""),
-            order.quantity,
-            order.price or "",
-            order.status.value if hasattr(order.status, "value") else order.status,
-            escape_csv_formula(all_users_map.get(order.applicant_id, "") if order.applicant_id else ""),
-            to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
-            escape_csv_formula(order.notes or ""),
-        ])
-
-    output.seek(0)
-    filename = f"consumable_orders_export_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    return export_consumable_orders_csv(orders, all_users_map)
 
 
 @router.get("/{order_id}", response_model=ConsumableOrderResponse)
