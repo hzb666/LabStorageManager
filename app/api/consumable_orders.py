@@ -5,11 +5,11 @@ Separated from Reagent orders (no stock-in needed)
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
-from app.core.auth import CurrentUser, AdminUser
+from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
@@ -171,9 +171,8 @@ async def create_consumable_order(
     return db_order
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(get_current_user)])
 def list_consumable_orders(
-    current_user: CurrentUser,
     db: DBSession,
     skip: int = 0,
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
@@ -185,7 +184,6 @@ def list_consumable_orders(
     sort_order: Optional[str] = 'desc',
 ):
     """List consumable orders with optional filters, pagination, search, sort and applicant name"""
-    del current_user  # 仅用于鉴权
 
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
@@ -282,10 +280,9 @@ def list_consumable_orders(
 
 # --- Export ---
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(require_admin)])
 def export_consumable_orders(
     db: DBSession,
-    current_user: AdminUser,
 ):
     """Export consumable orders as a downloadable CSV file."""
     from app.services.csv_export import export_consumable_orders_csv
@@ -300,10 +297,9 @@ def export_consumable_orders(
     return export_consumable_orders_csv(orders, all_users_map)
 
 
-@router.get("/{order_id}", response_model=ConsumableOrderResponse)
+@router.get("/{order_id}", response_model=ConsumableOrderResponse, dependencies=[Depends(get_current_user)])
 def get_consumable_order(
     order_id: int,
-    current_user: CurrentUser,
     db: DBSession,
 ):
     """Get consumable order by ID"""
@@ -382,10 +378,9 @@ async def update_consumable_order(
     return order
 
 
-@router.post("/{order_id}/approve")
+@router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
 async def approve_consumable_order(
     order_id: int,
-    admin_user: AdminUser,
     db: DBSession,
 ):
     """Approve a consumable order (Admin only)"""
@@ -416,10 +411,9 @@ async def approve_consumable_order(
     return order
 
 
-@router.post("/{order_id}/reject")
+@router.post("/{order_id}/reject", dependencies=[Depends(require_admin)])
 async def reject_consumable_order(
     order_id: int,
-    admin_user: AdminUser,
     db: DBSession,
 ):
     """Reject a consumable order (Admin only). Does not modify notes."""

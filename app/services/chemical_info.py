@@ -10,7 +10,7 @@ import logging
 import hashlib
 from urllib.parse import urlparse
 import requests
-from typing import Optional, Dict, Any, Annotated
+from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -25,7 +25,6 @@ from app.core.constants import (
     TRANSLATED_NAME_SUFFIX,
 )
 from app.core.auth import get_current_user
-from app.models.user import User
 from app.services.cas_utils import validate_and_normalize_cas, is_special_cas_value
 
 logger = logging.getLogger(__name__)
@@ -437,10 +436,9 @@ def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
     return result
 
 
-@router.get("/{cas_number}")
+@router.get("/{cas_number}", dependencies=[Depends(get_current_user)])
 def get_chemical_info(
     cas_number: str,
-    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """
     根据 CAS 号查询化学物质信息
@@ -449,8 +447,6 @@ def get_chemical_info(
     - name: 中文名（从 chemblink.com 获取）
     - english_name: 英文名（从 PubChem API 获取）
     """
-    del current_user
-
     is_valid, error_msg, normalized_cas = validate_and_normalize_cas(cas_number)
     if not is_valid:
         raise HTTPException(

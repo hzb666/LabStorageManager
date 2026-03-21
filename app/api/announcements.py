@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlmodel import Session, select, func
 
-from app.core.auth import CurrentUser, require_admin
+from app.core.auth import get_current_user, require_admin
 from app.core.config import settings
 from app.core.constants import INVALID_FILENAME_PREFIX, INVALID_FILENAME_SEGMENTS, MAX_PAGE_SIZE
 from app.core.request_utils import get_client_ip
@@ -48,9 +48,8 @@ def enrich_with_creator_name(announcement: Announcement, db: Session) -> Announc
 # ==================== Public Endpoints ====================
 
 
-@router.get("/public", response_model=List[AnnouncementResponse])
+@router.get("/public", response_model=List[AnnouncementResponse], dependencies=[Depends(get_current_user)])
 def get_public_announcements(
-    current_user: CurrentUser,  # 添加鉴权：要求登录
     db: Annotated[Session, Depends(get_db)],
 ):
     """
@@ -78,10 +77,8 @@ def get_public_announcements(
     return result
 
 
-@router.get("/storage-info")
-def get_storage_info(
-    current_user: Annotated[User, Depends(require_admin)],
-):
+@router.get("/storage-info", dependencies=[Depends(require_admin)])
+def get_storage_info():
     """
     Get storage usage information for announcement images (admin only)
     """
@@ -92,10 +89,9 @@ def get_storage_info(
 # ==================== Admin Endpoints ====================
 
 
-@router.get("/", response_model=List[AnnouncementResponse])
+@router.get("/", response_model=List[AnnouncementResponse], dependencies=[Depends(require_admin)])
 def list_announcements(
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
     skip: int = 0,
     limit: int = MAX_PAGE_SIZE,
 ):
@@ -177,11 +173,10 @@ def create_announcement(
     return enrich_with_creator_name(db_announcement, db)
 
 
-@router.get("/{announcement_id}", response_model=AnnouncementResponse)
+@router.get("/{announcement_id}", response_model=AnnouncementResponse, dependencies=[Depends(require_admin)])
 def get_announcement(
     announcement_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
 ):
     """
     Get announcement by ID (admin only)
@@ -195,12 +190,11 @@ def get_announcement(
     return enrich_with_creator_name(announcement, db)
 
 
-@router.put("/{announcement_id}", response_model=AnnouncementResponse)
+@router.put("/{announcement_id}", response_model=AnnouncementResponse, dependencies=[Depends(require_admin)])
 def update_announcement(
     announcement_id: int,
     announcement_update: AnnouncementUpdate,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
 ):
     """
     Update announcement (admin only)
@@ -226,11 +220,10 @@ def update_announcement(
     return enrich_with_creator_name(announcement, db)
 
 
-@router.delete("/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 def delete_announcement(
     announcement_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
 ):
     """
     Delete announcement (admin only)
@@ -255,11 +248,10 @@ def delete_announcement(
     db.commit()
 
 
-@router.post("/{announcement_id}/toggle-pin", response_model=AnnouncementResponse)
+@router.post("/{announcement_id}/toggle-pin", response_model=AnnouncementResponse, dependencies=[Depends(require_admin)])
 def toggle_pin_announcement(
     announcement_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
 ):
     """
     Toggle pin status of announcement (admin only)
@@ -280,11 +272,10 @@ def toggle_pin_announcement(
     return enrich_with_creator_name(announcement, db)
 
 
-@router.post("/{announcement_id}/toggle-visibility", response_model=AnnouncementResponse)
+@router.post("/{announcement_id}/toggle-visibility", response_model=AnnouncementResponse, dependencies=[Depends(require_admin)])
 def toggle_visibility_announcement(
     announcement_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
 ):
     """
     Toggle visibility of announcement (admin only)
@@ -305,11 +296,10 @@ def toggle_visibility_announcement(
     return enrich_with_creator_name(announcement, db)
 
 
-@router.post("/upload-image")
+@router.post("/upload-image", dependencies=[Depends(require_admin)])
 async def upload_announcement_image(
     file: UploadFile,
     request: Request,
-    current_user: Annotated[User, Depends(require_admin)],
 ):
     """
     Upload announcement image (admin only)
@@ -336,11 +326,8 @@ async def upload_announcement_image(
     return {"url": image_url, "message": "Image uploaded successfully"}
 
 
-@router.delete("/images/{filename}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_announcement_image(
-    filename: str,
-    current_user: Annotated[User, Depends(require_admin)],
-):
+@router.delete("/images/{filename}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
+def delete_announcement_image(filename: str):
     """
     Delete announcement image (admin only)
     """

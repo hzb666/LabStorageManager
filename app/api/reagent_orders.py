@@ -5,11 +5,11 @@ Separated from Consumable orders for independent workflow
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
-from app.core.auth import CurrentUser, AdminUser
+from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
@@ -252,9 +252,8 @@ async def create_reagent_order(
     return db_order
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(get_current_user)])
 def list_reagent_orders(
-    current_user: CurrentUser,
     db: DBSession,
     skip: int = 0,
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
@@ -266,7 +265,6 @@ def list_reagent_orders(
     sort_order: Optional[str] = 'desc',
 ):
     """List reagent orders with optional filters, pagination, search, sort and applicant name"""
-    del current_user  # 仅用于鉴权
 
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
@@ -372,10 +370,9 @@ def list_reagent_orders(
 
 # --- Export ---
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(require_admin)])
 def export_reagent_orders(
     db: DBSession,
-    current_user: AdminUser,
 ):
     """Export reagent orders as a downloadable CSV file."""
     from app.services.csv_export import export_reagent_orders_csv
@@ -390,16 +387,13 @@ def export_reagent_orders(
     return export_reagent_orders_csv(orders, all_users_map)
 
 
-@router.get("/cas-overview/{cas_number}")
+@router.get("/cas-overview/{cas_number}", dependencies=[Depends(get_current_user)])
 def get_cas_overview(
     cas_number: str,
-    current_user: CurrentUser,
     db: DBSession,
     exclude_order_id: Optional[int] = None,
 ):
     """Get CAS overview for duplicate-check hints in forms and expanded rows."""
-    del current_user  # 仅用于鉴权
-
     normalized_cas = normalize_cas(cas_number)
 
     if is_special_cas_value(normalized_cas):
@@ -503,10 +497,9 @@ def get_cas_overview(
     }
 
 
-@router.get("/{order_id}", response_model=ReagentOrderResponse)
+@router.get("/{order_id}", response_model=ReagentOrderResponse, dependencies=[Depends(get_current_user)])
 def get_reagent_order(
     order_id: int,
-    current_user: CurrentUser,
     db: DBSession,
 ):
     """Get reagent order by ID"""

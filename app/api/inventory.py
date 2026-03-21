@@ -14,8 +14,7 @@ from sqlmodel import Session, select, func
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
-from app.models.user import User
-from app.core.auth import get_current_user, require_admin, CurrentUser
+from app.core.auth import get_current_user, require_admin
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
@@ -99,16 +98,14 @@ def _apply_inventory_filters(
     search_field: Optional[str],
     fuzzy: bool,
 ):
+    # Regular inventory listing should always exclude common-shelf items.
+    base = base.where(Inventory.is_common.is_(False))
     if status_filter:
         base = base.where(Inventory.status == status_filter)
-    else:
-        base = base.where(
-            Inventory.is_common.is_(False),
-        )
     if cas_filter:
         base = base.where(Inventory.cas_number == normalize_cas(cas_filter))
     if hazardous_only:
-        base = base.where(Inventory.is_hazardous is True)
+        base = base.where(Inventory.is_hazardous.is_(True))
     if not search:
         return base
 
@@ -238,9 +235,8 @@ register_inventory_extended_routes(router, SEARCH_CACHE, LIST_CACHE_PREFIX)
 register_common_shelf(router, MAX_PAGE_SIZE, SEARCH_CACHE, LIST_CACHE_PREFIX)
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(get_current_user)])
 def list_inventory(
-    current_user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
@@ -318,8 +314,8 @@ def list_inventory(
     return result
 
 
-@router.get("/{inventory_id}", response_model=InventoryResponse)
-def get_inventory(inventory_id: int, db: DBSession, _: CurrentUser):
+@router.get("/{inventory_id}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
+def get_inventory(inventory_id: int, db: DBSession):
     item = _get_by_id(db, inventory_id)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
@@ -327,12 +323,11 @@ def get_inventory(inventory_id: int, db: DBSession, _: CurrentUser):
     return _add_specification(response)
 
 
-@router.put("/{inventory_id}", response_model=InventoryResponse)
+@router.put("/{inventory_id}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
 async def update_inventory(
     inventory_id: int,
     update: InventoryUpdate,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
 ):
     item = _get_by_id(db, inventory_id)
     if not item:
@@ -410,11 +405,10 @@ async def update_inventory(
     return response
 
 
-@router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 async def delete_inventory(
     inventory_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
 ):
     item = _get_by_id(db, inventory_id)
     if not item:

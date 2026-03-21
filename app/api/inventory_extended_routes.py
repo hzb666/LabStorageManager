@@ -88,8 +88,8 @@ def _add_specification(item_dict: dict) -> dict:
 
 
 def _register_cas_and_export_routes(router: APIRouter) -> None:
-    @router.get("/cas/{cas_number}")
-    def check_cas_inventory(cas_number: str, current_user: CurrentUser, db: DBSession):
+    @router.get("/cas/{cas_number}", dependencies=[Depends(get_current_user)])
+    def check_cas_inventory(cas_number: str, db: DBSession):
         normalized_cas = normalize_cas(cas_number)
 
         if is_special_cas_value(normalized_cas):
@@ -130,8 +130,8 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
             ],
         }
 
-    @router.get("/cas/{cas_number}/total")
-    def get_cas_total_quantity(cas_number: str, current_user: CurrentUser, db: DBSession):
+    @router.get("/cas/{cas_number}/total", dependencies=[Depends(get_current_user)])
+    def get_cas_total_quantity(cas_number: str, db: DBSession):
         normalized_cas = normalize_cas(cas_number)
 
         if is_special_cas_value(normalized_cas):
@@ -153,16 +153,16 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
             "total_remaining": total or 0.0,
         }
 
-    @router.get("/code/{internal_code}", response_model=InventoryResponse)
-    def get_inventory_by_internal_code(internal_code: str, current_user: CurrentUser, db: DBSession):
+    @router.get("/code/{internal_code}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
+    def get_inventory_by_internal_code(internal_code: str, db: DBSession):
         item = _find_by_code(db, internal_code)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
         response = InventoryResponse.model_validate(item).model_dump()
         return _add_specification(response)
 
-    @router.get("/export")
-    def export_inventory(current_user: CurrentUser, db: DBSession):
+    @router.get("/export", dependencies=[Depends(get_current_user)])
+    def export_inventory(db: DBSession):
         """Export regular inventory items (excluding common shelf items)."""
         statement = select(Inventory).where(
             Inventory.is_common.is_(False)
@@ -531,11 +531,10 @@ def _register_borrow_return_routes(
             result["warning"] = low_quantity_warning
         return result
 
-    @router.get("/{inventory_id}/borrow-history")
+    @router.get("/{inventory_id}/borrow-history", dependencies=[Depends(get_current_user)])
     def get_borrow_history(
         inventory_id: int,
         db: Annotated[Session, Depends(get_db)],
-        current_user: Annotated[User, Depends(get_current_user)],
     ):
         item = _get_by_id(db, inventory_id)
         if not item:
