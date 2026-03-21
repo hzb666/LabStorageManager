@@ -36,6 +36,25 @@ export function ImportPage() {
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const parseBlobErrorDetail = useCallback(async (error: AxiosError): Promise<unknown> => {
+    const responseData = error.response?.data
+    if (!responseData) return undefined
+    if (responseData instanceof Blob) {
+      try {
+        const text = await responseData.text()
+        if (!text.trim()) return undefined
+        const parsed = JSON.parse(text) as { detail?: unknown }
+        return parsed.detail ?? text
+      } catch {
+        return undefined
+      }
+    }
+    if (typeof responseData === 'object' && responseData !== null && 'detail' in responseData) {
+      return (responseData as { detail?: unknown }).detail
+    }
+    return undefined
+  }, [])
+
   const validateFile = useCallback((selectedFile: File): boolean => {
     const validExtensions = ['.csv', '.xlsx', '.xls']
     const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase()
@@ -128,10 +147,15 @@ export function ImportPage() {
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '下载模板失败'))
+      const axiosError = error as AxiosError
+      if (axiosError.response?.status === 429) {
+        toast.error('下载过于频繁，请 2 秒后重试')
+        return
+      }
+      const errorDetail = await parseBlobErrorDetail(axiosError)
+      toast.error(normalizeApiErrorMessage(errorDetail, '下载模板失败'))
     }
-  }, [])
+  }, [parseBlobErrorDetail])
 
   // Get file icon based on extension
   const getFileIcon = (fileName: string) => {

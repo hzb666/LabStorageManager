@@ -247,7 +247,7 @@ def delete_announcement(
     if announcement.images:
         for image_url in announcement.images:
             try:
-                delete_file(image_url)
+                delete_file(image_url, required_subdir="announcements")
             except Exception as e:
                 logger.error("Failed to delete image %s: %s", image_url, e)
 
@@ -348,10 +348,7 @@ def delete_announcement_image(
     if any(segment in filename for segment in INVALID_FILENAME_SEGMENTS) or filename.startswith(INVALID_FILENAME_PREFIX):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename")
 
-    # Construct the URL path
-    url_path = f"/static/announcements/{filename}"
-
-    deleted = delete_file(url_path)
+    deleted = delete_file(filename, required_subdir="announcements")
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

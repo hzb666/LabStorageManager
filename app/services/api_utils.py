@@ -81,11 +81,12 @@ def empty_to_none(obj: Any, fields: list[str]) -> dict:
             value = obj.get(field)
         else:
             value = getattr(obj, field, None)
-        # 空字符串或纯空格都转为 None
+        # 空字符串或纯空格都转为 None，同时统一去掉首尾空格
         if value is None:
             result[field] = None
         elif isinstance(value, str):
-            result[field] = None if not value.strip() else value
+            stripped = value.strip()
+            result[field] = None if not stripped else stripped
         else:
             result[field] = value
     return result

@@ -101,6 +101,9 @@ MIN_REQUEST_TIMEOUT_SECONDS = 0.1  # requests 库最小超时要求
 # ==================== Import/Rate-limit policy ====================
 IMPORT_RATE_LIMIT_DIVISOR = 2
 MIN_IMPORT_RATE_LIMIT = 3
+TEMPLATE_DOWNLOAD_RATE_LIMIT = 1
+TEMPLATE_DOWNLOAD_WINDOW_SECONDS = 2
+TEMPLATE_DOWNLOAD_RATE_LIMIT_SCOPE = "download_inventory_import_template"
 
 # ==================== Security and Validation ====================
 CAS_PATTERN = r"^\d{2,7}-\d{2}-\d$"

@@ -9,6 +9,7 @@ from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
 from app.core.constants import COMMON_SHELF_LOCATION
 from app.core.time_utils import utc_iso_str
+from app.models.user import UserRole
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus, ReagentOrderReason
 from app.models.inventory import Inventory, InventoryStatus
 from app.services.api_utils import clear_cache_by_prefix
@@ -172,8 +173,6 @@ def _register_arrival_routes(
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
 
-        from app.models.user import UserRole
-
         if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -327,9 +326,6 @@ def _register_delete_stock_routes(
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
-
-        from app.models.user import UserRole
-
         if current_user.role == UserRole.PUBLIC:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -356,8 +352,6 @@ def _register_delete_stock_routes(
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
-
-        from app.models.user import UserRole
 
         if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
             raise HTTPException(

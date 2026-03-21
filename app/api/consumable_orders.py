@@ -353,7 +353,6 @@ def update_consumable_order(
         )
 
     # 检查权限：只有订购人和管理员可以更新
-    from app.models.user import UserRole
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -469,7 +468,6 @@ def complete_consumable_order(
         )
     
     # Check if user is the applicant or admin
-    from app.models.user import UserRole
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -563,7 +561,6 @@ def delete_consumable_order(
         )
     
     # Check if user is the applicant or admin
-    from app.models.user import UserRole
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

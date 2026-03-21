@@ -2,7 +2,14 @@
 from .base import BaseResponse
 
 from .user import PublicUserResponse, User, UserRole, UserResponse
-from .inventory import Inventory, InventoryStatus, BorrowLog, BorrowLogResponse, InventoryResponse
+from .inventory import (
+    Inventory,
+    InventoryStatus,
+    BorrowLog,
+    BorrowLogType,
+    BorrowLogResponse,
+    InventoryResponse,
+)
 from .reagent_order import (
     ReagentOrder,
     ReagentOrderStatus,
@@ -42,6 +49,7 @@ __all__ = [
     "Inventory",
     "InventoryStatus",
     "BorrowLog",
+    "BorrowLogType",
     "BorrowLogResponse",
     "InventoryResponse",
     # Reagent Order

@@ -126,7 +126,11 @@ def check_sqlite_schema_consistency(connection: Connection) -> None:
         }
 
         missing_indexes = sorted(set(expected_indexes) - set(actual_indexes))
-        extra_indexes = sorted(set(actual_indexes) - set(expected_indexes))
+        extra_indexes = sorted(
+            index_name
+            for index_name in (set(actual_indexes) - set(expected_indexes))
+            if not index_name.startswith("sqlite_autoindex_")
+        )
         if missing_indexes:
             mismatch_messages.append(
                 f"table {table_name} missing indexes: {', '.join(missing_indexes)}"

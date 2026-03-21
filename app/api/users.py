@@ -814,7 +814,7 @@ def delete_avatar(
     
     # 如果有旧头像，删除文件
     if user.avatar_url:
-        delete_file(user.avatar_url)
+        delete_file(user.avatar_url, required_subdir="avatars")
     
     # 清空数据库中的头像 URL
     user.avatar_url = None
@@ -861,7 +861,7 @@ def upload_avatar(
 
     # 删除旧头像文件（如果存在）
     if user.avatar_url:
-        delete_file(user.avatar_url)
+        delete_file(user.avatar_url, required_subdir="avatars")
 
     # 保存新头像
     avatar_url = save_avatar(file, user_id)

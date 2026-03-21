@@ -16,7 +16,6 @@ from app.core.constants import (
     EXCEL_DATE_EPOCH,
     EXCEL_FILE_MAX_BYTES,
     EXCEL_RED_FONT_COLOR,
-    INTERNAL_CODE_SEQUENCE_PAD_WIDTH,
 )
 from app.core.time_utils import get_utc_now
 
@@ -178,7 +177,8 @@ def _generate_internal_code_with_tracking(
     else:
         date_str = get_utc_now().strftime("%y%m%d")
     
-    tracker_key = (cas_number, date_str)
+    cas_code = cas_number.replace("-", "")
+    tracker_key = (cas_code, date_str)
     
     # Check if we already have a sequence tracked for this CAS+date in this transaction
     if tracker_key in sequence_tracker:
@@ -188,7 +188,7 @@ def _generate_internal_code_with_tracking(
     else:
         # First time seeing this CAS+date combination in this transaction
         # Query database for existing max sequence using ORM
-        prefix = f"{cas_number}-{date_str}-"
+        prefix = f"{cas_code}-{date_str}-"
         
         statement = select(Inventory).where(
             Inventory.internal_code.like(f"{prefix}%")
@@ -212,7 +212,7 @@ def _generate_internal_code_with_tracking(
         sequence_tracker[tracker_key] = seq + 1
     
     # Generate the internal code
-    return f"{cas_number}-{date_str}-{str(seq).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)}"
+    return f"{cas_code}-{date_str}-{seq}"
 
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
@@ -535,12 +535,14 @@ def generate_excel_template() -> bytes:
         header_cell = ws.cell(row=1, column=col_idx, value=label)
         header_cell.font = header_font
         header_cell.alignment = Alignment(horizontal="center", vertical="center")
+        header_cell.number_format = FORMAT_TEXT
         
         # 写入示例数据（红色字体）
         example_cell = ws.cell(row=2, column=col_idx, value=example)
         example_cell.font = example_font
+        example_cell.number_format = FORMAT_TEXT
         
-        # 设置列的文本格式和宽度（只在列级别设置一次）
+        # 列样式用于后续新建单元格，已存在的单元格需在上方显式设置
         ws.column_dimensions[col_letter].number_format = FORMAT_TEXT
         ws.column_dimensions[col_letter].width = 15 if key == "cas_number" else 12
 

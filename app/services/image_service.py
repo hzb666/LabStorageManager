@@ -4,7 +4,7 @@ Critical Rule #3:
 Images are stored in filesystem, database only stores URL/path
 """
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from fastapi import UploadFile, HTTPException
 from PIL import Image
@@ -26,18 +26,70 @@ from app.core.constants import (
 from app.core.time_utils import get_utc_now
 
 
-def _resolve_static_path(file_path: str) -> Path | None:
-    """Resolve user-supplied file path safely under static directory only."""
+def _resolve_static_path(file_path: str, required_subdir: str | None = None) -> Path | None:
+    """Resolve user-supplied path safely under static (or a static subdirectory)."""
+    relative_path = _sanitize_static_relative_path(file_path)
+    if relative_path is None:
+        return None
+
+    static_root = (BASE_DIR / "static").resolve()
+    allowed_root = static_root
+    if required_subdir:
+        required_relative = _sanitize_static_relative_path(required_subdir)
+        if required_relative is None:
+            return None
+        allowed_root = (static_root / required_relative).resolve()
+        try:
+            allowed_root.relative_to(static_root)
+        except ValueError:
+            return None
+
+        required_parts = required_relative.parts
+        if relative_path.parts[:len(required_parts)] == required_parts:
+            relative_path = Path(*relative_path.parts[len(required_parts):])
+            if not relative_path.parts:
+                return None
+
+    candidate = (allowed_root / relative_path).resolve()
+
+    try:
+        candidate.relative_to(allowed_root)
+    except ValueError:
+        return None
+
+    return candidate
+
+
+def _sanitize_static_relative_path(file_path: str) -> Path | None:
+    """Normalize and validate a static-relative path from user input."""
     raw_path = (file_path or "").strip()
     if not raw_path:
         return None
 
-    candidate = (BASE_DIR / raw_path.lstrip("/\\")).resolve()
-    static_root = (BASE_DIR / "static").resolve()
+    normalized = raw_path.split("?", maxsplit=1)[0].split("#", maxsplit=1)[0].strip()
+    if not normalized:
+        return None
 
-    if candidate == static_root or static_root in candidate.parents:
-        return candidate
-    return None
+    windows_path = PureWindowsPath(normalized)
+    if windows_path.drive or normalized.startswith(("\\\\", "//")):
+        return None
+
+    normalized = normalized.replace("\\", "/").lstrip("/")
+    if not normalized:
+        return None
+
+    if normalized.startswith("static/"):
+        normalized = normalized[len("static/"):]
+    if not normalized:
+        return None
+
+    relative_path = PurePosixPath(normalized)
+    if relative_path.is_absolute():
+        return None
+    if any(part in {"", ".", ".."} for part in relative_path.parts):
+        return None
+
+    return Path(*relative_path.parts)
 
 
 def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
@@ -218,18 +270,36 @@ def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:
     return f"/static/uploads/{subfolder}/{filename}"
 
 
-def delete_file(file_path: str) -> bool:
+def delete_file(file_path: str, required_subdir: str | None = None) -> bool:
     """
     Delete file from filesystem.
     
     Args:
         file_path: Relative path from static directory
+        required_subdir: Optional static subdirectory constraint
         
     Returns:
         True if deleted successfully, False otherwise
     """
-    full_path = _resolve_static_path(file_path)
+    full_path = _resolve_static_path(file_path, required_subdir=required_subdir)
     if full_path is None:
+        return False
+
+    static_root = (BASE_DIR / "static").resolve()
+    allowed_root = static_root
+    if required_subdir:
+        required_relative = _sanitize_static_relative_path(required_subdir)
+        if required_relative is None:
+            return False
+        allowed_root = (static_root / required_relative).resolve()
+        try:
+            allowed_root.relative_to(static_root)
+        except ValueError:
+            return False
+
+    try:
+        full_path.relative_to(allowed_root)
+    except ValueError:
         return False
 
     if full_path.exists() and full_path.is_file():

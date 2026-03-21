@@ -1,14 +1,18 @@
 """
 Internal Code Generator - Generate unique internal codes for inventory items
-Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-01")
+Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-1")
 Sequence: Auto-increment per CAS number group
 """
 import re
 from sqlmodel import Session, select
 
 from app.models.inventory import Inventory
-from app.core.constants import INTERNAL_CODE_SEQUENCE_PAD_WIDTH
 from app.core.time_utils import get_utc_now
+
+
+def _cas_code_fragment(cas_number: str) -> str:
+    """Return CAS fragment used in internal_code by removing '-' characters."""
+    return cas_number.replace("-", "")
 
 
 def _get_max_sequence_for_prefix(session: Session, prefix: str) -> int:
@@ -22,26 +26,24 @@ def _get_max_sequence_for_prefix(session: Session, prefix: str) -> int:
     Returns:
         Maximum sequence number found, or 0 if none exist
     """
-    # Only select the internal_code column, order by it descending, and limit to 1
-    statement = (
-        select(Inventory.internal_code)
-        .where(Inventory.internal_code.like(f"{prefix}%"))
-        .order_by(Inventory.internal_code.desc())
-        .limit(1)
-    )
-    last_code = session.exec(statement).first()
+    statement = select(Inventory.internal_code).where(Inventory.internal_code.like(f"{prefix}%"))
+    existing_codes = session.exec(statement).all()
 
-    if not last_code:
+    if not existing_codes:
         return 0
 
-    # Extract sequence number from the last internal code
+    # Internal code suffix is numeric without fixed width; parse max suffix safely.
+    max_seq = 0
     prefix_len = len(prefix)
-    code_part = last_code[prefix_len:]
-    try:
-        return int(code_part)
-    except ValueError:
-        # If parsing fails, treat as no existing sequence
-        return 0
+    for internal_code in existing_codes:
+        code_part = internal_code[prefix_len:]
+        try:
+            seq = int(code_part)
+        except ValueError:
+            continue
+        if seq > max_seq:
+            max_seq = seq
+    return max_seq
 
 
 def generate_internal_code(
@@ -58,7 +60,7 @@ def generate_internal_code(
         quantity: Number of items to generate codes for
     
     Returns:
-        List of internal codes (e.g., ["64175-250113-01", "64175-250113-02"])
+        List of internal codes (e.g., ["64175-250113-1", "64175-250113-2"])
     """
     # Validate CAS number to prevent SQL injection
     # CAS should only contain digits and hyphens
@@ -68,9 +70,11 @@ def generate_internal_code(
     # Get current date in yymmdd format
     date_str = get_utc_now().strftime("%y%m%d")
     
+    cas_code = _cas_code_fragment(cas_number)
+
     # Get the current max sequence for this CAS number
     # Internal codes follow pattern: CAS-Date-Sequence
-    prefix = f"{cas_number}-{date_str}-"
+    prefix = f"{cas_code}-{date_str}-"
     
     # Use ORM query instead of raw SQL
     max_seq = _get_max_sequence_for_prefix(session, prefix)
@@ -81,7 +85,7 @@ def generate_internal_code(
     # Generate codes
     codes = []
     for i in range(start_seq, start_seq + quantity):
-        code = f"{prefix}{str(i).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)}"
+        code = f"{prefix}{i}"
         codes.append(code)
     
     return codes
@@ -105,23 +109,22 @@ def get_next_sequence(
     if not re.match(r"^[0-9-]+$", cas_number):
         raise ValueError(f"Invalid CAS number format: {cas_number}")
 
-    # Only select internal_code for this CAS number, order by it descending, and limit to 1
-    statement = (
-        select(Inventory.internal_code)
-        .where(Inventory.cas_number == cas_number)
-        .order_by(Inventory.internal_code.desc())
-        .limit(1)
-    )
-    last_code = session.exec(statement).first()
+    statement = select(Inventory.internal_code).where(Inventory.cas_number == cas_number)
+    existing_codes = session.exec(statement).all()
 
-    if not last_code:
+    if not existing_codes:
         return 1
 
-    # Parse the sequence from internal_code (last 2 digits)
-    try:
-        seq = int(last_code[-2:])
-    except ValueError:
-        # If parsing fails, start from 1
-        return 1
+    max_seq = 0
+    for internal_code in existing_codes:
+        parts = internal_code.split("-")
+        if not parts:
+            continue
+        try:
+            seq = int(parts[-1])
+        except ValueError:
+            continue
+        if seq > max_seq:
+            max_seq = seq
 
-    return seq + 1
+    return max_seq + 1

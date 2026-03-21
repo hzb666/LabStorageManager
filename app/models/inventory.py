@@ -21,6 +21,12 @@ class InventoryStatus(str, Enum):
     CONSUMED = "consumed"
 
 
+class BorrowLogType(str, Enum):
+    """Borrow log type enumeration."""
+    BORROW = "borrow"
+    CONSUME = "consume"
+
+
 class InventoryBase(SQLModel):
     """Base inventory model with common fields"""
     # Critical: CAS Number copied from Order (already normalized)
@@ -195,6 +201,7 @@ class BorrowLog(SQLModel, table=True):
         ondelete="CASCADE"
     )
     borrow_time: datetime = Field(default_factory=get_utc_now)
+    type: BorrowLogType = Field(index=True, default=BorrowLogType.BORROW, max_length=20)
     return_time: Optional[datetime] = None
     quantity_borrowed: float = Field(gt=0)
     quantity_returned: Optional[float] = None

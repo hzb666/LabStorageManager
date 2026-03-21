@@ -17,6 +17,9 @@ from app.core.constants import (
     MIN_IMPORT_RATE_LIMIT,
     OVERDUE_BORROW_DAYS,
     IMPORT_RATE_LIMIT_DIVISOR,
+    TEMPLATE_DOWNLOAD_RATE_LIMIT,
+    TEMPLATE_DOWNLOAD_RATE_LIMIT_SCOPE,
+    TEMPLATE_DOWNLOAD_WINDOW_SECONDS,
 )
 from app.core.request_utils import get_client_ip
 from app.core.time_utils import get_utc_now, to_china_time, utc_iso_str
@@ -502,6 +505,13 @@ def _register_common_shelf_and_import_routes(
     def get_import_template(current_user: CurrentUser):
         """Download Excel import template with text format for CAS column"""
         from app.services.excel_service import generate_excel_template
+
+        enforce_rate_limit(
+            scope=TEMPLATE_DOWNLOAD_RATE_LIMIT_SCOPE,
+            identifier=f"user:{current_user.id}",
+            limit=TEMPLATE_DOWNLOAD_RATE_LIMIT,
+            window_seconds=TEMPLATE_DOWNLOAD_WINDOW_SECONDS,
+        )
 
         excel_content = generate_excel_template()
         filename = "inventory_import_template.xlsx"

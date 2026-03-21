@@ -567,7 +567,6 @@ def update_reagent_order(
         )
     
     # 检查权限：普通用户只能编辑自己的订单，管理员可以编辑所有人的订单
-    from app.models.user import UserRole
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

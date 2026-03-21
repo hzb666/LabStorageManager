@@ -69,13 +69,13 @@ frontend/public/lib/
 
 # Docs subdirectories
 docs/
+BUGS.md
 
 # Tests
 tests/
 scripts/
 
-# Plans (do not commit)
+# Others
 plans/
-
 static/
 report/

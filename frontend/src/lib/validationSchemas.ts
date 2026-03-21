@@ -575,6 +575,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /IP address changed/i, message: 'IP 地址已变更，请重新登录' },
   { pattern: /IP limit reached/i, message: 'IP 数量已达上限，请先移除其他设备' },
   { pattern: /Too many login attempts/i, message: '登录尝试过多，请 5 分钟后重试' },
+  { pattern: /Too many requests, please retry after 2 seconds/i, message: '下载过于频繁，请 2 秒后重试' },
   { pattern: /Too many requests/i, message: '请求过于频繁，请稍后再试' },
 
   // 密码相关

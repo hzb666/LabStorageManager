@@ -29,7 +29,7 @@ class UserBase(SQLModel):
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: str) -> str:
-        if not re.match(r'^\w+$', v):
+        if not re.match(r'^\w+$', v, flags=re.ASCII):
             raise ValueError('用户名只能包含字母、数字和下划线')
         return v
 
@@ -72,7 +72,7 @@ class UserUpdate(SQLModel):
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not re.match(r'^\w+$', v):
+        if v is not None and not re.match(r'^\w+$', v, flags=re.ASCII):
             raise ValueError('用户名只能包含字母，数字和下划线')
         return v
     
