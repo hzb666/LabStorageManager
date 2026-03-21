@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select, func, update as sql_update
 
 from app.core.auth import get_current_user
+from app.core.constants import SSEEventType, SSERoom
 from app.core.time_utils import get_utc_now
 from app.database import get_db
 from app.models.inventory import (
@@ -29,6 +30,7 @@ from app.services.shelf_utils import (
     normalize_storage_location,
 )
 from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.sse_manager import sse_manager
 from app.services.user_utils import batch_get_user_names
 
 DEFAULT_PAGE_SIZE = 20
@@ -326,7 +328,7 @@ def register_common_shelf(
         }
 
     @router.post("/common-shelf/consume-one")
-    def consume_one_common_shelf_item(
+    async def consume_one_common_shelf_item(
         payload: CommonShelfConsumeRequest,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
@@ -401,6 +403,11 @@ def register_common_shelf(
         ).one()
 
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        await sse_manager.broadcast(
+            SSERoom.COMMON_SHELF,
+            SSEEventType.COMMON_SHELF_CONSUMED,
+            {"id": payload.sample_inventory_id, "consumed_inventory_id": consumed_item.id},
+        )
 
         return {
             "message": "已拿取一瓶",
@@ -409,7 +416,7 @@ def register_common_shelf(
         }
 
     @router.post('/common-shelf/manual-add', response_model=dict)
-    def manual_add_common_shelf_inventory(
+    async def manual_add_common_shelf_inventory(
         item_data: ManualInventoryCreate,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
@@ -422,6 +429,11 @@ def register_common_shelf(
         )
 
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        await sse_manager.broadcast(
+            SSERoom.COMMON_SHELF,
+            SSEEventType.COMMON_SHELF_CREATED,
+            {"ids": [item.id for item in created_items]},
+        )
 
         return {
             'message': 'Common shelf stock-in successful',
@@ -430,7 +442,7 @@ def register_common_shelf(
         }
 
     @router.put('/common-shelf/group/{sample_inventory_id}', response_model=dict)
-    def update_common_shelf_group(
+    async def update_common_shelf_group(
         sample_inventory_id: int,
         update: InventoryUpdate,
         current_user: Annotated[User, Depends(get_current_user)],
@@ -502,6 +514,11 @@ def register_common_shelf(
 
         db.commit()
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        await sse_manager.broadcast(
+            SSERoom.COMMON_SHELF,
+            SSEEventType.COMMON_SHELF_UPDATED,
+            {"id": sample_inventory_id},
+        )
 
         return {
             'message': 'Common shelf group updated',
@@ -510,7 +527,7 @@ def register_common_shelf(
         }
 
     @router.delete('/common-shelf/group/{sample_inventory_id}', response_model=dict)
-    def delete_common_shelf_group(
+    async def delete_common_shelf_group(
         sample_inventory_id: int,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
@@ -533,6 +550,11 @@ def register_common_shelf(
 
         db.commit()
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        await sse_manager.broadcast(
+            SSERoom.COMMON_SHELF,
+            SSEEventType.COMMON_SHELF_DELETED,
+            {"id": sample_inventory_id},
+        )
 
         return {
             'message': 'Common shelf group deleted',

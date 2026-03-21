@@ -6,14 +6,17 @@ from typing import Iterable, Optional
 import redis
 
 from app.core.config import settings
-from app.core.constants import REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS, REDIS_SOCKET_TIMEOUT_SECONDS
+from app.core.constants import (
+    REDIS_COOLDOWN_SECONDS,
+    REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+    REDIS_SOCKET_TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
 # Redis 客户端单例与断路器状态
 _redis_client: Optional[redis.Redis] = None
 _last_error_time: float = 0.0
-REDIS_COOLDOWN_SECONDS = 60.0  # 熔断冷却时间：60秒，期间不再尝试连接
 
 def get_redis() -> Optional[redis.Redis]:
     """获取 Redis 客户端（带简易熔断机制）"""

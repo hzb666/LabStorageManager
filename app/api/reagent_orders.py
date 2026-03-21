@@ -14,6 +14,8 @@ from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
+    SSEEventType,
+    SSERoom,
 )
 from app.core.time_utils import get_utc_now
 from app.models.user import User, UserRole
@@ -43,6 +45,7 @@ from app.services.api_utils import (
     get_cached_result,
     set_cached_result,
 )
+from app.services.sse_manager import sse_manager
 from app.api.reagent_orders_workflow import register_workflow_routes
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
@@ -174,7 +177,7 @@ def _apply_reagent_order_filters(
 
 
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
-def create_reagent_order(
+async def create_reagent_order(
     order: ReagentOrderCreate,
     current_user: CurrentUser,
     db: DBSession,
@@ -240,6 +243,11 @@ def create_reagent_order(
     db.commit()
     db.refresh(db_order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.REAGENT_ORDERS,
+        SSEEventType.REAGENT_ORDER_CREATED,
+        {"id": db_order.id},
+    )
     
     return db_order
 
@@ -512,7 +520,7 @@ def get_reagent_order(
 
 
 @router.put("/{order_id}", response_model=ReagentOrderResponse)
-def update_reagent_order(
+async def update_reagent_order(
     order_id: int,
     order_update: ReagentOrderUpdate,
     db: DBSession,
@@ -587,6 +595,11 @@ def update_reagent_order(
     
     # 清除列表缓存，确保更新后前端立即看到最新数据
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.REAGENT_ORDERS,
+        SSEEventType.REAGENT_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return order
 

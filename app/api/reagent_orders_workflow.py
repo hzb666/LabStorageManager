@@ -11,11 +11,13 @@ from app.core.time_utils import utc_iso_str
 from app.models.user import UserRole
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus, ReagentOrderReason
 from app.models.inventory import Inventory, InventoryStatus
+from app.core.constants import SSEEventType, SSERoom
 from app.services.api_utils import clear_cache_by_prefix
 from app.services.internal_code import generate_internal_code
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.shelf_utils import normalize_storage_location
 from app.services.spec_utils import format_specification
+from app.services.sse_manager import sse_manager
 
 ORDER_NOT_FOUND = "Order not found"
 LIST_CACHE_PREFIX = "list:"
@@ -123,7 +125,7 @@ def _register_approval_routes(
     search_cache: Dict[str, tuple[Any, Any]],
 ) -> None:
     @router.post("/{order_id}/approve")
-    def approve_reagent_order(order_id: int, admin_user: AdminUser, db: DBSession):
+    async def approve_reagent_order(order_id: int, admin_user: AdminUser, db: DBSession):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -139,11 +141,16 @@ def _register_approval_routes(
         db.commit()
         db.refresh(order)
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        await sse_manager.broadcast(
+            SSERoom.REAGENT_ORDERS,
+            SSEEventType.REAGENT_ORDER_UPDATED,
+            {"id": order_id},
+        )
 
         return order
 
     @router.post("/{order_id}/reject")
-    def reject_reagent_order(order_id: int, admin_user: AdminUser, db: DBSession):
+    async def reject_reagent_order(order_id: int, admin_user: AdminUser, db: DBSession):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -159,6 +166,11 @@ def _register_approval_routes(
         db.commit()
         db.refresh(order)
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        await sse_manager.broadcast(
+            SSERoom.REAGENT_ORDERS,
+            SSEEventType.REAGENT_ORDER_UPDATED,
+            {"id": order_id},
+        )
 
         return order
 
@@ -168,7 +180,7 @@ def _register_arrival_routes(
     search_cache: Dict[str, tuple[Any, Any]],
 ) -> None:
     @router.post("/{order_id}/confirm-arrival")
-    def confirm_reagent_arrival(
+    async def confirm_reagent_arrival(
         current_user: CurrentUser,
         db: DBSession,
         order_id: int,
@@ -239,6 +251,11 @@ def _register_arrival_routes(
         db.commit()
         db.refresh(order)
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        await sse_manager.broadcast(
+            SSERoom.REAGENT_ORDERS,
+            SSEEventType.REAGENT_ORDER_UPDATED,
+            {"id": order_id},
+        )
 
         return {
             "message": message,
@@ -332,7 +349,7 @@ def _register_delete_stock_routes(
     search_cache: Dict[str, tuple[Any, Any]],
 ) -> None:
     @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def delete_reagent_order(order_id: int, db: DBSession, current_user: CurrentUser):
+    async def delete_reagent_order(order_id: int, db: DBSession, current_user: CurrentUser):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -351,9 +368,14 @@ def _register_delete_stock_routes(
         db.delete(order)
         db.commit()
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        await sse_manager.broadcast(
+            SSERoom.REAGENT_ORDERS,
+            SSEEventType.REAGENT_ORDER_DELETED,
+            {"id": order_id},
+        )
 
     @router.post("/{order_id}/stock-in", response_model=dict)
-    def stock_in_reagent_order(
+    async def stock_in_reagent_order(
         order_id: int,
         payload: StockInRequest,
         current_user: CurrentUser,
@@ -427,6 +449,11 @@ def _register_delete_stock_routes(
 
             db.commit()
             clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+            await sse_manager.broadcast(
+                SSERoom.REAGENT_ORDERS,
+                SSEEventType.REAGENT_ORDER_UPDATED,
+                {"id": order_id},
+            )
 
             for item in inventory_items:
                 db.refresh(item)
@@ -479,6 +506,11 @@ def _register_delete_stock_routes(
 
         db.commit()
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        await sse_manager.broadcast(
+            SSERoom.REAGENT_ORDERS,
+            SSEEventType.REAGENT_ORDER_UPDATED,
+            {"id": order_id},
+        )
 
         return {
             "message": "已入库",

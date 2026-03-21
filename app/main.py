@@ -25,8 +25,9 @@ from app.core.constants import (
 )
 from app.core.banner import print_banner
 from app.database import init_db
-from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, announcements, error_logs
+from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, announcements, error_logs, events
 from app.services import chemical_info
+from app.services.sse_manager import sse_manager
 
 # Configure logging
 logging.basicConfig(
@@ -125,6 +126,7 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized (WAL mode enabled)")
     print_banner()
     yield
+    await sse_manager.stop_listener()
     logger.info("Shutting down...")
 
 
@@ -248,6 +250,7 @@ app.include_router(cart_sync.router, prefix="/api")
 app.include_router(chemical_info.router, prefix="/api")
 app.include_router(announcements.router, prefix="/api")
 app.include_router(error_logs.router, prefix="/api")
+app.include_router(events.router, prefix="/api")
 
 
 @app.get("/")

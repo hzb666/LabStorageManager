@@ -20,7 +20,10 @@ from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
+    SSEEventType,
+    SSERoom,
 )
+from app.services.sse_manager import sse_manager
 from app.core.time_utils import get_utc_now
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
@@ -325,7 +328,7 @@ def get_inventory(inventory_id: int, db: DBSession, _: CurrentUser):
 
 
 @router.put("/{inventory_id}", response_model=InventoryResponse)
-def update_inventory(
+async def update_inventory(
     inventory_id: int,
     update: InventoryUpdate,
     db: Annotated[Session, Depends(get_db)],
@@ -398,11 +401,17 @@ def update_inventory(
     _clear_list_cache()
 
     response = InventoryResponse.model_validate(item).model_dump()
-    return _add_specification(response)
+    response = _add_specification(response)
+    await sse_manager.broadcast(
+        SSERoom.INVENTORY,
+        SSEEventType.INVENTORY_UPDATED,
+        {"id": inventory_id, "item": response},
+    )
+    return response
 
 
 @router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_inventory(
+async def delete_inventory(
     inventory_id: int,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)],
@@ -413,3 +422,8 @@ def delete_inventory(
     db.delete(item)
     db.commit()
     _clear_list_cache()
+    await sse_manager.broadcast(
+        SSERoom.INVENTORY,
+        SSEEventType.INVENTORY_DELETED,
+        {"id": inventory_id},
+    )
