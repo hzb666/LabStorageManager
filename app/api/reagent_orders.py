@@ -2,13 +2,10 @@
 Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
-import io
-import csv
 from datetime import datetime
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
@@ -18,7 +15,7 @@ from app.core.constants import (
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
 )
-from app.core.time_utils import get_utc_now, to_china_time
+from app.core.time_utils import get_utc_now
 from app.models.user import User, UserRole
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import (
@@ -35,7 +32,6 @@ from app.services.cas_utils import (
     is_special_cas_value,
     BIOLOGICAL_REAGENT_CAS,
 )
-from app.services.csv_utils import escape_csv_formula
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
@@ -374,52 +370,16 @@ def export_reagent_orders(
     current_user: AdminUser,
 ):
     """Export reagent orders as a downloadable CSV file."""
+    from app.services.csv_export import export_reagent_orders_csv
+
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
     orders = db.exec(statement).all()
 
     # 查询所有订购人ID用于导出
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
-    all_users_map = batch_get_user_names(db, all_applicant_ids)
+    all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    output = io.StringIO()
-    output.write("\ufeff")
-    writer = csv.writer(output)
-
-    writer.writerow([
-        "CAS号", "名称", "英文名", "别名", "分类", "品牌",
-        "规格", "数量", "单价", "申购原因", "状态",
-        "是否危险品", "订购人", "申购时间", "备注",
-    ])
-
-    for order in orders:
-        # 使用公共函数格式化规格
-        spec = format_specification(order.initial_quantity, order.unit)
-        writer.writerow([
-            escape_csv_formula(order.cas_number),
-            escape_csv_formula(order.name),
-            escape_csv_formula(order.english_name or ""),
-            escape_csv_formula(order.alias or ""),
-            escape_csv_formula(order.category or ""),
-            escape_csv_formula(order.brand or ""),
-            escape_csv_formula(spec or ""),
-            order.quantity,
-            order.price or "",
-            order.order_reason.value if hasattr(order.order_reason, "value") else order.order_reason,
-            order.status.value if hasattr(order.status, "value") else order.status,
-            "是" if order.is_hazardous else "否",
-            escape_csv_formula(all_users_map.get(order.applicant_id, "") if order.applicant_id else ""),
-            to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
-            escape_csv_formula(order.notes or ""),
-        ])
-
-    output.seek(0)
-    filename = f"reagent_orders_export_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    return export_reagent_orders_csv(orders, all_users_map)
 
 
 @router.get("/cas-overview/{cas_number}")

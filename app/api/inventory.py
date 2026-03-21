@@ -36,6 +36,7 @@ from app.services.api_utils import clear_cache_by_prefix, get_cached_result, set
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
+from app.api.common_shelf import register_common_shelf
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +231,8 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> None:
 
 
 # Register named/extended routes first to keep path precedence semantics.
-register_inventory_extended_routes(router, SEARCH_CACHE, MAX_PAGE_SIZE, LIST_CACHE_PREFIX)
+register_inventory_extended_routes(router, SEARCH_CACHE, LIST_CACHE_PREFIX)
+register_common_shelf(router, MAX_PAGE_SIZE, SEARCH_CACHE, LIST_CACHE_PREFIX)
 
 
 @router.get("/")
@@ -351,6 +353,12 @@ def update_inventory(
         _normalize_update_payload(item, update_data)
     except SpecificationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    if update_data.get('status') == InventoryStatus.RUN_SHORT and not item.is_common:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='RUN_SHORT status is only supported for common shelf items',
+        )
 
     if 'remaining_quantity' in update_data:
         new_remaining = update_data['remaining_quantity']
