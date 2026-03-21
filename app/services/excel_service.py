@@ -11,11 +11,14 @@ from app.models.inventory import Inventory, InventoryStatus
 from app.services.api_utils import empty_to_none
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.spec_utils import parse_specification
+from app.services.shelf_utils import normalize_storage_location
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.core.constants import (
     EXCEL_DATE_EPOCH,
     EXCEL_FILE_MAX_BYTES,
     EXCEL_RED_FONT_COLOR,
+    INTERNAL_CODE_MAX_SEQUENCE,
+    INTERNAL_CODE_SEQUENCE_PAD_WIDTH,
 )
 from app.core.time_utils import get_utc_now
 
@@ -167,7 +170,7 @@ def _generate_internal_code_with_tracking(
         created_at: Optional custom created_at datetime (for backdated imports)
     
     Returns:
-        Internal code string (e.g., "10203-08-4-260224-01")
+        Internal code string (e.g., "10203084-260224-001")
     """
     from sqlmodel import select
     
@@ -184,6 +187,11 @@ def _generate_internal_code_with_tracking(
     if tracker_key in sequence_tracker:
         # Use the tracked sequence and increment AFTER
         seq = sequence_tracker[tracker_key]
+        if seq > INTERNAL_CODE_MAX_SEQUENCE:
+            raise ValueError(
+                f"Internal code sequence limit reached for {cas_number} on {date_str}: "
+                f"max is {INTERNAL_CODE_MAX_SEQUENCE}"
+            )
         sequence_tracker[tracker_key] = seq + 1
     else:
         # First time seeing this CAS+date combination in this transaction
@@ -208,11 +216,16 @@ def _generate_internal_code_with_tracking(
                 continue
         
         seq = max_seq + 1
+        if seq > INTERNAL_CODE_MAX_SEQUENCE:
+            raise ValueError(
+                f"Internal code sequence limit reached for {cas_number} on {date_str}: "
+                f"max is {INTERNAL_CODE_MAX_SEQUENCE}"
+            )
         # Store next sequence for subsequent calls
         sequence_tracker[tracker_key] = seq + 1
     
     # Generate the internal code
-    return f"{cas_code}-{date_str}-{seq}"
+    return f"{cas_code}-{date_str}-{str(seq).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)}"
 
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
@@ -384,7 +397,9 @@ def import_inventory_from_excel(
                 'notes': row.get('notes'),
             }
             normalized_optional = empty_to_none(all_optional_fields, list(all_optional_fields.keys()))
-            storage_location = normalized_optional['storage_location'] or default_storage_location
+            storage_location = normalize_storage_location(
+                normalized_optional['storage_location'] or default_storage_location
+            )
             alias = normalized_optional['alias']
             english_name = normalized_optional['english_name']
             category = normalized_optional['category']
@@ -445,6 +460,7 @@ def import_inventory_from_excel(
                 category=category,
                 brand=brand,
                 storage_location=storage_location,
+                is_common=False,
                 initial_quantity=initial_quantity,
                 remaining_quantity=remaining_qty,
                 remaining_percent=_compute_remaining_percent(remaining_qty, initial_quantity),
@@ -495,12 +511,24 @@ def generate_excel_template() -> bytes:
     
     Returns:
         Excel file content as bytes
+        
+    Raises:
+        HTTPException: If openpyxl library is not installed
     """
     from io import BytesIO
-    from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font
-    from openpyxl.styles.numbers import FORMAT_TEXT
-    from openpyxl.utils import get_column_letter
+    
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font
+        from openpyxl.styles.numbers import FORMAT_TEXT
+        from openpyxl.utils import get_column_letter
+    except ImportError as exc:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Excel template generation requires the 'openpyxl' package. "
+                   "Please ensure openpyxl is installed in the production environment.",
+        ) from exc
 
     wb = Workbook()
     ws = wb.active

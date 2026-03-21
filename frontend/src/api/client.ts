@@ -347,6 +347,8 @@ export const commonShelfAPI = {
     sort_by?: string
     sort_order?: string
   }) => api.get('/inventory/common-shelf', { params }),
+  consumeOne: (sampleInventoryId: number) =>
+    api.post('/inventory/common-shelf/consume-one', { sample_inventory_id: sampleInventoryId }),
 }
 
 // Chemical Info APIs

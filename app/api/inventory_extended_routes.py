@@ -7,6 +7,7 @@ from typing import Any, Annotated, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
 from app.core.auth import CurrentUser, get_current_user
@@ -42,11 +43,43 @@ from app.services.internal_code import generate_internal_code
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.rate_limit import enforce_rate_limit
 from app.services.spec_utils import SpecificationError, format_specification, parse_specification
+from app.services.shelf_utils import (
+    is_common_shelf_available_status,
+    is_common_shelf_item,
+    normalize_storage_location,
+)
 from app.services.sql_utils import normalize_field_sql, normalize_search_term
 from app.services.user_utils import batch_get_user_names
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
+COMMON_SHELF_CONSUME_NOTE = "common_shelf_consume"
+
+
+class CommonShelfConsumeRequest(BaseModel):
+    """Request body for consuming one bottle from a common-shelf group."""
+    sample_inventory_id: int
+
+
+def _common_group_sort_key(item: Inventory) -> tuple:
+    return (
+        item.cas_number or "",
+        item.name or "",
+        item.brand or "",
+        item.initial_quantity if item.initial_quantity is not None else -1,
+        item.unit or "",
+        item.storage_location or "",
+    )
+
+
+def _derive_common_group_status(available_bottles: int) -> InventoryStatus:
+    return InventoryStatus.IN_STOCK if available_bottles > 0 else InventoryStatus.CONSUMED
+
+
+def _same_value_clause(column, value):
+    if value is None:
+        return column.is_(None)
+    return column == value
 
 
 def _build_search_clause(field, pattern: str, *, fuzzy: bool):
@@ -258,17 +291,22 @@ def _register_manual_and_dashboard_routes(
         except SpecificationError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-        internal_codes = generate_internal_code(db, normalized_cas, item_data.quantity_bottles)
+        try:
+            internal_codes = generate_internal_code(db, normalized_cas, item_data.quantity_bottles)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        optional_string_fields = ["storage_location", "category", "brand", "english_name", "alias", "notes"]
+        string_fields = empty_to_none(item_data, optional_string_fields)
+        normalized_storage_location = normalize_storage_location(string_fields["storage_location"])
+        string_fields["storage_location"] = normalized_storage_location
 
         pinyin_fields = compute_pinyin_fields(
             name=item_data.name,
             category=item_data.category,
             brand=item_data.brand,
-            storage_location=item_data.storage_location,
+            storage_location=normalized_storage_location,
         )
-
-        optional_string_fields = ["storage_location", "category", "brand", "english_name", "alias", "notes"]
-        string_fields = empty_to_none(item_data, optional_string_fields)
 
         created_items = []
         for internal_code in internal_codes:
@@ -281,6 +319,7 @@ def _register_manual_and_dashboard_routes(
                 category=string_fields["category"],
                 brand=string_fields["brand"],
                 storage_location=string_fields["storage_location"],
+                is_common=False,
                 initial_quantity=per_bottle_value,
                 remaining_quantity=per_bottle_value,
                 remaining_percent=1,
@@ -326,7 +365,11 @@ def _register_manual_and_dashboard_routes(
         if inventory_ids:
             borrow_logs = db.exec(
                 select(BorrowLog)
-                .where(BorrowLog.inventory_id.in_(inventory_ids), BorrowLog.return_time.is_(None))
+                .where(
+                    BorrowLog.inventory_id.in_(inventory_ids),
+                    BorrowLog.is_consume.is_(False),
+                    BorrowLog.return_time.is_(None),
+                )
                 .order_by(BorrowLog.borrow_time.desc())
             ).all()
 
@@ -416,10 +459,7 @@ def _register_common_shelf_and_import_routes(
     ):
         del current_user
 
-        base = select(Inventory).where(Inventory.status == InventoryStatus.COMMON)
-
-        if status_filter:
-            base = base.where(Inventory.status == status_filter)
+        base = select(Inventory).where(Inventory.is_common.is_(True))
 
         if search:
             search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
@@ -456,49 +496,218 @@ def _register_common_shelf_and_import_routes(
                         )
                     base = base.where(_combine_search_clauses(all_clauses))
 
-        count_stmt = select(func.count()).select_from(base.subquery())
-        total = db.exec(count_stmt).one()
+        items = db.exec(base.order_by(Inventory.created_at.desc(), Inventory.id.desc())).all()
 
-        sortable = {
-            'cas_number': Inventory.cas_number,
-            'name': Inventory.name,
-            'category': Inventory.category,
-            'brand': Inventory.brand,
-            'status': Inventory.status,
-            'created_at': Inventory.created_at,
-        }
-        order_column = sortable.get(sort_by or '', Inventory.created_at)
-        order_expr = order_column.asc() if sort_order == 'asc' else order_column.desc()
-
-        items = db.exec(base.order_by(order_expr, Inventory.id.desc()).offset(skip).limit(limit)).all()
-
-        user_ids = set()
+        grouped: dict[tuple, dict[str, Any]] = {}
         for item in items:
-            if item.borrower_id:
-                user_ids.add(item.borrower_id)
-            if item.last_borrower_id:
-                user_ids.add(item.last_borrower_id)
-            if item.created_by_id:
-                user_ids.add(item.created_by_id)
-            if item.temporary_keeper_id:
-                user_ids.add(item.temporary_keeper_id)
+            group_key = _common_group_sort_key(item)
+            group = grouped.get(group_key)
+            if group is None:
+                group = {
+                    "sample_inventory_id": item.id,
+                    "cas_number": item.cas_number,
+                    "name": item.name,
+                    "english_name": item.english_name,
+                    "alias": item.alias,
+                    "category": item.category,
+                    "brand": item.brand,
+                    "storage_location": item.storage_location,
+                    "initial_quantity": item.initial_quantity,
+                    "unit": item.unit,
+                    "is_hazardous": item.is_hazardous,
+                    "notes": item.notes,
+                    "created_at": item.created_at,
+                    "updated_at": item.updated_at,
+                    "created_by_id": item.created_by_id,
+                    "total_bottles": 0,
+                    "available_bottles": 0,
+                }
+                grouped[group_key] = group
+
+            group["total_bottles"] += 1
+            if is_common_shelf_available_status(item.status):
+                group["available_bottles"] += 1
+
+            if item.created_at and group["created_at"] and item.created_at > group["created_at"]:
+                group["created_at"] = item.created_at
+                group["sample_inventory_id"] = item.id
+                group["created_by_id"] = item.created_by_id
+            elif group["created_at"] is None and item.created_at is not None:
+                group["created_at"] = item.created_at
+                group["sample_inventory_id"] = item.id
+                group["created_by_id"] = item.created_by_id
+
+        grouped_rows: list[dict[str, Any]] = []
+        for group in grouped.values():
+            available_bottles = group["available_bottles"]
+            row_status = _derive_common_group_status(available_bottles)
+            if status_filter:
+                if row_status != status_filter:
+                    continue
+
+            grouped_rows.append(
+                {
+                    "id": group["sample_inventory_id"],
+                    "sample_inventory_id": group["sample_inventory_id"],
+                    "cas_number": group["cas_number"],
+                    "name": group["name"],
+                    "english_name": group["english_name"],
+                    "alias": group["alias"],
+                    "category": group["category"],
+                    "brand": group["brand"],
+                    "storage_location": group["storage_location"],
+                    "initial_quantity": group["initial_quantity"],
+                    "remaining_quantity": available_bottles,
+                    "unit": group["unit"],
+                    "is_hazardous": group["is_hazardous"],
+                    "status": row_status,
+                    "available_bottles": available_bottles,
+                    "total_bottles": group["total_bottles"],
+                    "consumed_bottles": group["total_bottles"] - available_bottles,
+                    "created_at": group["created_at"],
+                    "updated_at": group["updated_at"],
+                    "notes": group["notes"],
+                    "created_by_id": group["created_by_id"],
+                    "is_common": True,
+                    "specification": format_specification(group["initial_quantity"], group["unit"]),
+                }
+            )
+
+        sort_reverse = sort_order != 'asc'
+        sort_key_map = {
+            'cas_number': lambda row: row["cas_number"] or "",
+            'name': lambda row: row["name"] or "",
+            'category': lambda row: row["category"] or "",
+            'brand': lambda row: row["brand"] or "",
+            'status': lambda row: row["status"].value if hasattr(row["status"], "value") else str(row["status"]),
+            'created_at': lambda row: row["created_at"] or get_utc_now(),
+            'available_bottles': lambda row: row["available_bottles"],
+            'total_bottles': lambda row: row["total_bottles"],
+            'storage_location': lambda row: row["storage_location"] or "",
+        }
+        sort_key = sort_key_map.get(sort_by or '', sort_key_map['created_at'])
+        grouped_rows.sort(key=sort_key, reverse=sort_reverse)
+
+        total = len(grouped_rows)
+        paged_rows = grouped_rows[skip:] if limit <= 0 else grouped_rows[skip: skip + limit]
+
+        user_ids = {
+            row["created_by_id"]
+            for row in paged_rows
+            if row.get("created_by_id")
+        }
         users_map = batch_get_user_names(db, user_ids)
 
-        result_data = []
-        for item in items:
-            item_dict = InventoryResponse.model_validate(item).model_dump()
-            item_dict = _add_specification(item_dict)
-            item_dict["borrower_name"] = users_map.get(item.borrower_id)
-            item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
-            item_dict["created_by_name"] = users_map.get(item.created_by_id)
-            item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
-            result_data.append(item_dict)
+        for row in paged_rows:
+            row["created_by_name"] = users_map.get(row.get("created_by_id"))
+            if hasattr(row["status"], "value"):
+                row["status"] = row["status"].value
 
         return {
-            "data": result_data,
+            "data": paged_rows,
             "total": total,
             "skip": skip,
             "limit": limit,
+        }
+
+    @router.post("/common-shelf/consume-one")
+    def consume_one_common_shelf_item(
+        payload: CommonShelfConsumeRequest,
+        current_user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[Session, Depends(get_db)],
+    ):
+        sample_item = db.get(Inventory, payload.sample_inventory_id)
+        if not sample_item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+        if not is_common_shelf_item(sample_item):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Item is not on common shelf")
+
+        from sqlmodel import update as sql_update
+
+        consumed_item: Optional[Inventory] = None
+        consumed_quantity: Optional[float] = None
+        now = get_utc_now()
+
+        for _ in range(5):
+            candidate = db.exec(
+                select(Inventory)
+                .where(
+                    Inventory.is_common.is_(True),
+                    Inventory.status == InventoryStatus.IN_STOCK,
+                    _same_value_clause(Inventory.cas_number, sample_item.cas_number),
+                    _same_value_clause(Inventory.name, sample_item.name),
+                    _same_value_clause(Inventory.brand, sample_item.brand),
+                    _same_value_clause(Inventory.initial_quantity, sample_item.initial_quantity),
+                    _same_value_clause(Inventory.unit, sample_item.unit),
+                    _same_value_clause(Inventory.storage_location, sample_item.storage_location),
+                )
+                .order_by(Inventory.created_at.asc(), Inventory.id.asc())
+            ).first()
+
+            if not candidate:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No available bottle in this group")
+
+            consumed_quantity = candidate.remaining_quantity or candidate.initial_quantity or 1.0
+            update_stmt = (
+                sql_update(Inventory)
+                .where(Inventory.id == candidate.id)
+                .where(Inventory.is_common.is_(True))
+                .where(Inventory.status == InventoryStatus.IN_STOCK)
+                .values(
+                    status=InventoryStatus.CONSUMED,
+                    remaining_quantity=0,
+                    remaining_percent=0,
+                    borrower_id=None,
+                    updated_at=now,
+                )
+            )
+            update_result = db.exec(update_stmt)
+            db.commit()
+            if update_result.rowcount == 0:
+                continue
+
+            consumed_item = db.get(Inventory, candidate.id)
+            break
+
+        if not consumed_item:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Item changed by another request, please retry",
+            )
+
+        consume_log = BorrowLog(
+            inventory_id=consumed_item.id,
+            borrower_id=current_user.id,
+            borrow_time=now,
+            is_consume=True,
+            quantity_borrowed=consumed_quantity or 1.0,
+            quantity_returned=0,
+            notes=COMMON_SHELF_CONSUME_NOTE,
+        )
+        db.add(consume_log)
+        db.commit()
+
+        remaining_available = db.exec(
+            select(func.count())
+            .select_from(Inventory)
+            .where(
+                Inventory.is_common.is_(True),
+                Inventory.status == InventoryStatus.IN_STOCK,
+                _same_value_clause(Inventory.cas_number, sample_item.cas_number),
+                _same_value_clause(Inventory.name, sample_item.name),
+                _same_value_clause(Inventory.brand, sample_item.brand),
+                _same_value_clause(Inventory.initial_quantity, sample_item.initial_quantity),
+                _same_value_clause(Inventory.unit, sample_item.unit),
+                _same_value_clause(Inventory.storage_location, sample_item.storage_location),
+            )
+        ).one()
+
+        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+
+        return {
+            "message": "已拿取一瓶",
+            "consumed_inventory_id": consumed_item.id,
+            "available_bottles": remaining_available,
         }
 
     @router.get("/import/template")
@@ -590,6 +799,11 @@ def _register_borrow_return_routes(
         item = db.get(Inventory, inventory_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+        if is_common_shelf_item(item):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Common shelf items do not support borrow workflow",
+            )
 
         actual_borrower_id: Optional[int] = None
         if current_user.role == UserRole.PUBLIC:
@@ -607,6 +821,7 @@ def _register_borrow_return_routes(
             sql_update(Inventory)
             .where(Inventory.id == inventory_id)
             .where(Inventory.status == InventoryStatus.IN_STOCK)
+            .where(Inventory.is_common.is_(False))
             .values(
                 status=InventoryStatus.BORROWED,
                 borrower_id=current_user.id,
@@ -630,6 +845,7 @@ def _register_borrow_return_routes(
             inventory_id=inventory_id,
             borrower_id=current_user.id,
             borrow_time=get_utc_now(),
+            is_consume=False,
             quantity_borrowed=item.remaining_quantity,
             notes=_encode_actual_borrower_notes(actual_borrower_id),
         )
@@ -670,7 +886,11 @@ def _register_borrow_return_routes(
 
         borrow_log = db.exec(
             select(BorrowLog)
-            .where(BorrowLog.inventory_id == inventory_id, BorrowLog.return_time.is_(None))
+            .where(
+                BorrowLog.inventory_id == inventory_id,
+                BorrowLog.is_consume.is_(False),
+                BorrowLog.return_time.is_(None),
+            )
             .order_by(BorrowLog.borrow_time.desc())
         ).first()
 
@@ -714,7 +934,10 @@ def _register_borrow_return_routes(
 
         logs = db.exec(
             select(BorrowLog)
-            .where(BorrowLog.inventory_id == inventory_id)
+            .where(
+                BorrowLog.inventory_id == inventory_id,
+                BorrowLog.is_consume.is_(False),
+            )
             .order_by(BorrowLog.borrow_time.desc())
             .limit(10)
         ).all()

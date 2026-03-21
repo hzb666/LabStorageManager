@@ -34,6 +34,7 @@ const LOG_TYPE_OPTIONS = [
   { value: 'consumable_order', label: '耗材订单' },
   { value: 'inventory', label: '入库记录' },
   { value: 'borrow', label: '借用记录' },
+  { value: 'consume', label: '拿取记录' },
   { value: 'session', label: '登录记录' }
 ]
 
@@ -200,6 +201,18 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
           <div><span className="text-muted-foreground">首次登录：</span>{formatDateTime(fullData.created_at as string)}</div>
           <div><span className="text-muted-foreground">最后活跃：</span>{formatDateTime(fullData.last_active_at as string)}</div>
           <div><span className="text-muted-foreground">过期时间：</span>{formatDateTime(fullData.expires_at as string)}</div>
+        </div>
+      )
+
+    case 'consume':
+      return (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
+          <div><span className="text-muted-foreground">物品名称：</span>{safeString(fullData.inventory_name)}</div>
+          <div><span className="text-muted-foreground">CAS号：</span>{safeString(fullData.cas_number)}</div>
+          <div><span className="text-muted-foreground">拿取数量：</span><span className="text-green-600">{safeString(fullData.quantity_consumed)} {safeString(fullData.unit)}</span></div>
+          <div><span className="text-muted-foreground">位置：</span>{safeString(fullData.storage_location)}</div>
+          <div><span className="text-muted-foreground">拿取时间：</span>{formatDateTime(fullData.consume_time as string)}</div>
+          <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(fullData.notes)}</div>
         </div>
       )
 

@@ -34,6 +34,7 @@ from app.services.sql_utils import (
 )
 from app.services.api_utils import clear_cache_by_prefix, get_cached_result, set_cached_result
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
+from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,9 @@ def _apply_inventory_filters(
     if status_filter:
         base = base.where(Inventory.status == status_filter)
     else:
-        base = base.where(Inventory.status != InventoryStatus.COMMON)
+        base = base.where(
+            Inventory.is_common.is_(False),
+        )
     if cas_filter:
         base = base.where(Inventory.cas_number == normalize_cas(cas_filter))
     if hazardous_only:
@@ -213,6 +216,10 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> None:
         normalized_cas = normalize_cas(update_data['cas_number'])
         if normalized_cas:
             update_data['cas_number'] = normalized_cas
+
+    if 'storage_location' in update_data:
+        normalized_storage = normalize_storage_location(update_data['storage_location'])
+        update_data['storage_location'] = normalized_storage
 
     if 'specification' in update_data and update_data['specification']:
         spec_str = update_data['specification']

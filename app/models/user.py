@@ -12,6 +12,7 @@ from typing import Optional
 import re
 
 from pydantic import field_validator
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 
@@ -42,6 +43,10 @@ class UserBase(SQLModel):
 class User(UserBase, table=True):
     """User database model"""
     __tablename__ = "users"
+    __table_args__ = (
+        Index("ix_users_active_role_created", "is_active", "role", "created_at"),
+        Index("ix_users_full_name_pinyin_id", "full_name_pinyin", "id"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     password_hash: str

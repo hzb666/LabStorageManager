@@ -10,6 +10,7 @@ from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 
@@ -68,15 +69,18 @@ class ReagentOrderBase(SQLModel):
 class ReagentOrder(ReagentOrderBase, table=True):
     """Reagent Order database model"""
     __tablename__ = "reagent_order"
+    __table_args__ = (
+        Index("ix_reagent_order_status_created_at_id", "status", "created_at", "id"),
+        Index("ix_reagent_order_applicant_created_at_id", "applicant_id", "created_at", "id"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     applicant_id: Optional[int] = Field(
         default=None,
-        index=True,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    status: ReagentOrderStatus = Field(default=ReagentOrderStatus.PENDING, index=True)
+    status: ReagentOrderStatus = Field(default=ReagentOrderStatus.PENDING)
     created_at: datetime = Field(default_factory=get_utc_now, index=True)
     updated_at: datetime = Field(
         default_factory=get_utc_now,

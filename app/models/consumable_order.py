@@ -9,6 +9,7 @@ from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 
@@ -45,15 +46,18 @@ class ConsumableOrderBase(SQLModel):
 class ConsumableOrder(ConsumableOrderBase, table=True):
     """Consumable Order database model"""
     __tablename__ = "consumable_order"
+    __table_args__ = (
+        Index("ix_consumable_order_status_created_at_id", "status", "created_at", "id"),
+        Index("ix_consumable_order_applicant_created_at_id", "applicant_id", "created_at", "id"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     applicant_id: Optional[int] = Field(
         default=None,
-        index=True,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    status: ConsumableOrderStatus = Field(default=ConsumableOrderStatus.PENDING, index=True)
+    status: ConsumableOrderStatus = Field(default=ConsumableOrderStatus.PENDING)
     # 拼音索引字段（用于排序和搜索）
     name_pinyin: Optional[str] = Field(None, max_length=200, index=True)
     name_pinyin_initials: Optional[str] = Field(None, max_length=200, index=True)

@@ -274,6 +274,8 @@ def delete_file(file_path: str, required_subdir: str | None = None) -> bool:
     """
     Delete file from filesystem.
     
+    Path validation is performed by _resolve_static_path (no need to repeat here).
+    
     Args:
         file_path: Relative path from static directory
         required_subdir: Optional static subdirectory constraint
@@ -283,25 +285,10 @@ def delete_file(file_path: str, required_subdir: str | None = None) -> bool:
     """
     full_path = _resolve_static_path(file_path, required_subdir=required_subdir)
     if full_path is None:
+        # Path validation failed in _resolve_static_path
         return False
 
-    static_root = (BASE_DIR / "static").resolve()
-    allowed_root = static_root
-    if required_subdir:
-        required_relative = _sanitize_static_relative_path(required_subdir)
-        if required_relative is None:
-            return False
-        allowed_root = (static_root / required_relative).resolve()
-        try:
-            allowed_root.relative_to(static_root)
-        except ValueError:
-            return False
-
-    try:
-        full_path.relative_to(allowed_root)
-    except ValueError:
-        return False
-
+    # Path is already validated, just check existence and delete
     if full_path.exists() and full_path.is_file():
         full_path.unlink()
         return True

@@ -7,7 +7,6 @@ from sqlmodel import Session, select
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, AdminUser
-from app.core.constants import COMMON_SHELF_LOCATION
 from app.core.time_utils import utc_iso_str
 from app.models.user import UserRole
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus, ReagentOrderReason
@@ -15,6 +14,7 @@ from app.models.inventory import Inventory, InventoryStatus
 from app.services.api_utils import clear_cache_by_prefix
 from app.services.internal_code import generate_internal_code
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.shelf_utils import normalize_storage_location
 from app.services.spec_utils import format_specification
 
 ORDER_NOT_FOUND = "Order not found"
@@ -55,6 +55,7 @@ def _create_inventory_items_from_order(
     temporary_keeper_id: Optional[int],
     storage_location: Optional[str],
     inventory_status: InventoryStatus,
+    is_common: bool,
     remaining_quantity: Optional[float] = None,
     note_suffix: Optional[str] = None,
 ) -> list[Inventory]:
@@ -67,7 +68,10 @@ def _create_inventory_items_from_order(
             detail="Order missing initial_quantity or unit. Please update the order.",
         )
 
-    internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
+    try:
+        internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     pinyin_fields = compute_pinyin_fields(
         name=order.name,
         category=order.category,
@@ -95,6 +99,7 @@ def _create_inventory_items_from_order(
             category=order.category,
             brand=order.brand,
             storage_location=storage_location,
+            is_common=is_common,
             initial_quantity=order.initial_quantity,
             remaining_quantity=effective_remaining,
             remaining_percent=_compute_remaining_percent(effective_remaining, order.initial_quantity),
@@ -191,24 +196,28 @@ def _register_arrival_routes(
         direct_storage_location = body.storage_location.strip() if body.storage_location else None
 
         if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
+            target_location = normalize_storage_location(direct_storage_location)
             inventory_items = _create_inventory_items_from_order(
                 db,
                 order,
                 created_by_id=current_user.id,
                 temporary_keeper_id=None,
-                storage_location=COMMON_SHELF_LOCATION,
-                inventory_status=InventoryStatus.COMMON,
+                storage_location=target_location,
+                inventory_status=InventoryStatus.IN_STOCK,
+                is_common=True,
             )
             order.status = ReagentOrderStatus.STOCKED
             message = "已到货并加入常用货架"
         elif direct_storage_location:
+            target_location = normalize_storage_location(direct_storage_location)
             inventory_items = _create_inventory_items_from_order(
                 db,
                 order,
                 created_by_id=current_user.id,
                 temporary_keeper_id=None,
-                storage_location=direct_storage_location,
+                storage_location=target_location,
                 inventory_status=InventoryStatus.IN_STOCK,
+                is_common=False,
             )
             order.status = ReagentOrderStatus.STOCKED
             message = "已到货并入库"
@@ -221,6 +230,7 @@ def _register_arrival_routes(
                 temporary_keeper_id=current_user.id,
                 storage_location=None,
                 inventory_status=InventoryStatus.IN_STOCK,
+                is_common=False,
                 note_suffix=f"{keeper_name}暂存",
             )
             order.status = ReagentOrderStatus.ARRIVED
@@ -374,7 +384,8 @@ def _register_delete_stock_routes(
                 detail="Order missing initial_quantity or unit. Please update the order.",
             )
 
-        if not payload.storage_location.strip():
+        is_common_shelf_order = order.order_reason == ReagentOrderReason.COMMON_PUBLIC
+        if not is_common_shelf_order and not payload.storage_location.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="storage_location is required")
 
         if payload.remaining_quantity is not None and payload.remaining_quantity <= 0:
@@ -395,9 +406,10 @@ def _register_delete_stock_routes(
                 detail="remaining_quantity is required for ARRIVED orders",
             )
 
-        default_status = InventoryStatus.COMMON if order.order_reason == ReagentOrderReason.COMMON_PUBLIC else InventoryStatus.IN_STOCK
-        target_status = default_status
-        target_location = COMMON_SHELF_LOCATION if default_status == InventoryStatus.COMMON else payload.storage_location.strip()
+        target_status = InventoryStatus.IN_STOCK
+        normalized_location = normalize_storage_location(payload.storage_location)
+        target_location = normalized_location
+        target_is_common = is_common_shelf_order
         effective_remaining = order.initial_quantity if payload.remaining_quantity is None else payload.remaining_quantity
 
         if order.status == ReagentOrderStatus.APPROVED:
@@ -408,6 +420,7 @@ def _register_delete_stock_routes(
                 temporary_keeper_id=None,
                 storage_location=target_location,
                 inventory_status=target_status,
+                is_common=target_is_common,
                 remaining_quantity=effective_remaining,
             )
             order.status = ReagentOrderStatus.STOCKED
@@ -450,6 +463,7 @@ def _register_delete_stock_routes(
             item.remaining_percent = _compute_remaining_percent(effective_remaining, item.initial_quantity)
             item.temporary_keeper_id = None
             item.status = target_status
+            item.is_common = target_is_common
 
             pinyin_fields = compute_pinyin_fields(
                 name=item.name,

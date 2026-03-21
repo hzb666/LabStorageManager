@@ -4,6 +4,7 @@ Announcement Model - System Announcements Management
 from datetime import datetime
 from typing import Optional, List
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel, JSON
 
 from app.core.time_utils import get_utc_now
@@ -26,6 +27,11 @@ class AnnouncementBase(SQLModel):
 class Announcement(AnnouncementBase, table=True):
     """Announcement database model"""
     __tablename__ = "announcements"
+    __table_args__ = (
+        Index("ix_announcements_pinned_created", "is_pinned", "created_at"),
+        Index("ix_announcements_visible_pinned_created", "is_visible", "is_pinned", "created_at"),
+        Index("ix_announcements_creator_visible", "created_by", "is_visible"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")

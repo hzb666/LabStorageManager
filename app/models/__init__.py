@@ -6,7 +6,6 @@ from .inventory import (
     Inventory,
     InventoryStatus,
     BorrowLog,
-    BorrowLogType,
     BorrowLogResponse,
     InventoryResponse,
 )
@@ -49,7 +48,6 @@ __all__ = [
     "Inventory",
     "InventoryStatus",
     "BorrowLog",
-    "BorrowLogType",
     "BorrowLogResponse",
     "InventoryResponse",
     # Reagent Order

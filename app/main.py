@@ -138,14 +138,6 @@ app = FastAPI(
 
 
 @app.middleware("http")
-async def security_headers_middleware(request, call_next):
-    """Attach security headers to every response."""
-    response = await call_next(request)
-    _apply_security_headers(response, request.url.path)
-    return response
-
-
-@app.middleware("http")
 async def upload_request_size_middleware(request, call_next):
     """Reject clearly oversized upload requests before route handling."""
     if request.method == "POST" and _is_upload_request(request.url.path):
@@ -211,6 +203,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers_middleware(request, call_next):
+    """
+    Attach security headers to every response, including short-circuit responses.
+    
+    Must be defined LAST (after other middlewares) to ensure it wraps all response paths
+    and adds CSP/HSTS/XFO headers to upload rejection (400/413), HTTPS redirects (307),
+    and CSRF failures (403).
+    """
+    response = await call_next(request)
+    _apply_security_headers(response, request.url.path)
+    return response
 
 # Global exception handler for logging 500 errors - must be added BEFORE routes
 @app.exception_handler(Exception)

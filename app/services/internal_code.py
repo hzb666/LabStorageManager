@@ -1,11 +1,12 @@
 """
 Internal Code Generator - Generate unique internal codes for inventory items
-Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-1")
-Sequence: Auto-increment per CAS number group
+Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-001")
+Sequence: Auto-increment per CAS number group, zero-padded to ensure proper sorting
 """
 import re
 from sqlmodel import Session, select
 
+from app.core.constants import INTERNAL_CODE_MAX_SEQUENCE, INTERNAL_CODE_SEQUENCE_PAD_WIDTH
 from app.models.inventory import Inventory
 from app.core.time_utils import get_utc_now
 
@@ -32,7 +33,7 @@ def _get_max_sequence_for_prefix(session: Session, prefix: str) -> int:
     if not existing_codes:
         return 0
 
-    # Internal code suffix is numeric without fixed width; parse max suffix safely.
+    # Internal code suffix should be numeric; parse safely to support legacy unpadded data.
     max_seq = 0
     prefix_len = len(prefix)
     for internal_code in existing_codes:
@@ -56,16 +57,18 @@ def generate_internal_code(
     
     Args:
         session: Database session
-        cas_number: Normalized CAS number (e.g., "64175")
+        cas_number: Normalized CAS number (e.g., "64-17-5")
         quantity: Number of items to generate codes for
-    
+
     Returns:
-        List of internal codes (e.g., ["64175-250113-1", "64175-250113-2"])
+        List of internal codes (e.g., ["64175-250113-001", "64175-250113-002"])
     """
     # Validate CAS number to prevent SQL injection
     # CAS should only contain digits and hyphens
     if not re.match(r"^[0-9-]+$", cas_number):
         raise ValueError(f"Invalid CAS number format: {cas_number}")
+    if quantity <= 0:
+        raise ValueError("quantity must be greater than 0")
     
     # Get current date in yymmdd format
     date_str = get_utc_now().strftime("%y%m%d")
@@ -78,14 +81,21 @@ def generate_internal_code(
     
     # Use ORM query instead of raw SQL
     max_seq = _get_max_sequence_for_prefix(session, prefix)
+    target_max_seq = max_seq + quantity
+    if target_max_seq > INTERNAL_CODE_MAX_SEQUENCE:
+        raise ValueError(
+            f"Internal code sequence limit reached for {cas_number} on {date_str}: "
+            f"max is {INTERNAL_CODE_MAX_SEQUENCE}"
+        )
     
     # Start sequence from result + 1 (or 1 if no existing)
     start_seq = max_seq + 1
     
-    # Generate codes
+    # Generate codes with zero-padded sequence numbers
     codes = []
     for i in range(start_seq, start_seq + quantity):
-        code = f"{prefix}{i}"
+        padded_seq = str(i).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)
+        code = f"{prefix}{padded_seq}"
         codes.append(code)
     
     return codes

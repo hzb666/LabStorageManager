@@ -83,6 +83,31 @@ SQLITE_SEARCH_INDEX_UPGRADES: tuple[tuple[str, str, str], ...] = (
     ("ix_users_full_name_pinyin_initials", "users", "full_name_pinyin_initials"),
 )
 
+SQLITE_PERFORMANCE_INDEX_UPGRADES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_created_at_id ON inventory (is_common, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_status_created_at_id ON inventory (status, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_borrower_status_updated_at ON inventory (borrower_id, status, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_keeper_location_created_at ON inventory (temporary_keeper_id, storage_location, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_cas_status_created_at ON inventory (cas_number, status, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_created_by_created_at_id ON inventory (created_by_id, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_borrowlog_borrower_consume_borrow_time ON borrowlog (borrower_id, is_consume, borrow_time DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_borrowlog_inventory_consume_return_borrow ON borrowlog (inventory_id, is_consume, return_time, borrow_time DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_status_created_at_id ON reagent_order (status, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_applicant_created_at_id ON reagent_order (applicant_id, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_status_created_at_id ON consumable_order (status, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_applicant_created_at_id ON consumable_order (applicant_id, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_announcements_pinned_created ON announcements (is_pinned DESC, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_announcements_visible_pinned_created ON announcements (is_visible, is_pinned DESC, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_announcements_creator_visible ON announcements (created_by, is_visible)",
+    "CREATE INDEX IF NOT EXISTS ix_users_active_role_created ON users (is_active DESC, role DESC, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_users_full_name_pinyin_id ON users (full_name_pinyin, id)",
+    "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_last_active ON user_sessions (user_id, last_active_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_device ON user_sessions (user_id, device_id)",
+    "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_expires ON user_sessions (user_id, expires_at)",
+    "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_ip ON user_sessions (user_id, ip_address)",
+    "CREATE INDEX IF NOT EXISTS ix_user_sessions_expires_at ON user_sessions (expires_at)",
+)
+
 
 def check_sqlite_schema_consistency(connection: Connection) -> None:
     """
@@ -185,6 +210,9 @@ def ensure_sqlite_search_columns(connection: Connection) -> int:
         connection.execute(
             text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})")
         )
+
+    for statement in SQLITE_PERFORMANCE_INDEX_UPGRADES:
+        connection.execute(text(statement))
 
     return added_columns
 

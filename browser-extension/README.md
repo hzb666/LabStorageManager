@@ -157,4 +157,5 @@ A: 请检查：
 1. 修改 `manifest.json` 配置
 2. 修改 `content/script.js` 调整购物车数据提取逻辑
 3. 修改 `background/service-worker.js` 调整详情页解析逻辑
-4. 修改 `popup/pop `popup.js ` 调整界面 up.html` 和5. 重新加载插件即可生效
+4. 修改 `popup/popup.js` 和 `popup/popup.html` 调整界面
+5. 重新加载插件即可生效
