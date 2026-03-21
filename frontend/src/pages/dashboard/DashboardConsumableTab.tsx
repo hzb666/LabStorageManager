@@ -232,7 +232,7 @@ export function DashboardConsumableTab() {
             <DialogTitle>编辑耗材订单</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitConsumableEdit}>
-            <BaseForm form={consumableForm} fields={getConsumableOrderFormFields(true)} />
+            <BaseForm form={consumableForm} fields={getConsumableOrderFormFields()} />
             <EditDialogActions
               mode="edit"
               onCancel={() => setEditingConsumable(null)}
