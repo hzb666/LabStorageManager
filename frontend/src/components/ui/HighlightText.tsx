@@ -21,7 +21,7 @@ interface LatinMatch {
   end: number
 }
 
-const HIGHLIGHT_CLASS = 'bg-amber-200 dark:bg-amber-800/50'
+const HIGHLIGHT_CLASS = 'bg-yellow-400/40 dark:bg-yellow-500/40'
 const SEPARATORS = String.raw`[\s\u00A0\u2002\u2003\u2009_.\-]`
 const SEPARATOR_REGEX = new RegExp(`${SEPARATORS}+`, 'g')
 const HANZI_REGEX = /[\u3400-\u9fff]/

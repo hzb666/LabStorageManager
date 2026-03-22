@@ -2,19 +2,22 @@
 Consumable Order API Routes - Consumables Purchase Order Management
 Separated from Reagent orders (no stock-in needed)
 """
-import io
-import csv
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
-from app.core.auth import CurrentUser, AdminUser
-from app.core.constants import DEFAULT_PAGE_SIZE, LIST_CACHE_TTL_SECONDS, MAX_PAGE_SIZE
-from app.core.time_utils import get_utc_now, to_china_time, utc_iso_str
+from app.core.auth import CurrentUser, get_current_user, require_admin
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
+    LIST_CACHE_TTL_SECONDS,
+    MAX_PAGE_SIZE,
+    SSEEventType,
+    SSERoom,
+)
+from app.core.time_utils import get_utc_now, utc_iso_str
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
@@ -23,7 +26,6 @@ from app.models.consumable_order import (
     ConsumableOrderStatus,
 )
 from app.models.user import User, UserRole
-from app.services.csv_utils import escape_csv_formula
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
@@ -33,6 +35,7 @@ from app.services.api_utils import (
     get_cached_result,
     set_cached_result,
 )
+from app.services.sse_manager import sse_manager
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 
@@ -128,7 +131,7 @@ def _apply_consumable_order_filters(
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
-def create_consumable_order(
+async def create_consumable_order(
     order: ConsumableOrderCreate,
     current_user: CurrentUser,
     db: DBSession,
@@ -159,13 +162,17 @@ def create_consumable_order(
     db.commit()
     db.refresh(db_order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_CREATED,
+        {"id": db_order.id},
+    )
     
     return db_order
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(get_current_user)])
 def list_consumable_orders(
-    current_user: CurrentUser,
     db: DBSession,
     skip: int = 0,
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
@@ -177,7 +184,6 @@ def list_consumable_orders(
     sort_order: Optional[str] = 'desc',
 ):
     """List consumable orders with optional filters, pagination, search, sort and applicant name"""
-    del current_user  # 仅用于鉴权
 
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
@@ -274,57 +280,26 @@ def list_consumable_orders(
 
 # --- Export ---
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(require_admin)])
 def export_consumable_orders(
     db: DBSession,
-    current_user: AdminUser,
 ):
     """Export consumable orders as a downloadable CSV file."""
+    from app.services.csv_export import export_consumable_orders_csv
+
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
     orders = db.exec(statement).all()
 
     # 查询所有订购人ID用于导出
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
-    all_users_map = batch_get_user_names(db, all_applicant_ids)
+    all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    output = io.StringIO()
-    output.write("\ufeff")
-    writer = csv.writer(output)
-
-    writer.writerow([
-        "名称", "英文名", "规格", "数量", "单价", "状态",
-        "订购人", "申购时间", "备注",
-    ])
-
-    for order in orders:
-        # 使用直接存储的规格字符串
-        spec = getattr(order, 'specification', '') or ''
-        writer.writerow([
-            escape_csv_formula(order.name),
-            escape_csv_formula(order.english_name or ""),
-            escape_csv_formula(spec or ""),
-            order.quantity,
-            order.price or "",
-            order.status.value if hasattr(order.status, "value") else order.status,
-            escape_csv_formula(all_users_map.get(order.applicant_id, "") if order.applicant_id else ""),
-            to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
-            escape_csv_formula(order.notes or ""),
-        ])
-
-    output.seek(0)
-    filename = f"consumable_orders_export_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    return export_consumable_orders_csv(orders, all_users_map)
 
 
-@router.get("/{order_id}", response_model=ConsumableOrderResponse)
+@router.get("/{order_id}", response_model=ConsumableOrderResponse, dependencies=[Depends(get_current_user)])
 def get_consumable_order(
     order_id: int,
-    current_user: CurrentUser,
     db: DBSession,
 ):
     """Get consumable order by ID"""
@@ -338,7 +313,7 @@ def get_consumable_order(
 
 
 @router.put("/{order_id}", response_model=ConsumableOrderResponse)
-def update_consumable_order(
+async def update_consumable_order(
     order_id: int,
     order_update: ConsumableOrderUpdate,
     db: DBSession,
@@ -394,14 +369,18 @@ def update_consumable_order(
     db.refresh(order)
     
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return order
 
 
-@router.post("/{order_id}/approve")
-def approve_consumable_order(
+@router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
+async def approve_consumable_order(
     order_id: int,
-    admin_user: AdminUser,
     db: DBSession,
 ):
     """Approve a consumable order (Admin only)"""
@@ -423,14 +402,18 @@ def approve_consumable_order(
     db.commit()
     db.refresh(order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return order
 
 
-@router.post("/{order_id}/reject")
-def reject_consumable_order(
+@router.post("/{order_id}/reject", dependencies=[Depends(require_admin)])
+async def reject_consumable_order(
     order_id: int,
-    admin_user: AdminUser,
     db: DBSession,
 ):
     """Reject a consumable order (Admin only). Does not modify notes."""
@@ -446,12 +429,17 @@ def reject_consumable_order(
     db.commit()
     db.refresh(order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return order
 
 
 @router.post("/{order_id}/complete")
-def complete_consumable_order(
+async def complete_consumable_order(
     order_id: int,
     current_user: CurrentUser,
     db: DBSession,
@@ -486,6 +474,11 @@ def complete_consumable_order(
     db.commit()
     db.refresh(order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return {
         "message": "耗材订单已完成",
@@ -547,7 +540,7 @@ def get_my_consumable_orders(
 
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_consumable_order(
+async def delete_consumable_order(
     order_id: int,
     db: DBSession,
     current_user: CurrentUser,
@@ -575,3 +568,8 @@ def delete_consumable_order(
     db.delete(order)
     db.commit()
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.CONSUMABLE_ORDERS,
+        SSEEventType.CONSUMABLE_ORDER_DELETED,
+        {"id": order_id},
+    )

@@ -324,6 +324,7 @@ export const InventoryFormSchema = v.object({
 
   // 危险品
   is_hazardous: v.boolean('危险品必须是布尔值'),
+  is_running_short: v.optional(v.boolean('快用完标记必须是布尔值')),
 })
 
 /**

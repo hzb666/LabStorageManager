@@ -2,23 +2,22 @@
 Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
-import io
-import csv
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
-from app.core.auth import CurrentUser, AdminUser
+from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
+    SSEEventType,
+    SSERoom,
 )
-from app.core.time_utils import get_utc_now, to_china_time
+from app.core.time_utils import get_utc_now
 from app.models.user import User, UserRole
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import (
@@ -35,7 +34,6 @@ from app.services.cas_utils import (
     is_special_cas_value,
     BIOLOGICAL_REAGENT_CAS,
 )
-from app.services.csv_utils import escape_csv_formula
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
@@ -47,6 +45,7 @@ from app.services.api_utils import (
     get_cached_result,
     set_cached_result,
 )
+from app.services.sse_manager import sse_manager
 from app.api.reagent_orders_workflow import register_workflow_routes
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
@@ -178,7 +177,7 @@ def _apply_reagent_order_filters(
 
 
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
-def create_reagent_order(
+async def create_reagent_order(
     order: ReagentOrderCreate,
     current_user: CurrentUser,
     db: DBSession,
@@ -244,13 +243,17 @@ def create_reagent_order(
     db.commit()
     db.refresh(db_order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.REAGENT_ORDERS,
+        SSEEventType.REAGENT_ORDER_CREATED,
+        {"id": db_order.id},
+    )
     
     return db_order
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(get_current_user)])
 def list_reagent_orders(
-    current_user: CurrentUser,
     db: DBSession,
     skip: int = 0,
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
@@ -262,7 +265,6 @@ def list_reagent_orders(
     sort_order: Optional[str] = 'desc',
 ):
     """List reagent orders with optional filters, pagination, search, sort and applicant name"""
-    del current_user  # 仅用于鉴权
 
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
@@ -368,70 +370,30 @@ def list_reagent_orders(
 
 # --- Export ---
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(require_admin)])
 def export_reagent_orders(
     db: DBSession,
-    current_user: AdminUser,
 ):
     """Export reagent orders as a downloadable CSV file."""
+    from app.services.csv_export import export_reagent_orders_csv
+
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
     orders = db.exec(statement).all()
 
     # 查询所有订购人ID用于导出
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
-    all_users_map = batch_get_user_names(db, all_applicant_ids)
+    all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    output = io.StringIO()
-    output.write("\ufeff")
-    writer = csv.writer(output)
-
-    writer.writerow([
-        "CAS号", "名称", "英文名", "别名", "分类", "品牌",
-        "规格", "数量", "单价", "申购原因", "状态",
-        "是否危险品", "订购人", "申购时间", "备注",
-    ])
-
-    for order in orders:
-        # 使用公共函数格式化规格
-        spec = format_specification(order.initial_quantity, order.unit)
-        writer.writerow([
-            escape_csv_formula(order.cas_number),
-            escape_csv_formula(order.name),
-            escape_csv_formula(order.english_name or ""),
-            escape_csv_formula(order.alias or ""),
-            escape_csv_formula(order.category or ""),
-            escape_csv_formula(order.brand or ""),
-            escape_csv_formula(spec or ""),
-            order.quantity,
-            order.price or "",
-            order.order_reason.value if hasattr(order.order_reason, "value") else order.order_reason,
-            order.status.value if hasattr(order.status, "value") else order.status,
-            "是" if order.is_hazardous else "否",
-            escape_csv_formula(all_users_map.get(order.applicant_id, "") if order.applicant_id else ""),
-            to_china_time(order.created_at).strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "",
-            escape_csv_formula(order.notes or ""),
-        ])
-
-    output.seek(0)
-    filename = f"reagent_orders_export_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    return export_reagent_orders_csv(orders, all_users_map)
 
 
-@router.get("/cas-overview/{cas_number}")
+@router.get("/cas-overview/{cas_number}", dependencies=[Depends(get_current_user)])
 def get_cas_overview(
     cas_number: str,
-    current_user: CurrentUser,
     db: DBSession,
     exclude_order_id: Optional[int] = None,
 ):
     """Get CAS overview for duplicate-check hints in forms and expanded rows."""
-    del current_user  # 仅用于鉴权
-
     normalized_cas = normalize_cas(cas_number)
 
     if is_special_cas_value(normalized_cas):
@@ -535,10 +497,9 @@ def get_cas_overview(
     }
 
 
-@router.get("/{order_id}", response_model=ReagentOrderResponse)
+@router.get("/{order_id}", response_model=ReagentOrderResponse, dependencies=[Depends(get_current_user)])
 def get_reagent_order(
     order_id: int,
-    current_user: CurrentUser,
     db: DBSession,
 ):
     """Get reagent order by ID"""
@@ -552,7 +513,7 @@ def get_reagent_order(
 
 
 @router.put("/{order_id}", response_model=ReagentOrderResponse)
-def update_reagent_order(
+async def update_reagent_order(
     order_id: int,
     order_update: ReagentOrderUpdate,
     db: DBSession,
@@ -627,6 +588,11 @@ def update_reagent_order(
     
     # 清除列表缓存，确保更新后前端立即看到最新数据
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    await sse_manager.broadcast(
+        SSERoom.REAGENT_ORDERS,
+        SSEEventType.REAGENT_ORDER_UPDATED,
+        {"id": order_id},
+    )
     
     return order
 

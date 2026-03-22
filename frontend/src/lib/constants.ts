@@ -31,6 +31,7 @@ export const BADGE_COLORS: Record<BadgeColor, string> = {
 
 export const STATUS_COLORS: Record<string, BadgeColor> = {
   in_stock: 'green',
+  run_short: 'orange',
   not_in_stock: 'amber',
   borrowed: 'blue',
   consume: 'green',
@@ -59,6 +60,7 @@ export const STATUS_COLORS: Record<string, BadgeColor> = {
 
 export const STATUS_LABELS: Record<string, string> = {
   in_stock: '在库',
+  run_short: '快用完',
   not_in_stock: '没有',
   borrowed: '借出',
   consume: '拿取',
@@ -146,12 +148,14 @@ export const CONSUMABLE_STATUS_STYLE: Record<string, string> = {
 // === Inventory Status ===
 export const INVENTORY_STATUS_MAP: Record<string, string> = {
   in_stock: '在库',
+  run_short: '快用完',
   borrowed: '已借出',
   consumed: '已耗尽',
 }
 
 export const INVENTORY_STATUS_STYLE: Record<string, string> = {
   in_stock: 'bg-green-100 text-green-800',
+  run_short: 'bg-orange-100 text-orange-800',
   borrowed: 'bg-blue-100 text-blue-800',
   consumed: 'bg-gray-100 text-gray-800',
 }

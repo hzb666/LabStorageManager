@@ -10,6 +10,10 @@ export function getApiBaseUrl(): string {
     return configured
   }
 
+  if (import.meta.env.DEV) {
+    return 'http://localhost:8000/api'
+  }
+
   if (typeof window === 'undefined') {
     return 'http://localhost:8000/api'
   }

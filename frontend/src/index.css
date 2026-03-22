@@ -14,7 +14,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -68,7 +68,7 @@
   --border: oklch(0.922 0.016 264.531);
   --input: oklch(0.922 0.016 264.531);
   --ring: oklch(0.704 0.04 256.788);
-  
+
   /* 侧边栏背景色 - 中性灰色 */
   --sidebar-bg: oklch(0.97 0 0);
   --sidebar: var(--sidebar-bg);
@@ -92,7 +92,7 @@
   --background: oklch(0.15 0.015 285.823);
   --foreground: oklch(0.92 0 0);
   /* 内容卡片背景 - 稍浅的深灰色 */
-  --card: oklch(0.22 0.015 285.823);
+  --card: oklch(0.20 0.008 285.823);
   --card-foreground: oklch(0.92 0 0);
   --popover: oklch(0.22 0.015 285.823);
   --popover-foreground: oklch(0.92 0 0);
@@ -109,9 +109,9 @@
   --border: oklch(0.3 0.015 285.823);
   --input: oklch(0.3 0.015 285.823);
   --ring: oklch(0.92 0 0);
-  
-  /* 侧边栏背景色 - 深灰色 */
-  --sidebar-bg: oklch(0.12 0.015 285.823);
+
+  /* 侧边栏背景色 - 纯深灰色 */
+  --sidebar-bg: oklch(0.12 0.008 285.823);
   --sidebar: var(--sidebar-bg);
   --sidebar-foreground: oklch(0.92 0 0);
   --sidebar-primary: var(--primary);
@@ -129,6 +129,7 @@
   * {
     border-color: hsl(var(--border));
   }
+
   html {
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
@@ -137,6 +138,7 @@
     /* 移除 overflow-x: hidden，可能导致 sticky 定位问题 */
     width: 100%;
   }
+
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
@@ -162,6 +164,7 @@
 
 /* Prevent focus zoom on mobile devices */
 @media screen and (max-width: 767px) {
+
   input,
   select,
   textarea {
@@ -178,6 +181,7 @@
   &::-webkit-scrollbar {
     display: none;
   }
+
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -202,7 +206,7 @@
     display: inline-flex;
     align-items: center;
   }
-  
+
   .card-title-placeholder::after {
     content: '';
     display: inline-block;
@@ -241,37 +245,43 @@
 /* 统一定义滚动条容器物理总宽度 (10px) */
 ::-webkit-scrollbar {
   width: 10px;
-  height: 10px; /* 横向滚动条高度 */
+  height: 10px;
+  /* 横向滚动条高度 */
 }
 
 /* --- 核心：滑块 (Thumb) --- */
 ::-webkit-scrollbar-thumb {
   /* [颜色] 亮色模式初始颜色 */
   background-color: #cbd5e1;
-  background-clip: padding-box; /* 关键：确保背景只在 border 内部渲染 */
-  
+  background-clip: padding-box;
+  /* 关键：确保背景只在 border 内部渲染 */
+
   /* [粗细控制 - 初始] */
-  border: 3px solid transparent; /* 3px透明边框，使色块视觉宽度为 10 - 3*2 = 4px */
-  
+  border: 3px solid transparent;
+  /* 3px透明边框，使色块视觉宽度为 10 - 3*2 = 4px */
+
   /* [新增强调：轻微圆角] */
-  border-radius: 5px; /* 这里设置略大的值，配合 border 挤压会形成轻微的胶囊感 */
+  border-radius: 5px;
+  /* 这里设置略大的值，配合 border 挤压会形成轻微的胶囊感 */
 }
 
 /* [滑块 Hover 状态] */
 ::-webkit-scrollbar-thumb:hover {
   /* [颜色] 悬浮加深 */
   background-color: #94a3b8;
-  
+
   /* [粗细控制 - Hover] */
-  border: 1px solid transparent; /* 1px透明边框，色块向外扩张，视觉宽度为 10 - 1*2 = 8px */
-  
+  border: 1px solid transparent;
+  /* 1px透明边框，色块向外扩张，视觉宽度为 10 - 1*2 = 8px */
+
   /* [关键：Hover 时必须再次声明圆角] */
   border-radius: 5px;
 }
 
 /* --- 轨道 (Track) --- */
 ::-webkit-scrollbar-track {
-  background: transparent; /* 轨道保持透明 */
+  background: transparent;
+  /* 轨道保持透明 */
 }
 
 /* --- [修正：隐藏所有三角按钮] --- */
@@ -283,7 +293,8 @@
 
 /* --- [新增强调：删除交界处小方框] --- */
 ::-webkit-scrollbar-corner {
-  background: transparent; /* 将死角背景设为透明 */
+  background: transparent;
+  /* 将死角背景设为透明 */
 }
 
 
@@ -291,6 +302,7 @@
 .dark ::-webkit-scrollbar-thumb {
   background-color: #475569;
 }
+
 .dark ::-webkit-scrollbar-thumb:hover {
   background-color: #64748b;
 }
@@ -300,20 +312,24 @@
 /* 仅在浏览器不支持 webkit 滚动条伪元素时应用 */
 @supports not selector(::-webkit-scrollbar) {
   * {
-    scrollbar-width: thin; /* Firefox 只能选 standard 或 thin */
-    scrollbar-color: #cbd5e1 transparent; /* 滑块颜色 轨道颜色 */
+    scrollbar-width: thin;
+    /* Firefox 只能选 standard 或 thin */
+    scrollbar-color: #cbd5e1 transparent;
+    /* 滑块颜色 轨道颜色 */
   }
-  
+
   .dark * {
     scrollbar-color: #475569 transparent;
   }
 }
+
 /* Toast 淡出动画 */
 @keyframes fade-out {
   from {
     opacity: 1;
     transform: translateX(0);
   }
+
   to {
     opacity: 0;
     transform: translateX(100%);
@@ -347,6 +363,7 @@
   0% {
     transform: translateX(0);
   }
+
   100% {
     /* 移动整个容器的宽度 */
     transform: translateX(-100%);
@@ -364,7 +381,7 @@
   display: flex;
   flex-shrink: 0;
   /* 确保每一组内容至少撑满整个父容器宽度，防止中间断裂 */
-  min-width: 100%; 
+  min-width: 100%;
   align-items: center;
   animation: marquee-infinite 50s linear infinite;
 }

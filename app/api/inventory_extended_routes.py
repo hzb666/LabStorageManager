@@ -1,29 +1,28 @@
 """Extended inventory routes extracted from inventory.py to keep modules maintainable."""
-import csv
-import io
 import os
 import tempfile
 from typing import Any, Annotated, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, update as sql_update
 
 from app.core.auth import CurrentUser, get_current_user
 from app.core.config import settings
 from app.core.constants import (
-    DEFAULT_PAGE_SIZE,
     LOW_STOCK_PERCENT,
     MIN_IMPORT_RATE_LIMIT,
     OVERDUE_BORROW_DAYS,
     IMPORT_RATE_LIMIT_DIVISOR,
+    SSEEventType,
+    SSERoom,
     TEMPLATE_DOWNLOAD_RATE_LIMIT,
     TEMPLATE_DOWNLOAD_RATE_LIMIT_SCOPE,
     TEMPLATE_DOWNLOAD_WINDOW_SECONDS,
 )
+from app.services.sse_manager import sse_manager
 from app.core.request_utils import get_client_ip
-from app.core.time_utils import get_utc_now, to_china_time, utc_iso_str
+from app.core.time_utils import get_utc_now, utc_iso_str
 from app.database import DBSession, get_db
 from app.models.inventory import (
     BorrowLog,
@@ -35,65 +34,18 @@ from app.models.inventory import (
     ManualInventoryCreate,
 )
 from app.models.user import User, UserRole
-from app.services.api_utils import clear_cache_by_prefix, empty_to_none
-from app.services.cas_utils import normalize_cas, validate_cas_format, is_special_cas_value
-from app.services.csv_utils import escape_csv_formula
+from app.services.api_utils import clear_cache_by_prefix
+from app.services.cas_utils import normalize_cas, is_special_cas_value
+from app.services.csv_export import export_inventory_csv
 from app.services.excel_service import validate_uploaded_file
-from app.services.internal_code import generate_internal_code
-from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.inventory_creation import create_manual_inventory_items
 from app.services.rate_limit import enforce_rate_limit
-from app.services.spec_utils import SpecificationError, format_specification, parse_specification
-from app.services.shelf_utils import (
-    is_common_shelf_available_status,
-    is_common_shelf_item,
-    normalize_storage_location,
-)
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.spec_utils import format_specification
+from app.services.shelf_utils import is_common_shelf_item
 from app.services.user_utils import batch_get_user_names
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
-COMMON_SHELF_CONSUME_NOTE = "common_shelf_consume"
-
-
-class CommonShelfConsumeRequest(BaseModel):
-    """Request body for consuming one bottle from a common-shelf group."""
-    sample_inventory_id: int
-
-
-def _common_group_sort_key(item: Inventory) -> tuple:
-    return (
-        item.cas_number or "",
-        item.name or "",
-        item.brand or "",
-        item.initial_quantity if item.initial_quantity is not None else -1,
-        item.unit or "",
-        item.storage_location or "",
-    )
-
-
-def _derive_common_group_status(available_bottles: int) -> InventoryStatus:
-    return InventoryStatus.IN_STOCK if available_bottles > 0 else InventoryStatus.CONSUMED
-
-
-def _same_value_clause(column, value):
-    if value is None:
-        return column.is_(None)
-    return column == value
-
-
-def _build_search_clause(field, pattern: str, *, fuzzy: bool):
-    column = func.coalesce(field, "")
-    if fuzzy:
-        return normalize_field_sql(column).ilike(pattern)
-    return column.ilike(pattern)
-
-
-def _combine_search_clauses(clauses: list[Any]):
-    expr = clauses[0]
-    for clause in clauses[1:]:
-        expr = expr | clause
-    return expr
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -136,8 +88,8 @@ def _add_specification(item_dict: dict) -> dict:
 
 
 def _register_cas_and_export_routes(router: APIRouter) -> None:
-    @router.get("/cas/{cas_number}")
-    def check_cas_inventory(cas_number: str, current_user: CurrentUser, db: DBSession):
+    @router.get("/cas/{cas_number}", dependencies=[Depends(get_current_user)])
+    def check_cas_inventory(cas_number: str, db: DBSession):
         normalized_cas = normalize_cas(cas_number)
 
         if is_special_cas_value(normalized_cas):
@@ -149,6 +101,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         statement = select(Inventory).where(
             Inventory.cas_number == normalized_cas,
             Inventory.status != InventoryStatus.CONSUMED,
+            Inventory.is_common.is_(False),
         ).order_by(Inventory.created_at.desc())
 
         items = db.exec(statement).all()
@@ -177,8 +130,8 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
             ],
         }
 
-    @router.get("/cas/{cas_number}/total")
-    def get_cas_total_quantity(cas_number: str, current_user: CurrentUser, db: DBSession):
+    @router.get("/cas/{cas_number}/total", dependencies=[Depends(get_current_user)])
+    def get_cas_total_quantity(cas_number: str, db: DBSession):
         normalized_cas = normalize_cas(cas_number)
 
         if is_special_cas_value(normalized_cas):
@@ -190,6 +143,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         statement = select(func.sum(Inventory.remaining_quantity)).where(
             Inventory.cas_number == normalized_cas,
             Inventory.status != InventoryStatus.CONSUMED,
+            Inventory.is_common.is_(False),
         )
 
         total = db.exec(statement).first()
@@ -199,70 +153,27 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
             "total_remaining": total or 0.0,
         }
 
-    @router.get("/code/{internal_code}", response_model=InventoryResponse)
-    def get_inventory_by_internal_code(internal_code: str, current_user: CurrentUser, db: DBSession):
+    @router.get("/code/{internal_code}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
+    def get_inventory_by_internal_code(internal_code: str, db: DBSession):
         item = _find_by_code(db, internal_code)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
         response = InventoryResponse.model_validate(item).model_dump()
         return _add_specification(response)
 
-    @router.get("/export")
-    def export_inventory(current_user: CurrentUser, db: DBSession):
-        statement = select(Inventory).order_by(Inventory.created_at.desc())
+    @router.get("/export", dependencies=[Depends(get_current_user)])
+    def export_inventory(db: DBSession):
+        """Export regular inventory items (excluding common shelf items)."""
+        statement = select(Inventory).where(
+            Inventory.is_common.is_(False)
+        ).order_by(Inventory.created_at.desc())
         items = db.exec(statement).all()
 
-        output = io.StringIO()
-        output.write("\ufeff")
-        writer = csv.writer(output)
+        # Get user map for created_by_id
+        user_ids = {item.created_by_id for item in items if item.created_by_id}
+        users_map = batch_get_user_names(db, user_ids) if user_ids else {}
 
-        writer.writerow(
-            [
-                "CAS号",
-                "名称",
-                "英文名",
-                "别名",
-                "分类",
-                "品牌",
-                "位置",
-                "初始数量",
-                "剩余数量",
-                "单位",
-                "状态",
-                "是否危险品",
-                "入库时间",
-                "备注",
-            ]
-        )
-
-        for item in items:
-            writer.writerow(
-                [
-                escape_csv_formula(item.cas_number),
-                escape_csv_formula(item.name),
-                escape_csv_formula(item.english_name or ""),
-                escape_csv_formula(item.alias or ""),
-                escape_csv_formula(item.category or ""),
-                escape_csv_formula(item.brand or ""),
-                escape_csv_formula(item.storage_location or ""),
-                    item.initial_quantity,
-                    item.remaining_quantity,
-                    item.unit,
-                    item.status.value if hasattr(item.status, "value") else item.status,
-                    "是" if item.is_hazardous else "否",
-                    to_china_time(item.created_at).strftime("%Y-%m-%d %H:%M:%S") if item.created_at else "",
-                escape_csv_formula(item.notes or ""),
-            ]
-            )
-
-        output.seek(0)
-        filename = f"inventory_export_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-        return StreamingResponse(
-            iter([output.getvalue()]),
-            media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f"attachment; filename={filename}"},
-        )
+        return export_inventory_csv(items, users_map)
 
 
 def _register_manual_and_dashboard_routes(
@@ -272,72 +183,25 @@ def _register_manual_and_dashboard_routes(
 ) -> None:
 
     @router.post("/manual-add", response_model=dict)
-    def manual_add_inventory(
+    async def manual_add_inventory(
         item_data: ManualInventoryCreate,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
-        normalized_cas = normalize_cas(item_data.cas_number)
-
-        if not normalized_cas:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CAS number is required")
-
-        is_valid, error_msg = validate_cas_format(normalized_cas)
-        if not is_valid:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CAS number: {error_msg}")
-
-        try:
-            per_bottle_value, unit = parse_specification(item_data.specification)
-        except SpecificationError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-        try:
-            internal_codes = generate_internal_code(db, normalized_cas, item_data.quantity_bottles)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-        optional_string_fields = ["storage_location", "category", "brand", "english_name", "alias", "notes"]
-        string_fields = empty_to_none(item_data, optional_string_fields)
-        normalized_storage_location = normalize_storage_location(string_fields["storage_location"])
-        string_fields["storage_location"] = normalized_storage_location
-
-        pinyin_fields = compute_pinyin_fields(
-            name=item_data.name,
-            category=item_data.category,
-            brand=item_data.brand,
-            storage_location=normalized_storage_location,
+        created_items = create_manual_inventory_items(
+            db,
+            item_data,
+            created_by_id=current_user.id,
+            is_common=False,
         )
 
-        created_items = []
-        for internal_code in internal_codes:
-            db_inventory = Inventory(
-                internal_code=internal_code,
-                cas_number=normalized_cas,
-                name=item_data.name,
-                english_name=string_fields["english_name"],
-                alias=string_fields["alias"],
-                category=string_fields["category"],
-                brand=string_fields["brand"],
-                storage_location=string_fields["storage_location"],
-                is_common=False,
-                initial_quantity=per_bottle_value,
-                remaining_quantity=per_bottle_value,
-                remaining_percent=1,
-                unit=unit,
-                is_hazardous=item_data.is_hazardous,
-                notes=string_fields["notes"],
-                status=InventoryStatus.IN_STOCK,
-                created_by_id=current_user.id,
-                **pinyin_fields,
-            )
-            db.add(db_inventory)
-            created_items.append(db_inventory)
-
-        db.commit()
-        for item in created_items:
-            db.refresh(item)
-
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        for ci in created_items:
+            await sse_manager.broadcast(
+                SSERoom.INVENTORY,
+                SSEEventType.INVENTORY_CREATED,
+                {"id": ci.id},
+            )
 
         return {
             "message": "Manual stock-in successful",
@@ -353,6 +217,7 @@ def _register_manual_and_dashboard_routes(
         statement = select(Inventory).where(
             Inventory.status == InventoryStatus.BORROWED,
             Inventory.borrower_id == current_user.id,
+            Inventory.is_common.is_(False),
         ).order_by(Inventory.updated_at.desc())
 
         items = db.exec(statement).all()
@@ -437,278 +302,11 @@ def _register_manual_and_dashboard_routes(
         }
 
 
-def _register_common_shelf_and_import_routes(
+def _register_import_routes(
     router: APIRouter,
-    max_page_size: int,
     search_cache: Dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
-
-    @router.get("/common-shelf")
-    def list_common_shelf(
-        current_user: Annotated[User, Depends(get_current_user)],
-        db: Annotated[Session, Depends(get_db)],
-        skip: int = 0,
-        limit: int = min(DEFAULT_PAGE_SIZE, max_page_size),
-        status_filter: Optional[InventoryStatus] = None,
-        search: Optional[str] = None,
-        search_field: Optional[str] = None,
-        fuzzy: bool = False,
-        sort_by: Optional[str] = None,
-        sort_order: Optional[str] = 'desc',
-    ):
-        del current_user
-
-        base = select(Inventory).where(Inventory.is_common.is_(True))
-
-        if search:
-            search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
-            if search_value:
-                keyword = f"%{search_value}%"
-                field_map = {
-                    'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
-                    'cas_number': [Inventory.cas_number],
-                    'brand': [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
-                    'category': [
-                        Inventory.category,
-                        Inventory.category_pinyin,
-                        Inventory.category_pinyin_initials,
-                    ],
-                    'storage_location': [
-                        Inventory.storage_location,
-                        Inventory.storage_location_pinyin,
-                        Inventory.storage_location_pinyin_initials,
-                    ],
-                }
-                if search_field and search_field != 'all' and search_field in field_map:
-                    base = base.where(
-                        _combine_search_clauses([
-                            _build_search_clause(field, keyword, fuzzy=fuzzy)
-                            for field in field_map[search_field]
-                        ])
-                    )
-                else:
-                    all_clauses = []
-                    for fields in field_map.values():
-                        all_clauses.extend(
-                            _build_search_clause(field, keyword, fuzzy=fuzzy)
-                            for field in fields
-                        )
-                    base = base.where(_combine_search_clauses(all_clauses))
-
-        items = db.exec(base.order_by(Inventory.created_at.desc(), Inventory.id.desc())).all()
-
-        grouped: dict[tuple, dict[str, Any]] = {}
-        for item in items:
-            group_key = _common_group_sort_key(item)
-            group = grouped.get(group_key)
-            if group is None:
-                group = {
-                    "sample_inventory_id": item.id,
-                    "cas_number": item.cas_number,
-                    "name": item.name,
-                    "english_name": item.english_name,
-                    "alias": item.alias,
-                    "category": item.category,
-                    "brand": item.brand,
-                    "storage_location": item.storage_location,
-                    "initial_quantity": item.initial_quantity,
-                    "unit": item.unit,
-                    "is_hazardous": item.is_hazardous,
-                    "notes": item.notes,
-                    "created_at": item.created_at,
-                    "updated_at": item.updated_at,
-                    "created_by_id": item.created_by_id,
-                    "total_bottles": 0,
-                    "available_bottles": 0,
-                }
-                grouped[group_key] = group
-
-            group["total_bottles"] += 1
-            if is_common_shelf_available_status(item.status):
-                group["available_bottles"] += 1
-
-            if item.created_at and group["created_at"] and item.created_at > group["created_at"]:
-                group["created_at"] = item.created_at
-                group["sample_inventory_id"] = item.id
-                group["created_by_id"] = item.created_by_id
-            elif group["created_at"] is None and item.created_at is not None:
-                group["created_at"] = item.created_at
-                group["sample_inventory_id"] = item.id
-                group["created_by_id"] = item.created_by_id
-
-        grouped_rows: list[dict[str, Any]] = []
-        for group in grouped.values():
-            available_bottles = group["available_bottles"]
-            row_status = _derive_common_group_status(available_bottles)
-            if status_filter:
-                if row_status != status_filter:
-                    continue
-
-            grouped_rows.append(
-                {
-                    "id": group["sample_inventory_id"],
-                    "sample_inventory_id": group["sample_inventory_id"],
-                    "cas_number": group["cas_number"],
-                    "name": group["name"],
-                    "english_name": group["english_name"],
-                    "alias": group["alias"],
-                    "category": group["category"],
-                    "brand": group["brand"],
-                    "storage_location": group["storage_location"],
-                    "initial_quantity": group["initial_quantity"],
-                    "remaining_quantity": available_bottles,
-                    "unit": group["unit"],
-                    "is_hazardous": group["is_hazardous"],
-                    "status": row_status,
-                    "available_bottles": available_bottles,
-                    "total_bottles": group["total_bottles"],
-                    "consumed_bottles": group["total_bottles"] - available_bottles,
-                    "created_at": group["created_at"],
-                    "updated_at": group["updated_at"],
-                    "notes": group["notes"],
-                    "created_by_id": group["created_by_id"],
-                    "is_common": True,
-                    "specification": format_specification(group["initial_quantity"], group["unit"]),
-                }
-            )
-
-        sort_reverse = sort_order != 'asc'
-        sort_key_map = {
-            'cas_number': lambda row: row["cas_number"] or "",
-            'name': lambda row: row["name"] or "",
-            'category': lambda row: row["category"] or "",
-            'brand': lambda row: row["brand"] or "",
-            'status': lambda row: row["status"].value if hasattr(row["status"], "value") else str(row["status"]),
-            'created_at': lambda row: row["created_at"] or get_utc_now(),
-            'available_bottles': lambda row: row["available_bottles"],
-            'total_bottles': lambda row: row["total_bottles"],
-            'storage_location': lambda row: row["storage_location"] or "",
-        }
-        sort_key = sort_key_map.get(sort_by or '', sort_key_map['created_at'])
-        grouped_rows.sort(key=sort_key, reverse=sort_reverse)
-
-        total = len(grouped_rows)
-        paged_rows = grouped_rows[skip:] if limit <= 0 else grouped_rows[skip: skip + limit]
-
-        user_ids = {
-            row["created_by_id"]
-            for row in paged_rows
-            if row.get("created_by_id")
-        }
-        users_map = batch_get_user_names(db, user_ids)
-
-        for row in paged_rows:
-            row["created_by_name"] = users_map.get(row.get("created_by_id"))
-            if hasattr(row["status"], "value"):
-                row["status"] = row["status"].value
-
-        return {
-            "data": paged_rows,
-            "total": total,
-            "skip": skip,
-            "limit": limit,
-        }
-
-    @router.post("/common-shelf/consume-one")
-    def consume_one_common_shelf_item(
-        payload: CommonShelfConsumeRequest,
-        current_user: Annotated[User, Depends(get_current_user)],
-        db: Annotated[Session, Depends(get_db)],
-    ):
-        sample_item = db.get(Inventory, payload.sample_inventory_id)
-        if not sample_item:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
-        if not is_common_shelf_item(sample_item):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Item is not on common shelf")
-
-        from sqlmodel import update as sql_update
-
-        consumed_item: Optional[Inventory] = None
-        consumed_quantity: Optional[float] = None
-        now = get_utc_now()
-
-        for _ in range(5):
-            candidate = db.exec(
-                select(Inventory)
-                .where(
-                    Inventory.is_common.is_(True),
-                    Inventory.status == InventoryStatus.IN_STOCK,
-                    _same_value_clause(Inventory.cas_number, sample_item.cas_number),
-                    _same_value_clause(Inventory.name, sample_item.name),
-                    _same_value_clause(Inventory.brand, sample_item.brand),
-                    _same_value_clause(Inventory.initial_quantity, sample_item.initial_quantity),
-                    _same_value_clause(Inventory.unit, sample_item.unit),
-                    _same_value_clause(Inventory.storage_location, sample_item.storage_location),
-                )
-                .order_by(Inventory.created_at.asc(), Inventory.id.asc())
-            ).first()
-
-            if not candidate:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No available bottle in this group")
-
-            consumed_quantity = candidate.remaining_quantity or candidate.initial_quantity or 1.0
-            update_stmt = (
-                sql_update(Inventory)
-                .where(Inventory.id == candidate.id)
-                .where(Inventory.is_common.is_(True))
-                .where(Inventory.status == InventoryStatus.IN_STOCK)
-                .values(
-                    status=InventoryStatus.CONSUMED,
-                    remaining_quantity=0,
-                    remaining_percent=0,
-                    borrower_id=None,
-                    updated_at=now,
-                )
-            )
-            update_result = db.exec(update_stmt)
-            db.commit()
-            if update_result.rowcount == 0:
-                continue
-
-            consumed_item = db.get(Inventory, candidate.id)
-            break
-
-        if not consumed_item:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Item changed by another request, please retry",
-            )
-
-        consume_log = BorrowLog(
-            inventory_id=consumed_item.id,
-            borrower_id=current_user.id,
-            borrow_time=now,
-            is_consume=True,
-            quantity_borrowed=consumed_quantity or 1.0,
-            quantity_returned=0,
-            notes=COMMON_SHELF_CONSUME_NOTE,
-        )
-        db.add(consume_log)
-        db.commit()
-
-        remaining_available = db.exec(
-            select(func.count())
-            .select_from(Inventory)
-            .where(
-                Inventory.is_common.is_(True),
-                Inventory.status == InventoryStatus.IN_STOCK,
-                _same_value_clause(Inventory.cas_number, sample_item.cas_number),
-                _same_value_clause(Inventory.name, sample_item.name),
-                _same_value_clause(Inventory.brand, sample_item.brand),
-                _same_value_clause(Inventory.initial_quantity, sample_item.initial_quantity),
-                _same_value_clause(Inventory.unit, sample_item.unit),
-                _same_value_clause(Inventory.storage_location, sample_item.storage_location),
-            )
-        ).one()
-
-        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
-
-        return {
-            "message": "已拿取一瓶",
-            "consumed_inventory_id": consumed_item.id,
-            "available_bottles": remaining_available,
-        }
 
     @router.get("/import/template")
     def get_import_template(current_user: CurrentUser):
@@ -790,7 +388,7 @@ def _register_borrow_return_routes(
 ) -> None:
 
     @router.post("/{inventory_id}/borrow", response_model=InventoryResponse)
-    def borrow_item(
+    async def borrow_item(
         inventory_id: int,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
@@ -815,7 +413,6 @@ def _register_borrow_return_routes(
             if not actual_borrower or not actual_borrower.is_active or actual_borrower.role == UserRole.PUBLIC:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please select a valid borrower")
 
-        from sqlmodel import update as sql_update
 
         update_statement = (
             sql_update(Inventory)
@@ -856,10 +453,16 @@ def _register_borrow_return_routes(
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
 
         response = InventoryResponse.model_validate(item).model_dump()
-        return _add_specification(response)
+        response = _add_specification(response)
+        await sse_manager.broadcast(
+            SSERoom.INVENTORY,
+            SSEEventType.INVENTORY_BORROWED,
+            {"id": inventory_id, "item": response},
+        )
+        return response
 
     @router.post("/{inventory_id}/return", response_model=dict)
-    def return_item(
+    async def return_item(
         inventory_id: int,
         return_data: InventoryBorrowReturn,
         current_user: Annotated[User, Depends(get_current_user)],
@@ -917,16 +520,21 @@ def _register_borrow_return_routes(
         db.refresh(item)
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
 
+        await sse_manager.broadcast(
+            SSERoom.INVENTORY,
+            SSEEventType.INVENTORY_RETURNED,
+            {"id": inventory_id, "item": item.model_dump()},
+        )
+
         result = item.model_dump()
         if low_quantity_warning:
             result["warning"] = low_quantity_warning
         return result
 
-    @router.get("/{inventory_id}/borrow-history")
+    @router.get("/{inventory_id}/borrow-history", dependencies=[Depends(get_current_user)])
     def get_borrow_history(
         inventory_id: int,
         db: Annotated[Session, Depends(get_db)],
-        current_user: Annotated[User, Depends(get_current_user)],
     ):
         item = _get_by_id(db, inventory_id)
         if not item:
@@ -972,10 +580,9 @@ def _register_borrow_return_routes(
 def register_inventory_extended_routes(
     router: APIRouter,
     search_cache: Dict[str, tuple[Any, Any]],
-    max_page_size: int,
     list_cache_prefix: str,
 ) -> None:
     _register_cas_and_export_routes(router)
     _register_manual_and_dashboard_routes(router, search_cache, list_cache_prefix)
-    _register_common_shelf_and_import_routes(router, max_page_size, search_cache, list_cache_prefix)
+    _register_import_routes(router, search_cache, list_cache_prefix)
     _register_borrow_return_routes(router, search_cache, list_cache_prefix)

@@ -106,3 +106,24 @@ export const REAGENT_BRAND_OPTIONS = [
   { label: '分装', value: '分装' },
   { label: '自己合成', value: '自己合成' },
 ]
+
+export const COMMON_SHELF_CATEGORY_OPTIONS = [
+  { label: '常用溶剂', value: '常用溶剂' },
+  { label: '常用酸', value: '常用酸' },
+  { label: '常用碱', value: '常用碱' },
+  { label: '常用盐', value: '常用盐' },
+  { label: '缓冲液', value: '缓冲液' },
+  { label: '清洗剂', value: '清洗剂' },
+  { label: '指示剂', value: '指示剂' },
+  { label: '其他', value: '其他' },
+]
+
+export const COMMON_SHELF_BRAND_OPTIONS = [
+  { label: '阿拉丁', value: '阿拉丁' },
+  { label: '国药', value: '国药' },
+  { label: 'MACKLIN', value: 'MACKLIN' },
+  { label: 'TCI', value: 'TCI' },
+  { label: '分装', value: '分装' },
+  { label: '自配', value: '自配' },
+  { label: '未确认', value: '未确认' },
+]

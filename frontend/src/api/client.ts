@@ -349,6 +349,24 @@ export const commonShelfAPI = {
   }) => api.get('/inventory/common-shelf', { params }),
   consumeOne: (sampleInventoryId: number) =>
     api.post('/inventory/common-shelf/consume-one', { sample_inventory_id: sampleInventoryId }),
+  manualAdd: (data: {
+    cas_number: string
+    name: string
+    english_name?: string
+    alias?: string
+    specification: string
+    quantity_bottles: number
+    brand?: string
+    category?: string
+    storage_location?: string
+    is_hazardous: boolean
+    notes?: string
+  }) => api.post('/inventory/common-shelf/manual-add', data),
+  updateGroup: (sampleInventoryId: number, data: Record<string, unknown>) =>
+    api.put(`/inventory/common-shelf/group/${sampleInventoryId}`, data),
+  deleteGroup: (sampleInventoryId: number) =>
+    api.delete(`/inventory/common-shelf/group/${sampleInventoryId}`),
+  exportCommonShelf: () => api.get('/inventory/common-shelf/export', { responseType: 'blob' }),
 }
 
 // Chemical Info APIs

@@ -125,11 +125,13 @@ def get_current_session(
             # 2. 刷新 Redis 缓存（不仅续期，也更新最后活跃时间和最后 IP）
             cached_data["last_active_at"] = now_utc.isoformat()
             cached_data["last_ip_address"] = client_ip
-            cache_session(
-                token_hash,
-                cached_data,
-                int((expires_at - now_utc).total_seconds())
-            )
+            ttl_seconds = int((expires_at - now_utc).total_seconds())
+            if ttl_seconds > 0:
+                cache_session(
+                    token_hash,
+                    cached_data,
+                    ttl_seconds
+                )
             
             # 同步更新当前流程内存对象的值
             session.last_active_at = now_utc
@@ -163,22 +165,24 @@ def get_current_session(
     db.refresh(session)
     
     # 5. 回填 Redis 缓存（加入 last_ip_address）
-    cache_session(
-        token_hash,
-        {
-            "session_id": session.id,
-            "user_id": user.id,
-            "username": user.username,
-            "is_active": user.is_active,
-            "device_id": session.device_id,
-            "device_name": session.device_name,
-            "ip_address": session.ip_address,
-            "last_ip_address": session.last_ip_address, # 缓存 last_ip
-            "user_agent": session.user_agent,
-            "expires_at": session.expires_at.isoformat(),
-            "last_active_at": session.last_active_at.isoformat(),
-        },
-        int((session.expires_at - get_utc_now()).total_seconds())
-    )
+    ttl_seconds = int((session.expires_at - get_utc_now()).total_seconds())
+    if ttl_seconds > 0:
+        cache_session(
+            token_hash,
+            {
+                "session_id": session.id,
+                "user_id": user.id,
+                "username": user.username,
+                "is_active": user.is_active,
+                "device_id": session.device_id,
+                "device_name": session.device_name,
+                "ip_address": session.ip_address,
+                "last_ip_address": session.last_ip_address, # 缓存 last_ip
+                "user_agent": session.user_agent,
+                "expires_at": session.expires_at.isoformat(),
+                "last_active_at": session.last_active_at.isoformat(),
+            },
+            ttl_seconds
+        )
     
     return user, session

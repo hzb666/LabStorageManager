@@ -13,7 +13,11 @@ import type {
   UserUpdateFormData,
   StockInFormInputData
 } from './validationSchemas'
-import { ORDER_REASON_OPTIONS, REAGENT_CATEGORY_OPTIONS, REAGENT_BRAND_OPTIONS } from './options'
+import {
+  ORDER_REASON_OPTIONS,
+  REAGENT_CATEGORY_OPTIONS,
+  REAGENT_BRAND_OPTIONS,
+} from './options'
 
 // ============================================================================
 // 库存表单配置
@@ -30,6 +34,7 @@ export const defaultInventoryValues: InventoryFormData = {
   brand: '',
   storage_location: '',
   is_hazardous: false,
+  is_running_short: false,
   notes: '',
   quantity_bottles: 1,
   initial_quantity: undefined,
@@ -42,7 +47,19 @@ export const defaultInventoryValues: InventoryFormData = {
  * @param isEdit 是否为编辑模式
  * @param initialQuantity 初始数量（编辑模式下使用）
  */
-export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number): FieldSchema<InventoryFormData>[] {
+export function getInventoryFormFields(
+  isEdit: boolean,
+  initialQuantity?: number,
+  config?: {
+    categoryOptions?: { label: string; value: string }[]
+    brandOptions?: { label: string; value: string }[]
+    includeRunningShort?: boolean
+  }
+): FieldSchema<InventoryFormData>[] {
+  const categoryOptions = config?.categoryOptions ?? REAGENT_CATEGORY_OPTIONS
+  const brandOptions = config?.brandOptions ?? REAGENT_BRAND_OPTIONS
+  const includeRunningShort = config?.includeRunningShort ?? false
+
   // 编辑模式下显示：剩余量 + 规格；添加模式下显示：瓶数 + 规格
   const quantityFields = isEdit && initialQuantity !== undefined
     ? [
@@ -61,8 +78,8 @@ export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
     { name: 'storage_location' as const, label: '存放位置', type: 'input' as const, placeholder: '如: A-1-1 柜' },
     ...quantityFields,
-    { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称' },
-    { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: REAGENT_CATEGORY_OPTIONS, placeholder: '输入分类名称' },
+    { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: brandOptions, placeholder: '输入品牌名称' },
+    { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: categoryOptions, placeholder: '输入分类名称' },
     {
       name: 'is_hazardous' as const,
       label: '危险品',
@@ -74,6 +91,21 @@ export function getInventoryFormFields(isEdit: boolean, initialQuantity?: number
         </span>
       )
     },
+    ...(includeRunningShort
+      ? [
+          {
+            name: 'is_running_short' as const,
+            label: '是否快用完',
+            type: 'checkbox' as const,
+            checkboxLabel: (
+              <span className="flex items-center gap-1">
+                <AlertTriangle className="w-4 h-4 text-orange-500" />
+                快用完
+              </span>
+            ),
+          },
+        ]
+      : []),
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
   ]
 }
@@ -114,10 +146,8 @@ export const defaultConsumableOrderValues: ConsumableOrderFormData = {
 
 /**
  * 获取试剂订单表单字段配置
- * @param isEdit 是否为编辑模式
  */
-export function getReagentOrderFormFields(isEdit: boolean): FieldSchema<ReagentOrderFormData>[] {
-  void isEdit
+export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormData>[] {
   return [
     { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
     { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
@@ -203,10 +233,8 @@ export function getUserEditFormFields(): FieldSchema<UserUpdateFormData>[] {
 
 /**
  * 获取耗材订单表单字段配置
- * @param isEdit 是否为编辑模式
  */
-export function getConsumableOrderFormFields(isEdit: boolean): FieldSchema<ConsumableOrderFormData>[] {
-  void isEdit
+export function getConsumableOrderFormFields(): FieldSchema<ConsumableOrderFormData>[] {
   return [
     { name: 'name' as const, label: '耗材名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 一次性手套' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 1, placeholder: '如: Disposable Gloves' },

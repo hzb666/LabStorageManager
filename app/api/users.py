@@ -297,7 +297,6 @@ def login(
         
         return json_response
     except HTTPException:
-        # 重新抛出 HTTP 异常
         raise
     except Exception:
         # 记录其他所有异常
@@ -369,11 +368,10 @@ def change_password(
     return {"message": "密码修改成功"}
 
 
-@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 def create_user(
     user: UserCreate,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)],
 ):
     """Create a new user (admin only)"""
     # Check if username exists
@@ -502,15 +500,12 @@ def list_users(
     }
 
 
-@router.get("/search", response_model=list[UserSearchItem])
+@router.get("/search", response_model=list[UserSearchItem], dependencies=[Depends(get_current_user)])
 def search_users(
     q: str,
     db: Annotated[Session, Depends(get_db)],
-    current_user: CurrentUser,
 ):
     """Search users for autocomplete by username/full_name/full_name_pinyin/full_name initials."""
-    del current_user  # authenticated users only
-
     keyword = normalize_search_term((q or "").strip())
     if not keyword:
         return []
@@ -540,11 +535,10 @@ def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     return current_user
 
 
-@router.get("/{user_id}", response_model=PublicUserResponse)
+@router.get("/{user_id}", response_model=PublicUserResponse, dependencies=[Depends(get_current_user)])
 def get_user(
     user_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)]
 ):
     """Get user by ID"""
     user = get_user_by_id(db, user_id)
@@ -635,11 +629,10 @@ def update_user(
     return user
 
 
-@router.post("/{user_id}/activate", response_model=UserResponse)
+@router.post("/{user_id}/activate", response_model=UserResponse, dependencies=[Depends(require_admin)])
 def activate_user(
     user_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)]
 ):
     """Activate a user account (admin only)"""
     user = get_user_by_id(db, user_id)
@@ -697,12 +690,11 @@ def delete_user(
     db.commit()
 
 
-@router.put("/{user_id}/role", response_model=UserResponse)
+@router.put("/{user_id}/role", response_model=UserResponse, dependencies=[Depends(require_admin)])
 def update_user_role(
     user_id: int,
     role: str,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)]
 ):
     """Update user role (admin only)"""
     user = get_user_by_id(db, user_id)
@@ -733,12 +725,11 @@ class ResetPasswordRequest(BaseModel):
     old_password: Optional[str] = None  # Required when resetting admin password
 
 
-@router.post("/{user_id}/reset-password")
+@router.post("/{user_id}/reset-password", dependencies=[Depends(require_admin)])
 def reset_user_password(
     user_id: int,
     password_request: ResetPasswordRequest,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(require_admin)]
 ):
     """Reset user password (admin only)
 

@@ -14,22 +14,31 @@ import {
 export interface ChemicalProperties {
   // 基本属性 (PUG REST)
   smiles?: string
-  molecularWeight?: string
   iupacName?: string
 }
 
 interface PUGRestProperty {
   SMILES?: string
-  MolecularWeight?: number
   IUPACName?: string
+}
+
+interface CachedChemicalProperties {
+  value: ChemicalProperties
+  expiresAt: number
+}
+
+interface ChemicalPropertiesStorage {
+  version: number
+  data: Record<string, CachedChemicalProperties>
 }
 
 // ============ 缓存配置 ============
 
 const CACHE_KEY = 'chemical_properties_cache'
+const CHEMICAL_PROPERTIES_STORAGE_VERSION = 1
 
 // 内存缓存
-const memoryCache = new Map<string, ChemicalProperties>()
+const memoryCache = new Map<string, CachedChemicalProperties>()
 const inFlightRequests = new Map<string, Promise<ChemicalProperties | null>>()
 
 // PubChem 全局限流状态：1 秒最多 5 个请求
@@ -38,32 +47,125 @@ let rateLimitQueue: Promise<void> = Promise.resolve()
 
 // ============ 缓存工具函数 ============
 
-function loadFromStorage(): Map<string, ChemicalProperties> {
+function normalizeChemicalProperties(value: Record<string, unknown>): ChemicalProperties {
+  return {
+    smiles: typeof value.smiles === 'string' ? value.smiles : undefined,
+    iupacName: typeof value.iupacName === 'string' ? value.iupacName : undefined,
+  }
+}
+
+function loadFromStorage(): Map<string, CachedChemicalProperties> {
   try {
     const stored = localStorage.getItem(CACHE_KEY)
     if (!stored) return new Map()
 
-    const { data, timestamp } = JSON.parse(stored)
-    if (Date.now() - timestamp > CHEMICAL_PROPERTIES_CACHE_EXPIRY_MS) {
+    const parsed = JSON.parse(stored) as ChemicalPropertiesStorage
+    if (
+      parsed?.version !== CHEMICAL_PROPERTIES_STORAGE_VERSION ||
+      !parsed?.data ||
+      typeof parsed.data !== 'object'
+    ) {
       localStorage.removeItem(CACHE_KEY)
       return new Map()
     }
 
-    return new Map(Object.entries(data || {}))
+    const now = Date.now()
+    let shouldRewrite = false
+    const hydrated = new Map<string, CachedChemicalProperties>()
+
+    for (const [cas, rawEntry] of Object.entries(parsed.data)) {
+      if (!rawEntry || typeof rawEntry !== 'object') {
+        shouldRewrite = true
+        continue
+      }
+
+      const entry = rawEntry as CachedChemicalProperties
+      if (
+        typeof entry.expiresAt !== 'number' ||
+        !entry.value ||
+        typeof entry.value !== 'object'
+      ) {
+        shouldRewrite = true
+        continue
+      }
+
+      const normalizedValue = normalizeChemicalProperties(entry.value as Record<string, unknown>)
+      if ('molecularWeight' in (entry.value as Record<string, unknown>)) {
+        shouldRewrite = true
+      }
+
+      if (entry.expiresAt > now) {
+        hydrated.set(cas, {
+          value: normalizedValue,
+          expiresAt: entry.expiresAt,
+        })
+      } else {
+        shouldRewrite = true
+      }
+    }
+
+    while (hydrated.size > CHEMICAL_PROPERTIES_CACHE_MAX_SIZE) {
+      const oldest = hydrated.keys().next()
+      if (oldest.done) break
+      hydrated.delete(oldest.value)
+      shouldRewrite = true
+    }
+
+    if (shouldRewrite) {
+      saveToStorage(hydrated)
+    }
+
+    return hydrated
   } catch {
     return new Map()
   }
 }
 
-function saveToStorage(cache: Map<string, ChemicalProperties>) {
+function saveToStorage(cache: Map<string, CachedChemicalProperties>): void {
   try {
+    const data = Object.fromEntries(cache)
     localStorage.setItem(CACHE_KEY, JSON.stringify({
-      data: Object.fromEntries(cache),
-      timestamp: Date.now()
+      version: CHEMICAL_PROPERTIES_STORAGE_VERSION,
+      data,
     }))
   } catch (e) {
     console.warn('保存缓存失败:', e)
   }
+}
+
+function getCachedProperties(casNumber: string): ChemicalProperties | null {
+  const cached = memoryCache.get(casNumber)
+  if (!cached) return null
+
+  if (cached.expiresAt <= Date.now()) {
+    memoryCache.delete(casNumber)
+    saveToStorage(memoryCache)
+    return null
+  }
+
+  memoryCache.delete(casNumber)
+  memoryCache.set(casNumber, cached)
+  return cached.value
+}
+
+function setCachedProperties(casNumber: string, data: ChemicalProperties): void {
+  const normalizedData = normalizeChemicalProperties(data as Record<string, unknown>)
+
+  if (memoryCache.has(casNumber)) {
+    memoryCache.delete(casNumber)
+  }
+
+  while (memoryCache.size >= CHEMICAL_PROPERTIES_CACHE_MAX_SIZE) {
+    const oldest = memoryCache.keys().next()
+    if (oldest.done) break
+    memoryCache.delete(oldest.value)
+  }
+
+  memoryCache.set(casNumber, {
+    value: normalizedData,
+    expiresAt: Date.now() + CHEMICAL_PROPERTIES_CACHE_EXPIRY_MS,
+  })
+  saveToStorage(memoryCache)
 }
 
 function sleep(ms: number): Promise<void> {
@@ -108,21 +210,22 @@ async function withPubChemRateLimit<T>(task: () => Promise<T>): Promise<T> {
 
 // 初始化内存缓存
 const storageCache = loadFromStorage()
-storageCache.forEach((value, key) => memoryCache.set(key, value))
+storageCache.forEach((entry, key) => memoryCache.set(key, entry))
 
 // ============ 主要查询函数 ============
 
 /**
  * 通过 CAS 号获取化合物基础属性
- * 流程: PUG REST (获取 SMILES, MolecularWeight, IUPACName)
+ * 流程: PUG REST (获取 SMILES, IUPACName)
  */
 export async function queryCompoundData(casNumber: string): Promise<ChemicalProperties | null> {
   if (!casNumber) return null
   if (isSpecialCasValue(casNumber)) return null
 
   // 检查内存缓存
-  if (memoryCache.has(casNumber)) {
-    return memoryCache.get(casNumber) ?? null
+  const cached = getCachedProperties(casNumber)
+  if (cached) {
+    return cached
   }
 
   const existingRequest = inFlightRequests.get(casNumber)
@@ -131,7 +234,7 @@ export async function queryCompoundData(casNumber: string): Promise<ChemicalProp
   const requestPromise = (async () => {
     try {
       // ============ 步骤1: PUG REST 获取基本属性 ============
-      const restUrl = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(casNumber)}/property/SMILES,MolecularWeight,IUPACName/JSON`
+      const restUrl = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(casNumber)}/property/SMILES,IUPACName/JSON`
       const restRes = await withPubChemRateLimit(() =>
         fetch(restUrl, { headers: { Accept: 'application/json' } })
       )
@@ -144,18 +247,11 @@ export async function queryCompoundData(casNumber: string): Promise<ChemicalProp
       // 基本属性
       const result: ChemicalProperties = {
         smiles: props.SMILES,
-        molecularWeight: props.MolecularWeight ? String(props.MolecularWeight) : undefined,
-        iupacName: props.IUPACName
+        iupacName: props.IUPACName,
       }
 
-      // 只有两个属性都获取成功时才缓存
-      if (result.smiles && result.molecularWeight) {
-        if (memoryCache.size >= CHEMICAL_PROPERTIES_CACHE_MAX_SIZE) {
-          const firstKey = memoryCache.keys().next().value
-          if (firstKey) memoryCache.delete(firstKey)
-        }
-        memoryCache.set(casNumber, result)
-        saveToStorage(memoryCache)
+      if (result.smiles) {
+        setCachedProperties(casNumber, result)
       }
 
       return result
