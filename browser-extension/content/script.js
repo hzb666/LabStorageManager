@@ -13,15 +13,12 @@
     if (message.action === 'ping') {
       console.log('[Content] Ping received');
       sendResponse({ success: true, data: 'pong' });
-      return true;
     }
 
     if (message.action === 'GET_CART') {
       const cartData = extractCartItems();
       sendResponse({ success: true, data: cartData });
     }
-
-    return true;
   });
 
   // 提取已提交订单的基本信息
@@ -37,7 +34,7 @@
         const submitted = item.textContent.includes('已提交');
         if (submitted) {
           const data = extractItemBasicInfo(item);
-          if (data && data.detailUrl) {
+          if (data?.detailUrl) {
             items.push(data);
           }
         }
@@ -87,7 +84,7 @@
     if (cartItemId) {
       const qtyInput = document.getElementById(`txt_${cartItemId}_数量`);
       if (qtyInput) {
-        quantity = parseInt(qtyInput.value) || 1;
+        quantity = Number.parseInt(qtyInput.value, 10) || 1;
       }
     }
 
@@ -95,13 +92,18 @@
     if (cartItemId) {
       const priceInput = document.getElementById(`txt_${cartItemId}_单价`);
       if (priceInput) {
-        price = parseFloat(priceInput.value) || 0;
+        price = Number.parseFloat(priceInput.value) || 0;
       }
     }
 
-    // 5. 检测危险品 - 通过 wxp.png 图片判断
-    const dangerousImg = element.querySelector('img[src*="wxp.png"]');
-    isDangerous = !!dangerousImg;
+    // 5. 检测危险品 - 优先图标，再用文本/链接兜底，兼容不同供应商模板
+    const dangerousImg = element.querySelector(
+      'img[src*="/images/wxp.png"], img[src$="wxp.png"], img[src*="wxp.png"]'
+    );
+    const textContent = (element.textContent || '').replaceAll(/\s+/g, ' ');
+    const hasDangerText = textContent.includes('危险品');
+    const hasMsdsLink = !!element.querySelector('a[href*="page=msdsxq"]');
+    isDangerous = Boolean(dangerousImg) || hasDangerText || hasMsdsLink;
 
     console.log('[Content] 提取基本信息: productId=', productId, 'cartItemId=', cartItemId, 'quantity=', quantity, 'price=', price, 'detailUrl=', detailUrl, 'isDangerous=', isDangerous);
 

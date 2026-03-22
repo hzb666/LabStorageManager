@@ -3,14 +3,23 @@
   "name": "北大医学部购物车同步",
   "version": "1.0.0",
   "description": "将北大医学部试剂平台的购物车同步到实验室库存管理系统",
+  "icons": {
+    "16": "icons/favicon.png",
+    "32": "icons/favicon.png",
+    "48": "icons/favicon.png",
+    "128": "icons/favicon.png"
+  },
   "permissions": [
-    "activeTab",
     "tabs",
-    "scripting",
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://reagent.bjmu.edu.cn/*",
+    "http://localhost:5173/*",
+    "http://127.0.0.1:5173/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
   ],
@@ -22,9 +31,25 @@
       "matches": ["https://reagent.bjmu.edu.cn/*"],
       "js": ["content/script.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:5173/cart-import*",
+        "http://127.0.0.1:5173/cart-import*",
+        "http://localhost:3000/cart-import*",
+        "http://127.0.0.1:3000/cart-import*",
+        "http://localhost:8000/cart-import*",
+        "http://127.0.0.1:8000/cart-import*"
+      ],
+      "js": ["content/import-bridge.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {
+    "default_icon": {
+      "16": "icons/favicon.png",
+      "32": "icons/favicon.png"
+    },
     "default_popup": "popup/popup.html"
   }
 }
