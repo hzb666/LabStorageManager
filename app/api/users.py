@@ -296,6 +296,8 @@ def login(
         )
         
         return json_response
+    except HTTPException:
+        raise
     except Exception:
         # 记录其他所有异常
         logger.exception("Login error")

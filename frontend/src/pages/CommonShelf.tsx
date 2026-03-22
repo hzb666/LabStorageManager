@@ -13,6 +13,7 @@ import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { chemicalAPI, commonShelfAPI } from '@/api/client'
+import { useSSE, type SSEEventHandler } from '@/hooks/useSSE'
 import type { FilterAPI } from '@/hooks/useTableState'
 import useDialogState from '@/hooks/useDialogState'
 import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfigs'
@@ -69,6 +70,13 @@ const SEARCH_FIELD_OPTIONS = [
   { value: 'storage_location', label: '位置' },
 ]
 
+const COMMON_SHELF_SSE_EVENTS = [
+  'common_shelf.created',
+  'common_shelf.updated',
+  'common_shelf.deleted',
+  'common_shelf.consumed',
+] as const
+
 const columnHelper = createColumnHelper<CommonShelfItem>()
 
 function createCommonShelfActionColumn(): ColumnDef<CommonShelfItem, unknown> {
@@ -108,6 +116,22 @@ export function CommonShelfPage() {
   const refreshCommonShelf = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['common-shelf'] })
   }, [queryClient])
+
+  const handleCommonShelfSSEEvent = useCallback<SSEEventHandler>(() => {
+    void refreshCommonShelf()
+  }, [refreshCommonShelf])
+
+  const commonShelfSSEHandlers = useMemo<Record<string, SSEEventHandler>>(() => {
+    return COMMON_SHELF_SSE_EVENTS.reduce<Record<string, SSEEventHandler>>((acc, eventType) => {
+      acc[eventType] = handleCommonShelfSSEEvent
+      return acc
+    }, {})
+  }, [handleCommonShelfSSEEvent])
+
+  useSSE({
+    rooms: ['common_shelf'],
+    handlers: commonShelfSSEHandlers,
+  })
 
   const handleAddClick = useCallback(() => {
     setEditingItem(null)

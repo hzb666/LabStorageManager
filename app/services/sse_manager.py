@@ -9,9 +9,11 @@ Design goals:
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import json
 import logging
 import secrets
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Optional
@@ -21,7 +23,6 @@ from app.core.constants import (
     SSE_CLIENT_QUEUE_MAXSIZE,
     SSE_HEARTBEAT_SECONDS,
     SSE_ORIGIN_TOKEN_HEX_LENGTH,
-    SSE_REDIS_EMPTY_POLL_SLEEP_SECONDS,
     SSE_REDIS_GET_MESSAGE_TIMEOUT_SECONDS,
     SSE_REDIS_LISTENER_ERROR_RETRY_SECONDS,
     SSE_REDIS_SUBSCRIBE_RETRY_SECONDS,
@@ -77,7 +78,8 @@ class SSEManager:
         self._slow_client_disconnects = 0
         self._initialized = True
 
-    def new_client_id(self) -> str:
+    @staticmethod
+    def new_client_id() -> str:
         """Generate a high-entropy client id for one SSE connection."""
         return secrets.token_hex(SSE_CLIENT_ID_TOKEN_HEX_LENGTH)
 
@@ -242,58 +244,110 @@ class SSEManager:
 
         if not task.done():
             task.cancel()
+        await asyncio.wait({task})
+
+    @staticmethod
+    def _decode_pubsub_value(raw_value: Any) -> str:
+        if isinstance(raw_value, bytes):
+            return raw_value.decode("utf-8")
+        return str(raw_value)
+
+    def _parse_pubsub_event(self, message: dict[str, Any]) -> Optional[tuple[str, str, dict[str, Any]]]:
+        raw_channel = message.get("channel")
+        channel = self._decode_pubsub_value(raw_channel)
+        room = channel.split(":", 1)[1] if ":" in channel else ""
+        raw_data = message.get("data")
+        text_data = self._decode_pubsub_value(raw_data)
 
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
+            event = json.loads(text_data)
+        except json.JSONDecodeError:
+            logger.warning("Invalid SSE Redis payload on %s", channel)
+            return None
+
+        if not isinstance(event, dict):
+            logger.warning("Unexpected SSE Redis payload type on %s: %s", channel, type(event).__name__)
+            return None
+
+        if event.get("origin") == self._origin:
+            # Already pushed locally by this process.
+            return None
+
+        event_type = str(event.get("event") or "message")
+        if not room:
+            room = str(event.get("room") or "")
+        if not room:
+            return None
+
+        return room, event_type, event
+
+    def _pubsub_reader_worker(
+        self,
+        pubsub: Any,
+        loop: asyncio.AbstractEventLoop,
+        message_queue: asyncio.Queue[dict[str, Any]],
+        stop_event: threading.Event,
+    ) -> None:
+        """Read PubSub messages in one dedicated thread and forward to asyncio queue."""
+        while not stop_event.is_set():
+            try:
+                message = pubsub.get_message(
+                    True,
+                    SSE_REDIS_GET_MESSAGE_TIMEOUT_SECONDS,
+                )
+            except Exception:
+                logger.exception("SSE Redis pubsub read failed")
+                break
+
+            if message is None:
+                continue
+
+            def enqueue_message(message_item: dict[str, Any] = message) -> None:
+                try:
+                    message_queue.put_nowait(message_item)
+                except asyncio.QueueFull:
+                    logger.warning("SSE Redis message queue full; dropping one event")
+
+            loop.call_soon_threadsafe(enqueue_message)
+
+    async def _consume_pubsub(self, pubsub: Any) -> None:
+        loop = asyncio.get_running_loop()
+        message_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=SSE_CLIENT_QUEUE_MAXSIZE)
+        stop_event = threading.Event()
+        reader_task = asyncio.create_task(
+            asyncio.to_thread(self._pubsub_reader_worker, pubsub, loop, message_queue, stop_event),
+            name="sse-redis-reader",
+        )
+
+        try:
+            while True:
+                message = await message_queue.get()
+                parsed = self._parse_pubsub_event(message)
+                if parsed is None:
+                    continue
+
+                room, event_type, event = parsed
+                await self._push_local(room, event_type, event)
+        finally:
+            stop_event.set()
+            redis_pubsub.close_pubsub(pubsub)
+            with suppress(Exception):
+                await reader_task
 
     async def _listener_loop(self) -> None:
         """Bridge Redis pubsub events into local client queues."""
         while True:
             pubsub = None
             try:
-                pubsub = redis_pubsub.subscribe_patterns("sse:*")
+                pubsub = await asyncio.to_thread(redis_pubsub.subscribe_patterns, "sse:*")
                 if pubsub is None:
                     await asyncio.sleep(SSE_REDIS_SUBSCRIBE_RETRY_SECONDS)
                     continue
 
-                while True:
-                    message = await asyncio.to_thread(
-                        pubsub.get_message,
-                        True,
-                        SSE_REDIS_GET_MESSAGE_TIMEOUT_SECONDS,
-                    )
-                    if message is None:
-                        await asyncio.sleep(SSE_REDIS_EMPTY_POLL_SLEEP_SECONDS)
-                        continue
-
-                    raw_channel = message.get("channel")
-                    channel = raw_channel.decode("utf-8") if isinstance(raw_channel, bytes) else str(raw_channel)
-                    room = channel.split(":", 1)[1] if ":" in channel else ""
-                    raw_data = message.get("data")
-                    text_data = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
-
-                    try:
-                        event = json.loads(text_data)
-                    except json.JSONDecodeError:
-                        logger.warning("Invalid SSE Redis payload on %s", channel)
-                        continue
-
-                    if event.get("origin") == self._origin:
-                        # Already pushed locally by this process.
-                        continue
-
-                    event_type = str(event.get("event") or "message")
-                    if not room:
-                        room = str(event.get("room") or "")
-                    if not room:
-                        continue
-
-                    await self._push_local(room, event_type, event)
+                await self._consume_pubsub(pubsub)
 
             except asyncio.CancelledError:
-                break
+                raise
             except Exception:
                 logger.exception("SSE Redis listener error; retrying")
                 await asyncio.sleep(SSE_REDIS_LISTENER_ERROR_RETRY_SECONDS)

@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 class RedisPubSub:
     """Thin wrapper around Redis publish/subscribe for SSE events."""
 
-    def publish(self, channel: str, message: dict[str, Any]) -> int:
+    @staticmethod
+    def publish(channel: str, message: dict[str, Any]) -> int:
         """Publish message JSON to a channel.
 
         Returns subscriber count reported by Redis.
@@ -37,7 +38,8 @@ class RedisPubSub:
             logger.exception("Failed publishing SSE message to %s", channel)
             return 0
 
-    def subscribe_patterns(self, *patterns: str) -> Optional[PubSub]:
+    @staticmethod
+    def subscribe_patterns(*patterns: str) -> Optional[PubSub]:
         """Subscribe to pub/sub patterns, e.g. sse:*.
 
         Returns None when Redis is not available.
@@ -54,7 +56,8 @@ class RedisPubSub:
             logger.exception("Failed subscribing SSE patterns: %s", patterns)
             return None
 
-    def close_pubsub(self, pubsub: Optional[PubSub]) -> None:
+    @staticmethod
+    def close_pubsub(pubsub: Optional[PubSub]) -> None:
         """Close pubsub safely."""
         if pubsub is None:
             return
@@ -63,7 +66,8 @@ class RedisPubSub:
         except Exception:
             logger.exception("Failed closing Redis pubsub")
 
-    def next_sequence(self, room: str) -> Optional[int]:
+    @staticmethod
+    def next_sequence(room: str) -> Optional[int]:
         """Generate a room-level monotonic sequence via Redis INCR.
 
         Returns None when Redis is unavailable so caller can use fallback.

@@ -128,7 +128,7 @@ def export_common_shelf_csv(
         "备注",
     ]
 
-    def row_converter(item: Any, user_map: dict[int, str]) -> list[Any]:
+    def row_converter(item: Any, _: dict[int, str]) -> list[Any]:
         return [
             escape_csv_formula(_get_field(item, "cas_number")),
             escape_csv_formula(_get_field(item, "name")),
