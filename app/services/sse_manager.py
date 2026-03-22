@@ -281,8 +281,8 @@ class SSEManager:
 
         return room, event_type, event
 
+    @staticmethod
     def _pubsub_reader_worker(
-        self,
         pubsub: Any,
         loop: asyncio.AbstractEventLoop,
         message_queue: asyncio.Queue[dict[str, Any]],
@@ -321,13 +321,30 @@ class SSEManager:
 
         try:
             while True:
-                message = await message_queue.get()
-                parsed = self._parse_pubsub_event(message)
-                if parsed is None:
-                    continue
+                queue_get_task = asyncio.create_task(message_queue.get(), name="sse-redis-message-get")
+                done, _ = await asyncio.wait(
+                    {queue_get_task, reader_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
 
-                room, event_type, event = parsed
-                await self._push_local(room, event_type, event)
+                if queue_get_task in done:
+                    message = queue_get_task.result()
+                    parsed = self._parse_pubsub_event(message)
+                    if parsed is not None:
+                        room, event_type, event = parsed
+                        await self._push_local(room, event_type, event)
+                else:
+                    queue_get_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await queue_get_task
+
+                if reader_task in done:
+                    if stop_event.is_set():
+                        break
+                    worker_error = reader_task.exception()
+                    if worker_error is not None:
+                        raise RuntimeError("SSE Redis reader worker failed") from worker_error
+                    raise RuntimeError("SSE Redis reader worker exited unexpectedly")
         finally:
             stop_event.set()
             redis_pubsub.close_pubsub(pubsub)
@@ -346,8 +363,6 @@ class SSEManager:
 
                 await self._consume_pubsub(pubsub)
 
-            except asyncio.CancelledError:
-                raise
             except Exception:
                 logger.exception("SSE Redis listener error; retrying")
                 await asyncio.sleep(SSE_REDIS_LISTENER_ERROR_RETRY_SECONDS)

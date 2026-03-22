@@ -44,11 +44,24 @@ export function useSSE({
   const markRoomStale = useSSEStore((state) => state.markRoomStale)
   const processSeq = useSSEStore((state) => state.processSeq)
 
+  const roomsKey = useMemo(() => {
+    const normalized = Array.from(
+      new Set(
+        rooms
+          .map((room) => room.trim())
+          .filter(Boolean),
+      ),
+    ).sort()
+    return normalized.join(',')
+  }, [rooms])
+
+  const stableRooms = useMemo(() => (roomsKey ? roomsKey.split(',') : []), [roomsKey])
+
   const eventsUrl = useMemo(() => {
     const base = getApiBaseUrl().replace(/\/$/, '')
-    const qs = new URLSearchParams({ rooms: rooms.join(',') })
+    const qs = new URLSearchParams({ rooms: roomsKey })
     return `${base}/events?${qs.toString()}`
-  }, [rooms])
+  }, [roomsKey])
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {
@@ -72,7 +85,7 @@ export function useSSE({
         // A successful re-open after previous open means stream recovery happened.
         if (openedOnceRef.current) {
           incrementReconnectCount()
-          rooms.forEach((room) => markRoomStale(room))
+          stableRooms.forEach((room) => markRoomStale(room))
         }
         openedOnceRef.current = true
       } catch {
@@ -84,7 +97,7 @@ export function useSSE({
       es.addEventListener(eventType, (evt) => {
         try {
           const payload = JSON.parse(String(evt.data)) as SSEEventEnvelope
-          const room = payload.room || rooms[0]
+          const room = payload.room || stableRooms[0]
           const seq = Number(payload.seq ?? 0)
 
           if (room && seq > 0) {
@@ -117,7 +130,7 @@ export function useSSE({
     incrementReconnectCount,
     markRoomStale,
     processSeq,
-    rooms,
+    stableRooms,
     setConnected,
     setDisconnected,
   ])
