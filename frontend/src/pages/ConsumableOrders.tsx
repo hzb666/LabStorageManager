@@ -105,10 +105,6 @@ export function ConsumableOrdersPage() {
     tableId: 'consumable-orders-table',
     statusOptions: CONSUMABLE_ORDER_STATUS_OPTIONS,
     searchFieldOptions: CONSUMABLE_SEARCH_FIELD_OPTIONS,
-    defaultStatus: 'all',
-    defaultSearchField: 'all',
-    pageSize: 50,
-    debounceMs: 300,
   })
 
   // Dialog 状态

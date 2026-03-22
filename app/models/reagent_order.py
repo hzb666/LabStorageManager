@@ -10,6 +10,7 @@ from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
 
+from pydantic import ConfigDict
 from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
@@ -70,6 +71,13 @@ class ReagentOrder(ReagentOrderBase, table=True):
     """Reagent Order database model"""
     __tablename__ = "reagent_order"
     __table_args__ = (
+        Index("ix_reagent_order_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
+        Index("ix_reagent_order_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),
+        Index("ix_reagent_order_category_pinyin_created_at_id", "category_pinyin", "created_at", "id"),
+        Index("ix_reagent_order_category_pinyin_initials_created_at_id", "category_pinyin_initials", "created_at", "id"),
+        Index("ix_reagent_order_brand_pinyin_created_at_id", "brand_pinyin", "created_at", "id"),
+        Index("ix_reagent_order_brand_pinyin_initials_created_at_id", "brand_pinyin_initials", "created_at", "id"),
+        Index("ix_reagent_order_created_at_id", "created_at", "id"),
         Index("ix_reagent_order_status_created_at_id", "status", "created_at", "id"),
         Index("ix_reagent_order_applicant_created_at_id", "applicant_id", "created_at", "id"),
     )
@@ -81,19 +89,19 @@ class ReagentOrder(ReagentOrderBase, table=True):
         ondelete="SET NULL"
     )
     status: ReagentOrderStatus = Field(default=ReagentOrderStatus.PENDING)
-    created_at: datetime = Field(default_factory=get_utc_now, index=True)
+    created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
         sa_column_kwargs={"onupdate": get_utc_now}
     )
     
     # 拼音排序字段（预计算，使用数据库索引加速排序）
-    name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    name_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
-    category_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    category_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
-    brand_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    brand_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
+    name_pinyin: Optional[str] = Field(default=None, max_length=200)
+    name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    category_pinyin: Optional[str] = Field(default=None, max_length=200)
+    category_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    brand_pinyin: Optional[str] = Field(default=None, max_length=200)
+    brand_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
 
 
 class ReagentOrderCreate(SQLModel):
@@ -117,6 +125,8 @@ class ReagentOrderCreate(SQLModel):
 
 class ReagentOrderUpdate(SQLModel):
     """DTO for updating reagent order information"""
+    model_config = ConfigDict(extra="forbid")
+
     cas_number: Optional[str] = None
     name: Optional[str] = None
     english_name: Optional[str] = None
@@ -129,7 +139,6 @@ class ReagentOrderUpdate(SQLModel):
     price: Optional[float] = None
     order_reason: Optional[ReagentOrderReason] = None
     is_hazardous: Optional[bool] = None
-    status: Optional[ReagentOrderStatus] = None
     notes: Optional[str] = None
 
 

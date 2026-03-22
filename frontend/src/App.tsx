@@ -15,6 +15,7 @@ const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m
 const InventoryPage = lazy(() => import('@/pages/Inventory').then(m => ({ default: m.InventoryPage })))
 const CommonShelfPage = lazy(() => import('@/pages/CommonShelf').then(m => ({ default: m.CommonShelfPage })))
 const ImportPage = lazy(() => import('@/pages/Import').then(m => ({ default: m.ImportPage })))
+const CartImportPage = lazy(() => import('@/pages/CartImport').then(m => ({ default: m.CartImportPage })))
 const AdminUsersPage = lazy(() => import('@/pages/AdminUsers').then(m => ({ default: m.AdminUsersPage })))
 const ReagentOrdersPage = lazy(() => import('@/pages/ReagentOrders').then(m => ({ default: m.ReagentOrdersPage })))
 const ConsumableOrdersPage = lazy(() => import('@/pages/ConsumableOrders').then(m => ({ default: m.ConsumableOrdersPage })))
@@ -71,6 +72,16 @@ function AppContent() {
         <ToastContainer />
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route
+            path="/cart-import"
+            element={
+              <ProtectedRoute>
+                <Suspense>
+                  <CartImportPage />
+                </Suspense>
+              </ProtectedRoute>
+            }
+          />
           <Route path="/test-error" element={<TestErrorPage />} />
           <Route path="*" element={<NotFoundPage />} />
           <Route
@@ -137,7 +148,7 @@ function AppContent() {
               </Suspense>
             } />
             <Route
-              path="admin/logs/:token"
+              path="admin/logs"
               element={
                 <AdminRoute>
                   <Suspense>

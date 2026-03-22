@@ -3,7 +3,7 @@
  * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、入库
  * 参考 Inventory 页面实现，使用 FilterTable 组件
  */
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
@@ -14,7 +14,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
@@ -29,10 +28,13 @@ import {
   reagentOrderAPI,
   chemicalAPI,
   ReagentOrderReason,
-  type CASOverviewResponse,
 } from '@/api/client'
-import { formatDate, processNotes, getInventoryBorrowLabel } from '@/lib/utils'
+import { processNotes } from '@/lib/utils'
 import { ReagentOrderExpandedRow } from '@/components/ReagentOrderExpandedRow'
+import {
+  ReagentCasDuplicateWarning,
+} from '@/components/ReagentCasDuplicateWarning'
+import { useReagentCasDuplicateCheck } from '@/hooks/useReagentCasDuplicateCheck'
 import {
   ReagentOrderSchema,
   createValibotResolver,
@@ -52,7 +54,6 @@ import {
 import {
   Plus,
   FlaskConical,
-  AlertTriangle,
   Loader2,
   ArrowUpFromLine,
   ScanSearch,
@@ -83,8 +84,6 @@ interface ReagentOrder {
   updated_at: string
 }
 
-type CASWarningInfo = CASOverviewResponse
-
 const columnHelper = createColumnHelper<ReagentOrder>()
 
 // 试剂订单状态筛选选项
@@ -106,11 +105,6 @@ const REAGENT_SEARCH_FIELD_OPTIONS = [
   { value: 'applicant', label: '订购人' },
   { value: 'created_at', label: '订购时间' },
 ]
-
-function truncateDisplayName(name: string | null | undefined, maxLength = 10): string | null {
-  if (!name) return null
-  return name.length > maxLength ? `${name.slice(0, maxLength)}...` : name
-}
 
 function getReagentOrderStatusLabel(status: string): string {
   return REAGENT_STATUS_MAP[status] || status
@@ -136,66 +130,25 @@ export function ReagentOrdersPage() {
     tableId: 'reagent-orders-table',
     statusOptions: REAGENT_ORDER_STATUS_OPTIONS,
     searchFieldOptions: REAGENT_SEARCH_FIELD_OPTIONS,
-    defaultStatus: 'all',
-    defaultSearchField: 'all',
-    pageSize: 50,
-    debounceMs: 300,
   })
 
   // Dialog 状态
   const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
   const [editingItem, setEditingItem] = useState<ReagentOrder | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
-  const [casWarning, setCasWarning] = useState<CASWarningInfo | null>(null)
-  const [casLoading, setCasLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
-  const casRequestIdRef = useRef(0)
-  const lastCheckedCasRef = useRef<string | null>(null)
+  const {
+    casWarning,
+    casLoading,
+    checkCASWarning,
+    clearCASWarning,
+    handleCasValueChange,
+  } = useReagentCasDuplicateCheck()
 
   // ---------------------------------------------------------------------------
   // 表单逻辑
   // ---------------------------------------------------------------------------
-  // CAS 检查（仅在失焦或点击识别按钮后触发）
-  const checkCASWarning = useCallback(async (casInput: string) => {
-    const casValidation = validateAndNormalizeCASInput(casInput || '')
-    if ('error' in casValidation) {
-      setCasWarning(null)
-      setCasLoading(false)
-      return
-    }
-
-    const normalizedCas = casValidation.normalized
-    if (isSpecialCasValue(normalizedCas)) {
-      setCasWarning(null)
-      setCasLoading(false)
-      lastCheckedCasRef.current = normalizedCas
-      return
-    }
-
-    if (lastCheckedCasRef.current === normalizedCas) {
-      return
-    }
-
-    const requestId = ++casRequestIdRef.current
-    setCasLoading(true)
-
-    try {
-      const response = await reagentOrderAPI.getCASOverview(normalizedCas)
-      if (requestId !== casRequestIdRef.current) return
-      const overview = response.data
-      setCasWarning(overview.has_warning ? overview : null)
-      lastCheckedCasRef.current = normalizedCas
-    } catch (error) {
-      if (requestId === casRequestIdRef.current) {
-        console.error('CAS check error:', error)
-      }
-    } finally {
-      if (requestId === casRequestIdRef.current) {
-        setCasLoading(false)
-      }
-    }
-  }, [])
 
   // 表单实例
   const form = useForm<ReagentOrderFormData>({
@@ -210,20 +163,25 @@ export function ReagentOrdersPage() {
       if (field.name === 'cas_number') {
         const currentValue = (value.cas_number || '').trim().toUpperCase()
         form.clearErrors('cas_number')
-        if (!lastCheckedCasRef.current || currentValue !== lastCheckedCasRef.current) {
-          casRequestIdRef.current += 1
-          setCasWarning(null)
-          setCasLoading(false)
-          lastCheckedCasRef.current = null
-        }
+        handleCasValueChange(currentValue)
       }
     })
     return () => subscription.unsubscribe()
-  }, [form])
+  }, [form, handleCasValueChange])
+
+  useEffect(() => {
+    if (!dialogState) {
+      return
+    }
+    const currentCas = form.getValues('cas_number')
+    if (currentCas) {
+      checkCASWarning(currentCas)
+    }
+  }, [dialogState, editingItem?.id, form, checkCASWarning])
 
   // 加载数据
-  const loadOrders = useCallback(async () => {
-    await filter.invalidate()
+  const loadOrders = useCallback(() => {
+    filter.invalidate()
   }, [filter])
 
   // 点击添加按钮
@@ -231,11 +189,9 @@ export function ReagentOrdersPage() {
     setEditingItem(null)
     setDeleteConfirm(false)
     form.reset(defaultReagentOrderValues)
-    setCasWarning(null)
-    setCasLoading(false)
-    lastCheckedCasRef.current = null
+    clearCASWarning()
     setDialogState('add')
-  }, [form, setDialogState])
+  }, [clearCASWarning, form, setDialogState])
 
   // 点击编辑按钮
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
@@ -297,7 +253,7 @@ export function ReagentOrdersPage() {
           })
         }
         // 先刷新数据，再弹出 toast，确保数据已加载完成
-        await loadOrders()
+        loadOrders()
         if (dialogState === 'edit') {
           toast.success('订单信息已更新')
         } else if (dialogState === 'add') {
@@ -367,8 +323,7 @@ export function ReagentOrdersPage() {
 
     if (isSpecialCasValue(casValidation.normalized)) {
       form.setError('cas_number', { message: '生物试剂不支持 CAS 识别查询' })
-      setCasWarning(null)
-      setCasLoading(false)
+      clearCASWarning()
       return
     }
 
@@ -396,8 +351,8 @@ export function ReagentOrdersPage() {
     } finally {
       setIsCasLookupLoading(false)
     }
-    await checkCASWarning(casValidation.normalized)
-  }, [form, checkCASWarning])
+    await checkCASWarning(casValidation.normalized, { force: true })
+  }, [clearCASWarning, form, checkCASWarning])
 
   const handleDeleteClick = useCallback(async () => {
     if (!editingItem) return
@@ -412,16 +367,14 @@ export function ReagentOrdersPage() {
       setDeleteConfirm(false)
       setEditingItem(null)
       setDialogState(null)
-      setCasWarning(null)
-      setCasLoading(false)
-      lastCheckedCasRef.current = null
-      await loadOrders()
+      clearCASWarning()
+      loadOrders()
       toast.success('试剂订单已删除')
     } catch (error) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
     }
-  }, [deleteConfirm, editingItem, loadOrders, setDialogState])
+  }, [clearCASWarning, deleteConfirm, editingItem, loadOrders, setDialogState])
 
   const navigateToCasSearch = useCallback((path: string, field: string) => {
     if (!casWarning?.cas_number) {
@@ -433,13 +386,9 @@ export function ReagentOrdersPage() {
       field,
     })
     setDialogState(null)
-    setCasWarning(null)
-    setCasLoading(false)
-    lastCheckedCasRef.current = null
+    clearCASWarning()
     navigate(`${path}?${query.toString()}`)
-  }, [casWarning?.cas_number, navigate, setDialogState])
-
-  const warningDisplayName = truncateDisplayName(casWarning?.display_name)
+  }, [casWarning?.cas_number, clearCASWarning, navigate, setDialogState])
 
   // ---------------------------------------------------------------------------
   // 表格列配置
@@ -511,9 +460,7 @@ export function ReagentOrdersPage() {
             setDialogState(null)
             setDeleteConfirm(false)
             form.reset()
-            setCasWarning(null)
-            setCasLoading(false)
-            lastCheckedCasRef.current = null
+            clearCASWarning()
           }
         }}
       >
@@ -534,7 +481,7 @@ export function ReagentOrdersPage() {
                         ...field,
                         onBlur: (value) => {
                           if (typeof value === 'string') {
-                            void checkCASWarning(value)
+                            checkCASWarning(value)
                           }
                         },
                         prefixButton: {
@@ -551,63 +498,14 @@ export function ReagentOrdersPage() {
               }, [dialogState, handleCasLookup, isCasLookupLoading, checkCASWarning])}
             />
             {/* CAS 警告显示 */}
-            {dialogState === 'add' && casWarning && casWarning.has_warning && (
-              <div className="mt-4 p-3 -mb-2 bg-orange-50 dark:bg-orange-950 rounded-md">
-                <p className="text-sm text-orange-700 dark:text-orange-300 flex items-center gap-1">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>
-                    注意：检测到同 CAS 相关记录（CAS: {casWarning.cas_number}
-                    {warningDisplayName ? `，名称：${warningDisplayName}` : ''}
-                    ）
-                  </span>
-                </p>
-                <div className="mt-2 space-y-1 text-sm text-orange-800 dark:text-orange-200">
-                  {casWarning.orders.total_count > 0 && casWarning.orders.latest && (
-                    <p>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className="font-bold transition-colors hover:text-orange-950 dark:hover:text-orange-100"
-                            onClick={() => navigateToCasSearch('/reagents', 'cas')}
-                          >
-                            现有订单（共 {casWarning.orders.total_count} 条）：
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>点击搜索订单</TooltipContent>
-                      </Tooltip>
-                      <span>订购人：{casWarning.orders.latest.applicant_name || '未知订购人'}，</span>
-                      <span>状态：{getReagentOrderStatusLabel(casWarning.orders.latest.status)}，</span>
-                      <span>规格：{casWarning.orders.latest.specification}，</span>
-                      <span>{formatDate(casWarning.orders.latest.created_at)}订购</span>
-                    </p>
-                  )}
-                  {casWarning.inventory.total_count > 0 && casWarning.inventory.latest && (
-                    <p>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className="font-bold transition-colors hover:text-orange-950 dark:hover:text-orange-100"
-                            onClick={() => navigateToCasSearch('/inventory', 'cas_number')}
-                          >
-                            现有库存（共 {casWarning.inventory.total_count} 条）：
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>点击搜索库存</TooltipContent>
-                      </Tooltip>
-                      <span>{casWarning.inventory.latest.storage_location || '位置未填写'}，</span>
-                      <span>{(casWarning.inventory.latest.remaining_quantity ?? '-')}</span>
-                      /{casWarning.inventory.latest.specification}，
-                      <span>{formatDate(casWarning.inventory.latest.created_at)}入库，</span>
-                      <span>{getInventoryBorrowLabel(
-                        casWarning.inventory.latest.status,
-                        casWarning.inventory.latest.borrower_name
-                      )}</span>
-                    </p>
-                  )}
-                </div>
-              </div>
+            {dialogState === 'add' && (
+              <ReagentCasDuplicateWarning
+                casWarning={casWarning}
+                className="mt-4 -mb-2 rounded-md bg-orange-50 p-3 dark:bg-orange-950"
+                onOpenOrders={() => navigateToCasSearch('/reagents', 'cas')}
+                onOpenInventory={() => navigateToCasSearch('/inventory', 'cas_number')}
+                getOrderStatusLabel={getReagentOrderStatusLabel}
+              />
             )}
 
             <EditDialogActions

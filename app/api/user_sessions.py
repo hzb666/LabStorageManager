@@ -1,6 +1,7 @@
 """
 User Sessions API - Device Management
 """
+import re
 from datetime import datetime, timedelta
 from typing import List, Annotated
 
@@ -161,16 +162,12 @@ class SessionUpdateRequest(BaseModel):
 
     @staticmethod
     def _sanitize(text: str) -> str:
-        """XSS 过滤：移除 HTML/JS 危险字符"""
-        import html
-        # 转义 HTML 实体
-        text = html.escape(text)
-        # 移除 script 标签（虽然 escape 已经转义了 < 和 >，但额外过滤更安全）
-        text = text.replace("<script", "").replace("</script", "")
-        text = text.replace("<iframe", "").replace("</iframe", "")
-        text = text.replace("javascript:", "")
-        text = text.replace("onerror=", "").replace("onclick=", "")
-        return text
+        """设备名白名单清洗，避免依赖可绕过的黑名单替换。"""
+        sanitized = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff _\-().#]", "", text)
+        sanitized = re.sub(r"\s+", " ", sanitized).strip()
+        if not sanitized:
+            raise ValueError("Device name contains invalid characters")
+        return sanitized
 
 
 @router.patch("/{session_id}", response_model=SessionResponse)

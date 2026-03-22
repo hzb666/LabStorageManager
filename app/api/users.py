@@ -8,7 +8,7 @@ import logging
 import time
 from typing import Optional, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select, func, or_
@@ -407,8 +407,8 @@ def list_users(
     current_user: Annotated[User, Depends(require_admin)],
     skip: int = 0,
     limit: int = 50,
-    username: Optional[str] = None,
-    full_name: Optional[str] = None,
+    username: Annotated[Optional[str], Query(max_length=100)] = None,
+    full_name: Annotated[Optional[str], Query(max_length=100)] = None,
     role: Optional[str] = None,
     is_active: Optional[bool] = None,
 ):
@@ -502,7 +502,7 @@ def list_users(
 
 @router.get("/search", response_model=list[UserSearchItem], dependencies=[Depends(get_current_user)])
 def search_users(
-    q: str,
+    q: Annotated[str, Query(max_length=100)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Search users for autocomplete by username/full_name/full_name_pinyin/full_name initials."""
@@ -575,10 +575,13 @@ def update_user(
     # Update fields
     update_data = user_update.model_dump(exclude_unset=True)
     update_data.pop("avatar_url", None)
-    
-    # Prevent non-admin users from changing role
+
+    # Security boundary: only admin can modify role
     if "role" in update_data and current_user.role != UserRole.ADMIN:
-        del update_data["role"]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin can update role"
+        )
     
     # Handle username change (user can change their own username, admin can change any)
     username_changed = False

@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from pydantic import ConfigDict
 from sqlalchemy import Index
 from app.core.constants import MAX_BOTTLES_PER_IMPORT
 from app.core.time_utils import get_utc_now
@@ -25,13 +26,13 @@ class InventoryStatus(str, Enum):
 class InventoryBase(SQLModel):
     """Base inventory model with common fields"""
     # Critical: CAS Number copied from Order (already normalized)
-    cas_number: str = Field(index=True, max_length=50)
-    name: str = Field(index=True, max_length=200)  # 排序/搜索常用
+    cas_number: str = Field(max_length=50)
+    name: str = Field(max_length=200)  # 排序/搜索常用
     english_name: Optional[str] = Field(None, max_length=200)  # English name
     alias: Optional[str] = Field(None, max_length=200)
-    category: Optional[str] = Field(index=True, max_length=100)  # 排序/搜索常用
-    brand: Optional[str] = Field(index=True, max_length=100)  # 排序/搜索常用
-    storage_location: Optional[str] = Field(index=True, max_length=200)  # 排序/搜索常用
+    category: Optional[str] = Field(max_length=100)  # 排序/搜索常用
+    brand: Optional[str] = Field(max_length=100)  # 排序/搜索常用
+    storage_location: Optional[str] = Field(max_length=200)  # 排序/搜索常用
     # 数据库模型：允许 NULL 以兼容旧数据
     initial_quantity: Optional[float] = Field(default=None)
     remaining_quantity: Optional[float] = Field(default=None)
@@ -45,22 +46,38 @@ class InventoryBase(SQLModel):
 class Inventory(InventoryBase, table=True):
     """Inventory database model - Individual item tracking"""
     __table_args__ = (
+        # Search acceleration: all searchable fields are prefixed with is_common.
+        Index("ix_inventory_is_common_cas_number_created_at_id", "is_common", "cas_number", "created_at", "id"),
+        Index("ix_inventory_is_common_name_created_at_id", "is_common", "name", "created_at", "id"),
+        Index("ix_inventory_is_common_name_pinyin", "is_common", "name_pinyin", "created_at", "id"),
+        Index("ix_inventory_is_common_name_pinyin_initials", "is_common", "name_pinyin_initials", "created_at", "id"),
+        Index("ix_inventory_is_common_alias_created_at_id", "is_common", "alias", "created_at", "id"),
+        Index("ix_inventory_is_common_category_created_at_id", "is_common", "category", "created_at", "id"),
+        Index("ix_inventory_is_common_category_pinyin", "is_common", "category_pinyin", "created_at", "id"),
+        Index("ix_inventory_is_common_category_pinyin_initials", "is_common", "category_pinyin_initials", "created_at", "id"),
+        Index("ix_inventory_is_common_brand_created_at_id", "is_common", "brand", "created_at", "id"),
+        Index("ix_inventory_is_common_brand_pinyin", "is_common", "brand_pinyin", "created_at", "id"),
+        Index("ix_inventory_is_common_brand_pinyin_initials", "is_common", "brand_pinyin_initials", "created_at", "id"),
+        Index("ix_inventory_is_common_storage_location_created_at_id", "is_common", "storage_location", "created_at", "id"),
+        Index("ix_inventory_is_common_storage_location_pinyin", "is_common", "storage_location_pinyin", "created_at", "id"),
+        Index("ix_inventory_is_common_storage_location_pinyin_initials", "is_common", "storage_location_pinyin_initials", "created_at", "id"),
         Index("ix_inventory_is_common_created_at_id", "is_common", "created_at", "id"),
+        Index("ix_inventory_is_common_status_created_at_id", "is_common", "status", "created_at", "id"),
         Index("ix_inventory_status_created_at_id", "status", "created_at", "id"),
         Index("ix_inventory_borrower_status_updated_at", "borrower_id", "status", "updated_at"),
         Index("ix_inventory_keeper_location_created_at", "temporary_keeper_id", "storage_location", "created_at"),
         Index("ix_inventory_cas_status_created_at", "cas_number", "status", "created_at"),
+        Index("ix_inventory_alias_created_at", "alias", "created_at"),
         Index("ix_inventory_created_by_created_at_id", "created_by_id", "created_at", "id"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     # Unique internal code: e.g., "64175-250113-001" (CAS-Date-Sequence)
     internal_code: str = Field(unique=True, index=True, max_length=50)
-    is_common: bool = Field(index=True, default=False)
-    status: InventoryStatus = Field(index=True, default=InventoryStatus.IN_STOCK)  # 排序/筛选常用
+    is_common: bool = Field(default=False)
+    status: InventoryStatus = Field(default=InventoryStatus.IN_STOCK)  # 排序/筛选常用
     borrower_id: Optional[int] = Field(
         default=None,
-        index=True,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
@@ -71,7 +88,6 @@ class Inventory(InventoryBase, table=True):
     )
     temporary_keeper_id: Optional[int] = Field(
         default=None,
-        index=True,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
@@ -83,25 +99,24 @@ class Inventory(InventoryBase, table=True):
     )
     created_by_id: Optional[int] = Field(
         default=None,
-        index=True,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    created_at: datetime = Field(default_factory=get_utc_now, index=True)  # 排序常用
+    created_at: datetime = Field(default_factory=get_utc_now)  # 排序常用
     updated_at: datetime = Field(
         default_factory=get_utc_now,
         sa_column_kwargs={"onupdate": get_utc_now}
     )
     
     # 拼音排序字段（预计算，使用数据库索引加速排序）
-    name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    name_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
-    category_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    category_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
-    brand_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    brand_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
-    storage_location_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    storage_location_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
+    name_pinyin: Optional[str] = Field(default=None, max_length=200)
+    name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    category_pinyin: Optional[str] = Field(default=None, max_length=200)
+    category_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    brand_pinyin: Optional[str] = Field(default=None, max_length=200)
+    brand_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    storage_location_pinyin: Optional[str] = Field(default=None, max_length=200)
+    storage_location_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
 
 
 class InventoryCreate(SQLModel):
@@ -128,15 +143,13 @@ class InventoryCreate(SQLModel):
 
 class InventoryUpdate(SQLModel):
     """DTO for updating inventory"""
+    # 安全边界：拒绝未声明字段（如 is_common），避免静默忽略带来的越权探测面
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = None
     cas_number: Optional[str] = None
     storage_location: Optional[str] = None
     remaining_quantity: Optional[float] = None
-    # 可选：通常由后端根据 remaining_quantity / initial_quantity 自动维护
-    remaining_percent: Optional[float] = None
-    status: Optional[InventoryStatus] = None
-    temporary_keeper_id: Optional[int] = None
-    source_order_id: Optional[int] = None
     notes: Optional[str] = None
     english_name: Optional[str] = None
     alias: Optional[str] = None
@@ -151,13 +164,13 @@ class InventoryUpdate(SQLModel):
 
 class InventoryBorrowReturn(SQLModel):
     """DTO for borrow/return operations"""
-    remaining_quantity: Optional[float] = Field(default=None, ge=0)
+    remaining_quantity: float = Field(ge=0)
     unit: Optional[str] = Field(default=None, max_length=20)
 
 
 class InventoryBorrowRequest(SQLModel):
     """DTO for borrow operation."""
-    actual_borrower_id: Optional[int] = Field(default=None, ge=1)
+    actual_borrower_id: Optional[int] = Field(default=None)
 
 
 class InventoryResponse(BaseResponse):
@@ -204,12 +217,10 @@ class BorrowLog(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     inventory_id: int = Field(
-        index=True,
         foreign_key="inventory.id",
         ondelete="CASCADE"
     )
     borrower_id: int = Field(
-        index=True,
         foreign_key="users.id",
         ondelete="CASCADE"
     )

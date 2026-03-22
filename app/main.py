@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -277,3 +277,14 @@ def health_check():
 # Import models to ensure tables are created
 # This is needed for SQLModel to register all models
 from app.models import User, Inventory, BorrowLog, ReagentOrder, ConsumableOrder, Announcement  # noqa: E402, F401
+
+
+@app.get("/cart-import")
+def cart_import_redirect(request: Request):
+    """Redirect extension entry from backend origin to frontend app origin."""
+    frontend_origin = settings.cors_origins[0].rstrip("/") if settings.cors_origins else str(request.base_url).rstrip("/")
+    query = request.url.query
+    target = f"{frontend_origin}/cart-import"
+    if query:
+        target = f"{target}?{query}"
+    return RedirectResponse(url=target, status_code=307)

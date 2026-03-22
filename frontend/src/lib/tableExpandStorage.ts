@@ -70,7 +70,7 @@ function parseStorageLock(raw: string | null): StorageLock | null {
 }
 
 function acquireStorageLock(): string | null {
-  if (typeof globalThis.window === 'undefined') return null
+  if (globalThis.window === undefined) return null
 
   const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`
   const deadline = Date.now() + TABLE_UI_STORAGE_LOCK_TIMEOUT_MS
@@ -101,7 +101,7 @@ function acquireStorageLock(): string | null {
 }
 
 function releaseStorageLock(token: string | null): void {
-  if (!token || typeof globalThis.window === 'undefined') return
+  if (!token || globalThis.window === undefined) return
 
   try {
     const currentLock = parseStorageLock(localStorage.getItem(TABLE_UI_STORAGE_LOCK_KEY))
@@ -161,7 +161,7 @@ export function getExpandAllState(
   tableKey: string,
   defaultValue = false
 ): boolean {
-  if (typeof globalThis.window === 'undefined') return defaultValue
+  if (globalThis.window === undefined) return defaultValue
 
   try {
     const stateMap = readTableUIStorage().tables
@@ -176,7 +176,7 @@ export function getExpandAllState(
 }
 
 export function setExpandAllState(tableKey: string, isExpanded: boolean): void {
-  if (typeof globalThis.window === 'undefined') return
+  if (globalThis.window === undefined) return
 
   try {
     writeTableState(tableKey, (current) => ({
@@ -189,7 +189,7 @@ export function setExpandAllState(tableKey: string, isExpanded: boolean): void {
 }
 
 export function getFuzzySearchState(tableKey: string, defaultValue = false): boolean {
-  if (typeof globalThis.window === 'undefined') return defaultValue
+  if (globalThis.window === undefined) return defaultValue
 
   try {
     const stateMap = readTableUIStorage().tables
@@ -204,7 +204,7 @@ export function getFuzzySearchState(tableKey: string, defaultValue = false): boo
 }
 
 export function setFuzzySearchState(tableKey: string, fuzzySearch: boolean): void {
-  if (typeof globalThis.window === 'undefined') return
+  if (globalThis.window === undefined) return
 
   try {
     writeTableState(tableKey, (current) => ({

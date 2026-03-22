@@ -12,8 +12,8 @@ import {
     type ReagentOrderReason,
 } from '@/api/client'
 import { BaseForm } from '@/components/BaseForm'
-import { ReagentCasDuplicateWarning } from '@/components/reagent/ReagentCasDuplicateWarning'
-import { useReagentCasDuplicateCheck } from '@/components/reagent/useReagentCasDuplicateCheck'
+import { ReagentCasDuplicateWarning } from '@/components/ReagentCasDuplicateWarning'
+import { useReagentCasDuplicateCheck } from '@/hooks/useReagentCasDuplicateCheck'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import {

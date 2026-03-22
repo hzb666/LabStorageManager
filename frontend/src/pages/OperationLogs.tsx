@@ -4,7 +4,7 @@
  * 使用 FilterTable 架构，与库存页面完全一致
  */
 import { useMemo, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useQuery } from '@tanstack/react-query'
 
@@ -26,6 +26,8 @@ import { safeString } from '@/lib/validationSchemas'
 interface LogItemData extends LogItem {
   id?: number
 }
+
+const LOGS_TOKEN_STORAGE_KEY = 'admin_logs_token'
 
 // 日志类型选项（用于筛选）
 const LOG_TYPE_OPTIONS = [
@@ -228,8 +230,17 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
 
 // 主组件
 export default function OperationLogsPage() {
-  const { token } = useParams<{ token: string }>()
+  const location = useLocation()
   const navigate = useNavigate()
+
+  const token = useMemo(() => {
+    const stateToken = (location.state as { logsToken?: string } | null)?.logsToken
+    if (stateToken) {
+      sessionStorage.setItem(LOGS_TOKEN_STORAGE_KEY, stateToken)
+      return stateToken
+    }
+    return sessionStorage.getItem(LOGS_TOKEN_STORAGE_KEY)
+  }, [location.state])
 
   // 创建日志 API 实例
   const logsAPI = useMemo(() => {
@@ -242,7 +253,11 @@ export default function OperationLogsPage() {
     queryKey: ['logs-user-info', token],
     queryFn: async () => {
       if (!token) return null
-      const response = await api.get<{ username: string; user_id: number; total: number }>(`/admin/users/logs/${token}?skip=0&limit=0`)
+      const response = await api.post<{ username: string; user_id: number; total: number }>('/admin/users/logs/query', {
+        token,
+        skip: 0,
+        limit: 0,
+      })
       return response.data
     },
     enabled: !!token,

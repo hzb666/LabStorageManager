@@ -161,8 +161,8 @@ export function FilterTable({
     data: filter.data as Record<string, unknown>[],
     columns: tableColumns,
     getRowId: (row, index) => {
-      if (row.id !== undefined && row.id !== null) return String(row.id)
-      if (row.uuid !== undefined && row.uuid !== null) return String(row.uuid)
+      if (typeof row.id === 'string' || typeof row.id === 'number') return String(row.id)
+      if (typeof row.uuid === 'string' || typeof row.uuid === 'number') return String(row.uuid)
       return String(index)
     },
     getCoreRowModel: getCoreRowModel(),

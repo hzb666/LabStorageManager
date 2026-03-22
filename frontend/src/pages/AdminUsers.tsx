@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useCallback, useEffect } from 'react'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -12,7 +12,6 @@ import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { valibotResolver } from '@hookform/resolvers/valibot'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
@@ -24,10 +23,8 @@ import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
 import { useAuthStore } from '@/store/useStore'
 // 注意这里引入了我们需要的图标
 import {
-  Search,
   Users,
   Loader2,
-  X,
   UserPlus,
   FileText,
   UserCheck,
@@ -46,7 +43,7 @@ import type { PaginationParams } from '@/api/client'
 
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { LoadingButton } from '@/components/ui/LoadingButton'
-import { TableEmptyState } from '@/components/ui/TableFilters'
+import { SEARCH_MAX_LENGTH, TableEmptyState, TableSearchInput } from '@/components/ui/TableFilters'
 import { getAdminUsersTableColumns } from '@/lib/tableConfigs'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 
@@ -66,14 +63,22 @@ export function AdminUsersPage() {
   const [sorting, setSorting] = useState<SortingState>([])
   const [inputValue, setInputValue] = useState('') // 仅用于输入框实时显示
   const [debouncedFilter, setDebouncedFilter] = useState('') // 用于 API 请求和表格高亮
+  const normalizedInputValue = inputValue.trim()
 
   // 防抖 effect - 300ms 延迟
   useEffect(() => {
+    if (!normalizedInputValue && debouncedFilter) {
+      setDebouncedFilter('')
+      return
+    }
+
     const timer = setTimeout(() => {
-      setDebouncedFilter(inputValue)
+      if (inputValue.length <= SEARCH_MAX_LENGTH) {
+        setDebouncedFilter(normalizedInputValue)
+      }
     }, 300)
     return () => clearTimeout(timer)
-  }, [inputValue])
+  }, [inputValue, normalizedInputValue, debouncedFilter])
 
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -99,7 +104,7 @@ export function AdminUsersPage() {
   })
 
   // 使用单一 React Query 获取用户列表及总数，配合 keepPreviousData 避免闪烁
-  const { data: queryResult, isLoading } = useQuery({
+  const { data: queryResult, isLoading, isPlaceholderData } = useQuery({
     queryKey: ['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize],
     queryFn: async () => {
       const params: UserListParams = {
@@ -129,6 +134,10 @@ export function AdminUsersPage() {
   
   // 判断是否有筛选条件
   const hasFilter = Boolean(debouncedFilter || roleFilter !== 'all' || statusFilter !== 'all')
+  const shouldShowGrandTotal = hasFilter
+    && totalWithoutFilter > 0
+    && (!isPlaceholderData || total !== totalWithoutFilter)
+  const displayCount = shouldShowGrandTotal ? `${total}/${totalWithoutFilter}` : `${total}`
 
   // 将当前管理员账户置顶显示
   const data = useMemo(() => {
@@ -207,7 +216,7 @@ export function AdminUsersPage() {
     try {
       const response = await userAdminAPI.generateLogsToken(user.id)
       const token = response.data.token
-      navigate(`/admin/logs/${token}`)
+      navigate('/admin/logs', { state: { logsToken: token } })
     } catch {
       toast.error('获取日志访问失败')
     }
@@ -216,21 +225,23 @@ export function AdminUsersPage() {
   // 表格列定义
   const columns = useMemo(() => {
     const baseColumns = getAdminUsersTableColumns()
-
     const actionColumn = columnHelper.display({
       id: 'actions',
       header: '操作',
       size: 200,
-      cell: ({ row }) => (
-        <ActionButtons
-          user={row.original}
-          currentUser={currentUser ? { ...currentUser, is_active: true } : null}
-          onEdit={openEditModal}
-          onViewLogs={handleViewLogs}
-          onActivate={handleActivate}
-          onDelete={openDeleteModal}
-        />
-      ),
+      cell: (info) => {
+        const row = info.row
+        return (
+          <ActionButtons
+            user={row.original}
+            currentUser={currentUser ? { ...currentUser, is_active: true } : null}
+            onEdit={openEditModal}
+            onViewLogs={handleViewLogs}
+            onActivate={handleActivate}
+            onDelete={openDeleteModal}
+          />
+        )
+      },
     })
 
     return [...baseColumns, actionColumn] as ColumnDef<User, unknown>[]
@@ -309,23 +320,12 @@ export function AdminUsersPage() {
 
       {/* Search & Filters */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-        <div className="relative flex-1 min-w-50">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-          <Input
-            placeholder="搜索用户名、姓名..."
-            value={inputValue} // 👈 修改这里
-            onChange={(e) => setInputValue(e.target.value)} // 👈 修改这里
-            className="pl-9 pr-8 h-10 text-base w-full"
-          />
-          {inputValue && ( // 👈 修改这里
-            <button
-              onClick={() => setInputValue('')} // 👈 修改这里
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
+        <TableSearchInput
+          value={inputValue}
+          onChange={setInputValue}
+          placeholder="搜索用户名、姓名..."
+          inputClassName="h-10"
+        />
         <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value)}>
           <SelectTrigger className="w-30 min-h-10">
             <SelectValue placeholder="全部角色" />
@@ -355,7 +355,7 @@ export function AdminUsersPage() {
           <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
             <Users className="w-5 h-5" />
             用户列表 
-            <span className="text-muted-foreground font-normal">(&thinsp;{total}{hasFilter && totalWithoutFilter > 0 ? `/${totalWithoutFilter}` : ''}&thinsp;)</span>
+            <span className="text-muted-foreground font-normal">(&thinsp;{displayCount}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -393,7 +393,7 @@ export function AdminUsersPage() {
                 </thead>
                 <tbody>
                   {table.getRowModel().rows.map(row => (
-                    <MemoizedTableRow key={row.id} row={row as Row<User>} />
+                    <MemoizedTableRow key={row.id} row={row} />
                   ))}
                 </tbody>
               </table>

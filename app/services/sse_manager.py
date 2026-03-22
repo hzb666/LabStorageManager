@@ -28,7 +28,7 @@ from app.core.constants import (
     SSE_REDIS_SUBSCRIBE_RETRY_SECONDS,
     SSE_SLOW_CLIENT_QUEUE_FULL_STREAK_LIMIT,
 )
-from app.core.redis import redis_key
+from app.core.redis import redis_key, REDIS_KEY_PREFIX
 from app.services.sse_redis import redis_pubsub
 
 logger = logging.getLogger(__name__)
@@ -256,11 +256,13 @@ class SSEManager:
     def _parse_pubsub_event(self, message: dict[str, Any]) -> Optional[tuple[str, str, dict[str, Any]]]:
         raw_channel = message.get("channel")
         channel = self._decode_pubsub_value(raw_channel)
-        marker = ":sse:"
-        if channel.startswith("sse:"):
-            room = channel[len("sse:"):]
-        elif marker in channel:
-            room = channel.split(marker, 1)[1]
+
+        # Extract room from channel with prefix: "lsm:sse:room-123" -> "room-123"
+        prefix_pattern = f"{REDIS_KEY_PREFIX}:sse:"
+        if channel.startswith(prefix_pattern):
+            room = channel[len(prefix_pattern):]
+        elif ":sse:" in channel:
+            room = channel.split(":sse:", 1)[1]
         else:
             room = channel.split(":", 1)[1] if ":" in channel else ""
         raw_data = message.get("data")

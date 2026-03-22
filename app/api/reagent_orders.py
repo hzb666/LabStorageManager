@@ -3,9 +3,9 @@ Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Annotated, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
@@ -45,6 +45,7 @@ from app.services.api_utils import (
     get_cached_result,
     set_cached_result,
 )
+from app.services.inventory_queries import regular_inventory_query
 from app.services.sse_manager import sse_manager
 from app.api.reagent_orders_workflow import register_workflow_routes
 
@@ -258,7 +259,7 @@ def list_reagent_orders(
     skip: int = 0,
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
     status_filter: Optional[ReagentOrderStatus] = None,
-    search: Optional[str] = None,
+    search: Annotated[Optional[str], Query(max_length=100)] = None,
     search_field: Optional[str] = None,
     fuzzy: bool = False,
     sort_by: Optional[str] = None,
@@ -428,7 +429,7 @@ def get_cas_overview(
     ).first()
 
     # 库存：过滤掉已消耗或剩余量为 0 的库存，取最近一条 + 总数
-    inventory_base = select(Inventory).where(
+    inventory_base = regular_inventory_query().where(
         Inventory.cas_number == normalized_cas,
         Inventory.status != InventoryStatus.CONSUMED,
         (Inventory.remaining_quantity.is_(None)) | (Inventory.remaining_quantity > 0),

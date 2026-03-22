@@ -70,32 +70,116 @@ SQLITE_SEARCH_COLUMN_UPGRADES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
-SQLITE_SEARCH_INDEX_UPGRADES: tuple[tuple[str, str, str], ...] = (
-    ("ix_inventory_name_pinyin_initials", "inventory", "name_pinyin_initials"),
-    ("ix_inventory_category_pinyin_initials", "inventory", "category_pinyin_initials"),
-    ("ix_inventory_brand_pinyin_initials", "inventory", "brand_pinyin_initials"),
-    ("ix_inventory_storage_location_pinyin_initials", "inventory", "storage_location_pinyin_initials"),
-    ("ix_reagent_order_name_pinyin_initials", "reagent_order", "name_pinyin_initials"),
-    ("ix_reagent_order_category_pinyin", "reagent_order", "category_pinyin"),
-    ("ix_reagent_order_category_pinyin_initials", "reagent_order", "category_pinyin_initials"),
-    ("ix_reagent_order_brand_pinyin_initials", "reagent_order", "brand_pinyin_initials"),
-    ("ix_consumable_order_name_pinyin_initials", "consumable_order", "name_pinyin_initials"),
-    ("ix_users_full_name_pinyin_initials", "users", "full_name_pinyin_initials"),
+SQLITE_SEARCH_INDEX_UPGRADES: tuple[tuple[str, str, str], ...] = ()
+
+
+SQLITE_DEPRECATED_INDEX_DROPS: tuple[str, ...] = (
+    # Inventory single-column indexes covered by composite indexes.
+    "DROP INDEX IF EXISTS ix_inventory_cas_number",
+    "DROP INDEX IF EXISTS ix_inventory_name",
+    "DROP INDEX IF EXISTS ix_inventory_category",
+    "DROP INDEX IF EXISTS ix_inventory_brand",
+    "DROP INDEX IF EXISTS ix_inventory_storage_location",
+    "DROP INDEX IF EXISTS ix_inventory_is_common",
+    "DROP INDEX IF EXISTS ix_inventory_status",
+    "DROP INDEX IF EXISTS ix_inventory_borrower_id",
+    "DROP INDEX IF EXISTS ix_inventory_temporary_keeper_id",
+    "DROP INDEX IF EXISTS ix_inventory_created_by_id",
+    "DROP INDEX IF EXISTS ix_inventory_created_at",
+    "DROP INDEX IF EXISTS ix_inventory_name_pinyin",
+    "DROP INDEX IF EXISTS ix_inventory_name_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_inventory_category_pinyin",
+    "DROP INDEX IF EXISTS ix_inventory_category_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_inventory_brand_pinyin",
+    "DROP INDEX IF EXISTS ix_inventory_brand_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_inventory_storage_location_pinyin",
+    "DROP INDEX IF EXISTS ix_inventory_storage_location_pinyin_initials",
+    # Recreate these indexes with created_at/id suffix for pinyin sort tie-breakers.
+    "DROP INDEX IF EXISTS ix_inventory_is_common_name_pinyin",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_name_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_category_pinyin",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_category_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_brand_pinyin",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_brand_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_storage_location_pinyin",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_storage_location_pinyin_initials",
+    # Historical residual indexes from earlier is_common rollout.
+    "DROP INDEX IF EXISTS ix_inventory_is_common_cas_number",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_name",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_alias",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_category",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_brand",
+    "DROP INDEX IF EXISTS ix_inventory_is_common_storage_location",
+    # Borrow log single-column indexes covered by composite indexes.
+    "DROP INDEX IF EXISTS ix_borrowlog_inventory_id",
+    "DROP INDEX IF EXISTS ix_borrowlog_borrower_id",
+    # Reagent order pinyin single-column indexes covered by composite indexes.
+    "DROP INDEX IF EXISTS ix_reagent_order_name_pinyin",
+    "DROP INDEX IF EXISTS ix_reagent_order_name_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_reagent_order_category_pinyin",
+    "DROP INDEX IF EXISTS ix_reagent_order_category_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_reagent_order_brand_pinyin",
+    "DROP INDEX IF EXISTS ix_reagent_order_brand_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_reagent_order_created_at",
+    # Consumable order pinyin single-column indexes covered by composite indexes.
+    "DROP INDEX IF EXISTS ix_consumable_order_name_pinyin",
+    "DROP INDEX IF EXISTS ix_consumable_order_name_pinyin_initials",
+    "DROP INDEX IF EXISTS ix_consumable_order_created_at",
+    # Users pinyin single-column indexes covered by composite/low-value historical leftovers.
+    "DROP INDEX IF EXISTS ix_users_full_name_pinyin",
+    "DROP INDEX IF EXISTS ix_users_full_name_pinyin_initials",
 )
 
-SQLITE_PERFORMANCE_INDEX_UPGRADES: tuple[str, ...] = (
+SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
+    # Inventory searchable fields (regular/common split by is_common).
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_cas_number_created_at_id ON inventory (is_common, cas_number, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_name_created_at_id ON inventory (is_common, name, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_name_pinyin ON inventory (is_common, name_pinyin DESC, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_name_pinyin_initials ON inventory (is_common, name_pinyin_initials DESC, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_alias_created_at_id ON inventory (is_common, alias, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_category_created_at_id ON inventory (is_common, category, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_category_pinyin ON inventory (is_common, category_pinyin DESC, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_category_pinyin_initials ON inventory (is_common, category_pinyin_initials DESC, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_brand_created_at_id ON inventory (is_common, brand, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_brand_pinyin ON inventory (is_common, brand_pinyin DESC, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_brand_pinyin_initials ON inventory (is_common, brand_pinyin_initials DESC, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_storage_location_created_at_id ON inventory (is_common, storage_location, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_storage_location_pinyin ON inventory (is_common, storage_location_pinyin DESC, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_storage_location_pinyin_initials ON inventory (is_common, storage_location_pinyin_initials DESC, created_at DESC, id DESC)",
+    # Reagent order searchable pinyin fields.
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_pinyin_created_at_id ON reagent_order (name_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_pinyin_initials_created_at_id ON reagent_order (name_pinyin_initials, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_category_pinyin_created_at_id ON reagent_order (category_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_category_pinyin_initials_created_at_id ON reagent_order (category_pinyin_initials, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_pinyin_created_at_id ON reagent_order (brand_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_pinyin_initials_created_at_id ON reagent_order (brand_pinyin_initials, created_at DESC, id DESC)",
+    # Consumable order searchable pinyin fields.
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_created_at_id ON consumable_order (name_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_initials_created_at_id ON consumable_order (name_pinyin_initials, created_at DESC, id DESC)",
+)
+
+
+SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
+    # Inventory filter/sort and operational paths.
     "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_created_at_id ON inventory (is_common, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_status_created_at_id ON inventory (is_common, status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_status_created_at_id ON inventory (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_borrower_status_updated_at ON inventory (borrower_id, status, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_keeper_location_created_at ON inventory (temporary_keeper_id, storage_location, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_cas_status_created_at ON inventory (cas_number, status, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_alias_created_at ON inventory (alias, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_created_by_created_at_id ON inventory (created_by_id, created_at DESC, id DESC)",
+    # Borrow log operational queries.
     "CREATE INDEX IF NOT EXISTS ix_borrowlog_borrower_consume_borrow_time ON borrowlog (borrower_id, is_consume, borrow_time DESC)",
     "CREATE INDEX IF NOT EXISTS ix_borrowlog_inventory_consume_return_borrow ON borrowlog (inventory_id, is_consume, return_time, borrow_time DESC)",
+    # Reagent/consumable list status + applicant filters.
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_created_at_id ON reagent_order (created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_status_created_at_id ON reagent_order (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_applicant_created_at_id ON reagent_order (applicant_id, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_created_at_id ON consumable_order (created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_status_created_at_id ON consumable_order (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_applicant_created_at_id ON consumable_order (applicant_id, created_at DESC, id DESC)",
+    # Other modules.
     "CREATE INDEX IF NOT EXISTS ix_announcements_pinned_created ON announcements (is_pinned DESC, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_announcements_visible_pinned_created ON announcements (is_visible, is_pinned DESC, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_announcements_creator_visible ON announcements (created_by, is_visible)",
@@ -106,6 +190,122 @@ SQLITE_PERFORMANCE_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_expires ON user_sessions (user_id, expires_at)",
     "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_ip ON user_sessions (user_id, ip_address)",
     "CREATE INDEX IF NOT EXISTS ix_user_sessions_expires_at ON user_sessions (expires_at)",
+)
+
+
+SQLITE_PERFORMANCE_INDEX_UPGRADES: tuple[str, ...] = (
+    SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES
+    + SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES
+)
+
+SQLITE_INVENTORY_FTS_SETUP: tuple[str, ...] = (
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS inventory_fts USING fts5(
+        cas_number,
+        name,
+        name_pinyin,
+        name_pinyin_initials,
+        alias,
+        category,
+        category_pinyin,
+        category_pinyin_initials,
+        brand,
+        brand_pinyin,
+        brand_pinyin_initials,
+        storage_location,
+        storage_location_pinyin,
+        storage_location_pinyin_initials,
+        tokenize='trigram'
+    )
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_inventory_fts_ai
+    AFTER INSERT ON inventory
+    BEGIN
+        INSERT INTO inventory_fts(
+            rowid,
+            cas_number,
+            name,
+            name_pinyin,
+            name_pinyin_initials,
+            alias,
+            category,
+            category_pinyin,
+            category_pinyin_initials,
+            brand,
+            brand_pinyin,
+            brand_pinyin_initials,
+            storage_location,
+            storage_location_pinyin,
+            storage_location_pinyin_initials
+        )
+        VALUES (
+            NEW.id,
+            NEW.cas_number,
+            NEW.name,
+            NEW.name_pinyin,
+            NEW.name_pinyin_initials,
+            NEW.alias,
+            NEW.category,
+            NEW.category_pinyin,
+            NEW.category_pinyin_initials,
+            NEW.brand,
+            NEW.brand_pinyin,
+            NEW.brand_pinyin_initials,
+            NEW.storage_location,
+            NEW.storage_location_pinyin,
+            NEW.storage_location_pinyin_initials
+        );
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_inventory_fts_ad
+    AFTER DELETE ON inventory
+    BEGIN
+        DELETE FROM inventory_fts WHERE rowid = OLD.id;
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_inventory_fts_au
+    AFTER UPDATE ON inventory
+    BEGIN
+        DELETE FROM inventory_fts WHERE rowid = OLD.id;
+        INSERT INTO inventory_fts(
+            rowid,
+            cas_number,
+            name,
+            name_pinyin,
+            name_pinyin_initials,
+            alias,
+            category,
+            category_pinyin,
+            category_pinyin_initials,
+            brand,
+            brand_pinyin,
+            brand_pinyin_initials,
+            storage_location,
+            storage_location_pinyin,
+            storage_location_pinyin_initials
+        )
+        VALUES (
+            NEW.id,
+            NEW.cas_number,
+            NEW.name,
+            NEW.name_pinyin,
+            NEW.name_pinyin_initials,
+            NEW.alias,
+            NEW.category,
+            NEW.category_pinyin,
+            NEW.category_pinyin_initials,
+            NEW.brand,
+            NEW.brand_pinyin,
+            NEW.brand_pinyin_initials,
+            NEW.storage_location,
+            NEW.storage_location_pinyin,
+            NEW.storage_location_pinyin_initials
+        );
+    END
+    """,
 )
 
 
@@ -211,10 +411,91 @@ def ensure_sqlite_search_columns(connection: Connection) -> int:
             text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})")
         )
 
+    for statement in SQLITE_DEPRECATED_INDEX_DROPS:
+        connection.execute(text(statement))
+
     for statement in SQLITE_PERFORMANCE_INDEX_UPGRADES:
         connection.execute(text(statement))
 
+    # Refresh planner statistics so SQLite can pick the intended composite indexes
+    # after large index upgrades (especially the is_common + created_at/id paths).
+    connection.execute(text("ANALYZE"))
+    connection.execute(text("PRAGMA optimize"))
+
     return added_columns
+
+
+def ensure_sqlite_inventory_fts(connection: Connection) -> None:
+    """Create inventory FTS table/triggers for fast substring search."""
+    try:
+        table_exists = connection.execute(
+            text(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='inventory_fts'"
+            )
+        ).first() is not None
+
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_ai"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_ad"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_au"))
+
+        for statement in SQLITE_INVENTORY_FTS_SETUP:
+            connection.execute(text(statement))
+
+        inventory_count = connection.execute(text("SELECT COUNT(*) FROM inventory")).scalar_one()
+        fts_count = connection.execute(text("SELECT COUNT(*) FROM inventory_fts")).scalar_one()
+        needs_rebuild = (not table_exists) or (inventory_count != fts_count)
+        if needs_rebuild:
+            connection.execute(text("DELETE FROM inventory_fts"))
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO inventory_fts(
+                        rowid,
+                        cas_number,
+                        name,
+                        name_pinyin,
+                        name_pinyin_initials,
+                        alias,
+                        category,
+                        category_pinyin,
+                        category_pinyin_initials,
+                        brand,
+                        brand_pinyin,
+                        brand_pinyin_initials,
+                        storage_location,
+                        storage_location_pinyin,
+                        storage_location_pinyin_initials
+                    )
+                    SELECT
+                        id,
+                        cas_number,
+                        name,
+                        name_pinyin,
+                        name_pinyin_initials,
+                        alias,
+                        category,
+                        category_pinyin,
+                        category_pinyin_initials,
+                        brand,
+                        brand_pinyin,
+                        brand_pinyin_initials,
+                        storage_location,
+                        storage_location_pinyin,
+                        storage_location_pinyin_initials
+                    FROM inventory
+                    """
+                )
+            )
+            fts_count_after = connection.execute(text("SELECT COUNT(*) FROM inventory_fts")).scalar_one()
+            logger.info(
+                "Rebuilt inventory_fts data (inventory rows=%s, fts rows before=%s, after=%s)",
+                inventory_count,
+                fts_count,
+                fts_count_after,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Inventory FTS initialization skipped: %s", exc)
 
 
 def init_db() -> None:
@@ -229,6 +510,7 @@ def init_db() -> None:
 
     with engine.begin() as connection:
         ensure_sqlite_search_columns(connection)
+        ensure_sqlite_inventory_fts(connection)
         check_sqlite_schema_consistency(connection)
 
     # Create default admin user if no users exist
@@ -280,5 +562,11 @@ def _create_default_admin() -> None:
 
 def reset_db() -> None:
     """Drop all tables and recreate (use with caution!)"""
+    with engine.begin() as connection:
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_ai"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_ad"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_au"))
+        connection.execute(text("DROP TABLE IF EXISTS inventory_fts"))
+
     SQLModel.metadata.drop_all(engine)
     init_db()

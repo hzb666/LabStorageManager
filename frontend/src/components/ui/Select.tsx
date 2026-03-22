@@ -109,7 +109,7 @@ function SelectItem({
       )}
       {...props}
     >
-      <span className='absolute end-2 flex size-3.5 items-center justify-center'>
+      <span className='absolute inset-e-2 flex size-3.5 items-center justify-center'>
         <SelectPrimitive.ItemIndicator>
           <CheckIcon className='size-4' />
         </SelectPrimitive.ItemIndicator>

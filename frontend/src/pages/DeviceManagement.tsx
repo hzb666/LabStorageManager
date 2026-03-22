@@ -2,7 +2,7 @@
  * 账户管理页面
  * 用户可以查看和管理自己的账户信息、头像、密码，以及查看和管理登录设备
  */
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   createColumnHelper,
   flexRender,
@@ -14,7 +14,6 @@ import {
 import type { SortingState } from '@tanstack/react-table'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import StatusBadge from '@/components/ui/StatusBadge'
@@ -25,7 +24,6 @@ import { type User } from '@/lib/constants'
 import useDialogState from '@/hooks/useDialogState'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import {
-  Search,
   Laptop,
   Loader2,
   Trash2,
@@ -33,7 +31,6 @@ import {
   LogOut,
   Shield,
   Edit,
-  X,
   Pencil,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
@@ -44,6 +41,8 @@ import { DeviceNameSchema, type DeviceNameFormData } from '@/lib/validationSchem
 import { defaultDeviceNameValues, getDeviceNameFormFields } from '@/lib/formConfigs'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { BaseForm } from '@/components/BaseForm'
+import { SEARCH_MAX_LENGTH, TableEmptyState, TableSearchInput } from '@/components/ui/TableFilters'
+import { HighlightText } from '@/components/ui/HighlightText'
 
 
 const columnHelper = createColumnHelper<SessionInfo>()
@@ -51,7 +50,24 @@ const columnHelper = createColumnHelper<SessionInfo>()
 export default function DeviceManagement() {
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
+  const [inputValue, setInputValue] = useState('')
   const [globalFilter, setGlobalFilter] = useState('')
+  const normalizedInputValue = inputValue.trim()
+
+  useEffect(() => {
+    if (!normalizedInputValue && globalFilter) {
+      setGlobalFilter('')
+      return
+    }
+
+    const timer = setTimeout(() => {
+      if (inputValue.length <= SEARCH_MAX_LENGTH) {
+        setGlobalFilter(normalizedInputValue)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [inputValue, normalizedInputValue, globalFilter])
 
   // Dialog state - 支持 kick/kickAll
   const [dialogState, setDialogState] = useDialogState<"kick" | "kickAll">()
@@ -123,7 +139,9 @@ export default function DeviceManagement() {
       cell: info => (
         <div className="flex items-center gap-2">
           <Laptop className="w-4 h-4 text-muted-foreground" />
-          <span>{info.getValue()}</span>
+          <span>
+            <HighlightText text={info.getValue()} highlight={info.table.getState().globalFilter} />
+          </span>
         </div>
       ),
     }),
@@ -131,7 +149,9 @@ export default function DeviceManagement() {
       header: 'IP地址',
       size: 120,
       cell: info => (
-        <span className="text-base">{info.getValue()}</span>
+        <span className="text-base">
+          <HighlightText text={info.getValue()} highlight={info.table.getState().globalFilter} />
+        </span>
       ),
     }),
     columnHelper.accessor('last_active_at', {
@@ -233,6 +253,69 @@ export default function DeviceManagement() {
     },
   })
 
+  const filteredRows = table.getRowModel().rows
+  const filteredCount = filteredRows.length
+  const totalCount = sortedData.length
+  const hasFilter = Boolean(globalFilter)
+  const shouldShowGrandTotal = hasFilter && totalCount > 0 && filteredCount !== totalCount
+  const displayCount = shouldShowGrandTotal ? `${filteredCount}/${totalCount}` : `${filteredCount}`
+
+  let tableContent: React.ReactNode
+  if (isLoading && totalCount === 0) {
+    tableContent = (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  } else if (filteredCount === 0) {
+    tableContent = (
+      <TableEmptyState
+        searchKeyword={globalFilter}
+        hasFilter={hasFilter}
+        emptyText="暂无设备数据"
+      />
+    )
+  } else {
+    tableContent = (
+      <div className="px-6 rounded-md overflow-auto">
+        <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
+          <thead>
+            {table.getHeaderGroups().map(headerGroup => (
+              <tr key={headerGroup.id} className="border-b-2 border-border">
+                {headerGroup.headers.map(header => (
+                  <th
+                    key={header.id}
+                    className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
+                    style={{ width: header.getSize() }}
+                  >
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </th>
+                ))}
+              </tr>
+            ))}
+          </thead>
+          <tbody>
+            {filteredRows.map(row => (
+              <tr key={row.id} className="border-b border-border hover:bg-muted/30">
+                {row.getVisibleCells().map(cell => (
+                  <td
+                    key={cell.id}
+                    className="p-3 align-middle text-base"
+                    style={{ width: cell.column.getSize() }}
+                  >
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   // ========== 设备管理相关函数 ==========
   // Kick single device handlers
   const handleKickDevice = async () => {
@@ -313,23 +396,12 @@ export default function DeviceManagement() {
 
       {/* 搜索 */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-        <div className="relative flex-1 min-w-50">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-          <Input
-            placeholder="搜索设备名称、IP地址..."
-            value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            className="pl-9 pr-8 h-10 text-base w-full"
-          />
-          {globalFilter && (
-            <button
-              onClick={() => setGlobalFilter('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
+        <TableSearchInput
+          value={inputValue}
+          onChange={setInputValue}
+          placeholder="搜索设备名称、IP地址..."
+          inputClassName="h-10"
+        />
       </div>
 
       {/* 设备列表 */}
@@ -337,56 +409,12 @@ export default function DeviceManagement() {
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
             <Laptop className="w-5 h-5" />
-            设备列表 <span className="text-muted-foreground font-normal">(&thinsp;{data.length}&thinsp;)</span>
+            设备列表
+            <span className="text-muted-foreground font-normal">(&thinsp;{displayCount}&thinsp;)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading && data.length === 0 ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : data.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              暂无设备数据
-            </div>
-          ) : (
-            <div className="px-6 rounded-md overflow-auto">
-              <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                <thead>
-                  {table.getHeaderGroups().map(headerGroup => (
-                    <tr key={headerGroup.id} className="border-b-2 border-border">
-                      {headerGroup.headers.map(header => (
-                        <th 
-                          key={header.id} 
-                          className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
-                          style={{ width: header.getSize() }}
-                        >
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.map(row => (
-                    <tr key={row.id} className="border-b border-border hover:bg-muted/30">
-                      {row.getVisibleCells().map(cell => (
-                        <td 
-                          key={cell.id} 
-                          className="p-3 align-middle text-base"
-                          style={{ width: cell.column.getSize() }}
-                        >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {tableContent}
         </CardContent>
       </Card>
 
@@ -464,7 +492,7 @@ export default function DeviceManagement() {
           <div className="space-y-4">
             <div>
               <p className="text-base">
-                当前设备：<span className="font-medium">{editSession?.device_name}</span>
+                当前设备：<span>{editSession?.device_name}</span>
               </p>
               <p className="text-sm text-muted-foreground">
                 IP地址：{editSession?.ip_address}

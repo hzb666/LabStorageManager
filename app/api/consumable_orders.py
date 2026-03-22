@@ -3,9 +3,9 @@ Consumable Order API Routes - Consumables Purchase Order Management
 Separated from Reagent orders (no stock-in needed)
 """
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Annotated, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
@@ -177,7 +177,7 @@ def list_consumable_orders(
     skip: int = 0,
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
     status_filter: Optional[ConsumableOrderStatus] = None,
-    search: Optional[str] = None,
+    search: Annotated[Optional[str], Query(max_length=100)] = None,
     search_field: Optional[str] = None,
     fuzzy: bool = False,
     sort_by: Optional[str] = None,

@@ -9,6 +9,7 @@ from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
 
+from pydantic import ConfigDict
 from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
@@ -47,6 +48,9 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
     """Consumable Order database model"""
     __tablename__ = "consumable_order"
     __table_args__ = (
+        Index("ix_consumable_order_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
+        Index("ix_consumable_order_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),
+        Index("ix_consumable_order_created_at_id", "created_at", "id"),
         Index("ix_consumable_order_status_created_at_id", "status", "created_at", "id"),
         Index("ix_consumable_order_applicant_created_at_id", "applicant_id", "created_at", "id"),
     )
@@ -59,9 +63,9 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
     )
     status: ConsumableOrderStatus = Field(default=ConsumableOrderStatus.PENDING)
     # 拼音索引字段（用于排序和搜索）
-    name_pinyin: Optional[str] = Field(None, max_length=200, index=True)
-    name_pinyin_initials: Optional[str] = Field(None, max_length=200, index=True)
-    created_at: datetime = Field(default_factory=get_utc_now, index=True)
+    name_pinyin: Optional[str] = Field(None, max_length=200)
+    name_pinyin_initials: Optional[str] = Field(None, max_length=200)
+    created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
         sa_column_kwargs={"onupdate": get_utc_now}
@@ -86,6 +90,8 @@ class ConsumableOrderCreate(SQLModel):
 
 class ConsumableOrderUpdate(SQLModel):
     """DTO for updating consumable order information"""
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = None
     english_name: Optional[str] = None
     product_number: Optional[str] = None
@@ -94,7 +100,6 @@ class ConsumableOrderUpdate(SQLModel):
     quantity: Optional[int] = None
     price: Optional[float] = None
     communication: Optional[str] = None
-    status: Optional[ConsumableOrderStatus] = None
     notes: Optional[str] = None
 
 

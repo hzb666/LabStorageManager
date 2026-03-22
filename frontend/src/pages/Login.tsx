@@ -332,8 +332,7 @@ export function Login() {
   return (
     <div className="flex min-h-svh w-full items-center justify-center px-4">
       <div className="absolute inset-0 -z-10 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] bg-size-[16px_16px] mask-[radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] dark:mask-[radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
-
-      <Card className="w-full max-w-sm">
+      <Card className='w-full max-w-sm'>
         <CardHeader className="space-y-1">
           <div className="flex items-start justify-between">
             <div className="text-left p-1">

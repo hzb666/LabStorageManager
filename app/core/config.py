@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./lab_inventory.db"
     
     # JWT Authentication
-    secret_key: str = Field(default="", description="JWT secret key (for HS256 fallback)")
+    secret_key: str = Field(default="", description="JWT secret key (for HS256 in development)")
     algorithm: str = "RS256"  # Changed from HS256 to RS256 for better security
     access_token_expire_minutes: int = 7 * 24 * 60  # 7 days
     
@@ -192,12 +192,13 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance"""
     settings = Settings()
-    
-    # Validate secret_key in production (needed for HS256 fallback)
-    if not settings.secret_key:
-        if settings.use_secure_runtime() and settings.algorithm == "HS256":
-            raise ValueError("SECRET_KEY must be set in production when using HS256")
-        # Use a secure random key in development
+
+    # 生产环境禁止 HS256，避免对称密钥模式的降级风险
+    if settings.use_secure_runtime() and settings.algorithm != "RS256":
+        raise ValueError("In production, JWT algorithm must be RS256. HS256 is not allowed.")
+
+    # 开发环境允许 HS256，并自动生成临时密钥
+    if settings.algorithm == "HS256" and not settings.secret_key:
         settings.secret_key = secrets.token_urlsafe(32)
     
     return settings

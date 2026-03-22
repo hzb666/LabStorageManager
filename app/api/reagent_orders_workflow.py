@@ -14,6 +14,7 @@ from app.models.inventory import Inventory, InventoryStatus
 from app.core.constants import SSEEventType, SSERoom
 from app.services.api_utils import clear_cache_by_prefix
 from app.services.internal_code import generate_internal_code
+from app.services.inventory_queries import regular_inventory_query
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.shelf_utils import normalize_storage_location
 from app.services.spec_utils import format_specification
@@ -381,6 +382,12 @@ def _register_delete_stock_routes(
         current_user: CurrentUser,
         db: DBSession,
     ):
+        if "remaining_quantity" in payload.model_fields_set and payload.remaining_quantity is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="remaining_quantity cannot be null",
+            )
+
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -467,7 +474,7 @@ def _register_delete_stock_routes(
             }
 
         pending_items = db.exec(
-            select(Inventory)
+            regular_inventory_query()
             .where(
                 Inventory.source_order_id == order.id,
                 Inventory.storage_location.is_(None),

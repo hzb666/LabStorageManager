@@ -11,7 +11,7 @@ from typing import Optional
 
 import re
 
-from pydantic import field_validator
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
@@ -52,8 +52,8 @@ class User(UserBase, table=True):
     password_hash: str
     username_version: int = Field(default=1, description="用户名版本号，每次修改用户名时+1")
     # 姓名拼音，用于按姓名排序
-    full_name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    full_name_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
+    full_name_pinyin: Optional[str] = Field(default=None, max_length=200)
+    full_name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
@@ -71,6 +71,9 @@ class UserCreate(SQLModel):
 
 class UserUpdate(SQLModel):
     """DTO for updating user information"""
+    # 安全边界：拒绝未声明字段（如 role），统一通过专用接口更新权限字段
+    model_config = ConfigDict(extra="forbid")
+
     username: Optional[str] = Field(None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
     
     # 添加 username 格式验证
@@ -82,7 +85,6 @@ class UserUpdate(SQLModel):
         return v
     
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    role: Optional[UserRole] = None
     is_active: Optional[bool] = None
 
 

@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select, func
 
 from app.database import get_db, DBSession
@@ -35,6 +35,15 @@ from app.services.sql_utils import (
     order_with_special_last,
 )
 from app.services.api_utils import clear_cache_by_prefix, get_cached_result, set_cached_result
+from app.services.inventory_fts import (
+    InventoryFTSError,
+    apply_inventory_fts_filter,
+    should_use_inventory_fts,
+)
+from app.services.inventory_queries import (
+    get_regular_inventory_by_id,
+    regular_inventory_query,
+)
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
@@ -48,6 +57,32 @@ INVENTORY_NOT_FOUND = "Inventory item not found"
 
 # ==================== Search Cache ====================
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
+INVENTORY_SEARCH_SQL_FIELD_MAP = {
+    'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
+    'cas_number': [Inventory.cas_number],
+    'storage_location': [
+        Inventory.storage_location,
+        Inventory.storage_location_pinyin,
+        Inventory.storage_location_pinyin_initials,
+    ],
+    'brand': [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
+    'category': [
+        Inventory.category,
+        Inventory.category_pinyin,
+        Inventory.category_pinyin_initials,
+    ],
+}
+INVENTORY_SEARCH_FTS_FIELD_MAP = {
+    'name': ["name", "name_pinyin", "name_pinyin_initials"],
+    'cas_number': ["cas_number"],
+    'storage_location': [
+        "storage_location",
+        "storage_location_pinyin",
+        "storage_location_pinyin_initials",
+    ],
+    'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
+    'category': ["category", "category_pinyin", "category_pinyin_initials"],
+}
 
 
 def _build_search_clause(field, pattern: str, *, fuzzy: bool):
@@ -73,7 +108,7 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
 
 
 def _get_by_id(db: Session, inventory_id: int) -> Optional[Inventory]:
-    return db.get(Inventory, inventory_id)
+    return get_regular_inventory_by_id(db, inventory_id)
 
 
 def _clear_list_cache() -> None:
@@ -98,8 +133,6 @@ def _apply_inventory_filters(
     search_field: Optional[str],
     fuzzy: bool,
 ):
-    # Regular inventory listing should always exclude common-shelf items.
-    base = base.where(Inventory.is_common.is_(False))
     if status_filter:
         base = base.where(Inventory.status == status_filter)
     if cas_filter:
@@ -114,31 +147,55 @@ def _apply_inventory_filters(
         return base
 
     search_pattern = f"%{search_value}%"
-    field_map = {
-        'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
-        'cas_number': [Inventory.cas_number],
-        'storage_location': [
-            Inventory.storage_location,
-            Inventory.storage_location_pinyin,
-            Inventory.storage_location_pinyin_initials,
-        ],
-        'brand': [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
-        'category': [
-            Inventory.category,
-            Inventory.category_pinyin,
-            Inventory.category_pinyin_initials,
-        ],
-    }
+    if not should_use_inventory_fts(search_value):
+        return _apply_inventory_like_filters(
+            base,
+            search_pattern=search_pattern,
+            search_field=search_field,
+            fuzzy=fuzzy,
+        )
 
-    if search_field and search_field != 'all' and search_field in field_map:
+    try:
+        return apply_inventory_fts_filter(
+            base,
+            search_value=search_value,
+            search_field=search_field,
+            field_map=INVENTORY_SEARCH_FTS_FIELD_MAP,
+        )
+    except InventoryFTSError as exc:
+        logger.warning("Inventory FTS fallback to LIKE due to configuration error: %s", exc)
+        return _apply_inventory_like_filters(
+            base,
+            search_pattern=search_pattern,
+            search_field=search_field,
+            fuzzy=fuzzy,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Inventory FTS fallback to LIKE due to runtime error: %s", exc)
+        return _apply_inventory_like_filters(
+            base,
+            search_pattern=search_pattern,
+            search_field=search_field,
+            fuzzy=fuzzy,
+        )
+
+
+def _apply_inventory_like_filters(
+    base,
+    *,
+    search_pattern: str,
+    search_field: Optional[str],
+    fuzzy: bool,
+):
+    if search_field and search_field != 'all' and search_field in INVENTORY_SEARCH_SQL_FIELD_MAP:
         clauses = [
             _build_search_clause(field, search_pattern, fuzzy=fuzzy)
-            for field in field_map[search_field]
+            for field in INVENTORY_SEARCH_SQL_FIELD_MAP[search_field]
         ]
         return base.where(_combine_search_clauses(clauses))
 
     all_clauses = []
-    for fields in field_map.values():
+    for fields in INVENTORY_SEARCH_SQL_FIELD_MAP.values():
         all_clauses.extend(
             _build_search_clause(field, search_pattern, fuzzy=fuzzy)
             for field in fields
@@ -165,7 +222,6 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
         'initial_quantity': Inventory.initial_quantity,
         'status': Inventory.status,
         'created_at': Inventory.created_at,
-        'updated_at': Inventory.updated_at,
     }
 
     sort_direction = sort_order.lower() if sort_order else 'desc'
@@ -173,6 +229,10 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
 
     if sort_by in pinyin_sort_fields:
         order_column = pinyin_sort_field_map.get(sort_by)
+        # 索引优先：避免使用 `field IS NULL` 表达式，给 SQLite 机会走复合索引排序
+        if sort_direction == 'asc':
+            return (order_column.asc(),)
+        return (order_column.desc(),)
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
 
@@ -243,7 +303,7 @@ def list_inventory(
     status_filter: Optional[InventoryStatus] = None,
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
-    search: Optional[str] = None,
+    search: Annotated[Optional[str], Query(max_length=100)] = None,
     search_field: Optional[str] = None,
     fuzzy: bool = False,
     sort_by: Optional[str] = None,
@@ -274,7 +334,7 @@ def list_inventory(
             }
 
     base = _apply_inventory_filters(
-        select(Inventory),
+        regular_inventory_query(),
         status_filter=status_filter,
         cas_filter=cas_filter,
         hazardous_only=hazardous_only,
@@ -351,12 +411,6 @@ async def update_inventory(
         _normalize_update_payload(item, update_data)
     except SpecificationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    if update_data.get('status') == InventoryStatus.RUN_SHORT and not item.is_common:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='RUN_SHORT status is only supported for common shelf items',
-        )
 
     if 'remaining_quantity' in update_data:
         new_remaining = update_data['remaining_quantity']

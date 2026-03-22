@@ -64,6 +64,7 @@ const STATUS_OPTIONS = [
 const SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
+  { value: 'alias', label: '别名' },
   { value: 'cas_number', label: 'CAS号' },
   { value: 'brand', label: '品牌' },
   { value: 'category', label: '分类' },
@@ -403,7 +404,7 @@ export function CommonShelfPage() {
         statusOptions={STATUS_OPTIONS}
         searchFieldOptions={SEARCH_FIELD_OPTIONS}
         title={<><Archive className="w-5 h-5" /> 常用/公用试剂</>}
-        searchPlaceholder="搜索名称、CAS号、品牌..."
+        searchPlaceholder="搜索名称、别名、CAS号、品牌..."
         renderExpandedRow={renderExpandedRow}
         noteField="notes"
       />

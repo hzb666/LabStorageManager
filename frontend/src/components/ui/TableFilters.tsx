@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import type { FilterOption, SearchFieldOption } from '@/hooks/useTableState'
 import { DEFAULT_STATUS_OPTIONS, DEFAULT_SEARCH_FIELD_OPTIONS } from '@/hooks/useTableState'
 
+export const SEARCH_MAX_LENGTH = 100
+
 // ============================================================================
 // 类型定义
 // ============================================================================
@@ -39,6 +41,15 @@ export interface TableFiltersProps {
   className?: string
 }
 
+export interface TableSearchInputProps {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  maxLength?: number
+  inputClassName?: string
+  containerClassName?: string
+}
+
 // ============================================================================
 // 空状态组件（暴露给 FilterTable 使用）
 // ============================================================================
@@ -49,23 +60,25 @@ export function TableEmptyState({
   hasFilter,
   emptyText = '暂无数据',
   statusOptions = DEFAULT_STATUS_OPTIONS
-}: {
+}: Readonly<{
   searchKeyword?: string
   statusFilter?: string
   hasFilter?: boolean
   emptyText?: string
   statusOptions?: FilterOption[]
-}) {
+}>) {
+  const normalizedKeyword = (searchKeyword ?? '').trim()
+
   const getMessage = () => {
-    if (searchKeyword && statusFilter && statusFilter !== 'all') {
+    if (normalizedKeyword && statusFilter && statusFilter !== 'all') {
       // 从 statusOptions 中查找对应的中文标签
       const statusOption = statusOptions.find(opt => opt.value === statusFilter)
       const statusLabel = statusOption?.label || statusFilter
-      return `未找到匹配"${searchKeyword}"的"${statusLabel}"记录`
+      return `未找到匹配"${normalizedKeyword}"的"${statusLabel}"记录`
     }
 
-    if (searchKeyword) {
-      return `未找到匹配"${searchKeyword}"的记录`
+    if (normalizedKeyword) {
+      return `未找到匹配"${normalizedKeyword}"的记录`
     }
 
     if (hasFilter) {
@@ -78,6 +91,51 @@ export function TableEmptyState({
   return (
     <div className="text-center py-8 text-muted-foreground">
       {getMessage()}
+    </div>
+  )
+}
+
+export function TableSearchInput({
+  value,
+  onChange,
+  placeholder = '搜索名称、CAS号、位置...',
+  maxLength = SEARCH_MAX_LENGTH,
+  inputClassName = '',
+  containerClassName = 'relative flex-1 min-w-50',
+}: Readonly<TableSearchInputProps>) {
+  const isSearchTooLong = value.length > maxLength
+  const searchErrorText = `不能超过 ${maxLength} 个字符` // 稍微缩短文案
+
+  return (
+    <div className={containerClassName}>
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10 pointer-events-none" />
+      <Input
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={isSearchTooLong}
+        className={`pl-9 text-base w-full inline-flex leading-none outline-none ${inputClassName} ${
+          isSearchTooLong 
+            ? 'pr-45 border-destructive! focus-visible:border-destructive! focus-visible:ring-destructive/20!' 
+            : value ? 'pr-8' : 'pr-3'
+        }`}
+      />
+      <div className="absolute right-1 top-1 bottom-1 flex items-center bg-transparent z-10 pointer-events-none">
+        {isSearchTooLong && (
+          <span className="text-sm text-destructive mr-1 whitespace-nowrap pointer-events-auto">
+            {searchErrorText}
+          </span>
+        )}
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="text-muted-foreground hover:text-foreground shrink-0 p-1 pointer-events-auto flex items-center justify-center mr-0.5"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -100,8 +158,7 @@ export function TableFilters({
   onStatusFilterChange,
   statusOptions = DEFAULT_STATUS_OPTIONS,
   className = '',
-}: TableFiltersProps) {
-
+}: Readonly<TableFiltersProps>) {
   const handleSearchChange = (value: string) => {
     onSearchInputChange(value)
   }
@@ -115,23 +172,11 @@ export function TableFilters({
   return (
     <div className={`flex flex-col sm:flex-row gap-3 items-stretch sm:items-center ${className}`}>
       {/* 搜索输入框 */}
-      <div className="relative flex-1 min-w-50">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-        <Input
-          placeholder={searchPlaceholder}
-          value={searchInput}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          className="pl-9 pr-8 text-base w-full inline-flex leading-none"
-        />
-        {searchInput && (
-          <button
-            onClick={() => handleSearchChange('')}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+      <TableSearchInput
+        value={searchInput}
+        onChange={handleSearchChange}
+        placeholder={searchPlaceholder}
+      />
       
       {/* 筛选控件 */}
       <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">

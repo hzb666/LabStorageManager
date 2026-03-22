@@ -65,22 +65,28 @@ def clear_cache_by_prefix(cache_store: CacheStore, prefix: str = "list:") -> int
     return len(keys_to_delete)
 
 
-def empty_to_none(obj: Any, fields: list[str]) -> dict:
+def empty_to_none(obj: Any, fields: Optional[list[str]] = None) -> dict:
     """将指定字段中的空字符串或纯空格字符串统一转换为 None。
 
     Args:
         obj: 输入对象，可以是字典或带属性的对象
-        fields: 需要处理的字段列表
+        fields: 需要处理的字段列表；不传时处理对象中的全部字段
 
     Returns:
         处理后的字典，空字符串和纯空格都会转为 None
     """
-    result = {}
-    for field in fields:
-        if isinstance(obj, dict):
-            value = obj.get(field)
-        else:
-            value = getattr(obj, field, None)
+    if isinstance(obj, dict):
+        source = dict(obj)
+    elif hasattr(obj, "model_dump"):
+        source = obj.model_dump()
+    else:
+        source = dict(vars(obj))
+
+    target_fields = fields if fields is not None else list(source.keys())
+    result = dict(source)
+
+    for field in target_fields:
+        value = source.get(field)
         # 空字符串或纯空格都转为 None，同时统一去掉首尾空格
         if value is None:
             result[field] = None

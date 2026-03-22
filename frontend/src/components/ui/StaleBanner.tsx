@@ -39,7 +39,7 @@ export function StaleBanner({ room, onRefresh, message }: StaleBannerProps) {
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Info className="h-4 w-4" />
         </div>
-        <span className="text-sm font-medium text-foreground">
+        <span className="text-sm  text-foreground">
           {message ?? '已接收到数据更新，点击刷新获取最新内容'}
         </span>
       </div>

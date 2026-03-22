@@ -16,7 +16,7 @@ from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.spec_utils import parse_specification
-from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
+from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS, normalize_cas
 
 MIN_CART_ITEM_PRICE = 0.01
 
@@ -49,6 +49,9 @@ class CartItem(BaseModel):
     cas_number: str = ""
     english_name: str = ""
     alias: str = ""
+    unit: str = ""
+    product_number: str = ""
+    is_hazardous: bool = False
     product_id: Optional[str] = None  # 学校系统产品ID
     detail_url: Optional[str] = None  # 详情页URL
 
@@ -88,7 +91,24 @@ class CartImportResponse(BaseModel):
     errors: List[str] = []
 
 
-def match_consumable_order(db: Session, item: CartItem) -> MatchedItem:
+def _clean_text(value: Optional[str]) -> str:
+    return (value or "").strip()
+
+
+def _safe_parse_specification(specification: str) -> tuple[Optional[float], Optional[str]]:
+    spec = _clean_text(specification)
+    if not spec:
+        return None, None
+
+    try:
+        parsed_quantity, parsed_unit = parse_specification(spec)
+        return parsed_quantity, parsed_unit
+    except Exception:
+        logger.info("Skip specification parsing due to unsupported format: %s", spec)
+        return None, None
+
+
+def match_consumable_order(_db: Session, item: CartItem) -> MatchedItem:
     """耗材订单不需要匹配，直接创建新订单"""
     return MatchedItem(cart_item=item, matched_id=None, match_type=MatchType.NONE, similarity=0.0)
 
@@ -103,8 +123,9 @@ def match_reagent_order(db: Session, item: CartItem) -> MatchedItem:
         return MatchedItem(cart_item=item, matched_id=exact_match.id, match_type=MatchType.EXACT, similarity=1.0)
 
     # CAS号匹配
-    if item.cas_number:
-        cas_query = select(ReagentOrder).where(ReagentOrder.cas_number == item.cas_number)
+    normalized_cas = normalize_cas(item.cas_number)
+    if normalized_cas:
+        cas_query = select(ReagentOrder).where(ReagentOrder.cas_number == normalized_cas)
         cas_match = db.exec(cas_query).first()
         if cas_match:
             return MatchedItem(cart_item=item, matched_id=cas_match.id, match_type=MatchType.EXACT, similarity=1.0)
@@ -145,7 +166,7 @@ async def sync_cart(
     )
 
 
-@router.post("/import", response_model=CartImportResponse)
+@router.post("/import", response_model=CartImportResponse, dependencies=[Depends(get_current_user)])
 async def import_cart(
     request: CartImportRequest,
     current_user: Annotated[User, Depends(get_current_user)],
@@ -160,37 +181,46 @@ async def import_cart(
 
     for item in request.items:
         try:
-            parsed = parse_specification(item.specification or "未知")
+            item_name = _clean_text(item.name) or "未知商品"
+            item_specification = _clean_text(item.specification) or "未知"
+            item_english_name = _clean_text(item.english_name)
+            item_brand = _clean_text(item.brand)
+            item_alias = _clean_text(item.alias)
+            item_cas_number = normalize_cas(item.cas_number) or BIOLOGICAL_REAGENT_CAS
+            item_product_number = _clean_text(item.product_number)
+            parsed_quantity, parsed_unit = _safe_parse_specification(item_specification)
 
             if request.order_type == OrderType.CONSUMABLE:
                 # 创建耗材订单
                 db_order = ConsumableOrder(
-                    name=item.name,
-                    specification=item.specification or "未知",
-                    unit=parsed.get("unit"),
+                    name=item_name,
+                    specification=item_specification,
+                    unit=_clean_text(item.unit) or parsed_unit,
                     quantity=item.quantity,
                     price=item.price,
-                    english_name=item.english_name or None,
+                    english_name=item_english_name or None,
+                    product_number=item_product_number or None,
                     applicant_id=current_user.id,
                     status=ConsumableOrderStatus.PENDING,
-                    **compute_pinyin_fields(name=item.name),
+                    **compute_pinyin_fields(name=item_name),
                 )
             else:
                 # 创建试剂订单
                 db_order = ReagentOrder(
-                    name=item.name,
-                    specification=item.specification or "未知",
-                    initial_quantity=parsed.get("initial_quantity"),
-                    unit=parsed.get("unit"),
+                    name=item_name,
+                    specification=item_specification,
+                    initial_quantity=parsed_quantity,
+                    unit=parsed_unit,
                     quantity=item.quantity,
                     price=item.price if item.price and item.price > 0 else MIN_CART_ITEM_PRICE,
-                    brand=item.brand,
-                    english_name=item.english_name or None,
-                    cas_number=item.cas_number or BIOLOGICAL_REAGENT_CAS,
-                    alias=item.alias or None,
+                    brand=item_brand or None,
+                    english_name=item_english_name or None,
+                    cas_number=item_cas_number,
+                    alias=item_alias or None,
+                    is_hazardous=item.is_hazardous,
                     applicant_id=current_user.id,
                     status=ReagentOrderStatus.PENDING,
-                    **compute_pinyin_fields(name=item.name, brand=item.brand),
+                    **compute_pinyin_fields(name=item_name, brand=item_brand),
                 )
 
             db.add(db_order)

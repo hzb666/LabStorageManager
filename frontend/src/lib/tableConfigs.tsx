@@ -372,7 +372,7 @@ export function getCommonShelfTableColumns(): ColumnDef<TableRowData, unknown>[]
       header: '可用瓶数',
       size: 90,
       minSize: 80,
-      cell: info => <span className="font-medium text-green-700">{safeString(info.getValue(), '0')} 瓶</span>,
+      cell: info => <span className=" text-green-700">{safeString(info.getValue(), '0')} 瓶</span>,
     }),
     columnHelper.accessor('total_bottles', {
       header: '总瓶数',
