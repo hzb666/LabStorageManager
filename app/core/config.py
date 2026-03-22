@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     redis_port: int = Field(default=6379, description="Redis port")
     redis_db: int = Field(default=0, description="Redis database number")
     redis_password: Optional[str] = Field(default=None, description="Redis password")
+    redis_key_prefix: str = Field(default="lsm", description="Redis key prefix for app namespace")
     
     # CAS Configuration
     cas_pattern: str = CAS_PATTERN

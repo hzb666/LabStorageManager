@@ -9,7 +9,7 @@ from collections import deque
 import redis
 from fastapi import HTTPException, status
 
-from app.core.redis import get_redis
+from app.core.redis import get_redis, redis_key
 
 
 _fallback_store: dict[str, deque[float]] = {}
@@ -37,7 +37,7 @@ def enforce_rate_limit(scope: str, identifier: str, limit: int, window_seconds: 
     """
     Enforce a simple fixed-window rate limit.
     """
-    key = f"rate_limit:{scope}:{identifier}"
+    key = redis_key(f"rate_limit:{scope}:{identifier}")
     redis_client = get_redis()
 
     if redis_client is None:

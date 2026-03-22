@@ -28,6 +28,7 @@ from app.core.constants import (
     SSE_REDIS_SUBSCRIBE_RETRY_SECONDS,
     SSE_SLOW_CLIENT_QUEUE_FULL_STREAK_LIMIT,
 )
+from app.core.redis import redis_key
 from app.services.sse_redis import redis_pubsub
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ class SSEManager:
         }
 
         local_delivered = await self._push_local(room, event_type, event)
-        redis_count = await asyncio.to_thread(redis_pubsub.publish, f"sse:{room}", event)
+        redis_count = await asyncio.to_thread(redis_pubsub.publish, redis_key(f"sse:{room}"), event)
         logger.debug(
             "SSE broadcast room=%s event=%s seq=%s local=%s redis=%s",
             room,
@@ -255,7 +256,13 @@ class SSEManager:
     def _parse_pubsub_event(self, message: dict[str, Any]) -> Optional[tuple[str, str, dict[str, Any]]]:
         raw_channel = message.get("channel")
         channel = self._decode_pubsub_value(raw_channel)
-        room = channel.split(":", 1)[1] if ":" in channel else ""
+        marker = ":sse:"
+        if channel.startswith("sse:"):
+            room = channel[len("sse:"):]
+        elif marker in channel:
+            room = channel.split(marker, 1)[1]
+        else:
+            room = channel.split(":", 1)[1] if ":" in channel else ""
         raw_data = message.get("data")
         text_data = self._decode_pubsub_value(raw_data)
 
@@ -356,7 +363,7 @@ class SSEManager:
         while True:
             pubsub = None
             try:
-                pubsub = await asyncio.to_thread(redis_pubsub.subscribe_patterns, "sse:*")
+                pubsub = await asyncio.to_thread(redis_pubsub.subscribe_patterns, redis_key("sse:*"))
                 if pubsub is None:
                     await asyncio.sleep(SSE_REDIS_SUBSCRIBE_RETRY_SECONDS)
                     continue

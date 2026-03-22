@@ -35,7 +35,7 @@ from app.core.constants import (
 )
 from app.core.time_utils import utc_iso_str
 from app.core.request_utils import get_client_ip
-from app.core.redis import delete_cached_session, get_redis
+from app.core.redis import delete_cached_session, get_redis, redis_key
 from app.database import get_db, DBSession
 from app.models.user import (
     PublicUserResponse,
@@ -68,7 +68,7 @@ DUMMY_PASSWORD_HASH = get_password_hash("constant-timing-placeholder")
 
 def _rate_limit_key(client_ip: str) -> str:
     """生成速率限制的 Redis Key"""
-    return f"rate_limit:login:{client_ip}"
+    return redis_key(f"rate_limit:login:{client_ip}")
 
 
 def _check_rate_limit(client_ip: str) -> None:

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlmodel import select
 
-from app.core.redis import get_redis
+from app.core.redis import get_redis, redis_key
 from app.core.auth import AdminUser, require_admin
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
@@ -38,7 +38,7 @@ def _check_logs_token_rate_limit(admin_user_id: int) -> None:
         # Redis 不可用时，跳过速率限制检查（降级处理）
         return
     
-    key = f"rate_limit:logs_token:{admin_user_id}"
+    key = redis_key(f"rate_limit:logs_token:{admin_user_id}")
     
     try:
         current = redis_client.get(key)
@@ -64,7 +64,7 @@ def _record_logs_token_request(admin_user_id: int) -> None:
     if redis_client is None:
         return
     
-    key = f"rate_limit:logs_token:{admin_user_id}"
+    key = redis_key(f"rate_limit:logs_token:{admin_user_id}")
     
     try:
         pipe = redis_client.pipeline()
