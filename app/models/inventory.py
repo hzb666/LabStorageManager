@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import ConfigDict
-from sqlalchemy import Index
+from sqlalchemy import Column, Enum as SAEnum, Index
 from app.core.constants import MAX_BOTTLES_PER_IMPORT
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
@@ -81,7 +81,20 @@ class Inventory(InventoryBase, table=True):
     # Unique internal code: e.g., "64175-250113-001" (CAS-Date-Sequence)
     internal_code: str = Field(unique=True, index=True, max_length=50)
     is_common: bool = Field(default=False)
-    status: InventoryStatus = Field(default=InventoryStatus.IN_STOCK)  # 排序/筛选常用
+    status: InventoryStatus = Field(
+        default=InventoryStatus.IN_STOCK,
+        sa_column=Column(
+            SAEnum(
+                InventoryStatus,
+                native_enum=False,
+                create_constraint=False,
+                values_callable=lambda enum_cls: [item.value for item in enum_cls],
+                validate_strings=True,
+            ),
+            nullable=False,
+            default=InventoryStatus.IN_STOCK.value,
+        ),
+    )  # 排序/筛选常用
     borrower_id: Optional[int] = Field(
         default=None,
         foreign_key="users.id",

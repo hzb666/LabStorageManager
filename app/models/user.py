@@ -12,7 +12,7 @@ from typing import Optional
 import re
 
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import Index
+from sqlalchemy import Column, Enum as SAEnum, Index
 from sqlmodel import Field, SQLModel
 
 
@@ -35,7 +35,20 @@ class UserBase(SQLModel):
         return v
 
     full_name: str = Field(max_length=100)
-    role: UserRole = Field(default=UserRole.USER)
+    role: UserRole = Field(
+        default=UserRole.USER,
+        sa_column=Column(
+            SAEnum(
+                UserRole,
+                native_enum=False,
+                create_constraint=False,
+                values_callable=lambda enum_cls: [item.value for item in enum_cls],
+                validate_strings=True,
+            ),
+            nullable=False,
+            default=UserRole.USER.value,
+        ),
+    )
     is_active: bool = Field(default=True)
     avatar_url: Optional[str] = Field(default=None, max_length=500)
 
@@ -71,7 +84,7 @@ class UserCreate(SQLModel):
 
 class UserUpdate(SQLModel):
     """DTO for updating user information"""
-    # 安全边界：拒绝未声明字段（如 role），统一通过专用接口更新权限字段
+    # 安全边界：拒绝未声明字段
     model_config = ConfigDict(extra="forbid")
 
     username: Optional[str] = Field(None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
@@ -86,6 +99,7 @@ class UserUpdate(SQLModel):
     
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     is_active: Optional[bool] = None
+    role: Optional[UserRole] = None
 
 
 class PublicUserResponse(BaseResponse):

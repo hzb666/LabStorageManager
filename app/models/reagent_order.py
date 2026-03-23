@@ -11,14 +11,14 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import ConfigDict
-from sqlalchemy import Index
+from sqlalchemy import Column, Enum as SAEnum, Index
 from sqlmodel import Field, SQLModel
 
 
 class ReagentOrderStatus(str, Enum):
     """Reagent order status enumeration"""
     PENDING = "pending"       # 已申购
-    APPROVED = "approved"     # 已审批（采购完成）
+    APPROVED = "approved"     # 已批准（采购完成）
     ARRIVED = "arrived"       # 已到货但未入库
     STOCKED = "stocked"       # 已入库
     REJECTED = "rejected"    # 未通过
@@ -60,7 +60,19 @@ class ReagentOrderBase(SQLModel):
     price: float = Field(ge=0)
     # Order reason
     # Order reason (optional, frontend must provide when creating)
-    order_reason: Optional[ReagentOrderReason] = None
+    order_reason: Optional[ReagentOrderReason] = Field(
+        default=None,
+        sa_column=Column(
+            SAEnum(
+                ReagentOrderReason,
+                native_enum=False,
+                create_constraint=False,
+                values_callable=lambda enum_cls: [item.value for item in enum_cls],
+                validate_strings=True,
+            ),
+            nullable=True,
+        ),
+    )
     # Hazardous flag
     is_hazardous: bool = False
     # Notes
@@ -92,7 +104,20 @@ class ReagentOrder(ReagentOrderBase, table=True):
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    status: ReagentOrderStatus = Field(default=ReagentOrderStatus.PENDING)
+    status: ReagentOrderStatus = Field(
+        default=ReagentOrderStatus.PENDING,
+        sa_column=Column(
+            SAEnum(
+                ReagentOrderStatus,
+                native_enum=False,
+                create_constraint=False,
+                values_callable=lambda enum_cls: [item.value for item in enum_cls],
+                validate_strings=True,
+            ),
+            nullable=False,
+            default=ReagentOrderStatus.PENDING.value,
+        ),
+    )
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,

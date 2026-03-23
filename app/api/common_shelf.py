@@ -1,10 +1,11 @@
-"""Common shelf routes for managing grouped inventory items."""
+"""Common shelf routes for managing grouped inventory items. All users can view/consume/add/edit/delete groups."""
 import logging
+from decimal import Decimal, InvalidOperation
 from typing import Any, Annotated, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlmodel import Session, select, func, update as sql_update
+from sqlmodel import Session, select, update as sql_update
 
 from app.core.auth import AdminUser, get_current_user
 from app.core.constants import SSEEventType, SSERoom, DEFAULT_PAGE_SIZE
@@ -33,6 +34,7 @@ from app.services.inventory_queries import (
     common_inventory_query,
     get_common_inventory_by_id,
 )
+from app.services.common_name_utils import is_std_marked_name, strip_std_name_marker
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     CASSearchMode,
@@ -43,7 +45,12 @@ from app.services.search_matchers import (
     combine_or_clauses,
     union_id_subqueries,
 )
-from app.services.spec_utils import SpecificationError, format_specification, parse_specification
+from app.services.spec_utils import (
+    SpecificationError,
+    UNIT_CANONICAL,
+    format_specification,
+    parse_specification,
+)
 from app.services.shelf_utils import (
     COMMON_SHELF_AVAILABLE_STATUSES,
     is_common_shelf_available_status,
@@ -57,6 +64,8 @@ from app.services.user_utils import batch_get_user_names
 INVENTORY_NOT_FOUND = "Inventory item not found"
 COMMON_SHELF_CONSUME_NOTE = "common_shelf_consume"
 logger = logging.getLogger(__name__)
+_DECIMAL_1000 = Decimal("1000")
+_DECIMAL_1000000 = Decimal("1000000")
 COMMON_SHELF_SEARCH_SQL_FIELD_MAP = {
     'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
     'alias': [Inventory.alias],
@@ -93,13 +102,13 @@ class CommonShelfConsumeRequest(BaseModel):
 
 
 def _common_group_sort_key(item: Inventory) -> tuple:
+    _, normalized_quantity, normalized_unit = _normalize_spec_for_group(item.initial_quantity, item.unit)
     return (
         item.cas_number or "",
-        item.name or "",
-        item.brand or "",
-        item.initial_quantity if item.initial_quantity is not None else -1,
-        item.unit or "",
-        item.storage_location or "",
+        _normalize_brand_for_group(item.brand),
+        normalized_quantity if normalized_quantity is not None else -1,
+        normalized_unit or "",
+        _normalize_storage_for_group(item.storage_location),
     )
 
 
@@ -117,16 +126,122 @@ def _same_value_clause(column, value):
     return column == value
 
 
-def _common_group_match_clauses(item: Inventory) -> list[Any]:
-    return [
-        common_inventory_clause(),
-        _same_value_clause(Inventory.cas_number, item.cas_number),
-        _same_value_clause(Inventory.name, item.name),
-        _same_value_clause(Inventory.brand, item.brand),
-        _same_value_clause(Inventory.initial_quantity, item.initial_quantity),
-        _same_value_clause(Inventory.unit, item.unit),
-        _same_value_clause(Inventory.storage_location, item.storage_location),
-    ]
+def _normalize_brand_for_group(brand: Optional[str]) -> str:
+    return (brand or "").strip().casefold()
+
+
+def _normalize_storage_for_group(storage_location: Optional[str]) -> str:
+    return (storage_location or "").strip().casefold()
+
+
+def _format_decimal_number(value: Decimal) -> str:
+    normalized = value.normalize()
+    number = format(normalized, "f")
+    if "." in number:
+        number = number.rstrip("0").rstrip(".")
+    return number or "0"
+
+
+def _decimal_from_float(value: Optional[float]) -> Optional[Decimal]:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _normalize_spec_for_group(
+    initial_quantity: Optional[float],
+    unit: Optional[str],
+) -> tuple[str, Optional[float], Optional[str]]:
+    quantity = _decimal_from_float(initial_quantity)
+    if quantity is None:
+        normalized_unit = UNIT_CANONICAL.get((unit or "").strip().lower(), (unit or "").strip())
+        spec_key = f"none|{normalized_unit.casefold()}"
+        return spec_key, initial_quantity, normalized_unit or None
+
+    raw_unit = (unit or "").strip()
+    canonical_unit = UNIT_CANONICAL.get(raw_unit.lower(), raw_unit)
+    unit_lower = canonical_unit.lower()
+
+    converted_value = quantity
+    display_unit = canonical_unit
+
+    if unit_lower in {"ml", "l"}:
+        ml_value = quantity if unit_lower == "ml" else quantity * _DECIMAL_1000
+        if ml_value < _DECIMAL_1000:
+            converted_value = ml_value
+            display_unit = "mL"
+        else:
+            converted_value = ml_value / _DECIMAL_1000
+            display_unit = "L"
+    elif unit_lower in {"mg", "g", "kg"}:
+        mg_value = quantity
+        if unit_lower == "g":
+            mg_value = quantity * _DECIMAL_1000
+        elif unit_lower == "kg":
+            mg_value = quantity * _DECIMAL_1000000
+
+        if mg_value < _DECIMAL_1000:
+            converted_value = mg_value
+            display_unit = "mg"
+        elif mg_value < _DECIMAL_1000000:
+            converted_value = mg_value / _DECIMAL_1000
+            display_unit = "g"
+        else:
+            converted_value = mg_value / _DECIMAL_1000000
+            display_unit = "kg"
+
+    spec_key = f"{_format_decimal_number(converted_value)}|{display_unit.casefold()}"
+    return spec_key, float(converted_value), display_unit
+
+
+def _is_item_newer(item: Inventory, current_item: Optional[Inventory]) -> bool:
+    if current_item is None:
+        return True
+    item_time = item.created_at or get_utc_now()
+    current_time = current_item.created_at or get_utc_now()
+    if item_time != current_time:
+        return item_time > current_time
+    return (item.id or 0) > (current_item.id or 0)
+
+
+def _search_name_alias_matched_cas(
+    db: Session,
+    *,
+    search_value: str,
+    fuzzy: bool,
+) -> set[str]:
+    match_query = common_inventory_query().where(
+        combine_or_clauses(
+            [
+                build_text_search_clause(Inventory.name, search_value, fuzzy=fuzzy),
+                build_text_search_clause(Inventory.name_pinyin, search_value, fuzzy=fuzzy),
+                build_text_search_clause(Inventory.name_pinyin_initials, search_value, fuzzy=fuzzy),
+                build_text_search_clause(Inventory.alias, search_value, fuzzy=fuzzy),
+            ]
+        )
+    )
+    matched_items = db.exec(match_query).all()
+    return {item.cas_number for item in matched_items if item.cas_number}
+
+
+def _find_common_group_items(
+    db: Session,
+    sample_item: Inventory,
+    *,
+    available_only: bool = False,
+) -> list[Inventory]:
+    query = common_inventory_query().where(
+        _same_value_clause(Inventory.cas_number, sample_item.cas_number),
+    )
+    if available_only:
+        query = query.where(Inventory.status.in_(COMMON_SHELF_AVAILABLE_STATUSES))
+
+    candidates = db.exec(query.order_by(Inventory.created_at.asc(), Inventory.id.asc())).all()
+    sample_key = _common_group_sort_key(sample_item)
+    return [item for item in candidates if _common_group_sort_key(item) == sample_key]
 
 
 def _normalize_common_group_update_data(update_data: dict[str, Any]) -> dict[str, Any]:
@@ -318,21 +433,34 @@ def _apply_common_shelf_filters(
 
 def _group_common_shelf_items(items: list[Inventory]) -> dict[tuple, dict[str, Any]]:
     grouped: dict[tuple, dict[str, Any]] = {}
+    cas_alias_map: dict[str, Inventory] = {}
+
+    for item in items:
+        alias = (item.alias or "").strip()
+        if not alias or not item.cas_number:
+            continue
+        current = cas_alias_map.get(item.cas_number)
+        if _is_item_newer(item, current):
+            cas_alias_map[item.cas_number] = item
+
     for item in items:
         group_key = _common_group_sort_key(item)
+        _, normalized_quantity, normalized_unit = _normalize_spec_for_group(item.initial_quantity, item.unit)
+        clean_name = strip_std_name_marker(item.name)
+        clean_alias = strip_std_name_marker(item.alias)
         group = grouped.get(group_key)
         if group is None:
             group = {
                 "sample_inventory_id": item.id,
                 "cas_number": item.cas_number,
-                "name": item.name,
+                "name": clean_name,
                 "english_name": item.english_name,
-                "alias": item.alias,
+                "alias": clean_alias,
                 "category": item.category,
                 "brand": item.brand,
                 "storage_location": item.storage_location,
-                "initial_quantity": item.initial_quantity,
-                "unit": item.unit,
+                "initial_quantity": normalized_quantity,
+                "unit": normalized_unit,
                 "is_hazardous": item.is_hazardous,
                 "notes": item.notes,
                 "created_at": item.created_at,
@@ -341,8 +469,18 @@ def _group_common_shelf_items(items: list[Inventory]) -> dict[tuple, dict[str, A
                 "total_bottles": 0,
                 "available_bottles": 0,
                 "has_running_short": False,
+                "group_name_candidates": [],
             }
             grouped[group_key] = group
+
+        group["group_name_candidates"].append(
+            {
+                "name": clean_name,
+                "is_std": is_std_marked_name(item.name),
+                "created_at": item.created_at,
+                "id": item.id or 0,
+            }
+        )
 
         group["total_bottles"] += 1
         if is_common_shelf_available_status(item.status):
@@ -356,6 +494,42 @@ def _group_common_shelf_items(items: list[Inventory]) -> dict[tuple, dict[str, A
             group["created_at"] = item.created_at
             group["sample_inventory_id"] = item.id
             group["created_by_id"] = item.created_by_id
+
+    for group in grouped.values():
+        name_candidates = sorted(
+            group.pop("group_name_candidates", []),
+            key=lambda entry: (
+                entry["created_at"] or get_utc_now(),
+                entry["id"],
+            ),
+            reverse=True,
+        )
+        std_candidates = [entry for entry in name_candidates if entry["is_std"] and entry["name"]]
+        selected_candidate = None
+        if std_candidates:
+            selected_candidate = std_candidates[0]
+        elif name_candidates:
+            selected_candidate = name_candidates[0]
+        if selected_candidate:
+            group["name"] = selected_candidate["name"]
+
+        dedup_names: list[str] = []
+        seen_names: set[str] = set()
+        for entry in name_candidates:
+            normalized_name = (entry["name"] or "").strip()
+            if not normalized_name:
+                continue
+            if normalized_name in seen_names:
+                continue
+            seen_names.add(normalized_name)
+            dedup_names.append(normalized_name)
+        group["group_names"] = dedup_names
+        group["other_names"] = [name for name in dedup_names if name != group["name"]]
+
+        cas_key = group.get("cas_number")
+        alias_source = cas_alias_map.get(cas_key)
+        if alias_source:
+            group["alias"] = strip_std_name_marker(alias_source.alias)
 
     return grouped
 
@@ -397,6 +571,8 @@ def _build_common_shelf_rows(
                 "created_by_id": group["created_by_id"],
                 "is_common": True,
                 "specification": format_specification(group["initial_quantity"], group["unit"]),
+                "group_names": group.get("group_names", []),
+                "other_names": group.get("other_names", []),
             }
         )
 
@@ -437,6 +613,27 @@ def register_common_shelf(
                 )
 
         items = db.exec(base.order_by(Inventory.created_at.desc(), Inventory.id.desc())).all()
+
+        if search and search_value and search_field in {None, 'all', 'name', 'alias'}:
+            cas_set = _search_name_alias_matched_cas(
+                db,
+                search_value=search_value,
+                fuzzy=fuzzy,
+            )
+            if cas_set:
+                expanded_items = db.exec(
+                    common_inventory_query()
+                    .where(Inventory.cas_number.in_(cas_set))
+                    .order_by(Inventory.created_at.desc(), Inventory.id.desc())
+                ).all()
+                if search_field in {'name', 'alias'}:
+                    items = expanded_items
+                else:
+                    merged_items: dict[int, Inventory] = {item.id: item for item in items if item.id is not None}
+                    for expanded_item in expanded_items:
+                        if expanded_item.id is not None:
+                            merged_items[expanded_item.id] = expanded_item
+                    items = list(merged_items.values())
 
         grouped = _group_common_shelf_items(items)
         grouped_rows = _build_common_shelf_rows(grouped, status_filter=status_filter)
@@ -495,14 +692,8 @@ def register_common_shelf(
         now = get_utc_now()
 
         for _ in range(5):
-            candidate = db.exec(
-                common_inventory_query()
-                .where(
-                    *_common_group_match_clauses(sample_item),
-                    Inventory.status.in_(COMMON_SHELF_AVAILABLE_STATUSES),
-                )
-                .order_by(Inventory.created_at.asc(), Inventory.id.asc())
-            ).first()
+            group_available_items = _find_common_group_items(db, sample_item, available_only=True)
+            candidate = group_available_items[0] if group_available_items else None
 
             if not candidate:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No available bottle in this group")
@@ -547,11 +738,7 @@ def register_common_shelf(
         db.add(consume_log)
         db.commit()
 
-        remaining_available = db.exec(
-            select(func.count())
-            .select_from(Inventory)
-            .where(*_common_group_match_clauses(sample_item), Inventory.status.in_(COMMON_SHELF_AVAILABLE_STATUSES))
-        ).one()
+        remaining_available = len(_find_common_group_items(db, sample_item, available_only=True))
 
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
         await sse_manager.broadcast(
@@ -618,11 +805,8 @@ def register_common_shelf(
                 except SpecificationError as e:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-        group_items = db.exec(
-            common_inventory_query()
-            .where(*_common_group_match_clauses(sample_item))
-            .order_by(Inventory.id.asc())
-        ).all()
+        group_items = _find_common_group_items(db, sample_item)
+        group_items.sort(key=lambda item: item.id or 0)
         if not group_items:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Common shelf group not found')
 
@@ -647,7 +831,7 @@ def register_common_shelf(
 
             if any(field in update_data for field in ['name', 'category', 'brand', 'storage_location']):
                 pinyin_fields = compute_pinyin_fields(
-                    name=item.name,
+                    name=strip_std_name_marker(item.name),
                     category=item.category,
                     brand=item.brand,
                     storage_location=item.storage_location,
@@ -685,7 +869,7 @@ def register_common_shelf(
         if not is_common_shelf_item(sample_item):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Item is not on common shelf')
 
-        group_items = db.exec(common_inventory_query().where(*_common_group_match_clauses(sample_item))).all()
+        group_items = _find_common_group_items(db, sample_item)
         if not group_items:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Common shelf group not found')
 

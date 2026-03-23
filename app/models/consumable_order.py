@@ -10,14 +10,14 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import ConfigDict
-from sqlalchemy import Index
+from sqlalchemy import Column, Enum as SAEnum, Index
 from sqlmodel import Field, SQLModel
 
 
 class ConsumableOrderStatus(str, Enum):
     """Consumable order status enumeration"""
     PENDING = "pending"       # 已申购
-    APPROVED = "approved"     # 已审批（采购完成）
+    APPROVED = "approved"     # 已批准（采购完成）
     REJECTED = "rejected"    # 未通过
     COMPLETED = "completed"  # 已完成（耗材不需要入库）
 
@@ -62,7 +62,20 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    status: ConsumableOrderStatus = Field(default=ConsumableOrderStatus.PENDING)
+    status: ConsumableOrderStatus = Field(
+        default=ConsumableOrderStatus.PENDING,
+        sa_column=Column(
+            SAEnum(
+                ConsumableOrderStatus,
+                native_enum=False,
+                create_constraint=False,
+                values_callable=lambda enum_cls: [item.value for item in enum_cls],
+                validate_strings=True,
+            ),
+            nullable=False,
+            default=ConsumableOrderStatus.PENDING.value,
+        ),
+    )
     # 拼音索引字段（用于排序和搜索）
     name_pinyin: Optional[str] = Field(None, max_length=200)
     name_pinyin_initials: Optional[str] = Field(None, max_length=200)

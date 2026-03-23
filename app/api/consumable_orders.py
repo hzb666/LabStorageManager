@@ -62,6 +62,16 @@ LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
+VALID_CONSUMABLE_SORT_FIELDS = {
+    "name",
+    "name_pinyin",
+    "quantity",
+    "price",
+    "status",
+    "created_at",
+    "updated_at",
+    *APPLICANT_SORT_KEYS,
+}
 CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP = {
     'name': [
         ConsumableOrder.name,
@@ -244,6 +254,9 @@ def list_consumable_orders(
 ):
     """List consumable orders with optional filters, pagination, search, sort and applicant name"""
 
+    if sort_by and sort_by not in VALID_CONSUMABLE_SORT_FIELDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
+
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
 
@@ -396,6 +409,15 @@ async def update_consumable_order(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the order applicant or admin can update this order"
+        )
+
+    if current_user.role != UserRole.ADMIN and order.status in (
+        ConsumableOrderStatus.APPROVED,
+        ConsumableOrderStatus.REJECTED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Approved or rejected orders can only be deleted by non-admin users"
         )
 
     update_data = order_update.model_dump(exclude_unset=True)
@@ -552,16 +574,27 @@ def get_my_consumable_orders(
     db: DBSession,
 ):
     """Get current user's consumable order progress"""
+    dashboard_statuses = [
+        ConsumableOrderStatus.PENDING,
+        ConsumableOrderStatus.APPROVED,
+        ConsumableOrderStatus.REJECTED,
+    ]
     statement = select(ConsumableOrder).where(
         ConsumableOrder.applicant_id == current_user.id,
-        ConsumableOrder.status.in_([ConsumableOrderStatus.PENDING, ConsumableOrderStatus.APPROVED])
+        ConsumableOrder.status.in_(dashboard_statuses),
     ).order_by(ConsumableOrder.created_at.desc())
     
     orders = db.exec(statement).all()
     
-    # Group by status
-    pending = []
-    approved = []
+    status_labels = {
+        ConsumableOrderStatus.PENDING.value: "已申购",
+        ConsumableOrderStatus.APPROVED.value: "已批准",
+        ConsumableOrderStatus.REJECTED.value: "未通过",
+    }
+    grouped_orders: dict[str, dict[str, Any]] = {
+        status.value: {"orders": [], "count": 0, "label": status_labels[status.value]}
+        for status in dashboard_statuses
+    }
     
     for order in orders:
         order_data = {
@@ -576,24 +609,16 @@ def get_my_consumable_orders(
             "updated_at": utc_iso_str(order.updated_at)
         }
         
-        if order.status == ConsumableOrderStatus.PENDING:
-            pending.append(order_data)
-        elif order.status == ConsumableOrderStatus.APPROVED:
-            approved.append(order_data)
+        status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
+        if status_key not in grouped_orders:
+            grouped_orders[status_key] = {"orders": [], "count": 0, "label": status_key}
+        grouped_orders[status_key]["orders"].append(order_data)
+
+    for key in grouped_orders:
+        grouped_orders[key]["count"] = len(grouped_orders[key]["orders"])
     
     return {
-        "data": {
-            "pending": {
-                "orders": pending,
-                "count": len(pending),
-                "label": "已申购"
-            },
-            "approved": {
-                "orders": approved,
-                "count": len(approved),
-                "label": "已审批"
-            }
-        },
+        "data": grouped_orders,
         "total": len(orders)
     }
 
