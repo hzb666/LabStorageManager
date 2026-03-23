@@ -1,4 +1,4 @@
-// 北大医学部购物车同步 - Service Worker
+// 购物车同步 - Service Worker
 // 处理跨标签页通信和后端API调用
 
 const TARGET_URL_PATTERN = 'https://reagent.bjmu.edu.cn/*';
@@ -56,7 +56,7 @@ async function getCartDataFromTargetSite() {
   console.log('[Background] 目标标签页:', targetTab);
 
   if (!targetTab) {
-    throw new Error('请先打开北大医学部试剂平台的购物车页面');
+    throw new Error('请先打开试剂平台的购物车页面');
   }
 
   console.log('[Background] 向内容脚本发送消息...');

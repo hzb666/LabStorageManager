@@ -4,7 +4,7 @@ import { getDeviceId, getDeviceName } from '@/lib/deviceId'
 import { getApiBaseUrl } from '@/lib/apiConfig'
 import { AUTH_NOTICE_KEY } from '@/lib/constants'
 import { toast } from '@/lib/toast'
-import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage } from '@/lib/validationSchemas'
 
 const API_BASE_URL = getApiBaseUrl()
 
@@ -36,8 +36,7 @@ api.interceptors.response.use(
     const isLoginRequest = error.config?.url?.includes('/users/login')
     if (error.response?.status === 401 && !isLoginRequest) {
       // 获取错误详情并转换为中文
-      const errorDetail = error.response?.data?.detail
-      const message = normalizeApiErrorMessage(errorDetail, '会话已失效，请重新登录')
+      const message = getApiErrorMessage(error, '会话已失效，请重新登录')
       try {
         sessionStorage.setItem(AUTH_NOTICE_KEY, message)
       } catch {
@@ -401,7 +400,10 @@ export interface ChemicalInfo {
 }
 
 export const chemicalAPI = {
-  getInfo: (casNumber: string) => api.get<ChemicalInfo>(`/chemical-info/${casNumber}`),
+  getInfo: (casNumber: string, options?: { skipChinese?: boolean }) =>
+    api.get<ChemicalInfo>(`/chemical-info/${casNumber}`, {
+      params: options?.skipChinese ? { skip_chinese: true } : undefined,
+    }),
 }
 
 // Announcement types

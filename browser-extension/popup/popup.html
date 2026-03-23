@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -25,29 +26,73 @@
       --border: oklch(0.922 0.016 264.531);
       --ring: oklch(0.704 0.04 256.788);
       --input: oklch(0.922 0.016 264.531);
+      --link-color: #2563eb;
+      --link-hover-color: #1d4ed8;
+
+      /* 统一状态颜色 - Badge & Message 共享 */
+      --success-bg: #dcfce7;
+      --success-border: #86efac;
+      --success-foreground: #166534;
+
+      --warning-bg: #fef3c7;
+      --warning-border: #fcd34d;
+      --warning-foreground: #92400e;
+
+      --error-bg: #fee2e2;
+      --error-border: #fca5a5;
+      --error-foreground: #991b1b;
+
+      --info-bg: #dbeafe;
+      --info-border: #93c5fd;
+      --info-foreground: #1e40af;
+
+      --secondary-bg: #e0e7ff;
+      --secondary-border: #a5b4fc;
+      --secondary-foreground: #3730a3;
     }
 
-    /* 深色模式 */
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --background: oklch(0.15 0.015 285.823);
-        --foreground: oklch(0.92 0 0);
-        --card: oklch(0.22 0.015 285.823);
-        --card-foreground: oklch(0.92 0 0);
-        --primary: oklch(0.92 0 0);
-        --primary-foreground: oklch(0.208 0.042 265.755);
-        --secondary: oklch(0.24 0.015 285.823);
-        --secondary-foreground: oklch(0.92 0 0);
-        --muted: oklch(0.22 0.015 285.823);
-        --muted-foreground: oklch(0.65 0.015 285.823);
-        --accent: oklch(0.24 0.015 285.823);
-        --accent-foreground: oklch(0.92 0 0);
-        --destructive: oklch(0.7022 0.1892 22.23);
-        --destructive-foreground: oklch(0.92 0 0);
-        --border: oklch(0.3 0.015 285.823);
-        --ring: oklch(0.92 0 0);
-        --input: oklch(0.3 0.015 285.823);
-      }
+    /* 深色模式 - 跟随目标网站主题（不依赖操作系统） */
+    body.dark-mode {
+      --background: oklch(0.15 0.015 285.823);
+      --foreground: oklch(0.92 0 0);
+      --card: oklch(0.22 0.015 285.823);
+      --card-foreground: oklch(0.92 0 0);
+      --primary: oklch(0.92 0 0);
+      --primary-foreground: oklch(0.208 0.042 265.755);
+      --secondary: oklch(0.24 0.015 285.823);
+      --secondary-foreground: oklch(0.92 0 0);
+      --muted: oklch(0.22 0.015 285.823);
+      --muted-foreground: oklch(0.65 0.015 285.823);
+      --accent: oklch(0.24 0.015 285.823);
+      --accent-foreground: oklch(0.92 0 0);
+      --destructive: oklch(0.7022 0.1892 22.23);
+      --destructive-foreground: oklch(0.92 0 0);
+      --border: oklch(0.3 0.015 285.823);
+      --ring: oklch(0.92 0 0);
+      --input: oklch(0.3 0.015 285.823);
+      --link-color: #93c5fd;
+      --link-hover-color: #bfdbfe;
+
+      /* 深色模式状态颜色 */
+      --success-bg: #14532d;
+      --success-border: #15803d;
+      --success-foreground: #bbf7d0;
+
+      --warning-bg: #78350f;
+      --warning-border: #b45309;
+      --warning-foreground: #fde68a;
+
+      --error-bg: #7f1d1d;
+      --error-border: #b91c1c;
+      --error-foreground: #fecaca;
+
+      --info-bg: #1e3a8a;
+      --info-border: #1d4ed8;
+      --info-foreground: #bfdbfe;
+
+      --secondary-bg: #312e81;
+      --secondary-border: #6366f1;
+      --secondary-foreground: #c7d2fe;
     }
 
     * {
@@ -56,7 +101,11 @@
       box-sizing: border-box;
     }
 
-    button, input, optgroup, select, textarea {
+    button,
+    input,
+    optgroup,
+    select,
+    textarea {
       font-family: inherit;
     }
 
@@ -113,7 +162,7 @@
       justify-content: center;
       gap: 8px;
       white-space: nowrap;
-      border-radius: 6px;
+      border-radius: var(--radius);
       font-size: 14px;
       font-weight: 500;
       height: 40px;
@@ -147,13 +196,12 @@
       background: color-mix(in srgb, var(--primary) 85%, transparent);
     }
 
-    @media (prefers-color-scheme: dark) {
-      .btn-primary {
-        border-color: 2px solid var(--primary);
-      }
-      .btn-primary:hover {
-        background: color-mix(in srgb, var(--primary) 85%, transparent);
-      }
+    body.dark-mode .btn-primary {
+      border: 2px solid var(--primary);
+    }
+
+    body.dark-mode .btn-primary:hover {
+      background: color-mix(in srgb, var(--primary) 85%, transparent);
     }
 
     /* Modern 按钮 - 与 variant="modern" 一致 */
@@ -169,14 +217,13 @@
       color: var(--accent-foreground);
     }
 
-    @media (prefers-color-scheme: dark) {
-      .btn-modern {
-        background: color-mix(in srgb, var(--input) 30%, transparent);
-        border-color: var(--input);
-      }
-      .btn-modern:hover {
-        background: var(--input);
-      }
+    body.dark-mode .btn-modern {
+      background: color-mix(in srgb, var(--input) 30%, transparent);
+      border-color: var(--input);
+    }
+
+    body.dark-mode .btn-modern:hover {
+      background: var(--input);
     }
 
     /* Danger 按钮 - 与 variant="destructive" 一致 */
@@ -190,13 +237,12 @@
       background: color-mix(in srgb, var(--destructive) 90%, transparent);
     }
 
-    @media (prefers-color-scheme: dark) {
-      .btn-danger {
-        background: color-mix(in srgb, var(--destructive) 70%, transparent);
-      }
-      .btn-danger:hover {
-        background: color-mix(in srgb, var(--destructive) 80%, transparent);
-      }
+    body.dark-mode .btn-danger {
+      background: color-mix(in srgb, var(--destructive) 70%, transparent);
+    }
+
+    body.dark-mode .btn-danger:hover {
+      background: color-mix(in srgb, var(--destructive) 80%, transparent);
     }
 
     .btn-sm {
@@ -227,42 +273,38 @@
       flex: 1;
     }
 
-    /* 输入框 - 匹配项目 Input 组件样式 */
-    .input, .select {
-      display: flex;
+    /* 输入框 - 与主项目 Input 组件样式一致 */
+    .input,
+    .select {
+      display: inline-flex;
       height: 40px;
       width: 100%;
       padding: 0 12px;
       font-size: 14px;
       line-height: 40px;
-      border-radius: 6px;
+      border-radius: var(--radius);
       border: 1px solid var(--border);
       background: var(--card);
       color: var(--foreground);
-      outline: none;
-      transition: border-color 0.3s, box-shadow 0.3s;
+      transition: all 0.3s ease-out;
       box-sizing: border-box;
+      outline: none;
     }
 
     .input::placeholder {
       color: var(--muted-foreground);
     }
 
-    .input:focus, .select:focus {
+    .input:focus,
+    .select:focus {
       border-color: var(--ring);
-      box-shadow: 0 0 0 2px var(--ring), 0 0 0 4px rgba(0, 0, 0, 0.05);
+      box-shadow: 0 0 0 1px var(--ring), 0 0 0 4px rgba(0, 0, 0, 0.05);
     }
 
-    .input:disabled, .select:disabled {
+    .input:disabled,
+    .select:disabled {
       opacity: 0.5;
       cursor: not-allowed;
-    }
-
-    .form-hint {
-      display: block;
-      font-size: 12px;
-      color: var(--muted-foreground);
-      margin-top: 4px;
     }
 
     /* 状态标签 */
@@ -272,27 +314,77 @@
       height: 32px;
       padding: 0 10px;
       font-size: 14px;
-      border-radius: 8px;
+      border-radius: var(--radius);
       white-space: nowrap;
     }
 
-    .badge-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
-    .badge-warning { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-    .badge-error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
-    .badge-info { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
-    .badge-secondary { background: #e0e7ff; color: #3730a3; border: 1px solid #a5b4fc; }
+    .badge-success {
+      background: var(--success-bg);
+      color: var(--success-foreground);
+      border: 1px solid var(--success-border);
+    }
 
-    @media (prefers-color-scheme: dark) {
-      .badge-success { background: #14532d; color: #bbf7d0; border-color: #15803d; }
-      .badge-warning { background: #78350f; color: #fde68a; border-color: #b45309; }
-      .badge-error { background: #7f1d1d; color: #fecaca; border-color: #b91c1c; }
-      .badge-info { background: #1e3a8a; color: #bfdbfe; border-color: #1d4ed8; }
-      .badge-secondary { background: #312e81; color: #c7d2fe; border-color: #6366f1; }
+    .badge-warning {
+      background: var(--warning-bg);
+      color: var(--warning-foreground);
+      border: 1px solid var(--warning-border);
+    }
+
+    .badge-error {
+      background: var(--error-bg);
+      color: var(--error-foreground);
+      border: 1px solid var(--error-border);
+    }
+
+    .badge-info {
+      background: var(--info-bg);
+      color: var(--info-foreground);
+      border: 1px solid var(--info-border);
+    }
+
+    .badge-secondary {
+      background: var(--secondary-bg);
+      color: var(--secondary-foreground);
+      border: 1px solid var(--secondary-border);
+    }
+
+    body.dark-mode .badge-success {
+      background: var(--success-bg);
+      color: var(--success-foreground);
+      border-color: var(--success-border);
+    }
+
+    body.dark-mode .badge-warning {
+      background: var(--warning-bg);
+      color: var(--warning-foreground);
+      border-color: var(--warning-border);
+    }
+
+    body.dark-mode .badge-error {
+      background: var(--error-bg);
+      color: var(--error-foreground);
+      border-color: var(--error-border);
+    }
+
+    body.dark-mode .badge-info {
+      background: var(--info-bg);
+      color: var(--info-foreground);
+      border-color: var(--info-border);
+    }
+
+    body.dark-mode .badge-secondary {
+      background: var(--secondary-bg);
+      color: var(--secondary-foreground);
+      border-color: var(--secondary-border);
     }
 
     /* 表单组 */
     .form-group {
       margin-bottom: 20px;
+    }
+
+    .form-group-last {
+      margin-bottom: 5px;
     }
 
     .form-label {
@@ -330,30 +422,61 @@
     }
 
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
 
     /* 消息提示 - Alert style */
     .message {
-      padding: 12px 16px;
+      padding: 10px 16px;
       border-radius: var(--radius);
       font-size: 14px;
       margin-top: 16px;
       display: none;
       border: 1px solid transparent;
       line-height: 1.4;
+      text-align: center;
     }
 
-    .message.show { display: block; }
+    .message.show {
+      display: block;
+    }
 
-    .message-success { background: #ecfdf5; border-color: #34d399; color: #065f46; }
-    .message-error { background: #fef2f2; border-color: #f87171; color: #991b1b; }
-    .message-info { background: #eff6ff; border-color: #60a5fa; color: #1e40af; }
+    .message-success {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success-foreground);
+    }
 
-    @media (prefers-color-scheme: dark) {
-      .message-success { background: #064e3b; border-color: #059669; color: #ecfdf5; }
-      .message-error { background: #7f1d1d; border-color: #dc2626; color: #fee2e2; }
-      .message-info { background: #1e3a8a; border-color: #2563eb; color: #eff6ff; }
+    .message-error {
+      background: var(--error-bg);
+      border-color: var(--error-border);
+      color: var(--error-foreground);
+    }
+
+    .message-info {
+      background: var(--info-bg);
+      border-color: var(--info-border);
+      color: var(--info-foreground);
+    }
+
+    body.dark-mode .message-success {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success-foreground);
+    }
+
+    body.dark-mode .message-error {
+      background: var(--error-bg);
+      border-color: var(--error-border);
+      color: var(--error-foreground);
+    }
+
+    body.dark-mode .message-info {
+      background: var(--info-bg);
+      border-color: var(--info-border);
+      color: var(--info-foreground);
     }
 
     /* 商品卡片 - shadcn styling (匹配 dashboard tab) */
@@ -362,7 +485,8 @@
       color: var(--card-foreground);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      /* shadow-sm */
       padding: 14px;
       margin-bottom: 10px;
       transition: all 0.15s ease;
@@ -375,15 +499,14 @@
       background: color-mix(in srgb, var(--accent) 50%, transparent);
     }
 
-    .item-card:hover, .item-card.selected:hover {
+    .item-card:hover,
+    .item-card.selected:hover {
       background: var(--accent);
       color: var(--accent-foreground);
     }
 
-    @media (prefers-color-scheme: dark) {
-      .item-card.selected {
-        border-color: var(--primary);
-      }
+    body.dark-mode .item-card.selected {
+      border-color: var(--primary);
     }
 
     .item-header {
@@ -400,21 +523,48 @@
       line-height: 1.4;
       color: var(--foreground);
     }
-    
+
     .item-name a {
-      color: inherit;
+      color: var(--link-color);
       text-decoration: underline;
       text-underline-offset: 4px;
     }
-    
+
     .item-name a:hover {
-      color: var(--primary);
+      color: var(--link-hover-color);
     }
 
     .item-body {
-      padding-left: 28px; /* alignment with name next to checkbox */
+      padding-left: 28px;
+      /* alignment with name next to checkbox */
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
       font-size: 14px;
       color: var(--muted-foreground);
+    }
+
+    .item-body-text {
+      min-width: 0;
+    }
+
+    .item-status-badge {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: var(--radius);
+      font-size: 12px;
+      line-height: 1;
+      border: 1px solid transparent;
+    }
+
+    .item-status-timeout {
+      background: var(--warning-bg);
+      color: var(--warning-foreground);
+      border-color: var(--warning-border);
     }
 
     .item-row {
@@ -442,13 +592,16 @@
     .item-list::-webkit-scrollbar {
       width: 6px;
     }
+
     .item-list::-webkit-scrollbar-track {
       background: transparent;
     }
+
     .item-list::-webkit-scrollbar-thumb {
       background: var(--border);
       border-radius: 4px;
     }
+
     .item-list::-webkit-scrollbar-thumb:hover {
       background: var(--muted-foreground);
     }
@@ -464,23 +617,47 @@
     }
 
     /* 工具类 */
-    .flex { display: flex; }
-    .items-center { align-items: center; }
-    .justify-between { justify-content: space-between; }
-    .gap-2 { gap: 8px; }
-    .gap-3 { gap: 12px; }
-    .mb-3 { margin-bottom: 12px; }
-    .mt-3 { margin-top: 12px; }
-    .hidden { display: none; }
+    .flex {
+      display: flex;
+    }
+
+    .items-center {
+      align-items: center;
+    }
+
+    .justify-between {
+      justify-content: space-between;
+    }
+
+    .gap-2 {
+      gap: 8px;
+    }
+
+    .gap-3 {
+      gap: 12px;
+    }
+
+    .mb-3 {
+      margin-bottom: 12px;
+    }
+
+    .mt-3 {
+      margin-top: 12px;
+    }
+
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
+
 <body>
   <!-- 主界面 -->
   <div id="mainSection">
     <div class="card">
       <div class="card-header">
         <div class="card-title">购物车同步</div>
-        <div class="card-description">北大医学部试剂平台 → 实验室管理系统</div>
+        <div class="card-description">试剂平台 → 实验室管理系统</div>
       </div>
       <div class="card-content">
         <div class="form-group">
@@ -489,7 +666,14 @@
         </div>
 
         <div class="btn-row">
-          <button class="btn btn-modern btn-icon" id="configBtn" title="配置">⚙️</button>
+          <button class="btn btn-modern btn-icon" id="configBtn" title="配置">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
           <button class="btn btn-primary btn-flex" id="fetchBtn">获取购物车</button>
         </div>
 
@@ -508,30 +692,20 @@
       <div class="card-content">
         <div class="form-group">
           <label class="form-label" for="systemUrl">系统地址</label>
-          <input
-            type="text"
-            id="systemUrl"
-            class="input"
-            placeholder="http://localhost:5173"
-          >
-          <small class="form-hint">开发环境默认 http://localhost:5173，生产环境填写公网域名</small>
+          <input type="text" id="systemUrl" class="input" placeholder="http://localhost:5173">
         </div>
 
         <div class="form-group">
           <label class="form-label" for="reagentSiteUrl">试剂平台地址</label>
-          <input
-            type="text"
-            id="reagentSiteUrl"
-            class="input"
-            placeholder="https://reagent.bjmu.edu.cn"
-          >
+          <input type="text" id="reagentSiteUrl" class="input" placeholder="https://reagent.bjmu.edu.cn">
         </div>
 
-        <div class="form-group">
+        <div class="form-group-last">
           <label class="form-label">检测到的网站主题</label>
           <div id="siteThemeStatus" class="badge badge-info">检测中...</div>
         </div>
       </div>
+
       <div class="card-footer">
         <button class="btn btn-modern btn-sm" id="configBackBtn">返回</button>
         <button class="btn btn-primary btn-sm" id="configSaveBtn">保存配置</button>
@@ -566,4 +740,5 @@
 
   <script src="popup.js"></script>
 </body>
+
 </html>

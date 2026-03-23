@@ -1,4 +1,4 @@
-// 北大医学部购物车同步 - Popup Script
+// 购物车同步 - Popup Script
 // 直接与内容脚本通信，不依赖 service worker
 
 const STORAGE_KEYS = {
@@ -18,6 +18,7 @@ let systemConfig = { ...DEFAULT_SYSTEM_CONFIG };
 const BATCH_TTL_MS = 2 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const DETAIL_FETCH_CONCURRENCY = 3;
+const DETAIL_REQUEST_TIMEOUT_MS = 3000;
 
 function isNoReceiverError(error) {
   return String(error?.message || '').includes('Receiving end does not exist');
@@ -87,7 +88,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
 }
 
 async function mapWithConcurrencyLimit(items, limit, mapper) {
-  const results = [];
+  const results = new Array(items.length).fill(null);
   let nextIndex = 0;
 
   async function worker() {
@@ -96,15 +97,13 @@ async function mapWithConcurrencyLimit(items, limit, mapper) {
       nextIndex += 1;
       const item = items[currentIndex];
       const mapped = await mapper(item, currentIndex);
-      if (mapped) {
-        results.push(mapped);
-      }
+      results[currentIndex] = mapped ?? null;
     }
   }
 
   const workerCount = Math.max(1, Math.min(limit, items.length));
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return results;
+  return results.filter((item) => item !== null);
 }
 
 function generateBatchId() {
@@ -127,9 +126,9 @@ async function cleanupExpiredBatches() {
   }
 }
 
-function createBasicItem(productId) {
+function createBasicItem(productId, detailFetchStatus = 'fallback') {
   return {
-    name: '查看产品详情',
+    name: '未知',
     english_name: '',
     specification: '',
     quantity: 1,
@@ -141,7 +140,12 @@ function createBasicItem(productId) {
     product_id: productId || '',
     detail_url: '',
     is_hazardous: false,
+    detail_fetch_status: detailFetchStatus,
   };
+}
+
+function isTimeoutError(error) {
+  return error?.name === 'AbortError';
 }
 
 async function saveCartItemsToStorage(items) {
@@ -297,19 +301,25 @@ async function findCartTab() {
 
 async function fetchProductDetail(detailUrl) {
   if (!detailUrl) {
-    return createBasicItem('');
+    return createBasicItem('', 'missing_url');
   }
 
   try {
-    const response = await fetchWithTimeout(detailUrl);
+    const response = await fetchWithTimeout(detailUrl, {}, DETAIL_REQUEST_TIMEOUT_MS);
     if (!response.ok) {
-      return createBasicItem('');
+      return createBasicItem('', 'http_error');
     }
     const html = await response.text();
-    return parseProductDetail(html);
+    return {
+      ...parseProductDetail(html),
+      detail_fetch_status: 'success',
+    };
   } catch (error) {
     console.error('[Popup] 获取详情页失败:', error);
-    return createBasicItem('');
+    if (isTimeoutError(error)) {
+      return createBasicItem('', 'timeout');
+    }
+    return createBasicItem('', 'error');
   }
 }
 
@@ -334,6 +344,41 @@ async function getSiteTheme() {
     return response?.success ? response.data : null;
   } catch (error) {
     console.warn('[Popup] 获取网站主题失败:', error);
+    return null;
+  }
+}
+
+// 动态注入脚本检测系统主题（用户自定义域名）
+async function getSystemTheme() {
+  try {
+    // 查找系统 URL 对应的标签页
+    const tabs = await chrome.tabs.query({ url: `${systemConfig.systemUrl}/*` });
+    const targetTab = tabs?.[0];
+    if (!targetTab?.id) {
+      return null;
+    }
+
+    // 动态注入脚本获取主题 - 只读取 localStorage
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTab.id },
+      func: () => {
+        const theme = localStorage.getItem('theme');
+        if (theme === 'dark') {
+          return { darkMode: true };
+        }
+        if (theme === 'light') {
+          return { darkMode: false };
+        }
+        return null;
+      }
+    });
+
+    if (results?.[0]?.result) {
+      return results[0].result;
+    }
+    return null;
+  } catch (error) {
+    console.warn('[Popup] 获取系统主题失败:', error);
     return null;
   }
 }
@@ -419,9 +464,6 @@ async function getSiteTheme() {
         link.href = item.detail_url;
         link.target = '_blank';
         link.textContent = item.name || '查看详情';
-        link.style.color = '#0066cc';
-        link.style.textDecoration = 'underline';
-        link.style.cursor = 'pointer';
         nameDiv.appendChild(link);
       } else {
         nameDiv.textContent = item.name || '未知商品';
@@ -434,7 +476,17 @@ async function getSiteTheme() {
 
       const body = document.createElement('div');
       body.className = 'item-body';
-      body.textContent = item.cas_number ? `CAS: ${item.cas_number}` : 'CAS: 无CAS';
+      const bodyText = document.createElement('span');
+      bodyText.className = 'item-body-text';
+      bodyText.textContent = item.cas_number ? `CAS: ${item.cas_number}` : 'CAS: 无CAS';
+      body.appendChild(bodyText);
+
+      if (item.detail_fetch_status === 'timeout') {
+        const timeoutBadge = document.createElement('span');
+        timeoutBadge.className = 'item-status-badge item-status-timeout';
+        timeoutBadge.textContent = '超时';
+        body.appendChild(timeoutBadge);
+      }
 
       card.appendChild(header);
       card.appendChild(body);
@@ -444,7 +496,9 @@ async function getSiteTheme() {
 
   function updateCount() {
     const checked = itemList.querySelectorAll('.item-card.selected').length;
-    previewCount.textContent = `已选择 ${checked} / ${cartItems.length} 项`;
+    const timeoutCount = cartItems.filter((item) => item.detail_fetch_status === 'timeout').length;
+    const timeoutText = timeoutCount > 0 ? ` · ${timeoutCount} 项详情超时` : '';
+    previewCount.textContent = `已选择 ${checked} / ${cartItems.length} 项${timeoutText}`;
     importBtn.textContent = `开始导入 (${checked})`;
     importBtn.disabled = checked === 0;
   }
@@ -488,20 +542,23 @@ async function getSiteTheme() {
     siteThemeStatus.textContent = '检测中...';
     siteThemeStatus.className = 'badge badge-info';
 
-    const theme = await getSiteTheme();
+    // 只检测系统 URL 的主题
+    const theme = await getSystemTheme();
+
     if (theme) {
       if (theme.darkMode === true) {
         siteThemeStatus.textContent = '🌙 深色模式';
         siteThemeStatus.className = 'badge badge-secondary';
+        // 同步插件深色模式
+        document.body.classList.add('dark-mode');
       } else if (theme.darkMode === false) {
         siteThemeStatus.textContent = '☀️ 浅色模式';
         siteThemeStatus.className = 'badge badge-warning';
-      } else {
-        siteThemeStatus.textContent = `未检测到主题偏好 (key: ${theme.key || 'unknown'})`;
-        siteThemeStatus.className = 'badge badge-info';
+        // 同步插件浅色模式
+        document.body.classList.remove('dark-mode');
       }
     } else {
-      siteThemeStatus.textContent = '无法检测（请先打开目标网站）';
+      siteThemeStatus.textContent = '请先打开系统网站';
       siteThemeStatus.className = 'badge badge-error';
     }
   }
@@ -512,13 +569,13 @@ async function getSiteTheme() {
 
     const parsedSystemUrl = parseHttpUrl(url);
     if (!parsedSystemUrl) {
-      alert('请输入有效的系统 URL（如 http://localhost:5173）');
+      alert('请输入有效的系统 URL');
       return;
     }
 
     const parsedReagentSiteUrl = parseHttpUrl(reagentSiteUrl);
     if (!parsedReagentSiteUrl) {
-      alert('请输入有效的试剂网站 URL（如 https://reagent.bjmu.edu.cn）');
+      alert('请输入有效的试剂网站 URL');
       return;
     }
 
@@ -558,7 +615,7 @@ async function getSiteTheme() {
     try {
       const targetTab = await findCartTab();
       if (!targetTab) {
-        throw new Error('请先打开北大医学部试剂平台的购物车页面');
+        throw new Error('请先打开试剂平台的购物车页面');
       }
 
       const response = await sendMessageWithAutoInject(targetTab.id, { action: 'GET_CART' });
@@ -646,6 +703,18 @@ async function getSiteTheme() {
   }
 
   await checkTargetStatus();
+
+  // 初始化时自动检测并同步主题
+  (async () => {
+    const theme = await getSystemTheme();
+    if (theme) {
+      if (theme.darkMode === true) {
+        document.body.classList.add('dark-mode');
+      } else {
+        document.body.classList.remove('dark-mode');
+      }
+    }
+  })();
 
   try {
     const targetTab = await findCartTab();

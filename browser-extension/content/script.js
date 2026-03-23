@@ -1,4 +1,4 @@
-// 北大医学部购物车同步 - Content Script
+// 购物车同步 - Content Script
 // 购物车页面：只获取产品ID、数量、价格、详情页URL
 
 (function() {
@@ -21,7 +21,7 @@
     }
   }
 
-  console.log('[Content] 北大医学部购物车同步插件内容脚本已加载');
+  console.log('[Content] 购物车同步插件内容脚本已加载');
 
   // 监听来自popup的消息
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
