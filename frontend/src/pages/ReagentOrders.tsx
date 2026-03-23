@@ -3,7 +3,7 @@
  * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、入库
  * 参考 Inventory 页面实现，使用 FilterTable 组件
  */
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
@@ -39,11 +39,13 @@ import {
   ReagentOrderSchema,
   createValibotResolver,
   validateAndNormalizeCASInput,
+  extractApiErrorDetail,
+  getApiErrorMessage,
   isSpecialCasValue,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { ReagentOrderFormData, ValidationError } from '@/lib/validationSchemas'
+import type { ReagentOrderFormData, ReagentOrderFormInputData, ValidationError } from '@/lib/validationSchemas'
 import { getReagentOrderTableColumns } from '@/lib/tableConfigs'
 import {
   getReagentOrderFormFields,
@@ -90,7 +92,7 @@ const columnHelper = createColumnHelper<ReagentOrder>()
 const REAGENT_ORDER_STATUS_OPTIONS = [
   { value: 'all', label: '全部状态' },
   { value: 'pending', label: '待审批' },
-  { value: 'approved', label: '已审批' },
+  { value: 'approved', label: '已批准' },
   { value: 'rejected', label: '已驳回' },
   { value: 'arrived', label: '已到货' },
   { value: 'stocked', label: '已入库' },
@@ -151,7 +153,7 @@ export function ReagentOrdersPage() {
   // ---------------------------------------------------------------------------
 
   // 表单实例
-  const form = useForm<ReagentOrderFormData>({
+  const form = useForm<ReagentOrderFormInputData, unknown, ReagentOrderFormData>({
     resolver: createValibotResolver(ReagentOrderSchema),
     defaultValues: defaultReagentOrderValues,
     shouldFocusError: false,
@@ -180,8 +182,8 @@ export function ReagentOrdersPage() {
   }, [dialogState, editingItem?.id, form, checkCASWarning])
 
   // 加载数据
-  const loadOrders = useCallback(() => {
-    filter.invalidate()
+  const loadOrders = useCallback(async () => {
+    await Promise.resolve(filter.invalidate())
   }, [filter])
 
   // 点击添加按钮
@@ -218,8 +220,6 @@ export function ReagentOrdersPage() {
   // 表单提交
   const handleFormSubmit = form.handleSubmit(
     async (formData) => {
-      console.log('✅ 订单表单验证通过:', formData)
-
       setIsSubmitting(true)
       try {
         if (dialogState === 'edit' && editingItem) {
@@ -253,7 +253,7 @@ export function ReagentOrdersPage() {
           })
         }
         // 先刷新数据，再弹出 toast，确保数据已加载完成
-        loadOrders()
+        await loadOrders()
         if (dialogState === 'edit') {
           toast.success('订单信息已更新')
         } else if (dialogState === 'add') {
@@ -262,8 +262,7 @@ export function ReagentOrdersPage() {
         setDeleteConfirm(false)
         setDialogState(null)
       } catch (err) {
-        const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
-        const errorDetail = error.response?.data?.detail
+        const errorDetail = extractApiErrorDetail(err)
         const validationErrors = toValidationErrors(errorDetail)
         if (validationErrors.length > 0) {
           validationErrors.forEach((e: ValidationError) => {
@@ -278,9 +277,6 @@ export function ReagentOrdersPage() {
       } finally {
         setIsSubmitting(false)
       }
-    },
-    (errors) => {
-      console.log('❌ 表单验证失败:', errors)
     }
   )
 
@@ -337,8 +333,7 @@ export function ReagentOrdersPage() {
         toast.warning('已完成识别，但未获取到名称信息')
       }
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      const detail = err.response?.data?.detail
+      const detail = extractApiErrorDetail(error)
       toast.error(normalizeApiErrorMessage(detail, 'CAS 号识别失败'))
     } finally {
       setIsCasLookupLoading(false)
@@ -360,11 +355,10 @@ export function ReagentOrdersPage() {
       setEditingItem(null)
       setDialogState(null)
       clearCASWarning()
-      loadOrders()
+      await loadOrders()
       toast.success('试剂订单已删除')
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+      toast.error(getApiErrorMessage(error, '删除失败'))
     }
   }, [clearCASWarning, deleteConfirm, editingItem, loadOrders, setDialogState])
 
@@ -550,6 +544,11 @@ const ActionButtons = React.memo(function ActionButtons({
   onEdit: (item: Record<string, unknown>) => void
   onRefresh: () => void | Promise<void>
 }) {
+  const onRefreshRef = useRef(onRefresh)
+  useEffect(() => {
+    onRefreshRef.current = onRefresh
+  }, [onRefresh])
+
   const actions = useMemo(() => [
     {
       id: 'approve',
@@ -562,7 +561,7 @@ const ActionButtons = React.memo(function ActionButtons({
       disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'rejected',
       onClick: async (currItem: Record<string, unknown>) => {
         await reagentOrderAPI.approve(currItem.id as number)
-        await onRefresh()
+        await onRefreshRef.current()
         toast.success('审批通过')
       }
     },
@@ -577,11 +576,11 @@ const ActionButtons = React.memo(function ActionButtons({
       disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'approved',
       onClick: async (currItem: Record<string, unknown>) => {
         await reagentOrderAPI.reject(currItem.id as number, '管理员驳回')
-        await onRefresh()
+        await onRefreshRef.current()
         toast.success('已驳回')
       }
     }
-  ], [onRefresh])
+  ], [])
 
   return (
     <TableActionButtonsMemo
@@ -599,13 +598,11 @@ const ActionButtons = React.memo(function ActionButtons({
     return false
   }
 
-  const prevItem = prevProps.item
-  const nextItem = nextProps.item
-  if (prevItem === nextItem) return true
-
-  const prevKeys = Object.keys(prevItem)
-  const nextKeys = Object.keys(nextItem)
-  if (prevKeys.length !== nextKeys.length) return false
-
-  return prevKeys.every((key) => prevItem[key] === nextItem[key])
+  const prevItem = prevProps.item as Record<string, unknown>
+  const nextItem = nextProps.item as Record<string, unknown>
+  return (
+    prevItem.id === nextItem.id
+    && prevItem.status === nextItem.status
+    && prevItem.updated_at === nextItem.updated_at
+  )
 })

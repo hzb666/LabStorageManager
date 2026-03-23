@@ -19,7 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { userAdminAPI } from '@/api/client'
 import { toast } from '@/lib/toast'
-import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage } from '@/lib/validationSchemas'
 import { useAuthStore } from '@/store/useStore'
 // 注意这里引入了我们需要的图标
 import {
@@ -38,7 +38,6 @@ import {
   type UserCreateFormData,
 } from '@/lib/validationSchemas'
 import { defaultUserValues, getUserCreateFormFields, USER_ROLE_OPTIONS } from '@/lib/formConfigs'
-import { AxiosError } from 'axios'
 import type { PaginationParams } from '@/api/client'
 
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
@@ -207,8 +206,7 @@ export function AdminUsersPage() {
       refetchUsers()
       toast.success('用户已启用')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
+      toast.error(getApiErrorMessage(error, '操作失败'))
     }
   }, [refetchUsers])
 
@@ -271,8 +269,7 @@ export function AdminUsersPage() {
       refetchUsers()
       toast.success('用户已禁用')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
+      toast.error(getApiErrorMessage(error, '操作失败'))
     } finally {
       setDeleteLoading(false)
     }
@@ -292,8 +289,7 @@ export function AdminUsersPage() {
       refetchUsers()
       toast.success('用户创建成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '创建失败'))
+      toast.error(getApiErrorMessage(error, '创建失败'))
     } finally {
       setCreateLoading(false)
     }

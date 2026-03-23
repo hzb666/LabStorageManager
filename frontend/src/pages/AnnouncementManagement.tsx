@@ -18,10 +18,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { announcementAPI, type Announcement } from '@/api/client'
 import { toast } from '@/lib/toast'
-import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage } from '@/lib/validationSchemas'
 import { formatDate, cn, getFullImageUrl } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
-import { AxiosError } from 'axios'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import {
   Megaphone,
@@ -98,8 +97,7 @@ export function AnnouncementManagement() {
       refetchAnnouncements()
       toast.success('置顶状态已更新')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
+      toast.error(getApiErrorMessage(error, '操作失败'))
     }
   }, [refetchAnnouncements])
 
@@ -110,8 +108,7 @@ export function AnnouncementManagement() {
       refetchAnnouncements()
       toast.success('显示状态已更新')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
+      toast.error(getApiErrorMessage(error, '操作失败'))
     }
   }, [refetchAnnouncements])
 
@@ -375,8 +372,7 @@ export function AnnouncementManagement() {
       resetForm()
       refetchAnnouncements()
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '操作失败'))
+      toast.error(getApiErrorMessage(error, '操作失败'))
     } finally {
       setFormLoading(false)
     }
@@ -394,8 +390,7 @@ export function AnnouncementManagement() {
       refetchAnnouncements()
       toast.success('公告删除成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '删除失败'))
+      toast.error(getApiErrorMessage(error, '删除失败'))
     } finally {
       setDeleteLoading(false)
     }
@@ -435,9 +430,7 @@ export function AnnouncementManagement() {
       }))
       toast.success('图片上传成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      const errorMsg = axiosError.response?.data?.detail || '图片上传失败'
-      toast.error(normalizeApiErrorMessage(errorMsg, '图片上传失败'))
+      toast.error(getApiErrorMessage(error, '图片上传失败'))
     } finally {
       setUploading(false)
       // 清空 input 值，允许重复选择同一文件
@@ -517,9 +510,7 @@ export function AnnouncementManagement() {
         }))
         toast.success('图片上传成功')
       } catch (error) {
-        const axiosError = error as AxiosError<{ detail?: string }>
-        const errorMsg = axiosError.response?.data?.detail || '图片上传失败'
-        toast.error(normalizeApiErrorMessage(errorMsg, '图片上传失败'))
+        toast.error(getApiErrorMessage(error, '图片上传失败'))
       } finally {
         setUploading(false)
       }

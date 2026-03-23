@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
-import { AxiosError } from 'axios'
 import { CheckCircle, Loader2, Trash2, List, X, ScanSearch } from 'lucide-react'
 
 import {
@@ -22,12 +21,16 @@ import {
     ConsumableOrderSchema,
     ReagentOrderSchema,
     createValibotResolver,
+    extractApiErrorDetail,
+    getApiErrorMessage,
     isSpecialCasValue,
     normalizeApiErrorMessage,
     toValidationErrors,
     validateAndNormalizeCASInput,
     type ConsumableOrderFormData,
+    type ConsumableOrderFormInputData,
     type ReagentOrderFormData,
+    type ReagentOrderFormInputData,
     type ValidationError,
 } from '@/lib/validationSchemas'
 import {
@@ -102,10 +105,20 @@ function getReagentOrderStatusLabel(status: string): string {
     return REAGENT_STATUS_MAP[status] || status
 }
 
+function isPlaceholderImportName(name: string): boolean {
+    const normalized = (name || '').trim()
+    return normalized === '未知'
+}
+
+function shouldSkipChineseLookupByName(name: string): boolean {
+    const normalizedName = (name || '').trim()
+    return Boolean(normalizedName && !isPlaceholderImportName(normalizedName))
+}
+
 function toImportItem(item: Partial<ImportItem>, index: number): ImportItem {
     const rawName = item.name?.trim() || ''
-    // 如果名称是"未知"，转为空字符串，让表单验证强制要求填写
-    const name = rawName === '未知' ? '' : rawName
+    // 占位名称不写入表单，强制用户确认中文名
+    const name = isPlaceholderImportName(rawName) ? '' : rawName
 
     return {
         id: index,
@@ -154,13 +167,13 @@ export function CartImportPage() {
         handleCasValueChange,
     } = useReagentCasDuplicateCheck()
 
-    const reagentForm = useForm<ReagentOrderFormData>({
+    const reagentForm = useForm<ReagentOrderFormInputData, unknown, ReagentOrderFormData>({
         resolver: createValibotResolver(ReagentOrderSchema),
         defaultValues: defaultReagentOrderValues,
         shouldFocusError: false,
     })
 
-    const consumableForm = useForm<ConsumableOrderFormData>({
+    const consumableForm = useForm<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>({
         resolver: createValibotResolver(ConsumableOrderSchema),
         defaultValues: defaultConsumableOrderValues,
         shouldFocusError: false,
@@ -188,7 +201,9 @@ export function CartImportPage() {
 
             // Auto-lookup English name if CAS is present but English name is missing
             if (item.cas_number && !item.english_name) {
-                chemicalAPI.getInfo(item.cas_number)
+                chemicalAPI.getInfo(item.cas_number, {
+                    skipChinese: shouldSkipChineseLookupByName(item.name),
+                })
                     .then((response) => {
                         const info = response.data
                         if (info.english_name) {
@@ -226,6 +241,12 @@ export function CartImportPage() {
 
         try {
             const batch = JSON.parse(raw) as StoredBatch
+            if (batch.batch_id !== batchId) {
+                toast.error('批次ID不匹配，请重新发起导入')
+                navigate('/reagents')
+                return true
+            }
+
             if (isExpiredBatch(batch)) {
                 localStorage.removeItem(CART_STORAGE_KEY)
                 toast.error('导入批次已过期（2小时），请在插件中重新发起导入')
@@ -259,8 +280,7 @@ export function CartImportPage() {
         authAPI.getProfile()
             .then((response) => setCurrentUser(response.data))
             .catch((error) => {
-                const axiosError = error as AxiosError
-                toast.error(normalizeApiErrorMessage(axiosError.response?.data, '获取当前用户失败'))
+                toast.error(getApiErrorMessage(error, '获取当前用户失败'))
             })
     }, [])
 
@@ -297,7 +317,7 @@ export function CartImportPage() {
             globalThis.clearInterval(retryTimer)
             globalThis.removeEventListener('message', handleBatchMessage)
         }
-    }, [batchId, loadBatchFromLocalStorage])
+    }, [batchId, loadBatchFromLocalStorage, navigate])
 
     useEffect(() => {
         if (currentItem) {
@@ -364,9 +384,7 @@ export function CartImportPage() {
                 toast.warning('未查询到英文名')
             }
         } catch (error) {
-            const err = error as { response?: { data?: { detail?: string } } }
-            const detail = err.response?.data?.detail
-            toast.error(normalizeApiErrorMessage(detail, 'CAS 号识别失败'))
+            toast.error(getApiErrorMessage(error, 'CAS 号识别失败'))
         } finally {
             setIsCasLookupLoading(false)
         }
@@ -515,8 +533,8 @@ export function CartImportPage() {
                 }, 2000)
             }
         } catch (error) {
-            const axiosError = error as AxiosError
-            const validationErrors = toValidationErrors((axiosError.response?.data as { detail?: unknown })?.detail)
+            const detail = extractApiErrorDetail(error)
+            const validationErrors = toValidationErrors(detail)
 
             if (validationErrors.length > 0) {
                 if (orderType === 'reagent') {
@@ -539,7 +557,7 @@ export function CartImportPage() {
                 return
             }
 
-            toast.error(normalizeApiErrorMessage(axiosError.response?.data, '提交失败'))
+            toast.error(normalizeApiErrorMessage(detail, '提交失败'))
         } finally {
             setSubmitting(false)
         }
@@ -563,52 +581,49 @@ export function CartImportPage() {
             const isCurrent = index === currentIndex
             const isSubmitted = submittedIds.has(item.id)
             return (
-                <button
+                <Card
                     key={item.id}
-                    type='button'
+                    role='button'
+                    tabIndex={0}
                     onClick={() => {
                         setCurrentIndex(index)
                         setMobileListOpen(false)
                     }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            setCurrentIndex(index)
+                            setMobileListOpen(false)
+                        }
+                    }}
                     className={cn(
-                        'group relative w-full rounded-md px-4 py-3 text-left transition-colors duration-200 overflow-hidden outline-none',
-                        isCurrent
-                            ? 'bg-accent text-accent-foreground shadow-sm '
-                            : 'hover:bg-accent/50 text-muted-foreground outline outline-transparent hover:outline-border',
-                        isSubmitted ? 'opacity-50 grayscale-30' : ''
+                        'cursor-pointer transition-all hover:bg-accent text-card-foreground py-4',
+                        isCurrent ? 'border bg-accent/50 dark:border-primary' : '',
+                        isSubmitted ? 'opacity-50' : ''
                     )}
                 >
-                    {isCurrent && (
-                        <div className='absolute left-0 top-1/2 -translate-y-1/2 h-4/5 w-1 bg-primary rounded-r-md' />
-                    )}
-                    <div className='flex flex-col gap-1.5'>
-                        <div className='flex items-start'>
-                            <div className={cn('leading-tight line-clamp-2 pr-2', isCurrent ? 'text-primary' : 'text-foreground')}>
-                                {item.name}
-                            </div>
-
-                        </div>
-                        <div className='text-sm text-muted-foreground flex items-start justify-between'>
-                            {item.order_type === 'reagent'
-                                ? <span className='truncate'>CAS: {item.cas_number || '无CAS'}</span>
-                                : <span className='truncate'>规格: {item.specification || '未提供'}</span>}
-                            <div className='shrink-0'>
-                                {isSubmitted ? (
-                                    <CheckCircle className='w-4 h-4 text-green-500' />
-                                ) : (
-                                    <span className={cn(
-                                        'text-xs  rounded-sm border',
-                                        item.order_type === 'consumable'
-                                            ? 'bg-blue-50/50 text-blue-700 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
-                                            : 'bg-indigo-50/50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-800'
-                                    )}>
-                                        {item.order_type === 'consumable' ? '耗材' : '试剂'}
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </button>
+                    <CardHeader className='flex flex-row items-start justify-between gap-2 px-4 py pb-2'>
+                        <CardTitle className={cn('font-normal leading-tight line-clamp-2', isCurrent ? 'text-primary' : '')}>
+                            {item.name}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className='px-4 flex flex-row items-center justify-between text-muted-foreground'>
+                        {item.order_type === 'reagent'
+                            ? <>CAS: {item.cas_number || '无CAS'}</>
+                            : <>规格: {item.specification || '未提供'}</>}
+                        {isSubmitted ? (
+                            <CheckCircle className='w-4 h-4 text-green-500 shrink-0 mt-0.5' />
+                        ) : (
+                            <span className={cn(
+                                'shrink-0 text-sm rounded-sm border px-1.5 py-0.5',
+                                item.order_type === 'consumable'
+                                    ? 'bg-blue-50/50 text-blue-700 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
+                                    : 'bg-indigo-50/50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-800'
+                            )}>
+                                {item.order_type === 'consumable' ? '耗材' : '试剂'}
+                            </span>
+                        )}
+                    </CardContent>
+                </Card>
             )
         })
     )
@@ -616,140 +631,147 @@ export function CartImportPage() {
     return (
         <div className="flex min-h-svh w-full items-center justify-center px-4">
             <div className="absolute inset-0 -z-10 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] bg-size-[16px_16px] mask-[radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] dark:mask-[radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
-            <Card className='w-full md:w-auto md:min-w-md py-6 max-h-[90vh] overflow-y-auto'>
-                <CardHeader className='pb-4 border-b border-muted'>
-                    <CardTitle className='text-2xl'>购物车导入 <span className='text-base font-normal ml-4'>当前用户: </span><span className='text-base font-normal'>{currentUser?.full_name || currentUser?.username || '未知用户'}</span></CardTitle>
-                </CardHeader>
-                <CardContent className='p-0 relative flex'>
+            <Card className='w-full md:w-auto md:min-w-md overflow-hidden'>
+                <div className='max-h-[90vh] overflow-y-auto'>
+                    <CardHeader className='pb-4 border-b border-muted'>
+                        <CardTitle className='text-2xl'>购物车导入 <span className='text-base font-normal ml-4'>当前用户: </span><span className='text-base font-normal'>{currentUser?.full_name || currentUser?.username || '未知用户'}</span></CardTitle>
+                    </CardHeader>
+                    <CardContent className='p-0 relative flex'>
 
-                    {/* Mobile Overlay List */}
-                    <div
-                        className={cn(
-                            "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm lg:hidden transition-opacity duration-200",
-                            mobileListOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-                        )}
-                        onClick={() => setMobileListOpen(false)}
-                    >
-                        <aside
+                        {/* Mobile Overlay List */}
+                        <div
                             className={cn(
-                                "fixed inset-y-0 left-0 w-80 bg-card transition-transform duration-200 flex flex-col pointer-events-auto",
-                                mobileListOpen ? "translate-x-0" : "-translate-x-full"
+                                "fixed inset-0 z-50 bg-background/80 backdrop-blur-sm lg:hidden transition-opacity duration-200",
+                                mobileListOpen ? "opacity-100" : "opacity-0 pointer-events-none"
                             )}
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={() => setMobileListOpen(false)}
                         >
-                            <div className="flex items-center justify-between p-5 shrink-0">
-                                <h3 className='font-semibold text-lg'>待导入列表</h3>
-                                <Button variant="ghost" size="icon" onClick={() => setMobileListOpen(false)}>
-                                    <X className="w-5 h-5 opacity-60" />
-                                </Button>
-                            </div>
-                            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                                {renderItemList()}
-                            </div>
-                        </aside>
-                    </div>
-
-                    {/* Desktop Sidebar List */}
-                    <div className='hidden lg:flex flex-col w-75 shrink-0 p-4 md:p-6'>
-                        <div className='flex items-center justify-between mb-4'>
-                            <h3 className='font-semibold text-lg'>待导入</h3>
-                            <span className='text-xs  bg-muted text-muted-foreground px-2 py-0.5 rounded-full'>
-                                已提交 {submittedIds.size}/{items.length}
-                            </span>
-                        </div>
-
-                        <div className='flex-1 overflow-y-auto space-y-1.5 pr-2 -mr-2 pb-2'>
-                            {renderItemList()}
-                        </div>
-                    </div>
-
-                    {/* Right Area: Form */}
-                    <div className='flex-1 p-4 md:pl-6 md:pr-8 md:pt-6 md:pb-2 flex flex-col min-w-0'>
-                        <div className='flex items-center justify-between mb-6 flex-wrap'>
-                            <h3 className='font-semibold text-lg flex items-center min-w-0'>
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    className="lg:hidden mr-3 shrink-0 rounded-full h-8 w-8"
-                                    onClick={() => setMobileListOpen(true)}
-                                >
-                                    <List className="w-4 h-4" />
-                                </Button>
-                                <span className="shrink-0">完善订单</span>
-                            </h3>
-                            <div className='flex items-center gap-2'>
-                                <span className='text-sm text-muted-foreground'>表单类型</span>
-                                <RadioGroup
-                                    value={orderType}
-                                    onValueChange={(value) => handleTypeSwitch(value as OrderType)}
-                                    className="flex items-center gap-4 h-9"
-                                >
-                                    <div className="flex items-center space-x-2">
-                                        <RadioGroupItem value="reagent" id="r-reagent" />
-                                        <Label htmlFor="r-reagent" className="cursor-pointer">试剂</Label>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                        <RadioGroupItem value="consumable" id="r-consumable" />
-                                        <Label htmlFor="r-consumable" className="cursor-pointer">耗材</Label>
-                                    </div>
-                                </RadioGroup>
-                            </div>
-                        </div>
-
-                        <div className='flex-1 overflow-y-auto pb-4'>
-                            <div className='max-w-2xl mx-auto'>
-                                {orderType === 'reagent' ? (
-                                    <>
-                                        <BaseForm form={reagentForm} fields={reagentFormFields} />
-                                        <ReagentCasDuplicateWarning
-                                            casWarning={casWarning}
-                                            className='mt-3 rounded-md bg-orange-50 p-3 dark:bg-orange-950'
-                                            onOpenOrders={() => navigateToCasSearch('/reagents', 'cas')}
-                                            onOpenInventory={() => navigateToCasSearch('/inventory', 'cas_number')}
-                                            getOrderStatusLabel={getReagentOrderStatusLabel}
-                                        />
-                                    </>
-                                ) : (
-                                    <BaseForm form={consumableForm} fields={getConsumableOrderFormFields()} />
+                            <aside
+                                className={cn(
+                                    "fixed inset-y-0 left-0 w-80 bg-card transition-transform duration-200 flex flex-col pointer-events-auto",
+                                    mobileListOpen ? "translate-x-0" : "-translate-x-full"
                                 )}
-                            </div>
-                        </div>
-
-                        <div className='pt-4 mt-auto border-t border-muted'>
-                            <div className='max-w-2xl mx-auto flex flex-wrap items-center justify-between gap-3'>
-                                <div className='flex items-center gap-2 order-1'>
-                                    <Button
-                                        variant='destructive'
-                                        size='lg'
-                                        type='button'
-                                        onClick={handleDeleteCurrent}
-                                        disabled={submitting || !currentItem}
-                                    >
-                                        <Trash2 className='w-4 h-4 mr-1.5' />
-                                        {deleteConfirm ? '确认删除' : '删除'}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div className="flex items-center justify-between p-5 shrink-0">
+                                    <h3 className='font-semibold text-lg'>待导入列表</h3>
+                                    <Button variant="ghost" size="icon" onClick={() => setMobileListOpen(false)}>
+                                        <X className="w-5 h-5 opacity-60" />
                                     </Button>
                                 </div>
-                                <div className='flex items-center gap-2 order-2 ml-auto'>
-                                    {casLoading && orderType === 'reagent' && (
-                                        <span className='text-sm text-muted-foreground flex items-center'>
-                                            <Loader2 className='mr-1 h-3 w-3 animate-spin' />
-                                            检查CAS号中
+                                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                                    {renderItemList()}
+                                </div>
+                            </aside>
+                        </div>
+
+                        {/* Desktop Sidebar List */}
+                        <div className='hidden lg:flex flex-col w-75 shrink-0 p-4 md:p-6'>
+                            <div className='flex items-center justify-between mb-4'>
+                                <h3 className='font-semibold text-lg'>待导入</h3>
+                                <span className='text-sm text-muted-foreground'>
+                                    已提交 {submittedIds.size}/{items.length}
+                                </span>
+                            </div>
+
+                            <div className='flex-1 overflow-y-auto space-y-1.5 pr-2 -mr-2 pb-2'>
+                                {renderItemList()}
+                            </div>
+                        </div>
+
+                        {/* Right Area: Form */}
+                        <div className='flex-1 p-4 md:pl-6 md:pr-8 md:pt-6 md:pb-2 flex flex-col min-w-0'>
+                            <div className='flex items-center justify-between mb-6 flex-wrap'>
+                                <div>
+                                    <h3 className='font-semibold text-lg flex items-center min-w-0'>
+                                        <Button
+                                            variant="modern"
+                                            size="icon"
+                                            className="lg:hidden mr-3 shrink-0"
+                                            onClick={() => setMobileListOpen(true)}
+                                        >
+                                            <List className="w-4 h-4" />
+                                        </Button>
+                                        <span className="shrink-0">完善订单</span>
+                                        <span className='text-sm text-muted-foreground pt-1 lg:hidden ml-3 shrink-0 font-normal'>
+                                            已提交 {submittedIds.size}/{items.length}
                                         </span>
-                                    )}
-                                    <LoadingButton
-                                        type='button'
-                                        size='lg'
-                                        onClick={handleSubmitCurrent}
-                                        isLoading={submitting}
-                                        disabled={submitting || !currentItem}
+                                    </h3>
+                                </div>
+                                <div className='flex items-center gap-2'>
+                                    <span className='pr-2 text-muted-foreground'>表单类型</span>
+                                    <RadioGroup
+                                        value={orderType}
+                                        onValueChange={(value) => handleTypeSwitch(value as OrderType)}
+                                        className="flex items-center gap-4"
                                     >
-                                        提交当前项
-                                    </LoadingButton>
+                                        <div className="flex items-center space-x-2">
+                                            <RadioGroupItem value="reagent" id="r-reagent" />
+                                            <Label htmlFor="r-reagent" className="cursor-pointer text-base">试剂</Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <RadioGroupItem value="consumable" id="r-consumable" />
+                                            <Label htmlFor="r-consumable" className="cursor-pointer text-base">耗材</Label>
+                                        </div>
+                                    </RadioGroup>
+                                </div>
+                            </div>
+
+                            <div className='flex-1 pb-4'>
+                                <div>
+                                    {orderType === 'reagent' ? (
+                                        <>
+                                            <BaseForm form={reagentForm} fields={reagentFormFields} />
+                                            <ReagentCasDuplicateWarning
+                                                casWarning={casWarning}
+                                                className='mt-3 rounded-md bg-orange-50 p-3 dark:bg-orange-950'
+                                                onOpenOrders={() => navigateToCasSearch('/reagents', 'cas')}
+                                                onOpenInventory={() => navigateToCasSearch('/inventory', 'cas_number')}
+                                                getOrderStatusLabel={getReagentOrderStatusLabel}
+                                            />
+                                        </>
+                                    ) : (
+                                        <BaseForm form={consumableForm} fields={getConsumableOrderFormFields()} />
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className='pt-4 mt-auto'>
+                                <div className='flex flex-wrap items-center justify-between gap-3'>
+                                    <div className='flex items-center gap-2 order-1'>
+                                        <Button
+                                            variant='destructive'
+                                            size='lg'
+                                            type='button'
+                                            onClick={handleDeleteCurrent}
+                                            disabled={submitting || !currentItem}
+                                        >
+                                            <Trash2 className='w-4 h-4 mr-1.5' />
+                                            {deleteConfirm ? '确认删除' : '删除'}
+                                        </Button>
+                                    </div>
+                                    <div className='flex items-center gap-2 order-2'>
+                                        {casLoading && orderType === 'reagent' && (
+                                            <span className='text-sm text-muted-foreground flex items-center'>
+                                                <Loader2 className='mr-1 h-3 w-3 animate-spin' />
+                                                检查CAS号中
+                                            </span>
+                                        )}
+                                        <LoadingButton
+                                            type='button'
+                                            size='lg'
+                                            onClick={handleSubmitCurrent}
+                                            isLoading={submitting}
+                                            disabled={submitting || !currentItem}
+                                        >
+                                            提交当前项
+                                        </LoadingButton>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </CardContent>
+                    </CardContent>
+                </div>
             </Card>
         </div>
     )

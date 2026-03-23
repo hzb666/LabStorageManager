@@ -103,14 +103,16 @@ export function clearDashboardTab(): void {
 export const REAGENT_STATUS_OPTIONS = [
   { value: 'all', label: '全部状态' },
   { value: 'pending', label: '待审批' },
-  { value: 'approved', label: '已审批' },
+  { value: 'approved', label: '已批准' },
+  { value: 'rejected', label: '未通过' },
   { value: 'arrived', label: '已到货' },
 ]
 
 export const CONSUMABLE_STATUS_OPTIONS = [
   { value: 'all', label: '全部状态' },
   { value: 'pending', label: '待审批' },
-  { value: 'approved', label: '已审批' },
+  { value: 'approved', label: '已批准' },
+  { value: 'rejected', label: '未通过' },
 ]
 
 export const DASHBOARD_REAGENT_SEARCH_FIELDS = [
@@ -146,6 +148,25 @@ function normalizeValue(value: unknown): string {
   return ''
 }
 
+function parseDateForSort(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return null
+  }
+  const text = String(value).trim()
+  if (!text) {
+    return null
+  }
+  const timestamp = Date.parse(text)
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function toPrimitiveString(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  return ''
+}
+
 function sortLocally<T extends Record<string, unknown>>(
   rows: T[],
   sortBy?: string,
@@ -161,8 +182,11 @@ function sortLocally<T extends Record<string, unknown>>(
       return (aVal - bVal) * factor
     }
 
-    if (Date.parse(String(aVal)) && Date.parse(String(bVal))) {
-      return (Date.parse(String(aVal)) - Date.parse(String(bVal))) * factor
+    const aDate = parseDateForSort(aVal)
+    const bDate = parseDateForSort(bVal)
+    // 保持原有“truthy 才按日期排序”的行为（例如 1970-01-01 对应 0 不进入日期排序）
+    if (aDate && bDate) {
+      return (aDate - bDate) * factor
     }
 
     const aText = normalizeValue(aVal)
@@ -189,7 +213,7 @@ export function buildLocalListData<T extends Record<string, unknown>>(
   let filtered = rows
 
   if (status_filter && status_filter !== 'all') {
-    filtered = filtered.filter((row) => String(row.status) === status_filter)
+    filtered = filtered.filter((row) => toPrimitiveString(row.status) === status_filter)
   }
 
   if (search) {

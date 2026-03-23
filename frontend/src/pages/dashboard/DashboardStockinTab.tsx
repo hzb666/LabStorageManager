@@ -6,7 +6,6 @@ import { useMemo, useState, useCallback } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
-import { AxiosError } from 'axios'
 import { ArrowRightLeft } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import * as v from 'valibot'
@@ -26,9 +25,9 @@ import {
   type StockInFormInputData,
   createValibotResolver,
   createRemainingQuantitySchema,
+  extractApiErrorDetail,
   normalizeApiErrorMessage,
   toValidationErrors,
-  type ValidationError,
 } from '@/lib/validationSchemas'
 import { defaultStockInValues, getStockInFormFields } from '@/lib/formConfigs'
 
@@ -106,8 +105,7 @@ export function DashboardStockinTab() {
       await refreshTables()
       toast.success('入库成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string | ValidationError[] }>
-      const detail = axiosError.response?.data?.detail
+      const detail = extractApiErrorDetail(error)
       const validationErrors = toValidationErrors(detail)
       if (validationErrors.length > 0) {
         validationErrors.forEach((e) => {
