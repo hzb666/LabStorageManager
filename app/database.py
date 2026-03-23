@@ -49,104 +49,6 @@ def get_db() -> Generator[Session, None, None]:
 DBSession = Annotated[Session, Depends(get_db)]
 
 
-SQLITE_SEARCH_COLUMN_UPGRADES: dict[str, tuple[tuple[str, str], ...]] = {
-    "inventory": (
-        ("name_pinyin_initials", "VARCHAR(200)"),
-        ("category_pinyin_initials", "VARCHAR(200)"),
-        ("brand_pinyin_initials", "VARCHAR(200)"),
-        ("storage_location_pinyin_initials", "VARCHAR(200)"),
-    ),
-    "reagent_order": (
-        ("name_pinyin_initials", "VARCHAR(200)"),
-        ("category_pinyin", "VARCHAR(200)"),
-        ("category_pinyin_initials", "VARCHAR(200)"),
-        ("brand_pinyin_initials", "VARCHAR(200)"),
-    ),
-    "consumable_order": (
-        ("name_pinyin_initials", "VARCHAR(200)"),
-    ),
-    "users": (
-        ("full_name_pinyin_initials", "VARCHAR(200)"),
-    ),
-}
-
-SQLITE_SEARCH_INDEX_UPGRADES: tuple[tuple[str, str, str], ...] = ()
-
-
-SQLITE_DEPRECATED_INDEX_DROPS: tuple[str, ...] = (
-    # Inventory single-column indexes covered by composite indexes.
-    "DROP INDEX IF EXISTS ix_inventory_cas_number",
-    "DROP INDEX IF EXISTS ix_inventory_name",
-    "DROP INDEX IF EXISTS ix_inventory_category",
-    "DROP INDEX IF EXISTS ix_inventory_brand",
-    "DROP INDEX IF EXISTS ix_inventory_storage_location",
-    "DROP INDEX IF EXISTS ix_inventory_is_common",
-    "DROP INDEX IF EXISTS ix_inventory_status",
-    "DROP INDEX IF EXISTS ix_inventory_borrower_id",
-    "DROP INDEX IF EXISTS ix_inventory_temporary_keeper_id",
-    "DROP INDEX IF EXISTS ix_inventory_created_by_id",
-    "DROP INDEX IF EXISTS ix_inventory_created_at",
-    "DROP INDEX IF EXISTS ix_inventory_name_pinyin",
-    "DROP INDEX IF EXISTS ix_inventory_name_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_inventory_category_pinyin",
-    "DROP INDEX IF EXISTS ix_inventory_category_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_inventory_brand_pinyin",
-    "DROP INDEX IF EXISTS ix_inventory_brand_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_inventory_storage_location_pinyin",
-    "DROP INDEX IF EXISTS ix_inventory_storage_location_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_inventory_remaining_percent",
-    # Recreate these indexes with created_at/id suffix for pinyin sort tie-breakers.
-    "DROP INDEX IF EXISTS ix_inventory_is_common_name_pinyin",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_name_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_category_pinyin",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_category_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_brand_pinyin",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_brand_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_storage_location_pinyin",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_storage_location_pinyin_initials",
-    # Historical residual indexes from earlier is_common rollout.
-    "DROP INDEX IF EXISTS ix_inventory_is_common_cas_number",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_name",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_alias",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_category",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_brand",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_storage_location",
-    # Remove low-yield raw-text inventory indexes after FTS rollout.
-    "DROP INDEX IF EXISTS ix_inventory_is_common_name_created_at_id",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_alias_created_at_id",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_category_created_at_id",
-    "DROP INDEX IF EXISTS ix_inventory_is_common_brand_created_at_id",
-    # Replace broad inventory operational indexes with is_common-prefixed variants.
-    "DROP INDEX IF EXISTS ix_inventory_status_created_at_id",
-    "DROP INDEX IF EXISTS ix_inventory_keeper_location_created_at",
-    "DROP INDEX IF EXISTS ix_inventory_cas_status_created_at",
-    "DROP INDEX IF EXISTS ix_inventory_alias_created_at",
-    # Borrow log single-column indexes covered by composite indexes.
-    "DROP INDEX IF EXISTS ix_borrowlog_inventory_id",
-    "DROP INDEX IF EXISTS ix_borrowlog_borrower_id",
-    # Reagent order pinyin single-column indexes covered by composite indexes.
-    "DROP INDEX IF EXISTS ix_reagent_order_name_pinyin",
-    "DROP INDEX IF EXISTS ix_reagent_order_name_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_reagent_order_category_pinyin",
-    "DROP INDEX IF EXISTS ix_reagent_order_category_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_reagent_order_brand_pinyin",
-    "DROP INDEX IF EXISTS ix_reagent_order_brand_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_reagent_order_created_at",
-    "DROP INDEX IF EXISTS ix_reagent_order_cas_number",
-    "DROP INDEX IF EXISTS ix_reagent_order_name",
-    "DROP INDEX IF EXISTS ix_reagent_order_category",
-    "DROP INDEX IF EXISTS ix_reagent_order_brand",
-    # Consumable order pinyin single-column indexes covered by composite indexes.
-    "DROP INDEX IF EXISTS ix_consumable_order_name_pinyin",
-    "DROP INDEX IF EXISTS ix_consumable_order_name_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_consumable_order_created_at",
-    "DROP INDEX IF EXISTS ix_consumable_order_name",
-    # Users pinyin single-column indexes covered by composite/low-value historical leftovers.
-    "DROP INDEX IF EXISTS ix_users_full_name_pinyin",
-    "DROP INDEX IF EXISTS ix_users_full_name_pinyin_initials",
-    "DROP INDEX IF EXISTS ix_users_full_name",
-)
-
 SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
     # Inventory searchable fields (regular/common split by is_common).
     "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_cas_number_created_at_id ON inventory (is_common, cas_number, created_at DESC, id DESC)",
@@ -635,13 +537,63 @@ SELECT
 FROM users
 """
 
+SQLITE_SAFE_COUNT_STATEMENTS: dict[str, str] = {
+    "inventory": "SELECT COUNT(*) FROM inventory",
+    "reagent_order": "SELECT COUNT(*) FROM reagent_order",
+    "consumable_order": "SELECT COUNT(*) FROM consumable_order",
+    "users": "SELECT COUNT(*) FROM users",
+    "inventory_fts": "SELECT COUNT(*) FROM inventory_fts",
+    "reagent_order_fts": "SELECT COUNT(*) FROM reagent_order_fts",
+    "consumable_order_fts": "SELECT COUNT(*) FROM consumable_order_fts",
+    "users_fts": "SELECT COUNT(*) FROM users_fts",
+}
+
+SQLITE_SAFE_DELETE_STATEMENTS: dict[str, str] = {
+    "inventory_fts": "DELETE FROM inventory_fts",
+    "reagent_order_fts": "DELETE FROM reagent_order_fts",
+    "consumable_order_fts": "DELETE FROM consumable_order_fts",
+    "users_fts": "DELETE FROM users_fts",
+}
+
+SQLITE_SAFE_DROP_TRIGGER_STATEMENTS: dict[str, str] = {
+    "trg_inventory_fts_ai": "DROP TRIGGER IF EXISTS trg_inventory_fts_ai",
+    "trg_inventory_fts_ad": "DROP TRIGGER IF EXISTS trg_inventory_fts_ad",
+    "trg_inventory_fts_au": "DROP TRIGGER IF EXISTS trg_inventory_fts_au",
+    "trg_reagent_order_fts_ai": "DROP TRIGGER IF EXISTS trg_reagent_order_fts_ai",
+    "trg_reagent_order_fts_ad": "DROP TRIGGER IF EXISTS trg_reagent_order_fts_ad",
+    "trg_reagent_order_fts_au": "DROP TRIGGER IF EXISTS trg_reagent_order_fts_au",
+    "trg_consumable_order_fts_ai": "DROP TRIGGER IF EXISTS trg_consumable_order_fts_ai",
+    "trg_consumable_order_fts_ad": "DROP TRIGGER IF EXISTS trg_consumable_order_fts_ad",
+    "trg_consumable_order_fts_au": "DROP TRIGGER IF EXISTS trg_consumable_order_fts_au",
+    "trg_users_fts_ai": "DROP TRIGGER IF EXISTS trg_users_fts_ai",
+    "trg_users_fts_ad": "DROP TRIGGER IF EXISTS trg_users_fts_ad",
+    "trg_users_fts_au": "DROP TRIGGER IF EXISTS trg_users_fts_au",
+}
+
+
+def _get_safe_count_statement(table_name: str) -> str:
+    statement = SQLITE_SAFE_COUNT_STATEMENTS.get(table_name)
+    if statement is None:
+        raise ValueError(f"Unsupported table for count query: {table_name}")
+    return statement
+
+
+def _get_safe_delete_statement(table_name: str) -> str:
+    statement = SQLITE_SAFE_DELETE_STATEMENTS.get(table_name)
+    if statement is None:
+        raise ValueError(f"Unsupported table for delete query: {table_name}")
+    return statement
+
+
+def _get_safe_drop_trigger_statement(trigger_name: str) -> str:
+    statement = SQLITE_SAFE_DROP_TRIGGER_STATEMENTS.get(trigger_name)
+    if statement is None:
+        raise ValueError(f"Unsupported trigger for drop query: {trigger_name}")
+    return statement
+
 
 def check_sqlite_schema_consistency(connection: Connection) -> None:
-    """
-    Check whether SQLite schema matches SQLModel definitions.
-
-    This function only checks and logs; it does not mutate schema.
-    """
+    """Check whether SQLite schema matches current SQLModel definitions."""
     inspector = inspect(connection)
     metadata = SQLModel.metadata
 
@@ -713,43 +665,14 @@ def check_sqlite_schema_consistency(connection: Connection) -> None:
         logger.info("SQLite schema consistency check passed for all SQLModel tables.")
 
 
-def ensure_sqlite_search_columns(connection: Connection) -> int:
-    """Add newly introduced search columns/indexes for existing SQLite databases."""
-    added_columns = 0
-
-    for table_name, columns in SQLITE_SEARCH_COLUMN_UPGRADES.items():
-        existing_columns = {
-            row[1]
-            for row in connection.execute(text(f"PRAGMA table_info({table_name})"))
-        }
-
-        for column_name, column_type in columns:
-            if column_name in existing_columns:
-                continue
-
-            connection.execute(
-                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
-            )
-            added_columns += 1
-            logger.info("Added SQLite search column %s.%s", table_name, column_name)
-
-    for index_name, table_name, column_name in SQLITE_SEARCH_INDEX_UPGRADES:
-        connection.execute(
-            text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})")
-        )
-
-    for statement in SQLITE_DEPRECATED_INDEX_DROPS:
-        connection.execute(text(statement))
-
+def ensure_sqlite_performance_indexes(connection: Connection) -> None:
+    """Ensure current SQLite performance indexes exist."""
     for statement in SQLITE_PERFORMANCE_INDEX_UPGRADES:
         connection.execute(text(statement))
 
-    # Refresh planner statistics so SQLite can pick the intended composite indexes
-    # after large index upgrades (especially the is_common + created_at/id paths).
+    # Refresh planner stats so SQLite can pick the intended composite indexes.
     connection.execute(text("ANALYZE"))
     connection.execute(text("PRAGMA optimize"))
-
-    return added_columns
 
 
 def _ensure_sqlite_fts_table(
@@ -770,20 +693,24 @@ def _ensure_sqlite_fts_table(
     ).first() is not None
 
     for trigger_name in trigger_names:
-        connection.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+        drop_statement = _get_safe_drop_trigger_statement(trigger_name)
+        connection.execute(text(drop_statement))
 
     for statement in setup_statements:
         connection.execute(text(statement))
 
-    source_count = connection.execute(text(f"SELECT COUNT(*) FROM {source_table}")).scalar_one()
-    fts_count = connection.execute(text(f"SELECT COUNT(*) FROM {fts_table}")).scalar_one()
+    source_count_statement = _get_safe_count_statement(source_table)
+    fts_count_statement = _get_safe_count_statement(fts_table)
+    source_count = connection.execute(text(source_count_statement)).scalar_one()
+    fts_count = connection.execute(text(fts_count_statement)).scalar_one()
     needs_rebuild = (not table_exists) or (source_count != fts_count)
     if not needs_rebuild:
         return
 
-    connection.execute(text(f"DELETE FROM {fts_table}"))
+    delete_statement = _get_safe_delete_statement(fts_table)
+    connection.execute(text(delete_statement))
     connection.execute(text(rebuild_sql))
-    fts_count_after = connection.execute(text(f"SELECT COUNT(*) FROM {fts_table}")).scalar_one()
+    fts_count_after = connection.execute(text(fts_count_statement)).scalar_one()
     logger.info(
         "Rebuilt %s data (%s rows=%s, fts rows before=%s, after=%s)",
         fts_table,
@@ -865,7 +792,7 @@ def init_db() -> None:
     logger.info("Database tables created / verified")
 
     with engine.begin() as connection:
-        ensure_sqlite_search_columns(connection)
+        ensure_sqlite_performance_indexes(connection)
         ensure_sqlite_inventory_fts(connection)
         check_sqlite_schema_consistency(connection)
 
