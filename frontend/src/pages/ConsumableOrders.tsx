@@ -24,7 +24,7 @@ import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
-import { processNotes } from '@/lib/utils'
+import { downloadBlobResponse, processNotes } from '@/lib/utils'
 import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import {
   ConsumableOrderSchema,
@@ -221,15 +221,7 @@ export function ConsumableOrdersPage() {
   const handleExport = useCallback(async () => {
     try {
       const response = await consumableOrderAPI.exportOrders()
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `consumable_orders_export_${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      downloadBlobResponse(response, `consumable_orders_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
     } catch {
       toast.error('导出失败')
     }

@@ -4,6 +4,23 @@
 (function() {
   'use strict';
 
+  const ALLOWED_HAZARD_ICON_HOSTS = new Set([globalThis.location.hostname, 'reagent.bjmu.edu.cn']);
+
+  function isTrustedHazardIconSrc(src) {
+    if (!src) {
+      return false;
+    }
+    try {
+      const parsed = new URL(src, globalThis.location.origin);
+      if (!ALLOWED_HAZARD_ICON_HOSTS.has(parsed.hostname)) {
+        return false;
+      }
+      return /\/images\/wxp\.png$/i.test(parsed.pathname) || /(^|\/)wxp\.png$/i.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  }
+
   console.log('[Content] 北大医学部购物车同步插件内容脚本已加载');
 
   // 监听来自popup的消息
@@ -19,7 +36,59 @@
       const cartData = extractCartItems();
       sendResponse({ success: true, data: cartData });
     }
+
+    if (message.action === 'GET_THEME') {
+      const theme = getSiteTheme();
+      sendResponse({ success: true, data: theme });
+    }
   });
+
+  // 获取网站主题状态
+  function getSiteTheme() {
+    try {
+      // 尝试多种常见的深色模式 localStorage key
+      const possibleKeys = [
+        'darkMode',
+        'dark_mode',
+        'theme',
+        'color-scheme',
+        'colorScheme',
+        'dark',
+        'isDarkMode',
+        '__dark_mode',
+        'theme_mode'
+      ];
+
+      for (const key of possibleKeys) {
+        const value = localStorage.getItem(key);
+        if (value !== null) {
+          // 尝试解析为布尔值
+          if (value === 'true' || value === 'dark' || value === 'darkMode') {
+            return { darkMode: true, key };
+          }
+          if (value === 'false' || value === 'light') {
+            return { darkMode: false, key };
+          }
+          // 返回原始值
+          return { darkMode: null, key, value };
+        }
+      }
+
+      // 尝试从 CSS 类名判断
+      const isDark = document.documentElement.classList.contains('dark') ||
+                     document.documentElement.classList.contains('dark-mode') ||
+                     document.documentElement.classList.contains('theme-dark');
+      if (isDark) {
+        return { darkMode: true, source: 'css-class' };
+      }
+
+      // 尝试从 prefers-color-scheme 判断
+      const prefersDark = globalThis.matchMedia('(prefers-color-scheme: dark)').matches;
+      return { darkMode: prefersDark, source: 'system-preference' };
+    } catch (error) {
+      return { darkMode: null, error: error?.message || String(error) };
+    }
+  }
 
   // 提取已提交订单的基本信息
   function extractCartItems() {
@@ -61,7 +130,7 @@
       const match = href?.match(/param=(\d+)/);
       if (match) {
         productId = match[1];
-        detailUrl = 'https://reagent.bjmu.edu.cn/Front.aspx?page=cpxq&param=' + productId;
+        detailUrl = `${globalThis.location.origin}/Front.aspx?page=cpxq&param=${productId}`;
       }
     }
 
@@ -97,8 +166,8 @@
     }
 
     // 5. 检测危险品 - 优先图标，再用文本/链接兜底，兼容不同供应商模板
-    const dangerousImg = element.querySelector(
-      'img[src*="/images/wxp.png"], img[src$="wxp.png"], img[src*="wxp.png"]'
+    const dangerousImg = Array.from(element.querySelectorAll('img')).find((img) =>
+      isTrustedHazardIconSrc(img.getAttribute('src') || '')
     );
     const textContent = (element.textContent || '').replaceAll(/\s+/g, ' ');
     const hasDangerText = textContent.includes('危险品');

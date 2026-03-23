@@ -56,10 +56,14 @@
       box-sizing: border-box;
     }
 
+    button, input, optgroup, select, textarea {
+      font-family: inherit;
+    }
+
     body {
       width: 380px;
       min-height: 280px;
-      font-family: 'SourceHanSansSC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
       font-size: 14px;
       background: var(--background);
       color: var(--foreground);
@@ -96,33 +100,34 @@
     }
 
     .card-footer {
-      padding: 12px 16px;
-      border-top: 1px solid var(--border);
+      padding: 0px 16px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
-    /* 按钮样式 */
+    /* 按钮样式 - 与项目 Button 组件完全一致 */
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
       white-space: nowrap;
-      border-radius: var(--radius);
+      border-radius: 6px;
       font-size: 14px;
       font-weight: 500;
       height: 40px;
       padding: 0 16px;
       cursor: pointer;
-      transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+      transition: background-color 0.15s, color 0.15s, box-shadow 0.15s, border-color 0.15s;
       border: 1px solid transparent;
       outline: none;
+      box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.05);
     }
 
     .btn:focus-visible {
-      box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+      border-color: var(--ring);
+      box-shadow: 0 0 0 3px var(--ring);
     }
 
     .btn:disabled {
@@ -130,133 +135,159 @@
       pointer-events: none;
     }
 
+    /* Primary 按钮 - 与 variant="default" 一致 */
     .btn-primary {
       background: var(--primary);
       color: var(--primary-foreground);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      border-color: transparent;
+      box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.05);
     }
 
     .btn-primary:hover {
-      background: oklch(0.208 0.042 265.755 / 0.9);
+      background: color-mix(in srgb, var(--primary) 85%, transparent);
     }
 
     @media (prefers-color-scheme: dark) {
+      .btn-primary {
+        border-color: 2px solid var(--primary);
+      }
       .btn-primary:hover {
-        background: oklch(0.92 0 0 / 0.9);
+        background: color-mix(in srgb, var(--primary) 85%, transparent);
       }
     }
 
-    .btn-secondary {
-      background: var(--secondary);
-      color: var(--secondary-foreground);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    }
-
-    .btn-secondary:hover {
-      background: oklch(0.968 0.007 247.896 / 0.8);
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .btn-secondary:hover {
-        background: oklch(0.24 0.015 285.823 / 0.8);
-      }
-    }
-
-    .btn-outline {
-      background: transparent;
-      border-color: var(--border);
+    /* Modern 按钮 - 与 variant="modern" 一致 */
+    .btn-modern {
+      background: var(--card);
       color: var(--foreground);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.05);
     }
 
-    .btn-outline:hover {
+    .btn-modern:hover {
       background: var(--accent);
       color: var(--accent-foreground);
     }
 
-    .btn-success {
-      background: #10b981; /* Default emerald */
-      color: white;
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    }
-
-    .btn-success:hover {
-      background: #059669;
-    }
-
     @media (prefers-color-scheme: dark) {
-      .btn-success {
-        background: #059669;
+      .btn-modern {
+        background: color-mix(in srgb, var(--input) 30%, transparent);
+        border-color: var(--input);
       }
-      .btn-success:hover {
-        background: #047857;
+      .btn-modern:hover {
+        background: var(--input);
       }
     }
 
+    /* Danger 按钮 - 与 variant="destructive" 一致 */
     .btn-danger {
       background: var(--destructive);
       color: var(--destructive-foreground);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.05);
     }
 
     .btn-danger:hover {
-      background: oklch(0.577 0.245 27.325 / 0.9);
+      background: color-mix(in srgb, var(--destructive) 90%, transparent);
     }
 
     @media (prefers-color-scheme: dark) {
+      .btn-danger {
+        background: color-mix(in srgb, var(--destructive) 70%, transparent);
+      }
       .btn-danger:hover {
-        background: oklch(0.7022 0.1892 22.23 / 0.9);
+        background: color-mix(in srgb, var(--destructive) 80%, transparent);
       }
     }
 
     .btn-sm {
-      height: 36px;
-      padding: 0 12px;
-      font-size: 13px;
+      height: 40px;
+      padding: 0 20px;
+      font-size: 14px;
     }
 
     .btn-block {
       width: 100%;
     }
 
-    /* 输入框 */
-    .input, .select {
+    .btn-row {
+      display: flex;
+      width: 100%;
+      gap: 8px;
+    }
+
+    /* 图标按钮 */
+    .btn-icon {
       height: 40px;
+      width: 40px;
+      padding: 0;
+      flex-shrink: 0;
+    }
+
+    .btn-flex {
+      flex: 1;
+    }
+
+    /* 输入框 - 匹配项目 Input 组件样式 */
+    .input, .select {
+      display: flex;
+      height: 40px;
+      width: 100%;
       padding: 0 12px;
       font-size: 14px;
+      line-height: 40px;
+      border-radius: 6px;
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--background);
+      background: var(--card);
       color: var(--foreground);
       outline: none;
-      transition: border-color 0.15s;
+      transition: border-color 0.3s, box-shadow 0.3s;
+      box-sizing: border-box;
+    }
+
+    .input::placeholder {
+      color: var(--muted-foreground);
     }
 
     .input:focus, .select:focus {
       border-color: var(--ring);
-      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.05);
+      box-shadow: 0 0 0 2px var(--ring), 0 0 0 4px rgba(0, 0, 0, 0.05);
+    }
+
+    .input:disabled, .select:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .form-hint {
+      display: block;
+      font-size: 12px;
+      color: var(--muted-foreground);
+      margin-top: 4px;
     }
 
     /* 状态标签 */
     .badge {
       display: inline-flex;
       align-items: center;
-      padding: 2px 10px;
-      font-size: 12px;
-      font-weight: 500;
-      border-radius: 9999px;
+      height: 32px;
+      padding: 0 10px;
+      font-size: 14px;
+      border-radius: 8px;
+      white-space: nowrap;
     }
 
-    .badge-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
-    .badge-warning { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
-    .badge-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
-    .badge-info { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+    .badge-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .badge-warning { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .badge-error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .badge-info { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+    .badge-secondary { background: #e0e7ff; color: #3730a3; border: 1px solid #a5b4fc; }
 
     @media (prefers-color-scheme: dark) {
-      .badge-success { background: #064e3b; color: #d1fae5; border-color: #065f46; }
-      .badge-warning { background: #713f12; color: #fef9c3; border-color: #854d0e; }
-      .badge-error { background: #7f1d1d; color: #fee2e2; border-color: #991b1b; }
-      .badge-info { background: #1e3a8a; color: #dbeafe; border-color: #1e40af; }
+      .badge-success { background: #14532d; color: #bbf7d0; border-color: #15803d; }
+      .badge-warning { background: #78350f; color: #fde68a; border-color: #b45309; }
+      .badge-error { background: #7f1d1d; color: #fecaca; border-color: #b91c1c; }
+      .badge-info { background: #1e3a8a; color: #bfdbfe; border-color: #1d4ed8; }
+      .badge-secondary { background: #312e81; color: #c7d2fe; border-color: #6366f1; }
     }
 
     /* 表单组 */
@@ -325,30 +356,34 @@
       .message-info { background: #1e3a8a; border-color: #2563eb; color: #eff6ff; }
     }
 
-    /* 商品卡片 - shadcn styling */
+    /* 商品卡片 - shadcn styling (匹配 dashboard tab) */
     .item-card {
-      background: var(--background);
+      background: var(--card);
+      color: var(--card-foreground);
       border: 1px solid var(--border);
-      border-radius: calc(var(--radius) - 2px);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
       padding: 14px;
       margin-bottom: 10px;
       transition: all 0.15s ease;
       cursor: pointer;
-    }
-
-    .item-card:hover {
-      border-color: oklch(0.208 0.042 265.755 / 0.3);
-      background: oklch(0.968 0.007 247.896 / 0.5); /* muted bg */
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .item-card:hover { border-color: oklch(0.92 0 0 / 0.3); background: oklch(0.22 0.015 285.823 / 0.5); }
+      width: 100%;
+      box-sizing: border-box;
     }
 
     .item-card.selected {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 1px var(--primary);
+      background: color-mix(in srgb, var(--accent) 50%, transparent);
+    }
+
+    .item-card:hover, .item-card.selected:hover {
       background: var(--accent);
+      color: var(--accent-foreground);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .item-card.selected {
+        border-color: var(--primary);
+      }
     }
 
     .item-header {
@@ -378,7 +413,7 @@
 
     .item-body {
       padding-left: 28px; /* alignment with name next to checkbox */
-      font-size: 13px;
+      font-size: 14px;
       color: var(--muted-foreground);
     }
 
@@ -401,9 +436,9 @@
       max-height: 280px;
       overflow-y: auto;
       margin-top: 16px;
-      padding-right: 4px;
+      scrollbar-gutter: stable;
     }
-    
+
     .item-list::-webkit-scrollbar {
       width: 6px;
     }
@@ -422,7 +457,7 @@
     .footer {
       padding: 12px 16px;
       text-align: center;
-      font-size: 12px;
+      font-size: 14px;
       color: var(--muted-foreground);
       border-top: 1px solid var(--border);
       background: var(--background);
@@ -453,9 +488,53 @@
           <div id="targetStatus" class="badge badge-warning">检测中...</div>
         </div>
 
-        <button class="btn btn-primary btn-block" id="fetchBtn">获取购物车</button>
+        <div class="btn-row">
+          <button class="btn btn-modern btn-icon" id="configBtn" title="配置">⚙️</button>
+          <button class="btn btn-primary btn-flex" id="fetchBtn">获取购物车</button>
+        </div>
 
         <div class="message" id="result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 配置界面 -->
+  <div id="configSection" class="hidden">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">插件配置</div>
+        <div class="card-description">配置系统 URL 以适配不同环境</div>
+      </div>
+      <div class="card-content">
+        <div class="form-group">
+          <label class="form-label" for="systemUrl">系统地址</label>
+          <input
+            type="text"
+            id="systemUrl"
+            class="input"
+            placeholder="http://localhost:5173"
+          >
+          <small class="form-hint">开发环境默认 http://localhost:5173，生产环境填写公网域名</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reagentSiteUrl">试剂平台地址</label>
+          <input
+            type="text"
+            id="reagentSiteUrl"
+            class="input"
+            placeholder="https://reagent.bjmu.edu.cn"
+          >
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">检测到的网站主题</label>
+          <div id="siteThemeStatus" class="badge badge-info">检测中...</div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <button class="btn btn-modern btn-sm" id="configBackBtn">返回</button>
+        <button class="btn btn-primary btn-sm" id="configSaveBtn">保存配置</button>
       </div>
     </div>
   </div>
@@ -475,14 +554,14 @@
         <div class="item-list" id="itemList"></div>
       </div>
       <div class="card-footer">
-        <button class="btn btn-outline btn-sm" id="backBtn">返回</button>
+        <button class="btn btn-modern btn-sm" id="backBtn">返回</button>
         <button class="btn btn-primary btn-sm" id="importBtn">开始导入</button>
       </div>
     </div>
   </div>
 
   <div class="footer">
-    提示：请确保北京大学试剂管理平台购物车页面已打开
+    提示：请确保试剂管理平台购物车页面已打开
   </div>
 
   <script src="popup.js"></script>

@@ -20,11 +20,12 @@ from app.models.inventory import (
 from app.models.user import User
 from app.services.api_utils import clear_cache_by_prefix
 from app.services.cas_utils import normalize_cas, validate_cas_format
-from app.services.csv_export import export_common_shelf_csv
+from app.services.xlsx_export import export_common_shelf_xlsx
 from app.services.inventory_creation import create_manual_inventory_items
 from app.services.inventory_fts import (
     InventoryFTSError,
     apply_inventory_fts_filter,
+    build_inventory_fts_rowid_subquery,
     should_use_inventory_fts,
 )
 from app.services.inventory_queries import (
@@ -33,6 +34,15 @@ from app.services.inventory_queries import (
     get_common_inventory_by_id,
 )
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.search_matchers import (
+    CASSearchMode,
+    build_cas_search_clause,
+    build_text_search_clause,
+    classify_cas_search,
+    collect_search_fields,
+    combine_or_clauses,
+    union_id_subqueries,
+)
 from app.services.spec_utils import SpecificationError, format_specification, parse_specification
 from app.services.shelf_utils import (
     COMMON_SHELF_AVAILABLE_STATUSES,
@@ -40,7 +50,7 @@ from app.services.shelf_utils import (
     is_common_shelf_item,
     normalize_storage_location,
 )
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.sql_utils import normalize_search_term
 from app.services.sse_manager import sse_manager
 from app.services.user_utils import batch_get_user_names
 
@@ -161,43 +171,149 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
         return None
     return remaining / initial
 
-
-def _build_search_clause(field, pattern: str, *, fuzzy: bool):
-    column = func.coalesce(field, "")
-    if fuzzy:
-        return normalize_field_sql(column).ilike(pattern)
-    return column.ilike(pattern)
-
-
-def _combine_search_clauses(clauses: list[Any]):
-    expr = clauses[0]
-    for clause in clauses[1:]:
-        expr = expr | clause
-    return expr
-
-
 def _apply_common_shelf_like_filters(
     base,
     *,
-    search_pattern: str,
+    search_value: str,
     search_field: Optional[str],
     fuzzy: bool,
 ):
     if search_field and search_field != 'all' and search_field in COMMON_SHELF_SEARCH_SQL_FIELD_MAP:
+        if search_field == 'cas_number':
+            return base.where(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
         return base.where(
-            _combine_search_clauses([
-                _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            combine_or_clauses(
+                build_text_search_clause(field, search_value, fuzzy=fuzzy)
                 for field in COMMON_SHELF_SEARCH_SQL_FIELD_MAP[search_field]
-            ])
+            )
         )
 
     all_clauses = []
-    for fields in COMMON_SHELF_SEARCH_SQL_FIELD_MAP.values():
+    for field_key, fields in COMMON_SHELF_SEARCH_SQL_FIELD_MAP.items():
+        if field_key == 'cas_number':
+            all_clauses.append(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
+            continue
         all_clauses.extend(
-            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            build_text_search_clause(field, search_value, fuzzy=fuzzy)
             for field in fields
         )
-    return base.where(_combine_search_clauses(all_clauses))
+    return base.where(combine_or_clauses(all_clauses))
+
+
+def _apply_common_shelf_filters(
+    base,
+    *,
+    search_value: str,
+    search_field: Optional[str],
+    fuzzy: bool,
+):
+    is_all_field = not search_field or search_field == 'all'
+    cas_mode, _ = classify_cas_search(search_value, fuzzy=fuzzy)
+    cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
+
+    if not is_all_field:
+        if search_field == 'cas_number' and cas_exact_or_prefix:
+            return base.where(
+                build_cas_search_clause(
+                    Inventory.cas_number,
+                    search_value,
+                    fuzzy=fuzzy,
+                )
+            )
+
+        if not should_use_inventory_fts(search_value):
+            return _apply_common_shelf_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+
+        try:
+            return apply_inventory_fts_filter(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                field_map=COMMON_SHELF_SEARCH_FTS_FIELD_MAP,
+            )
+        except InventoryFTSError as exc:
+            logger.warning(
+                "Common shelf FTS fallback to LIKE due to configuration error: %s",
+                exc,
+            )
+            return _apply_common_shelf_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Common shelf FTS fallback to LIKE due to runtime error: %s",
+                exc,
+            )
+            return _apply_common_shelf_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+
+    # all 模式：分路召回候选 ID，最后 UNION 去重，避免超大 OR。
+    use_fts_all = (not fuzzy) and should_use_inventory_fts(search_value) and not cas_exact_or_prefix
+    all_candidates = []
+
+    if use_fts_all:
+        try:
+            fts_rowid_subquery = build_inventory_fts_rowid_subquery(
+                search_value=search_value,
+                search_field='all',
+                field_map=COMMON_SHELF_SEARCH_FTS_FIELD_MAP,
+            )
+            all_candidates.append(
+                select(Inventory.id).where(Inventory.id.in_(fts_rowid_subquery))
+            )
+        except InventoryFTSError as exc:
+            logger.warning(
+                "Common shelf ALL-search FTS fallback to LIKE due to configuration error: %s",
+                exc,
+            )
+            use_fts_all = False
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Common shelf ALL-search FTS fallback to LIKE due to runtime error: %s",
+                exc,
+            )
+            use_fts_all = False
+
+    if not use_fts_all:
+        all_candidates.append(
+            select(Inventory.id).where(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
+        )
+        text_fields = collect_search_fields(
+            COMMON_SHELF_SEARCH_SQL_FIELD_MAP,
+            exclude_keys={'cas_number'},
+        )
+        if text_fields:
+            all_candidates.append(
+                select(Inventory.id).where(
+                    combine_or_clauses(
+                        build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                        for field in text_fields
+                    )
+                )
+            )
+
+    all_id_subquery = union_id_subqueries(all_candidates)
+    if all_id_subquery is None:
+        return base
+    return base.where(Inventory.id.in_(all_id_subquery))
 
 
 def _group_common_shelf_items(items: list[Inventory]) -> dict[tuple, dict[str, Any]]:
@@ -313,43 +429,12 @@ def register_common_shelf(
         if search:
             search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
             if search_value:
-                if should_use_inventory_fts(search_value):
-                    try:
-                        base = apply_inventory_fts_filter(
-                            base,
-                            search_value=search_value,
-                            search_field=search_field,
-                            field_map=COMMON_SHELF_SEARCH_FTS_FIELD_MAP,
-                        )
-                    except InventoryFTSError as exc:
-                        logger.warning(
-                            "Common shelf FTS fallback to LIKE due to configuration error: %s",
-                            exc,
-                        )
-                        base = _apply_common_shelf_like_filters(
-                            base,
-                            search_pattern=f"%{search_value}%",
-                            search_field=search_field,
-                            fuzzy=fuzzy,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning(
-                            "Common shelf FTS fallback to LIKE due to runtime error: %s",
-                            exc,
-                        )
-                        base = _apply_common_shelf_like_filters(
-                            base,
-                            search_pattern=f"%{search_value}%",
-                            search_field=search_field,
-                            fuzzy=fuzzy,
-                        )
-                else:
-                    base = _apply_common_shelf_like_filters(
-                        base,
-                        search_pattern=f"%{search_value}%",
-                        search_field=search_field,
-                        fuzzy=fuzzy,
-                    )
+                base = _apply_common_shelf_filters(
+                    base,
+                    search_value=search_value,
+                    search_field=search_field,
+                    fuzzy=fuzzy,
+                )
 
         items = db.exec(base.order_by(Inventory.created_at.desc(), Inventory.id.desc())).all()
 
@@ -626,9 +711,9 @@ def register_common_shelf(
     def export_common_shelf(
         db: Annotated[Session, Depends(get_db)],
     ):
-        """Export common shelf items (grouped by sample_inventory_id)."""
+        """Export common shelf items (grouped by sample_inventory_id) as XLSX."""
         base = common_inventory_query()
         items = db.exec(base.order_by(Inventory.created_at.desc(), Inventory.id.desc())).all()
         grouped = _group_common_shelf_items(items)
         export_rows = _build_common_shelf_rows(grouped, status_filter=None)
-        return export_common_shelf_csv(export_rows)
+        return export_common_shelf_xlsx(export_rows)

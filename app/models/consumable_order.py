@@ -25,7 +25,7 @@ class ConsumableOrderStatus(str, Enum):
 class ConsumableOrderBase(SQLModel):
     """Base consumable order model"""
     # Chinese name (with index for query)
-    name: str = Field(index=True, max_length=200)
+    name: str = Field(max_length=200)
     # English name
     english_name: Optional[str] = Field(None, max_length=200)
     # Product number (货号)
@@ -48,6 +48,7 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
     """Consumable Order database model"""
     __tablename__ = "consumable_order"
     __table_args__ = (
+        Index("ix_consumable_order_name_created_at_id", "name", "created_at", "id"),
         Index("ix_consumable_order_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
         Index("ix_consumable_order_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),
         Index("ix_consumable_order_created_at_id", "created_at", "id"),

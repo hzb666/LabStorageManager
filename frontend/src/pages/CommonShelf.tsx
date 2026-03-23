@@ -19,7 +19,7 @@ import useDialogState from '@/hooks/useDialogState'
 import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfigs'
 import { getCommonShelfTableColumns } from '@/lib/tableConfigs'
 import { COMMON_SHELF_BRAND_OPTIONS, COMMON_SHELF_CATEGORY_OPTIONS } from '@/lib/options'
-import { formatDate } from '@/lib/utils'
+import { downloadBlobResponse, formatDate } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import {
   InventoryFormSchema,
@@ -167,15 +167,7 @@ export function CommonShelfPage() {
   const handleExport = useCallback(async () => {
     try {
       const response = await commonShelfAPI.exportCommonShelf()
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `common_shelf_export_${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      downloadBlobResponse(response, `common_shelf_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
     } catch {
       toast.error('导出失败')
     }

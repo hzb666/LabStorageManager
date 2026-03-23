@@ -27,7 +27,7 @@ import type { FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { inventoryAPI, chemicalAPI } from '@/api/client'
-import { formatDate, processNotes } from '@/lib/utils'
+import { downloadBlobResponse, formatDate, processNotes } from '@/lib/utils'
 import {
   InventoryFormSchema,
   parseSpecification,
@@ -270,15 +270,7 @@ export function InventoryPage() {
   const handleExport = useCallback(async () => {
     try {
       const response = await inventoryAPI.exportInventory()
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `inventory_export_${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      downloadBlobResponse(response, `inventory_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
     } catch {
       toast.error('导出失败')
     }

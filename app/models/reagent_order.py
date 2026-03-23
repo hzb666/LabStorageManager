@@ -39,17 +39,17 @@ class ReagentOrderReason(str, Enum):
 class ReagentOrderBase(SQLModel):
     """Base reagent order model with common fields"""
     # CAS Number - Critical field for reagents
-    cas_number: str = Field(index=True, max_length=50)
+    cas_number: str = Field(max_length=50)
     # Chinese name (with index for query and pinyin for sorting)
-    name: str = Field(index=True, max_length=200)
+    name: str = Field(max_length=200)
     # English name
     english_name: Optional[str] = Field(None, max_length=200)
     # Alias (e.g., "酒精, Ethanol")
     alias: Optional[str] = Field(None, max_length=200)
     # Category (with index for query and pinyin for sorting)
-    category: Optional[str] = Field(index=True, max_length=100)
+    category: Optional[str] = Field(max_length=100)
     # Brand (with index for query and pinyin for sorting)
-    brand: Optional[str] = Field(index=True, max_length=100)
+    brand: Optional[str] = Field(max_length=100)
     # 数据库模型：允许 NULL 以兼容旧数据
     initial_quantity: Optional[float] = Field(default=None)
     # Unit (e.g., "ml", "g", "L")
@@ -71,6 +71,10 @@ class ReagentOrder(ReagentOrderBase, table=True):
     """Reagent Order database model"""
     __tablename__ = "reagent_order"
     __table_args__ = (
+        Index("ix_reagent_order_cas_number_created_at_id", "cas_number", "created_at", "id"),
+        Index("ix_reagent_order_name_created_at_id", "name", "created_at", "id"),
+        Index("ix_reagent_order_category_created_at_id", "category", "created_at", "id"),
+        Index("ix_reagent_order_brand_created_at_id", "brand", "created_at", "id"),
         Index("ix_reagent_order_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
         Index("ix_reagent_order_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),
         Index("ix_reagent_order_category_pinyin_created_at_id", "category_pinyin", "created_at", "id"),

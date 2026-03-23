@@ -37,7 +37,7 @@ class InventoryBase(SQLModel):
     initial_quantity: Optional[float] = Field(default=None)
     remaining_quantity: Optional[float] = Field(default=None)
     # 剩余百分比：remaining_quantity / initial_quantity，存储到数据库用于排序
-    remaining_percent: Optional[float] = Field(default=None, index=True)
+    remaining_percent: Optional[float] = Field(default=None)
     unit: Optional[str] = Field(default=None, max_length=20)  # Case-insensitive storage
     is_hazardous: bool = False
     notes: Optional[str] = Field(None, max_length=500)  # User custom notes
@@ -46,28 +46,34 @@ class InventoryBase(SQLModel):
 class Inventory(InventoryBase, table=True):
     """Inventory database model - Individual item tracking"""
     __table_args__ = (
-        # Search acceleration: all searchable fields are prefixed with is_common.
+        # Search/sort acceleration: keep indexes that can actually hit B-Tree paths.
         Index("ix_inventory_is_common_cas_number_created_at_id", "is_common", "cas_number", "created_at", "id"),
-        Index("ix_inventory_is_common_name_created_at_id", "is_common", "name", "created_at", "id"),
         Index("ix_inventory_is_common_name_pinyin", "is_common", "name_pinyin", "created_at", "id"),
         Index("ix_inventory_is_common_name_pinyin_initials", "is_common", "name_pinyin_initials", "created_at", "id"),
-        Index("ix_inventory_is_common_alias_created_at_id", "is_common", "alias", "created_at", "id"),
-        Index("ix_inventory_is_common_category_created_at_id", "is_common", "category", "created_at", "id"),
         Index("ix_inventory_is_common_category_pinyin", "is_common", "category_pinyin", "created_at", "id"),
         Index("ix_inventory_is_common_category_pinyin_initials", "is_common", "category_pinyin_initials", "created_at", "id"),
-        Index("ix_inventory_is_common_brand_created_at_id", "is_common", "brand", "created_at", "id"),
         Index("ix_inventory_is_common_brand_pinyin", "is_common", "brand_pinyin", "created_at", "id"),
         Index("ix_inventory_is_common_brand_pinyin_initials", "is_common", "brand_pinyin_initials", "created_at", "id"),
         Index("ix_inventory_is_common_storage_location_created_at_id", "is_common", "storage_location", "created_at", "id"),
         Index("ix_inventory_is_common_storage_location_pinyin", "is_common", "storage_location_pinyin", "created_at", "id"),
         Index("ix_inventory_is_common_storage_location_pinyin_initials", "is_common", "storage_location_pinyin_initials", "created_at", "id"),
+        Index(
+            "ix_inventory_is_common_remaining_percent_created_at_id",
+            "is_common",
+            "remaining_percent",
+            "created_at",
+            "id",
+        ),
         Index("ix_inventory_is_common_created_at_id", "is_common", "created_at", "id"),
         Index("ix_inventory_is_common_status_created_at_id", "is_common", "status", "created_at", "id"),
-        Index("ix_inventory_status_created_at_id", "status", "created_at", "id"),
         Index("ix_inventory_borrower_status_updated_at", "borrower_id", "status", "updated_at"),
-        Index("ix_inventory_keeper_location_created_at", "temporary_keeper_id", "storage_location", "created_at"),
-        Index("ix_inventory_cas_status_created_at", "cas_number", "status", "created_at"),
-        Index("ix_inventory_alias_created_at", "alias", "created_at"),
+        Index(
+            "ix_inventory_is_common_keeper_location_created_at",
+            "is_common",
+            "temporary_keeper_id",
+            "storage_location",
+            "created_at",
+        ),
         Index("ix_inventory_created_by_created_at_id", "created_by_id", "created_at", "id"),
     )
 

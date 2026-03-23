@@ -36,10 +36,11 @@ from app.models.inventory import (
 from app.models.user import User, UserRole
 from app.services.api_utils import clear_cache_by_prefix
 from app.services.cas_utils import normalize_cas, is_special_cas_value
-from app.services.csv_export import export_inventory_csv
+from app.services.xlsx_export import export_inventory_xlsx
 from app.services.excel_service import validate_uploaded_file
 from app.services.inventory_creation import create_manual_inventory_items
 from app.services.inventory_queries import (
+    common_inventory_query,
     get_regular_inventory_by_id,
     regular_inventory_clause,
     regular_inventory_query,
@@ -166,15 +167,12 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
 
     @router.get("/export", dependencies=[Depends(get_current_user)])
     def export_inventory(db: DBSession):
-        """Export regular inventory items (excluding common shelf items)."""
+        """Export inventory workbook with regular and common-shelf sheets."""
         statement = regular_inventory_query().order_by(Inventory.created_at.desc())
         items = db.exec(statement).all()
+        common_items = db.exec(common_inventory_query().order_by(Inventory.created_at.desc())).all()
 
-        # Get user map for created_by_id
-        user_ids = {item.created_by_id for item in items if item.created_by_id}
-        users_map = batch_get_user_names(db, user_ids) if user_ids else {}
-
-        return export_inventory_csv(items, users_map)
+        return export_inventory_xlsx(items, common_items)
 
 
 def _register_manual_and_dashboard_routes(

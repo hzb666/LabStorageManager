@@ -1,4 +1,5 @@
 import { type ClassValue, clsx } from "clsx"
+import type { AxiosResponse } from 'axios'
 import { twMerge } from "tailwind-merge"
 import { buildBackendUrl } from "./apiConfig"
 import { inputConfigs } from "./inputConfigs"
@@ -85,5 +86,50 @@ export function toText(value: unknown): string {
 
 export function getFullImageUrl(url: string): string {
   return buildBackendUrl(url)
+}
+
+function parseFilenameFromContentDisposition(contentDisposition?: string): string | null {
+  if (!contentDisposition) {
+    return null
+  }
+
+  const utf8Regex = /filename\*=UTF-8''([^;]+)/i
+  const utf8Match = utf8Regex.exec(contentDisposition)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const asciiRegex = /filename="?([^";]+)"?/i
+  const asciiMatch = asciiRegex.exec(contentDisposition)
+  if (asciiMatch?.[1]) {
+    return asciiMatch[1]
+  }
+
+  return null
+}
+
+export function downloadBlobResponse(
+  response: AxiosResponse<Blob>,
+  fallbackFilename: string,
+): void {
+  const contentDisposition = response.headers?.['content-disposition'] as string | undefined
+  const filename = parseFilenameFromContentDisposition(contentDisposition) || fallbackFilename
+
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data])
+  const url = URL.createObjectURL(blob)
+
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.style.display = 'none'
+
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 

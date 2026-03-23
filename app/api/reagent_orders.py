@@ -2,6 +2,7 @@
 Reagent Order API Routes - Reagent Purchase Order Management
 Separated from Consumable orders for independent workflow
 """
+import logging
 from datetime import datetime
 from typing import Annotated, Optional, Dict, Any
 
@@ -36,8 +37,19 @@ from app.services.cas_utils import (
 )
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.search_matchers import (
+    CASSearchMode,
+    build_applicant_id_subquery,
+    build_cas_search_clause,
+    build_date_search_clause,
+    build_text_search_clause,
+    classify_cas_search,
+    collect_search_fields,
+    combine_or_clauses,
+    union_id_subqueries,
+)
 from app.services.user_utils import batch_get_user_names
-from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
+from app.services.sql_utils import normalize_search_term, order_with_nulls_last
 from app.services.sql_utils import order_with_special_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
@@ -45,11 +57,18 @@ from app.services.api_utils import (
     get_cached_result,
     set_cached_result,
 )
+from app.services.order_fts import (
+    OrderFTSError,
+    build_order_fts_id_clause,
+    build_order_fts_rowid_subquery,
+    should_use_order_fts,
+)
 from app.services.inventory_queries import regular_inventory_query
 from app.services.sse_manager import sse_manager
 from app.api.reagent_orders_workflow import register_workflow_routes
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
+logger = logging.getLogger(__name__)
 
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
@@ -58,21 +77,33 @@ LIST_CACHE_PREFIX = "list:"
 VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
-
-
-def _build_search_clause(field, pattern: str, *, fuzzy: bool):
-    column = func.coalesce(field, "")
-    if fuzzy:
-        return normalize_field_sql(column).ilike(pattern)
-    return column.ilike(pattern)
-
-
-def _combine_search_clauses(clauses: list[Any]):
-    expr = clauses[0]
-    for clause in clauses[1:]:
-        expr = expr | clause
-    return expr
-
+REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
+    'name': [
+        ReagentOrder.name,
+        ReagentOrder.name_pinyin,
+        ReagentOrder.name_pinyin_initials,
+    ],
+    'cas': [ReagentOrder.cas_number],
+    'cas_number': [ReagentOrder.cas_number],
+    'brand': [
+        ReagentOrder.brand,
+        ReagentOrder.brand_pinyin,
+        ReagentOrder.brand_pinyin_initials,
+    ],
+    'created_at': [ReagentOrder.created_at],
+    'category': [
+        ReagentOrder.category,
+        ReagentOrder.category_pinyin,
+        ReagentOrder.category_pinyin_initials,
+    ],
+}
+REAGENT_ORDER_SEARCH_FTS_FIELD_MAP = {
+    'name': ["name", "name_pinyin", "name_pinyin_initials"],
+    'cas': ["cas_number"],
+    'cas_number': ["cas_number"],
+    'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
+    'category': ["category", "category_pinyin", "category_pinyin_initials"],
+}
 
 def _validate_order_reason(reason: Optional[str], required: bool = False) -> Optional[ReagentOrderReason]:
     """Validate order reason in API layer and convert to enum for model persistence."""
@@ -129,52 +160,100 @@ def _apply_reagent_order_filters(
     if not search_value:
         return base
 
-    search_pattern = f"%{search_value}%"
-    field_map = {
-        'name': [
-            ReagentOrder.name,
-            ReagentOrder.name_pinyin,
-            ReagentOrder.name_pinyin_initials,
-        ],
-        'cas': [ReagentOrder.cas_number],
-        'cas_number': [ReagentOrder.cas_number],
-        'brand': [
-            ReagentOrder.brand,
-            ReagentOrder.brand_pinyin,
-            ReagentOrder.brand_pinyin_initials,
-        ],
-        'created_at': [func.strftime('%Y-%m-%d %H:%M:%S', ReagentOrder.created_at)],
-        'category': [
-            ReagentOrder.category,
-            ReagentOrder.category_pinyin,
-            ReagentOrder.category_pinyin_initials,
-        ],
-    }
-    applicant_match = _combine_search_clauses([
-        _build_search_clause(User.full_name, search_pattern, fuzzy=fuzzy),
-        _build_search_clause(User.full_name_pinyin, search_pattern, fuzzy=fuzzy),
-        _build_search_clause(User.full_name_pinyin_initials, search_pattern, fuzzy=fuzzy),
-    ])
-    applicant_id_subquery = select(User.id).where(applicant_match)
+    applicant_id_subquery = build_applicant_id_subquery(search_value, fuzzy=fuzzy)
+
+    cas_mode, _ = classify_cas_search(search_value, fuzzy=fuzzy)
+    cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
+
+    fts_clause = None
+    fts_rowid_subquery = None
+    use_fts = (not fuzzy) and should_use_order_fts(search_value) and not cas_exact_or_prefix
+    if use_fts:
+        try:
+            fts_clause = build_order_fts_id_clause(
+                ReagentOrder.id,
+                fts_table="reagent_order_fts",
+                search_value=search_value,
+                search_field=search_field,
+                field_map=REAGENT_ORDER_SEARCH_FTS_FIELD_MAP,
+            )
+            fts_rowid_subquery = build_order_fts_rowid_subquery(
+                fts_table="reagent_order_fts",
+                search_value=search_value,
+                search_field='all',
+                field_map=REAGENT_ORDER_SEARCH_FTS_FIELD_MAP,
+            )
+        except OrderFTSError:
+            fts_clause = None
+            fts_rowid_subquery = None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Reagent order FTS fallback to SQL LIKE due to runtime error: %s",
+                exc,
+            )
+            fts_clause = None
+            fts_rowid_subquery = None
 
     if search_field and search_field != 'all':
         if search_field in APPLICANT_SEARCH_KEYS:
             return base.where(ReagentOrder.applicant_id.in_(applicant_id_subquery))
-        if search_field in field_map:
-            clauses = [
-                _build_search_clause(field, search_pattern, fuzzy=fuzzy)
-                for field in field_map[search_field]
-            ]
-            return base.where(_combine_search_clauses(clauses))
+        if search_field == 'created_at':
+            return base.where(build_date_search_clause(ReagentOrder.created_at, search_value))
+        if search_field in {'cas', 'cas_number'} and cas_exact_or_prefix:
+            return base.where(
+                build_cas_search_clause(ReagentOrder.cas_number, search_value, fuzzy=fuzzy)
+            )
+        if fts_clause is not None and search_field in REAGENT_ORDER_SEARCH_FTS_FIELD_MAP:
+            return base.where(fts_clause)
+        if search_field in REAGENT_ORDER_SEARCH_SQL_FIELD_MAP:
+            if search_field in {'cas', 'cas_number'}:
+                return base.where(
+                    build_cas_search_clause(ReagentOrder.cas_number, search_value, fuzzy=fuzzy)
+                )
+            return base.where(
+                combine_or_clauses(
+                    build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                    for field in REAGENT_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
+                )
+            )
 
-    all_clauses = []
-    for fields in field_map.values():
-        all_clauses.extend(
-            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
-            for field in fields
+    all_candidates = [
+        select(ReagentOrder.id).where(
+            ReagentOrder.applicant_id.in_(applicant_id_subquery)
+        ),
+        select(ReagentOrder.id).where(
+            build_date_search_clause(ReagentOrder.created_at, search_value)
+        ),
+    ]
+
+    if fts_rowid_subquery is not None:
+        all_candidates.append(
+            select(ReagentOrder.id).where(ReagentOrder.id.in_(fts_rowid_subquery))
         )
-    all_clauses.append(ReagentOrder.applicant_id.in_(applicant_id_subquery))
-    return base.where(_combine_search_clauses(all_clauses))
+    else:
+        all_candidates.append(
+            select(ReagentOrder.id).where(
+                build_cas_search_clause(ReagentOrder.cas_number, search_value, fuzzy=fuzzy)
+            )
+        )
+        text_fields = collect_search_fields(
+            REAGENT_ORDER_SEARCH_SQL_FIELD_MAP,
+            exclude_keys={'cas', 'cas_number', 'created_at'},
+        )
+        if text_fields:
+            all_candidates.append(
+                select(ReagentOrder.id).where(
+                    combine_or_clauses(
+                        build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                        for field in text_fields
+                    )
+                )
+            )
+
+    all_id_subquery = union_id_subqueries(all_candidates)
+    if all_id_subquery is None:
+        return base
+    return base.where(ReagentOrder.id.in_(all_id_subquery))
 
 
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -375,8 +454,8 @@ def list_reagent_orders(
 def export_reagent_orders(
     db: DBSession,
 ):
-    """Export reagent orders as a downloadable CSV file."""
-    from app.services.csv_export import export_reagent_orders_csv
+    """Export reagent orders as a downloadable XLSX file."""
+    from app.services.xlsx_export import export_reagent_orders_xlsx
 
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
     orders = db.exec(statement).all()
@@ -385,7 +464,7 @@ def export_reagent_orders(
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    return export_reagent_orders_csv(orders, all_users_map)
+    return export_reagent_orders_xlsx(orders, all_users_map)
 
 
 @router.get("/cas-overview/{cas_number}", dependencies=[Depends(get_current_user)])

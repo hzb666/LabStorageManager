@@ -29,7 +29,6 @@ from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import (
-    normalize_field_sql,
     normalize_search_term,
     order_with_nulls_last,
     order_with_special_last,
@@ -38,11 +37,21 @@ from app.services.api_utils import clear_cache_by_prefix, get_cached_result, set
 from app.services.inventory_fts import (
     InventoryFTSError,
     apply_inventory_fts_filter,
+    build_inventory_fts_rowid_subquery,
     should_use_inventory_fts,
 )
 from app.services.inventory_queries import (
     get_regular_inventory_by_id,
     regular_inventory_query,
+)
+from app.services.search_matchers import (
+    CASSearchMode,
+    build_cas_search_clause,
+    build_text_search_clause,
+    classify_cas_search,
+    collect_search_fields,
+    combine_or_clauses,
+    union_id_subqueries,
 )
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.shelf_utils import normalize_storage_location
@@ -83,21 +92,6 @@ INVENTORY_SEARCH_FTS_FIELD_MAP = {
     'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
     'category': ["category", "category_pinyin", "category_pinyin_initials"],
 }
-
-
-def _build_search_clause(field, pattern: str, *, fuzzy: bool):
-    column = func.coalesce(field, "")
-    if fuzzy:
-        return normalize_field_sql(column).ilike(pattern)
-    return column.ilike(pattern)
-
-
-def _combine_search_clauses(clauses: list[Any]):
-    expr = clauses[0]
-    for clause in clauses[1:]:
-        expr = expr | clause
-    return expr
-
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
     if initial is None or initial <= 0:
@@ -146,61 +140,124 @@ def _apply_inventory_filters(
     if not search_value:
         return base
 
-    search_pattern = f"%{search_value}%"
-    if not should_use_inventory_fts(search_value):
-        return _apply_inventory_like_filters(
-            base,
-            search_pattern=search_pattern,
-            search_field=search_field,
-            fuzzy=fuzzy,
-        )
+    is_all_field = not search_field or search_field == 'all'
+    cas_mode, _ = classify_cas_search(search_value, fuzzy=fuzzy)
+    cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
 
-    try:
-        return apply_inventory_fts_filter(
-            base,
-            search_value=search_value,
-            search_field=search_field,
-            field_map=INVENTORY_SEARCH_FTS_FIELD_MAP,
+    if not is_all_field:
+        if search_field == 'cas_number' and cas_exact_or_prefix:
+            return base.where(build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy))
+
+        if not should_use_inventory_fts(search_value):
+            return _apply_inventory_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+
+        try:
+            return apply_inventory_fts_filter(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                field_map=INVENTORY_SEARCH_FTS_FIELD_MAP,
+            )
+        except InventoryFTSError as exc:
+            logger.warning("Inventory FTS fallback to LIKE due to configuration error: %s", exc)
+            return _apply_inventory_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Inventory FTS fallback to LIKE due to runtime error: %s", exc)
+            return _apply_inventory_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+
+    # all 模式：分路召回候选 ID，最后 UNION 去重，避免一个超大 OR。
+    use_fts_all = (not fuzzy) and should_use_inventory_fts(search_value) and not cas_exact_or_prefix
+    all_candidates = []
+
+    if use_fts_all:
+        try:
+            fts_rowid_subquery = build_inventory_fts_rowid_subquery(
+                search_value=search_value,
+                search_field='all',
+                field_map=INVENTORY_SEARCH_FTS_FIELD_MAP,
+            )
+            all_candidates.append(
+                select(Inventory.id).where(Inventory.id.in_(fts_rowid_subquery))
+            )
+        except InventoryFTSError as exc:
+            logger.warning("Inventory ALL-search FTS fallback to LIKE due to configuration error: %s", exc)
+            use_fts_all = False
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Inventory ALL-search FTS fallback to LIKE due to runtime error: %s", exc)
+            use_fts_all = False
+
+    if not use_fts_all:
+        all_candidates.append(
+            select(Inventory.id).where(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
         )
-    except InventoryFTSError as exc:
-        logger.warning("Inventory FTS fallback to LIKE due to configuration error: %s", exc)
-        return _apply_inventory_like_filters(
-            base,
-            search_pattern=search_pattern,
-            search_field=search_field,
-            fuzzy=fuzzy,
+        text_fields = collect_search_fields(
+            INVENTORY_SEARCH_SQL_FIELD_MAP,
+            exclude_keys={'cas_number'},
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Inventory FTS fallback to LIKE due to runtime error: %s", exc)
-        return _apply_inventory_like_filters(
-            base,
-            search_pattern=search_pattern,
-            search_field=search_field,
-            fuzzy=fuzzy,
-        )
+        if text_fields:
+            all_candidates.append(
+                select(Inventory.id).where(
+                    combine_or_clauses(
+                        build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                        for field in text_fields
+                    )
+                )
+            )
+
+    all_id_subquery = union_id_subqueries(all_candidates)
+    if all_id_subquery is None:
+        return base
+    return base.where(Inventory.id.in_(all_id_subquery))
 
 
 def _apply_inventory_like_filters(
     base,
     *,
-    search_pattern: str,
+    search_value: str,
     search_field: Optional[str],
     fuzzy: bool,
 ):
     if search_field and search_field != 'all' and search_field in INVENTORY_SEARCH_SQL_FIELD_MAP:
-        clauses = [
-            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
-            for field in INVENTORY_SEARCH_SQL_FIELD_MAP[search_field]
-        ]
-        return base.where(_combine_search_clauses(clauses))
+        if search_field == 'cas_number':
+            return base.where(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
+        return base.where(
+            combine_or_clauses(
+                build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                for field in INVENTORY_SEARCH_SQL_FIELD_MAP[search_field]
+            )
+        )
 
     all_clauses = []
-    for fields in INVENTORY_SEARCH_SQL_FIELD_MAP.values():
+    for field_key, fields in INVENTORY_SEARCH_SQL_FIELD_MAP.items():
+        if field_key == 'cas_number':
+            all_clauses.append(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
+            continue
         all_clauses.extend(
-            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            build_text_search_clause(field, search_value, fuzzy=fuzzy)
             for field in fields
         )
-    return base.where(_combine_search_clauses(all_clauses))
+    return base.where(combine_or_clauses(all_clauses))
 
 
 def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str]):

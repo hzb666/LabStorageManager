@@ -2,6 +2,7 @@
 Consumable Order API Routes - Consumables Purchase Order Management
 Separated from Reagent orders (no stock-in needed)
 """
+import logging
 from datetime import datetime
 from typing import Annotated, Optional, Dict, Any
 
@@ -28,16 +29,31 @@ from app.models.consumable_order import (
 from app.models.user import User, UserRole
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.sql_utils import normalize_field_sql, normalize_search_term, order_with_nulls_last
+from app.services.search_matchers import (
+    build_applicant_id_subquery,
+    build_date_search_clause,
+    build_text_search_clause,
+    collect_search_fields,
+    combine_or_clauses,
+    union_id_subqueries,
+)
+from app.services.sql_utils import normalize_search_term, order_with_nulls_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
     get_cached_result,
     set_cached_result,
 )
+from app.services.order_fts import (
+    OrderFTSError,
+    build_order_fts_id_clause,
+    build_order_fts_rowid_subquery,
+    should_use_order_fts,
+)
 from app.services.sse_manager import sse_manager
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
+logger = logging.getLogger(__name__)
 
 # ==================== Search Cache ====================
 # 简单内存缓存，用于减少重复搜索查询
@@ -46,20 +62,21 @@ LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
-
-
-def _build_search_clause(field, pattern: str, *, fuzzy: bool):
-    column = func.coalesce(field, "")
-    if fuzzy:
-        return normalize_field_sql(column).ilike(pattern)
-    return column.ilike(pattern)
-
-
-def _combine_search_clauses(clauses: list[Any]):
-    expr = clauses[0]
-    for clause in clauses[1:]:
-        expr = expr | clause
-    return expr
+CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP = {
+    'name': [
+        ConsumableOrder.name,
+        ConsumableOrder.name_pinyin,
+        ConsumableOrder.name_pinyin_initials,
+    ],
+    'specification': [ConsumableOrder.specification],
+    'created_at': [ConsumableOrder.created_at],
+    'communication': [ConsumableOrder.communication],
+}
+CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP = {
+    'name': ["name", "name_pinyin", "name_pinyin_initials"],
+    'specification': ["specification"],
+    'communication': ["communication"],
+}
 
 def _add_specification(item_dict: dict) -> dict:
     """Add specification field to order response dict
@@ -92,42 +109,84 @@ def _apply_consumable_order_filters(
     if not search_value:
         return base
 
-    search_pattern = f"%{search_value}%"
-    field_map = {
-        'name': [
-            ConsumableOrder.name,
-            ConsumableOrder.name_pinyin,
-            ConsumableOrder.name_pinyin_initials,
-        ],
-        'specification': [ConsumableOrder.specification],
-        'created_at': [func.strftime('%Y-%m-%d %H:%M:%S', ConsumableOrder.created_at)],
-        'communication': [ConsumableOrder.communication],
-    }
-    applicant_match = _combine_search_clauses([
-        _build_search_clause(User.full_name, search_pattern, fuzzy=fuzzy),
-        _build_search_clause(User.full_name_pinyin, search_pattern, fuzzy=fuzzy),
-        _build_search_clause(User.full_name_pinyin_initials, search_pattern, fuzzy=fuzzy),
-    ])
-    applicant_id_subquery = select(User.id).where(applicant_match)
+    applicant_id_subquery = build_applicant_id_subquery(search_value, fuzzy=fuzzy)
+
+    fts_clause = None
+    fts_rowid_subquery = None
+    use_fts = (not fuzzy) and should_use_order_fts(search_value)
+    if use_fts:
+        try:
+            fts_clause = build_order_fts_id_clause(
+                ConsumableOrder.id,
+                fts_table="consumable_order_fts",
+                search_value=search_value,
+                search_field=search_field,
+                field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
+            )
+            fts_rowid_subquery = build_order_fts_rowid_subquery(
+                fts_table="consumable_order_fts",
+                search_value=search_value,
+                search_field='all',
+                field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
+            )
+        except OrderFTSError:
+            fts_clause = None
+            fts_rowid_subquery = None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Consumable order FTS fallback to SQL LIKE due to runtime error: %s",
+                exc,
+            )
+            fts_clause = None
+            fts_rowid_subquery = None
 
     if search_field and search_field != 'all':
         if search_field in APPLICANT_SEARCH_KEYS:
             return base.where(ConsumableOrder.applicant_id.in_(applicant_id_subquery))
-        if search_field in field_map:
-            clauses = [
-                _build_search_clause(field, search_pattern, fuzzy=fuzzy)
-                for field in field_map[search_field]
-            ]
-            return base.where(_combine_search_clauses(clauses))
+        if search_field == 'created_at':
+            return base.where(build_date_search_clause(ConsumableOrder.created_at, search_value))
+        if fts_clause is not None and search_field in CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP:
+            return base.where(fts_clause)
+        if search_field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP:
+            return base.where(
+                combine_or_clauses(
+                    build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                    for field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
+                )
+            )
 
-    all_clauses = []
-    for fields in field_map.values():
-        all_clauses.extend(
-            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
-            for field in fields
+    all_candidates = [
+        select(ConsumableOrder.id).where(
+            ConsumableOrder.applicant_id.in_(applicant_id_subquery)
+        ),
+        select(ConsumableOrder.id).where(
+            build_date_search_clause(ConsumableOrder.created_at, search_value)
+        ),
+    ]
+
+    if fts_rowid_subquery is not None:
+        all_candidates.append(
+            select(ConsumableOrder.id).where(ConsumableOrder.id.in_(fts_rowid_subquery))
         )
-    all_clauses.append(ConsumableOrder.applicant_id.in_(applicant_id_subquery))
-    return base.where(_combine_search_clauses(all_clauses))
+    else:
+        text_fields = collect_search_fields(
+            CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP,
+            exclude_keys={'created_at'},
+        )
+        if text_fields:
+            all_candidates.append(
+                select(ConsumableOrder.id).where(
+                    combine_or_clauses(
+                        build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                        for field in text_fields
+                    )
+                )
+            )
+
+    all_id_subquery = union_id_subqueries(all_candidates)
+    if all_id_subquery is None:
+        return base
+    return base.where(ConsumableOrder.id.in_(all_id_subquery))
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -284,8 +343,8 @@ def list_consumable_orders(
 def export_consumable_orders(
     db: DBSession,
 ):
-    """Export consumable orders as a downloadable CSV file."""
-    from app.services.csv_export import export_consumable_orders_csv
+    """Export consumable orders as a downloadable XLSX file."""
+    from app.services.xlsx_export import export_consumable_orders_xlsx
 
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
     orders = db.exec(statement).all()
@@ -294,7 +353,7 @@ def export_consumable_orders(
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    return export_consumable_orders_csv(orders, all_users_map)
+    return export_consumable_orders_xlsx(orders, all_users_map)
 
 
 @router.get("/{order_id}", response_model=ConsumableOrderResponse, dependencies=[Depends(get_current_user)])

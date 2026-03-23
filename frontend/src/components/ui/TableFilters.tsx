@@ -2,7 +2,7 @@
  * 表格筛选组件
  * 独立渲染筛选栏和空状态提示
  */
-import React, { startTransition } from 'react'
+import React, { startTransition, useMemo } from 'react'
 import { Search, X } from 'lucide-react'
 import { Input } from './Input'
 import { Checkbox } from './Checkbox'
@@ -11,6 +11,7 @@ import type { FilterOption, SearchFieldOption } from '@/hooks/useTableState'
 import { DEFAULT_STATUS_OPTIONS, DEFAULT_SEARCH_FIELD_OPTIONS } from '@/hooks/useTableState'
 
 export const SEARCH_MAX_LENGTH = 100
+const DEFAULT_SEARCH_FIELD_ALL_VALUE = 'all'
 
 // ============================================================================
 // 类型定义
@@ -169,13 +170,32 @@ export function TableFilters({
     })
   }
 
+  const resolvedSearchPlaceholder = useMemo(() => {
+    const normalizedField = searchField.trim()
+    if (!normalizedField || normalizedField === DEFAULT_SEARCH_FIELD_ALL_VALUE) {
+      return searchPlaceholder
+    }
+
+    const selectedOption = searchFieldOptions.find((option) => option.value === normalizedField)
+    if (!selectedOption || selectedOption.value === DEFAULT_SEARCH_FIELD_ALL_VALUE) {
+      return searchPlaceholder
+    }
+
+    const optionLabel = selectedOption.label.trim()
+    if (!optionLabel) {
+      return searchPlaceholder
+    }
+
+    return `搜索${optionLabel}...`
+  }, [searchField, searchFieldOptions, searchPlaceholder])
+
   return (
     <div className={`flex flex-col sm:flex-row gap-3 items-stretch sm:items-center ${className}`}>
       {/* 搜索输入框 */}
       <TableSearchInput
         value={searchInput}
         onChange={handleSearchChange}
-        placeholder={searchPlaceholder}
+        placeholder={resolvedSearchPlaceholder}
       />
       
       {/* 筛选控件 */}

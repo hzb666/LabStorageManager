@@ -1,18 +1,17 @@
-"""Inventory FTS helpers for high-performance substring search on SQLite."""
+"""Order FTS helpers for high-performance search on SQLite."""
 from typing import Mapping, Optional, Sequence
 
 from sqlalchemy import bindparam, text
 from sqlmodel import select
 
-from app.models.inventory import Inventory
 from app.services.search_matchers import should_use_trigram_fts
 
 
-class InventoryFTSError(RuntimeError):
-    """Raised when building or applying inventory FTS expressions fails."""
+class OrderFTSError(RuntimeError):
+    """Raised when building or applying order FTS expressions fails."""
 
 
-def should_use_inventory_fts(search_value: str) -> bool:
+def should_use_order_fts(search_value: str) -> bool:
     """Use trigram FTS for >=3-char non-fuzzy terms (ASCII + Chinese)."""
     return should_use_trigram_fts(search_value, fuzzy=False)
 
@@ -40,55 +39,53 @@ def _collect_target_columns(
     return deduped
 
 
-def build_inventory_match_query(
+def build_order_match_query(
     *,
     search_value: str,
     search_field: Optional[str],
     field_map: Mapping[str, Sequence[str]],
 ) -> str:
-    """Build a safe FTS5 MATCH expression for inventory search."""
+    """Build a safe FTS5 MATCH expression."""
     target_columns = _collect_target_columns(field_map, search_field)
     if not target_columns:
-        raise InventoryFTSError("No inventory FTS target columns configured")
+        raise OrderFTSError("No order FTS target columns configured")
 
     phrase = _quote_fts_phrase(search_value)
     return " OR ".join(f"{column}:{phrase}" for column in target_columns)
 
 
-def apply_inventory_fts_filter(
-    base,
+def build_order_fts_id_clause(
+    id_column,
     *,
+    fts_table: str,
     search_value: str,
     search_field: Optional[str],
     field_map: Mapping[str, Sequence[str]],
 ):
-    """Apply `inventory_fts MATCH ...` filter onto an inventory SQLModel query."""
-    rowid_subquery = build_inventory_fts_rowid_subquery(
+    """Build `id IN (SELECT rowid FROM <fts_table> WHERE MATCH ...)` clause."""
+    rowid_subquery = build_order_fts_rowid_subquery(
+        fts_table=fts_table,
         search_value=search_value,
         search_field=search_field,
         field_map=field_map,
     )
-    return base.where(Inventory.id.in_(rowid_subquery))
+    return id_column.in_(rowid_subquery)
 
 
-def build_inventory_fts_rowid_subquery(
+def build_order_fts_rowid_subquery(
     *,
+    fts_table: str,
     search_value: str,
     search_field: Optional[str],
     field_map: Mapping[str, Sequence[str]],
 ):
-    """Build `SELECT rowid FROM inventory_fts WHERE MATCH ...` subquery."""
-    match_query = build_inventory_match_query(
+    """Build `SELECT rowid FROM <fts_table> WHERE MATCH ...` subquery."""
+    match_query = build_order_match_query(
         search_value=search_value,
         search_field=search_field,
         field_map=field_map,
     )
-
-    match_expr = text("inventory_fts MATCH :match_query").bindparams(
+    match_expr = text(f"{fts_table} MATCH :match_query").bindparams(
         bindparam("match_query", match_query)
     )
-    return (
-        select(text("rowid"))
-        .select_from(text("inventory_fts"))
-        .where(match_expr)
-    )
+    return select(text("rowid")).select_from(text(fts_table)).where(match_expr)

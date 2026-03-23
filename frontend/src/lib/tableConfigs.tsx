@@ -215,17 +215,33 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 70,
       minSize: 60,
       maxSize: 100,
-      cell: info => {
-        const value = info.getValue()
-        return <span>{safeString(value, '-')}</span>
-      },
+      cell: info => (
+        <span>
+          <HighlightText
+            text={safeString(info.getValue(), '-')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('created_at', {
       header: '时间',
       size: 80,
       minSize: 70,
       maxSize: 120,
-      cell: info => <span>{formatDate(info.getValue() as string).split(' ')[0]}</span>,
+      cell: info => {
+        const dateText = formatDate(info.getValue() as string).split(' ')[0]
+        return (
+          <span>
+            <HighlightText
+              text={dateText}
+              highlight={info.table.getState().globalFilter}
+              fuzzy={info.table.options.meta?.fuzzySearch}
+            />
+          </span>
+        )
+      },
     }),
     columnHelper.accessor('order_reason', {
       header: '原因',
@@ -297,10 +313,15 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       size: 60,
       minSize: 50,
       maxSize: 120,
-      cell: info => {
-        const value = safeString(info.getValue(), '-')
-        return <span>{value}</span>
-      },
+      cell: info => (
+        <span>
+          <HighlightText
+            text={safeString(info.getValue(), '-')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('communication', {
       header: '订购信息',
@@ -313,14 +334,22 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
         return <span className="break-all">{safeString(value, '-')}</span>
       },
     }),
-        columnHelper.accessor('created_at',{
+    columnHelper.accessor('created_at', {
       header:'申购时间',
       size: 100,
       minSize: 80,
       maxSize: 120,
       cell: info => {
-        const value = info.getValue() as string
-        return <span>{formatDate(value)}</span>
+        const dateText = formatDate(info.getValue() as string)
+        return (
+          <span>
+            <HighlightText
+              text={dateText}
+              highlight={info.table.getState().globalFilter}
+              fuzzy={info.table.options.meta?.fuzzySearch}
+            />
+          </span>
+        )
       }
     }),
     columnHelper.accessor('status', {

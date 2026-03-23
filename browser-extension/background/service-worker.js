@@ -3,8 +3,7 @@
 
 const TARGET_URL_PATTERN = 'https://reagent.bjmu.edu.cn/*';
 const TARGET_BASE_URL = 'https://reagent.bjmu.edu.cn';
-// 使用相对路径，浏览器扩展会自动使用当前页面或 manifest 中配置的 host
-const SYSTEM_API_BASE = '';
+const REQUEST_TIMEOUT_MS = 15000;
 
 console.log('[Background] Service Worker 加载中...');
 
@@ -25,13 +24,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'SYNC_TO_SYSTEM') {
-    syncToSystem(message.items, message.order_type)
-      .then(data => sendResponse({ success: true, data }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
-
   if (message.type === 'CHECK_TARGET_TAB') {
     checkTargetTab()
       .then(tab => sendResponse({ success: true, exists: !!tab, tabId: tab?.id }))
@@ -42,6 +34,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   sendResponse({ success: false, error: '未知消息类型' });
   return false;
 });
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timerId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    globalThis.clearTimeout(timerId);
+  }
+}
 
 // 从目标网站获取购物车数据
 async function getCartDataFromTargetSite() {
@@ -99,7 +101,7 @@ async function fetchProductDetail(productId) {
 
   try {
     // 使用fetch需要目标网站在host_permissions中
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     console.log('[Background] 详情页响应状态:', response.status);
 
     if (!response.ok) {
@@ -178,27 +180,6 @@ function parseProductDetail(html, productId) {
     product_id: productId,
     detail_url: `${TARGET_BASE_URL}/Front.aspx?page=cpxq&param=${productId}`
   };
-}
-
-// 同步数据到本地系统
-async function syncToSystem(items, orderType = 'consumable') {
-  try {
-    const response = await fetch(`${SYSTEM_API_BASE}/api/cart-sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ items, order_type: orderType })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API请求失败: ${response.status}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('[Background] 同步失败:', error);
-    throw error;
-  }
 }
 
 // 检查目标标签页

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { AxiosError } from 'axios'
-import { CheckCircle, Loader2, AlertCircle, List, X, ScanSearch } from 'lucide-react'
+import { CheckCircle, Loader2, Trash2, List, X, ScanSearch } from 'lucide-react'
 
 import {
     authAPI,
@@ -16,6 +16,8 @@ import { ReagentCasDuplicateWarning } from '@/components/ReagentCasDuplicateWarn
 import { useReagentCasDuplicateCheck } from '@/hooks/useReagentCasDuplicateCheck'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Label } from '@/components/ui/Label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import {
     ConsumableOrderSchema,
     ReagentOrderSchema,
@@ -34,8 +36,10 @@ import {
     getConsumableOrderFormFields,
     getReagentOrderFormFields,
 } from '@/lib/formConfigs'
+import { REAGENT_STATUS_MAP } from '@/lib/constants'
 import { cn, processNotes } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 
 const CART_STORAGE_KEY = 'cart_import_batch_latest'
 const BATCH_TTL_MS = 2 * 60 * 60 * 1000
@@ -94,10 +98,18 @@ function normalizeReagentSpecification(specification: string): string {
     return trimmed.split('/')[0].trim()
 }
 
+function getReagentOrderStatusLabel(status: string): string {
+    return REAGENT_STATUS_MAP[status] || status
+}
+
 function toImportItem(item: Partial<ImportItem>, index: number): ImportItem {
+    const rawName = item.name?.trim() || ''
+    // 如果名称是"未知"，转为空字符串，让表单验证强制要求填写
+    const name = rawName === '未知' ? '' : rawName
+
     return {
         id: index,
-        name: item.name?.trim() || '',
+        name,
         cas_number: extractFirstCasNumber(item.cas_number || ''),
         english_name: item.english_name?.trim() || '',
         specification: item.specification?.trim() || '',
@@ -129,7 +141,7 @@ export function CartImportPage() {
 
     const [loading, setLoading] = useState(true)
     const [submitting, setSubmitting] = useState(false)
-    const [formError, setFormError] = useState('')
+    const [deleteConfirm, setDeleteConfirm] = useState(false)
     const [mobileListOpen, setMobileListOpen] = useState(false)
     const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
 
@@ -173,6 +185,18 @@ export function CartImportPage() {
                 price: item.price,
                 is_hazardous: item.is_hazardous,
             })
+
+            // Auto-lookup English name if CAS is present but English name is missing
+            if (item.cas_number && !item.english_name) {
+                chemicalAPI.getInfo(item.cas_number)
+                    .then((response) => {
+                        const info = response.data
+                        if (info.english_name) {
+                            reagentForm.setValue('english_name', info.english_name, { shouldValidate: false })
+                        }
+                    })
+                    .catch(() => { /* silent - user can manually lookup */ })
+            }
             return
         }
 
@@ -249,10 +273,10 @@ export function CartImportPage() {
         const retryTimer = globalThis.setInterval(() => {
             retryCount += 1
             const loaded = loadBatchFromLocalStorage()
-            if (loaded || retryCount >= 20) {
+            if (loaded || retryCount >= 10) {
                 globalThis.clearInterval(retryTimer)
                 if (!loaded) {
-                    toast.error('未找到批次数据，请返回插件重试')
+                    toast.error('未找到批次数据，请重试')
                     navigate('/reagents')
                 }
             }
@@ -278,7 +302,7 @@ export function CartImportPage() {
     useEffect(() => {
         if (currentItem) {
             fillFormByItem(currentItem)
-            setFormError('')
+            setDeleteConfirm(false)
         }
     }, [currentItem, fillFormByItem])
 
@@ -295,15 +319,14 @@ export function CartImportPage() {
 
     useEffect(() => {
         if (orderType !== 'reagent') {
-            clearCASWarning()
             return
         }
 
-        const casValue = reagentForm.getValues('cas_number')
-        if (casValue) {
-            checkCASWarning(casValue)
+        const currentCas = reagentForm.getValues('cas_number')
+        if (currentCas) {
+            checkCASWarning(currentCas)
         }
-    }, [orderType, currentIndex, currentItem?.id, reagentForm, checkCASWarning, clearCASWarning])
+    }, [orderType, currentItem?.id, reagentForm, checkCASWarning])
 
     const handleCasLookup = useCallback(async () => {
         const isValidCas = await reagentForm.trigger('cas_number')
@@ -360,8 +383,19 @@ export function CartImportPage() {
         if (value !== 'reagent') {
             clearCASWarning()
         }
-        setFormError('')
     }
+
+    const navigateToCasSearch = useCallback((path: string, field: string) => {
+        if (!casWarning?.cas_number) {
+            return
+        }
+
+        const query = new URLSearchParams({
+            search: casWarning.cas_number,
+            field,
+        })
+        navigate(`${path}?${query.toString()}`)
+    }, [casWarning?.cas_number, navigate])
 
     const reagentFormFields = useMemo(() => {
         return getReagentOrderFormFields().map((field) =>
@@ -384,13 +418,33 @@ export function CartImportPage() {
         )
     }, [checkCASWarning, handleCasLookup, isCasLookupLoading])
 
+    const handleDeleteCurrent = () => {
+        if (!currentItem) return
+        if (!deleteConfirm) {
+            setDeleteConfirm(true)
+            return
+        }
+        setDeleteConfirm(false)
+        const nextItems = items.filter((_, i) => i !== currentIndex)
+        setItems(nextItems)
+        if (nextItems.length === 0) {
+            toast.success('已删除全部条目，即将返回试剂页')
+            localStorage.removeItem(CART_STORAGE_KEY)
+            globalThis.setTimeout(() => navigate('/reagents'), 2000)
+            return
+        }
+        const nextIndex = Math.min(currentIndex, nextItems.length - 1)
+        setCurrentIndex(nextIndex)
+        toast.success(`已删除: ${currentItem.name}`)
+    }
+
     const handleSubmitCurrent = async () => {
         if (!currentItem) {
             return
         }
 
+        setDeleteConfirm(false)
         setSubmitting(true)
-        setFormError('')
         let submitSucceeded = false
 
         try {
@@ -413,9 +467,7 @@ export function CartImportPage() {
                         })
                         submitSucceeded = true
                     },
-                    () => {
-                        setFormError('请先修正试剂表单中的校验错误')
-                    }
+                    () => { /* form errors shown inline */ }
                 )
 
                 await submitReagent()
@@ -435,9 +487,7 @@ export function CartImportPage() {
                         })
                         submitSucceeded = true
                     },
-                    () => {
-                        setFormError('请先修正耗材表单中的校验错误')
-                    }
+                    () => { /* form errors shown inline */ }
                 )
 
                 await submitConsumable()
@@ -458,7 +508,7 @@ export function CartImportPage() {
             }
 
             if (nextSubmitted.size >= items.length) {
-                toast.success('全部导入完成，2 秒后返回试剂页')
+                toast.success('全部导入完成，即将返回试剂页')
                 localStorage.removeItem(CART_STORAGE_KEY)
                 globalThis.setTimeout(() => {
                     navigate('/reagents')
@@ -477,7 +527,6 @@ export function CartImportPage() {
                             })
                         }
                     })
-                    setFormError('请先修正试剂表单中的校验错误')
                 } else {
                     validationErrors.forEach((item: ValidationError) => {
                         if (item.loc?.[1]) {
@@ -486,7 +535,6 @@ export function CartImportPage() {
                             })
                         }
                     })
-                    setFormError('请先修正耗材表单中的校验错误')
                 }
                 return
             }
@@ -568,7 +616,7 @@ export function CartImportPage() {
     return (
         <div className="flex min-h-svh w-full items-center justify-center px-4">
             <div className="absolute inset-0 -z-10 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] bg-size-[16px_16px] mask-[radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] dark:mask-[radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
-            <Card className='w-full md:w-auto md:min-w-md py-6 max-h-[90vh] overflow-y-auto shadow-lg'>
+            <Card className='w-full md:w-auto md:min-w-md py-6 max-h-[90vh] overflow-y-auto'>
                 <CardHeader className='pb-4 border-b border-muted'>
                     <CardTitle className='text-2xl'>购物车导入 <span className='text-base font-normal ml-4'>当前用户: </span><span className='text-base font-normal'>{currentUser?.full_name || currentUser?.username || '未知用户'}</span></CardTitle>
                 </CardHeader>
@@ -631,14 +679,20 @@ export function CartImportPage() {
                             </h3>
                             <div className='flex items-center gap-2'>
                                 <span className='text-sm text-muted-foreground'>表单类型</span>
-                                <select
+                                <RadioGroup
                                     value={orderType}
-                                    onChange={(e) => handleTypeSwitch(e.target.value as OrderType)}
-                                    className='h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                                    onValueChange={(value) => handleTypeSwitch(value as OrderType)}
+                                    className="flex items-center gap-4 h-9"
                                 >
-                                    <option value='reagent'>试剂</option>
-                                    <option value='consumable'>耗材</option>
-                                </select>
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="reagent" id="r-reagent" />
+                                        <Label htmlFor="r-reagent" className="cursor-pointer">试剂</Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="consumable" id="r-consumable" />
+                                        <Label htmlFor="r-consumable" className="cursor-pointer">耗材</Label>
+                                    </div>
+                                </RadioGroup>
                             </div>
                         </div>
 
@@ -650,45 +704,48 @@ export function CartImportPage() {
                                         <ReagentCasDuplicateWarning
                                             casWarning={casWarning}
                                             className='mt-3 rounded-md bg-orange-50 p-3 dark:bg-orange-950'
+                                            onOpenOrders={() => navigateToCasSearch('/reagents', 'cas')}
+                                            onOpenInventory={() => navigateToCasSearch('/inventory', 'cas_number')}
+                                            getOrderStatusLabel={getReagentOrderStatusLabel}
                                         />
                                     </>
                                 ) : (
                                     <BaseForm form={consumableForm} fields={getConsumableOrderFormFields()} />
                                 )}
-
-                                {casLoading && orderType === 'reagent' && (
-                                    <div className='mt-3 flex items-center text-sm text-muted-foreground'>
-                                        <Loader2 className='mr-1 h-3 w-3 animate-spin' />
-                                        检查 CAS 重复记录中
-                                    </div>
-                                )}
-
-                                {formError && (
-                                    <div className='mt-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-center gap-2'>
-                                        <AlertCircle className='w-4 h-4 shrink-0' />
-                                        {formError}
-                                    </div>
-                                )}
                             </div>
                         </div>
 
-                        <div className='pt-4 mt-auto'>
-                            <div className='max-w-2xl mx-auto'>
-                                <Button
-                                    className='w-full'
-                                    size='lg'
-                                    onClick={handleSubmitCurrent}
-                                    disabled={submitting || !currentItem}
-                                >
-                                    {submitting ? (
-                                        <>
-                                            <Loader2 className='w-4 h-4 mr-2 animate-spin' />
-                                            提交中...
-                                        </>
-                                    ) : (
-                                        '提交当前项'
+                        <div className='pt-4 mt-auto border-t border-muted'>
+                            <div className='max-w-2xl mx-auto flex flex-wrap items-center justify-between gap-3'>
+                                <div className='flex items-center gap-2 order-1'>
+                                    <Button
+                                        variant='destructive'
+                                        size='lg'
+                                        type='button'
+                                        onClick={handleDeleteCurrent}
+                                        disabled={submitting || !currentItem}
+                                    >
+                                        <Trash2 className='w-4 h-4 mr-1.5' />
+                                        {deleteConfirm ? '确认删除' : '删除'}
+                                    </Button>
+                                </div>
+                                <div className='flex items-center gap-2 order-2 ml-auto'>
+                                    {casLoading && orderType === 'reagent' && (
+                                        <span className='text-sm text-muted-foreground flex items-center'>
+                                            <Loader2 className='mr-1 h-3 w-3 animate-spin' />
+                                            检查CAS号中
+                                        </span>
                                     )}
-                                </Button>
+                                    <LoadingButton
+                                        type='button'
+                                        size='lg'
+                                        onClick={handleSubmitCurrent}
+                                        isLoading={submitting}
+                                        disabled={submitting || !currentItem}
+                                    >
+                                        提交当前项
+                                    </LoadingButton>
+                                </div>
                             </div>
                         </div>
                     </div>

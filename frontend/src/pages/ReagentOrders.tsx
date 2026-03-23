@@ -29,7 +29,7 @@ import {
   chemicalAPI,
   ReagentOrderReason,
 } from '@/api/client'
-import { processNotes } from '@/lib/utils'
+import { downloadBlobResponse, processNotes } from '@/lib/utils'
 import { ReagentOrderExpandedRow } from '@/components/ReagentOrderExpandedRow'
 import {
   ReagentCasDuplicateWarning,
@@ -288,15 +288,7 @@ export function ReagentOrdersPage() {
   const handleExport = useCallback(async () => {
     try {
       const response = await reagentOrderAPI.exportOrders()
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `reagent_orders_${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      downloadBlobResponse(response, `reagent_orders_${new Date().toISOString().slice(0, 10)}.xlsx`)
     } catch {
       toast.error('导出失败')
     }

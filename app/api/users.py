@@ -50,7 +50,8 @@ from app.services.image_service import save_avatar, delete_file
 from app.services.rate_limit import enforce_rate_limit
 from app.services.user_service import get_user_by_username, get_user_by_id
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.search_matchers import build_applicant_id_subquery
+from app.services.sql_utils import normalize_search_term
 from app.services.session_service import (
     cleanup_expired_sessions,
     _check_device_limit,
@@ -506,21 +507,20 @@ def search_users(
     db: Annotated[Session, Depends(get_db)],
 ):
     """Search users for autocomplete by username/full_name/full_name_pinyin/full_name initials."""
-    keyword = normalize_search_term((q or "").strip())
-    if not keyword:
+    raw_keyword = (q or "").strip()
+    keyword = normalize_search_term(raw_keyword)
+    if not raw_keyword or not keyword:
         return []
 
-    search_pattern = f"%{keyword}%"
+    applicant_id_subquery = build_applicant_id_subquery(raw_keyword, fuzzy=False)
 
     statement = (
         select(User)
         .where(User.is_active)
         .where(User.role != UserRole.PUBLIC)
         .where(
-            normalize_field_sql(User.username).ilike(search_pattern)
-            | normalize_field_sql(User.full_name).ilike(search_pattern)
-            | normalize_field_sql(func.coalesce(User.full_name_pinyin, "")).ilike(search_pattern)
-            | normalize_field_sql(func.coalesce(User.full_name_pinyin_initials, "")).ilike(search_pattern)
+            (User.username == raw_keyword)
+            | User.id.in_(applicant_id_subquery)
         )
         .order_by(func.coalesce(User.full_name_pinyin, User.full_name).asc(), User.id.asc())
     )
