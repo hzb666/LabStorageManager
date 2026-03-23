@@ -236,7 +236,7 @@ def export_inventory_xlsx(
             title="库存",
             headers=regular_headers,
             rows=regular_rows,
-            text_columns=set(range(1, len(regular_headers) + 1)),
+            text_columns={1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14},
         )
     ]
 
@@ -289,7 +289,7 @@ def export_inventory_xlsx(
             title="常用",
             headers=common_headers,
             rows=common_rows,
-            text_columns=set(range(1, len(common_headers) + 1)),
+            text_columns={1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15},
         )
     )
 
@@ -347,7 +347,7 @@ def export_common_shelf_xlsx(
                 title="常用",
                 headers=headers,
                 rows=rows,
-                text_columns=set(range(1, len(headers) + 1)),
+                text_columns={1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15},
             )
         ],
         filename_prefix="common_shelf_export",

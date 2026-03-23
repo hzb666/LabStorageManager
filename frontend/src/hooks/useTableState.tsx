@@ -4,7 +4,7 @@
  */
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
-import type { InfiniteData } from '@tanstack/react-query'
+import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query'
 import type { SortingState, ColumnSizingState } from '@tanstack/react-table'
 import {
   getExpandAllState,
@@ -73,6 +73,8 @@ export interface UseTableStateOptions {
 }
 
 // Hook 返回值
+type TableQueryResult = UseInfiniteQueryResult<InfiniteData<ListResponseData>>
+
 export interface UseTableStateReturn {
   // ========== 筛选状态 ==========
   // 搜索输入（未防抖）
@@ -122,9 +124,9 @@ export interface UseTableStateReturn {
   // 是否还有更多数据
   hasNextPage: boolean
   // 加载更多数据
-  fetchNextPage: () => void
+  fetchNextPage: TableQueryResult['fetchNextPage']
   // 刷新数据
-  refetch: () => void
+  refetch: TableQueryResult['refetch']
   // 手动使缓存失效
   invalidate: () => void
   // 重置筛选状态
@@ -150,7 +152,7 @@ export const DEFAULT_SEARCH_FIELD_OPTIONS: SearchFieldOption[] = [
   { value: 'category', label: '分类' },
 ]
 
-export const MAX_SEARCH_INPUT_LENGTH = 100
+export const SEARCH_MAX_LENGTH = 100
 
 /**
  * 表格状态综合 Hook
@@ -203,7 +205,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   const applySearchImmediate = useCallback((value: string, field?: string) => {
     const nextValue = value.trim()
     setSearchInput(nextValue)
-    if (nextValue.length <= MAX_SEARCH_INPUT_LENGTH) {
+    if (nextValue.length <= SEARCH_MAX_LENGTH) {
       setGlobalFilter(nextValue)
     }
     if (field !== undefined) {
@@ -284,7 +286,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     const timer = setTimeout(() => {
       if (
         globalFilter !== normalizedSearchInput
-        && searchInput.length <= MAX_SEARCH_INPUT_LENGTH
+        && searchInput.length <= SEARCH_MAX_LENGTH
       ) {
         setGlobalFilter(normalizedSearchInput)
       }
@@ -379,12 +381,6 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey })
   }, [queryClient, queryKey])
-  const fetchNextPageSafe = useCallback(() => {
-    void fetchNextPage()
-  }, [fetchNextPage])
-  const refetchSafe = useCallback(() => {
-    void refetch()
-  }, [refetch])
 
   return {
     // 筛选状态
@@ -416,8 +412,8 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     isLoading,
     isFetchingNextPage,
     hasNextPage,
-    fetchNextPage: fetchNextPageSafe,
-    refetch: refetchSafe,
+    fetchNextPage,
+    refetch,
     invalidate,
     resetFilters,
   }

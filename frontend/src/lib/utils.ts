@@ -112,12 +112,30 @@ function parseFilenameFromContentDisposition(contentDisposition?: string): strin
   return null
 }
 
+function sanitizeFilename(rawFilename: string, fallback: string): string {
+  const base = rawFilename.split(/[\\/]/).pop() ?? ''
+  const withoutControlChars = Array.from(base)
+    .filter((char) => {
+      const code = char.charCodeAt(0)
+      return code >= 0x20 && code !== 0x7f
+    })
+    .join('')
+  const stripped = withoutControlChars.trim().replace(/["<>|?*:]/g, '')
+  if (!stripped) return fallback
+
+  const normalized = stripped.replace(/^\.+/, '')
+  if (!normalized) return fallback
+
+  return normalized.slice(0, 255)
+}
+
 export function downloadBlobResponse(
   response: AxiosResponse<Blob>,
   fallbackFilename: string,
 ): void {
   const contentDisposition = response.headers?.['content-disposition'] as string | undefined
-  const filename = parseFilenameFromContentDisposition(contentDisposition) || fallbackFilename
+  const parsedFilename = parseFilenameFromContentDisposition(contentDisposition)
+  const filename = sanitizeFilename(parsedFilename ?? fallbackFilename, fallbackFilename)
 
   const blob = response.data instanceof Blob ? response.data : new Blob([response.data])
   const url = URL.createObjectURL(blob)
@@ -132,4 +150,3 @@ export function downloadBlobResponse(
   link.remove()
   URL.revokeObjectURL(url)
 }
-

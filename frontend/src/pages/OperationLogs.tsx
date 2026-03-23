@@ -3,7 +3,7 @@
  * 用户操作日志页面
  * 使用 FilterTable 架构，与库存页面完全一致
  */
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useQuery } from '@tanstack/react-query'
@@ -233,14 +233,17 @@ export default function OperationLogsPage() {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const token = useMemo(() => {
-    const stateToken = (location.state as { logsToken?: string } | null)?.logsToken
+  const stateToken = (location.state as { logsToken?: string } | null)?.logsToken
+  const token = useMemo(
+    () => stateToken ?? sessionStorage.getItem(LOGS_TOKEN_STORAGE_KEY),
+    [stateToken]
+  )
+
+  useEffect(() => {
     if (stateToken) {
       sessionStorage.setItem(LOGS_TOKEN_STORAGE_KEY, stateToken)
-      return stateToken
     }
-    return sessionStorage.getItem(LOGS_TOKEN_STORAGE_KEY)
-  }, [location.state])
+  }, [stateToken])
 
   // 创建日志 API 实例
   const logsAPI = useMemo(() => {

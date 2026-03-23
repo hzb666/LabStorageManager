@@ -8,9 +8,10 @@ import { Input } from './Input'
 import { Checkbox } from './Checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './Select'
 import type { FilterOption, SearchFieldOption } from '@/hooks/useTableState'
-import { DEFAULT_STATUS_OPTIONS, DEFAULT_SEARCH_FIELD_OPTIONS } from '@/hooks/useTableState'
+import { DEFAULT_STATUS_OPTIONS, DEFAULT_SEARCH_FIELD_OPTIONS, SEARCH_MAX_LENGTH } from '@/hooks/useTableState'
 
-export const SEARCH_MAX_LENGTH = 100
+export { SEARCH_MAX_LENGTH }
+
 const DEFAULT_SEARCH_FIELD_ALL_VALUE = 'all'
 
 // ============================================================================
@@ -116,9 +117,11 @@ export function TableSearchInput({
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={isSearchTooLong}
         className={`pl-9 text-base w-full inline-flex leading-none outline-none ${inputClassName} ${
-          isSearchTooLong 
-            ? 'pr-45 border-destructive! focus-visible:border-destructive! focus-visible:ring-destructive/20!' 
-            : value ? 'pr-8' : 'pr-3'
+          isSearchTooLong
+            ? 'pr-44 !border-destructive focus-visible:!border-destructive focus-visible:!ring-destructive/20'
+            : value
+              ? 'pr-8'
+              : 'pr-3'
         }`}
       />
       <div className="absolute right-1 top-1 bottom-1 flex items-center bg-transparent z-10 pointer-events-none">
