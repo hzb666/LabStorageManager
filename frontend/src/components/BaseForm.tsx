@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Controller, type UseFormReturn, type FieldPath } from "react-hook-form"
+import { Controller, type UseFormReturn, type FieldPath, type FieldValues } from "react-hook-form"
 import { Input, type PrefixButtonConfig } from "./ui/Input"
 import { Checkbox } from "./ui/Checkbox"
 import { FormField } from "./ui/FormField"
@@ -28,7 +28,7 @@ export interface SelectOption {
  * 字段 Schema 定义
  * 描述每个表单字段的配置
  */
-export interface FieldSchema<T extends Record<string, unknown>> {
+export interface FieldSchema<T extends FieldValues> {
   name: FieldPath<T>           // 字段名
   label: string          // 标签
   type: 'input' | 'password' | 'select' | 'checkbox' | 'textarea' | 'number' | 'autocomplete'
@@ -61,8 +61,11 @@ export interface FormSchema<T extends Record<string, unknown>> {
 /**
  * 简化的 BaseForm Props - 支持直接传递 fields 数组
  */
-interface SimpleBaseFormProps<T extends Record<string, unknown>> {
-  form: UseFormReturn<T>
+interface SimpleBaseFormProps<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined
+> {
+  form: UseFormReturn<T, unknown, TTransformedValues>
   fields: FieldSchema<T>[]
   columns?: number
   layout?: 'grid' | 'flex' | 'stack'  // 布局模式：grid-网格布局(默认), flex-弹性布局, stack-垂直堆叠
@@ -81,9 +84,12 @@ interface SimpleBaseFormProps<T extends Record<string, unknown>> {
 /**
  * 传统的 BaseForm Props - 使用 schema 对象
  */
-interface SchemaBaseFormProps<T extends Record<string, unknown>> {
+interface SchemaBaseFormProps<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined
+> {
   schema: FormSchema<T>
-  form: UseFormReturn<T>
+  form: UseFormReturn<T, unknown, TTransformedValues>
   disabled?: boolean
   readOnly?: boolean
   loading?: boolean
@@ -95,10 +101,16 @@ interface SchemaBaseFormProps<T extends Record<string, unknown>> {
   onCancel?: () => void
 }
 
-type BaseFormProps<T extends Record<string, unknown>> = SimpleBaseFormProps<T> | SchemaBaseFormProps<T>
+type BaseFormProps<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined
+> = SimpleBaseFormProps<T, TTransformedValues> | SchemaBaseFormProps<T, TTransformedValues>
 
 // 判断是否为 Schema 模式
-function isSchemaMode<T extends Record<string, unknown>>(props: BaseFormProps<T>): props is SchemaBaseFormProps<T> {
+function isSchemaMode<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined
+>(props: BaseFormProps<T, TTransformedValues>): props is SchemaBaseFormProps<T, TTransformedValues> {
   return 'schema' in props && !('fields' in props)
 }
 
@@ -130,7 +142,10 @@ function isSchemaMode<T extends Record<string, unknown>>(props: BaseFormProps<T>
  * * <BaseForm schema={schema} form={form} />
  * ```
  */
-function BaseForm<T extends Record<string, unknown>>(props: BaseFormProps<T>) {
+function BaseForm<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined
+>(props: BaseFormProps<T, TTransformedValues>) {
   // 获取 layout 和 className（从 props 中解构）
   const layout = 'layout' in props ? props.layout : 'grid'
   const className = 'className' in props ? props.className : ''

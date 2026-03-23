@@ -7,9 +7,9 @@ import React from 'react'
 import { AlertTriangle } from 'lucide-react'
 import type { FieldSchema } from '../components/BaseForm'
 import type {
-  ReagentOrderFormData,
-  ConsumableOrderFormData,
-  InventoryFormData,
+  ReagentOrderFormInputData,
+  ConsumableOrderFormInputData,
+  InventoryFormInputData,
   UserUpdateFormData,
   StockInFormInputData
 } from './validationSchemas'
@@ -24,7 +24,7 @@ import {
 // ============================================================================
 
 /** 库存表单默认值 */
-export const defaultInventoryValues: InventoryFormData = {
+export const defaultInventoryValues: InventoryFormInputData = {
   name: '',
   cas_number: '',
   english_name: '',
@@ -55,7 +55,7 @@ export function getInventoryFormFields(
     brandOptions?: { label: string; value: string }[]
     includeRunningShort?: boolean
   }
-): FieldSchema<InventoryFormData>[] {
+): FieldSchema<InventoryFormInputData>[] {
   const categoryOptions = config?.categoryOptions ?? REAGENT_CATEGORY_OPTIONS
   const brandOptions = config?.brandOptions ?? REAGENT_BRAND_OPTIONS
   const includeRunningShort = config?.includeRunningShort ?? false
@@ -132,7 +132,7 @@ export const defaultReagentOrderValues = {
 }
 
 // 耗材订单默认值
-export const defaultConsumableOrderValues: ConsumableOrderFormData = {
+export const defaultConsumableOrderValues: ConsumableOrderFormInputData = {
   name: '',
   english_name: '',
   product_number: '',
@@ -147,7 +147,7 @@ export const defaultConsumableOrderValues: ConsumableOrderFormData = {
 /**
  * 获取试剂订单表单字段配置
  */
-export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormData>[] {
+export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormInputData>[] {
   return [
     { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
     { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
@@ -234,7 +234,7 @@ export function getUserEditFormFields(): FieldSchema<UserUpdateFormData>[] {
 /**
  * 获取耗材订单表单字段配置
  */
-export function getConsumableOrderFormFields(): FieldSchema<ConsumableOrderFormData>[] {
+export function getConsumableOrderFormFields(): FieldSchema<ConsumableOrderFormInputData>[] {
   return [
     { name: 'name' as const, label: '耗材名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 一次性手套' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 1, placeholder: '如: Disposable Gloves' },

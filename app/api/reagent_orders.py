@@ -77,6 +77,21 @@ LIST_CACHE_PREFIX = "list:"
 VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
+VALID_REAGENT_SORT_FIELDS = {
+    "cas_number",
+    "name",
+    "name_pinyin",
+    "category",
+    "brand",
+    "brand_pinyin",
+    "quantity",
+    "price",
+    "status",
+    "order_reason",
+    "created_at",
+    "updated_at",
+    *APPLICANT_SORT_KEYS,
+}
 REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
     'name': [
         ReagentOrder.name,
@@ -345,6 +360,9 @@ def list_reagent_orders(
     sort_order: Optional[str] = 'desc',
 ):
     """List reagent orders with optional filters, pagination, search, sort and applicant name"""
+
+    if sort_by and sort_by not in VALID_REAGENT_SORT_FIELDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
 
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
@@ -617,6 +635,15 @@ async def update_reagent_order(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the order applicant or admin can edit this order"
+        )
+
+    if current_user.role != UserRole.ADMIN and order.status in (
+        ReagentOrderStatus.APPROVED,
+        ReagentOrderStatus.REJECTED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Approved or rejected orders can only be deleted by non-admin users"
         )
     
     update_data = order_update.model_dump(exclude_unset=True)

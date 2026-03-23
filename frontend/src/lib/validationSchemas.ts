@@ -15,12 +15,25 @@
 
 import * as v from 'valibot'
 import { valibotResolver } from '@hookform/resolvers/valibot'
+import type { FieldValues, Resolver } from 'react-hook-form'
 
 // 类型化 resolver - 解决类型推断问题
 // 使用方法: resolver: createValibotResolver(InventoryFormSchema)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createValibotResolver(schema: any): any {
-  return valibotResolver(schema)
+type GenericValibotSchema<
+  TInput extends FieldValues = FieldValues,
+  TOutput extends FieldValues = TInput,
+> =
+  | v.BaseSchema<TInput, TOutput, v.BaseIssue<unknown>>
+  | v.BaseSchemaAsync<TInput, TOutput, v.BaseIssue<unknown>>
+
+export function createValibotResolver<
+  TInput extends FieldValues,
+  TOutput extends FieldValues,
+  TSchema extends GenericValibotSchema<TInput, TOutput>,
+>(
+  schema: TSchema
+): Resolver<TInput, unknown, TOutput> {
+  return valibotResolver(schema) as Resolver<TInput, unknown, TOutput>
 }
 
 const parseNumberOrNaN = (input: string | number): number => {
@@ -181,7 +194,7 @@ export const SpecificationSchema = v.pipe(
 // 规格解析辅助函数 - 从规格字符串提取数值
 export function parseSpecification(spec: string): number | null {
   if (!spec) return null
-  const match = new RegExp(/^(\d+\.?\d*)\s*/i).exec(spec)
+  const match = /(\d+(?:\.\d+)?)\s*/i.exec(spec)
   return match ? Number.parseFloat(match[1]) : null
 }
 
@@ -195,6 +208,7 @@ export function parseSpecification(spec: string): number | null {
  * 校验码计算：将第一二部分的数字从右到左依次乘以1,2,3...，求和后取模10
  */
 export const validateCASLogic = (input: string): boolean => {
+  if (typeof input !== 'string') return false
   const parts = input.split('-')
   if (parts.length !== 3) return false
 
@@ -331,6 +345,7 @@ export const InventoryFormSchema = v.object({
  * 库存表单 Schema 类型
  */
 export type InventoryFormData = v.InferOutput<typeof InventoryFormSchema>
+export type InventoryFormInputData = v.InferInput<typeof InventoryFormSchema>
 
 // ==========================================
 // 5. 订单模块 Schema
@@ -376,6 +391,8 @@ export const ConsumableOrderSchema = v.object({
  */
 export type ReagentOrderFormData = v.InferOutput<typeof ReagentOrderSchema>
 export type ConsumableOrderFormData = v.InferOutput<typeof ConsumableOrderSchema>
+export type ReagentOrderFormInputData = v.InferInput<typeof ReagentOrderSchema>
+export type ConsumableOrderFormInputData = v.InferInput<typeof ConsumableOrderSchema>
 
 // ==========================================
 // 6. 用户模块 Schema
@@ -502,6 +519,7 @@ export const ReturnFormSchema = v.object({
 })
 
 export type ReturnFormData = v.InferOutput<typeof ReturnFormSchema>
+export type ReturnFormInputData = v.InferInput<typeof ReturnFormSchema>
 
 /**
  * 入库表单 Schema
@@ -559,6 +577,18 @@ export const toValidationErrors = (detail: unknown): ValidationError[] => {
   return detail.filter((item): item is ValidationError => typeof item === 'object' && item !== null)
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null
+}
+
+const pickErrorDetailFromData = (data: unknown): unknown => {
+  if (!isRecord(data)) return undefined
+  if ('detail' in data) return data.detail
+  if ('msg' in data) return data.msg
+  if ('message' in data) return data.message
+  return undefined
+}
+
 // 错误消息映射表 - 使用正则表达式模式匹配
 const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   // 认证相关
@@ -591,6 +621,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /User is already active/i, message: '用户已是激活状态' },
   { pattern: /Cannot deactivate yourself/i, message: '不能停用自己' },
   { pattern: /Cannot update other users/i, message: '不能修改其他用户的信息' },
+  { pattern: /Only admin can update role/i, message: '仅管理员可更新角色' },
   { pattern: /Cannot change other users' username/i, message: '不能修改其他用户的用户名' },
   { pattern: /Cannot delete other user'.*session/i, message: '不能删除其他用户的会话' },
   { pattern: /Cannot update other user'.*session/i, message: '不能修改其他用户的会话' },
@@ -605,6 +636,8 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Cannot borrow, current status/i, message: '无法借用，当前状态' },
   { pattern: /Common shelf items do not support borrow workflow/i, message: '常用货架物品不支持借用流程' },
   { pattern: /Item is not on common shelf/i, message: '该物品不在常用货架' },
+  { pattern: /Common shelf group not found/i, message: '常用货架分组不存在' },
+  { pattern: /Item changed by another request, please retry/i, message: '该物品状态已变更，请刷新后重试' },
   { pattern: /No available bottle in this group/i, message: '该分组已无可用瓶数' },
   { pattern: /Item is not borrowed, current status/i, message: '该物品未被借用' },
   { pattern: /You are not the borrower of this item/i, message: '你不是该物品的借用人' },
@@ -619,8 +652,10 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Public account cannot edit orders/i, message: '公用账户不能编辑订单' },
   { pattern: /Public account must select a borrower/i, message: '公用账户借用时必须选择借用人' },
   { pattern: /Please select a valid borrower/i, message: '请选择有效借用人' },
+  { pattern: /You are not allowed to view this item's borrow history/i, message: '你无权查看该物品的借用历史' },
   { pattern: /Public account cannot delete orders/i, message: '公用账户不能删除订单' },
   { pattern: /Only the order applicant or admin can/i, message: '只有申请人或管理员才能执行此操作' },
+  { pattern: /Approved or rejected orders can only be deleted by non-admin users/i, message: '已批准或已驳回订单不可编辑，仅可删除' },
   { pattern: /Status must be changed via workflow endpoints/i, message: '状态必须通过工作流接口变更' },
   { pattern: /Cannot approve order with status/i, message: '当前状态不允许审批订单' },
   { pattern: /Cannot reject order with status/i, message: '当前状态不允许拒绝订单' },
@@ -630,12 +665,16 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /remaining_quantity must be greater than 0/i, message: '剩余数量必须大于 0' },
   { pattern: /Invalid order quantity/i, message: '订单数量无效' },
   { pattern: /No enough pending stock items/i, message: '没有足够的待入库物品' },
-  { pattern: /Order must be in APPROVED or ARRIVED status to stock in/i, message: '订单必须处于已审批或已到货状态才能入库' },
+  { pattern: /Order must be in APPROVED or ARRIVED status to stock in/i, message: '订单必须处于已批准或已到货状态才能入库' },
   { pattern: /storage_location is required/i, message: '存储位置不能为空' },
   { pattern: /remaining_quantity is required for ARRIVED orders/i, message: '已到货订单需要填写剩余数量' },
 
   // 购物车
   { pattern: /Cart is empty/i, message: '购物车不能为空' },
+
+  // SSE / 服务可用性
+  { pattern: /No SSE rooms are accessible for current user/i, message: '当前用户没有可用的实时通知通道' },
+  { pattern: /Login service temporarily unavailable/i, message: '登录服务暂时不可用，请稍后重试' },
 
   // 公告相关
   { pattern: /Announcement not found/i, message: '公告不存在' },
@@ -675,4 +714,28 @@ export const normalizeApiErrorMessage = (detail: unknown, fallback = '操作失�
   }
 
   return detail
+}
+
+export const extractApiErrorDetail = (error: unknown): unknown => {
+  if (error === null || error === undefined) return undefined
+  if (typeof error === 'string') return error
+
+  if (!isRecord(error)) return undefined
+
+  if ('response' in error && isRecord(error.response) && 'data' in error.response) {
+    const responseData = error.response.data
+    const detail = pickErrorDetailFromData(responseData)
+    if (detail !== undefined) return detail
+    if (typeof responseData === 'string') return responseData
+  }
+
+  const directDetail = pickErrorDetailFromData(error)
+  if (directDetail !== undefined) return directDetail
+
+  if (typeof error.message === 'string') return error.message
+  return undefined
+}
+
+export const getApiErrorMessage = (error: unknown, fallback = '操作失败'): string => {
+  return normalizeApiErrorMessage(extractApiErrorDetail(error), fallback)
 }

@@ -1,7 +1,7 @@
 """
 Inventory API Routes - Stock Management
 Critical Rule #2: CAS Number normalization (data copied from Order)
-
+All users can view/consume/add/edit/delete groups.
 Route ordering: Named routes MUST come before /{inventory_id} to avoid
 the path parameter capturing strings like "export", "dashboard", etc.
 """
@@ -14,7 +14,7 @@ from sqlmodel import Session, select, func
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
-from app.core.auth import get_current_user, require_admin
+from app.core.auth import get_current_user
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
@@ -80,6 +80,19 @@ INVENTORY_SEARCH_SQL_FIELD_MAP = {
         Inventory.category_pinyin,
         Inventory.category_pinyin_initials,
     ],
+}
+
+VALID_INVENTORY_SORT_FIELDS = {
+    'cas_number',
+    'name',
+    'category',
+    'storage_location',
+    'brand',
+    'remaining_quantity',
+    'remaining_percent',
+    'initial_quantity',
+    'status',
+    'created_at',
 }
 INVENTORY_SEARCH_FTS_FIELD_MAP = {
     'name': ["name", "name_pinyin", "name_pinyin_initials"],
@@ -261,6 +274,10 @@ def _apply_inventory_like_filters(
 
 
 def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str]):
+    computed_remaining_percent = (
+        Inventory.remaining_quantity / func.nullif(Inventory.initial_quantity, 0)
+    )
+
     pinyin_sort_field_map = {
         'name': Inventory.name_pinyin,
         'category': Inventory.category_pinyin,
@@ -275,7 +292,8 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
         'storage_location': Inventory.storage_location,
         'brand': Inventory.brand,
         'remaining_quantity': Inventory.remaining_quantity,
-        'remaining_percent': Inventory.remaining_percent,
+        # 对历史数据做兜底：当存储列为空时，实时按 remaining/initial 计算用于排序。
+        'remaining_percent': func.coalesce(Inventory.remaining_percent, computed_remaining_percent),
         'initial_quantity': Inventory.initial_quantity,
         'status': Inventory.status,
         'created_at': Inventory.created_at,
@@ -324,7 +342,8 @@ def _attach_user_names(db: Session, items: list[Inventory]) -> list[dict]:
     return result_data
 
 
-def _normalize_update_payload(item: Inventory, update_data: dict) -> None:
+def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
+    specification_updated = False
     optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'notes']
     for field in optional_string_fields:
         if field in update_data and update_data[field] == '':
@@ -339,12 +358,16 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> None:
         normalized_storage = normalize_storage_location(update_data['storage_location'])
         update_data['storage_location'] = normalized_storage
 
-    if 'specification' in update_data and update_data['specification']:
+    if 'specification' in update_data:
         spec_str = update_data['specification']
-        quantity, unit = parse_specification(spec_str)
-        item.initial_quantity = quantity
-        item.unit = unit
+        if spec_str:
+            quantity, unit = parse_specification(spec_str)
+            item.initial_quantity = quantity
+            item.unit = unit
+            specification_updated = True
         update_data.pop('specification')
+
+    return specification_updated
 
 
 # Register named/extended routes first to keep path precedence semantics.
@@ -371,6 +394,9 @@ def list_inventory(
     Requires authentication - users must be logged in to view inventory.
     """
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
+
+    if sort_by and sort_by not in VALID_INVENTORY_SORT_FIELDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
 
     is_first_page = skip == 0
     has_search = bool(search or status_filter or cas_filter or hazardous_only or sort_by)
@@ -430,7 +456,6 @@ def list_inventory(
 
     return result
 
-
 @router.get("/{inventory_id}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
 def get_inventory(inventory_id: int, db: DBSession):
     item = _get_by_id(db, inventory_id)
@@ -465,7 +490,7 @@ async def update_inventory(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CAS number: {error_msg}")
 
     try:
-        _normalize_update_payload(item, update_data)
+        specification_updated = _normalize_update_payload(item, update_data)
     except SpecificationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -486,7 +511,11 @@ async def update_inventory(
             )
         item.remaining_quantity = new_remaining
         item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
-    elif 'specification' in update_data:
+        if new_remaining is not None:
+            item.status = (
+                InventoryStatus.CONSUMED if new_remaining == 0 else InventoryStatus.IN_STOCK
+            )
+    elif specification_updated:
         item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
 
     for field, value in update_data.items():
@@ -516,7 +545,7 @@ async def update_inventory(
     return response
 
 
-@router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
+@router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_user)])
 async def delete_inventory(
     inventory_id: int,
     db: Annotated[Session, Depends(get_db)],

@@ -1,17 +1,17 @@
 """
-Cart Sync API - 北大医学部购物车同步
+Cart Sync API - 购物车同步
 支持耗材订单和试剂订单的自动匹配与导入
 """
 import logging
 from enum import Enum
 from typing import List, Optional, Annotated
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.database import get_db
 from app.core.auth import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.services.pinyin_utils import compute_pinyin_fields
@@ -80,7 +80,7 @@ class CartSyncResponse(BaseModel):
 
 class CartImportRequest(BaseModel):
     """导入请求"""
-    items: List[CartItem]
+    items: List[CartItem] = Field(min_length=1, max_length=100)
     order_type: OrderType = OrderType.CONSUMABLE
 
 
@@ -88,7 +88,7 @@ class CartImportResponse(BaseModel):
     """导入响应"""
     success: bool
     created: int
-    errors: List[str] = []
+    errors: List[str] = Field(default_factory=list)
 
 
 def _clean_text(value: Optional[str]) -> str:
@@ -166,22 +166,23 @@ async def sync_cart(
     )
 
 
-@router.post("/import", response_model=CartImportResponse, dependencies=[Depends(get_current_user)])
+@router.post("/import", response_model=CartImportResponse)
 async def import_cart(
     request: CartImportRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)]
 ):
     """导入购物车商品到系统"""
-    if not request.items:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cart is empty")
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="公共账号不允许导入订单")
 
     created_count = 0
-    errors = []
+    errors: List[str] = []
+    pending_orders: List[ConsumableOrder | ReagentOrder] = []
 
     for item in request.items:
+        item_name = _clean_text(item.name) or "未知商品"
         try:
-            item_name = _clean_text(item.name) or "未知商品"
             item_specification = _clean_text(item.specification) or "未知"
             item_english_name = _clean_text(item.english_name)
             item_brand = _clean_text(item.brand)
@@ -223,13 +224,21 @@ async def import_cart(
                     **compute_pinyin_fields(name=item_name, brand=item_brand),
                 )
 
-            db.add(db_order)
-            db.commit()
-            db.refresh(db_order)
-            created_count += 1
+            pending_orders.append(db_order)
 
-        except Exception as e:
-            logger.error(f"Failed to import cart item '{item.name}': {str(e)}")
-            errors.append(f"{item.name}: {str(e)}")
+        except Exception:
+            logger.exception("Failed to parse/import cart item '%s'", item_name)
+            errors.append(f"{item_name}: 导入失败，请检查商品数据")
+
+    if pending_orders:
+        try:
+            for order in pending_orders:
+                db.add(order)
+            db.commit()
+            created_count = len(pending_orders)
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to persist imported cart orders")
+            errors.append("批量保存订单失败，请稍后重试")
 
     return CartImportResponse(success=len(errors) == 0, created=created_count, errors=errors)

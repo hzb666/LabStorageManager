@@ -1,4 +1,5 @@
 """Extended inventory routes extracted from inventory.py to keep modules maintainable."""
+import logging
 import os
 import tempfile
 from typing import Any, Annotated, Dict, Optional
@@ -51,6 +52,7 @@ from app.services.user_utils import batch_get_user_names
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
+logger = logging.getLogger(__name__)
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -369,8 +371,9 @@ def _register_import_routes(
                 "errors_count": len(result["errors"]),
                 "errors": result["errors"] if result["errors"] else None,
             }
-        except Exception as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Import failed: {str(e)}")
+        except Exception:
+            logger.exception("Import inventory failed")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Import failed, please check file format")
         finally:
             if os.path.exists(tmp_file_path):
                 os.remove(tmp_file_path)
@@ -434,13 +437,17 @@ def _register_borrow_return_routes(
         db.commit()
 
         if result.rowcount == 0:
-            db.refresh(item)
-            if item.status == InventoryStatus.BORROWED:
+            latest_item = _get_by_id(db, inventory_id)
+            if latest_item and latest_item.status == InventoryStatus.BORROWED:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Item is borrowed by another user, please refresh and retry",
                 )
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot borrow, current status: {item.status}")
+            latest_status = latest_item.status if latest_item else "unknown"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot borrow, current status: {latest_status}",
+            )
 
         borrow_log = BorrowLog(
             inventory_id=inventory_id,

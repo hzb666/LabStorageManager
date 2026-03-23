@@ -3,7 +3,7 @@
  * 通过 Props 传入配置，实现不同表格的操作按钮复用
  * 使用 React.memo + 通用浅比较 优化性能并防止闭包陷阱
  */
-import React, { useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
@@ -69,6 +69,10 @@ export function TableActionButtons<T>({
   statusDisplay,
 }: Readonly<TableActionButtonsProps<T>>) {
   const status = statusField ? (item[statusField] as string) : undefined
+  const handleEditClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation()
+    onEdit?.(item)
+  }, [item, onEdit])
 
   if (statusDisplay && status) {
     const matchedStatus = statusDisplay.find(s => s.value === status)
@@ -100,10 +104,7 @@ export function TableActionButtons<T>({
               size="sm"
               className="h-8 w-8 p-0"
               disabled={disableEdit}
-              onClick={(e) => {
-                e.stopPropagation()
-                onEdit(item)
-              }}
+              onClick={handleEditClick}
             >
               <Pencil className="size-4" />
             </Button>

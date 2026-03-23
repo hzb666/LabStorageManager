@@ -92,15 +92,23 @@ export function FilterTable({
   const [isTableAtTop, setIsTableAtTop] = useState(true)
 
   const initialUrlSearchState = useMemo(() => {
-    const query = new URLSearchParams(location.search)
-    const nextSearch = query.get('search')?.trim() ?? ''
-    const nextField = query.get('field')?.trim() ?? ''
-    const hasValidField = searchFieldOptions.some((option) => option.value === nextField)
+    try {
+      const query = new URLSearchParams(location.search)
+      const nextSearch = query.get('search')?.trim() ?? ''
+      const nextField = query.get('field')?.trim() ?? ''
+      const hasValidField = searchFieldOptions.some((option) => option.value === nextField)
 
-    return {
-      search: nextSearch,
-      field: hasValidField ? nextField : defaultSearchField,
-      hasQuery: query.has('search') || query.has('field'),
+      return {
+        search: nextSearch,
+        field: hasValidField ? nextField : defaultSearchField,
+        hasQuery: query.has('search') || query.has('field'),
+      }
+    } catch {
+      return {
+        search: '',
+        field: defaultSearchField,
+        hasQuery: false,
+      }
     }
   }, [defaultSearchField, location.search, searchFieldOptions])
 
@@ -184,6 +192,10 @@ export function FilterTable({
       onBorrowSuccess: () => onBorrowSuccessRef.current?.(), // 🚀 使用稳定引用
     },
   })
+  const tableRef = useRef(table)
+  useEffect(() => {
+    tableRef.current = table
+  }, [table])
 
   const prevFiltersRef = useRef({
     globalFilter: filter.globalFilter,
@@ -211,9 +223,9 @@ export function FilterTable({
       prev.sorting !== current.sorting
 
     if (hasFilterChanged) {
-      table.resetExpanded()
+      tableRef.current.resetExpanded()
       if (enableExpandAll && filter.isAllExpanded) {
-        table.toggleAllRowsExpanded(true)
+        tableRef.current.toggleAllRowsExpanded(true)
       }
       prevFiltersRef.current = current
     }
@@ -224,8 +236,7 @@ export function FilterTable({
     filter.fuzzySearch,
     filter.sorting,
     filter.isAllExpanded,
-    enableExpandAll,
-    table
+    enableExpandAll
   ])
 
   const calculatedScrollHeight = useMemo(() => {
@@ -259,19 +270,20 @@ export function FilterTable({
       <Card className="overflow-hidden">
         {title && (
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              {title}
-              <span className="text-muted-foreground font-normal">
-                (&thinsp;{filter.displayCount}&thinsp;)
-              </span>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                {title}
+                <span className="text-muted-foreground font-normal">
+                  (&thinsp;{filter.displayCount}&thinsp;)
+                </span>
+              </CardTitle>
               {enableExpandAll && (
                 <Button
                   variant="modern"
                   size="lg"
                   onClick={filter.toggleExpandAll}
                   disabled={disableExpandAll}
-                  className={`ml-auto flex font-normal transition-all ${disableExpandAll ? 'text-muted-foreground opacity-60' : ''
-                    }`}
+                  className={disableExpandAll ? 'text-muted-foreground opacity-60' : ''}
                 >
                   {filter.isAllExpanded ? (
                     <><ChevronsDownUp className="size-4 -ml-0.5 mr-1.5" />收起全部</>
@@ -280,7 +292,7 @@ export function FilterTable({
                   )}
                 </Button>
               )}
-            </CardTitle>
+            </div>
           </CardHeader>
         )}
         <CardContent className="p-0">
