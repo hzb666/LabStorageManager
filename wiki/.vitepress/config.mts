@@ -4,7 +4,7 @@ export default defineConfig({
   lang: 'zh-CN',
   title: 'LabStorageManager',
   description: '基于真实代码行为整理的实验室库存管理系统知识库',
-  base: '/',
+  base: '/LabStorageManager/',
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]
   ],
