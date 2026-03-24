@@ -46,7 +46,7 @@
 :root {
   --radius: 0.625rem;
   --app-font-family-fallback: 'Arial', 'Helvetica Neue', 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif;
-  --app-font-family-web: 'Arial', 'Helvetica Neue', 'SourceHanSansSC-CJK', '思源黑体', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --app-font-family-web: 'Arial', 'Helvetica Neue', 'Noto Sans SC', 'SourceHanSansCN-VF-Local', 'SourceHanSansSC-CJK', '思源黑体', 'Microsoft YaHei', sans-serif;
   /* 页面主背景 - 浅灰色 */
   --background: oklch(0.97 0 0);
   --foreground: oklch(0.129 0.042 264.695);

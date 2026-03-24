@@ -654,7 +654,7 @@ export function CartImportPage() {
                                 onClick={(e) => e.stopPropagation()}
                             >
                                 <div className="flex items-center justify-between p-5 shrink-0">
-                                    <h3 className='font-semibold text-lg'>待导入列表</h3>
+                                    <h3 className='font-bold text-lg'>待导入列表</h3>
                                     <Button variant="ghost" size="icon" onClick={() => setMobileListOpen(false)}>
                                         <X className="w-5 h-5 opacity-60" />
                                     </Button>
@@ -668,7 +668,7 @@ export function CartImportPage() {
                         {/* Desktop Sidebar List */}
                         <div className='hidden lg:flex flex-col w-75 shrink-0 p-4 md:p-6'>
                             <div className='flex items-center justify-between mb-4'>
-                                <h3 className='font-semibold text-lg'>待导入</h3>
+                                <h3 className='font-bold text-lg'>待导入</h3>
                                 <span className='text-sm text-muted-foreground'>
                                     已提交 {submittedIds.size}/{items.length}
                                 </span>
@@ -683,7 +683,7 @@ export function CartImportPage() {
                         <div className='flex-1 p-4 md:pl-6 md:pr-8 md:pt-6 md:pb-2 flex flex-col min-w-0'>
                             <div className='flex items-center justify-between mb-6 flex-wrap'>
                                 <div>
-                                    <h3 className='font-semibold text-lg flex items-center min-w-0'>
+                                    <h3 className='font-bold text-lg flex items-center min-w-0'>
                                         <Button
                                             variant="modern"
                                             size="icon"
