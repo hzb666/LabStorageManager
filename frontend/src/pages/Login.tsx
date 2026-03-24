@@ -249,7 +249,7 @@ export function Login() {
             )}
           </Avatar>
           {/* 欢迎 + 全名 */}
-          <p className="text-lg font-semibold">
+          <p className="text-lg font-bold">
             欢迎{rememberedUser.full_name ? `，${rememberedUser.full_name}` : ''}
           </p>
           {/* 用户名显示在角色位置 */}

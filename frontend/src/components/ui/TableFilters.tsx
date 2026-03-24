@@ -55,6 +55,7 @@ export interface TableSearchInputProps {
 // 空状态组件（暴露给 FilterTable 使用）
 // ============================================================================
 
+/** 根据搜索与筛选上下文渲染统一的表格空状态文案。 */
 export function TableEmptyState({
   searchKeyword,
   statusFilter,
@@ -70,6 +71,7 @@ export function TableEmptyState({
 }>) {
   const normalizedKeyword = (searchKeyword ?? '').trim()
 
+  /** 根据搜索词与状态筛选生成空状态文案。 */
   const getMessage = () => {
     if (normalizedKeyword && statusFilter && statusFilter !== 'all') {
       // 从 statusOptions 中查找对应的中文标签
@@ -96,6 +98,7 @@ export function TableEmptyState({
   )
 }
 
+/** 渲染表格搜索输入框，并处理超长校验与一键清空交互。 */
 export function TableSearchInput({
   value,
   onChange,
@@ -106,6 +109,13 @@ export function TableSearchInput({
 }: Readonly<TableSearchInputProps>) {
   const isSearchTooLong = value.length > maxLength
   const searchErrorText = `不能超过 ${maxLength} 个字符` // 稍微缩短文案
+  let inputPaddingClassName = 'pr-3'
+  if (isSearchTooLong) {
+    inputPaddingClassName =
+      'pr-45 border-destructive! focus-visible:border-destructive! focus-visible:ring-destructive/20!'
+  } else if (value) {
+    inputPaddingClassName = 'pr-8'
+  }
 
   return (
     <div className={containerClassName}>
@@ -115,11 +125,7 @@ export function TableSearchInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={isSearchTooLong}
-        className={`pl-9 text-base w-full inline-flex leading-none outline-none ${inputClassName} ${
-          isSearchTooLong 
-            ? 'pr-45 border-destructive! focus-visible:border-destructive! focus-visible:ring-destructive/20!' 
-            : value ? 'pr-8' : 'pr-3'
-        }`}
+        className={`pl-9 text-base w-full inline-flex leading-none outline-none ${inputClassName} ${inputPaddingClassName}`}
       />
       <div className="absolute right-1 top-1 bottom-1 flex items-center bg-transparent z-10 pointer-events-none">
         {isSearchTooLong && (
@@ -145,6 +151,7 @@ export function TableSearchInput({
 // 主组件 - 仅渲染过滤控件，不包裹子元素
 // ============================================================================
 
+/** 渲染表格搜索、状态、字段与模糊搜索等筛选控件。 */
 export function TableFilters({
   searchInput,
   onSearchInputChange,
@@ -160,16 +167,19 @@ export function TableFilters({
   statusOptions = DEFAULT_STATUS_OPTIONS,
   className = '',
 }: Readonly<TableFiltersProps>) {
+  /** 透传搜索输入变化，保留后续扩展节流或埋点的落点。 */
   const handleSearchChange = (value: string) => {
     onSearchInputChange(value)
   }
 
+  /** 在低优先级任务中切换模糊搜索，避免阻塞主输入交互。 */
   const handleFuzzySearchChange = (checked: boolean) => {
     startTransition(() => {
       onFuzzySearchChange(checked === true)
     })
   }
 
+  /** 根据当前搜索字段动态计算输入框占位文案。 */
   const resolvedSearchPlaceholder = useMemo(() => {
     const normalizedField = searchField.trim()
     if (!normalizedField || normalizedField === DEFAULT_SEARCH_FIELD_ALL_VALUE) {

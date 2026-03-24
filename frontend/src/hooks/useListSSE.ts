@@ -8,9 +8,10 @@
 import { useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
+
 import { useSSE, type SSEEventEnvelope, type SSEEventHandler } from '@/hooks/useSSE'
-import { useSSEStore } from '@/store/sseStore'
 import type { ListResponseData } from '@/hooks/useTableState'
+import { useSSEStore } from '@/store/sseStore'
 
 export interface ListSSEContext {
   loadedIds: Set<number>
@@ -30,16 +31,87 @@ export interface UseListSSEOptions {
 
 type AnyRecord = Record<string, unknown>
 
+/** 从 SSE 载荷中提取统一的条目 id。 */
 function toItemId(data: AnyRecord): number | null {
   const candidate = data.item_id ?? data.id
   return typeof candidate === 'number' ? candidate : null
 }
 
+/** 判断事件载荷中是否包含当前搜索或排序会关注的字段。 */
 function containsAnyField(data: AnyRecord, fields: string[]): boolean {
   if (fields.length === 0) return false
   return fields.some((field) => Object.prototype.hasOwnProperty.call(data, field))
 }
 
+/** 标记新增或删除事件，这类事件统一走 stale 刷新策略。 */
+function isCreateOrDeleteEvent(eventType: string): boolean {
+  return eventType.includes('.created') || eventType.includes('.deleted')
+}
+
+/** 判断当前事件是否已经超出安全局部 patch 的边界。 */
+function shouldMarkContextStale(
+  context: ListSSEContext,
+  itemId: number,
+  item: AnyRecord
+): boolean {
+  if (!context.loadedIds.has(itemId)) {
+    return true
+  }
+
+  if (context.searchKeyword.trim() && containsAnyField(item, context.searchFields)) {
+    return true
+  }
+
+  if (context.sortBy && Object.prototype.hasOwnProperty.call(item, context.sortBy)) {
+    return true
+  }
+
+  return false
+}
+
+/** 仅更新单页列表中命中的那一行数据。 */
+function patchPageRows(
+  rows: ListResponseData['data'],
+  itemId: number,
+  item: AnyRecord
+): ListResponseData['data'] {
+  return rows.map((row) => {
+    const record = row as AnyRecord
+    if (record.id === itemId) {
+      return { ...record, ...item }
+    }
+    return row
+  })
+}
+
+/** 对 InfiniteData 的所有分页结果执行安全的单行 patch。 */
+function patchListResponseData(
+  oldData: InfiniteData<ListResponseData> | undefined,
+  itemId: number,
+  item: AnyRecord
+): InfiniteData<ListResponseData> | undefined {
+  if (!oldData) {
+    return oldData
+  }
+
+  return {
+    ...oldData,
+    pages: oldData.pages.map((page) => ({
+      ...page,
+      data: patchPageRows(page.data, itemId, item),
+    })),
+  }
+}
+
+/** 把多个事件类型映射到同一个列表事件处理器。 */
+function createHandlers(
+  eventTypes: string[],
+  handler: SSEEventHandler
+): Record<string, SSEEventHandler> {
+  return Object.fromEntries(eventTypes.map((type) => [type, handler]))
+}
+
+/** 管理列表页的 SSE 局部更新与 stale 标记逻辑。 */
 export function useListSSE({
   room,
   queryKey,
@@ -55,11 +127,8 @@ export function useListSSE({
     return (event) => {
       const payload = event.data as AnyRecord
       const eventType = String(event.event ?? '').toLowerCase()
-      const isCreate = eventType.includes('.created')
-      const isDelete = eventType.includes('.deleted')
 
-      // Rule A: create/delete always stale.
-      if (isCreate || isDelete) {
+      if (isCreateOrDeleteEvent(eventType)) {
         markRoomStale(room)
         return
       }
@@ -67,62 +136,27 @@ export function useListSSE({
       const itemId = toItemId(payload)
       const item = (payload.item as AnyRecord | undefined) ?? payload
 
-      // Rule B: cannot identify item -> stale.
       if (!itemId) {
         markRoomStale(room)
         return
       }
 
       const context = getContext()
-
-      // Rule C: update for unloaded record -> stale.
-      if (!context.loadedIds.has(itemId)) {
+      if (shouldMarkContextStale(context, itemId, item)) {
         markRoomStale(room)
         return
       }
 
-      // Rule D: search keyword active + touched searchable field -> stale.
-      if (context.searchKeyword.trim() && containsAnyField(item, context.searchFields)) {
-        markRoomStale(room)
-        return
-      }
+      queryClient.setQueryData<InfiniteData<ListResponseData>>(queryKey, (oldData) =>
+        patchListResponseData(oldData, itemId, item)
+      )
 
-      // Rule E: sort field changed -> stale.
-      if (context.sortBy && Object.prototype.hasOwnProperty.call(item, context.sortBy)) {
-        markRoomStale(room)
-        return
-      }
-
-      // Safe path: patch loaded cache only.
-      queryClient.setQueryData<InfiniteData<ListResponseData>>(queryKey, (oldData) => {
-        if (!oldData) return oldData
-
-        return {
-          ...oldData,
-          pages: oldData.pages.map((page) => ({
-            ...page,
-            data: page.data.map((row) => {
-              const record = row as AnyRecord
-              if (record.id === itemId) {
-                return { ...record, ...item }
-              }
-              return row
-            }),
-          })),
-        }
-      })
-
-      if (onSafePatch) {
-        onSafePatch(event)
-      }
+      onSafePatch?.(event)
     }
   }, [getContext, markRoomStale, onSafePatch, queryClient, queryKey, room])
 
   const handlers = useMemo<Record<string, SSEEventHandler>>(() => {
-    return eventTypes.reduce<Record<string, SSEEventHandler>>((acc, type) => {
-      acc[type] = handler
-      return acc
-    }, {})
+    return createHandlers(eventTypes, handler)
   }, [eventTypes, handler])
 
   const sse = useSSE({

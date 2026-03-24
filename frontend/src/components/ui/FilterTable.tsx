@@ -2,22 +2,25 @@
  * 通用筛选表格组件
  * 集成搜索/筛选、分页、表格列配置、展开/收起等功能
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react' // <--- 新增 useState
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   getCoreRowModel,
   getExpandedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import type { RowData, ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef, RowData, Table } from '@tanstack/react-table'
 import { useLocation } from 'react-router-dom'
-
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import { DataTable } from '@/components/ui/DataTable'
-import { TableFilters, TableEmptyState } from '@/components/ui/TableFilters'
-import { Button } from '@/components/ui/Button'
 import { ChevronsDownUp, ChevronsUpDown, Loader2 } from 'lucide-react'
 
-import { useTableState, DEFAULT_STATUS_OPTIONS, DEFAULT_SEARCH_FIELD_OPTIONS } from '@/hooks/useTableState'
+import { Button } from '@/components/ui/Button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { DataTable } from '@/components/ui/DataTable'
+import { TableEmptyState, TableFilters } from '@/components/ui/TableFilters'
+import {
+  DEFAULT_SEARCH_FIELD_OPTIONS,
+  DEFAULT_STATUS_OPTIONS,
+  useTableState,
+} from '@/hooks/useTableState'
 import type { FilterAPI, FilterOption, SearchFieldOption } from '@/hooks/useTableState'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 
@@ -54,145 +57,127 @@ export interface FilterTableProps {
   emptyText?: string
 }
 
-export function FilterTable({
-  api,
-  queryKey = ['list'],
-  tableId,
-  customColumns,
-  onEdit,
-  onBorrowSuccess,
-  statusOptions = DEFAULT_STATUS_OPTIONS,
-  searchFieldOptions = DEFAULT_SEARCH_FIELD_OPTIONS,
-  showFuzzySearch = true,
-  defaultStatus = 'all',
-  defaultSearchField = 'all',
-  pageSize = 50,
-  debounceMs = 300,
-  extraParams = {},
-  searchPlaceholder = '搜索名称、CAS号、位置...',
-  title,
-  enableExpandAll = true,
-  renderExpandedRow,
-  noteField,
-  scrollHeight,
-  className = '',
-  emptyText = '暂无数据'
-}: Readonly<FilterTableProps>) {
-  const location = useLocation()
+/** 从地址栏解析初始搜索词与搜索字段，作为表格首屏状态来源。 */
+function getInitialUrlSearchState({
+  defaultSearchField,
+  locationSearch,
+  searchFieldOptions,
+}: Readonly<{
+  defaultSearchField: string
+  locationSearch: string
+  searchFieldOptions: SearchFieldOption[]
+}>) {
+  try {
+    const query = new URLSearchParams(locationSearch)
+    const nextSearch = query.get('search')?.trim() ?? ''
+    const nextField = query.get('field')?.trim() ?? ''
+    const hasValidField = searchFieldOptions.some((option) => option.value === nextField)
 
-  // 🚀 防御性引用：防止父组件传内联函数引起 Meta 频繁更新导致子树重新渲染
+    return {
+      search: nextSearch,
+      field: hasValidField ? nextField : defaultSearchField,
+      hasQuery: query.has('search') || query.has('field'),
+    }
+  } catch {
+    return {
+      search: '',
+      field: defaultSearchField,
+      hasQuery: false,
+    }
+  }
+}
+
+/** 为表格生成稳定行 id，优先使用业务主键，其次回退到索引。 */
+function getTableRowId(row: Record<string, unknown>, index: number): string {
+  if (typeof row.id === 'string' || typeof row.id === 'number') {
+    return String(row.id)
+  }
+
+  if (typeof row.uuid === 'string' || typeof row.uuid === 'number') {
+    return String(row.uuid)
+  }
+
+  return String(index)
+}
+
+/** 根据行数与显式配置推导表格滚动容器高度。 */
+function getScrollHeight(rowCount: number, scrollHeight?: number | string): number | string {
+  if (scrollHeight !== undefined) {
+    return scrollHeight
+  }
+
+  if (rowCount <= 10) {
+    return 'auto'
+  }
+
+  return 'calc(100vh - 112px - 16px)'
+}
+
+/** 通过 ref 持有外部动作回调，避免表格 meta 因函数引用变化而频繁重建。 */
+function useActionRefs({
+  onBorrowSuccess,
+  onEdit,
+}: Readonly<Pick<FilterTableProps, 'onBorrowSuccess' | 'onEdit'>>) {
   const onEditRef = useRef(onEdit)
   const onBorrowSuccessRef = useRef(onBorrowSuccess)
+
   useEffect(() => {
     onEditRef.current = onEdit
     onBorrowSuccessRef.current = onBorrowSuccess
   }, [onEdit, onBorrowSuccess])
 
-  // 新增：用于跟踪表格是否滚动在顶部
-  const [isTableAtTop, setIsTableAtTop] = useState(true)
+  return { onEditRef, onBorrowSuccessRef }
+}
 
-  const initialUrlSearchState = useMemo(() => {
-    try {
-      const query = new URLSearchParams(location.search)
-      const nextSearch = query.get('search')?.trim() ?? ''
-      const nextField = query.get('field')?.trim() ?? ''
-      const hasValidField = searchFieldOptions.some((option) => option.value === nextField)
-
-      return {
-        search: nextSearch,
-        field: hasValidField ? nextField : defaultSearchField,
-        hasQuery: query.has('search') || query.has('field'),
-      }
-    } catch {
-      return {
-        search: '',
-        field: defaultSearchField,
-        hasQuery: false,
-      }
-    }
-  }, [defaultSearchField, location.search, searchFieldOptions])
-
-  const filter = useTableState({
-    api,
-    queryKey,
-    tableId,
-    statusOptions,
-    searchFieldOptions,
-    defaultStatus,
-    defaultSearchField,
-    pageSize,
-    debounceMs,
-    extraParams,
-    initialSearch: initialUrlSearchState.search,
-    initialSearchField: initialUrlSearchState.field,
-  })
-  const applySearchImmediate = filter.applySearchImmediate
-
-  // 🚀 此处需要父组件配合，若使用 customColumns 需确保是稳定的引用，不过组件内已做尽可能的降级兼容
-  const tableColumns = useMemo(() => {
-    if (customColumns && customColumns.length > 0) {
-      return customColumns
-    }
-    return getInventoryTableColumns() as ColumnDef<Record<string, unknown>, unknown>[]
-  }, [customColumns])
-
-  const lastAppliedSearchRef = useRef<string>(location.search)
+/** 监听地址栏搜索参数变化，并把 URL 中的搜索态同步回表格状态。 */
+function useLocationSearchSync({
+  applySearchImmediate,
+  defaultSearchField,
+  initialUrlSearchState,
+  locationSearch,
+}: Readonly<{
+  applySearchImmediate: (search: string, field?: string) => void
+  defaultSearchField: string
+  initialUrlSearchState: ReturnType<typeof getInitialUrlSearchState>
+  locationSearch: string
+}>) {
+  const lastAppliedSearchRef = useRef<string>(locationSearch)
 
   useEffect(() => {
-    if (location.search === lastAppliedSearchRef.current) return
-
-    if (!location.search) {
-      applySearchImmediate('', defaultSearchField)
-      lastAppliedSearchRef.current = location.search
+    if (locationSearch === lastAppliedSearchRef.current) {
       return
     }
 
-    if (!initialUrlSearchState.hasQuery) return
+    if (!locationSearch || !initialUrlSearchState.hasQuery) {
+      applySearchImmediate('', defaultSearchField)
+      lastAppliedSearchRef.current = locationSearch
+      return
+    }
 
     applySearchImmediate(initialUrlSearchState.search, initialUrlSearchState.field)
-    lastAppliedSearchRef.current = location.search
+    lastAppliedSearchRef.current = locationSearch
   }, [
     applySearchImmediate,
+    defaultSearchField,
     initialUrlSearchState.field,
     initialUrlSearchState.hasQuery,
     initialUrlSearchState.search,
-    location.search,
-    defaultSearchField
+    locationSearch,
   ])
+}
 
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const table = useReactTable({
-    defaultColumn: {
-      sortDescFirst: false,
-      sortingFn: 'text',
-    },
-    data: filter.data as Record<string, unknown>[],
-    columns: tableColumns,
-    getRowId: (row, index) => {
-      if (typeof row.id === 'string' || typeof row.id === 'number') return String(row.id)
-      if (typeof row.uuid === 'string' || typeof row.uuid === 'number') return String(row.uuid)
-      return String(index)
-    },
-    getCoreRowModel: getCoreRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getRowCanExpand: () => true,
-    columnResizeMode: 'onChange',
-    enableColumnResizing: true,
-    onColumnSizingChange: filter.setColumnSizing,
-    manualSorting: true,
-    onSortingChange: filter.setSorting,
-    state: {
-      sorting: filter.sorting,
-      columnSizing: filter.columnSizing,
-      globalFilter: filter.globalFilter,
-    },
-    meta: {
-      fuzzySearch: filter.fuzzySearch,
-      onEdit: (item) => onEditRef.current?.(item), // 🚀 使用稳定引用
-      onBorrowSuccess: () => onBorrowSuccessRef.current?.(), // 🚀 使用稳定引用
-    },
-  })
+/** 在筛选条件变化后重置展开态，避免旧展开行与新结果集错位。 */
+function useExpandedResetOnFilterChange({
+  enableExpandAll,
+  filter,
+  table,
+}: Readonly<{
+  enableExpandAll: boolean
+  filter: ReturnType<typeof useTableState>
+  table: Table<Record<string, unknown>>
+}>) {
   const tableRef = useRef(table)
+
   useEffect(() => {
     tableRef.current = table
   }, [table])
@@ -222,32 +207,247 @@ export function FilterTable({
       prev.fuzzySearch !== current.fuzzySearch ||
       prev.sorting !== current.sorting
 
-    if (hasFilterChanged) {
-      tableRef.current.resetExpanded()
-      if (enableExpandAll && filter.isAllExpanded) {
-        tableRef.current.toggleAllRowsExpanded(true)
-      }
-      prevFiltersRef.current = current
+    if (!hasFilterChanged) {
+      return
     }
+
+    tableRef.current.resetExpanded()
+    if (enableExpandAll && filter.isAllExpanded) {
+      tableRef.current.toggleAllRowsExpanded(true)
+    }
+    prevFiltersRef.current = current
   }, [
-    filter.globalFilter,
-    filter.statusFilter,
-    filter.searchField,
+    enableExpandAll,
     filter.fuzzySearch,
-    filter.sorting,
+    filter.globalFilter,
     filter.isAllExpanded,
-    enableExpandAll
+    filter.searchField,
+    filter.sorting,
+    filter.statusFilter,
   ])
+}
+
+interface FilterTableHeaderProps {
+  disableExpandAll: boolean
+  displayCount: number
+  enableExpandAll: boolean
+  isAllExpanded: boolean
+  onToggleExpandAll: () => void
+  title?: React.ReactNode
+}
+
+/** 渲染筛选表格卡片头部与“展开全部”控制区。 */
+function FilterTableHeader({
+  disableExpandAll,
+  displayCount,
+  enableExpandAll,
+  isAllExpanded,
+  onToggleExpandAll,
+  title,
+}: Readonly<FilterTableHeaderProps>) {
+  if (!title) {
+    return null
+  }
+
+  return (
+    <CardHeader>
+      <div className="flex items-center justify-between">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          {title}
+          <span className="text-muted-foreground font-normal">
+            (&thinsp;{displayCount}&thinsp;)
+          </span>
+        </CardTitle>
+        {enableExpandAll && (
+          <Button
+            variant="modern"
+            size="lg"
+            onClick={onToggleExpandAll}
+            disabled={disableExpandAll}
+            className={disableExpandAll ? 'text-muted-foreground opacity-60' : ''}
+          >
+            {isAllExpanded ? (
+              <><ChevronsDownUp className="size-4 -ml-0.5 mr-1.5" />收起全部</>
+            ) : (
+              <><ChevronsUpDown className="size-4 -ml-0.5 mr-1.5" />展开全部</>
+            )}
+          </Button>
+        )}
+      </div>
+    </CardHeader>
+  )
+}
+
+interface FilterTableContentProps {
+  emptyText: string
+  enableExpandAll: boolean
+  filter: ReturnType<typeof useTableState>
+  noteField?: string
+  renderExpandedRow?: (item: Record<string, unknown>) => React.ReactNode
+  scrollHeight: number | string
+  setIsTableAtTop: React.Dispatch<React.SetStateAction<boolean>>
+  statusOptions: FilterOption[]
+  table: Table<Record<string, unknown>>
+  tableId: string
+}
+
+/** 根据加载态、空态和数据态切换表格主体内容。 */
+function FilterTableContent({
+  emptyText,
+  enableExpandAll,
+  filter,
+  noteField,
+  renderExpandedRow,
+  scrollHeight,
+  setIsTableAtTop,
+  statusOptions,
+  table,
+  tableId,
+}: Readonly<FilterTableContentProps>) {
+  if (filter.isLoading && filter.data.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-8 text-muted-foreground">
+        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+      </div>
+    )
+  }
+
+  if (filter.data.length === 0) {
+    return (
+      <TableEmptyState
+        searchKeyword={filter.globalFilter}
+        statusFilter={filter.statusFilter}
+        hasFilter={filter.hasFilter}
+        emptyText={emptyText}
+        statusOptions={statusOptions}
+      />
+    )
+  }
+
+  return (
+    <div className="px-6">
+      <DataTable
+        table={table}
+        renderExpandedRow={renderExpandedRow}
+        scrollHeight={scrollHeight}
+        enableExpandAll={enableExpandAll}
+        expandAllStorageKey={tableId}
+        noteField={noteField}
+        isAllExpanded={filter.isAllExpanded}
+        onToggleExpandAll={filter.toggleExpandAll}
+        hasNextPage={filter.hasNextPage}
+        isFetchingNextPage={filter.isFetchingNextPage}
+        fetchNextPage={filter.fetchNextPage}
+        total={filter.total}
+        searchKeyword={filter.globalFilter}
+        onIsAtTopChange={setIsTableAtTop}
+      />
+    </div>
+  )
+}
+
+/** 组合筛选栏、表格状态与数据表格渲染，是 FilterTable 的总入口。 */
+export function FilterTable({
+  api,
+  queryKey = ['list'],
+  tableId,
+  customColumns,
+  onEdit,
+  onBorrowSuccess,
+  statusOptions = DEFAULT_STATUS_OPTIONS,
+  searchFieldOptions = DEFAULT_SEARCH_FIELD_OPTIONS,
+  showFuzzySearch = true,
+  defaultStatus = 'all',
+  defaultSearchField = 'all',
+  pageSize = 50,
+  debounceMs = 300,
+  extraParams = {},
+  searchPlaceholder = '搜索名称、CAS号、位置...',
+  title,
+  enableExpandAll = true,
+  renderExpandedRow,
+  noteField,
+  scrollHeight,
+  className = '',
+  emptyText = '暂无数据',
+}: Readonly<FilterTableProps>) {
+  const location = useLocation()
+  const { onEditRef, onBorrowSuccessRef } = useActionRefs({ onEdit, onBorrowSuccess })
+  const [isTableAtTop, setIsTableAtTop] = useState(true)
+
+  const initialUrlSearchState = useMemo(() => {
+    return getInitialUrlSearchState({
+      defaultSearchField,
+      locationSearch: location.search,
+      searchFieldOptions,
+    })
+  }, [defaultSearchField, location.search, searchFieldOptions])
+
+  const filter = useTableState({
+    api,
+    queryKey,
+    tableId,
+    statusOptions,
+    searchFieldOptions,
+    defaultStatus,
+    defaultSearchField,
+    pageSize,
+    debounceMs,
+    extraParams,
+    initialSearch: initialUrlSearchState.search,
+    initialSearchField: initialUrlSearchState.field,
+  })
+
+  useLocationSearchSync({
+    applySearchImmediate: filter.applySearchImmediate,
+    defaultSearchField,
+    initialUrlSearchState,
+    locationSearch: location.search,
+  })
+
+  const tableColumns = useMemo(() => {
+    if (customColumns && customColumns.length > 0) {
+      return customColumns
+    }
+
+    return getInventoryTableColumns() as ColumnDef<Record<string, unknown>, unknown>[]
+  }, [customColumns])
+
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const table = useReactTable({
+    defaultColumn: {
+      sortDescFirst: false,
+      sortingFn: 'text',
+    },
+    data: filter.data as Record<string, unknown>[],
+    columns: tableColumns,
+    getRowId: getTableRowId,
+    getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getRowCanExpand: () => true,
+    columnResizeMode: 'onChange',
+    enableColumnResizing: true,
+    onColumnSizingChange: filter.setColumnSizing,
+    manualSorting: true,
+    onSortingChange: filter.setSorting,
+    state: {
+      sorting: filter.sorting,
+      columnSizing: filter.columnSizing,
+      globalFilter: filter.globalFilter,
+    },
+    meta: {
+      fuzzySearch: filter.fuzzySearch,
+      onEdit: (item) => onEditRef.current?.(item),
+      onBorrowSuccess: () => onBorrowSuccessRef.current?.(),
+    },
+  })
+
+  useExpandedResetOnFilterChange({ enableExpandAll, filter, table })
 
   const calculatedScrollHeight = useMemo(() => {
-    if (scrollHeight !== undefined) return scrollHeight
-    const rowCount = filter.data.length
-    if (rowCount <= 10) return 'auto'
-    return 'calc(100vh - 112px - 16px)'
+    return getScrollHeight(filter.data.length, scrollHeight)
   }, [filter.data.length, scrollHeight])
 
-  // 计算展开全部按钮是否应该被禁用
-  // 规则：如果没有全展开 且 表格没有滚动到顶部，则禁用展开操作
   const disableExpandAll = !filter.isAllExpanded && !isTableAtTop
 
   return (
@@ -268,66 +468,27 @@ export function FilterTable({
       />
 
       <Card className="overflow-hidden">
-        {title && (
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                {title}
-                <span className="text-muted-foreground font-normal">
-                  (&thinsp;{filter.displayCount}&thinsp;)
-                </span>
-              </CardTitle>
-              {enableExpandAll && (
-                <Button
-                  variant="modern"
-                  size="lg"
-                  onClick={filter.toggleExpandAll}
-                  disabled={disableExpandAll}
-                  className={disableExpandAll ? 'text-muted-foreground opacity-60' : ''}
-                >
-                  {filter.isAllExpanded ? (
-                    <><ChevronsDownUp className="size-4 -ml-0.5 mr-1.5" />收起全部</>
-                  ) : (
-                    <><ChevronsUpDown className="size-4 -ml-0.5 mr-1.5" />展开全部</>
-                  )}
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-        )}
+        <FilterTableHeader
+          title={title}
+          displayCount={filter.displayCount}
+          enableExpandAll={enableExpandAll}
+          isAllExpanded={filter.isAllExpanded}
+          onToggleExpandAll={filter.toggleExpandAll}
+          disableExpandAll={disableExpandAll}
+        />
         <CardContent className="p-0">
-          {filter.isLoading && filter.data.length === 0 ? (
-            <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            </div>
-          ) : filter.data.length === 0 ? (
-            <TableEmptyState
-              searchKeyword={filter.globalFilter}
-              statusFilter={filter.statusFilter}
-              hasFilter={filter.hasFilter}
-              emptyText={emptyText}
-              statusOptions={statusOptions}
-            />
-          ) : (
-            <div className="px-6">
-              <DataTable
-                table={table}
-                renderExpandedRow={renderExpandedRow}
-                scrollHeight={calculatedScrollHeight}
-                enableExpandAll={enableExpandAll}
-                expandAllStorageKey={tableId}
-                noteField={noteField}
-                isAllExpanded={filter.isAllExpanded}
-                onToggleExpandAll={filter.toggleExpandAll}
-                hasNextPage={filter.hasNextPage}
-                isFetchingNextPage={filter.isFetchingNextPage}
-                fetchNextPage={filter.fetchNextPage}
-                total={filter.total}
-                searchKeyword={filter.globalFilter}
-                onIsAtTopChange={setIsTableAtTop} // 新增：接收子组件的滚动状态
-              />
-            </div>
-          )}
+          <FilterTableContent
+            emptyText={emptyText}
+            enableExpandAll={enableExpandAll}
+            filter={filter}
+            noteField={noteField}
+            renderExpandedRow={renderExpandedRow}
+            scrollHeight={calculatedScrollHeight}
+            setIsTableAtTop={setIsTableAtTop}
+            statusOptions={statusOptions}
+            table={table}
+            tableId={tableId}
+          />
         </CardContent>
       </Card>
     </div>
