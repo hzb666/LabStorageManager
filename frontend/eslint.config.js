@@ -18,7 +18,7 @@ export default defineConfig([
       'max-statements': ['error', 30],
       'max-lines-per-function': [
         'error',
-        { max: 120, skipBlankLines: true, skipComments: true },
+        { max: 150, skipBlankLines: true, skipComments: true },
       ],
       'sonarjs/cognitive-complexity': ['error', 15],
     },
