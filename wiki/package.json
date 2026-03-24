@@ -1,0 +1,13 @@
+{
+  "name": "lab-storage-manager-wiki",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "vitepress dev . --port 5174",
+    "build": "vitepress build .",
+    "preview": "vitepress preview ."
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

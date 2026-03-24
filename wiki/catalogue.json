@@ -1,0 +1,67 @@
+{
+  "items": [
+    {
+      "title": "入门引导",
+      "name": "onboarding",
+      "prompt": "从高级开发者和新成员两个视角理解仓库，优先阅读 app/main.py:179、frontend/src/App.tsx:46、docker-compose.yml:1。",
+      "children": [
+        {
+          "title": "核心导读",
+          "name": "principal-guide",
+          "prompt": "提炼核心架构洞见并解释试剂/耗材双链路，参考 app/models/reagent_order.py:17、app/models/consumable_order.py:17、app/main.py:167。",
+          "children": []
+        },
+        {
+          "title": "从零到上手",
+          "name": "zero-to-hero",
+          "prompt": "为新成员构造循序渐进学习路径，参考 README.md:1、frontend/src/App.tsx:46、frontend/src/hooks/useTableState.tsx:161。",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "使用者指南",
+      "name": "user-guide",
+      "prompt": "面向系统使用者解释页面入口、角色与常见操作，参考 frontend/src/App.tsx:29、app/models/user.py:19、app/api/cart_sync.py:176。",
+      "children": [
+        {
+          "title": "系统怎么用",
+          "name": "overview",
+          "prompt": "说明系统解决的问题和使用入口，参考 frontend/src/App.tsx:84、app/models/user.py:19。",
+          "children": []
+        },
+        {
+          "title": "日常操作",
+          "name": "daily-tasks",
+          "prompt": "说明试剂、耗材、库存、公告和导入等高频动作，参考 app/models/reagent_order.py:136、app/models/consumable_order.py:89、browser-extension/content/import-bridge.js:48。",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "深入阅读",
+      "name": "deep-dive",
+      "prompt": "分前端、后端、部署扩展三条线阅读真实实现，参考 app/database.py:32、frontend/src/store/useStore.ts:53、docker/nginx/default.conf:1。",
+      "children": [
+        {
+          "title": "后端",
+          "name": "backend",
+          "prompt": "理解入口、中间件、安全、搜索和工作流，参考 app/main.py:191、app/database.py:120、app/api/reagent_orders_workflow.py:1。",
+          "children": []
+        },
+        {
+          "title": "前端",
+          "name": "frontend",
+          "prompt": "理解路由、列表/表单复用、状态持久化和实时同步，参考 frontend/src/App.tsx:46、frontend/src/hooks/useTableState.tsx:161、frontend/src/lib/validationSchemas.ts:29。",
+          "children": []
+        },
+        {
+          "title": "部署与扩展",
+          "name": "operations-extension",
+          "prompt": "理解 Compose、Nginx 和购物车同步桥接，参考 docker-compose.yml:1、docker/nginx/default.conf:34、browser-extension/popup/popup.js:160。",
+          "children": []
+        }
+      ]
+    }
+  ]
+}
