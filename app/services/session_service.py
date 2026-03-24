@@ -30,6 +30,25 @@ LOGIN_ATTEMPTS: Dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次
 _login_attempts_lock = threading.Lock()  # 线程锁，保护并发访问
 
 
+def _coerce_count(value: object) -> int:
+    """Normalize DB count results across SQLAlchemy/SQLModel return shapes."""
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (tuple, list)):
+        if not value:
+            return 0
+        return int(value[0] or 0)
+
+    mapping = getattr(value, "_mapping", None)
+    if mapping:
+        first = next(iter(mapping.values()), 0)
+        return int(first or 0)
+
+    return int(value)
+
+
 def cleanup_expired_sessions(db: Session) -> int:
     """清理过期的会话，返回删除的数量"""
     now = get_utc_now()
@@ -58,11 +77,12 @@ def _check_device_limit(db: Session, user_id: int, device_id: str) -> bool:
         return True  # 没有 device_id 不限制
     
     # 统计当前用户的设备数（排除当前设备）
-    count = db.exec(
+    count_result = db.exec(
         select(func.count(UserSession.id))
         .where(UserSession.user_id == user_id)
         .where(UserSession.device_id != device_id)
     ).one()
+    count = _coerce_count(count_result)
     
     return count < settings.max_device_per_user
 
@@ -76,11 +96,12 @@ def _check_ip_limit(db: Session, user_id: int, ip_address: str) -> bool:
         return True
     
     # 统计当前用户不同 IP 数（排除当前 IP）
-    unique_ips = db.exec(
+    unique_ips_result = db.exec(
         select(func.count(func.distinct(UserSession.ip_address)))
         .where(UserSession.user_id == user_id)
         .where(UserSession.ip_address != ip_address)
     ).one()
+    unique_ips = _coerce_count(unique_ips_result)
     
     return unique_ips < settings.max_ip_per_user
 

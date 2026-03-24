@@ -4,17 +4,25 @@ import { valibotResolver } from '@hookform/resolvers/valibot'
 import { Loader2, Lock, X } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { cn, getFullImageUrl } from '@/lib/utils'
-import { UserUpdateSchema, ChangePasswordWithConfirmSchema, normalizeApiErrorMessage } from '@/lib/validationSchemas'
+import {
+  UserUpdateSchema,
+  ChangePasswordWithConfirmSchema,
+  extractApiErrorDetail,
+  getApiErrorMessage,
+  normalizeApiErrorMessage,
+} from '@/lib/validationSchemas'
 import { UserRoles } from '@/lib/constants'
 import type { UserUpdateFormData, ChangePasswordFormData } from '@/lib/validationSchemas'
 import { userAdminAPI, authAPI } from '@/api/client'
+
+type UserRole = 'admin' | 'user' | 'public'
 
 // 用户类型定义
 export interface User {
   id: number
   username: string
   full_name: string | null
-  role: 'admin' | 'user' | 'public'
+  role: UserRole
   is_active: boolean
   created_at: string
   avatar_url?: string
@@ -29,7 +37,6 @@ import { BaseForm } from '@/components/BaseForm'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
-import { AxiosError } from 'axios'
 import { getUserEditFormFields, USER_ROLE_OPTIONS } from '@/lib/formConfigs'
 
 export interface UserEditDialogProps {
@@ -55,7 +62,7 @@ export function UserEditDialog({
   user,
   mode,
   onSuccess,
-}: UserEditDialogProps) {
+}: Readonly<UserEditDialogProps>) {
   const { user: currentUser, setAuth } = useAuthStore()
   const { rememberedUser, updateRememberedUser } = useRememberedUser()
 
@@ -111,26 +118,41 @@ export function UserEditDialog({
   // 清理 Object URL
   useEffect(() => {
     return () => {
-      if (avatarPreview && avatarPreview.startsWith('blob:')) {
+      if (avatarPreview?.startsWith('blob:')) {
         URL.revokeObjectURL(avatarPreview)
       }
     }
   }, [avatarPreview])
 
   // 关闭弹窗时清理状态
+  const revokeBlobUrlIfNeeded = (previewUrl: string) => {
+    if (previewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(previewUrl)
+    }
+  }
+
+  const redirectToLogin = () => {
+    setTimeout(() => {
+      globalThis.location.href = '/login'
+    }, 1500)
+  }
+
   const handleClose = useCallback(() => {
+    if (avatarLoading) {
+      toast.error('头像上传中，请稍后')
+      return
+    }
+
     onOpenChange(false)
     setIsEditingPassword(false)
     setAvatarFile(null)
-    if (avatarPreview && avatarPreview.startsWith('blob:')) {
-      URL.revokeObjectURL(avatarPreview)
-    }
+    revokeBlobUrlIfNeeded(avatarPreview)
     setAvatarPreview('')
     setOriginalAvatarUrl('')
     setAvatarImageLoaded(false)
     editForm.reset()
     passwordForm.reset()
-  }, [onOpenChange, avatarPreview, editForm, passwordForm])
+  }, [avatarLoading, onOpenChange, avatarPreview, editForm, passwordForm])
 
   // 头像文件变化处理
   const handleAvatarChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,9 +174,7 @@ export function UserEditDialog({
     }
 
     // 释放旧的 blob URL
-    if (avatarPreview && avatarPreview.startsWith('blob:')) {
-      URL.revokeObjectURL(avatarPreview)
-    }
+    revokeBlobUrlIfNeeded(avatarPreview)
 
     setAvatarFile(file)
     setAvatarPreview(URL.createObjectURL(file))
@@ -174,6 +194,67 @@ export function UserEditDialog({
   }, [])
 
   // 保存用户信息
+  const handleAvatarUpdate = async (targetUser: User): Promise<boolean> => {
+    const wasAvatarDeleted = Boolean(originalAvatarUrl) && !avatarPreview && !avatarFile
+
+    if (wasAvatarDeleted) {
+      try {
+        await userAdminAPI.deleteAvatar(targetUser.id)
+        return true
+      } catch {
+        toast.error('头像删除失败')
+        return false
+      }
+    }
+
+    if (!avatarFile) {
+      return true
+    }
+
+    setAvatarLoading(true)
+    try {
+      const response = await userAdminAPI.uploadAvatar(targetUser.id, avatarFile)
+      const newAvatarUrl = response.data.avatar_url
+      setAvatarPreview(newAvatarUrl)
+
+      if (rememberedUser?.userId === targetUser.id) {
+        updateRememberedUser({ avatar_url: newAvatarUrl })
+      }
+
+      return true
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '头像上传失败'))
+      return false
+    } finally {
+      setAvatarLoading(false)
+    }
+  }
+
+  const buildUpdatePayload = (formData: UserUpdateFormData) => {
+    const updatePayload: { username?: string; full_name?: string; role?: UserRole } = {
+      username: formData.username,
+      full_name: formData.full_name,
+    }
+
+    if (mode === 'admin') {
+      updatePayload.role = formData.role
+    }
+
+    return updatePayload
+  }
+
+  const handleUsernameChanged = async () => {
+    toast.success('用户名已更新，请重新登录')
+    handleClose()
+    localStorage.clear()
+    try {
+      await authAPI.logout()
+    } catch {
+      // ignore
+    }
+    redirectToLogin()
+  }
+
   const handleSave = async () => {
     const isValid = await editForm.trigger()
     if (!isValid) return
@@ -183,64 +264,24 @@ export function UserEditDialog({
 
     setEditLoading(true)
     try {
-      // 处理头像
-      const wasAvatarDeleted = originalAvatarUrl && !avatarPreview && !avatarFile
-
-      if (wasAvatarDeleted) {
-        try {
-          await userAdminAPI.deleteAvatar(user.id)
-        } catch {
-          toast.error('头像删除失败')
-          setEditLoading(false)
-          return
-        }
-      } else if (avatarFile) {
-        setAvatarLoading(true)
-        try {
-          const response = await userAdminAPI.uploadAvatar(user.id, avatarFile)
-          const newAvatarUrl = response.data.avatar_url
-          setAvatarPreview(newAvatarUrl)
-
-          // 更新 rememberedUser
-          if (rememberedUser && rememberedUser.userId === user.id) {
-            updateRememberedUser({ avatar_url: newAvatarUrl })
-          }
-        } catch (error) {
-          const axiosError = error as AxiosError<{ detail?: string }>
-          const errorMsg = axiosError.response?.data?.detail || '头像上传失败'
-          toast.error(normalizeApiErrorMessage(errorMsg, '头像上传失败'))
-          setAvatarLoading(false)
-          setEditLoading(false)
-          return
-        }
-        setAvatarLoading(false)
+      const avatarUpdated = await handleAvatarUpdate(user)
+      if (!avatarUpdated) {
+        return
       }
 
       // 更新用户信息
-      const response = await userAdminAPI.update(user.id, {
-        username: formData.username,
-        full_name: formData.full_name,
-        role: formData.role,
-      })
+      const updatePayload = buildUpdatePayload(formData)
+      const response = await userAdminAPI.update(user.id, updatePayload)
       const updatedUser = response.data
 
       // 用户名变更需要重新登录
       if (user.username !== formData.username) {
-        toast.success('用户名已更新，请重新登录')
-        handleClose()
-        localStorage.clear()
-        try {
-          await authAPI.logout()
-        } catch { /* ignore */ }
-        setTimeout(() => {
-          window.location.href = '/login'
-        }, 1500)
-        setEditLoading(false)
+        await handleUsernameChanged()
         return
       }
 
       // 更新 rememberedUser
-      if (rememberedUser && rememberedUser.userId === user.id) {
+      if (rememberedUser?.userId === user.id) {
         updateRememberedUser({ full_name: formData.full_name })
       }
 
@@ -253,14 +294,42 @@ export function UserEditDialog({
       handleClose()
       toast.success(mode === 'admin' ? '用户更新成功' : '信息更新成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(axiosError.response?.data?.detail || '更新失败')
+      toast.error(getApiErrorMessage(error, '更新失败'))
     } finally {
       setEditLoading(false)
     }
   }
 
   // 修改密码
+  const getPasswordErrorMessage = (error: unknown): string => {
+    const detail = extractApiErrorDetail(error)
+    return normalizeApiErrorMessage(detail, '密码修改失败')
+  }
+
+  const applyPasswordError = (errorMsg: string) => {
+    if (errorMsg === '原密码错误') {
+      passwordForm.setError('old_password', { type: 'manual', message: '原密码错误' })
+      return
+    }
+
+    if (errorMsg === '新密码不能与原密码相同') {
+      passwordForm.setError('new_password', { type: 'manual', message: '新密码不能与原密码相同' })
+      return
+    }
+
+    if (errorMsg.includes('Password must be at least') || errorMsg.includes('至少')) {
+      passwordForm.setError('new_password', { type: 'manual', message: '密码至少6个字符' })
+      return
+    }
+
+    if (errorMsg.includes('password') && errorMsg.includes('match')) {
+      passwordForm.setError('confirm_password', { type: 'manual', message: '两次输入的密码不一致' })
+      return
+    }
+
+    toast.error(errorMsg)
+  }
+
   const handleChangePassword = passwordForm.handleSubmit(async (formData) => {
     const oldPassword = String(formData.old_password || '')
     const newPassword = String(formData.new_password || '')
@@ -277,44 +346,24 @@ export function UserEditDialog({
 
     setChangePasswordLoading(true)
     try {
-      if (user?.id === currentUser?.id) {
+      if (isSelf) {
         await authAPI.changePassword(oldPassword, newPassword)
         handleClose()
         toast.success('密码修改成功，请重新登录')
         setTimeout(() => {
           useAuthStore.getState().logout()
-          window.location.href = '/login'
+          globalThis.location.href = '/login'
         }, 1500)
       } else {
-        const adminOldPassword = user?.role === UserRoles.ADMIN ? oldPassword : undefined
+        const adminOldPassword = isTargetAdmin ? oldPassword : undefined
         await userAdminAPI.resetPassword(user!.id, newPassword, adminOldPassword)
         setIsEditingPassword(false)
         passwordForm.reset({ old_password: '', new_password: '', confirm_password: '' })
         toast.success('密码重置成功')
       }
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string | { msg: string } }>
-      const detail = axiosError.response?.data?.detail
-      let errorMsg = ''
-      if (typeof detail === 'string') {
-        errorMsg = detail
-      } else if (detail && 'msg' in detail) {
-        errorMsg = (detail as { msg: string }).msg
-      } else {
-        errorMsg = '密码修改失败'
-      }
-
-      if (errorMsg === '原密码错误') {
-        passwordForm.setError('old_password', { type: 'manual', message: '原密码错误' })
-      } else if (errorMsg === '新密码不能与原密码相同') {
-        passwordForm.setError('new_password', { type: 'manual', message: '新密码不能与原密码相同' })
-      } else if (errorMsg.includes('Password must be at least') || errorMsg.includes('至少')) {
-        passwordForm.setError('new_password', { type: 'manual', message: '密码至少6个字符' })
-      } else if (errorMsg.includes('password') && errorMsg.includes('match')) {
-        passwordForm.setError('confirm_password', { type: 'manual', message: '两次输入的密码不一致' })
-      } else {
-        toast.error(errorMsg)
-      }
+      const errorMsg = getPasswordErrorMessage(error)
+      applyPasswordError(errorMsg)
     } finally {
       setChangePasswordLoading(false)
     }
@@ -322,12 +371,18 @@ export function UserEditDialog({
 
   const isTitlePassword = isEditingPassword
   const showRoleSelector = mode === 'admin'
+  let dialogTitle = '编辑个人信息'
+  if (isTitlePassword) {
+    dialogTitle = '修改密码'
+  } else if (mode === 'admin') {
+    dialogTitle = '编辑用户'
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className={cn(!isTitlePassword && "mb-4")}>{isTitlePassword ? '修改密码' : (mode === 'admin' ? '编辑用户' : '编辑个人信息')}</DialogTitle>
+          <DialogTitle className={cn(!isTitlePassword && "mb-4")}>{dialogTitle}</DialogTitle>
         </DialogHeader>
 
         {isEditingPassword ? (
@@ -431,7 +486,7 @@ export function UserEditDialog({
                   <Label className="text-base">角色</Label>
                   <RadioGroup
                     value={editForm.watch('role')}
-                    onValueChange={(value) => editForm.setValue('role', value as 'admin' | 'user' | 'public')}
+                    onValueChange={(value) => editForm.setValue('role', value as UserRole)}
                     className="flex gap-4 mt-2"
                   >
                     {USER_ROLE_OPTIONS.map((option) => (

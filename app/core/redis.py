@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 # Redis 客户端单例与断路器状态
 _redis_client: Optional[redis.Redis] = None
 _last_error_time: float = 0.0
+_raw_prefix = (settings.redis_key_prefix or "lsm").strip(":").strip()
+REDIS_KEY_PREFIX = _raw_prefix or "lsm"
 
 def get_redis() -> Optional[redis.Redis]:
     """获取 Redis 客户端（带简易熔断机制）"""
@@ -51,8 +53,14 @@ def get_redis() -> Optional[redis.Redis]:
         _last_error_time = time.time()
         return None
 
+
+def redis_key(raw_key: str) -> str:
+    """Build one app-scoped Redis key with configured prefix."""
+    return f"{REDIS_KEY_PREFIX}:{raw_key.lstrip(':')}"
+
+
 def session_key(token_hash: str) -> str:
-    return f"session:{token_hash}"
+    return redis_key(f"session:{token_hash}")
 
 def _handle_redis_error(e: Exception, operation: str, key: str):
     logger.error(f"{operation} 失败 (Key: {key}): {e}")

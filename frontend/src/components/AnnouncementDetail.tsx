@@ -11,7 +11,7 @@ interface AnnouncementDetailProps {
   onOpenChange: (open: boolean) => void
 }
 
-export function AnnouncementDetail({ announcement, open, onOpenChange }: AnnouncementDetailProps) {
+export function AnnouncementDetail({ announcement, open, onOpenChange }: Readonly<AnnouncementDetailProps>) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null)
 
   const hasImages = Boolean(announcement?.images && announcement.images.length > 0)
@@ -26,16 +26,16 @@ export function AnnouncementDetail({ announcement, open, onOpenChange }: Announc
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent 
-          className={`!max-w-none w-[90vw] max-h-[80vh] overflow-y-scroll transition-none ${
-            hasImages ? 'sm:!w-[700px]' : 'sm:!w-auto'
+          className={`max-w-none! w-[90vw] max-h-[80vh] overflow-y-scroll transition-none ${
+            hasImages ? 'sm:w-175!' : 'sm:w-auto!'
           }`}
         >
           {announcement && (
             <>
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 pr-8 mb-4 break-words">
+                <DialogTitle className="flex items-center gap-2 pr-8 mb-4 wrap-break-word">
                   {announcement.is_pinned && <Pin className="size-4 text-amber-600 dark:text-amber-500 shrink-0" />}
-                  <span className="break-words">{announcement.title}</span>
+                  <span className="wrap-break-word">{announcement.title}</span>
                 </DialogTitle>
                 <Button
                   variant="ghost"
@@ -59,7 +59,7 @@ export function AnnouncementDetail({ announcement, open, onOpenChange }: Announc
                   <div className="space-y-2">
                     <h4 className="text-sm text-muted-foreground">附件图片</h4>
                     {/* 给外层 grid 彻底写死 100% 宽度 */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-h-[100px] w-full">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-h-25 w-full">
                       {announcement.images.map((image, index) => {
                         const fullImageUrl = getFullImageUrl(image)
                         return (
@@ -103,8 +103,8 @@ export function AnnouncementDetail({ announcement, open, onOpenChange }: Announc
           if (!val) setSelectedImageIndex(null)
         }}
       >
-        <DialogContent className="!max-w-none w-auto bg-transparent border-none p-0 shadow-none max-h-[90vh] flex items-center justify-center">
-          {selectedImageIndex !== null && announcement?.images && announcement.images[selectedImageIndex] && (
+        <DialogContent className="max-w-none! w-auto bg-transparent border-none p-0 shadow-none max-h-[90vh] flex items-center justify-center">
+          {selectedImageIndex !== null && announcement?.images?.[selectedImageIndex] && (
             <img
               src={getFullImageUrl(announcement.images[selectedImageIndex])}
               alt={`${announcement.title} - 图片 ${selectedImageIndex + 1}`}

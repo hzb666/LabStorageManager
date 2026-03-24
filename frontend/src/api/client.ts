@@ -4,7 +4,7 @@ import { getDeviceId, getDeviceName } from '@/lib/deviceId'
 import { getApiBaseUrl } from '@/lib/apiConfig'
 import { AUTH_NOTICE_KEY } from '@/lib/constants'
 import { toast } from '@/lib/toast'
-import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage } from '@/lib/validationSchemas'
 
 const API_BASE_URL = getApiBaseUrl()
 
@@ -36,8 +36,7 @@ api.interceptors.response.use(
     const isLoginRequest = error.config?.url?.includes('/users/login')
     if (error.response?.status === 401 && !isLoginRequest) {
       // 获取错误详情并转换为中文
-      const errorDetail = error.response?.data?.detail
-      const message = normalizeApiErrorMessage(errorDetail, '会话已失效，请重新登录')
+      const message = getApiErrorMessage(error, '会话已失效，请重新登录')
       try {
         sessionStorage.setItem(AUTH_NOTICE_KEY, message)
       } catch {
@@ -292,6 +291,29 @@ export const consumableOrderAPI = {
   exportOrders: () => api.get('/consumable-orders/export', { responseType: 'blob' as const }),
 }
 
+export type CartSyncOrderType = 'reagent' | 'consumable'
+
+export interface CartSyncItemPayload {
+  name: string
+  specification?: string
+  quantity: number
+  price?: number
+  brand?: string
+  cas_number?: string
+  english_name?: string
+  alias?: string
+  unit?: string
+  product_number?: string
+  is_hazardous?: boolean
+  product_id?: string
+  detail_url?: string
+}
+
+export const cartSyncAPI = {
+  importItems: (data: { items: CartSyncItemPayload[]; order_type: CartSyncOrderType }) =>
+    api.post('/cart-sync/import', data),
+}
+
 // Inventory APIs
 export const inventoryAPI = {
   list: (params?: PaginationParams & {
@@ -378,7 +400,10 @@ export interface ChemicalInfo {
 }
 
 export const chemicalAPI = {
-  getInfo: (casNumber: string) => api.get<ChemicalInfo>(`/chemical-info/${casNumber}`),
+  getInfo: (casNumber: string, options?: { skipChinese?: boolean }) =>
+    api.get<ChemicalInfo>(`/chemical-info/${casNumber}`, {
+      params: options?.skipChinese ? { skip_chinese: true } : undefined,
+    }),
 }
 
 // Announcement types
@@ -467,18 +492,25 @@ export interface LogsAPI {
 // 注意：FilterTable 使用 status_filter 参数，但日志 API 需要 log_type，需要转换
 export const createLogsAPI = (token: string): LogsAPI => ({
   list: async (params) => {
-    const queryParams = new URLSearchParams()
-    if (params.skip !== undefined) queryParams.append('skip', String(params.skip))
-    if (params.limit !== undefined) queryParams.append('limit', String(params.limit))
-    if (params.search) queryParams.append('keyword', params.search)
+    const payload: {
+      token: string
+      skip?: number
+      limit?: number
+      keyword?: string
+      log_type?: string
+    } = { token }
+
+    if (params.skip !== undefined) payload.skip = params.skip
+    if (params.limit !== undefined) payload.limit = params.limit
+    if (params.search) payload.keyword = params.search
 
     // 将 status_filter 转换为 log_type（FilterTable 使用 status_filter，日志 API 需要 log_type）
     // 注意：'all' 表示全部类型，不传参给后端
     if (params.status_filter && params.status_filter !== 'all') {
-      queryParams.append('log_type', params.status_filter)
+      payload.log_type = params.status_filter
     }
 
-    const response = await api.get<LogsResponse>(`/admin/users/logs/${token}?${queryParams.toString()}`)
+    const response = await api.post<LogsResponse>('/admin/users/logs/query', payload)
     // LogsResponse 包含 { user_id, username, data: LogItem[], total }
     const logsData = response.data
     return { data: { data: logsData.data, total: logsData.total } }

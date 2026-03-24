@@ -8,7 +8,7 @@ import time
 import random
 import logging
 import hashlib
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 import requests
 from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
@@ -230,8 +230,10 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
     primary_failure_reason: Optional[str] = None
     fallback_failure_reason: Optional[str] = None
     
+    encoded_cas = quote(cas, safe="")
+
     # 使用 PubChem REST API
-    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{cas}/property/IUPACName/JSON"
+    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_cas}/property/IUPACName/JSON"
     
     try:
         response = _safe_get(url, timeout=PUBCHEM_PRIMARY_TIMEOUT_SECONDS)
@@ -251,7 +253,7 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
     # 如果 IUPACName 失败，尝试在 1 秒总预算内 fallback
     if not english_name:
         deadline = time.monotonic() + PUBCHEM_FALLBACK_BUDGET_SECONDS
-        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{cas}/cids/JSON"
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_cas}/cids/JSON"
         try:
             fallback_timeout = _remaining_timeout(deadline)
             if fallback_timeout is None:
@@ -439,12 +441,13 @@ def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
 @router.get("/{cas_number}", dependencies=[Depends(get_current_user)])
 def get_chemical_info(
     cas_number: str,
+    skip_chinese: bool = False,
 ):
     """
     根据 CAS 号查询化学物质信息
     
     返回:
-    - name: 中文名（从 chemblink.com 获取）
+    - name: 中文名（从 chemblink.com 获取；skip_chinese=true 时不查询）
     - english_name: 英文名（从 PubChem API 获取）
     """
     is_valid, error_msg, normalized_cas = validate_and_normalize_cas(cas_number)
@@ -459,6 +462,15 @@ def get_chemical_info(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Biological reagents do not support CAS query",
         )
+
+    if skip_chinese:
+        english_name, warning_message = query_english_name(normalized_cas)
+        return {
+            "cas_number": normalized_cas,
+            "name": None,
+            "english_name": english_name,
+            "warning": warning_message,
+        }
 
     result = query_chemical_info(normalized_cas)
 

@@ -1,6 +1,6 @@
-# 北大医学部购物车同步插件
+# 购物车同步插件
 
-TODO: 未完成功能。Chrome浏览器插件，用于将北大医学部试剂管理平台的购物车同步到实验室库存管理系统。
+TODO: 未完成功能。Chrome浏览器插件，用于将试剂管理平台的购物车同步到实验室库存管理系统。
 
 ## 功能特点
 
@@ -38,7 +38,7 @@ chrome://extensions/
 
 ### 准备工作
 
-1. 在Chrome中打开 **北大医学部试剂管理平台**：https://reagent.bjmu.edu.cn
+1. 在Chrome中打开 **试剂管理平台**：https://reagent.bjmu.edu.cn
 2. 登录账号，进入 **购物车页面**
 3. 在Chrome新标签页中打开 **实验室管理系统**
 
@@ -159,3 +159,12 @@ A: 请检查：
 3. 修改 `background/service-worker.js` 调整详情页解析逻辑
 4. 修改 `popup/popup.js` 和 `popup/popup.html` 调整界面
 5. 重新加载插件即可生效
+
+## 部署说明
+
+- `manifest.json` 必须是严格 JSON，不能包含注释。
+- 生产环境请在 `host_permissions` 和 `content_scripts.matches` 中替换本地地址：
+  - 移除 `localhost` / `127.0.0.1` 域名。
+  - 添加你的正式域名（例如 `https://inventory.example.com/*`）。
+- 当前默认仅放行 `5173` 开发端口；如你使用 `3000` 或 `8000`，请在上述两个字段中显式增加匹配规则。
+- 修改后需要在 `chrome://extensions/` 重新加载扩展。

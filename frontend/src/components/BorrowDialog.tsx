@@ -79,7 +79,11 @@ export function BorrowDialog({ open, onOpenChange, onConfirm, isSubmitting }: Re
       setErrorMessage('请从候选列表中选择真实借用人')
       return
     }
-    await onConfirm(selectedUser.id)
+    try {
+      await onConfirm(selectedUser.id)
+    } catch {
+      setErrorMessage('借用失败，请重试')
+    }
   }
 
   return (
@@ -97,7 +101,7 @@ export function BorrowDialog({ open, onOpenChange, onConfirm, isSubmitting }: Re
               placeholder="输入姓名或拼音，至少2个字符"
               autoFocus
             />
-            <p className="text-xs text-muted-foreground">仅支持选择系统中现有用户，不能自由输入。</p>
+            <p className="text-sm text-muted-foreground">仅支持选择系统中现有用户，不能自由输入。</p>
           </div>
 
           {loadingOptions && (

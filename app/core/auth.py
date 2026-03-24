@@ -161,7 +161,7 @@ def create_access_token(user_id: int, username: str, role: str, username_version
         "iat": get_utc_now(),
     }
     
-    # Use RS256 with private key, or HS256 with secret_key as fallback
+    # Production must use RS256; HS256 branch is for development fallback only.
     if settings.algorithm == "RS256":
         token = jwt.encode(
             payload,
@@ -169,7 +169,7 @@ def create_access_token(user_id: int, username: str, role: str, username_version
             algorithm=settings.algorithm
         )
     else:
-        # HS256 fallback
+        # HS256 development fallback
         token = jwt.encode(
             payload,
             settings.secret_key,
@@ -193,7 +193,7 @@ def decode_token(token: str) -> dict:
         HTTPException: If token is invalid or expired
     """
     try:
-        # Use RS256 with public key, or HS256 with secret_key as fallback
+        # Production must use RS256; HS256 branch is for development fallback only.
         if settings.algorithm == "RS256":
             payload = jwt.decode(
                 token,
@@ -201,7 +201,7 @@ def decode_token(token: str) -> dict:
                 algorithms=[settings.algorithm]
             )
         else:
-            # HS256 fallback
+            # HS256 development fallback
             payload = jwt.decode(
                 token,
                 settings.secret_key,

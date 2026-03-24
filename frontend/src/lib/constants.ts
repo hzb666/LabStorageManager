@@ -29,7 +29,7 @@ export const BADGE_COLORS: Record<BadgeColor, string> = {
   amber: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700',
 }
 
-export const STATUS_COLORS: Record<string, BadgeColor> = {
+export const STATUS_COLORS = {
   in_stock: 'green',
   run_short: 'orange',
   not_in_stock: 'amber',
@@ -56,7 +56,7 @@ export const STATUS_COLORS: Record<string, BadgeColor> = {
   high_usage: 'amber',
   degraded: 'red',
   others: 'gray',
-}
+} as const satisfies Record<string, BadgeColor>
 
 export const STATUS_LABELS: Record<string, string> = {
   in_stock: '在库',
@@ -115,7 +115,7 @@ export const AUTH_NOTICE_KEY = 'auth_notice'
 // === Order Status (Reagent) ===
 export const REAGENT_STATUS_MAP: Record<string, string> = {
   pending: '已申购',
-  approved: '已审批',
+  approved: '已批准',
   arrived: '已到货',
   stocked: '已入库',
   rejected: '未通过',
@@ -132,7 +132,7 @@ export const REAGENT_STATUS_STYLE: Record<string, string> = {
 // === Order Status (Consumable) ===
 export const CONSUMABLE_STATUS_MAP: Record<string, string> = {
   pending: '已申购',
-  approved: '已审批',
+  approved: '已批准',
   completed: '已完成',
   rejected: '未通过',
   cannot_find: '没有（找不到）',

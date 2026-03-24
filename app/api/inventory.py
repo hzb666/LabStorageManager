@@ -1,7 +1,7 @@
 """
 Inventory API Routes - Stock Management
 Critical Rule #2: CAS Number normalization (data copied from Order)
-
+All users can view/consume/add/edit/delete groups.
 Route ordering: Named routes MUST come before /{inventory_id} to avoid
 the path parameter capturing strings like "export", "dashboard", etc.
 """
@@ -9,12 +9,12 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select, func
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
-from app.core.auth import get_current_user, require_admin
+from app.core.auth import get_current_user
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
@@ -29,12 +29,30 @@ from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import (
-    normalize_field_sql,
     normalize_search_term,
     order_with_nulls_last,
     order_with_special_last,
 )
 from app.services.api_utils import clear_cache_by_prefix, get_cached_result, set_cached_result
+from app.services.inventory_fts import (
+    InventoryFTSError,
+    apply_inventory_fts_filter,
+    build_inventory_fts_rowid_subquery,
+    should_use_inventory_fts,
+)
+from app.services.inventory_queries import (
+    get_regular_inventory_by_id,
+    regular_inventory_query,
+)
+from app.services.search_matchers import (
+    CASSearchMode,
+    build_cas_search_clause,
+    build_text_search_clause,
+    classify_cas_search,
+    collect_search_fields,
+    combine_or_clauses,
+    union_id_subqueries,
+)
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
@@ -48,21 +66,45 @@ INVENTORY_NOT_FOUND = "Inventory item not found"
 
 # ==================== Search Cache ====================
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
+INVENTORY_SEARCH_SQL_FIELD_MAP = {
+    'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
+    'cas_number': [Inventory.cas_number],
+    'storage_location': [
+        Inventory.storage_location,
+        Inventory.storage_location_pinyin,
+        Inventory.storage_location_pinyin_initials,
+    ],
+    'brand': [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
+    'category': [
+        Inventory.category,
+        Inventory.category_pinyin,
+        Inventory.category_pinyin_initials,
+    ],
+}
 
-
-def _build_search_clause(field, pattern: str, *, fuzzy: bool):
-    column = func.coalesce(field, "")
-    if fuzzy:
-        return normalize_field_sql(column).ilike(pattern)
-    return column.ilike(pattern)
-
-
-def _combine_search_clauses(clauses: list[Any]):
-    expr = clauses[0]
-    for clause in clauses[1:]:
-        expr = expr | clause
-    return expr
-
+VALID_INVENTORY_SORT_FIELDS = {
+    'cas_number',
+    'name',
+    'category',
+    'storage_location',
+    'brand',
+    'remaining_quantity',
+    'remaining_percent',
+    'initial_quantity',
+    'status',
+    'created_at',
+}
+INVENTORY_SEARCH_FTS_FIELD_MAP = {
+    'name': ["name", "name_pinyin", "name_pinyin_initials"],
+    'cas_number': ["cas_number"],
+    'storage_location': [
+        "storage_location",
+        "storage_location_pinyin",
+        "storage_location_pinyin_initials",
+    ],
+    'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
+    'category': ["category", "category_pinyin", "category_pinyin_initials"],
+}
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
     if initial is None or initial <= 0:
@@ -73,7 +115,7 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
 
 
 def _get_by_id(db: Session, inventory_id: int) -> Optional[Inventory]:
-    return db.get(Inventory, inventory_id)
+    return get_regular_inventory_by_id(db, inventory_id)
 
 
 def _clear_list_cache() -> None:
@@ -98,8 +140,6 @@ def _apply_inventory_filters(
     search_field: Optional[str],
     fuzzy: bool,
 ):
-    # Regular inventory listing should always exclude common-shelf items.
-    base = base.where(Inventory.is_common.is_(False))
     if status_filter:
         base = base.where(Inventory.status == status_filter)
     if cas_filter:
@@ -113,40 +153,131 @@ def _apply_inventory_filters(
     if not search_value:
         return base
 
-    search_pattern = f"%{search_value}%"
-    field_map = {
-        'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
-        'cas_number': [Inventory.cas_number],
-        'storage_location': [
-            Inventory.storage_location,
-            Inventory.storage_location_pinyin,
-            Inventory.storage_location_pinyin_initials,
-        ],
-        'brand': [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
-        'category': [
-            Inventory.category,
-            Inventory.category_pinyin,
-            Inventory.category_pinyin_initials,
-        ],
-    }
+    is_all_field = not search_field or search_field == 'all'
+    cas_mode, _ = classify_cas_search(search_value, fuzzy=fuzzy)
+    cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
 
-    if search_field and search_field != 'all' and search_field in field_map:
-        clauses = [
-            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
-            for field in field_map[search_field]
-        ]
-        return base.where(_combine_search_clauses(clauses))
+    if not is_all_field:
+        if search_field == 'cas_number' and cas_exact_or_prefix:
+            return base.where(build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy))
+
+        if not should_use_inventory_fts(search_value):
+            return _apply_inventory_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+
+        try:
+            return apply_inventory_fts_filter(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                field_map=INVENTORY_SEARCH_FTS_FIELD_MAP,
+            )
+        except InventoryFTSError as exc:
+            logger.warning("Inventory FTS fallback to LIKE due to configuration error: %s", exc)
+            return _apply_inventory_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Inventory FTS fallback to LIKE due to runtime error: %s", exc)
+            return _apply_inventory_like_filters(
+                base,
+                search_value=search_value,
+                search_field=search_field,
+                fuzzy=fuzzy,
+            )
+
+    # all 模式：分路召回候选 ID，最后 UNION 去重，避免一个超大 OR。
+    use_fts_all = (not fuzzy) and should_use_inventory_fts(search_value) and not cas_exact_or_prefix
+    all_candidates = []
+
+    if use_fts_all:
+        try:
+            fts_rowid_subquery = build_inventory_fts_rowid_subquery(
+                search_value=search_value,
+                search_field='all',
+                field_map=INVENTORY_SEARCH_FTS_FIELD_MAP,
+            )
+            all_candidates.append(
+                select(Inventory.id).where(Inventory.id.in_(fts_rowid_subquery))
+            )
+        except InventoryFTSError as exc:
+            logger.warning("Inventory ALL-search FTS fallback to LIKE due to configuration error: %s", exc)
+            use_fts_all = False
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Inventory ALL-search FTS fallback to LIKE due to runtime error: %s", exc)
+            use_fts_all = False
+
+    if not use_fts_all:
+        all_candidates.append(
+            select(Inventory.id).where(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
+        )
+        text_fields = collect_search_fields(
+            INVENTORY_SEARCH_SQL_FIELD_MAP,
+            exclude_keys={'cas_number'},
+        )
+        if text_fields:
+            all_candidates.append(
+                select(Inventory.id).where(
+                    combine_or_clauses(
+                        build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                        for field in text_fields
+                    )
+                )
+            )
+
+    all_id_subquery = union_id_subqueries(all_candidates)
+    if all_id_subquery is None:
+        return base
+    return base.where(Inventory.id.in_(all_id_subquery))
+
+
+def _apply_inventory_like_filters(
+    base,
+    *,
+    search_value: str,
+    search_field: Optional[str],
+    fuzzy: bool,
+):
+    if search_field and search_field != 'all' and search_field in INVENTORY_SEARCH_SQL_FIELD_MAP:
+        if search_field == 'cas_number':
+            return base.where(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
+        return base.where(
+            combine_or_clauses(
+                build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                for field in INVENTORY_SEARCH_SQL_FIELD_MAP[search_field]
+            )
+        )
 
     all_clauses = []
-    for fields in field_map.values():
+    for field_key, fields in INVENTORY_SEARCH_SQL_FIELD_MAP.items():
+        if field_key == 'cas_number':
+            all_clauses.append(
+                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            )
+            continue
         all_clauses.extend(
-            _build_search_clause(field, search_pattern, fuzzy=fuzzy)
+            build_text_search_clause(field, search_value, fuzzy=fuzzy)
             for field in fields
         )
-    return base.where(_combine_search_clauses(all_clauses))
+    return base.where(combine_or_clauses(all_clauses))
 
 
 def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str]):
+    computed_remaining_percent = (
+        Inventory.remaining_quantity / func.nullif(Inventory.initial_quantity, 0)
+    )
+
     pinyin_sort_field_map = {
         'name': Inventory.name_pinyin,
         'category': Inventory.category_pinyin,
@@ -161,11 +292,11 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
         'storage_location': Inventory.storage_location,
         'brand': Inventory.brand,
         'remaining_quantity': Inventory.remaining_quantity,
-        'remaining_percent': Inventory.remaining_percent,
+        # 对历史数据做兜底：当存储列为空时，实时按 remaining/initial 计算用于排序。
+        'remaining_percent': func.coalesce(Inventory.remaining_percent, computed_remaining_percent),
         'initial_quantity': Inventory.initial_quantity,
         'status': Inventory.status,
         'created_at': Inventory.created_at,
-        'updated_at': Inventory.updated_at,
     }
 
     sort_direction = sort_order.lower() if sort_order else 'desc'
@@ -173,6 +304,10 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
 
     if sort_by in pinyin_sort_fields:
         order_column = pinyin_sort_field_map.get(sort_by)
+        # 索引优先：避免使用 `field IS NULL` 表达式，给 SQLite 机会走复合索引排序
+        if sort_direction == 'asc':
+            return (order_column.asc(),)
+        return (order_column.desc(),)
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
 
@@ -207,7 +342,8 @@ def _attach_user_names(db: Session, items: list[Inventory]) -> list[dict]:
     return result_data
 
 
-def _normalize_update_payload(item: Inventory, update_data: dict) -> None:
+def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
+    specification_updated = False
     optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'notes']
     for field in optional_string_fields:
         if field in update_data and update_data[field] == '':
@@ -222,12 +358,16 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> None:
         normalized_storage = normalize_storage_location(update_data['storage_location'])
         update_data['storage_location'] = normalized_storage
 
-    if 'specification' in update_data and update_data['specification']:
+    if 'specification' in update_data:
         spec_str = update_data['specification']
-        quantity, unit = parse_specification(spec_str)
-        item.initial_quantity = quantity
-        item.unit = unit
+        if spec_str:
+            quantity, unit = parse_specification(spec_str)
+            item.initial_quantity = quantity
+            item.unit = unit
+            specification_updated = True
         update_data.pop('specification')
+
+    return specification_updated
 
 
 # Register named/extended routes first to keep path precedence semantics.
@@ -243,7 +383,7 @@ def list_inventory(
     status_filter: Optional[InventoryStatus] = None,
     cas_filter: Optional[str] = None,
     hazardous_only: bool = False,
-    search: Optional[str] = None,
+    search: Annotated[Optional[str], Query(max_length=100)] = None,
     search_field: Optional[str] = None,
     fuzzy: bool = False,
     sort_by: Optional[str] = None,
@@ -254,6 +394,9 @@ def list_inventory(
     Requires authentication - users must be logged in to view inventory.
     """
     cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
+
+    if sort_by and sort_by not in VALID_INVENTORY_SORT_FIELDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
 
     is_first_page = skip == 0
     has_search = bool(search or status_filter or cas_filter or hazardous_only or sort_by)
@@ -274,7 +417,7 @@ def list_inventory(
             }
 
     base = _apply_inventory_filters(
-        select(Inventory),
+        regular_inventory_query(),
         status_filter=status_filter,
         cas_filter=cas_filter,
         hazardous_only=hazardous_only,
@@ -313,7 +456,6 @@ def list_inventory(
 
     return result
 
-
 @router.get("/{inventory_id}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
 def get_inventory(inventory_id: int, db: DBSession):
     item = _get_by_id(db, inventory_id)
@@ -348,15 +490,9 @@ async def update_inventory(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CAS number: {error_msg}")
 
     try:
-        _normalize_update_payload(item, update_data)
+        specification_updated = _normalize_update_payload(item, update_data)
     except SpecificationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    if update_data.get('status') == InventoryStatus.RUN_SHORT and not item.is_common:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='RUN_SHORT status is only supported for common shelf items',
-        )
 
     if 'remaining_quantity' in update_data:
         new_remaining = update_data['remaining_quantity']
@@ -375,7 +511,11 @@ async def update_inventory(
             )
         item.remaining_quantity = new_remaining
         item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
-    elif 'specification' in update_data:
+        if new_remaining is not None:
+            item.status = (
+                InventoryStatus.CONSUMED if new_remaining == 0 else InventoryStatus.IN_STOCK
+            )
+    elif specification_updated:
         item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
 
     for field, value in update_data.items():
@@ -405,7 +545,7 @@ async def update_inventory(
     return response
 
 
-@router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
+@router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_user)])
 async def delete_inventory(
     inventory_id: int,
     db: Annotated[Session, Depends(get_db)],

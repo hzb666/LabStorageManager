@@ -1,4 +1,5 @@
 """Extended inventory routes extracted from inventory.py to keep modules maintainable."""
+import logging
 import os
 import tempfile
 from typing import Any, Annotated, Dict, Optional
@@ -36,16 +37,22 @@ from app.models.inventory import (
 from app.models.user import User, UserRole
 from app.services.api_utils import clear_cache_by_prefix
 from app.services.cas_utils import normalize_cas, is_special_cas_value
-from app.services.csv_export import export_inventory_csv
+from app.services.xlsx_export import export_inventory_xlsx
 from app.services.excel_service import validate_uploaded_file
 from app.services.inventory_creation import create_manual_inventory_items
+from app.services.inventory_queries import (
+    common_inventory_query,
+    get_regular_inventory_by_id,
+    regular_inventory_clause,
+    regular_inventory_query,
+)
 from app.services.rate_limit import enforce_rate_limit
 from app.services.spec_utils import format_specification
-from app.services.shelf_utils import is_common_shelf_item
 from app.services.user_utils import batch_get_user_names
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
+logger = logging.getLogger(__name__)
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -57,7 +64,7 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
 
 
 def _get_by_id(db: Session, inventory_id: int) -> Optional[Inventory]:
-    return db.get(Inventory, inventory_id)
+    return get_regular_inventory_by_id(db, inventory_id)
 
 
 def _encode_actual_borrower_notes(actual_borrower_id: Optional[int]) -> Optional[str]:
@@ -76,7 +83,7 @@ def _parse_actual_borrower_id(notes: Optional[str]) -> Optional[int]:
 
 
 def _find_by_code(db: Session, code: str) -> Optional[Inventory]:
-    statement = select(Inventory).where(Inventory.internal_code == code)
+    statement = regular_inventory_query().where(Inventory.internal_code == code)
     return db.exec(statement).first()
 
 
@@ -98,15 +105,14 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
                 detail="Biological reagents do not support CAS query",
             )
 
-        statement = select(Inventory).where(
+        statement = regular_inventory_query().where(
             Inventory.cas_number == normalized_cas,
             Inventory.status != InventoryStatus.CONSUMED,
-            Inventory.is_common.is_(False),
         ).order_by(Inventory.created_at.desc())
 
         items = db.exec(statement).all()
 
-        total_remaining = sum(item.remaining_quantity for item in items)
+        total_remaining = sum((item.remaining_quantity or 0) for item in items)
         borrowed_count = sum(1 for item in items if item.status == InventoryStatus.BORROWED)
         in_stock_count = sum(1 for item in items if item.status == InventoryStatus.IN_STOCK)
 
@@ -143,7 +149,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         statement = select(func.sum(Inventory.remaining_quantity)).where(
             Inventory.cas_number == normalized_cas,
             Inventory.status != InventoryStatus.CONSUMED,
-            Inventory.is_common.is_(False),
+            regular_inventory_clause(),
         )
 
         total = db.exec(statement).first()
@@ -163,17 +169,12 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
 
     @router.get("/export", dependencies=[Depends(get_current_user)])
     def export_inventory(db: DBSession):
-        """Export regular inventory items (excluding common shelf items)."""
-        statement = select(Inventory).where(
-            Inventory.is_common.is_(False)
-        ).order_by(Inventory.created_at.desc())
+        """Export inventory workbook with regular and common-shelf sheets."""
+        statement = regular_inventory_query().order_by(Inventory.created_at.desc())
         items = db.exec(statement).all()
+        common_items = db.exec(common_inventory_query().order_by(Inventory.created_at.desc())).all()
 
-        # Get user map for created_by_id
-        user_ids = {item.created_by_id for item in items if item.created_by_id}
-        users_map = batch_get_user_names(db, user_ids) if user_ids else {}
-
-        return export_inventory_csv(items, users_map)
+        return export_inventory_xlsx(items, common_items)
 
 
 def _register_manual_and_dashboard_routes(
@@ -214,10 +215,9 @@ def _register_manual_and_dashboard_routes(
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
-        statement = select(Inventory).where(
+        statement = regular_inventory_query().where(
             Inventory.status == InventoryStatus.BORROWED,
             Inventory.borrower_id == current_user.id,
-            Inventory.is_common.is_(False),
         ).order_by(Inventory.updated_at.desc())
 
         items = db.exec(statement).all()
@@ -278,7 +278,7 @@ def _register_manual_and_dashboard_routes(
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
-        statement = select(Inventory).where(
+        statement = regular_inventory_query().where(
             Inventory.storage_location.is_(None),
             Inventory.temporary_keeper_id == current_user.id,
         ).order_by(Inventory.created_at.desc())
@@ -371,8 +371,9 @@ def _register_import_routes(
                 "errors_count": len(result["errors"]),
                 "errors": result["errors"] if result["errors"] else None,
             }
-        except Exception as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Import failed: {str(e)}")
+        except Exception:
+            logger.exception("Import inventory failed")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Import failed, please check file format")
         finally:
             if os.path.exists(tmp_file_path):
                 os.remove(tmp_file_path)
@@ -394,16 +395,12 @@ def _register_borrow_return_routes(
         db: Annotated[Session, Depends(get_db)],
         borrow_data: Optional[InventoryBorrowRequest] = None,
     ):
-        item = db.get(Inventory, inventory_id)
+        item = _get_by_id(db, inventory_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
-        if is_common_shelf_item(item):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Common shelf items do not support borrow workflow",
-            )
 
         actual_borrower_id: Optional[int] = None
+        borrower_id = current_user.id
         if current_user.role == UserRole.PUBLIC:
             actual_borrower_id = borrow_data.actual_borrower_id if borrow_data else None
             if not actual_borrower_id:
@@ -412,16 +409,26 @@ def _register_borrow_return_routes(
             actual_borrower = db.get(User, actual_borrower_id)
             if not actual_borrower or not actual_borrower.is_active or actual_borrower.role == UserRole.PUBLIC:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please select a valid borrower")
+            borrower_id = actual_borrower_id
+
+        borrow_quantity = item.remaining_quantity
+        if borrow_quantity is None:
+            borrow_quantity = item.initial_quantity
+        if borrow_quantity is None or borrow_quantity <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid inventory quantity: cannot borrow item with null or non-positive quantity",
+            )
 
 
         update_statement = (
             sql_update(Inventory)
             .where(Inventory.id == inventory_id)
             .where(Inventory.status == InventoryStatus.IN_STOCK)
-            .where(Inventory.is_common.is_(False))
+            .where(regular_inventory_clause())
             .values(
                 status=InventoryStatus.BORROWED,
-                borrower_id=current_user.id,
+                borrower_id=borrower_id,
                 updated_at=get_utc_now(),
             )
         )
@@ -430,20 +437,24 @@ def _register_borrow_return_routes(
         db.commit()
 
         if result.rowcount == 0:
-            db.refresh(item)
-            if item.status == InventoryStatus.BORROWED:
+            latest_item = _get_by_id(db, inventory_id)
+            if latest_item and latest_item.status == InventoryStatus.BORROWED:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Item is borrowed by another user, please refresh and retry",
                 )
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot borrow, current status: {item.status}")
+            latest_status = latest_item.status if latest_item else "unknown"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot borrow, current status: {latest_status}",
+            )
 
         borrow_log = BorrowLog(
             inventory_id=inventory_id,
-            borrower_id=current_user.id,
+            borrower_id=borrower_id,
             borrow_time=get_utc_now(),
             is_consume=False,
-            quantity_borrowed=item.remaining_quantity,
+            quantity_borrowed=borrow_quantity,
             notes=_encode_actual_borrower_notes(actual_borrower_id),
         )
         db.add(borrow_log)
@@ -481,7 +492,19 @@ def _register_borrow_return_routes(
         if item.borrower_id != current_user.id and current_user.role != UserRole.ADMIN:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the borrower of this item")
 
-        if return_data.remaining_quantity > item.initial_quantity:
+        if return_data.remaining_quantity is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="remaining_quantity is required",
+            )
+
+        if return_data.remaining_quantity < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="remaining_quantity must be greater than or equal to 0",
+            )
+
+        if item.initial_quantity is not None and return_data.remaining_quantity > item.initial_quantity:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Remaining quantity ({return_data.remaining_quantity}) cannot exceed initial quantity ({item.initial_quantity})",
@@ -510,9 +533,10 @@ def _register_borrow_return_routes(
         low_quantity_warning = None
         if return_data.remaining_quantity > 0:
             item.status = InventoryStatus.IN_STOCK
-            percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
-            if percentage < (LOW_STOCK_PERCENT * 100):
-                low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
+            if item.initial_quantity and item.initial_quantity > 0:
+                percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
+                if percentage < (LOW_STOCK_PERCENT * 100):
+                    low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
         else:
             item.status = InventoryStatus.CONSUMED
 
@@ -534,11 +558,22 @@ def _register_borrow_return_routes(
     @router.get("/{inventory_id}/borrow-history", dependencies=[Depends(get_current_user)])
     def get_borrow_history(
         inventory_id: int,
+        current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
         item = _get_by_id(db, inventory_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+
+        if current_user.role != UserRole.ADMIN:
+            allowed_user_ids = {
+                uid for uid in [item.borrower_id, item.last_borrower_id, item.created_by_id] if uid is not None
+            }
+            if current_user.id not in allowed_user_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You are not allowed to view this item's borrow history",
+                )
 
         logs = db.exec(
             select(BorrowLog)

@@ -2,11 +2,14 @@
 Lab Storage Manager - Main FastAPI Application
 """
 import logging
+import time
+import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -24,17 +27,60 @@ from app.core.constants import (
     UPLOAD_PATHS,
 )
 from app.core.banner import print_banner
+from app.core.request_utils import get_client_ip, get_request_id
 from app.database import init_db
 from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, announcements, error_logs, events
 from app.services import chemical_info
 from app.services.sse_manager import sse_manager
 
+
+def _get_log_level() -> int:
+    """Return runtime log level with quieter defaults for production-like environments."""
+    if settings.use_secure_runtime():
+        return logging.WARNING
+    if settings.debug:
+        return logging.DEBUG
+    return logging.INFO
+
+
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG if settings.debug else logging.INFO,
+    level=_get_log_level(),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+if settings.use_secure_runtime():
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+else:
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+
+
+def _sanitize_path_for_log(path: str) -> str:
+    """Mask likely identifiers in URL path for safer request logs."""
+    masked_segments: list[str] = []
+    for segment in path.split("/"):
+        if not segment:
+            masked_segments.append(segment)
+            continue
+
+        # Mask numeric ids and long opaque tokens/UUID-like segments.
+        if segment.isdigit() or (len(segment) >= 16 and any(char.isdigit() for char in segment)):
+            masked_segments.append("{id}")
+            continue
+
+        masked_segments.append(segment)
+
+    return "/".join(masked_segments)
+
+
+def _resolve_request_log_path(request: Request) -> str:
+    """Prefer route template (e.g. /users/{user_id}) over raw URL path."""
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path:
+        return route_path
+    return _sanitize_path_for_log(request.url.path)
 
 def _build_content_security_policy(path: str | None) -> str:
     """Build a route-aware CSP so API responses stay strict without breaking docs UI."""
@@ -136,11 +182,60 @@ app = FastAPI(
     version=settings.app_version,
     description="Laboratory Inventory Management System (LIMS)",
     lifespan=lifespan,
+    docs_url=None if settings.use_secure_runtime() else "/docs",
+    redoc_url=None if settings.use_secure_runtime() else "/redoc",
+    openapi_url=None if settings.use_secure_runtime() else "/openapi.json",
 )
 
 
 @app.middleware("http")
-async def upload_request_size_middleware(request, call_next):
+async def request_logging_middleware(request: Request, call_next):
+    """Add request id and structured request logs with route/path sanitization."""
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    started = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - started) * 1000
+        logger.exception(
+            "request_error request_id=%s method=%s path=%s client_ip=%s duration_ms=%.2f",
+            request_id,
+            request.method,
+            _resolve_request_log_path(request),
+            get_client_ip(request),
+            duration_ms,
+        )
+        raise
+
+    duration_ms = (time.perf_counter() - started) * 1000
+    status = response.status_code
+    log_level = logging.INFO
+    if status >= 500:
+        log_level = logging.ERROR
+    elif status >= 400:
+        log_level = logging.WARNING
+
+    logger.log(
+        log_level,
+        "request request_id=%s method=%s path=%s status=%s client_ip=%s duration_ms=%.2f",
+        request_id,
+        request.method,
+        _resolve_request_log_path(request),
+        status,
+        get_client_ip(request),
+        duration_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.middleware("http")
+async def upload_request_size_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
     """Reject clearly oversized upload requests before route handling."""
     if request.method == "POST" and _is_upload_request(request.url.path):
         content_length = request.headers.get("content-length")
@@ -161,7 +256,10 @@ async def upload_request_size_middleware(request, call_next):
 
 
 @app.middleware("http")
-async def https_redirect_middleware(request, call_next):
+async def https_redirect_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
     """Redirect plain HTTP to HTTPS in non-development environments."""
     if settings.use_secure_runtime():
         forwarded_proto = _get_forwarded_proto(request)
@@ -176,7 +274,10 @@ async def https_redirect_middleware(request, call_next):
 
 
 @app.middleware("http")
-async def csrf_origin_check_middleware(request, call_next):
+async def csrf_origin_check_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
     """Protect cookie-authenticated write requests with Origin/Referer validation."""
     unsafe_methods = {"POST", "PUT", "PATCH", "DELETE"}
     if request.method in unsafe_methods and request.url.path.startswith("/api"):
@@ -208,7 +309,10 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def security_headers_middleware(request, call_next):
+async def security_headers_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
     """
     Attach security headers to every response, including short-circuit responses.
     
@@ -224,14 +328,23 @@ async def security_headers_middleware(request, call_next):
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     """Global exception handler to log all unhandled errors"""
+    request_id = get_request_id(request)
+    log_path = _resolve_request_log_path(request)
     if settings.debug:
-        logger.exception("Unhandled exception on %s", request.url.path)
+        logger.exception("Unhandled exception request_id=%s path=%s", request_id, log_path)
     else:
-        logger.error("Unhandled exception on %s: %s", request.url.path, type(exc).__name__)
-    return JSONResponse(
+        logger.error(
+            "Unhandled exception request_id=%s path=%s error=%s",
+            request_id,
+            log_path,
+            type(exc).__name__,
+        )
+    response = JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"}
     )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 # Mount static files with caching
 STATIC_DIR = Path(__file__).parent.parent / "static"
@@ -277,3 +390,14 @@ def health_check():
 # Import models to ensure tables are created
 # This is needed for SQLModel to register all models
 from app.models import User, Inventory, BorrowLog, ReagentOrder, ConsumableOrder, Announcement  # noqa: E402, F401
+
+
+@app.get("/cart-import")
+def cart_import_redirect(request: Request):
+    """Redirect extension entry from backend origin to frontend app origin."""
+    frontend_origin = settings.cors_origins[0].rstrip("/") if settings.cors_origins else str(request.base_url).rstrip("/")
+    query = request.url.query
+    target = f"{frontend_origin}/cart-import"
+    if query:
+        target = f"{target}?{query}"
+    return RedirectResponse(url=target, status_code=307)

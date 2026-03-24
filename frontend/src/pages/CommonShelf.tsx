@@ -19,17 +19,19 @@ import useDialogState from '@/hooks/useDialogState'
 import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfigs'
 import { getCommonShelfTableColumns } from '@/lib/tableConfigs'
 import { COMMON_SHELF_BRAND_OPTIONS, COMMON_SHELF_CATEGORY_OPTIONS } from '@/lib/options'
-import { formatDate } from '@/lib/utils'
+import { downloadBlobResponse, formatDate } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import {
   InventoryFormSchema,
   createValibotResolver,
+  extractApiErrorDetail,
+  getApiErrorMessage,
   isSpecialCasValue,
   normalizeApiErrorMessage,
   toValidationErrors,
   validateAndNormalizeCASInput,
 } from '@/lib/validationSchemas'
-import type { InventoryFormData, ValidationError } from '@/lib/validationSchemas'
+import type { InventoryFormData, InventoryFormInputData, ValidationError } from '@/lib/validationSchemas'
 
 interface CommonShelfItem {
   id: number
@@ -52,6 +54,8 @@ interface CommonShelfItem {
   total_bottles: number
   consumed_bottles: number
   specification?: string | null
+  group_names?: string[]
+  other_names?: string[]
 }
 
 const STATUS_OPTIONS = [
@@ -64,6 +68,7 @@ const STATUS_OPTIONS = [
 const SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
+  { value: 'alias', label: '别名' },
   { value: 'cas_number', label: 'CAS号' },
   { value: 'brand', label: '品牌' },
   { value: 'category', label: '分类' },
@@ -107,7 +112,7 @@ export function CommonShelfPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
 
-  const form = useForm<InventoryFormData>({
+  const form = useForm<InventoryFormInputData, unknown, InventoryFormData>({
     resolver: createValibotResolver(InventoryFormSchema),
     defaultValues: defaultInventoryValues,
     shouldFocusError: false,
@@ -166,15 +171,7 @@ export function CommonShelfPage() {
   const handleExport = useCallback(async () => {
     try {
       const response = await commonShelfAPI.exportCommonShelf()
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `common_shelf_export_${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      downloadBlobResponse(response, `common_shelf_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
     } catch {
       toast.error('导出失败')
     }
@@ -205,8 +202,7 @@ export function CommonShelfPage() {
       }
       toast.success('CAS 号识别成功')
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      const detail = err.response?.data?.detail
+      const detail = extractApiErrorDetail(error)
       if (typeof detail === 'string') {
         form.setError('cas_number', { message: normalizeApiErrorMessage(detail, 'CAS 号识别失败') })
       } else {
@@ -257,8 +253,7 @@ export function CommonShelfPage() {
       await refreshCommonShelf()
       setDialogState(null)
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string | ValidationError[] } } }
-      const detail = err.response?.data?.detail
+      const detail = extractApiErrorDetail(error)
       const validationErrors = toValidationErrors(detail)
       if (validationErrors.length > 0) {
         validationErrors.forEach((e: ValidationError) => {
@@ -287,8 +282,7 @@ export function CommonShelfPage() {
       setDialogState(null)
       await refreshCommonShelf()
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+      toast.error(getApiErrorMessage(error, '删除失败'))
     }
   }, [deleteConfirm, editingItem, refreshCommonShelf, setDialogState])
 
@@ -301,6 +295,13 @@ export function CommonShelfPage() {
     return fields.map(field => {
       if (dialogState === 'edit' && field.name === 'quantity_bottles') {
         return { ...field, hidden: true }
+      }
+      if ((dialogState === 'add' || dialogState === 'edit') && field.name === 'name') {
+        return {
+          ...field,
+          enableTagToggle: true,
+          tag: '[std]',
+        }
       }
       if (dialogState === 'add' && field.name === 'cas_number') {
         return {
@@ -335,6 +336,7 @@ export function CommonShelfPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 flex-1">
           <div>英文名称：{item.english_name || '-'}</div>
           <div>别名：{item.alias || '-'}</div>
+          <div>其他名称：{item.other_names && item.other_names.length > 0 ? item.other_names.join(' / ') : '-'}</div>
           <div>分类：{item.category || '-'}</div>
           <div>品牌：{item.brand || '-'}</div>
           <div>创建人：{item.created_by_name || '-'}</div>
@@ -403,7 +405,7 @@ export function CommonShelfPage() {
         statusOptions={STATUS_OPTIONS}
         searchFieldOptions={SEARCH_FIELD_OPTIONS}
         title={<><Archive className="w-5 h-5" /> 常用/公用试剂</>}
-        searchPlaceholder="搜索名称、CAS号、品牌..."
+        searchPlaceholder="搜索名称、别名、CAS号、品牌..."
         renderExpandedRow={renderExpandedRow}
         noteField="notes"
       />
@@ -434,8 +436,7 @@ const CommonShelfActionButtons = React.memo(function CommonShelfActionButtons({
             await onConsumeSuccess()
             toast.success('已记录拿取 1 瓶')
           } catch (error) {
-            const err = error as { response?: { data?: { detail?: string } } }
-            toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '拿取失败'))
+            toast.error(getApiErrorMessage(error, '拿取失败'))
             throw error
           }
         },

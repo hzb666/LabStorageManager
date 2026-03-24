@@ -26,10 +26,12 @@ import { getConsumableOrderTableColumns } from '@/lib/tableConfigs'
 import {
   ConsumableOrderSchema,
   createValibotResolver,
+  extractApiErrorDetail,
+  getApiErrorMessage,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { ConsumableOrderFormData, ValidationError } from '@/lib/validationSchemas'
+import type { ConsumableOrderFormData, ConsumableOrderFormInputData } from '@/lib/validationSchemas'
 import { getConsumableOrderFormFields, defaultConsumableOrderValues } from '@/lib/formConfigs'
 
 import {
@@ -53,7 +55,7 @@ export function DashboardConsumableTab() {
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [isSubmittingConsumable, setIsSubmittingConsumable] = useState(false)
 
-  const consumableForm = useForm<ConsumableOrderFormData>({
+  const consumableForm = useForm<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>({
     resolver: createValibotResolver(ConsumableOrderSchema),
     defaultValues: defaultConsumableOrderValues,
     shouldFocusError: false,
@@ -65,6 +67,8 @@ export function DashboardConsumableTab() {
       queryClient.invalidateQueries({ queryKey: ['consumable-orders'] }),
     ])
   }, [queryClient])
+
+  const isConsumableEditLocked = editingConsumable?.status === 'approved' || editingConsumable?.status === 'rejected'
 
   const consumableDashboardAPI: FilterAPI = useMemo(() => ({
     list: async (params) => {
@@ -120,8 +124,7 @@ export function DashboardConsumableTab() {
       await refreshTables()
       toast.success('耗材订单已更新')
     } catch (err) {
-      const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
-      const detail = error.response?.data?.detail
+      const detail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(detail)
       if (validationErrors.length > 0) {
         validationErrors.forEach((e) => {
@@ -153,8 +156,7 @@ export function DashboardConsumableTab() {
       await refreshTables()
       toast.success('耗材订单已删除')
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+      toast.error(getApiErrorMessage(error, '删除失败'))
     }
   }, [consumableForm, deleteConfirm, editingConsumable, refreshTables])
 
@@ -229,10 +231,13 @@ export function DashboardConsumableTab() {
       >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>编辑耗材订单</DialogTitle>
+            <DialogTitle className="flex items-center justify-between gap-3">
+              <span>编辑耗材订单</span>
+              {isConsumableEditLocked ? <span className="text-base text-muted-foreground">当前状态仅支持删除</span> : null}
+            </DialogTitle>
           </DialogHeader>
           <form onSubmit={submitConsumableEdit}>
-            <BaseForm form={consumableForm} fields={getConsumableOrderFormFields()} />
+            <BaseForm form={consumableForm} fields={getConsumableOrderFormFields()} disabled={isConsumableEditLocked} />
             <EditDialogActions
               mode="edit"
               onCancel={() => setEditingConsumable(null)}
@@ -241,6 +246,7 @@ export function DashboardConsumableTab() {
               submitLabelEdit="保存"
               submitLabelAdd="保存"
               isSubmitting={isSubmittingConsumable}
+              disableSubmit={isConsumableEditLocked}
             />
           </form>
         </DialogContent>

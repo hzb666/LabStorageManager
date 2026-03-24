@@ -19,6 +19,7 @@ python-multipart = "^0.0.22"
 
 # Database
 sqlmodel = "^0.0.37"
+pysqlite3-binary = {version = "^0.5.4", markers = "sys_platform != 'win32'"}
 
 # Auth
 python-jose = {version = "^3.3.0", extras = ["cryptography"]}

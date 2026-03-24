@@ -1,342 +1,469 @@
-// 北大医学部购物车同步 - Popup Script
-// 直接与内容脚本通信，不依赖service worker
+// 购物车同步 - Popup Script
+// 直接与内容脚本通信，不依赖 service worker
 
-// 系统URL配置 - 生产环境修改这里
-const SYSTEM_URL = 'http://localhost:8000';
 const STORAGE_KEYS = {
-  CART_ITEMS: 'pendingCartItems'
+  CART_ITEMS: 'pendingCartItems',
+  IMPORT_BATCH_LATEST: 'import_batch_latest',
+  SYSTEM_CONFIG: 'systemConfig',
 };
 
-// 保存待导入的商品数据到storage
-async function saveCartItemsToStorage(items, orderType) {
+const DEFAULT_SYSTEM_CONFIG = {
+  // 开发环境默认（会自动检测当前打开的页面）
+  systemUrl: 'http://localhost:5173',
+  reagentSiteUrl: 'https://reagent.bjmu.edu.cn',
+};
+
+let systemConfig = { ...DEFAULT_SYSTEM_CONFIG };
+
+const BATCH_TTL_MS = 2 * 60 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15000;
+const DETAIL_FETCH_CONCURRENCY = 3;
+const DETAIL_REQUEST_TIMEOUT_MS = 3000;
+
+function isNoReceiverError(error) {
+  return String(error?.message || '').includes('Receiving end does not exist');
+}
+
+async function sendMessageWithAutoInject(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    if (!isNoReceiverError(error)) {
+      throw error;
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content/script.js'],
+    });
+
+    return await chrome.tabs.sendMessage(tabId, message);
+  }
+}
+
+function extractFirstCasNumber(input) {
+  const match = /\b\d{2,7}-\d{2}-\d\b/.exec(String(input || ''));
+  return match ? match[0] : '';
+}
+
+function detectOrderType(casNumber) {
+  return extractFirstCasNumber(casNumber) ? 'reagent' : 'consumable';
+}
+
+function isCartPageUrl(url) {
+  const pageParamRegex = /[?&]page=gwc/i;
+  return pageParamRegex.test(url || '');
+}
+
+async function resolveSystemUrl() {
+  return systemConfig.systemUrl;
+}
+
+function parseHttpUrl(urlValue) {
+  try {
+    const parsed = new URL(urlValue);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return null;
+    }
+    if (!parsed.hostname) {
+      return null;
+    }
+    if (parsed.username || parsed.password) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timerId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    globalThis.clearTimeout(timerId);
+  }
+}
+
+async function mapWithConcurrencyLimit(items, limit, mapper) {
+  const results = new Array(items.length).fill(null);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      const item = items[currentIndex];
+      const mapped = await mapper(item, currentIndex);
+      results[currentIndex] = mapped ?? null;
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results.filter((item) => item !== null);
+}
+
+function generateBatchId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+async function cleanupExpiredBatches() {
+  const data = await chrome.storage.local.get([STORAGE_KEYS.IMPORT_BATCH_LATEST]);
+  const payload = data?.[STORAGE_KEYS.IMPORT_BATCH_LATEST];
+  if (!payload) {
+    return;
+  }
+
+  const createdAt = payload?.created_at ? Date.parse(payload.created_at) : Number.NaN;
+  if (Number.isNaN(createdAt) || Date.now() - createdAt > BATCH_TTL_MS) {
+    await chrome.storage.local.remove([STORAGE_KEYS.IMPORT_BATCH_LATEST]);
+  }
+}
+
+function createBasicItem(productId, detailFetchStatus = 'fallback') {
+  return {
+    name: '未知',
+    english_name: '',
+    specification: '',
+    quantity: 1,
+    price: 0,
+    brand: '',
+    cas_number: '',
+    alias: '',
+    product_number: '',
+    product_id: productId || '',
+    detail_url: '',
+    is_hazardous: false,
+    detail_fetch_status: detailFetchStatus,
+  };
+}
+
+function isTimeoutError(error) {
+  return error?.name === 'AbortError';
+}
+
+async function saveCartItemsToStorage(items) {
   const data = {
-    items: items,
-    orderType: orderType,
-    timestamp: Date.now()
+    items,
+    orderType: 'mixed',
+    timestamp: Date.now(),
   };
   await chrome.storage.local.set({ [STORAGE_KEYS.CART_ITEMS]: data });
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-  console.log('[Popup] 脚本加载');
+async function saveImportBatch(items) {
+  await cleanupExpiredBatches();
+
+  const batchId = generateBatchId();
+  const normalizedItems = items.map((item) => ({
+    ...item,
+    order_type: detectOrderType(item.cas_number),
+    selected: true,
+  }));
+
+  const payload = {
+    batch_id: batchId,
+    items: normalizedItems,
+    created_at: new Date().toISOString(),
+  };
+
+  // 使用单一 key 覆盖旧批次，避免长期累积。
+  await chrome.storage.local.set({ [STORAGE_KEYS.IMPORT_BATCH_LATEST]: payload });
+  return batchId;
+}
+
+function sanitizeExtractedValue(value) {
+  return String(value || '')
+    .replaceAll('\u00a0', ' ')
+    .replace(/^\s*[:：-]\s*/, '')
+    .trim();
+}
+
+function extractFieldFromHtml(html, pattern) {
+  const match = pattern.exec(html);
+  return sanitizeExtractedValue(match?.[1] || '');
+}
+
+function extractFieldFromLines(pageText, labels) {
+  const lines = String(pageText || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const label of labels) {
+    const found = lines.find((line) => line.toLowerCase().startsWith(label.toLowerCase()));
+    if (found) {
+      return sanitizeExtractedValue(found.slice(label.length));
+    }
+  }
+
+  return '';
+}
+
+function extractLeadingSpecificationValue(specificationText) {
+  const source = sanitizeExtractedValue(specificationText);
+  if (!source) {
+    return '';
+  }
+
+  const start = /^\d+(?:\.\d+)?\s*/.exec(source);
+  if (!start) {
+    return source;
+  }
+
+  let result = start[0];
+  let index = result.length;
+
+  while (index < source.length) {
+    const char = source[index];
+    if (/[A-Za-zμµ]/.test(char)) {
+      result += char;
+      index += 1;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      const next = source[index + 1] || '';
+      if (/[A-Za-zμµ]/.test(next)) {
+        result += char;
+        index += 1;
+        continue;
+      }
+    }
+
+    // 字母段结束后，遇到汉字、斜杠、数字等后缀信息即停止。
+    break;
+  }
+
+  return sanitizeExtractedValue(result) || source;
+}
+
+function extractCasFromDoc(doc) {
+  const candidates = [];
+  const labelRegex = /(cas\s*no|casno|cas号|cas)/i;
+
+  doc.querySelectorAll('td,th,li,div,span,p').forEach((element) => {
+    const text = (element.textContent || '').replaceAll(/\s+/g, ' ').trim();
+    if (!text || !labelRegex.test(text)) {
+      return;
+    }
+    candidates.push(text);
+    if (element.nextElementSibling?.textContent) {
+      candidates.push(element.nextElementSibling.textContent);
+    }
+    if (element.parentElement?.textContent) {
+      candidates.push(element.parentElement.textContent);
+    }
+  });
+
+  for (const candidate of candidates) {
+    const extracted = extractFirstCasNumber(candidate);
+    if (extracted) {
+      return extracted;
+    }
+  }
+
+  return '';
+}
+
+function parseProductDetail(html) {
+  // 表格结构固定，直接匹配 td-2 中的内容
+  // 注意：</td> 和 <td> 之间可能有换行和空格
+  const name = extractFieldFromHtml(html, /中文名称：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '未知';
+  const englishName = extractFieldFromHtml(html, /英文名称：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
+  const brand = extractFieldFromHtml(html, /品牌：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
+  const specificationRaw = extractFieldFromHtml(html, /包装规格：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
+  const casNumber = extractFirstCasNumber(extractFieldFromHtml(html, /casno：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '') || '';
+
+  const specification = extractLeadingSpecificationValue(specificationRaw);
+
+  return {
+    name: name.trim(),
+    english_name: englishName.trim(),
+    specification: specification.trim(),
+    brand: brand.trim(),
+    cas_number: casNumber,
+    product_number: '',
+    alias: '',
+  };
+}
+
+async function findCartTab() {
+  const tabs = await chrome.tabs.query({ url: `${systemConfig.reagentSiteUrl}/*` });
+  return tabs.find((tab) => isCartPageUrl(tab.url));
+}
+
+async function fetchProductDetail(detailUrl) {
+  if (!detailUrl) {
+    return createBasicItem('', 'missing_url');
+  }
+
+  try {
+    const response = await fetchWithTimeout(detailUrl, {}, DETAIL_REQUEST_TIMEOUT_MS);
+    if (!response.ok) {
+      return createBasicItem('', 'http_error');
+    }
+    const html = await response.text();
+    return {
+      ...parseProductDetail(html),
+      detail_fetch_status: 'success',
+    };
+  } catch (error) {
+    console.error('[Popup] 获取详情页失败:', error);
+    if (isTimeoutError(error)) {
+      return createBasicItem('', 'timeout');
+    }
+    return createBasicItem('', 'error');
+  }
+}
+
+async function loadSystemConfig() {
+  try {
+    const data = await chrome.storage.local.get([STORAGE_KEYS.SYSTEM_CONFIG]);
+    if (data?.[STORAGE_KEYS.SYSTEM_CONFIG]) {
+      systemConfig = { ...DEFAULT_SYSTEM_CONFIG, ...data[STORAGE_KEYS.SYSTEM_CONFIG] };
+    }
+  } catch (error) {
+    console.warn('[Popup] 加载配置失败，使用默认配置:', error);
+  }
+}
+
+async function getSiteTheme() {
+  try {
+    const targetTab = await findCartTab();
+    if (!targetTab?.id) {
+      return null;
+    }
+    const response = await sendMessageWithAutoInject(targetTab.id, { action: 'GET_THEME' });
+    return response?.success ? response.data : null;
+  } catch (error) {
+    console.warn('[Popup] 获取网站主题失败:', error);
+    return null;
+  }
+}
+
+// 动态注入脚本检测系统主题（用户自定义域名）
+async function getSystemTheme() {
+  try {
+    // 查找系统 URL 对应的标签页
+    const tabs = await chrome.tabs.query({ url: `${systemConfig.systemUrl}/*` });
+    const targetTab = tabs?.[0];
+    if (!targetTab?.id) {
+      return null;
+    }
+
+    // 动态注入脚本获取主题 - 只读取 localStorage
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTab.id },
+      func: () => {
+        const theme = localStorage.getItem('theme');
+        if (theme === 'dark') {
+          return { darkMode: true };
+        }
+        if (theme === 'light') {
+          return { darkMode: false };
+        }
+        return null;
+      }
+    });
+
+    if (results?.[0]?.result) {
+      return results[0].result;
+    }
+    return null;
+  } catch (error) {
+    console.warn('[Popup] 获取系统主题失败:', error);
+    return null;
+  }
+}
+
+// 立即初始化，避免 DOMContentLoaded 不触发
+(async function init() {
+  await loadSystemConfig();
 
   const mainSection = document.getElementById('mainSection');
   const previewSection = document.getElementById('previewSection');
+  const configSection = document.getElementById('configSection');
   const fetchBtn = document.getElementById('fetchBtn');
   const targetStatus = document.getElementById('targetStatus');
   const result = document.getElementById('result');
-  const orderType = document.getElementById('orderType');
   const itemList = document.getElementById('itemList');
   const previewCount = document.getElementById('previewCount');
   const selectAll = document.getElementById('selectAll');
   const backBtn = document.getElementById('backBtn');
   const importBtn = document.getElementById('importBtn');
+  const configBtn = document.getElementById('configBtn');
+  const configBackBtn = document.getElementById('configBackBtn');
+  const configSaveBtn = document.getElementById('configSaveBtn');
+  const systemUrlInput = document.getElementById('systemUrl');
+  const reagentSiteUrlInput = document.getElementById('reagentSiteUrl');
+  const siteThemeStatus = document.getElementById('siteThemeStatus');
 
   let cartItems = [];
 
-  // 先尝试发送一个测试消息来激活连接
-  try {
-    const tabs = await chrome.tabs.query({ url: 'https://reagent.bjmu.edu.cn/*' });
-    if (tabs.length > 0) {
-      await chrome.tabs.sendMessage(tabs[0].id, { action: 'ping' });
-      console.log('[Popup] 连接测试成功');
-    }
-  } catch (e) {
-    console.log('[Popup] 连接测试:', e.message);
-  }
-
-  // 初始化
-  await checkTargetStatus();
-
-  // 事件绑定
-  fetchBtn.addEventListener('click', fetchCart);
-  selectAll.addEventListener('change', toggleSelectAll);
-  backBtn.addEventListener('click', showMainSection);
-  importBtn.addEventListener('click', importSelected);
-
-  // 检查目标网站状态
   async function checkTargetStatus() {
     try {
-      const tabs = await chrome.tabs.query({ url: 'https://reagent.bjmu.edu.cn/*' });
-      const targetTab = tabs.find(tab => tab.url && tab.url.includes('page=gwc'));
-
+      const targetTab = await findCartTab();
       if (targetTab) {
         targetStatus.textContent = '已连接';
         targetStatus.className = 'badge badge-success';
         fetchBtn.disabled = false;
         return targetTab;
-      } else {
-        targetStatus.textContent = '请先打开购物车页面';
-        targetStatus.className = 'badge badge-warning';
-        fetchBtn.disabled = true;
-        return null;
       }
+
+      targetStatus.textContent = '请先打开购物车页面';
+      targetStatus.className = 'badge badge-warning';
+      fetchBtn.disabled = true;
+      return null;
     } catch (error) {
       console.error('[Popup] 检查失败:', error);
       targetStatus.textContent = '检查失败';
       targetStatus.className = 'badge badge-error';
+      fetchBtn.disabled = true;
       return null;
     }
   }
 
-  // 获取购物车数据
-  async function fetchCart() {
-    fetchBtn.disabled = true;
-    fetchBtn.innerHTML = '<span class="loading"></span>获取中...';
-    result.className = 'message message-info show';
-    result.textContent = '正在获取购物车数据...';
-
-    try {
-      // 直接查找目标标签页
-      const tabs = await chrome.tabs.query({ url: 'https://reagent.bjmu.edu.cn/*' });
-      const targetTab = tabs.find(tab => tab.url && tab.url.includes('page=gwc'));
-
-      if (!targetTab) {
-        throw new Error('请先打开北大医学部试剂平台的购物车页面');
-      }
-
-      // 直接发送消息给内容脚本
-      const response = await chrome.tabs.sendMessage(targetTab.id, { action: 'GET_CART' });
-      console.log('[Popup] 内容脚本响应:', response);
-
-      if (!response || !response.success) {
-        throw new Error(response?.error || '获取购物车数据失败');
-      }
-
-      const cartItemsRaw = response.data;
-      console.log('[Popup] 原始购物车数据:', cartItemsRaw);
-
-      if (!cartItemsRaw || cartItemsRaw.length === 0) {
-        result.className = 'message message-info show';
-        result.textContent = '购物车为空或无已提交订单';
-        fetchBtn.disabled = false;
-        fetchBtn.textContent = '获取购物车';
-        return;
-      }
-
-      // 获取每个产品的详情页信息
-      result.textContent = `获取到 ${cartItemsRaw.length} 个商品，正在获取详情...`;
-
-      const items = [];
-      for (const cartItem of cartItemsRaw) {
-        try {
-          const detail = await fetchProductDetail(cartItem.detailUrl);
-          if (detail) {
-            // 数量、价格、危险品标记用购物车的
-            detail.quantity = cartItem.quantity;
-            detail.price = cartItem.price;
-            detail.product_id = cartItem.productId;
-            detail.detail_url = cartItem.detailUrl;
-            detail.is_dangerous = cartItem.is_dangerous || false;
-            items.push(detail);
-          }
-        } catch (error) {
-          console.error('[Popup] 获取详情失败:', cartItem.productId, error);
-        }
-      }
-
-      cartItems = items;
-      console.log('[Popup] 最终商品列表:', cartItems);
-
-      if (cartItems.length === 0) {
-        result.className = 'message message-error show';
-        result.textContent = '无法获取产品详情';
-        fetchBtn.disabled = false;
-        fetchBtn.textContent = '获取购物车';
-        return;
-      }
-
-      showPreview();
-
-    } catch (error) {
-      console.error('[Popup] 获取失败:', error);
-      result.className = 'message message-error show';
-      result.textContent = error.message || '获取失败，请重试';
-      fetchBtn.disabled = false;
-      fetchBtn.textContent = '获取购物车';
-    }
-  }
-
-  // 从标签页获取产品详情 - 通过执行脚本
-  async function fetchProductDetailFromTab(tabId, productId) {
-    const url = `https://reagent.bjmu.edu.cn/Front.aspx?page=cpxq&param=${productId}`;
-
-    try {
-      // 使用fetch获取详情页
-      const response = await fetch(url);
-      if (!response.ok) {
-        return createBasicItem(productId);
-      }
-
-      const html = await response.text();
-      return parseProductDetail(html, productId);
-    } catch (error) {
-      console.error('[Popup] 获取详情页失败:', error);
-      return createBasicItem(productId);
-    }
-  }
-
-  // 获取产品详情
-  async function fetchProductDetail(detailUrl) {
-    if (!detailUrl) {
-      return createBasicItem('');
-    }
-
-    try {
-      const response = await fetch(detailUrl);
-      if (!response.ok) {
-        return createBasicItem('');
-      }
-
-      const html = await response.text();
-      return parseProductDetail(html);
-    } catch (error) {
-      console.error('[Popup] 获取详情页失败:', error);
-      return createBasicItem('');
-    }
-  }
-
-  // 创建基本信息
-  function createBasicItem(productId) {
-    return {
-      name: `查看产品详情`,
-      english_name: '',
-      specification: '',
-      quantity: 1,
-      price: 0,
-      brand: '',
-      cas_number: '',
-      alias: '',
-      product_id: productId || '',
-      detail_url: ''
-    };
-  }
-
-  // 解析产品详情页
-  function parseProductDetail(html) {
-    let name = '';
-    let englishName = '';
-    let brand = '';
-    let specification = '';
-    let casNumber = '';
-
-    console.log('[Popup] 开始解析详情页, HTML长度:', html.length);
-
-    // 从 imginfo 区域获取主要信息
-    // 格式: <li>品名<span class="pl50">产品名</span></li>
-    const nameMatch = html.match(/品名<span[^>]*class="pl50"[^>]*>([^<]+)<\/span>/i);
-    if (nameMatch) {
-      name = nameMatch[1].trim();
-      console.log('[Popup] 找到品名:', name);
-    }
-
-    // 品牌
-    const brandMatch = html.match(/品牌<span[^>]*class="pl50"[^>]*>([^<]+)<\/span>/i);
-    if (brandMatch) {
-      brand = brandMatch[1].trim();
-      console.log('[Popup] 找到品牌:', brand);
-    }
-
-    // 包装规格
-    const specMatch = html.match(/包装规格<span[^>]*class="pl20"[^>]*>([^<]+)<\/span>/i);
-    if (specMatch) {
-      specification = specMatch[1].trim();
-      console.log('[Popup] 找到包装规格:', specification);
-    }
-
-    // 尝试从表格中获取更多信息
-    // 中文名称
-    const cnNameMatch = html.match(/中文名称[：:][^<]*<td[^>]*>([^<]+)<\/td>/i);
-    if (cnNameMatch && !name) {
-      name = cnNameMatch[1].trim();
-    }
-
-    // CAS号 - 从表格
-    const casTdMatch = html.match(/casno[：:][^<]*<td[^>]*>([^<]+)<\/td>/i);
-    if (casTdMatch) {
-      casNumber = casTdMatch[1].trim();
-      console.log('[Popup] 找到CAS:', casNumber);
-    }
-
-    // 纯度
-    const purityMatch = html.match(/纯度[：:][^<]*<td[^>]*>([^<]+)<\/td>/i);
-    if (purityMatch) {
-      const purity = purityMatch[1].trim();
-      if (!specification) {
-        specification = purity;
-      }
-    }
-
-    // 英文名称
-    const enTdMatch = html.match(/英文名称[：:][^<]*<td[^>]*>([^<]+)<\/td>/i);
-    if (enTdMatch) {
-      englishName = enTdMatch[1].trim();
-    }
-
-    // 供货商（作为品牌备用）
-    const supplierMatch = html.match(/供货商[：:][^<]*<td[^>]*>([^<]+)<\/td>/i);
-    if (supplierMatch && !brand) {
-      brand = supplierMatch[1].trim();
-    }
-
-    // 如果还是没找到，从页面标题获取
-    if (!name) {
-      const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-      if (titleMatch) {
-        name = titleMatch[1].split('-')[0].trim();
-      }
-    }
-
-    console.log('[Popup] 解析结果: name=', name, 'englishName=', englishName, 'brand=', brand, 'specification=', specification, 'casNumber=', casNumber);
-
-    return {
-      name: name || '未知产品',
-      english_name: englishName || '',
-      specification: specification || '',
-      brand: brand || '',
-      cas_number: casNumber || '',
-      alias: ''
-    };
-  }
-
-  // 显示预览界面
-  function showPreview() {
-    mainSection.classList.add('hidden');
-    previewSection.classList.remove('hidden');
-    renderItems();
-    updateCount();
-  }
-
-  // 渲染商品列表
   function renderItems() {
     itemList.innerHTML = '';
 
     cartItems.forEach((item, index) => {
       const card = document.createElement('div');
       card.className = 'item-card selected';
-      card.dataset.index = index;
+      card.dataset.index = String(index);
 
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.className = 'checkbox';
       checkbox.checked = true;
-      checkbox.addEventListener('change', () => {
+
+      // 卡片任意区域点击均可切换选中状态
+      card.addEventListener('click', (e) => {
+        // 如果点击的是标题链接，不触发切换
+        if (e.target.closest('a')) return;
+
+        // 如果点击的不是复选框本身，则手动切换复选框的状态
+        if (e.target !== checkbox) {
+          checkbox.checked = !checkbox.checked;
+        }
+
         card.classList.toggle('selected', checkbox.checked);
         updateCount();
       });
 
       const nameDiv = document.createElement('div');
       nameDiv.className = 'item-name';
-
-      // 商品名称可点击跳转详情页
       if (item.detail_url) {
         const link = document.createElement('a');
         link.href = item.detail_url;
         link.target = '_blank';
         link.textContent = item.name || '查看详情';
-        link.style.color = '#0066cc';
-        link.style.textDecoration = 'underline';
-        link.style.cursor = 'pointer';
         nameDiv.appendChild(link);
       } else {
         nameDiv.textContent = item.name || '未知商品';
@@ -349,31 +476,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const body = document.createElement('div');
       body.className = 'item-body';
+      const bodyText = document.createElement('span');
+      bodyText.className = 'item-body-text';
+      bodyText.textContent = item.cas_number ? `CAS: ${item.cas_number}` : 'CAS: 无CAS';
+      body.appendChild(bodyText);
 
-      // 使用安全的 DOM 创建方式代替 innerHTML，避免 HTML 注入风险
-      function addRow(labelText, valueText) {
-        const row = document.createElement('div');
-        row.className = 'item-row';
-
-        const labelSpan = document.createElement('span');
-        labelSpan.className = 'item-label';
-        labelSpan.textContent = labelText;
-
-        const valueSpan = document.createElement('span');
-        valueSpan.className = 'item-value';
-        valueSpan.textContent = valueText;
-
-        row.appendChild(labelSpan);
-        row.appendChild(valueSpan);
-        body.appendChild(row);
-      }
-
-      addRow('规格:', item.specification || '-');
-      addRow('数量:', String(item.quantity));
-      addRow('单价:', item.price ? '¥' + item.price : '-');
-      addRow('品牌:', item.brand || '-');
-      if (item.product_id) {
-        addRow('产品ID:', String(item.product_id));
+      if (item.detail_fetch_status === 'timeout') {
+        const timeoutBadge = document.createElement('span');
+        timeoutBadge.className = 'item-status-badge item-status-timeout';
+        timeoutBadge.textContent = '超时';
+        body.appendChild(timeoutBadge);
       }
 
       card.appendChild(header);
@@ -382,42 +494,191 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // 更新选中计数
   function updateCount() {
     const checked = itemList.querySelectorAll('.item-card.selected').length;
-    previewCount.textContent = `已选择 ${checked} / ${cartItems.length} 项`;
-    importBtn.textContent = `导入选中 (${checked})`;
+    const timeoutCount = cartItems.filter((item) => item.detail_fetch_status === 'timeout').length;
+    const timeoutText = timeoutCount > 0 ? ` · ${timeoutCount} 项详情超时` : '';
+    previewCount.textContent = `已选择 ${checked} / ${cartItems.length} 项${timeoutText}`;
+    importBtn.textContent = `开始导入 (${checked})`;
     importBtn.disabled = checked === 0;
   }
 
-  // 全选/取消全选
   function toggleSelectAll() {
     const checked = selectAll.checked;
-    itemList.querySelectorAll('.item-card').forEach(card => {
+    itemList.querySelectorAll('.item-card').forEach((card) => {
       const checkbox = card.querySelector('.checkbox');
-      checkbox.checked = checked;
+      if (checkbox) {
+        checkbox.checked = checked;
+      }
       card.classList.toggle('selected', checked);
     });
     updateCount();
   }
 
-  // 返回主界面
   function showMainSection() {
     previewSection.classList.add('hidden');
+    configSection.classList.add('hidden');
     mainSection.classList.remove('hidden');
     fetchBtn.disabled = false;
     fetchBtn.textContent = '获取购物车';
-    // 清除消息提示
     result.className = 'message';
     result.textContent = '';
   }
 
-  // 导入选中的商品 - 使用storage传递数据，跳转页面
+  function showConfigSection() {
+    mainSection.classList.add('hidden');
+    previewSection.classList.add('hidden');
+    configSection.classList.remove('hidden');
+
+    // 填充当前配置
+    systemUrlInput.value = systemConfig.systemUrl;
+    reagentSiteUrlInput.value = systemConfig.reagentSiteUrl;
+
+    // 检测网站主题
+    detectSiteTheme();
+  }
+
+  async function detectSiteTheme() {
+    siteThemeStatus.textContent = '检测中...';
+    siteThemeStatus.className = 'badge badge-info';
+
+    // 只检测系统 URL 的主题
+    const theme = await getSystemTheme();
+
+    if (theme) {
+      if (theme.darkMode === true) {
+        siteThemeStatus.textContent = '🌙 深色模式';
+        siteThemeStatus.className = 'badge badge-secondary';
+        // 同步插件深色模式
+        document.body.classList.add('dark-mode');
+      } else if (theme.darkMode === false) {
+        siteThemeStatus.textContent = '☀️ 浅色模式';
+        siteThemeStatus.className = 'badge badge-warning';
+        // 同步插件浅色模式
+        document.body.classList.remove('dark-mode');
+      }
+    } else {
+      siteThemeStatus.textContent = '请先打开系统网站';
+      siteThemeStatus.className = 'badge badge-error';
+    }
+  }
+
+  async function saveConfig() {
+    const url = systemUrlInput.value.trim();
+    const reagentSiteUrl = reagentSiteUrlInput.value.trim() || DEFAULT_SYSTEM_CONFIG.reagentSiteUrl;
+
+    const parsedSystemUrl = parseHttpUrl(url);
+    if (!parsedSystemUrl) {
+      alert('请输入有效的系统 URL');
+      return;
+    }
+
+    const parsedReagentSiteUrl = parseHttpUrl(reagentSiteUrl);
+    if (!parsedReagentSiteUrl) {
+      alert('请输入有效的试剂网站 URL');
+      return;
+    }
+
+    const newConfig = {
+      systemUrl: parsedSystemUrl.origin,
+      reagentSiteUrl: parsedReagentSiteUrl.origin,
+    };
+
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEYS.SYSTEM_CONFIG]: newConfig });
+      systemConfig = { ...DEFAULT_SYSTEM_CONFIG, ...newConfig };
+      showMainSection();
+      result.className = 'message message-success show';
+      result.textContent = '配置已保存';
+      setTimeout(() => {
+        result.className = 'message';
+        result.textContent = '';
+      }, 2000);
+    } catch (error) {
+      alert('保存失败: ' + error.message);
+    }
+  }
+
+  function showPreview() {
+    mainSection.classList.add('hidden');
+    previewSection.classList.remove('hidden');
+    renderItems();
+    updateCount();
+  }
+
+  async function fetchCart() {
+    fetchBtn.disabled = true;
+    fetchBtn.innerHTML = '<span class="loading"></span>获取中...';
+    result.className = 'message message-info show';
+    result.textContent = '正在获取购物车数据...';
+
+    try {
+      const targetTab = await findCartTab();
+      if (!targetTab) {
+        throw new Error('请先打开试剂平台的购物车页面');
+      }
+
+      const response = await sendMessageWithAutoInject(targetTab.id, { action: 'GET_CART' });
+      if (!response?.success) {
+        throw new Error(response?.error || '获取购物车数据失败');
+      }
+
+      const cartItemsRaw = response.data;
+      if (!Array.isArray(cartItemsRaw) || cartItemsRaw.length === 0) {
+        result.className = 'message message-info show';
+        result.textContent = '购物车为空或无已提交订单';
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = '获取购物车';
+        return;
+      }
+
+      result.textContent = `获取到 ${cartItemsRaw.length} 个商品，正在获取详情...`;
+
+      const items = await mapWithConcurrencyLimit(
+        cartItemsRaw,
+        DETAIL_FETCH_CONCURRENCY,
+        async (cartItem) => {
+          try {
+            const detail = await fetchProductDetail(cartItem.detailUrl);
+            detail.quantity = cartItem.quantity;
+            detail.price = cartItem.price;
+            detail.product_id = cartItem.productId;
+            detail.detail_url = cartItem.detailUrl;
+            detail.is_hazardous = cartItem.is_dangerous || false;
+            return detail;
+          } catch (error) {
+            console.error('[Popup] 获取详情失败:', cartItem.productId, error);
+            return null;
+          }
+        }
+      );
+
+      cartItems = items;
+      if (cartItems.length === 0) {
+        result.className = 'message message-error show';
+        result.textContent = '无法获取产品详情';
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = '获取购物车';
+        return;
+      }
+
+      showPreview();
+    } catch (error) {
+      console.error('[Popup] 获取失败:', error);
+      result.className = 'message message-error show';
+      result.textContent = error.message || '获取失败，请重试';
+      fetchBtn.disabled = false;
+      fetchBtn.textContent = '获取购物车';
+    }
+  }
+
   async function importSelected() {
     const selectedItems = [];
-    itemList.querySelectorAll('.item-card.selected').forEach(card => {
-      const index = parseInt(card.dataset.index);
-      selectedItems.push(cartItems[index]);
+    itemList.querySelectorAll('.item-card.selected').forEach((card) => {
+      const index = Number.parseInt(card.dataset.index, 10);
+      if (!Number.isNaN(index)) {
+        selectedItems.push(cartItems[index]);
+      }
     });
 
     if (selectedItems.length === 0) {
@@ -425,25 +686,50 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const orderTypeValue = orderType.value;
-
     try {
-      // 保存数据到 storage（解决URL长度限制问题）
-      await saveCartItemsToStorage(selectedItems, orderTypeValue);
-      console.log('[Popup] 商品数据已保存到storage');
-
-      const targetPage = orderTypeValue === 'reagent' ? '/reagent-orders' : '/consumable-orders';
-      const importUrl = `${SYSTEM_URL}${targetPage}?import=true&_t=${Date.now()}`;
+      await saveCartItemsToStorage(selectedItems);
+      const batchId = await saveImportBatch(selectedItems);
+      const systemUrl = await resolveSystemUrl();
+      const importUrl = `${systemUrl}/cart-import?import=true&batch_id=${encodeURIComponent(batchId)}`;
 
       result.className = 'message message-info show';
-      result.textContent = `正在跳转到系统页面...`;
-
-      // 打开系统页面
+      result.textContent = '正在跳转到系统页面...';
       await chrome.tabs.create({ url: importUrl });
     } catch (error) {
       console.error('[Popup] 导入失败:', error);
       result.className = 'message message-error show';
-      result.textContent = '导入失败: ' + error.message;
+      result.textContent = `导入失败: ${error.message}`;
     }
   }
-});
+
+  await checkTargetStatus();
+
+  // 初始化时自动检测并同步主题
+  (async () => {
+    const theme = await getSystemTheme();
+    if (theme) {
+      if (theme.darkMode === true) {
+        document.body.classList.add('dark-mode');
+      } else {
+        document.body.classList.remove('dark-mode');
+      }
+    }
+  })();
+
+  try {
+    const targetTab = await findCartTab();
+    if (targetTab) {
+      await sendMessageWithAutoInject(targetTab.id, { action: 'ping' });
+    }
+  } catch (error) {
+    console.warn('[Popup] ping 失败:', error?.message || error);
+  }
+
+  fetchBtn.addEventListener('click', fetchCart);
+  selectAll.addEventListener('change', toggleSelectAll);
+  backBtn.addEventListener('click', showMainSection);
+  importBtn.addEventListener('click', importSelected);
+  configBtn.addEventListener('click', showConfigSection);
+  configBackBtn.addEventListener('click', showMainSection);
+  configSaveBtn.addEventListener('click', saveConfig);
+})();

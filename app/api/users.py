@@ -8,7 +8,7 @@ import logging
 import time
 from typing import Optional, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select, func, or_
@@ -34,8 +34,8 @@ from app.core.constants import (
     USERNAME_MIN_LENGTH,
 )
 from app.core.time_utils import utc_iso_str
-from app.core.request_utils import get_client_ip
-from app.core.redis import delete_cached_session, get_redis
+from app.core.request_utils import get_client_ip, get_request_id
+from app.core.redis import delete_cached_session, get_redis, redis_key
 from app.database import get_db, DBSession
 from app.models.user import (
     PublicUserResponse,
@@ -50,7 +50,8 @@ from app.services.image_service import save_avatar, delete_file
 from app.services.rate_limit import enforce_rate_limit
 from app.services.user_service import get_user_by_username, get_user_by_id
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.sql_utils import normalize_field_sql, normalize_search_term
+from app.services.search_matchers import build_applicant_id_subquery
+from app.services.sql_utils import normalize_search_term
 from app.services.session_service import (
     cleanup_expired_sessions,
     _check_device_limit,
@@ -60,6 +61,7 @@ from app.services.session_service import (
     LOGIN_ATTEMPTS,
     _login_attempts_lock,
 )
+from app.services.audit_logger import log_audit_event
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +70,7 @@ DUMMY_PASSWORD_HASH = get_password_hash("constant-timing-placeholder")
 
 def _rate_limit_key(client_ip: str) -> str:
     """生成速率限制的 Redis Key"""
-    return f"rate_limit:login:{client_ip}"
+    return redis_key(f"rate_limit:login:{client_ip}")
 
 
 def _check_rate_limit(client_ip: str) -> None:
@@ -76,6 +78,11 @@ def _check_rate_limit(client_ip: str) -> None:
     redis_client = get_redis()
     
     if redis_client is None:
+        if settings.use_secure_runtime():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Login service temporarily unavailable"
+            )
         _check_rate_limit_memory(client_ip)
         return
     
@@ -87,7 +94,12 @@ def _check_rate_limit(client_ip: str) -> None:
         current = redis_client.get(key)
         
         if current is not None:
-            attempts = int(current)
+            try:
+                attempts = int(current)
+            except (TypeError, ValueError):
+                # 兼容历史/异常脏数据，避免把登录流程放大为 500
+                redis_client.delete(key)
+                return
             ttl = redis_client.ttl(key)
             
             if ttl > 0 and attempts >= MAX_LOGIN_ATTEMPTS:
@@ -96,6 +108,11 @@ def _check_rate_limit(client_ip: str) -> None:
                     detail="Too many login attempts, please try again in 5 minutes"
                 )
     except redis.RedisError:
+        if settings.use_secure_runtime():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Login service temporarily unavailable"
+            )
         _check_rate_limit_memory(client_ip)
 
 
@@ -104,7 +121,9 @@ def _record_failed_login(client_ip: str) -> None:
     redis_client = get_redis()
     
     if redis_client is None:
-        # Redis 不可用时，使用内存后备
+        # 生产环境 fail-closed，开发环境使用内存后备
+        if settings.use_secure_runtime():
+            return
         _record_failed_login_memory(client_ip)
         return
     
@@ -118,7 +137,9 @@ def _record_failed_login(client_ip: str) -> None:
         pipe.expire(key, LOGIN_WINDOW_SECONDS)
         pipe.execute()
     except redis.RedisError:
-        # Redis 错误时，使用内存后备
+        # 生产环境 fail-closed，开发环境使用内存后备
+        if settings.use_secure_runtime():
+            return
         _record_failed_login_memory(client_ip)
 
 
@@ -207,7 +228,12 @@ def login(
     """
     try:
         # 清理过期会话
-        cleanup_expired_sessions(db)
+        try:
+            cleanup_expired_sessions(db)
+        except Exception:
+            # 会话清理是维护任务，不应阻断登录主流程
+            db.rollback()
+            logger.exception("Session cleanup failed before login, continue with auth flow")
 
         client_ip = get_client_ip(http_request)
         user_agent = http_request.headers.get("User-Agent", "Unknown")
@@ -222,6 +248,13 @@ def login(
         if not user or not password_valid:
             # 记录失败尝试
             _record_failed_login(client_ip)
+            log_audit_event(
+                "login",
+                outcome="failure",
+                client_ip=client_ip,
+                request_id=get_request_id(http_request),
+                detail=f"username={login_request.username}",
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
@@ -229,6 +262,15 @@ def login(
             )
         
         if not user.is_active:
+            log_audit_event(
+                "login",
+                outcome="failure",
+                actor_user_id=user.id,
+                target_user_id=user.id,
+                client_ip=client_ip,
+                request_id=get_request_id(http_request),
+                detail="account_disabled",
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is disabled"
@@ -249,10 +291,11 @@ def login(
             _evict_oldest_session(db, user.id)
         
         # Create JWT token (include username_version for session invalidation)
+        user_role = user.role.value if isinstance(user.role, UserRole) else str(user.role)
         access_token = create_access_token(
             user_id=user.id,
             username=user.username,
-            role=user.role.value,
+            role=user_role,
             username_version=user.username_version or 1
         )
         
@@ -294,16 +337,27 @@ def login(
             max_age=settings.session_expire_hours * SECONDS_PER_HOUR,
             path="/",
         )
+
+        log_audit_event(
+            "login",
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            client_ip=client_ip,
+            request_id=get_request_id(http_request),
+            detail=f"device_id={login_request.device_id or '-'}",
+        )
         
         return json_response
     except HTTPException:
         raise
     except Exception:
-        # 记录其他所有异常
-        logger.exception("Login error")
+        # 记录其他所有异常，并返回可关联追踪的 request id
+        request_id = get_request_id(http_request)
+        logger.exception("Login error request_id=%s", request_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed"
+            detail="Login failed",
+            headers={"X-Request-ID": request_id},
         )
 
 
@@ -315,6 +369,9 @@ def logout(
     """Logout endpoint - clears the authentication cookie and session"""
     # 获取 token 并删除会话
     token = http_request.cookies.get("access_token")
+    client_ip = get_client_ip(http_request)
+    request_id = get_request_id(http_request)
+    actor_user_id: int | None = None
     if token:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         
@@ -323,6 +380,7 @@ def logout(
             select(UserSession).where(UserSession.token_hash == token_hash)
         ).first()
         if session:
+            actor_user_id = session.user_id
             db.delete(session)
             db.commit()
         
@@ -336,6 +394,14 @@ def logout(
         key="access_token",
         path="/",
     )
+
+    log_audit_event(
+        "logout",
+        actor_user_id=actor_user_id,
+        target_user_id=actor_user_id,
+        client_ip=client_ip,
+        request_id=request_id,
+    )
     
     return response
 
@@ -343,6 +409,7 @@ def logout(
 @router.post("/change-password")
 def change_password(
     password_request: ChangePasswordRequest,
+    http_request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -364,6 +431,14 @@ def change_password(
     # Update password
     current_user.password_hash = get_password_hash(password_request.new_password)
     db.commit()
+
+    log_audit_event(
+        "change_password",
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        client_ip=get_client_ip(http_request),
+        request_id=get_request_id(http_request),
+    )
     
     return {"message": "密码修改成功"}
 
@@ -407,8 +482,8 @@ def list_users(
     current_user: Annotated[User, Depends(require_admin)],
     skip: int = 0,
     limit: int = 50,
-    username: Optional[str] = None,
-    full_name: Optional[str] = None,
+    username: Annotated[Optional[str], Query(max_length=100)] = None,
+    full_name: Annotated[Optional[str], Query(max_length=100)] = None,
     role: Optional[str] = None,
     is_active: Optional[bool] = None,
 ):
@@ -502,25 +577,24 @@ def list_users(
 
 @router.get("/search", response_model=list[UserSearchItem], dependencies=[Depends(get_current_user)])
 def search_users(
-    q: str,
+    q: Annotated[str, Query(max_length=100)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Search users for autocomplete by username/full_name/full_name_pinyin/full_name initials."""
-    keyword = normalize_search_term((q or "").strip())
-    if not keyword:
+    raw_keyword = (q or "").strip()
+    keyword = normalize_search_term(raw_keyword)
+    if not raw_keyword or not keyword:
         return []
 
-    search_pattern = f"%{keyword}%"
+    applicant_id_subquery = build_applicant_id_subquery(raw_keyword, fuzzy=False)
 
     statement = (
         select(User)
         .where(User.is_active)
         .where(User.role != UserRole.PUBLIC)
         .where(
-            normalize_field_sql(User.username).ilike(search_pattern)
-            | normalize_field_sql(User.full_name).ilike(search_pattern)
-            | normalize_field_sql(func.coalesce(User.full_name_pinyin, "")).ilike(search_pattern)
-            | normalize_field_sql(func.coalesce(User.full_name_pinyin_initials, "")).ilike(search_pattern)
+            (User.username == raw_keyword)
+            | User.id.in_(applicant_id_subquery)
         )
         .order_by(func.coalesce(User.full_name_pinyin, User.full_name).asc(), User.id.asc())
     )
@@ -554,6 +628,7 @@ def get_user(
 def update_user(
     user_id: int,
     user_update: UserUpdate,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
@@ -575,10 +650,24 @@ def update_user(
     # Update fields
     update_data = user_update.model_dump(exclude_unset=True)
     update_data.pop("avatar_url", None)
-    
-    # Prevent non-admin users from changing role
+
+    allowed_fields_for_admin = {"username", "full_name", "is_active", "role"}
+    allowed_fields_for_user = {"username", "full_name"}
+
+    allowed_fields = allowed_fields_for_admin if current_user.role == UserRole.ADMIN else allowed_fields_for_user
+    blocked_fields = sorted(set(update_data.keys()) - allowed_fields)
+    if blocked_fields:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not allowed to update fields: {', '.join(blocked_fields)}"
+        )
+
+    # Security boundary: only admin can modify role
     if "role" in update_data and current_user.role != UserRole.ADMIN:
-        del update_data["role"]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin can update role"
+        )
     
     # Handle username change (user can change their own username, admin can change any)
     username_changed = False
@@ -625,14 +714,26 @@ def update_user(
     
     db.commit()
     db.refresh(user)
+
+    if any(field in update_data for field in ("role", "is_active", "username")):
+        log_audit_event(
+            "update_user_sensitive_fields",
+            actor_user_id=current_user.id,
+            target_user_id=user.id,
+            client_ip=get_client_ip(request),
+            request_id=get_request_id(request),
+            detail=f"fields={','.join(sorted(update_data.keys()))}",
+        )
     
     return user
 
 
-@router.post("/{user_id}/activate", response_model=UserResponse, dependencies=[Depends(require_admin)])
+@router.post("/{user_id}/activate", response_model=UserResponse)
 def activate_user(
     user_id: int,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ):
     """Activate a user account (admin only)"""
     user = get_user_by_id(db, user_id)
@@ -651,6 +752,14 @@ def activate_user(
     user.is_active = True
     db.commit()
     db.refresh(user)
+
+    log_audit_event(
+        "activate_user",
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+    )
     
     return user
 
@@ -658,6 +767,7 @@ def activate_user(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)]
 ):
@@ -689,12 +799,22 @@ def delete_user(
 
     db.commit()
 
+    log_audit_event(
+        "deactivate_user",
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+    )
 
-@router.put("/{user_id}/role", response_model=UserResponse, dependencies=[Depends(require_admin)])
+
+@router.put("/{user_id}/role", response_model=UserResponse)
 def update_user_role(
     user_id: int,
     role: str,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ):
     """Update user role (admin only)"""
     user = get_user_by_id(db, user_id)
@@ -715,6 +835,15 @@ def update_user_role(
     
     db.commit()
     db.refresh(user)
+
+    log_audit_event(
+        "update_user_role",
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+        detail=f"new_role={user.role.value}",
+    )
     
     return user
 
@@ -729,7 +858,9 @@ class ResetPasswordRequest(BaseModel):
 def reset_user_password(
     user_id: int,
     password_request: ResetPasswordRequest,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ):
     """Reset user password (admin only)
 
@@ -773,6 +904,14 @@ def reset_user_password(
     # Update password
     user.password_hash = get_password_hash(password_request.new_password)
     db.commit()
+
+    log_audit_event(
+        "reset_user_password",
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+    )
 
     return {"message": "密码重置成功"}
 

@@ -3,7 +3,7 @@
  * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、完成
  * 参考 Inventory 页面实现，使用 FilterTable 组件
  */
-import React, { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
 
@@ -24,15 +24,17 @@ import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
-import { processNotes } from '@/lib/utils'
+import { downloadBlobResponse, processNotes } from '@/lib/utils'
 import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import {
   ConsumableOrderSchema,
   createValibotResolver,
+  extractApiErrorDetail,
+  getApiErrorMessage,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { ConsumableOrderFormData, ValidationError } from '@/lib/validationSchemas'
+import type { ConsumableOrderFormData, ConsumableOrderFormInputData, ValidationError } from '@/lib/validationSchemas'
 import { getConsumableOrderTableColumns } from '@/lib/tableConfigs'
 import {
   getConsumableOrderFormFields,
@@ -72,7 +74,7 @@ const columnHelper = createColumnHelper<ConsumableOrder>()
 const CONSUMABLE_ORDER_STATUS_OPTIONS = [
   { value: 'all', label: '全部状态' },
   { value: 'pending', label: '待审批' },
-  { value: 'approved', label: '已审批' },
+  { value: 'approved', label: '已批准' },
   { value: 'rejected', label: '已驳回' },
   { value: 'completed', label: '已完成' },
 ]
@@ -105,10 +107,6 @@ export function ConsumableOrdersPage() {
     tableId: 'consumable-orders-table',
     statusOptions: CONSUMABLE_ORDER_STATUS_OPTIONS,
     searchFieldOptions: CONSUMABLE_SEARCH_FIELD_OPTIONS,
-    defaultStatus: 'all',
-    defaultSearchField: 'all',
-    pageSize: 50,
-    debounceMs: 300,
   })
 
   // Dialog 状态
@@ -121,7 +119,7 @@ export function ConsumableOrdersPage() {
   // 表单逻辑
   // ---------------------------------------------------------------------------
   // 表单实例
-  const form = useForm<ConsumableOrderFormData>({
+  const form = useForm<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>({
     resolver: createValibotResolver(ConsumableOrderSchema),
     defaultValues: defaultConsumableOrderValues,
     shouldFocusError: false,
@@ -129,7 +127,7 @@ export function ConsumableOrdersPage() {
 
   // 加载数据
   const loadOrders = useCallback(async () => {
-    await filter.invalidate()
+    await Promise.resolve(filter.invalidate())
   }, [filter])
 
   // 点击添加按钮
@@ -161,8 +159,6 @@ export function ConsumableOrdersPage() {
 
   const handleFormSubmit = form.handleSubmit(
     async (formData) => {
-      console.log('✅ 耗材订单表单验证通过:', formData)
-
       setIsSubmitting(true)
       try {
         if (dialogState === 'edit' && editingItem) {
@@ -200,8 +196,7 @@ export function ConsumableOrdersPage() {
         setDeleteConfirm(false)
         setDialogState(null)
       } catch (err) {
-        const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
-        const errorDetail = error.response?.data?.detail
+        const errorDetail = extractApiErrorDetail(err)
         const validationErrors = toValidationErrors(errorDetail)
         if (validationErrors.length > 0) {
           validationErrors.forEach((e: ValidationError) => {
@@ -216,24 +211,13 @@ export function ConsumableOrdersPage() {
       } finally {
         setIsSubmitting(false)
       }
-    },
-    (errors) => {
-      console.log('❌ 表单验证失败:', errors)
     }
   )
 
   const handleExport = useCallback(async () => {
     try {
       const response = await consumableOrderAPI.exportOrders()
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `consumable_orders_export_${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      downloadBlobResponse(response, `consumable_orders_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
     } catch {
       toast.error('导出失败')
     }
@@ -255,8 +239,7 @@ export function ConsumableOrdersPage() {
       await loadOrders()
       toast.success('耗材订单已删除')
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+      toast.error(getApiErrorMessage(error, '删除失败'))
     }
   }, [deleteConfirm, editingItem, loadOrders, setDialogState])
 
@@ -384,6 +367,11 @@ const ActionButtons = React.memo(function ActionButtons({
   onEdit: (item: Record<string, unknown>) => void
   onRefresh: () => void | Promise<void>
 }) {
+  const onRefreshRef = useRef(onRefresh)
+  useEffect(() => {
+    onRefreshRef.current = onRefresh
+  }, [onRefresh])
+
   const actions = useMemo(() => [
     {
       id: 'approve',
@@ -396,7 +384,7 @@ const ActionButtons = React.memo(function ActionButtons({
       disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'rejected',
       onClick: async (currItem: Record<string, unknown>) => {
         await consumableOrderAPI.approve(currItem.id as number)
-        await onRefresh()
+        await onRefreshRef.current()
         toast.success('审批通过')
       }
     },
@@ -411,7 +399,7 @@ const ActionButtons = React.memo(function ActionButtons({
       disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'approved',
       onClick: async (currItem: Record<string, unknown>) => {
         await consumableOrderAPI.reject(currItem.id as number, '管理员驳回')
-        await onRefresh()
+        await onRefreshRef.current()
         toast.success('已驳回')
       }
     },
@@ -421,11 +409,11 @@ const ActionButtons = React.memo(function ActionButtons({
       showWhen: (currItem: Record<string, unknown>) => currItem.status === 'approved',
       onClick: async (currItem: Record<string, unknown>) => {
         await consumableOrderAPI.complete(currItem.id as number)
-        await onRefresh()
+        await onRefreshRef.current()
         toast.success('耗材订单已完成')
       }
     }
-  ], [onRefresh])
+  ], [])
 
   return (
     <TableActionButtonsMemo
@@ -445,11 +433,9 @@ const ActionButtons = React.memo(function ActionButtons({
 
   const prevItem = prevProps.item
   const nextItem = nextProps.item
-  if (prevItem === nextItem) return true
-
-  const prevKeys = Object.keys(prevItem)
-  const nextKeys = Object.keys(nextItem)
-  if (prevKeys.length !== nextKeys.length) return false
-
-  return prevKeys.every((key) => prevItem[key] === nextItem[key])
+  return (
+    prevItem.id === nextItem.id
+    && prevItem.status === nextItem.status
+    && prevItem.updated_at === nextItem.updated_at
+  )
 })

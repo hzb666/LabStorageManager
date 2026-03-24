@@ -8,10 +8,10 @@ from typing import Callable, Optional
 
 import redis
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import select
 
-from app.core.redis import get_redis
+from app.core.redis import get_redis, redis_key
 from app.core.auth import AdminUser, require_admin
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
@@ -24,6 +24,11 @@ from app.core.constants import (
 from app.core.time_utils import utc_iso_str
 from app.database import DBSession
 from app.models.user_session import UserSession
+from app.services.inventory_queries import (
+    common_inventory_clause,
+    regular_inventory_clause,
+    regular_inventory_query,
+)
 from app.services.user_service import get_user_by_id
 
 router = APIRouter(prefix="/admin/users", tags=["User Logs"])
@@ -38,7 +43,7 @@ def _check_logs_token_rate_limit(admin_user_id: int) -> None:
         # Redis 不可用时，跳过速率限制检查（降级处理）
         return
     
-    key = f"rate_limit:logs_token:{admin_user_id}"
+    key = redis_key(f"rate_limit:logs_token:{admin_user_id}")
     
     try:
         current = redis_client.get(key)
@@ -64,7 +69,7 @@ def _record_logs_token_request(admin_user_id: int) -> None:
     if redis_client is None:
         return
     
-    key = f"rate_limit:logs_token:{admin_user_id}"
+    key = redis_key(f"rate_limit:logs_token:{admin_user_id}")
     
     try:
         pipe = redis_client.pipeline()
@@ -106,8 +111,17 @@ def is_token_valid(token: str) -> bool:
 
 class LogsQueryParams(BaseModel):
     """日志查询参数"""
-    keyword: Optional[str] = None  # 搜索关键词
+    keyword: Optional[str] = Field(default=None, max_length=100)  # 搜索关键词
     log_type: Optional[str] = None  # 日志类型：reagent_order, consumable_order, inventory, borrow, consume, session
+    skip: int = 0
+    limit: int = DEFAULT_PAGE_SIZE
+
+
+class LogsQueryRequest(BaseModel):
+    """日志查询请求体。"""
+    token: str
+    keyword: Optional[str] = Field(default=None, max_length=100)
+    log_type: Optional[str] = None
     skip: int = 0
     limit: int = DEFAULT_PAGE_SIZE
 
@@ -144,16 +158,18 @@ def generate_logs_token(
     }
 
 
-@router.get("/logs/{token}", response_model=dict, dependencies=[Depends(require_admin)])
+@router.post("/logs/query", response_model=dict, dependencies=[Depends(require_admin)])
 def get_user_logs(
-    token: str,
+    request: LogsQueryRequest,
     db: DBSession,
-    keyword: Optional[str] = None,
-    log_type: Optional[str] = None,
-    skip: int = 0,
-    limit: int = DEFAULT_PAGE_SIZE,
 ):
     """获取用户日志（管理员专属）"""
+    token = request.token
+    keyword = request.keyword
+    log_type = request.log_type
+    skip = request.skip
+    limit = request.limit
+
     # 验证 token（避免重复解析）
     parsed = parse_log_token(token)
     if parsed is None:
@@ -274,7 +290,7 @@ def get_user_logs(
     # 3. 库存（入库）
     if log_type is None or log_type == "inventory":
         from app.models.inventory import Inventory
-        query = select(Inventory).where(Inventory.created_by_id == user_id)
+        query = regular_inventory_query().where(Inventory.created_by_id == user_id)
         if keyword:
             query = query.where(Inventory.name.contains(keyword))
         items = db.exec(query.order_by(Inventory.created_at.desc()).offset(skip).limit(limit)).all()
@@ -317,6 +333,7 @@ def get_user_logs(
         ).where(
             BorrowLog.borrower_id == user_id,
             BorrowLog.is_consume.is_(False),
+            regular_inventory_clause(),
         )
         if keyword:
             query = query.where(Inventory.name.contains(keyword))
@@ -360,6 +377,7 @@ def get_user_logs(
         ).where(
             BorrowLog.borrower_id == user_id,
             BorrowLog.is_consume.is_(True),
+            common_inventory_clause(),
         )
         if keyword:
             query = query.where(Inventory.name.contains(keyword))

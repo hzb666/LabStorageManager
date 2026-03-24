@@ -9,6 +9,7 @@ from app.models.inventory import Inventory, InventoryStatus, ManualInventoryCrea
 from app.services.api_utils import empty_to_none
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.internal_code import generate_internal_code
+from app.services.common_name_utils import strip_std_name_marker
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.spec_utils import SpecificationError, parse_specification
 from app.services.shelf_utils import normalize_storage_location
@@ -45,8 +46,9 @@ def create_manual_inventory_items(
     normalized_storage_location = normalize_storage_location(string_fields["storage_location"])
     string_fields["storage_location"] = normalized_storage_location
 
+    normalized_name_for_pinyin = strip_std_name_marker(item_data.name) if is_common else item_data.name
     pinyin_fields = compute_pinyin_fields(
-        name=item_data.name,
+        name=normalized_name_for_pinyin,
         category=item_data.category,
         brand=item_data.brand,
         storage_location=normalized_storage_location,

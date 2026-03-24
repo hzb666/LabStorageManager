@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { inventoryAPI } from '@/api/client'
 import { toast } from '@/lib/toast'
-import { normalizeApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage, normalizeApiErrorMessage } from '@/lib/validationSchemas'
 import { cn } from '@/lib/utils'
 import { IMPORT_TEMPLATE_COLUMNS } from '@/lib/constants'
 import { 
@@ -122,8 +122,7 @@ export function ImportPage() {
         toast.success(`导入成功！共 ${response.data.created} 条记录`)
       }
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '导入失败'))
+      toast.error(getApiErrorMessage(error, '导入失败'))
     } finally {
       setImporting(false)
     }
@@ -138,13 +137,13 @@ export function ImportPage() {
       const blob = new Blob([response.data], { 
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
       })
-      const url = window.URL.createObjectURL(blob)
+      const url = globalThis.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
       a.download = 'inventory_import_template.xlsx'
       document.body.appendChild(a)
       a.click()
-      window.URL.revokeObjectURL(url)
+      globalThis.URL.revokeObjectURL(url)
       document.body.removeChild(a)
     } catch (error) {
       const axiosError = error as AxiosError

@@ -2,11 +2,18 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+    command:
+      [
+        "sh",
+        "-c",
+        "printf 'appendonly yes\nrequirepass %s\n' \"$REDIS_PASSWORD\" > /tmp/redis.conf && exec redis-server /tmp/redis.conf",
+      ]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -22,7 +29,8 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      TRUST_PROXY_HEADERS: "true"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+      TRUST_PROXY_HEADERS: "false"
     volumes:
       - app_data:/data
     depends_on:

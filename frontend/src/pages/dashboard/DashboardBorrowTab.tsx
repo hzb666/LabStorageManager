@@ -7,7 +7,6 @@ import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
-import { AxiosError } from 'axios'
 import * as v from 'valibot'
 import { Package } from 'lucide-react'
 
@@ -28,7 +27,7 @@ import type { FilterAPI } from '@/hooks/useTableState'
 import {
   ReturnFormSchema,
   createValibotResolver,
-  normalizeApiErrorMessage,
+  getApiErrorMessage,
   createReturnQuantitySchema,
 } from '@/lib/validationSchemas'
 import { getReturnFormFields, defaultReturnValues } from '@/lib/formConfigs'
@@ -164,8 +163,7 @@ export function DashboardBorrowTab() {
       await refreshTables()
       toast.success('归还成功')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      toast.error(normalizeApiErrorMessage(axiosError.response?.data?.detail, '归还失败'))
+      toast.error(getApiErrorMessage(error, '归还失败'))
     } finally {
       setIsSubmittingReturn(false)
     }

@@ -11,8 +11,8 @@ from typing import Optional
 
 import re
 
-from pydantic import field_validator
-from sqlalchemy import Index
+from pydantic import ConfigDict, field_validator
+from sqlalchemy import Column, Enum as SAEnum, Index
 from sqlmodel import Field, SQLModel
 
 
@@ -34,8 +34,21 @@ class UserBase(SQLModel):
             raise ValueError('用户名只能包含字母、数字和下划线')
         return v
 
-    full_name: str = Field(max_length=100, index=True)
-    role: UserRole = Field(default=UserRole.USER)
+    full_name: str = Field(max_length=100)
+    role: UserRole = Field(
+        default=UserRole.USER,
+        sa_column=Column(
+            SAEnum(
+                UserRole,
+                native_enum=False,
+                create_constraint=False,
+                values_callable=lambda enum_cls: [item.value for item in enum_cls],
+                validate_strings=True,
+            ),
+            nullable=False,
+            default=UserRole.USER.value,
+        ),
+    )
     is_active: bool = Field(default=True)
     avatar_url: Optional[str] = Field(default=None, max_length=500)
 
@@ -52,8 +65,8 @@ class User(UserBase, table=True):
     password_hash: str
     username_version: int = Field(default=1, description="用户名版本号，每次修改用户名时+1")
     # 姓名拼音，用于按姓名排序
-    full_name_pinyin: Optional[str] = Field(default=None, index=True, max_length=200)
-    full_name_pinyin_initials: Optional[str] = Field(default=None, index=True, max_length=200)
+    full_name_pinyin: Optional[str] = Field(default=None, max_length=200)
+    full_name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
@@ -71,6 +84,9 @@ class UserCreate(SQLModel):
 
 class UserUpdate(SQLModel):
     """DTO for updating user information"""
+    # 安全边界：拒绝未声明字段
+    model_config = ConfigDict(extra="forbid")
+
     username: Optional[str] = Field(None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
     
     # 添加 username 格式验证
@@ -82,8 +98,8 @@ class UserUpdate(SQLModel):
         return v
     
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    role: Optional[UserRole] = None
 
 
 class PublicUserResponse(BaseResponse):

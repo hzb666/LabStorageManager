@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -25,29 +26,73 @@
       --border: oklch(0.922 0.016 264.531);
       --ring: oklch(0.704 0.04 256.788);
       --input: oklch(0.922 0.016 264.531);
+      --link-color: #2563eb;
+      --link-hover-color: #1d4ed8;
+
+      /* 统一状态颜色 - Badge & Message 共享 */
+      --success-bg: #dcfce7;
+      --success-border: #86efac;
+      --success-foreground: #166534;
+
+      --warning-bg: #fef3c7;
+      --warning-border: #fcd34d;
+      --warning-foreground: #92400e;
+
+      --error-bg: #fee2e2;
+      --error-border: #fca5a5;
+      --error-foreground: #991b1b;
+
+      --info-bg: #dbeafe;
+      --info-border: #93c5fd;
+      --info-foreground: #1e40af;
+
+      --secondary-bg: #e0e7ff;
+      --secondary-border: #a5b4fc;
+      --secondary-foreground: #3730a3;
     }
 
-    /* 深色模式 */
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --background: oklch(0.15 0.015 285.823);
-        --foreground: oklch(0.92 0 0);
-        --card: oklch(0.22 0.015 285.823);
-        --card-foreground: oklch(0.92 0 0);
-        --primary: oklch(0.92 0 0);
-        --primary-foreground: oklch(0.208 0.042 265.755);
-        --secondary: oklch(0.24 0.015 285.823);
-        --secondary-foreground: oklch(0.92 0 0);
-        --muted: oklch(0.22 0.015 285.823);
-        --muted-foreground: oklch(0.65 0.015 285.823);
-        --accent: oklch(0.24 0.015 285.823);
-        --accent-foreground: oklch(0.92 0 0);
-        --destructive: oklch(0.7022 0.1892 22.23);
-        --destructive-foreground: oklch(0.92 0 0);
-        --border: oklch(0.3 0.015 285.823);
-        --ring: oklch(0.92 0 0);
-        --input: oklch(0.3 0.015 285.823);
-      }
+    /* 深色模式 - 跟随目标网站主题（不依赖操作系统） */
+    body.dark-mode {
+      --background: oklch(0.15 0.015 285.823);
+      --foreground: oklch(0.92 0 0);
+      --card: oklch(0.22 0.015 285.823);
+      --card-foreground: oklch(0.92 0 0);
+      --primary: oklch(0.92 0 0);
+      --primary-foreground: oklch(0.208 0.042 265.755);
+      --secondary: oklch(0.24 0.015 285.823);
+      --secondary-foreground: oklch(0.92 0 0);
+      --muted: oklch(0.22 0.015 285.823);
+      --muted-foreground: oklch(0.65 0.015 285.823);
+      --accent: oklch(0.24 0.015 285.823);
+      --accent-foreground: oklch(0.92 0 0);
+      --destructive: oklch(0.7022 0.1892 22.23);
+      --destructive-foreground: oklch(0.92 0 0);
+      --border: oklch(0.3 0.015 285.823);
+      --ring: oklch(0.92 0 0);
+      --input: oklch(0.3 0.015 285.823);
+      --link-color: #93c5fd;
+      --link-hover-color: #bfdbfe;
+
+      /* 深色模式状态颜色 */
+      --success-bg: #14532d;
+      --success-border: #15803d;
+      --success-foreground: #bbf7d0;
+
+      --warning-bg: #78350f;
+      --warning-border: #b45309;
+      --warning-foreground: #fde68a;
+
+      --error-bg: #7f1d1d;
+      --error-border: #b91c1c;
+      --error-foreground: #fecaca;
+
+      --info-bg: #1e3a8a;
+      --info-border: #1d4ed8;
+      --info-foreground: #bfdbfe;
+
+      --secondary-bg: #312e81;
+      --secondary-border: #6366f1;
+      --secondary-foreground: #c7d2fe;
     }
 
     * {
@@ -56,10 +101,18 @@
       box-sizing: border-box;
     }
 
+    button,
+    input,
+    optgroup,
+    select,
+    textarea {
+      font-family: inherit;
+    }
+
     body {
       width: 380px;
       min-height: 280px;
-      font-family: 'SourceHanSansSC', 'SourceHanSansSC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
       font-size: 14px;
       background: var(--background);
       color: var(--foreground);
@@ -96,14 +149,13 @@
     }
 
     .card-footer {
-      padding: 12px 16px;
-      border-top: 1px solid var(--border);
+      padding: 0px 16px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
-    /* 按钮样式 */
+    /* 按钮样式 - 与项目 Button 组件完全一致 */
     .btn {
       display: inline-flex;
       align-items: center;
@@ -113,16 +165,18 @@
       border-radius: var(--radius);
       font-size: 14px;
       font-weight: 500;
-      height: 36px;
+      height: 40px;
       padding: 0 16px;
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: background-color 0.15s, color 0.15s, box-shadow 0.15s, border-color 0.15s;
       border: 1px solid transparent;
       outline: none;
+      box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.05);
     }
 
     .btn:focus-visible {
-      box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+      border-color: var(--ring);
+      box-shadow: 0 0 0 3px var(--ring);
     }
 
     .btn:disabled {
@@ -130,60 +184,70 @@
       pointer-events: none;
     }
 
+    /* Primary 按钮 - 与 variant="default" 一致 */
     .btn-primary {
       background: var(--primary);
       color: var(--primary-foreground);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      border-color: transparent;
+      box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.05);
     }
 
     .btn-primary:hover {
-      opacity: 0.9;
+      background: color-mix(in srgb, var(--primary) 85%, transparent);
     }
 
-    .btn-secondary {
-      background: var(--secondary);
-      color: var(--secondary-foreground);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    body.dark-mode .btn-primary {
+      border: 2px solid var(--primary);
     }
 
-    .btn-secondary:hover {
-      opacity: 0.9;
+    body.dark-mode .btn-primary:hover {
+      background: color-mix(in srgb, var(--primary) 85%, transparent);
     }
 
-    .btn-outline {
-      background: transparent;
-      border-color: var(--border);
+    /* Modern 按钮 - 与 variant="modern" 一致 */
+    .btn-modern {
+      background: var(--card);
       color: var(--foreground);
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.05);
     }
 
-    .btn-outline:hover {
+    .btn-modern:hover {
       background: var(--accent);
       color: var(--accent-foreground);
     }
 
-    .btn-success {
-      background: #22c55e;
-      color: white;
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    body.dark-mode .btn-modern {
+      background: color-mix(in srgb, var(--input) 30%, transparent);
+      border-color: var(--input);
     }
 
-    .btn-success:hover {
-      background: #16a34a;
+    body.dark-mode .btn-modern:hover {
+      background: var(--input);
     }
 
+    /* Danger 按钮 - 与 variant="destructive" 一致 */
     .btn-danger {
       background: var(--destructive);
       color: var(--destructive-foreground);
-      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.05);
     }
 
     .btn-danger:hover {
-      opacity: 0.9;
+      background: color-mix(in srgb, var(--destructive) 90%, transparent);
+    }
+
+    body.dark-mode .btn-danger {
+      background: color-mix(in srgb, var(--destructive) 70%, transparent);
+    }
+
+    body.dark-mode .btn-danger:hover {
+      background: color-mix(in srgb, var(--destructive) 80%, transparent);
     }
 
     .btn-sm {
-      height: 32px;
-      padding: 0 12px;
+      height: 40px;
+      padding: 0 20px;
       font-size: 14px;
     }
 
@@ -191,92 +255,136 @@
       width: 100%;
     }
 
-    /* 输入框 */
-    .input, .select {
-      height: 36px;
+    .btn-row {
+      display: flex;
+      width: 100%;
+      gap: 8px;
+    }
+
+    /* 图标按钮 */
+    .btn-icon {
+      height: 40px;
+      width: 40px;
+      padding: 0;
+      flex-shrink: 0;
+    }
+
+    .btn-flex {
+      flex: 1;
+    }
+
+    /* 输入框 - 与主项目 Input 组件样式一致 */
+    .input,
+    .select {
+      display: inline-flex;
+      height: 40px;
+      width: 100%;
       padding: 0 12px;
       font-size: 14px;
-      border: 1px solid var(--border);
+      line-height: 40px;
       border-radius: var(--radius);
-      background: var(--background);
+      border: 1px solid var(--border);
+      background: var(--card);
       color: var(--foreground);
+      transition: all 0.3s ease-out;
+      box-sizing: border-box;
       outline: none;
     }
 
-    .input:focus, .select:focus {
+    .input::placeholder {
+      color: var(--muted-foreground);
+    }
+
+    .input:focus,
+    .select:focus {
       border-color: var(--ring);
-      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 0 0 1px var(--ring), 0 0 0 4px rgba(0, 0, 0, 0.05);
+    }
+
+    .input:disabled,
+    .select:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     /* 状态标签 */
     .badge {
       display: inline-flex;
       align-items: center;
-      padding: 2px 8px;
-      font-size: 12px;
-      font-weight: 500;
-      border-radius: 9999px;
+      height: 32px;
+      padding: 0 10px;
+      font-size: 14px;
+      border-radius: var(--radius);
+      white-space: nowrap;
     }
 
     .badge-success {
-      background: #f0fdf4;
-      color: #16a34a;
-      border: 1px solid #bbf7d0;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .badge-success {
-        background: rgba(34, 197, 94, 0.2);
-        color: #4ade80;
-        border-color: rgba(34, 197, 94, 0.3);
-      }
+      background: var(--success-bg);
+      color: var(--success-foreground);
+      border: 1px solid var(--success-border);
     }
 
     .badge-warning {
-      background: #fefce8;
-      color: #ca8a04;
-      border: 1px solid #fef08a;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .badge-warning {
-        background: rgba(234, 179, 8, 0.2);
-        color: #facc15;
-        border-color: rgba(234, 179, 8, 0.3);
-      }
+      background: var(--warning-bg);
+      color: var(--warning-foreground);
+      border: 1px solid var(--warning-border);
     }
 
     .badge-error {
-      background: #fef2f2;
-      color: #dc2626;
-      border: 1px solid #fecaca;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .badge-error {
-        background: rgba(239, 68, 68, 0.2);
-        color: #f87171;
-        border-color: rgba(239, 68, 68, 0.3);
-      }
+      background: var(--error-bg);
+      color: var(--error-foreground);
+      border: 1px solid var(--error-border);
     }
 
     .badge-info {
-      background: #eff6ff;
-      color: #2563eb;
-      border: 1px solid #bfdbfe;
+      background: var(--info-bg);
+      color: var(--info-foreground);
+      border: 1px solid var(--info-border);
     }
 
-    @media (prefers-color-scheme: dark) {
-      .badge-info {
-        background: rgba(59, 130, 246, 0.2);
-        color: #93c5fd;
-        border-color: rgba(59, 130, 246, 0.3);
-      }
+    .badge-secondary {
+      background: var(--secondary-bg);
+      color: var(--secondary-foreground);
+      border: 1px solid var(--secondary-border);
+    }
+
+    body.dark-mode .badge-success {
+      background: var(--success-bg);
+      color: var(--success-foreground);
+      border-color: var(--success-border);
+    }
+
+    body.dark-mode .badge-warning {
+      background: var(--warning-bg);
+      color: var(--warning-foreground);
+      border-color: var(--warning-border);
+    }
+
+    body.dark-mode .badge-error {
+      background: var(--error-bg);
+      color: var(--error-foreground);
+      border-color: var(--error-border);
+    }
+
+    body.dark-mode .badge-info {
+      background: var(--info-bg);
+      color: var(--info-foreground);
+      border-color: var(--info-border);
+    }
+
+    body.dark-mode .badge-secondary {
+      background: var(--secondary-bg);
+      color: var(--secondary-foreground);
+      border-color: var(--secondary-border);
     }
 
     /* 表单组 */
     .form-group {
-      margin-bottom: 16px;
+      margin-bottom: 20px;
+    }
+
+    .form-group-last {
+      margin-bottom: 5px;
     }
 
     .form-label {
@@ -284,19 +392,20 @@
       font-size: 14px;
       font-weight: 500;
       color: var(--foreground);
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
 
-    /* 复选框 */
+    /* 复选框 - Native looking styling */
     .checkbox-wrapper {
       display: flex;
-      align-items: center;
-      gap: 8px;
+      align-items: flex-start;
+      gap: 10px;
     }
 
     .checkbox {
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
+      margin-top: 2px;
       cursor: pointer;
       accent-color: var(--primary);
     }
@@ -304,8 +413,8 @@
     /* 加载动画 */
     .loading {
       display: inline-block;
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
       border: 2px solid currentColor;
       border-right-color: transparent;
       border-radius: 50%;
@@ -313,61 +422,98 @@
     }
 
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
 
-    /* 消息提示 */
+    /* 消息提示 - Alert style */
     .message {
-      padding: 12px;
+      padding: 10px 16px;
       border-radius: var(--radius);
       font-size: 14px;
-      margin-top: 12px;
+      margin-top: 16px;
       display: none;
+      border: 1px solid transparent;
+      line-height: 1.4;
+      text-align: center;
     }
 
-    .message.show { display: block; }
-    .message-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; }
-    .message-error { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
-    .message-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #2563eb; }
-
-    @media (prefers-color-scheme: dark) {
-      .message-success {
-        background: rgba(34, 197, 94, 0.15);
-        border-color: rgba(34, 197, 94, 0.3);
-        color: #4ade80;
-      }
-      .message-error {
-        background: rgba(239, 68, 68, 0.15);
-        border-color: rgba(239, 68, 68, 0.3);
-        color: #f87171;
-      }
-      .message-info {
-        background: rgba(59, 130, 246, 0.15);
-        border-color: rgba(59, 130, 246, 0.3);
-        color: #93c5fd;
-      }
+    .message.show {
+      display: block;
     }
 
-    /* 商品卡片 */
+    .message-success {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success-foreground);
+    }
+
+    .message-error {
+      background: var(--error-bg);
+      border-color: var(--error-border);
+      color: var(--error-foreground);
+    }
+
+    .message-info {
+      background: var(--info-bg);
+      border-color: var(--info-border);
+      color: var(--info-foreground);
+    }
+
+    body.dark-mode .message-success {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success-foreground);
+    }
+
+    body.dark-mode .message-error {
+      background: var(--error-bg);
+      border-color: var(--error-border);
+      color: var(--error-foreground);
+    }
+
+    body.dark-mode .message-info {
+      background: var(--info-bg);
+      border-color: var(--info-border);
+      color: var(--info-foreground);
+    }
+
+    /* 商品卡片 - shadcn styling (匹配 dashboard tab) */
     .item-card {
-      background: var(--background);
+      background: var(--card);
+      color: var(--card-foreground);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 12px;
-      margin-bottom: 8px;
-      transition: border-color 0.15s ease;
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      /* shadow-sm */
+      padding: 14px;
+      margin-bottom: 10px;
+      transition: all 0.15s ease;
+      cursor: pointer;
+      width: 100%;
+      box-sizing: border-box;
     }
 
     .item-card.selected {
-      border-color: var(--primary);
+      background: color-mix(in srgb, var(--accent) 50%, transparent);
+    }
+
+    .item-card:hover,
+    .item-card.selected:hover {
       background: var(--accent);
+      color: var(--accent-foreground);
+    }
+
+    body.dark-mode .item-card.selected {
+      border-color: var(--primary);
     }
 
     .item-header {
       display: flex;
       align-items: flex-start;
-      gap: 10px;
-      margin-bottom: 8px;
+      gap: 12px;
+      margin-bottom: 6px;
     }
 
     .item-name {
@@ -375,11 +521,50 @@
       font-weight: 500;
       font-size: 14px;
       line-height: 1.4;
+      color: var(--foreground);
+    }
+
+    .item-name a {
+      color: var(--link-color);
+      text-decoration: underline;
+      text-underline-offset: 4px;
+    }
+
+    .item-name a:hover {
+      color: var(--link-hover-color);
     }
 
     .item-body {
-      font-size: 12px;
+      padding-left: 28px;
+      /* alignment with name next to checkbox */
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 14px;
       color: var(--muted-foreground);
+    }
+
+    .item-body-text {
+      min-width: 0;
+    }
+
+    .item-status-badge {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: var(--radius);
+      font-size: 12px;
+      line-height: 1;
+      border: 1px solid transparent;
+    }
+
+    .item-status-timeout {
+      background: var(--warning-bg);
+      color: var(--warning-foreground);
+      border-color: var(--warning-border);
     }
 
     .item-row {
@@ -398,57 +583,132 @@
 
     /* 商品列表容器 */
     .item-list {
-      max-height: 240px;
+      max-height: 280px;
       overflow-y: auto;
-      margin-top: 12px;
+      margin-top: 16px;
+      scrollbar-gutter: stable;
+    }
+
+    .item-list::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .item-list::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .item-list::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    .item-list::-webkit-scrollbar-thumb:hover {
+      background: var(--muted-foreground);
     }
 
     /* 底部说明 */
     .footer {
       padding: 12px 16px;
       text-align: center;
-      font-size: 12px;
+      font-size: 14px;
       color: var(--muted-foreground);
       border-top: 1px solid var(--border);
       background: var(--background);
     }
 
     /* 工具类 */
-    .flex { display: flex; }
-    .items-center { align-items: center; }
-    .justify-between { justify-content: space-between; }
-    .gap-2 { gap: 8px; }
-    .gap-3 { gap: 12px; }
-    .mb-3 { margin-bottom: 12px; }
-    .mt-3 { margin-top: 12px; }
-    .hidden { display: none; }
+    .flex {
+      display: flex;
+    }
+
+    .items-center {
+      align-items: center;
+    }
+
+    .justify-between {
+      justify-content: space-between;
+    }
+
+    .gap-2 {
+      gap: 8px;
+    }
+
+    .gap-3 {
+      gap: 12px;
+    }
+
+    .mb-3 {
+      margin-bottom: 12px;
+    }
+
+    .mt-3 {
+      margin-top: 12px;
+    }
+
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
+
 <body>
   <!-- 主界面 -->
   <div id="mainSection">
     <div class="card">
       <div class="card-header">
         <div class="card-title">购物车同步</div>
-        <div class="card-description">北大医学部试剂平台 → 实验室管理系统</div>
+        <div class="card-description">试剂平台 → 实验室管理系统</div>
       </div>
       <div class="card-content">
         <div class="form-group">
-          <label class="form-label">目标网站状态</label>
+          <div class="form-label">目标网站状态</div>
           <div id="targetStatus" class="badge badge-warning">检测中...</div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">订单类型</label>
-          <select id="orderType" class="select" style="width: 100%;">
-            <option value="consumable">耗材订单</option>
-            <option value="reagent">试剂订单</option>
-          </select>
+        <div class="btn-row">
+          <button class="btn btn-modern btn-icon" id="configBtn" title="配置">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+          <button class="btn btn-primary btn-flex" id="fetchBtn">获取购物车</button>
         </div>
 
-        <button class="btn btn-primary btn-block" id="fetchBtn">获取购物车</button>
-
         <div class="message" id="result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 配置界面 -->
+  <div id="configSection" class="hidden">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">插件配置</div>
+        <div class="card-description">配置系统 URL 以适配不同环境</div>
+      </div>
+      <div class="card-content">
+        <div class="form-group">
+          <label class="form-label" for="systemUrl">系统地址</label>
+          <input type="text" id="systemUrl" class="input" placeholder="http://localhost:5173">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reagentSiteUrl">试剂平台地址</label>
+          <input type="text" id="reagentSiteUrl" class="input" placeholder="https://reagent.bjmu.edu.cn">
+        </div>
+
+        <div class="form-group-last">
+          <label class="form-label">检测到的网站主题</label>
+          <div id="siteThemeStatus" class="badge badge-info">检测中...</div>
+        </div>
+      </div>
+
+      <div class="card-footer">
+        <button class="btn btn-modern btn-sm" id="configBackBtn">返回</button>
+        <button class="btn btn-primary btn-sm" id="configSaveBtn">保存配置</button>
       </div>
     </div>
   </div>
@@ -468,16 +728,17 @@
         <div class="item-list" id="itemList"></div>
       </div>
       <div class="card-footer">
-        <button class="btn btn-outline btn-sm" id="backBtn">返回</button>
-        <button class="btn btn-success btn-sm" id="importBtn">导入选中</button>
+        <button class="btn btn-modern btn-sm" id="backBtn">返回</button>
+        <button class="btn btn-primary btn-sm" id="importBtn">开始导入</button>
       </div>
     </div>
   </div>
 
   <div class="footer">
-    请确保购物车页面已打开并登录
+    提示：请确保试剂管理平台购物车页面已打开
   </div>
 
   <script src="popup.js"></script>
 </body>
+
 </html>

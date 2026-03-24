@@ -27,17 +27,19 @@ import type { FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { inventoryAPI, chemicalAPI } from '@/api/client'
-import { formatDate, processNotes } from '@/lib/utils'
+import { downloadBlobResponse, formatDate, processNotes } from '@/lib/utils'
 import {
   InventoryFormSchema,
   parseSpecification,
   createValibotResolver,
   validateAndNormalizeCASInput,
+  extractApiErrorDetail,
+  getApiErrorMessage,
   isSpecialCasValue,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { InventoryFormData, ValidationError } from '@/lib/validationSchemas'
+import type { InventoryFormData, InventoryFormInputData, ValidationError } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 import { UserRoles } from '@/lib/constants'
 import { useAuthStore } from '@/store/useStore'
@@ -106,15 +108,13 @@ export function InventoryPage() {
   // 刷新库存数据
   const loadInventory = useCallback(async () => {
     // 使缓存失效，后端已清除服务器缓存，会获取最新数据
-    console.log('🔄 开始刷新数据')
     await queryClient.invalidateQueries({ queryKey: ['inventory'] })
-    console.log('✅ 刷新完成')
   }, [queryClient])
 
   // ---------------------------------------------------------------------------
   // 表单逻辑
   // ---------------------------------------------------------------------------
-  const form = useForm<InventoryFormData>({
+  const form = useForm<InventoryFormInputData, unknown, InventoryFormData>({
     resolver: createValibotResolver(InventoryFormSchema),
     defaultValues: defaultInventoryValues,
     shouldFocusError: false,
@@ -176,8 +176,6 @@ export function InventoryPage() {
       setIsSubmitting(true)
       try {
         if (dialogState === 'edit' && editingItem) {
-          const status = formData.remaining_quantity === 0 ? 'consumed' : 'in_stock'
-          
           // 直接传递 specification 字符串，后端使用 parse_specification 解析
           // 使用 processNotes 处理备注：如果只有标签前缀但没有内容，则返回空字符串
           await inventoryAPI.update(editingItem.id, {
@@ -189,7 +187,6 @@ export function InventoryPage() {
             storage_location: formData.storage_location || '',
             remaining_quantity: formData.remaining_quantity,
             brand: formData.brand || '',
-            status: status,
             is_hazardous: formData.is_hazardous,
             notes: processNotes(formData.notes),
             specification: formData.specification || ''
@@ -219,8 +216,7 @@ export function InventoryPage() {
         }
         setDialogState(null)
       } catch (err) {
-        const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
-        const errorDetail = error.response?.data?.detail
+        const errorDetail = extractApiErrorDetail(err)
         const validationErrors = toValidationErrors(errorDetail)
         if (validationErrors.length > 0) {
           validationErrors.forEach((e: ValidationError) => {
@@ -259,8 +255,7 @@ export function InventoryPage() {
         await loadInventory()
         toast.success('库存已删除')
       } catch (error) {
-        const err = error as { response?: { data?: { detail?: string } } }
-        toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+        toast.error(getApiErrorMessage(error, '删除失败'))
       }
     } else {
       setDeleteConfirm(true)
@@ -270,15 +265,7 @@ export function InventoryPage() {
   const handleExport = useCallback(async () => {
     try {
       const response = await inventoryAPI.exportInventory()
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `inventory_export_${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      downloadBlobResponse(response, `inventory_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
     } catch {
       toast.error('导出失败')
     }
@@ -310,8 +297,7 @@ export function InventoryPage() {
       }
       toast.success('CAS 号识别成功')
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      const detail = err.response?.data?.detail
+      const detail = extractApiErrorDetail(error)
       if (typeof detail === 'string') {
         form.setError('cas_number', { message: normalizeApiErrorMessage(detail, 'CAS 号识别失败') })
       } else {
@@ -483,10 +469,11 @@ const ActionButtons = React.memo(function ActionButtons({
       setBorrowDialogOpen(false)
       setPendingBorrowItem(null)
     } catch (error) {
-      const err = error as { response?: { status?: number; data?: { detail?: string } } }
-      toast[err.response?.status === 409 ? 'warning' : 'error'](
-        err.response?.data?.detail || '借用失败'
-      )
+      const maybeStatus = typeof error === 'object' && error !== null && 'response' in error
+        ? (error as { response?: { status?: number } }).response?.status
+        : undefined
+      const message = getApiErrorMessage(error, '借用失败')
+      toast[maybeStatus === 409 ? 'warning' : 'error'](message)
       throw error
     } finally {
       setIsSubmittingBorrow(false)

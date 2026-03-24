@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from redis.client import PubSub
 
-from app.core.redis import get_redis
+from app.core.redis import get_redis, redis_key
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class RedisPubSub:
 
     @staticmethod
     def subscribe_patterns(*patterns: str) -> Optional[PubSub]:
-        """Subscribe to pub/sub patterns, e.g. sse:*.
+        """Subscribe to pub/sub patterns, e.g. lsm:sse:*.
 
         Returns None when Redis is not available.
         """
@@ -77,7 +77,7 @@ class RedisPubSub:
             return None
 
         try:
-            return int(redis_client.incr(f"sse:seq:{room}"))
+            return int(redis_client.incr(redis_key(f"sse:seq:{room}")))
         except Exception:
             logger.exception("Failed to generate Redis sequence for room %s", room)
             return None

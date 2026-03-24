@@ -8,7 +8,7 @@ import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
-import { FlaskConical } from 'lucide-react'
+import { FlaskConical, PackageCheck, Warehouse } from 'lucide-react'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
@@ -31,9 +31,11 @@ import {
   StockInFormSchema,
   type StockInFormInputData,
   type ReagentOrderFormData,
-  type ValidationError,
+  type ReagentOrderFormInputData,
   createValibotResolver,
   createRemainingQuantitySchema,
+  extractApiErrorDetail,
+  getApiErrorMessage,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
@@ -70,7 +72,7 @@ export function DashboardReagentTab() {
   const [stockinMode, setStockinMode] = useState<StockinMode>('quick')
   const [isSubmittingStockin, setIsSubmittingStockin] = useState(false)
 
-  const reagentForm = useForm<ReagentOrderFormData>({
+  const reagentForm = useForm<ReagentOrderFormInputData, unknown, ReagentOrderFormData>({
     resolver: createValibotResolver(ReagentOrderSchema),
     defaultValues: defaultReagentOrderValues,
     shouldFocusError: false,
@@ -89,6 +91,8 @@ export function DashboardReagentTab() {
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
     ])
   }, [queryClient])
+
+  const isReagentEditLocked = editingReagent?.status === 'approved' || editingReagent?.status === 'rejected'
 
   const reagentDashboardAPI: FilterAPI = useMemo(() => ({
     list: async (params) => {
@@ -151,8 +155,7 @@ export function DashboardReagentTab() {
       await refreshTables()
       toast.success('试剂订单已更新')
     } catch (err) {
-      const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
-      const detail = error.response?.data?.detail
+      const detail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(detail)
       if (validationErrors.length > 0) {
         validationErrors.forEach((e) => {
@@ -184,8 +187,7 @@ export function DashboardReagentTab() {
       await refreshTables()
       toast.success('试剂订单已删除')
     } catch (error) {
-      const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(normalizeApiErrorMessage(err.response?.data?.detail, '删除失败'))
+      toast.error(getApiErrorMessage(error, '删除失败'))
     }
   }, [deleteConfirm, editingReagent, reagentForm, refreshTables])
 
@@ -220,16 +222,15 @@ export function DashboardReagentTab() {
 
     setIsSubmittingStockin(true)
     try {
-      const result = await reagentOrderAPI.stockIn(stockinTarget.id, {
+      await reagentOrderAPI.stockIn(stockinTarget.id, {
         storage_location: formData.storage_location,
         remaining_quantity: remaining,
       })
       closeStockinDialog()
       await refreshTables()
-      toast.success(result.data?.message || '入库成功')
+      toast.success('入库成功')
     } catch (err) {
-      const error = err as { response?: { data?: { detail?: string | ValidationError[] } } }
-      const detail = error.response?.data?.detail
+      const detail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(detail)
       if (validationErrors.length > 0) {
         validationErrors.forEach((e) => {
@@ -257,18 +258,24 @@ export function DashboardReagentTab() {
           {
             id: 'confirm-arrival',
             label: '到货',
+            icon: <PackageCheck className="size-4" />,
+            variant: 'modern' as const,
+            className: 'text-blue-600/90 hover:text-blue-700 dark:text-blue-400/70 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30',
             confirm: true,
             confirmLabel: '确认',
             showWhen: (currItem: DashboardReagentOrder) => currItem.status === 'approved',
             onClick: async (currItem: DashboardReagentOrder) => {
-              const result = await reagentOrderAPI.confirmArrival(currItem.id, {})
+              await reagentOrderAPI.confirmArrival(currItem.id, {})
               await refreshTables()
-              toast.success(result.data.message || '确认到货成功')
+              toast.success('确认到货成功')
             },
           },
           {
             id: 'quick-stock-in',
             label: '一键入库',
+            icon: <Warehouse className="size-4" />,
+            variant: 'modern' as const,
+            className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
             showWhen: (currItem: DashboardReagentOrder) => currItem.status === 'approved',
             onClick: (currItem: DashboardReagentOrder) => {
               openStockinDialog(currItem, 'quick')
@@ -332,10 +339,13 @@ export function DashboardReagentTab() {
       >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>编辑试剂订单</DialogTitle>
+            <DialogTitle className="flex items-center justify-between gap-3">
+              <span>编辑试剂订单</span>
+              {isReagentEditLocked ? <span className="text-base text-muted-foreground">当前状态仅支持删除</span> : null}
+            </DialogTitle>
           </DialogHeader>
           <form onSubmit={submitReagentEdit}>
-            <BaseForm form={reagentForm} fields={getReagentOrderFormFields()} />
+            <BaseForm form={reagentForm} fields={getReagentOrderFormFields()} disabled={isReagentEditLocked} />
             <EditDialogActions
               mode="edit"
               onCancel={() => setEditingReagent(null)}
@@ -344,6 +354,7 @@ export function DashboardReagentTab() {
               submitLabelEdit="保存"
               submitLabelAdd="保存"
               isSubmitting={isSubmittingReagent}
+              disableSubmit={isReagentEditLocked}
             />
           </form>
         </DialogContent>

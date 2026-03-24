@@ -2,9 +2,9 @@
  * 表格状态综合 Hook
  * 整合 useFilterList、useTableSettings、useTableExpand 的功能
  */
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
-import type { InfiniteData } from '@tanstack/react-query'
+import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query'
 import type { SortingState, ColumnSizingState } from '@tanstack/react-table'
 import {
   getExpandAllState,
@@ -72,6 +72,8 @@ export interface UseTableStateOptions {
   defaultExpanded?: boolean
 }
 
+type TableQueryResult = UseInfiniteQueryResult<InfiniteData<ListResponseData>, unknown>
+
 // Hook 返回值
 export interface UseTableStateReturn {
   // ========== 筛选状态 ==========
@@ -122,9 +124,9 @@ export interface UseTableStateReturn {
   // 是否还有更多数据
   hasNextPage: boolean
   // 加载更多数据
-  fetchNextPage: () => void
+  fetchNextPage: TableQueryResult['fetchNextPage']
   // 刷新数据
-  refetch: () => void
+  refetch: TableQueryResult['refetch']
   // 手动使缓存失效
   invalidate: () => void
   // 重置筛选状态
@@ -150,6 +152,8 @@ export const DEFAULT_SEARCH_FIELD_OPTIONS: SearchFieldOption[] = [
   { value: 'category', label: '分类' },
 ]
 
+export const SEARCH_MAX_LENGTH = 100
+
 /**
  * 表格状态综合 Hook
  * 整合筛选、排序、分页、列宽持久化、展开状态管理
@@ -162,7 +166,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     defaultStatus = 'all',
     defaultSearchField = 'all',
     pageSize = 50,
-    debounceMs = 300,
+    debounceMs = 200,
     columnSizingDebounceMs = 500,
     extraParams = {},
     initialSearch = '',
@@ -173,14 +177,13 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   } = options
 
   const queryClient = useQueryClient()
-  const sortingRef = useRef<SortingState>([])
 
   // ========== 筛选状态 ==========
   const normalizedInitialSearch = initialSearch.trim()
   const normalizedInitialSearchField = initialSearchField ?? defaultSearchField
   const expandStorageId = expandStorageKey || tableId
 
-  const [searchInput, setSearchInputState] = useState(normalizedInitialSearch)
+  const [searchInput, setSearchInput] = useState(normalizedInitialSearch)
   const [globalFilter, setGlobalFilter] = useState(normalizedInitialSearch)
   const [statusFilter, setStatusFilter] = useState(defaultStatus)
   const [searchField, setSearchField] = useState(normalizedInitialSearchField)
@@ -188,15 +191,23 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     return getFuzzySearchState(expandStorageId, false)
   })
   const [sorting, setSorting] = useState<SortingState>([])
+  const normalizedSearchInput = searchInput.trim()
 
-  const setSearchInput = useCallback((value: string) => {
-    setSearchInputState(value)
-  }, [])
+  const handleSearchInputChange = useCallback((value: string) => {
+    setSearchInput(value)
+
+    // 清空输入时立即清空过滤词，避免 effect 中同步 setState
+    if (!value.trim() && globalFilter) {
+      setGlobalFilter('')
+    }
+  }, [globalFilter])
 
   const applySearchImmediate = useCallback((value: string, field?: string) => {
     const nextValue = value.trim()
-    setSearchInputState(nextValue)
-    setGlobalFilter(nextValue)
+    setSearchInput(nextValue)
+    if (nextValue.length <= SEARCH_MAX_LENGTH) {
+      setGlobalFilter(nextValue)
+    }
     if (field !== undefined) {
       setSearchField(field)
     }
@@ -204,8 +215,8 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
 
   // ========== 列宽状态 ==========
   const columnSizingStorageKey = `${storageKeyPrefix}-${tableId}`
-  const [columnSizing, setColumnSizingState] = useState<ColumnSizingState>(() => {
-    if (typeof globalThis.window === 'undefined') return {}
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
+    if (globalThis.window === undefined) return {}
     try {
       const stored = localStorage.getItem(columnSizingStorageKey)
       if (stored) {
@@ -233,9 +244,9 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   }, [columnSizing, columnSizingStorageKey, columnSizingDebounceMs])
 
   // 设置列宽
-  const setColumnSizing = useCallback(
+  const handleColumnSizingChange = useCallback(
     (updater: ColumnSizingState | ((prev: ColumnSizingState) => ColumnSizingState)) => {
-      setColumnSizingState(prev => {
+      setColumnSizing(prev => {
         const newSizing = typeof updater === 'function' ? updater(prev) : updater
         return newSizing
       })
@@ -273,17 +284,19 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   // 搜索防抖
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (globalFilter !== searchInput) {
-        setGlobalFilter(searchInput)
+      if (
+        globalFilter !== normalizedSearchInput
+        && searchInput.length <= SEARCH_MAX_LENGTH
+      ) {
+        setGlobalFilter(normalizedSearchInput)
       }
     }, debounceMs)
     return () => clearTimeout(timer)
-  }, [searchInput, globalFilter, debounceMs])
+  }, [searchInput, normalizedSearchInput, globalFilter, debounceMs])
 
   // 数据查询函数
   const queryFn = useCallback(async ({ pageParam = 0 }: { pageParam?: number }) => {
-    const currentSorting = sorting.length > 0 ? sorting : sortingRef.current
-    const sort = currentSorting[0]
+    const sort = sorting[0]
 
     const params: Record<string, unknown> = {
       skip: pageParam,
@@ -316,6 +329,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     hasNextPage,
     fetchNextPage,
     refetch,
+    isPlaceholderData,
   } = useInfiniteQuery({
     queryKey: [...queryKey, statusFilter, globalFilter, searchField, fuzzySearch, sorting],
     queryFn,
@@ -330,11 +344,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
 
   // 处理排序变化
   const handleSortingChange = useCallback((updater: SortingState | ((prev: SortingState) => SortingState)) => {
-    setSorting(prev => {
-      const newSorting = typeof updater === 'function' ? updater(prev) : updater
-      sortingRef.current = newSorting
-      return newSorting
-    })
+    setSorting(updater)
   }, [])
 
   // 展平数据
@@ -349,10 +359,13 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   )
   // 避免把可推导总数镜像到本地 state，直接读取基础查询缓存即可绕开 effect 中同步 setState。
   const cachedBaseData = queryClient.getQueryData<InfiniteData<ListResponseData>>(baseQueryKey)
-  const grandTotal = cachedBaseData?.pages[0]?.total ?? total
+  const grandTotal = cachedBaseData?.pages[0]?.total
 
   // 显示的数量
-  const displayCount = hasFilter ? `${total}/${grandTotal}` : `${total}`
+  const shouldShowGrandTotal = hasFilter
+    && grandTotal !== undefined
+    && (!isPlaceholderData || total !== grandTotal)
+  const displayCount = shouldShowGrandTotal ? `${total}/${grandTotal}` : `${total}`
 
   // 重置筛选状态
   const resetFilters = useCallback(() => {
@@ -372,7 +385,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   return {
     // 筛选状态
     searchInput,
-    setSearchInput,
+    setSearchInput: handleSearchInputChange,
     applySearchImmediate,
     globalFilter,
     statusFilter,
@@ -388,7 +401,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
 
     // 表格状态
     columnSizing,
-    setColumnSizing,
+    setColumnSizing: handleColumnSizingChange,
     isAllExpanded,
     toggleExpandAll,
     resetExpanded,
@@ -398,7 +411,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     total,
     isLoading,
     isFetchingNextPage,
-    hasNextPage,
+    hasNextPage: Boolean(hasNextPage),
     fetchNextPage,
     refetch,
     invalidate,
