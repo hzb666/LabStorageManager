@@ -54,10 +54,24 @@ interface ActionButtonProps<T> {
   isAdmin?: boolean
 }
 
+/** 根据角色要求判断当前动作是否应该展示。 */
+function canShowActionForRole<T>(action: ActionButtonConfig<T>, isAdmin: boolean): boolean {
+  if (action.requiredRole === UserRoles.ADMIN) {
+    return isAdmin
+  }
+
+  if (action.requiredRole === UserRoles.USER) {
+    return true
+  }
+
+  return true
+}
+
 // ============================================================================
 // 组件实现
 // ============================================================================
 
+/** 根据配置渲染操作列按钮集合，并统一处理编辑按钮和状态展示分支。 */
 export function TableActionButtons<T>({
   item,
   actions,
@@ -69,6 +83,8 @@ export function TableActionButtons<T>({
   statusDisplay,
 }: Readonly<TableActionButtonsProps<T>>) {
   const status = statusField ? (item[statusField] as string) : undefined
+
+  /** 拦截编辑按钮点击，避免触发行展开等父级事件。 */
   const handleEditClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation()
     onEdit?.(item)
@@ -88,8 +104,7 @@ export function TableActionButtons<T>({
   }
 
   const visibleActions = actions.filter(action => {
-    if (action.requiredRole === UserRoles.ADMIN && !isAdmin) return false
-    if (action.requiredRole === UserRoles.USER && isAdmin === undefined) return false
+    if (!canShowActionForRole(action, isAdmin)) return false
     if (action.showWhen) return action.showWhen(item, isAdmin)
     return true
   })
@@ -127,17 +142,21 @@ export function TableActionButtons<T>({
   )
 }
 
-function ActionButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T>>) {
+// ============================================================================
+// ActionButton 渲染变体
+// ============================================================================
+
+/** 确认操作的公共状态逻辑 */
+function useConfirmAction<T>(config: ActionButtonConfig<T>, item: T, isDisabled: boolean) {
   const [isConfirming, setIsConfirming] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  const isDisabled = config.disableWhen ? config.disableWhen(item, isAdmin) : false
-
+  // 二次点击时真正执行危险操作，首次点击仅进入确认态。
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (isLoading || isDisabled) return
 
-    if (!isConfirming && config.confirm) {
+    if (!isConfirming) {
       setIsConfirming(true)
       return
     }
@@ -153,93 +172,128 @@ function ActionButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T
     }
   }
 
-  const handleSimpleClick = (e: React.MouseEvent) => {
+  // 失焦后退出确认态，避免危险按钮长时间停留在确认状态。
+  const handleBlur = () => {
+    if (isConfirming && !isLoading) setIsConfirming(false)
+  }
+
+  const displayLabel = isConfirming ? (config.confirmLabel || '确认') : config.label
+
+  return { isConfirming, isLoading, handleClick, handleBlur, displayLabel }
+}
+
+/** 图标 + 确认 按钮 */
+function IconConfirmButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T>>) {
+  const isDisabled = config.disableWhen ? config.disableWhen(item, isAdmin) : false
+  const { isConfirming, isLoading, handleClick, handleBlur, displayLabel } =
+    useConfirmAction(config, item, isDisabled)
+
+  const isApprove = config.id === 'approve'
+  const confirmStateClass = isApprove
+    ? 'bg-green-600 text-white [&_svg]:text-white hover:bg-green-600/70 dark:bg-green-600 dark:hover:bg-green-600/70'
+    : 'bg-destructive text-white [&_svg]:text-white hover:bg-destructive/70 dark:bg-destructive dark:hover:bg-destructive/70'
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <LoadingButton
+          size="sm"
+          disabled={isDisabled}
+          variant="modern"
+          className={cn(
+            config.className,
+            'h-8 w-8 p-0',
+            isConfirming
+              ? cn(
+                'transition-none [&_svg]:transition-none',
+                confirmStateClass,
+                isLoading && 'opacity-100 cursor-wait'
+              )
+              : ''
+          )}
+          onClick={handleClick}
+          onBlur={handleBlur}
+          isLoading={isLoading}
+        >
+          {config.icon}
+        </LoadingButton>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p>{displayLabel}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** 文字确认按钮（无图标） */
+function ConfirmButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T>>) {
+  const isDisabled = config.disableWhen ? config.disableWhen(item, isAdmin) : false
+  const { isConfirming, isLoading, handleClick, handleBlur, displayLabel } =
+    useConfirmAction(config, item, isDisabled)
+
+  // 根据确认阶段和加载状态切换按钮的危险态样式。
+  const confirmClassName = (() => {
+    if (!isConfirming) return ''
+    if (isLoading) return 'text-destructive-foreground opacity-100 cursor-wait bg-destructive/70 transition-none'
+    return 'bg-destructive text-destructive-foreground hover:bg-destructive/70 transition-none'
+  })()
+
+  return (
+    <LoadingButton
+      size="sm"
+      disabled={isDisabled}
+      className={cn(
+        config.className,
+        'h-8 text-sm leading-4',
+        confirmClassName
+      )}
+      onClick={handleClick}
+      onBlur={handleBlur}
+      isLoading={isLoading}
+    >
+      {displayLabel}
+    </LoadingButton>
+  )
+}
+
+/** 纯图标按钮（无确认） */
+function IconButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T>>) {
+  const isDisabled = config.disableWhen ? config.disableWhen(item, isAdmin) : false
+
+  // 纯图标按钮只负责阻止冒泡并透传业务点击事件。
+  const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
     config.onClick(item)
   }
 
-  // 同时有 icon 和 confirm 时，显示带图标的确认按钮
-  if (config.icon && config.confirm) {
-    // 根据按钮 id 确定确认状态的背景色；确认态图标与常规态保持一致
-    const isApprove = config.id === 'approve'
-    const confirmStateClass = isApprove
-      ? 'bg-green-600 text-white [&_svg]:text-white hover:bg-green-600/70 dark:bg-green-600 dark:hover:bg-green-600/70'
-      : 'bg-destructive text-white [&_svg]:text-white hover:bg-destructive/70 dark:bg-destructive dark:hover:bg-destructive/70'
-    
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <LoadingButton
-            size="sm"
-            disabled={isDisabled}
-            variant="modern"
-            className={cn(
-              config.className,
-              'h-8 w-8 p-0',
-              isConfirming
-                ? cn(
-                  'transition-none [&_svg]:transition-none',
-                  confirmStateClass,
-                  isLoading && 'opacity-100 cursor-wait'
-                )
-                : ''
-            )}
-            onClick={handleClick}
-            onBlur={() => { if (isConfirming && !isLoading) setIsConfirming(false) }}
-            isLoading={isLoading}
-          >
-            {config.icon}
-          </LoadingButton>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <p>{isConfirming ? (config.confirmLabel || '确认') : config.label}</p>
-        </TooltipContent>
-      </Tooltip>
-    )
-  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant={config.variant || 'modern'}
+          size="sm"
+          className={cn('h-8 w-8 p-0', config.className)}
+          disabled={isDisabled}
+          onClick={handleClick}
+        >
+          {config.icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p>{config.label}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
 
-  if (config.confirm) {
-    return (
-      <LoadingButton
-        size="sm"
-        disabled={isDisabled}
-        className={cn(
-          config.className,
-          'h-8 text-sm leading-4',
-          isConfirming
-            ? isLoading
-              ? 'text-destructive-foreground opacity-100 cursor-wait bg-destructive/70 transition-none'
-              : 'bg-destructive text-destructive-foreground hover:bg-destructive/70 transition-none'
-            : ''
-        )}
-        onClick={handleClick}
-        onBlur={() => { if (isConfirming && !isLoading) setIsConfirming(false) }}
-        isLoading={isLoading}
-      >
-        {isConfirming ? (config.confirmLabel || '确认') : config.label}
-      </LoadingButton>
-    )
-  }
+/** 纯文字按钮（无图标、无确认） */
+function SimpleButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T>>) {
+  const isDisabled = config.disableWhen ? config.disableWhen(item, isAdmin) : false
 
-  if (config.icon) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant={config.variant || 'modern'}
-            size="sm"
-            className={cn('h-8 w-8 p-0', config.className)}
-            disabled={isDisabled}
-            onClick={handleSimpleClick}
-          >
-            {config.icon}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <p>{config.label}</p>
-        </TooltipContent>
-      </Tooltip>
-    )
+  // 纯文字按钮沿用与图标按钮一致的点击边界处理。
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    config.onClick(item)
   }
 
   return (
@@ -248,13 +302,24 @@ function ActionButton<T>({ config, item, isAdmin }: Readonly<ActionButtonProps<T
       size="sm"
       className={cn('h-7 text-sm px-2', config.className)}
       disabled={isDisabled}
-      onClick={handleSimpleClick}
+      onClick={handleClick}
     >
       {config.label}
     </Button>
   )
 }
 
+/** 根据 config 特征选择对应的渲染变体 */
+function ActionButton<T>(props: Readonly<ActionButtonProps<T>>) {
+  const { config } = props
+
+  if (config.icon && config.confirm) return <IconConfirmButton {...props} />
+  if (config.confirm) return <ConfirmButton {...props} />
+  if (config.icon) return <IconButton {...props} />
+  return <SimpleButton {...props} />
+}
+
+/** 通过浅比较配置和条目字段，避免操作列在无关更新时重复渲染。 */
 export const TableActionButtonsMemo = React.memo(
   TableActionButtons,
   (prevProps, nextProps) => {

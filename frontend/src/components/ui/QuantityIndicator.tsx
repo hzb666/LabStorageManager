@@ -1,4 +1,4 @@
-﻿import { cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 interface QuantityIndicatorProps {
   /** 剩余数量 */
@@ -17,6 +17,66 @@ interface QuantityIndicatorProps {
   barWidth?: string
 }
 
+const NARROW_SPACE = '\u200A'
+
+/** 统一组装剩余量文本，优先展示已格式化规格。 */
+const getDisplayText = ({
+  initial,
+  remaining,
+  specification,
+  unit,
+}: Pick<QuantityIndicatorProps, 'initial' | 'remaining' | 'specification' | 'unit'>): string => {
+  if (specification) {
+    return `${remaining}${NARROW_SPACE}/${NARROW_SPACE}${specification}`
+  }
+
+  if (unit) {
+    return `${remaining}${NARROW_SPACE}/${NARROW_SPACE}${initial} ${unit}`
+  }
+
+  return `${remaining}${NARROW_SPACE}/${NARROW_SPACE}${initial}`
+}
+
+/** 根据剩余百分比返回数量文本的强调颜色。 */
+const getQuantityTextClassName = (percentage: number): string | undefined => {
+  if (percentage === 0) {
+    return 'text-destructive'
+  }
+
+  if (percentage > 0 && percentage < 20) {
+    return 'text-amber-600 dark:text-amber-400'
+  }
+
+  return undefined
+}
+
+/** 根据剩余百分比返回进度条轨道颜色。 */
+const getProgressTrackClassName = (percentage: number): string => {
+  if (percentage === 0) {
+    return 'bg-destructive/20'
+  }
+
+  return 'bg-amber-500/20'
+}
+
+/** 根据剩余百分比返回进度条填充颜色。 */
+const getProgressFillClassName = (percentage: number): string => {
+  if (percentage === 0) {
+    return 'bg-destructive'
+  }
+
+  return 'bg-amber-500'
+}
+
+/** 计算进度条宽度，并为极小值保留最小可见宽度。 */
+const getProgressWidth = (percentage: number): string => {
+  if (percentage === 0) {
+    return '0%'
+  }
+
+  return `${Math.max(percentage, 5)}%`
+}
+
 /**
  * 库存剩余量指示器组件
  * 显示剩余量/初始量，并根据剩余百分比显示不同颜色
@@ -32,9 +92,8 @@ export function QuantityIndicator({
   specification,
   className,
   showBar = true,
-  barWidth = 'w-16'
+  barWidth = 'w-16',
 }: QuantityIndicatorProps) {
-  // 当 initial 为 0 时，不显示剩余量/规格，显示 "-"
   if (initial === 0) {
     return (
       <div className={cn('flex items-center h-8 break-all', className)}>
@@ -43,35 +102,24 @@ export function QuantityIndicator({
     )
   }
 
-  const percentage = initial > 0 ? (remaining / initial) * 100 : 0
-  const narrowSpace = '\u200A'
-  const displayText = specification 
-    ? `${remaining}${narrowSpace}/${narrowSpace}${specification}` 
-    : (unit ? `${remaining}${narrowSpace}/${narrowSpace}${initial} ${unit}` : `${remaining}${narrowSpace}/${narrowSpace}${initial}`)
+  const percentage = (remaining / initial) * 100
+  const displayText = getDisplayText({ remaining, initial, specification, unit })
+  const quantityTextClassName = getQuantityTextClassName(percentage)
+  const shouldShowProgressBar = showBar && percentage < 20
+  const progressTrackClassName = getProgressTrackClassName(percentage)
+  const progressFillClassName = getProgressFillClassName(percentage)
+  const progressWidth = getProgressWidth(percentage)
 
   return (
     <div className={cn('flex flex-col justify-center h-8 break-all', className)}>
-      <span
-        className={cn(
-          'leading-none', // 【核心修改】：消除默认行高带来的上下留白
-          // 快用完时 (0 < percentage < 20)：使用琥珀色
-          percentage < 20 && percentage > 0 && 'text-amber-600 dark:text-amber-400',
-          // 完全耗尽时 (percentage === 0)：使用红色
-          percentage === 0 && 'text-destructive'
-        )}
-      >
+      <span className={cn('leading-none', quantityTextClassName)}>
         {displayText}
       </span>
-      {showBar && percentage < 20 && (
-        <div className={cn(barWidth, 'h-1.5 rounded mt-1.5', // mt-1.5 配合 leading-none 让视觉更紧凑
-          percentage === 0 ? 'bg-destructive/20' : 'bg-amber-500/20'
-        )}>
+      {shouldShowProgressBar && (
+        <div className={cn(barWidth, 'h-1.5 rounded mt-1.5', progressTrackClassName)}>
           <div
-            className={cn(
-              'h-full rounded transition-all',
-              percentage === 0 ? 'bg-destructive' : 'bg-amber-500'
-            )}
-            style={{ width: `${percentage === 0 ? 0 : Math.max(percentage, 5)}%` }}
+            className={cn('h-full rounded transition-all', progressFillClassName)}
+            style={{ width: progressWidth }}
           />
         </div>
       )}
