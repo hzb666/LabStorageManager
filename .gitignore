@@ -65,9 +65,6 @@ dist/
 # Template/External projects (do not commit)
 shadcn-admin/
 
-# Local library files
-frontend/public/lib/
-
 # Docs subdirectories
 docs/
 BUGS.md
