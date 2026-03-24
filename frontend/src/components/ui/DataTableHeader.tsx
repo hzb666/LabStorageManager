@@ -142,7 +142,7 @@ export function DataTableHeader<TData>({
             {table.getHeaderGroups().map((headerGroup) => (
               <React.Fragment key={headerGroup.id}>
                 {headerGroup.headers.map((header, index) => {
-                  const canResize = header.column.getCanResize() && header.index !== headerGroup.headers.length - 1
+                  const canResize = header.column.getCanResize() && index !== headerGroup.headers.length - 1
 
                   return (
                     <HeaderCell
