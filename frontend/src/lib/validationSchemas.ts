@@ -194,7 +194,7 @@ export const SpecificationSchema = v.pipe(
 // 规格解析辅助函数 - 从规格字符串提取数值
 export function parseSpecification(spec: string): number | null {
   if (!spec) return null
-  const match = /(\d+(?:\.\d+)?)\s*/i.exec(spec)
+  const match = /^(\d+(?:\.\d+)?)\s*/i.exec(spec)
   return match ? Number.parseFloat(match[1]) : null
 }
 
