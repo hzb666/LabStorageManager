@@ -54,17 +54,9 @@ interface ActionButtonProps<T> {
   isAdmin?: boolean
 }
 
-/** 根据角色要求判断当前动作是否应该展示。 */
+/** 根据角色要求判断当前动作是否应该展示，统一收敛角色分支避免重复条件流。 */
 function canShowActionForRole<T>(action: ActionButtonConfig<T>, isAdmin: boolean): boolean {
-  if (action.requiredRole === UserRoles.ADMIN) {
-    return isAdmin
-  }
-
-  if (action.requiredRole === UserRoles.USER) {
-    return true
-  }
-
-  return true
+  return action.requiredRole !== UserRoles.ADMIN || isAdmin
 }
 
 // ============================================================================

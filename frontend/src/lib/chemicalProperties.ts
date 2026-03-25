@@ -47,6 +47,7 @@ let rateLimitQueue: Promise<void> = Promise.resolve()
 
 // ============ 缓存工具函数 ============
 
+/** 归一化化学属性对象，确保缓存中仅保留受支持字段。 */
 function normalizeChemicalProperties(value: Record<string, unknown>): ChemicalProperties {
   return {
     smiles: typeof value.smiles === 'string' ? value.smiles : undefined,
@@ -54,17 +55,73 @@ function normalizeChemicalProperties(value: Record<string, unknown>): ChemicalPr
   }
 }
 
+/** 解析 localStorage 中的缓存快照，兼容异常数据并给出空回退。 */
+function parseStorageSnapshot(stored: string | null): ChemicalPropertiesStorage | null {
+  if (!stored) return null
+
+  const parsed = JSON.parse(stored) as ChemicalPropertiesStorage
+  if (
+    parsed?.version !== CHEMICAL_PROPERTIES_STORAGE_VERSION ||
+    !parsed?.data ||
+    typeof parsed.data !== 'object'
+  ) {
+    return null
+  }
+
+  return parsed
+}
+
+/** 归一化并校验单条缓存记录，返回可用条目和是否需要回写标记。 */
+function normalizeStorageEntry(
+  rawEntry: unknown,
+  now: number
+): { entry: CachedChemicalProperties | null; shouldRewrite: boolean } {
+  if (!rawEntry || typeof rawEntry !== 'object') {
+    return { entry: null, shouldRewrite: true }
+  }
+
+  const entry = rawEntry as CachedChemicalProperties
+  if (
+    typeof entry.expiresAt !== 'number' ||
+    !entry.value ||
+    typeof entry.value !== 'object'
+  ) {
+    return { entry: null, shouldRewrite: true }
+  }
+
+  const normalizedValue = normalizeChemicalProperties(entry.value as Record<string, unknown>)
+  const containsLegacyField = 'molecularWeight' in (entry.value as Record<string, unknown>)
+  const expired = entry.expiresAt <= now
+  if (expired) {
+    return { entry: null, shouldRewrite: true }
+  }
+
+  return {
+    entry: {
+      value: normalizedValue,
+      expiresAt: entry.expiresAt,
+    },
+    shouldRewrite: containsLegacyField,
+  }
+}
+
+/** 裁剪缓存大小到上限，并返回是否触发了删除。 */
+function trimHydratedCache(cache: Map<string, CachedChemicalProperties>): boolean {
+  let trimmed = false
+  while (cache.size > CHEMICAL_PROPERTIES_CACHE_MAX_SIZE) {
+    const oldest = cache.keys().next()
+    if (oldest.done) break
+    cache.delete(oldest.value)
+    trimmed = true
+  }
+  return trimmed
+}
+
+/** 从 localStorage 读取并恢复缓存，必要时清洗后回写。 */
 function loadFromStorage(): Map<string, CachedChemicalProperties> {
   try {
-    const stored = localStorage.getItem(CACHE_KEY)
-    if (!stored) return new Map()
-
-    const parsed = JSON.parse(stored) as ChemicalPropertiesStorage
-    if (
-      parsed?.version !== CHEMICAL_PROPERTIES_STORAGE_VERSION ||
-      !parsed?.data ||
-      typeof parsed.data !== 'object'
-    ) {
+    const parsed = parseStorageSnapshot(localStorage.getItem(CACHE_KEY))
+    if (!parsed) {
       localStorage.removeItem(CACHE_KEY)
       return new Map()
     }
@@ -74,42 +131,14 @@ function loadFromStorage(): Map<string, CachedChemicalProperties> {
     const hydrated = new Map<string, CachedChemicalProperties>()
 
     for (const [cas, rawEntry] of Object.entries(parsed.data)) {
-      if (!rawEntry || typeof rawEntry !== 'object') {
-        shouldRewrite = true
-        continue
+      const normalized = normalizeStorageEntry(rawEntry, now)
+      if (normalized.entry) {
+        hydrated.set(cas, normalized.entry)
       }
-
-      const entry = rawEntry as CachedChemicalProperties
-      if (
-        typeof entry.expiresAt !== 'number' ||
-        !entry.value ||
-        typeof entry.value !== 'object'
-      ) {
-        shouldRewrite = true
-        continue
-      }
-
-      const normalizedValue = normalizeChemicalProperties(entry.value as Record<string, unknown>)
-      if ('molecularWeight' in (entry.value as Record<string, unknown>)) {
-        shouldRewrite = true
-      }
-
-      if (entry.expiresAt > now) {
-        hydrated.set(cas, {
-          value: normalizedValue,
-          expiresAt: entry.expiresAt,
-        })
-      } else {
-        shouldRewrite = true
-      }
+      shouldRewrite = shouldRewrite || normalized.shouldRewrite
     }
 
-    while (hydrated.size > CHEMICAL_PROPERTIES_CACHE_MAX_SIZE) {
-      const oldest = hydrated.keys().next()
-      if (oldest.done) break
-      hydrated.delete(oldest.value)
-      shouldRewrite = true
-    }
+    shouldRewrite = trimHydratedCache(hydrated) || shouldRewrite
 
     if (shouldRewrite) {
       saveToStorage(hydrated)
@@ -121,6 +150,7 @@ function loadFromStorage(): Map<string, CachedChemicalProperties> {
   }
 }
 
+/** 持久化缓存快照，用于跨刷新复用查询结果。 */
 function saveToStorage(cache: Map<string, CachedChemicalProperties>): void {
   try {
     const data = Object.fromEntries(cache)
@@ -133,6 +163,7 @@ function saveToStorage(cache: Map<string, CachedChemicalProperties>): void {
   }
 }
 
+/** 读取单条缓存并执行过期清理，同时维持 LRU 顺序。 */
 function getCachedProperties(casNumber: string): ChemicalProperties | null {
   const cached = memoryCache.get(casNumber)
   if (!cached) return null
@@ -148,6 +179,7 @@ function getCachedProperties(casNumber: string): ChemicalProperties | null {
   return cached.value
 }
 
+/** 写入单条缓存，统一做字段归一化与容量裁剪。 */
 function setCachedProperties(casNumber: string, data: ChemicalProperties): void {
   const normalizedData = normalizeChemicalProperties(data as Record<string, unknown>)
 
@@ -168,10 +200,12 @@ function setCachedProperties(casNumber: string, data: ChemicalProperties): void 
   saveToStorage(memoryCache)
 }
 
+/** 提供可 await 的延时工具，用于限流等待窗口。 */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** 获取 PubChem 请求令牌，确保窗口期内请求数不超过限制。 */
 async function acquirePubChemSlot(): Promise<void> {
   while (true) {
     const now = Date.now()
@@ -194,6 +228,7 @@ async function acquirePubChemSlot(): Promise<void> {
   }
 }
 
+/** 串行化限流队列，避免并发请求绕过速率窗口。 */
 async function withPubChemRateLimit<T>(task: () => Promise<T>): Promise<T> {
   const slotReady = rateLimitQueue.then(async () => {
     await acquirePubChemSlot()
