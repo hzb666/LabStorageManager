@@ -37,9 +37,10 @@
 - `borrower`：借用人
 
 ## 参考代码
+- [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
+- [app/models/consumable_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order.py)
+- [app/models/reagent_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py)
+- [app/models/user_session.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/user_session.py)
+- [app/models/user.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/user.py)
 
-- `app/models/user.py:19`
-- `app/models/reagent_order.py:107`
-- `app/models/consumable_order.py:17`
-- `app/models/user_session.py:13`
-- `app/database.py:120`
+

@@ -1,0 +1,214 @@
+# API 参考（全量路由，代码自动核对）
+
+> 本页按 `app/main.py` 实际挂载结果和各路由文件装饰器自动整理，覆盖 `app/main.py`、`app/api/*.py`、`app/services/chemical_info.py`。
+
+## 挂载总览
+
+- `announcements.router` -> `/api`
+- `cart_sync.router` -> `/api`
+- `chemical_info.router` -> `/api`
+- `consumable_orders.router` -> `/api`
+- `error_logs.router` -> `/api`
+- `events.router` -> `/api`
+- `inventory.router` -> `/api`
+- `reagent_orders.router` -> `/api`
+- `user_logs.router` -> `/api`
+- `user_sessions.router` -> `/api/users/me`
+- `users.router` -> `/api`
+- `inventory_extended_routes` 与 `common_shelf` 通过 `register_*` 动态挂到 `inventory.router`，最终前缀为 `/api/inventory`。
+- `reagent_orders_workflow` 通过 `register_*` 动态挂到 `reagent_orders.router`，最终前缀为 `/api/reagent-orders`。
+
+## 权限判读说明
+
+- `管理员`：路由依赖 `require_admin` 或参数类型为 `AdminUser`。
+- `已登录用户`：路由依赖 `get_current_user` / `get_current_session` 或参数类型为 `CurrentUser`。
+- `公开`：无上述依赖。
+- `POST /api/users/logout` 为公开接口，但实现会校验当前会话 Cookie/Token 后执行退出。
+
+## 全量路由清单（共 86 条）
+
+### 应用级路由 (`main`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/` | `root` | 公开 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py#L370" /> |
+| `GET` | `/cart-import` | `cart_import_redirect` | 公开 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py#L396" /> |
+| `GET` | `/health` | `health_check` | 公开 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py#L382" /> |
+
+### 用户与认证 (`users`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/users/` | `list_users` | 管理员 | query: `username`；query: `full_name` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L480" /> |
+| `POST` | `/api/users/` | `create_user` | 管理员 | body: `UserCreate` | `UserResponse` | `status.HTTP_201_CREATED` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L447" /> |
+| `POST` | `/api/users/change-password` | `change_password` | 已登录用户 | body: `ChangePasswordRequest` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L410" /> |
+| `POST` | `/api/users/login` | `login` | 公开 | body: `LoginRequest` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L211" /> |
+| `POST` | `/api/users/logout` | `logout` | 公开 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L365" /> |
+| `GET` | `/api/users/me` | `get_me` | 已登录用户 | — | `UserResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L607" /> |
+| `GET` | `/api/users/search` | `search_users` | 已登录用户 | query: `q` | `list[UserSearchItem]` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L579" /> |
+| `DELETE` | `/api/users/{user_id}` | `delete_user` | 管理员 | path: `user_id` | `—` | `status.HTTP_204_NO_CONTENT` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L768" /> |
+| `GET` | `/api/users/{user_id}` | `get_user` | 已登录用户 | path: `user_id` | `PublicUserResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L613" /> |
+| `PUT` | `/api/users/{user_id}` | `update_user` | 已登录用户 | path: `user_id`；body: `UserUpdate` | `UserResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L628" /> |
+| `POST` | `/api/users/{user_id}/activate` | `activate_user` | 管理员 | path: `user_id` | `UserResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L732" /> |
+| `DELETE` | `/api/users/{user_id}/avatar` | `delete_avatar` | 已登录用户 | path: `user_id` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L922" /> |
+| `POST` | `/api/users/{user_id}/avatar` | `upload_avatar` | 已登录用户 | path: `user_id` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L958" /> |
+| `POST` | `/api/users/{user_id}/reset-password` | `reset_user_password` | 管理员 | path: `user_id`；body: `ResetPasswordRequest` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L858" /> |
+| `PUT` | `/api/users/{user_id}/role` | `update_user_role` | 管理员 | path: `user_id` | `UserResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py#L812" /> |
+
+### 会话与设备 (`user_sessions`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `DELETE` | `/api/users/me/sessions/` | `delete_all_sessions` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py#L92" /> |
+| `GET` | `/api/users/me/sessions/` | `list_sessions` | 已登录用户 | — | `List[SessionResponse]` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py#L43" /> |
+| `POST` | `/api/users/me/sessions/refresh` | `refresh_session` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py#L119" /> |
+| `DELETE` | `/api/users/me/sessions/{session_id}` | `delete_session` | 已登录用户 | path: `session_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py#L60" /> |
+| `PATCH` | `/api/users/me/sessions/{session_id}` | `update_session` | 已登录用户 | path: `session_id`；body: `SessionUpdateRequest` | `SessionResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py#L174" /> |
+
+### 管理员用户日志 (`user_logs`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/admin/users/logs/query` | `get_user_logs` | 管理员 | body: `LogsQueryRequest` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py#L162" /> |
+| `POST` | `/api/admin/users/{user_id}/logs-token` | `generate_logs_token` | 管理员 | path: `user_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py#L132" /> |
+
+### 库存基础接口 (`inventory`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/inventory/` | `list_inventory` | 已登录用户 | query: `search` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py#L379" /> |
+| `DELETE` | `/api/inventory/{inventory_id}` | `delete_inventory` | 已登录用户 | path: `inventory_id` | `—` | `status.HTTP_204_NO_CONTENT` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py#L549" /> |
+| `GET` | `/api/inventory/{inventory_id}` | `get_inventory` | 已登录用户 | path: `inventory_id` | `InventoryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py#L460" /> |
+| `PUT` | `/api/inventory/{inventory_id}` | `update_inventory` | 已登录用户 | path: `inventory_id`；body: `InventoryUpdate` | `InventoryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py#L469" /> |
+
+### 库存扩展接口 (`inventory_extended_routes`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/inventory/cas/{cas_number}` | `check_cas_inventory` | 已登录用户 | path: `cas_number` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L99" /> |
+| `GET` | `/api/inventory/cas/{cas_number}/total` | `get_cas_total_quantity` | 已登录用户 | path: `cas_number` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L140" /> |
+| `GET` | `/api/inventory/code/{internal_code}` | `get_inventory_by_internal_code` | 已登录用户 | path: `internal_code` | `InventoryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L163" /> |
+| `GET` | `/api/inventory/dashboard/my-borrows` | `get_my_borrows` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L214" /> |
+| `GET` | `/api/inventory/dashboard/pending-stockin` | `get_pending_stockin` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L277" /> |
+| `GET` | `/api/inventory/export` | `export_inventory` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L171" /> |
+| `POST` | `/api/inventory/import` | `import_inventory` | 已登录用户 | file: `file` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L333" /> |
+| `GET` | `/api/inventory/import/template` | `get_import_template` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L312" /> |
+| `POST` | `/api/inventory/manual-add` | `manual_add_inventory` | 已登录用户 | body: `ManualInventoryCreate` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L187" /> |
+| `POST` | `/api/inventory/{inventory_id}/borrow` | `borrow_item` | 已登录用户 | path: `inventory_id` | `InventoryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L392" /> |
+| `GET` | `/api/inventory/{inventory_id}/borrow-history` | `get_borrow_history` | 已登录用户 | path: `inventory_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L559" /> |
+| `POST` | `/api/inventory/{inventory_id}/return` | `return_item` | 已登录用户 | path: `inventory_id` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py#L476" /> |
+
+### 常用货架接口 (`common_shelf`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/inventory/common-shelf` | `list_common_shelf` | 已登录用户 | query: `search` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L591" /> |
+| `POST` | `/api/inventory/common-shelf/consume-one` | `consume_one_common_shelf_item` | 管理员 | body: `CommonShelfConsumeRequest` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L679" /> |
+| `GET` | `/api/inventory/common-shelf/export` | `export_common_shelf` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L895" /> |
+| `DELETE` | `/api/inventory/common-shelf/group/{sample_inventory_id}` | `delete_common_shelf_group` | 已登录用户 | path: `sample_inventory_id` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L862" /> |
+| `PUT` | `/api/inventory/common-shelf/group/{sample_inventory_id}` | `update_common_shelf_group` | 已登录用户 | path: `sample_inventory_id`；body: `InventoryUpdate` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L783" /> |
+| `POST` | `/api/inventory/common-shelf/manual-add` | `manual_add_common_shelf_inventory` | 已登录用户 | body: `ManualInventoryCreate` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L757" /> |
+
+### 试剂订单基础接口 (`reagent_orders`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/reagent-orders/` | `list_reagent_orders` | 已登录用户 | query: `search` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py#L351" /> |
+| `POST` | `/api/reagent-orders/` | `create_reagent_order` | 已登录用户 | body: `ReagentOrderCreate` | `ReagentOrderResponse` | `status.HTTP_201_CREATED` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py#L275" /> |
+| `GET` | `/api/reagent-orders/cas-overview/{cas_number}` | `get_cas_overview` | 已登录用户 | path: `cas_number` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py#L489" /> |
+| `GET` | `/api/reagent-orders/export` | `export_reagent_orders` | 管理员 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py#L472" /> |
+| `GET` | `/api/reagent-orders/{order_id}` | `get_reagent_order` | 已登录用户 | path: `order_id` | `ReagentOrderResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py#L599" /> |
+| `PUT` | `/api/reagent-orders/{order_id}` | `update_reagent_order` | 已登录用户 | path: `order_id`；body: `ReagentOrderUpdate` | `ReagentOrderResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py#L614" /> |
+
+### 试剂订单工作流接口 (`reagent_orders_workflow`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/reagent-orders/dashboard/arrived-orders` | `get_arrived_reagent_orders` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py#L272" /> |
+| `GET` | `/api/reagent-orders/dashboard/my-reagent-orders` | `get_my_reagent_orders` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py#L299" /> |
+| `DELETE` | `/api/reagent-orders/{order_id}` | `delete_reagent_order` | 已登录用户 | path: `order_id` | `—` | `status.HTTP_204_NO_CONTENT` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py#L361" /> |
+| `POST` | `/api/reagent-orders/{order_id}/approve` | `approve_reagent_order` | 管理员 | path: `order_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py#L129" /> |
+| `POST` | `/api/reagent-orders/{order_id}/confirm-arrival` | `confirm_reagent_arrival` | 已登录用户 | path: `order_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py#L184" /> |
+| `POST` | `/api/reagent-orders/{order_id}/reject` | `reject_reagent_order` | 管理员 | path: `order_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py#L154" /> |
+| `POST` | `/api/reagent-orders/{order_id}/stock-in` | `stock_in_reagent_order` | 已登录用户 | path: `order_id`；body: `StockInRequest` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py#L387" /> |
+
+### 耗材订单接口 (`consumable_orders`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/consumable-orders/` | `list_consumable_orders` | 已登录用户 | query: `search` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L244" /> |
+| `POST` | `/api/consumable-orders/` | `create_consumable_order` | 已登录用户 | body: `ConsumableOrderCreate` | `ConsumableOrderResponse` | `status.HTTP_201_CREATED` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L203" /> |
+| `GET` | `/api/consumable-orders/dashboard/my-consumable-orders` | `get_my_consumable_orders` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L572" /> |
+| `GET` | `/api/consumable-orders/export` | `export_consumable_orders` | 管理员 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L356" /> |
+| `DELETE` | `/api/consumable-orders/{order_id}` | `delete_consumable_order` | 已登录用户 | path: `order_id` | `—` | `status.HTTP_204_NO_CONTENT` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L627" /> |
+| `GET` | `/api/consumable-orders/{order_id}` | `get_consumable_order` | 已登录用户 | path: `order_id` | `ConsumableOrderResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L373" /> |
+| `PUT` | `/api/consumable-orders/{order_id}` | `update_consumable_order` | 已登录用户 | path: `order_id`；body: `ConsumableOrderUpdate` | `ConsumableOrderResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L388" /> |
+| `POST` | `/api/consumable-orders/{order_id}/approve` | `approve_consumable_order` | 管理员 | path: `order_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L463" /> |
+| `POST` | `/api/consumable-orders/{order_id}/complete` | `complete_consumable_order` | 已登录用户 | path: `order_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L523" /> |
+| `POST` | `/api/consumable-orders/{order_id}/reject` | `reject_consumable_order` | 管理员 | path: `order_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py#L496" /> |
+
+### 公告接口 (`announcements`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/announcements/` | `list_announcements` | 管理员 | — | `List[AnnouncementResponse]` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L93" /> |
+| `POST` | `/api/announcements/` | `create_announcement` | 管理员 | body: `AnnouncementCreate` | `AnnouncementResponse` | `status.HTTP_201_CREATED` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L130" /> |
+| `DELETE` | `/api/announcements/images/{filename}` | `delete_announcement_image` | 管理员 | path: `filename` | `—` | `status.HTTP_204_NO_CONTENT` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L330" /> |
+| `GET` | `/api/announcements/public` | `get_public_announcements` | 已登录用户 | — | `List[AnnouncementResponse]` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L52" /> |
+| `GET` | `/api/announcements/storage-info` | `get_storage_info` | 管理员 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L81" /> |
+| `POST` | `/api/announcements/upload-image` | `upload_announcement_image` | 管理员 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L300" /> |
+| `DELETE` | `/api/announcements/{announcement_id}` | `delete_announcement` | 管理员 | path: `announcement_id` | `—` | `status.HTTP_204_NO_CONTENT` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L224" /> |
+| `GET` | `/api/announcements/{announcement_id}` | `get_announcement` | 管理员 | path: `announcement_id` | `AnnouncementResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L177" /> |
+| `PUT` | `/api/announcements/{announcement_id}` | `update_announcement` | 管理员 | path: `announcement_id`；body: `AnnouncementUpdate` | `AnnouncementResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L194" /> |
+| `POST` | `/api/announcements/{announcement_id}/toggle-pin` | `toggle_pin_announcement` | 管理员 | path: `announcement_id` | `AnnouncementResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L252" /> |
+| `POST` | `/api/announcements/{announcement_id}/toggle-visibility` | `toggle_visibility_announcement` | 管理员 | path: `announcement_id` | `AnnouncementResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py#L276" /> |
+
+### SSE 事件接口 (`events`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/events` | `sse_events` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py#L57" /> |
+
+### 错误日志接口 (`error_logs`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/error-logs` | `get_error_logs` | 已登录用户 | query: `hours`；query: `lines` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/error_logs.py#L34" /> |
+
+### 购物车同步接口 (`cart_sync`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/cart-sync` | `sync_cart` | 已登录用户 | body: `CartItemRequest` | `CartSyncResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py#L138" /> |
+| `POST` | `/api/cart-sync/import` | `import_cart` | 已登录用户 | body: `CartImportRequest` | `CartImportResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py#L170" /> |
+
+### 化学信息接口 (`chemical_info`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/chemical-info/{cas_number}` | `get_chemical_info` | 已登录用户 | path: `cas_number` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/chemical_info.py#L442" /> |
+
+## 二次开发建议
+
+- 新增 API 时，优先在对应模块使用与现有一致的依赖模式（`CurrentUser` / `AdminUser`）以避免权限漂移。
+- 新增 `/api/inventory/*` 或 `/api/reagent-orders/*` 路径时，先检查命名路由优先级，避免被 `/{id}` 路由吞掉。
+- 涉及列表接口的新增筛选条件时，需要同时评估：索引、缓存 Key、FTS 字段、前端查询参数同步。
+
+## 参考代码
+- [app/api/announcements.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py)（行52，81，93，130，177，194，224，252，276，300，330）
+- [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)（行138，170）
+- [app/api/common_shelf.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py)（行591，679，757，783，862，895）
+- [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py)（行203，244，356，373，388，463，496，523，572，627）
+- [app/api/error_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/error_logs.py)（行34）
+- [app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py)（行57）
+- [app/api/inventory_extended_routes.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py)（行99，140，163，171，187，214，277，312，333，392，476，559）
+- [app/api/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py)（行379，460，469，549）
+- [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)（行129，154，184，272，299，361，387）
+- [app/api/reagent_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py)（行275，351，472，489，599，614）
+- [app/api/user_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py)（行132，162）
+- [app/api/user_sessions.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py)（行43，60，92，119，174）
+- [app/api/users.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py)（行211，365，410，447，480，579，607，613，628，732，768，812，858，922，958）
+- [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)（行370，382，396）
+- [app/services/chemical_info.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/chemical_info.py)（行442）
+
+

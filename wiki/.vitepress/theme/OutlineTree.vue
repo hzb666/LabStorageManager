@@ -84,7 +84,7 @@ function isActive(link: string) {
           :class="{ 'is-expanded': isExpanded(link) }"
         >
           <div class="wiki-outline-children-inner">
-            <Menu
+            <OutlineTree
               :headers="children"
               :expanded-links="expandedLinks"
               :active-hash="activeHash"
@@ -106,7 +106,7 @@ function isActive(link: string) {
           {{ title }}
         </a>
 
-        <Menu
+        <OutlineTree
           v-if="children.length"
           :headers="children"
           :expanded-links="expandedLinks"
