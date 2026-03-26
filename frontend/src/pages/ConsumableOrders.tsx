@@ -1,11 +1,8 @@
-/**
- * 耗材订单页面
- * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、完成
- * 参考 Inventory 页面实现，使用 FilterTable 组件
- */
+// 耗材订单页面 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、完成 参考 Inventory 页面实现，使用 FilterTable 组件
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
+import type { UseFormReturn } from 'react-hook-form'
 
 // UI 组件
 import { Button } from '@/components/ui/Button'
@@ -89,48 +86,114 @@ const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
 ]
 
 // ============================================================================
-// 主组件
+// 页面辅助函数
 // ============================================================================
 
-export function ConsumableOrdersPage() {
-  const currentUser = useAuthStore((state) => state.user)
-  const isAdmin = currentUser?.role === UserRoles.ADMIN
-  const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
+// 将耗材订单回填到表单中。 让编辑入口复用统一的字段归一化规则，避免重置表单时散落默认值逻辑。
+function createConsumableOrderFormValues(item: ConsumableOrder): ConsumableOrderFormInputData {
+  return {
+    name: item.name || '',
+    english_name: item.english_name || '',
+    specification: item.specification || '',
+    unit: item.unit || '',
+    quantity: item.quantity || 1,
+    product_number: item.product_number || '',
+    price: item.price || undefined,
+    communication: item.communication || '',
+    notes: item.notes || '',
+  }
+}
 
-  // ---------------------------------------------------------------------------
-  // 状态管理
-  // ---------------------------------------------------------------------------
-  // 使用 useTableState 管理表格状态
-  const filter = useTableState({
-    api: consumableOrderAPI,
-    queryKey: ['consumable-orders'],
-    tableId: 'consumable-orders-table',
-    statusOptions: CONSUMABLE_ORDER_STATUS_OPTIONS,
-    searchFieldOptions: CONSUMABLE_SEARCH_FIELD_OPTIONS,
+// 生成新增耗材订单的请求体。 把表单值与接口对 `undefined`/空字符串的契约收口到同一处。
+function createConsumableOrderCreatePayload(formData: ConsumableOrderFormData) {
+  return {
+    name: formData.name,
+    english_name: formData.english_name || undefined,
+    product_number: formData.product_number || undefined,
+    specification: formData.specification,
+    unit: formData.unit || undefined,
+    quantity: formData.quantity,
+    price: formData.price,
+    communication: formData.communication || undefined,
+    notes: processNotes(formData.notes),
+  }
+}
+
+// 生成编辑耗材订单的请求体。 保持更新接口继续沿用当前空字符串回写语义，而不是把判断堆在提交处理器里。
+function createConsumableOrderUpdatePayload(formData: ConsumableOrderFormData) {
+  return {
+    name: formData.name,
+    english_name: formData.english_name || '',
+    product_number: formData.product_number || '',
+    specification: formData.specification || '',
+    unit: formData.unit || '',
+    quantity: formData.quantity,
+    price: formData.price,
+    communication: formData.communication || '',
+    notes: processNotes(formData.notes),
+  }
+}
+
+// 将后端字段级校验错误写回表单。 让提交异常处理只保留流程判断，不再重复遍历错误数组。
+function applyConsumableValidationErrors(
+  form: UseFormReturn<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>,
+  validationErrors: ValidationError[],
+): boolean {
+  if (validationErrors.length === 0) {
+    return false
+  }
+
+  validationErrors.forEach((errorItem) => {
+    if (errorItem.loc?.[1]) {
+      form.setError(errorItem.loc[1] as keyof ConsumableOrderFormData, {
+        message: errorItem.msg || '输入不合法',
+      })
+    }
   })
+  return true
+}
 
-  // Dialog 状态
-  const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
+// 按当前弹窗模式执行新增或编辑请求。 把请求分支从提交处理器中拆出，直接降低主提交流程的复杂度。
+async function submitConsumableOrderRequest(params: {
+  dialogState: 'edit' | 'add' | null
+  editingItem: ConsumableOrder | null
+  formData: ConsumableOrderFormData
+}) {
+  const { dialogState, editingItem, formData } = params
+
+  if (dialogState === 'edit' && editingItem) {
+    await consumableOrderAPI.update(editingItem.id, createConsumableOrderUpdatePayload(formData))
+    return
+  }
+
+  if (dialogState === 'add') {
+    await consumableOrderAPI.create(createConsumableOrderCreatePayload(formData))
+  }
+}
+
+// 统一返回提交成功提示语。 让提交逻辑只关心“何时提示”，而不是反复判断文案分支。
+function getConsumableSubmitSuccessMessage(dialogState: 'edit' | 'add' | null): string | null {
+  if (dialogState === 'edit') {
+    return '订单信息已更新'
+  }
+  if (dialogState === 'add') {
+    return '耗材订单创建成功'
+  }
+  return null
+}
+
+// 管理耗材订单弹窗、表单与提交删除流程。 把页面主组件收回成列表编排层，只保留筛选、表格和入口按钮。
+function useConsumableOrderDialogController(refreshOrders: () => void | Promise<void>) {
+  const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<ConsumableOrder | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  // ---------------------------------------------------------------------------
-  // 表单逻辑
-  // ---------------------------------------------------------------------------
-  // 表单实例
   const form = useForm<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>({
     resolver: createValibotResolver(ConsumableOrderSchema),
     defaultValues: defaultConsumableOrderValues,
     shouldFocusError: false,
   })
 
-  // 加载数据
-  const loadOrders = useCallback(async () => {
-    await Promise.resolve(filter.invalidate())
-  }, [filter])
-
-  // 点击添加按钮
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
     setDeleteConfirm(false)
@@ -138,90 +201,44 @@ export function ConsumableOrdersPage() {
     setDialogState('add')
   }, [form, setDialogState])
 
-  // 点击编辑按钮
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
     setEditingItem(item)
     setDeleteConfirm(false)
-    form.reset({
-      name: item.name || '',
-      english_name: item.english_name || '',
-      specification: item.specification || '',
-      unit: item.unit || '',
-      quantity: item.quantity || 1,
-      product_number: item.product_number || '',
-      price: item.price || undefined,
-      communication: item.communication || '',
-      notes: item.notes || ''
-    })
+    form.reset(createConsumableOrderFormValues(item))
     setDialogState('edit')
   }, [form, setDialogState])
 
-  const handleFormSubmit = form.handleSubmit(
-    async (formData) => {
-      setIsSubmitting(true)
-      try {
-        if (dialogState === 'edit' && editingItem) {
-          await consumableOrderAPI.update(editingItem.id, {
-            name: formData.name,
-            english_name: formData.english_name || '',
-            product_number: formData.product_number || '',
-            specification: formData.specification || '',
-            unit: formData.unit || '',
-            quantity: formData.quantity,
-            price: formData.price,
-            communication: formData.communication || '',
-            notes: processNotes(formData.notes)
-          })
-        } else if (dialogState === 'add') {
-          await consumableOrderAPI.create({
-            name: formData.name,
-            english_name: formData.english_name || undefined,
-            product_number: formData.product_number || undefined,
-            specification: formData.specification,
-            unit: formData.unit || undefined,
-            quantity: formData.quantity,
-            price: formData.price,
-            communication: formData.communication || undefined,
-            notes: processNotes(formData.notes),
-          })
-        }
-        // 先刷新数据，再弹出 toast，确保数据已加载完成
-        await loadOrders()
-        if (dialogState === 'edit') {
-          toast.success('订单信息已更新')
-        } else if (dialogState === 'add') {
-          toast.success('耗材订单创建成功')
-        }
-        setDeleteConfirm(false)
-        setDialogState(null)
-      } catch (err) {
-        const errorDetail = extractApiErrorDetail(err)
-        const validationErrors = toValidationErrors(errorDetail)
-        if (validationErrors.length > 0) {
-          validationErrors.forEach((e: ValidationError) => {
-            if (e.loc?.[1]) {
-              form.setError(e.loc[1] as keyof ConsumableOrderFormData, { message: e.msg || '输入不合法' })
-            }
-          })
-          return
-        }
-
-        toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
-      } finally {
-        setIsSubmitting(false)
-      }
+  const handleDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setDialogState(null)
+      setDeleteConfirm(false)
+      form.reset()
     }
-  )
+  }, [form, setDialogState])
 
-  const handleExport = useCallback(async () => {
+  const handleFormSubmit = form.handleSubmit(async (formData) => {
+    setIsSubmitting(true)
     try {
-      const response = await consumableOrderAPI.exportOrders()
-      downloadBlobResponse(response, `consumable_orders_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
-    } catch {
-      toast.error('导出失败')
+      await submitConsumableOrderRequest({ dialogState, editingItem, formData })
+      await Promise.resolve(refreshOrders())
+      const successMessage = getConsumableSubmitSuccessMessage(dialogState)
+      if (successMessage) {
+        toast.success(successMessage)
+      }
+      setDeleteConfirm(false)
+      setDialogState(null)
+    } catch (err) {
+      const errorDetail = extractApiErrorDetail(err)
+      const validationErrors = toValidationErrors(errorDetail)
+      if (applyConsumableValidationErrors(form, validationErrors)) {
+        return
+      }
+      toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
+    } finally {
+      setIsSubmitting(false)
     }
-  }, [])
+  })
 
   const handleDeleteClick = useCallback(async () => {
     if (!editingItem) return
@@ -236,65 +253,102 @@ export function ConsumableOrdersPage() {
       setDeleteConfirm(false)
       setEditingItem(null)
       setDialogState(null)
-      await loadOrders()
+      await Promise.resolve(refreshOrders())
       toast.success('耗材订单已删除')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
-  }, [deleteConfirm, editingItem, loadOrders, setDialogState])
+  }, [deleteConfirm, editingItem, refreshOrders, setDialogState])
 
-  // ---------------------------------------------------------------------------
-  // 表格列配置
-  // ---------------------------------------------------------------------------
-  // 表格列配置
-  const columns = useMemo(() => {
-    const baseColumns = getConsumableOrderTableColumns()
+  return {
+    dialogState,
+    deleteConfirm,
+    editingItem,
+    isSubmitting,
+    form,
+    handleAddClick,
+    handleEditClick,
+    handleDialogOpenChange,
+    handleFormSubmit,
+    handleDeleteClick,
+    setDialogState,
+  }
+}
 
-    if (!isAdmin) {
-      return baseColumns as ColumnDef<Record<string, unknown>, unknown>[]
+// 创建耗材订单页的表格列。 把管理员操作列的拼装从页面主函数中移走，避免页面继续承担表格细节。
+function createConsumableOrderColumns(
+  isAdmin: boolean,
+  onRefresh: () => void | Promise<void>,
+): ColumnDef<Record<string, unknown>, unknown>[] {
+  const baseColumns = getConsumableOrderTableColumns()
+  if (!isAdmin) {
+    return baseColumns as ColumnDef<Record<string, unknown>, unknown>[]
+  }
+
+  const actionColumn = columnHelper.display({
+    id: 'actions',
+    header: '操作',
+    size: 100,
+    minSize: 100,
+    maxSize: 100,
+    cell: (info) => {
+      const meta = info.table.options.meta
+      return (
+        <ActionButtons
+          item={info.row.original as unknown as Record<string, unknown>}
+          onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
+          onRefresh={onRefresh}
+        />
+      )
+    },
+  })
+
+  return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
+}
+
+// ============================================================================
+// 主组件
+// ============================================================================
+
+// 直接组合列表、筛选与叶子组件，避免继续保留只转发参数的头部和弹窗壳层。
+export function ConsumableOrdersPage() {
+  const currentUser = useAuthStore((state) => state.user)
+  const isAdmin = currentUser?.role === UserRoles.ADMIN
+  const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
+  const filter = useTableState({
+    api: consumableOrderAPI,
+    queryKey: ['consumable-orders'],
+    tableId: 'consumable-orders-table',
+    statusOptions: CONSUMABLE_ORDER_STATUS_OPTIONS,
+    searchFieldOptions: CONSUMABLE_SEARCH_FIELD_OPTIONS,
+  })
+  const dialogController = useConsumableOrderDialogController(filter.invalidate)
+
+  const handleExport = useCallback(async () => {
+    try {
+      const response = await consumableOrderAPI.exportOrders()
+      downloadBlobResponse(response, `consumable_orders_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } catch {
+      toast.error('导出失败')
     }
+  }, [])
 
-    const actionColumn = columnHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 100,
-      minSize: 100,
-      maxSize: 100,
-      cell: info => {
-        const meta = info.table.options.meta
-        return (
-          <ActionButtons
-            item={info.row.original as unknown as Record<string, unknown>}
-            onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
-            onRefresh={filter.invalidate}
-          />
-        )
-      },
-    })
-
-    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
+  const columns = useMemo(() => {
+    return createConsumableOrderColumns(isAdmin, filter.invalidate)
   }, [isAdmin, filter.invalidate])
 
-  // ---------------------------------------------------------------------------
-  // 渲染相关回调
-  // ---------------------------------------------------------------------------
-  // 展开行渲染
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
     return <ConsumableOrderExpandedRow item={item} showExtraFields={true} />
   }, [])
 
-  // ============================================================================
-  // 渲染
-  // ============================================================================
   return (
     <div className="space-y-6">
-      {/* 头部区域 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">耗材订购</h1>
         <div className="flex flex-wrap gap-2">
           {canCreateOrder && (
-            <Button onClick={handleAddClick} size="lg">
+            <Button onClick={dialogController.handleAddClick} size="lg">
               <Plus className="w-4 h-4 mr-1.5" /> 创建订单
             </Button>
           )}
@@ -305,38 +359,29 @@ export function ConsumableOrdersPage() {
           )}
         </div>
       </div>
-
-
-      {/* 创建/编辑对话框 */}
-      <Dialog
-        open={dialogState !== null}
-        onOpenChange={(open) => {
-          if (!open) { setDialogState(null); setDeleteConfirm(false); form.reset() }
-        }}
-      >
+      <Dialog open={dialogController.dialogState !== null} onOpenChange={dialogController.handleDialogOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{dialogState === 'edit' ? '编辑订单' : '创建订单'}</DialogTitle>
+            <DialogTitle>{dialogController.dialogState === 'edit' ? '编辑订单' : '创建订单'}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleFormSubmit}>
-            <BaseForm
-              form={form}
-              fields={getConsumableOrderFormFields()}
-            />
+          <form onSubmit={dialogController.handleFormSubmit}>
+            <BaseForm form={dialogController.form} fields={getConsumableOrderFormFields()} />
             <EditDialogActions
-              mode={dialogState ?? 'add'}
-              onCancel={() => setDialogState(null)}
-              onDelete={dialogState === 'edit' && editingItem ? handleDeleteClick : undefined}
-              deleteConfirm={deleteConfirm}
+              mode={dialogController.dialogState ?? 'add'}
+              onCancel={() => dialogController.setDialogState(null)}
+              onDelete={
+                dialogController.dialogState === 'edit' && dialogController.editingItem
+                  ? dialogController.handleDeleteClick
+                  : undefined
+              }
+              deleteConfirm={dialogController.deleteConfirm}
               submitLabelEdit="保存"
               submitLabelAdd="提交订单"
-              isSubmitting={isSubmitting}
+              isSubmitting={dialogController.isSubmitting}
             />
           </form>
         </DialogContent>
       </Dialog>
-
-      {/* 数据表格区域 */}
       <FilterTable
         api={consumableOrderAPI as FilterAPI}
         queryKey={['consumable-orders']}
@@ -344,7 +389,7 @@ export function ConsumableOrdersPage() {
         statusOptions={CONSUMABLE_ORDER_STATUS_OPTIONS}
         searchFieldOptions={CONSUMABLE_SEARCH_FIELD_OPTIONS}
         customColumns={columns}
-        onEdit={handleEditClick}
+        onEdit={dialogController.handleEditClick}
         title={<><ShoppingCart className="w-5 h-5" /> 耗材订单列表</>}
         searchPlaceholder="搜索名称、规格、订购人、订购时间..."
         renderExpandedRow={renderExpandedRow}
@@ -358,6 +403,7 @@ export function ConsumableOrdersPage() {
 // 表格操作按钮组件
 // ============================================================================
 
+// 渲染耗材订单行级操作。 把审批/驳回/完成动作集中在表格行内，避免页面主组件直接处理行级业务按钮。
 const ActionButtons = React.memo(function ActionButtons({
   item,
   onEdit,

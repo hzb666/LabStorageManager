@@ -33,6 +33,12 @@ type ColumnCssVariableKey =
 
 type ColumnCssVariables = Partial<Record<ColumnCssVariableKey, string>>
 
+function getOverscanCount(isBulkAnimating: boolean, isAllExpanded: boolean) {
+  if (isBulkAnimating) return 4
+  if (isAllExpanded) return 5
+  return 10
+}
+
 // 用 CSS 变量共享列宽和隐藏态，避免表头与表体各算一套布局。
 function computeCssVariables<TData>(
   visibleColumns: ReturnType<TableType<TData>['getVisibleLeafColumns']>,
@@ -147,7 +153,7 @@ export function DataTable<TData>({
   // 为虚拟列表提供稳定的 item key，避免展开/折叠时错位复用。
   const getRowItemKey = useCallback((index: number) => rows[index]?.id ?? index, [rows])
 
-  const overscanCount = isBulkAnimating ? 4 : isAllExpanded ? 5 : 10 // eslint-disable-line sonarjs/no-nested-conditional
+  const overscanCount = getOverscanCount(isBulkAnimating, isAllExpanded)
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({

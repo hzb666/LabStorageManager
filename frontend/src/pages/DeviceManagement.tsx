@@ -468,6 +468,8 @@ function useDeviceTableModel({
     }),
   ], [currentDeviceId, handleOpenKickDialog, handleOpenRenameDialog])
 
+  // 这里直接消费 table 实例，不再放进 useMemo 缓存；按项目约定定点忽略编译器告警。
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: sortedData,
     columns,
@@ -490,16 +492,14 @@ function useDeviceTableModel({
   const hasFilter = Boolean(globalFilter)
   const displayCount = getDeviceDisplayCount(filteredCount, totalCount, hasFilter)
 
-  const tableContent = useMemo(() => {
-    return buildDeviceTableContent({
-      isLoading,
-      totalCount,
-      filteredCount,
-      globalFilter,
-      hasFilter,
-      table,
-    })
-  }, [filteredCount, globalFilter, hasFilter, isLoading, table, totalCount])
+  const tableContent = buildDeviceTableContent({
+    isLoading,
+    totalCount,
+    filteredCount,
+    globalFilter,
+    hasFilter,
+    table,
+  })
 
   return {
     displayCount,

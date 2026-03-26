@@ -388,7 +388,7 @@ function AdminUsersTableCard({
               </thead>
               <tbody>
                 {tableState.table.getRowModel().rows.map((row) => (
-                  <MemoizedTableRow key={row.id} row={row} />
+                  <TableRow key={row.id} row={row} />
                 ))}
               </tbody>
             </table>
@@ -600,6 +600,8 @@ export function AdminUsersPage() {
     return [...getAdminUsersTableColumns(), actionColumn] as ColumnDef<User, unknown>[]
   }, [currentUser, dialogs.handleActivate, dialogs.openDeleteModal, dialogs.openEditModal, handleViewLogs])
 
+  // 这里不会把 table 实例再交给 memo comparator 缓存，按项目约定定点忽略编译器告警。
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data,
     columns,
@@ -740,8 +742,8 @@ const ActionButtons = React.memo(function ActionButtons({
   return prevKeys.every((key) => prevUser[key] === nextUser[key])
 })
 
-// 单行内容保持原有 `memo` 边界，避免分页或筛选变化时无关行重复渲染。
-const MemoizedTableRow = React.memo(({ row }: { row: Row<User> }) => {
+// 行渲染依赖 TanStack Table 的运行时上下文，不能只按 `row.original` 做 memo。
+function TableRow({ row }: { row: Row<User> }) {
   return (
     <tr className="border-b border-border hover:bg-muted/30">
       {row.getVisibleCells().map((cell: Cell<User, unknown>) => (
@@ -755,4 +757,4 @@ const MemoizedTableRow = React.memo(({ row }: { row: Row<User> }) => {
       ))}
     </tr>
   )
-}, (prevProps, nextProps) => prevProps.row.original === nextProps.row.original)
+}

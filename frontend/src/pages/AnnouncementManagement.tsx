@@ -768,6 +768,8 @@ function useAnnouncementListController({ onEdit, onDelete }: AnnouncementListCon
     [handleTogglePin, handleToggleVisibility, onDelete, onEdit]
   )
 
+  // 这里直接在当前 hook 内消费 table 实例，没有额外 memo 边界，按项目约定定点忽略。
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: filteredAnnouncements,
     columns,

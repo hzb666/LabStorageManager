@@ -58,6 +58,7 @@ class User(UserBase, table=True):
     __tablename__ = "users"
     __table_args__ = (
         Index("ix_users_active_role_created", "is_active", "role", "created_at"),
+        Index("ix_users_role_created_at", "role", "created_at"),
         Index("ix_users_full_name_pinyin_id", "full_name_pinyin", "id"),
     )
 

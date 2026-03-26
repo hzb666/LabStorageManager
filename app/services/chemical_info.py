@@ -181,8 +181,8 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
         return cached['chinese_name']
 
     urls = [
-        f"https://www.chemblink.com/products/{cas}C.htm",
-        f"https://www.chemblink.com/moreProducts/more{cas}C.htm",
+        f"https://www.chemblink.com/zh/products/{cas}C.htm",
+        f"https://www.chemblink.com/zh/moreProducts/more{cas}C.htm",
     ]
 
     chinese_name: Optional[str] = None
