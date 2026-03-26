@@ -218,8 +218,9 @@ html.web-fonts-ready .VPFooter {
 
 .wiki-hero-logo {
   width: min(100%, 300px);
-  max-height: 300px;
   display: block;
+  max-height: 300px;
+  opacity: 0.76;
 }
 
 .VPHomeHero .heading {
@@ -250,9 +251,13 @@ html.web-fonts-ready .VPFooter {
   --vp-button-brand-active-bg: #3451b2;
 }
 
-.dark .wiki-nav-logo,
+.dark .wiki-nav-logo {
+  filter: invert(0.95);
+}
+
 .dark .wiki-hero-logo {
   filter: invert(0.95);
+  opacity: 0.9;
 }
 
 .dark .vp-doc .wiki-table-scroll::-webkit-scrollbar-thumb {

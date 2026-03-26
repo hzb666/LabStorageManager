@@ -1,28 +1,59 @@
-# Docker 与 Nginx
+# 运维与排障
 
-## 镜像构建
+本页收拢运行期巡检、故障定位和恢复动作，作为开发指南中面向运行阶段的统一入口。
 
-- 后端镜像基于 `python:3.11-slim`，安装 `openssl`、Poetry 并通过 `poetry install --without dev,scripts` 安装依赖，再执行 `pip install redis`，最后在 entrypoint 生成 `.keys` 并把 `/data/static` 挂载至 `/app/static`，保证数据库与图片在 `app_data` 卷中持久化。
-- 前端采用多阶段构建：`node:20-alpine` 阶段执行 `npm ci` 与 `npm run build`（可通过 `ARG VITE_API_URL` 指定 API 前缀）；最终镜像基于 `nginx:1.27-alpine`，用 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" /> 替换默认配置，并把 `dist` 目录拷贝到 `/usr/share/nginx/html`。
+## 日常巡检
 
-## Nginx 路由职责
+### 服务与依赖
 
-- `location /api/static/` 重写为 `/static/` 并代理至 `backend:8000`，确保上传图片、缩略图与资源共享同一路径。
-- `/api/`、`/docs`、`/docs/`、`/redoc`、`/openapi.json`、`/health` 统一代理到后端，代理时设置 `Host`、`X-Real-IP`、`X-Forwarded-For`、`X-Forwarded-Proto` 并使用 `proxy_http_version 1.1`。
-- `/static/` 也代理到后端，避免 Nginx 作为静态服务器时直接访问不到后端生成的上传内容。
-- 根路径 `/` 使用 `try_files $uri $uri/ /index.html`，保持单页应用的 history 路由。
-- `client_max_body_size` 设为 20m，避免上传大文件被 Nginx 提前拒绝。
+- 访问 `/health` 确认后端整体存活。
+- 使用 `redis-cli -a <REDIS_PASSWORD> ping` 确认 Redis 可用。
+- 查看 `docker compose logs backend` 与 `docker compose logs frontend`，优先关注启动错误、Redis 连接失败和静态资源异常。
 
-## 生产注意事项
+### 数据与文件
 
-- Compose 中 `TRUST_PROXY_HEADERS=false`，若 Nginx 在真实受信代理（例如 Cloudflare、Ingress Controller）后面，请设置该环境变量为 `true`，并确保代理传递 `X-Forwarded-*`。
-- 如果使用自定义域名或 TLS，替换 `server_name _;` 并在 Nginx 配置中增加 `listen 443 ssl`、证书路径等，同样保持 `/api`、`/docs` 等路径不冲突。
-- `frontend` 镜像构建时的 `VITE_API_URL` 应与 Nginx Proxy 的路径对齐。如果前端部署在独立子域，直接在 `docker compose` 命令前 export 一个 `VITE_API_URL`。
+- 检查 `app_data/static`、`app_data/keys`、`app_data/lab_inventory.db` 是否存在且权限正常。
+- 确认 `/static` 能正常返回公告图片、上传文件和模板。
+- 抽查 `/cart-import?import=true`，确认前端仍能读取最新导入批次。
+
+## 常见故障
+
+### 启动失败
+
+- `DEFAULT_ADMIN_PASSWORD` 为空：补齐 `.env` 中的默认管理员配置。
+- `RSA private key not found`：检查 `.keys` 挂载；开发环境可暂时切换 `HS256`，生产环境必须补齐 PEM。
+- SQLite 被占用：确认没有多个进程同时写同一个 `lab_inventory.db`；必要时停掉相关进程后再恢复。
+
+### Redis 与会话异常
+
+- `NOAUTH` 或连接失败：核对 `REDIS_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`。
+- Redis 不可用时，登录限流和会话缓存会降级，功能可能仍可用，但吞吐和安全边界会下降。
+- 如前端收到 `X-Redis-Status: unavailable`，应优先检查 Redis，而不是直接怀疑业务接口。
+
+### 静态资源或 API 404
+
+- `/static/*` 返回 404：先检查 `entrypoint.sh` 是否成功把 `/data/static` 链接到 `/app/static`。
+- `/users/login` 返回 404：通常是前端错误绕过 `/api` 前缀，请检查 `VITE_API_URL`。
+- `/docs` 路径冲突：不要把其他服务也部署在 `/docs`、`/redoc` 或 `/openapi.json`。
+
+### 扩展导入异常
+
+- 扩展 host 权限不匹配：检查 `manifest.json` 中的 `host_permissions`。
+- 批次数据过期或未落盘：检查 `chrome.storage.local.import_batch_latest` 与页面 `localStorage.cart_import_batch_latest`。
+- `batch_id` 不一致：确认扩展打开的跳转链路与当前系统地址一致。
+
+## 快速恢复顺序
+
+1. 检查 `/health`、Compose 状态和容器日志。
+2. 检查 Redis 连通性。
+3. 检查 `.keys`、`static` 和数据库文件挂载状态。
+4. 扩展导入问题再补充检查扩展存储与跳转参数。
+
+多数故障都能先用这条顺序把范围缩小到后端配置、Redis、挂载卷或扩展桥接中的一类。
 
 ## 参考代码
-- [docker/backend/Dockerfile](https://github.com/hzb666/LabStorageManager/blob/main/docker/backend/Dockerfile)
+
+- [app/core/config.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/config.py)
+- [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)
 - [docker/backend/entrypoint.sh](https://github.com/hzb666/LabStorageManager/blob/main/docker/backend/entrypoint.sh)
-- [docker/frontend/Dockerfile](https://github.com/hzb666/LabStorageManager/blob/main/docker/frontend/Dockerfile)
 - [docker/nginx/default.conf](https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf)
-
-

@@ -1,12 +1,6 @@
 # 字段参考
 
-## 这页怎么用
-
-这页不是 ER 图，也不是完整 schema dump。它只做一件事：
-
-- 用业务语言解释主要表里的关键字段
-
-如果你想看实体关系，先看 [数据模型](/database/data-model)。
+本页按业务语义解释主要表里的关键字段，而不是重复展示 schema dump。它更适合作为字段职责速查表；如果要先理解实体之间的关系，可以先看 [数据模型](/database/data-model)。
 
 ## `users`
 
@@ -170,18 +164,18 @@
 | `created_by` | 创建人 | 关联管理员 |
 | `created_at` / `updated_at` | 审计时间 | 展示和排序使用 |
 
-## DTO 与表字段的区别
+## DTO 与表字段
 
-除了数据库表字段外，项目里还有很多 `Create`、`Update`、`Response` 模型。它们有几个常见差别：
+除了数据库表字段外，项目里还有很多 `Create`、`Update`、`Response` 模型。它们通常有三类差异：
 
-- `Create` 模型更贴近前端输入
-- `Update` 模型通常是可选字段集合
-- `Response` 模型会补充计算字段和显示名
+- `Create` 模型更贴近前端输入。
+- `Update` 模型通常是可选字段集合。
+- `Response` 模型会补充计算字段和显示名。
 
 例如：
 
-- `InventoryResponse` 会带 `specification` 和多种 `*_name`
-- `ReagentOrderCreate` 接收 `specification`，后端再拆成 `initial_quantity + unit`
+- `InventoryResponse` 会带 `specification` 和多种 `*_name`。
+- `ReagentOrderCreate` 接收 `specification`，后端再拆成 `initial_quantity + unit`。
 
 ## 参考代码
 

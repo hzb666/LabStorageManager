@@ -1,45 +1,50 @@
 # 核心导读
 
-这页写给已经能独立接手系统设计、代码治理和线上问题定位的开发者。你不需要先知道每个页面怎么点，但需要先抓住项目的核心架构洞见以及实际行为路径。
+这页写给需要接手系统设计、代码治理和线上问题定位的开发者。重点不是页面操作，而是先建立对业务分流、事实源、实时同步和外部导入边界的统一认识。
 
 ## 最重要的架构洞见
 
-1. **试剂/耗材分流**：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order.py" /> 分别定义两条链路，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" /> 负责试剂从 `pending`→`approved`→`arrived`→`stocked`，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py" /> 只需 `pending`→`approved`→`completed`（不存在库存）。
-2. **库存作为事实源**：`Inventory` 模型在 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory.py" /> 中实现 `internal_code`, `is_common`, 拼音字段；所有借用/归还/常用货架都通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" /> 与 `register_common_shelf` 实现，`BorrowLog` 记录每次借用。
-3. **前端 + SSE 负责可感知实时反馈**：前端 `useSSE.ts` + `sseStore.ts` 订阅 `/api/events?rooms=...`，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py" /> 保证消息对齐（序列号、慢客户端回退）。
-4. **购物车同步始终回到系统**：浏览器扩展抓购物车写入 `chrome.storage.local.import_batch_latest`，`content/import-bridge.js` 把数据送到 `/cart-import` 页面并写入 `localStorage.cart_import_batch_latest`，前端 `cartSyncAPI.importItems` 调用 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" />，导入过程中仍通过 `compute_pinyin_fields`、`normalize_cas`、`parse_specification` 统一清洗。
+1. 试剂和耗材是两条不同业务链：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order.py" /> 明确了两种订单模型；<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" /> 负责试剂从审批、到货到入库的完整链路，而 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py" /> 只覆盖采购完成，不进入库存。
+2. 库存是现货侧事实源：`Inventory` 在 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory.py" /> 中承载 `internal_code`、`is_common`、拼音字段和剩余量；借用、归还、常用货架和库存导出都围绕这张表展开，`BorrowLog` 只记录动作历史，不替代库存当前状态。
+3. 实时同步是增量通知，不是第二事实源：前端 `useSSE.ts` + `sseStore.ts` 订阅 `/api/events`，后端 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py" /> 负责房间、序列号和慢客户端处理。事件用于提示和局部 patch，权威数据仍然来自 HTTP 查询。
+4. 外部购物车导入不会绕开主系统规则：扩展抓到的数据先写入浏览器存储，再由 `content/import-bridge.js` 注入 `/cart-import` 页面，最终仍调用 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" />，复用 CAS、规格和拼音清洗链路。
 
-## 先打开这些文件
+## 接手时先确认的四个系统约束
 
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />：看中间件链（CORS、CSRF、HTTPS 重定向）、`init_db()` 流程以及 `/cart-import` 入口。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py" />：验证 WAL/FTS/索引创建 + 拼音/internal code 实现。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" />：重要工作流、借用接口、SSE 事件。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" />：耗材审批、完成与外部购物车导入策略。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" />：掌握路由、受保护页面、Auth、API 定义。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts" /> + `store/sseStore.ts`：理解 SSE 订阅/状态治理逻辑。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" />：理解扩展如何把外部数据注入到应用。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" />：确认部署边界（`/api`、`/static`、`health`、SSE）。
+- SQLite 不是临时方案：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" /> 在启动时强制打开 WAL、补索引、初始化 FTS 并执行一致性检查。
+- 搜索依赖预计算字段：拼音字段、CAS 标准化和规格解析都在写入阶段完成。
+- 缓存必须配合失效和 SSE：`LIST_CACHE_PREFIX` 只承担短 TTL 列表削峰；写操作后需要清缓存并广播事件。
+- Redis 是加速层，不是唯一依赖：会话、限流和跨进程 SSE 会优先走 Redis，但系统设计允许 Redis 不可用时降级继续运行。
 
-## 运行链的记忆套路
+## 建议优先打开的文件
 
-1. 后端：`python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`，`init_db` 会创建索引、FTS、default admin；`/api/events` 需要登录并用 `/api/events?rooms=...` 订阅。
-2. 前端：`npm run dev` 启动 Vite（5173），`App` 会懒加载页面；`Auth` 通过 HTTP-only Cookie，`useAuthStore` 在 `authAPI.getProfile()` 中刷新。
-3. SSE：`useSSE` 会注册 `handlers`（事件类型如 `inventory_updated`、`common_shelf_updated`），`processSeq` 保证不重复，`markRoomStale` 触发数据刷新。
-4. 购物车导入：扩展到 `/cart-import` 页面 → `cartSyncAPI.importItems` → <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" /> → `ReagentOrder`/`ConsumableOrder` 创建。
+- 运行边界：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />。
+- 数据基线：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py" />。
+- 主业务流：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" />。
+- 前端入口：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts" />。
+- 外围系统：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" />。
 
-## 设计取舍提醒
+## 按任务切入的阅读顺序
 
-- **SQLite**：启用 WAL + FTS（`inventory_fts`, `reagent_order_fts`, `consumable_order_fts`, `users_fts`），`SQLITE_PERFORMANCE_INDEX_UPGRADES` 拼接复合索引，避免在业务逻辑里直接写 SQL。
-- **Redis**：主要用于 SSE、登录限流、会话黑名单（封装在 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_redis.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/rate_limit.py" />），业务仍以 SQLite 作为事实源。
-- **安全优先**：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" /> 中 `_apply_security_headers`、`CurrentUser`、`require_admin`、HTTPS 重定向/CSRF 检查全部在线。
-- **前后端输入验证**：前端 `validationSchemas.ts`、Valibot 校验，后端 `pydantic` DTO（如 `ReagentOrderCreate`、`InventoryUpdate`）保障字段合法性；`cart_sync` 进一步清洗。
-- **扩展不会绕过权限**：扩展本身只负责数据搬运，最终创建订单仍走后端 API，因此不要在扩展中添加独立验证逻辑。
+1. 业务流程调整：试剂/耗材订单模型、对应 API 与 workflow、库存承接链路。
+2. 搜索与性能调整：`app/database.py` 的索引与 FTS 初始化、`search_matchers.py`、`api_utils.py` 和前端表格状态。
+3. 权限与安全调整：`app/core/auth.py`、`app/main.py` 的中间件和 `CurrentUser` 依赖、前端路由守卫。
+4. 实时同步调整：SSE 后端、`useSSE.ts`、`useListSSE.ts` 和 `sseStore.ts`，重点确认 patch 与 stale 刷新的边界。
+5. 导入链路调整：扩展桥接、`CartImport.tsx` 与 `cart_sync.py`，避免在扩展中重复实现业务校验。
 
-## 其他提醒
+## 设计取舍
 
-- 避免参考旧的 `docs/` 内容，真正可靠的是 `app/`、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/frontend/src" />、`browser-extension/`、`docker/` 这四个目录。
-- 所有变更需关注 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/api_utils.py" />、`LIST_CACHE_PREFIX` 与 SSE 推送是否同步（`clear_cache_by_prefix` + `sse_manager.broadcast`）。
-- 解决问题时优先复盘 `app` 日志、`frontend` 控制台、`docker-compose logs`，必要时使用 `python -m uvicorn` 和 `npm run dev` 分别确认接口与前端表现。
+- SQLite：启用 WAL + FTS（`inventory_fts`, `reagent_order_fts`, `consumable_order_fts`, `users_fts`），`SQLITE_PERFORMANCE_INDEX_UPGRADES` 拼接复合索引。
+- Redis：主要用于 SSE、登录限流和会话黑名单，但业务仍以 SQLite 作为事实源。
+- 安全优先：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" /> 中的安全头、`CurrentUser`、`require_admin`、HTTPS 重定向和 CSRF 检查都在线。
+- 前后端输入验证：前端 `validationSchemas.ts`、Valibot 校验，后端 DTO 保障字段合法性；`cart_sync` 进一步清洗。
+- 扩展不会绕过权限：扩展只负责数据搬运，最终创建订单仍走后端 API。
+
+## 接手时容易漏掉的点
+
+- 不要把旧 `docs/` 当作事实源，当前代码行为应以 `app/`、`frontend/src/`、`browser-extension/` 和 `docker/` 为准。
+- 任何写操作改动都要同步检查缓存失效和 SSE 广播。
+- 线上问题定位应优先检查 `app` 日志、前端控制台和 `docker compose logs`。
 
 ## 参考代码
 - [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)
@@ -65,5 +70,3 @@
 - [frontend/src/api/client.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts)
 - [frontend/src/App.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx)
 - [frontend/src/hooks/useSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts)
-
-

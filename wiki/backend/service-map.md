@@ -1,17 +1,8 @@
 # 后端服务地图
 
-## 这页看什么
+后端代码按“HTTP 入口 -> 业务服务 -> 数据模型 -> 运行时基础设施”分层组织。`app/api/*.py` 负责请求入口和权限边界，`app/services/` 承担可复用业务逻辑，`app/models/` 定义实体与 DTO，`app/core/` 则集中认证、配置、Redis 与运行时常量。本页用于快速定位代码归属和新增逻辑的推荐落点。
 
-`app/api/*.py` 只是后端入口，不是全部逻辑。真正的业务能力分散在：
-
-- `api/` 路由层
-- `services/` 服务与复用工具层
-- `models/` 数据模型层
-- `core/` 运行时与安全基础设施层
-
-这页的目标是帮你快速找到“某种逻辑应该去哪看”。
-
-## 总体分层
+## 分层总览
 
 ```mermaid
 flowchart TD
@@ -24,9 +15,9 @@ flowchart TD
     E --> F["SQLite + Redis"]
 ```
 
-## 1. 路由层 `app/api/`
+## 路由层 `app/api/`
 
-路由层负责：
+路由层只处理 HTTP 相关职责：
 
 - 定义 HTTP 路径
 - 绑定权限依赖
@@ -40,18 +31,18 @@ flowchart TD
 | `users.py` | 登录、登出、用户 CRUD、头像、密码 |
 | `user_sessions.py` | 设备会话管理 |
 | `inventory.py` | 库存基础 CRUD |
-| `inventory_extended_routes.py` | 导入导出、借还、仪表盘库存扩展路由 |
+| `inventory_extended_routes.py` | 导入导出、借还、仪表盘等库存扩展路由 |
 | `common_shelf.py` | 常用货架专用路由 |
 | `reagent_orders.py` | 试剂订单基础 CRUD |
 | `reagent_orders_workflow.py` | 试剂审批、到货、入库工作流 |
 | `consumable_orders.py` | 耗材订单 CRUD 与状态流转 |
 | `announcements.py` | 公告管理与图片上传 |
 | `cart_sync.py` | 购物车匹配与导入 |
-| `events.py` | SSE 长连接 |
+| `events.py` | SSE 长连接入口 |
 
-## 2. 认证、配置与运行时 `app/core/`
+## 认证、配置与运行时 `app/core/`
 
-这层不是业务逻辑，但几乎所有业务都会经过它：
+这层不直接承载业务流程，但几乎所有请求都会经过它：
 
 | 文件 | 作用 |
 | --- | --- |
@@ -62,7 +53,7 @@ flowchart TD
 | `request_utils.py` | 客户端 IP、request id 等请求工具 |
 | `time_utils.py` | UTC 时间和格式化 |
 
-## 3. 订单与库存核心服务
+## 订单与库存核心服务
 
 ### 查询与搜索
 
@@ -91,7 +82,7 @@ flowchart TD
 | `inventory_creation.py` | 创建库存时的共用逻辑 |
 | `internal_code.py` | 生成瓶级内部编号 |
 
-## 4. 用户、会话与限流服务
+## 用户、会话与限流服务
 
 | 文件 | 作用 |
 | --- | --- |
@@ -101,7 +92,7 @@ flowchart TD
 | `user_utils.py` | 批量用户名补全、响应辅助 |
 | `audit_logger.py` | 审计日志记录 |
 
-## 5. 文件、导入导出与外围能力
+## 文件、导入导出与外围能力
 
 | 文件 | 作用 |
 | --- | --- |
@@ -112,56 +103,53 @@ flowchart TD
 | `error_logger.py` | 错误记录能力 |
 | `api_utils.py` | API 层缓存清理和通用辅助 |
 
-## 6. 实时能力
+## 实时能力
 
 | 文件 | 作用 |
 | --- | --- |
 | `sse_manager.py` | 本地 SSE 客户端管理、序号、心跳 |
 | `sse_redis.py` | 跨实例 pub/sub |
 
-## 7. 数据模型层 `app/models/`
+## 数据模型层 `app/models/`
 
-模型层包含两类东西：
+模型层通常分成两类：
 
 - 表模型：`User`、`Inventory`、`ReagentOrder`、`ConsumableOrder`、`Announcement`、`UserSession`、`BorrowLog`
 - DTO / Response：`Create`、`Update`、`Response` 等输入输出模型
 
-继续阅读：
+实体关系和字段职责可继续对照 [数据模型](/database/data-model) 与 [字段参考](/database/field-reference)。
 
-- [数据模型](/database/data-model)
-- [字段参考](/database/field-reference)
-
-## 常见问题应该去哪看
+## 定位建议
 
 ### 登录、Cookie、Token、管理员权限
 
-看：
+相关文件：
 
 - `app/core/auth.py`
 - `app/services/session_service.py`
 - [认证与安全](/backend/auth-security)
 
-### 列表搜索为什么这样写
+### 列表搜索的实现分层
 
-看：
+相关文件：
 
 - `search_matchers.py`
 - `inventory_fts.py`
 - `order_fts.py`
 - `sql_utils.py`
 
-### 订单为什么能转成库存
+### 订单转库存的实现入口
 
-看：
+相关文件：
 
 - `reagent_orders_workflow.py`
 - `inventory_creation.py`
 - `internal_code.py`
 - `inventory.py`
 
-### 为什么改一条数据前端列表会自动刷新
+### 前端列表自动刷新的事件链路
 
-看：
+相关文件：
 
 - `events.py`
 - `sse_manager.py`

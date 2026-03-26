@@ -1,59 +1,50 @@
-# 前端 Hooks
+# Hooks 层
 
-## 这页看什么
+`frontend/src/hooks/` 负责承接页面中的可复用状态逻辑。它不直接渲染 UI，而是为页面、组件和 `lib/` 提供稳定的状态协作接口。
 
-`frontend/src/hooks/` 承担了前端的大部分基础设施：
+## 分类
 
-- 表格状态
-- URL 状态同步
-- SSE 连接和列表增量更新
-- 主题与设备偏好
-- 对话框和表单弹窗控制
-- 错误采集
+### 表格与列表状态
 
-## Hooks 分类
-
-### 1. 表格与列表状态
-
-| Hook | 作用 | 典型调用方 |
+| Hook | 职责 | 典型调用方 |
 | --- | --- | --- |
-| `useTableState` | 统一管理筛选、排序、分页、列宽、展开、数据拉取 | 库存页、订单页、管理页 |
-| `useTableUrlState` | 把筛选和分页同步到 URL | 带筛选表格的页面 |
-| `useBulkExpand` | 统一控制展开/收起全部行 | 可展开明细表格 |
-| `useColumnResize` | 列宽拖拽和持久化 | DataTable |
-| `useDataTableScroll` | 表格滚动容器和虚拟列表协作 | DataTable / FilterTable |
+| `useTableState` | 统一管理筛选、排序、分页、列宽、展开和数据拉取 | 库存页、订单页、管理页 |
+| `useTableUrlState` | 将筛选和分页同步到 URL | 带筛选表格的页面 |
+| `useBulkExpand` | 统一控制整表展开与收起 | 可展开明细表格 |
+| `useColumnResize` | 处理列宽拖拽和持久化 | `DataTable` |
+| `useDataTableScroll` | 处理滚动容器与虚拟列表协作 | `DataTable`、`FilterTable` |
 
-### 2. 实时同步
+### 状态同步
 
-| Hook | 作用 | 典型调用方 |
+| Hook | 职责 | 典型调用方 |
 | --- | --- | --- |
-| `useSSE` | 建立 `/api/events` 长连接、管理订阅房间和重连 | 页面级 SSE 接入 |
-| `useListSSE` | 把 SSE 事件应用到列表缓存或标记 stale | 库存、订单、仪表盘列表 |
+| `useSSE` | 建立 `/api/events` 长连接，管理订阅房间和重连 | 页面级实时同步接入 |
+| `useListSSE` | 将 SSE 事件应用到列表缓存或标记 stale | 库存、订单、仪表盘列表 |
 
-### 3. 业务专用 Hook
+### 业务专用 Hook
 
-| Hook | 作用 |
+| Hook | 职责 |
 | --- | --- |
-| `useReagentCasDuplicateCheck` | 创建试剂订单时做同 CAS 风险检查 |
+| `useReagentCasDuplicateCheck` | 创建试剂订单时进行同 CAS 风险检查 |
 | `useRememberedUser` | 记住登录用户名等轻量偏好 |
-| `useErrorLogger` | 捕获前端异常和 API 错误，形成错误上报 |
+| `useErrorLogger` | 统一采集前端异常和 API 错误 |
 
-### 4. UI / 交互状态
+### UI 与交互状态
 
-| Hook | 作用 |
+| Hook | 职责 |
 | --- | --- |
-| `useTheme` | 明暗主题切换 |
-| `useDialogState` | 统一开关弹窗状态 |
-| `useFormModal` | 表单弹窗的打开、关闭、重置和提交协作 |
-| `useMobile` | 响应式断点判断 |
+| `useTheme` | 管理明暗主题切换 |
+| `useDialogState` | 管理弹窗开关状态 |
+| `useFormModal` | 管理表单弹窗的打开、关闭、重置和提交 |
+| `useMobile` | 判断响应式断点 |
 
-## 最值得先读的几个 Hook
+## 核心职责
 
 ### `useTableState`
 
-这是表格页的“总控 hook”，处理：
+这是表格页面的状态总控，负责：
 
-- 筛选
+- 筛选与搜索
 - 排序
 - 查询参数
 - 无限分页
@@ -61,39 +52,28 @@
 - 展开状态
 - 数据刷新
 
-### `useSSE` + `useListSSE`
+### `useSSE` 与 `useListSSE`
 
-这对组合决定了：
+这两个 Hook 共同定义实时同步策略：
 
-- SSE 什么时候连接
-- 哪些房间被订阅
-- 什么情况下做局部 patch
-- 什么情况下只打 `stale` 标记并要求全量刷新
+- `useSSE` 决定连接时机、订阅房间和重连行为
+- `useListSSE` 决定事件是局部 patch 还是降级为 stale
+- 两者共同维护“优先保证语义正确，再争取局部更新”的一致性原则
 
 ### `useErrorLogger`
 
-这个 hook 负责把：
+该 Hook 将运行时异常、Promise 错误和 API 错误收敛为统一的错误记录行为，便于页面层保持简洁。
 
-- 运行时异常
-- Promise 错误
-- API 请求错误
+## 改动入口
 
-转成统一的错误记录行为。
+- 页面状态过多时，优先考虑新增或拆分 Hook，而不是继续堆进组件
+- 表格相关改动通常先看 `useTableState`、`useTableUrlState`、`useColumnResize`
+- 实时同步改动通常先看 `useSSE`、`useListSSE` 和 `store/sseStore.ts`
+- 弹窗和主题改动通常先看 `useDialogState`、`useFormModal`、`useTheme`
 
-## hooks 与其他目录的关系
+## 阅读顺序
 
-```mermaid
-flowchart LR
-    A[pages] --> B[hooks]
-    B --> C[components]
-    B --> D[lib]
-    B --> E[store]
-    B --> F[api/client.ts]
-```
-
-## 阅读顺序建议
-
-### 想改表格页
+### 修改表格页
 
 1. `useTableState`
 2. `useTableUrlState`
@@ -101,26 +81,26 @@ flowchart LR
 4. `useBulkExpand`
 5. `useDataTableScroll`
 
-### 想改实时更新
+### 修改实时更新
 
 1. `useSSE`
 2. `useListSSE`
 3. `frontend/src/store/sseStore.ts`
 
-### 想改主题或弹窗体验
+### 修改主题或弹窗体验
 
 1. `useTheme`
 2. `useDialogState`
 3. `useFormModal`
 
-## 二次开发建议
+## 验证建议
 
-- 页面里出现大段状态管理时，优先考虑抽到 hooks，而不是继续堆在页面组件里
-- 业务专用 hook 和通用 hook 要分开，不要把页面特例塞进 `useTableState`
-- 涉及 URL、表格和缓存联动时，先确认有没有现成 hook 可以复用
+- 页面状态是否已经抽离到 Hook 层
+- 同一类能力是否复用了现有 Hook
+- 表格筛选、分页和列宽状态是否能正确恢复
+- SSE 断线和重连后，是否仍能回到一致状态
 
 ## 参考代码
-
 - [frontend/src/hooks/useColumnResize.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useColumnResize.ts)
 - [frontend/src/hooks/useDataTableScroll.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useDataTableScroll.ts)
 - [frontend/src/hooks/useDialogState.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useDialogState.tsx)

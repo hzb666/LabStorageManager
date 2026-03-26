@@ -38,14 +38,14 @@ export default defineConfig({
         activeMatch: "^/database/",
       },
       {
-        text: "系统优化",
-        link: "/optimization/optimization",
-        activeMatch: "^/optimization/",
-      },
-      {
         text: "开发指南",
         link: "/dev-guide/principal-guide",
         activeMatch: "^/dev-guide/",
+      },
+      {
+        text: "更新日志",
+        link: "/changelog",
+        activeMatch: "^/changelog$",
       },
     ],
     socialLinks: [
@@ -62,6 +62,9 @@ export default defineConfig({
       message: "开源项目 · Apache-2.0 license",
       copyright: "Copyright © 2026 hzb666 and AssetManager contributors",
     },
+    lastUpdated: {
+      text: "最后更新",
+    },
     sidebar: [
       {
         text: "使用者指南",
@@ -75,10 +78,10 @@ export default defineConfig({
             text: "订单、采购与入库",
             link: "/user-guide/orders-and-procurement",
           },
-          { text: "库存与借还", link: "/user-guide/inventory-and-borrowing" },
-          { text: "账户、公告与支持", link: "/user-guide/account-and-support" },
+          { text: "库存、借还与常用货架", link: "/user-guide/inventory-and-borrowing" },
+          { text: "账户、公告与使用支持", link: "/user-guide/account-and-support" },
           { text: "管理员指南", link: "/user-guide/admin-guide" },
-          { text: "常见问题", link: "/user-guide/faq" },
+          { text: "常见情况说明", link: "/user-guide/faq" },
         ],
       },
       {
@@ -100,11 +103,11 @@ export default defineConfig({
         items: [
           { text: "应用骨架", link: "/frontend/app-shell" },
           { text: "页面地图", link: "/frontend/page-map" },
-          { text: "组件介绍", link: "/frontend/components" },
-          { text: "Hooks", link: "/frontend/hooks" },
-          { text: "Lib 工具箱", link: "/frontend/lib-overview" },
+          { text: "组件层", link: "/frontend/components" },
+          { text: "Hooks 层", link: "/frontend/hooks" },
+          { text: "Lib 层", link: "/frontend/lib-overview" },
           { text: "表格与表单体系", link: "/frontend/table-form-system" },
-          { text: "状态与实时同步", link: "/frontend/state-sync" },
+          { text: "状态同步", link: "/frontend/state-sync" },
         ],
       },
       {
@@ -129,27 +132,19 @@ export default defineConfig({
         ],
       },
       {
-        text: "系统优化",
-        collapsed: false,
-        items: [
-          { text: "优化思路", link: "/optimization/optimization" },
-          { text: "日常维护", link: "/optimization/maintenance" },
-          { text: "问题排查", link: "/optimization/troubleshooting" },
-        ],
-      },
-      {
         text: "开发指南",
         collapsed: false,
         items: [
           { text: "核心导读", link: "/dev-guide/principal-guide" },
           { text: "从零到上手", link: "/dev-guide/zero-to-hero" },
           { text: "关键文件索引", link: "/dev-guide/key-files" },
-          { text: "术语表", link: "/dev-guide/glossary" },
-          { text: "部署指南", link: "/dev-guide/deployment" },
-          { text: "Docker 与 Nginx", link: "/dev-guide/docker-nginx" },
+          { text: "开发、部署与代理", link: "/dev-guide/deployment" },
+          { text: "运维与排障", link: "/dev-guide/docker-nginx" },
           { text: "购物车同步扩展", link: "/dev-guide/cart-sync" },
+          { text: "术语表", link: "/dev-guide/glossary" },
         ],
       },
+      { text: "更新日志", link: "/changelog" },
     ],
     outline: {
       level: [2, 3],

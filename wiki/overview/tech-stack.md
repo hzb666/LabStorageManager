@@ -2,123 +2,100 @@
 
 ## 总览
 
-LabStorageManager 的技术栈围绕几个明确目标选型：
+当前技术选型围绕四个目标展开：
 
-- 用 SQLite 支撑中小规模实验室业务，同时保留足够快的搜索和筛选
-- 用 React + Vite 提供高密度业务界面
-- 用 Redis 增强会话、限流和 SSE，但允许不可用时降级
-- 用浏览器扩展对接外部采购平台
+- 用 SQLite 支撑中小规模实验室业务，并保持可接受的检索能力。
+- 用 React + Vite 提供高密度业务界面。
+- 用 Redis 增强会话、限流和 SSE，同时允许降级。
+- 用浏览器扩展对接外部采购平台。
 
 ## 后端
 
 ### FastAPI
 
-- 用途：提供 REST API、SSE、静态资源和运行时中间件
+- 用途：提供 REST API、SSE、静态资源和运行时中间件。
 - 落点：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />
-- 适合原因：
-  - 路由和依赖注入清晰
-  - 文档生成能力强
-  - 和 Pydantic / SQLModel 组合自然
 
 ### SQLModel + SQLAlchemy
 
-- 用途：定义模型、DTO 和 SQLite 映射
+- 用途：定义模型、DTO 和 SQLite 映射。
 - 落点：`app/models/*.py`
-- 适合原因：
-  - 同时覆盖数据表和 API 模型
-  - 代码风格接近 Pydantic，维护成本低
 
 ### SQLite
 
-- 用途：主数据库
+- 用途：主数据库。
 - 落点：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />
-- 关键配置：
-  - `WAL` 模式
-  - `foreign_keys=ON`
-  - 多组复合索引
-  - FTS5 虚拟表和触发器
+- 关键配置：`WAL`、`foreign_keys=ON`、复合索引、FTS5 虚拟表和触发器。
 
 ### JWT + python-jose
 
-- 用途：登录认证
+- 用途：登录认证。
 - 落点：`app/core/auth.py`
-- 模式：
-  - 浏览器走 HttpOnly Cookie
-  - 脚本或调试工具可走 Bearer Token
-  - 生产默认 `RS256`
-  - 开发可回退 `HS256`
+- 模式：浏览器使用 HttpOnly Cookie，脚本或调试工具可使用 Bearer Token。
 
 ### Redis
 
-- 用途：
-  - 会话缓存
-  - 登录限流
-  - SSE pub/sub
+- 用途：会话缓存、登录限流和 SSE pub/sub。
 - 落点：`app/core/redis.py`、`app/services/sse_redis.py`
-- 特点：
-  - 有断路器
-  - 不可用时部分能力可降级
+- 特点：具备降级能力，不可用时部分功能仍可继续。
 
 ### Ruff
 
-- 用途：后端 lint
+- 用途：后端 lint。
 - 验证命令：`ruff check app/`
 
 ## 前端
 
 ### React 19
 
-- 用途：页面和组件开发
+- 用途：页面和组件开发。
 - 落点：`frontend/src/`
 
 ### TypeScript 5.9
 
-- 用途：前端类型系统
-- 价值：
-  - API 类型和表单字段更稳
-  - 重构时更容易发现连锁影响
+- 用途：前端类型系统。
 
 ### Vite 7
 
-- 用途：前端构建与开发服务器
+- 用途：前端构建与开发服务器。
 - 落点：`frontend/`
 
 ### React Router DOM 7
 
-- 用途：页面路由
+- 用途：页面路由。
 - 落点：`frontend/src/App.tsx`
 
 ### Zustand
 
-- 用途：认证状态、UI 状态、SSE 状态
+- 用途：认证状态、UI 状态和 SSE 状态。
 - 落点：`frontend/src/store/`
 
 ### TanStack Table 8 + React Virtual
 
-- 用途：高密度列表和虚拟滚动
+- 用途：高密度列表和虚拟滚动。
 - 落点：`frontend/src/components/ui/DataTable.tsx`、`frontend/src/hooks/useTableState.tsx`
 
 ### React Hook Form + Valibot
 
-- 用途：表单状态管理与输入校验
+- 用途：表单状态管理与输入校验。
 - 落点：`frontend/src/lib/validationSchemas.ts`、`frontend/src/lib/formConfigs.tsx`
 
 ### Tailwind CSS 4 + Radix UI
 
-- 用途：样式系统和基础无障碍组件
+- 用途：样式系统和基础无障碍组件。
 - 落点：`frontend/src/components/ui/`
 
 ## 实时通信与外围能力
 
 ### SSE
 
-- 用途：库存、订单、仪表盘局部更新
+- 用途：库存、订单和仪表盘的局部更新。
 - 后端：`app/api/events.py`、`app/services/sse_manager.py`
 - 前端：`frontend/src/hooks/useSSE.ts`、`frontend/src/hooks/useListSSE.ts`
 
 ### 浏览器扩展
 
-- 用途：采集外部购物车并导入系统
+- 用途：采集外部购物车并导入系统。
 - 落点：`browser-extension/`
 - 关键桥接路径：`/cart-import`、`/api/cart-sync`、`/api/cart-sync/import`
 
@@ -126,12 +103,12 @@ LabStorageManager 的技术栈围绕几个明确目标选型：
 
 ### VitePress
 
-- 用途：当前 wiki
+- 用途：当前 wiki。
 - 落点：`wiki/`
 
 ### Docker + Nginx
 
-- 用途：部署后端、前端、Redis 和统一入口
+- 用途：部署后端、前端、Redis 和统一入口。
 - 落点：`docker/`、`docker-compose.yml`
 
 ## 技术选型之间的关系
@@ -169,7 +146,6 @@ flowchart LR
 - 想看数据库实体：去 [数据模型](/database/data-model) 和 [字段参考](/database/field-reference)
 
 ## 参考代码
-
 - [app/core/auth.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)

@@ -1,8 +1,8 @@
 # API 参考（全量路由，代码自动核对）
 
-> 本页按 `app/main.py` 实际挂载结果和各路由文件装饰器自动整理，覆盖 `app/main.py`、`app/api/*.py`、`app/services/chemical_info.py`。
+> 本页按 `app/main.py` 的实际挂载结果和各路由文件的装饰器整理，覆盖 `app/main.py`、`app/api/*.py`、`app/services/chemical_info.py`。
 
-## 挂载总览
+## 路由挂载
 
 - `announcements.router` -> `/api`
 - `cart_sync.router` -> `/api`
@@ -18,14 +18,14 @@
 - `inventory_extended_routes` 与 `common_shelf` 通过 `register_*` 动态挂到 `inventory.router`，最终前缀为 `/api/inventory`。
 - `reagent_orders_workflow` 通过 `register_*` 动态挂到 `reagent_orders.router`，最终前缀为 `/api/reagent-orders`。
 
-## 权限判读说明
+## 权限判定
 
 - `管理员`：路由依赖 `require_admin` 或参数类型为 `AdminUser`。
 - `已登录用户`：路由依赖 `get_current_user` / `get_current_session` 或参数类型为 `CurrentUser`。
 - `公开`：无上述依赖。
 - `POST /api/users/logout` 为公开接口，但实现会校验当前会话 Cookie/Token 后执行退出。
 
-## 全量路由清单（共 86 条）
+## 路由清单（共 86 条）
 
 ### 应用级路由 (`main`)
 
@@ -190,9 +190,9 @@
 
 ## 二次开发建议
 
-- 新增 API 时，优先在对应模块使用与现有一致的依赖模式（`CurrentUser` / `AdminUser`）以避免权限漂移。
-- 新增 `/api/inventory/*` 或 `/api/reagent-orders/*` 路径时，先检查命名路由优先级，避免被 `/{id}` 路由吞掉。
-- 涉及列表接口的新增筛选条件时，需要同时评估：索引、缓存 Key、FTS 字段、前端查询参数同步。
+- 新增 API 时，优先沿用现有依赖模式（`CurrentUser` / `AdminUser`），避免权限漂移。
+- 新增 `/api/inventory/*` 或 `/api/reagent-orders/*` 路径时，先确认命名路由优先级，避免被 `/{id}` 路由吞掉。
+- 新增列表筛选条件时，需要同步评估索引、缓存 Key、FTS 字段和前端查询参数。
 
 ## 参考代码
 - [app/api/announcements.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py)（行52，81，93，130，177，194，224，252，276，300，330）
