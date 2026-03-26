@@ -35,37 +35,679 @@ import {
   X,
   Upload,
   Image as ImageIcon,
-  HardDrive
+  HardDrive,
 } from 'lucide-react'
+
+type AnnouncementDialogMode = 'create' | 'edit' | 'delete'
+// `all` 表示不过滤，`visible / hidden` 分别映射 `is_visible` 的两种状态。
+type VisibilityFilter = 'all' | 'visible' | 'hidden'
+// `all` 表示不过滤，`pinned / unpinned` 分别映射 `is_pinned` 的两种状态。
+type PinnedFilter = 'all' | 'pinned' | 'unpinned'
+
+// 创建和编辑共用这份本地表单草稿，也是 `create / update` 提交时使用的数据形状。
+interface AnnouncementFormState {
+  title: string
+  content: string
+  images: string[]
+  is_pinned: boolean
+  is_visible: boolean
+}
+
+type AnnouncementStorageInfo = {
+  usage_percent?: number
+  used_mb?: number
+  max_mb?: number
+}
+
+interface AnnouncementImageUploadProps {
+  uploading: boolean
+  isDragging: boolean
+  onUpload: (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>
+  onDragEnter: (event: React.DragEvent) => void
+  onDragLeave: (event: React.DragEvent) => void
+  onDragOver: (event: React.DragEvent) => void
+  onDrop: (event: React.DragEvent) => Promise<void>
+}
+
+// 列表 controller 只依赖编辑和删除入口，查询和表格逻辑不直接感知弹窗状态。
+type AnnouncementListControllerParams = {
+  onEdit: (announcement: Announcement) => void
+  onDelete: (announcement: Announcement) => void
+}
+
+type AnnouncementDialogActionsParams = {
+  formData: AnnouncementFormState
+  editingId: number | null
+  deleteId: number | null
+  setFormData: React.Dispatch<React.SetStateAction<AnnouncementFormState>>
+  setFormErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  setFormLoading: React.Dispatch<React.SetStateAction<boolean>>
+  setDeleteLoading: React.Dispatch<React.SetStateAction<boolean>>
+  setUploading: React.Dispatch<React.SetStateAction<boolean>>
+  setIsDragging: React.Dispatch<React.SetStateAction<boolean>>
+  setDialogState: (value: AnnouncementDialogMode | null) => void
+  setDeleteId: React.Dispatch<React.SetStateAction<number | null>>
+  resetForm: () => void
+  refetchAnnouncements: () => void
+}
 
 const columnHelper = createColumnHelper<Announcement>()
 
-export function AnnouncementManagement() {
-  const queryClient = useQueryClient()
-  const [sorting] = useState<SortingState>([])
-  const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all')
-  const [pinnedFilter, setPinnedFilter] = useState<'all' | 'pinned' | 'unpinned'>('all')
-
-  // Dialog state - 使用 useDialogState 管理 create/edit/delete 对话框
-  const [dialogState, setDialogState] = useDialogState<"create" | "edit" | "delete">()
-
-  // 状态管理
-  const [formData, setFormData] = useState({
+function getEmptyAnnouncementFormState(): AnnouncementFormState {
+  return {
     title: '',
     content: '',
-    images: [] as string[],
+    images: [],
     is_pinned: false,
     is_visible: true,
-  })
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
-  const [formLoading, setFormLoading] = useState(false)
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [deleteId, setDeleteId] = useState<number | null>(null)
-  const [deleteLoading, setDeleteLoading] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [isDragging, setIsDragging] = useState(false)
+  }
+}
 
-  // 使用 React Query 获取公告列表
+function validateAnnouncementForm(formData: AnnouncementFormState) {
+  const errors: Record<string, string> = {}
+
+  if (!formData.title.trim()) {
+    errors.title = '请输入公告标题'
+  } else if (formData.title.length > 200) {
+    errors.title = '标题不能超过200字符'
+  }
+
+  if (!formData.content.trim()) {
+    errors.content = '请输入公告内容'
+  } else if (formData.content.length > 10000) {
+    errors.content = '内容不能超过10000字符'
+  }
+
+  return errors
+}
+
+function filterAnnouncements(
+  announcements: Announcement[],
+  visibilityFilter: VisibilityFilter,
+  pinnedFilter: PinnedFilter
+) {
+  return announcements.filter((announcement) => {
+    if (visibilityFilter === 'visible' && !announcement.is_visible) {
+      return false
+    }
+
+    if (visibilityFilter === 'hidden' && announcement.is_visible) {
+      return false
+    }
+
+    if (pinnedFilter === 'pinned' && !announcement.is_pinned) {
+      return false
+    }
+
+    if (pinnedFilter === 'unpinned' && announcement.is_pinned) {
+      return false
+    }
+
+    return true
+  })
+}
+
+// 上传校验只接受 `image/*` 且不超过 5MB；点击上传和拖拽上传共用这套规则。
+function validateAnnouncementImageFile(file: File) {
+  if (!file.type.startsWith('image/')) {
+    return '请选择图片文件'
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    return '图片大小不能超过 5MB'
+  }
+
+  return null
+}
+
+// `create / edit` 分别映射到对应标题，删除确认不走这套标题逻辑。
+function getAnnouncementDialogTitle(dialogState: AnnouncementDialogMode | null) {
+  if (dialogState === 'create') {
+    return '创建公告'
+  }
+
+  if (dialogState === 'edit') {
+    return '编辑公告'
+  }
+
+  return ''
+}
+
+// 提交按钮文案按 `create / edit` 模式切换，`formLoading` 决定是否展示进行中文案。
+function getAnnouncementSubmitLabel(dialogState: AnnouncementDialogMode | null, formLoading: boolean) {
+  if (dialogState === 'create') {
+    return formLoading ? '创建中...' : '创建'
+  }
+
+  if (dialogState === 'edit') {
+    return formLoading ? '保存中...' : '保存'
+  }
+
+  return ''
+}
+
+function AnnouncementStorageBar({
+  storageInfo,
+}: {
+  storageInfo: AnnouncementStorageInfo | undefined
+}) {
+  return (
+    <div className="relative flex-1 h-10 rounded-md border border-input bg-card overflow-hidden flex items-center">
+      <div
+        className="absolute inset-y-0 left-0 bg-muted transition-all duration-500 ease-in-out"
+        style={{ width: `${Math.min(storageInfo?.usage_percent ?? 0, 100)}%` }}
+      />
+      <div className="relative z-10 flex items-center justify-between w-full px-3 gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <HardDrive className="w-4 h-4 text-muted-foreground shrink-0" />
+          <span className="text-base text-foreground truncate">
+            存储: <span>{storageInfo?.used_mb ?? 0}</span> / {storageInfo?.max_mb ?? 50} MB
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AnnouncementActionsCell({
+  announcement,
+  onTogglePin,
+  onToggleVisibility,
+  onEdit,
+  onDelete,
+}: {
+  announcement: Announcement
+  onTogglePin: (id: number) => Promise<void>
+  onToggleVisibility: (id: number) => Promise<void>
+  onEdit: (announcement: Announcement) => void
+  onDelete: (announcement: Announcement) => void
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="modern"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={(event) => {
+              event.stopPropagation()
+              void onTogglePin(announcement.id)
+            }}
+          >
+            {announcement.is_pinned ? (
+              <PinOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-500" />
+            ) : (
+              <Pin className="w-3.5 h-3.5" />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>{announcement.is_pinned ? '取消置顶' : '置顶'}</p>
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="modern"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={(event) => {
+              event.stopPropagation()
+              void onToggleVisibility(announcement.id)
+            }}
+          >
+            {announcement.is_visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>{announcement.is_visible ? '隐藏' : '显示'}</p>
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="modern"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={(event) => {
+              event.stopPropagation()
+              onEdit(announcement)
+            }}
+          >
+            <Edit className="w-3.5 h-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>编辑</p>
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="modern"
+            size="sm"
+            className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete(announcement)
+            }}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>删除</p>
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  )
+}
+
+function buildAnnouncementColumns(params: {
+  onTogglePin: (id: number) => Promise<void>
+  onToggleVisibility: (id: number) => Promise<void>
+  onEdit: (announcement: Announcement) => void
+  onDelete: (announcement: Announcement) => void
+}) {
+  return [
+    columnHelper.accessor('title', {
+      header: '标题',
+      size: 200,
+      cell: (info) => {
+        const isPinned = info.row.original.is_pinned
+        const isVisible = info.row.original.is_visible
+        const title = info.getValue()
+
+        return (
+          <div className="flex items-center gap-2 min-w-0">
+            {isPinned && <Pin className="size-4 text-amber-600 dark:text-amber-500 shrink-0" />}
+            <span className={cn('truncate', !isVisible && 'text-muted-foreground')} title={title}>
+              {title}
+            </span>
+            {!isVisible && <span className="text-sm text-muted-foreground shrink-0">(已隐藏)</span>}
+          </div>
+        )
+      },
+    }),
+    columnHelper.accessor('content', {
+      header: '内容',
+      size: 300,
+      cell: (info) => (
+        <div className="truncate" title={info.getValue()}>
+          {info.getValue()}
+        </div>
+      ),
+    }),
+    columnHelper.accessor('images', {
+      header: '图片',
+      size: 80,
+      cell: (info) => {
+        const images = info.getValue()
+        if (!images || images.length === 0) {
+          return '-'
+        }
+
+        return (
+          <div className="flex items-center gap-1">
+            <ImageIcon className="w-4 h-4" />
+            <span>{images.length}</span>
+          </div>
+        )
+      },
+    }),
+    columnHelper.accessor('created_at', {
+      header: '创建时间',
+      size: 150,
+      cell: (info) => formatDate(info.getValue()),
+    }),
+    columnHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 180,
+      cell: (info) => (
+        <AnnouncementActionsCell
+          announcement={info.row.original}
+          onTogglePin={params.onTogglePin}
+          onToggleVisibility={params.onToggleVisibility}
+          onEdit={params.onEdit}
+          onDelete={params.onDelete}
+        />
+      ),
+    }),
+  ]
+}
+
+function AnnouncementFiltersBar({
+  listController,
+}: {
+  listController: ReturnType<typeof useAnnouncementListController>
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <AnnouncementStorageBar storageInfo={listController.storageInfo} />
+      <Select value={listController.visibilityFilter} onValueChange={listController.setVisibilityFilter}>
+        <SelectTrigger className="w-30 min-h-10">
+          <SelectValue placeholder="显示状态" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部状态</SelectItem>
+          <SelectItem value="visible">显示</SelectItem>
+          <SelectItem value="hidden">隐藏</SelectItem>
+        </SelectContent>
+      </Select>
+
+      <Select value={listController.pinnedFilter} onValueChange={listController.setPinnedFilter}>
+        <SelectTrigger className="w-30 min-h-10">
+          <SelectValue placeholder="置顶状态" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部状态</SelectItem>
+          <SelectItem value="pinned">置顶</SelectItem>
+          <SelectItem value="unpinned">未置顶</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
+function AnnouncementTableContent({
+  isLoading,
+  rowCount,
+  table,
+}: {
+  isLoading: boolean
+  rowCount: number
+  table: ReturnType<typeof useReactTable<Announcement>>
+}) {
+  if (isLoading && rowCount === 0) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (rowCount === 0) {
+    return <div className="text-center py-8 text-muted-foreground">暂无公告数据</div>
+  }
+
+  return (
+    <div className="px-6 rounded-md overflow-auto">
+      <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
+        <thead>
+          {table.getHeaderGroups().map((headerGroup) => (
+            <tr key={headerGroup.id} className="border-b-2 border-border">
+              {headerGroup.headers.map((header) => (
+                <th
+                  key={header.id}
+                  className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
+                  style={{ width: header.getSize() }}
+                >
+                  {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                </th>
+              ))}
+            </tr>
+          ))}
+        </thead>
+        <tbody>
+          {table.getRowModel().rows.map((row) => (
+            <tr key={row.id} className="border-b border-border hover:bg-muted/30">
+              {row.getVisibleCells().map((cell) => (
+                <td
+                  key={cell.id}
+                  className="p-3 align-middle text-base"
+                  style={{ width: cell.column.getSize() }}
+                >
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function AnnouncementTableCard({
+  listController,
+}: {
+  listController: ReturnType<typeof useAnnouncementListController>
+}) {
+  const announcementCount = listController.filteredAnnouncements.length
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
+          <Megaphone className="w-5 h-5" />
+          公告列表 <span className="text-muted-foreground font-normal">(&thinsp;{announcementCount}&thinsp;)</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <AnnouncementTableContent
+          isLoading={listController.isLoading}
+          rowCount={announcementCount}
+          table={listController.table}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+function AnnouncementImageList({
+  images,
+  onRemoveImage,
+}: {
+  images: string[]
+  onRemoveImage: (url: string) => Promise<void>
+}) {
+  if (images.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {images.map((url, index) => (
+        <div key={url} className="relative group">
+          <img
+            src={getFullImageUrl(url)}
+            alt={`图片 ${index + 1}`}
+            className="w-20 h-20 object-cover rounded-md border border-input"
+          />
+          <button
+            type="button"
+            onClick={() => void onRemoveImage(url)}
+            className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+          >
+            <X className="size-3.5 stroke-3" />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function AnnouncementImageUploader({
+  uploading,
+  isDragging,
+  onUpload,
+  onDragEnter,
+  onDragLeave,
+  onDragOver,
+  onDrop,
+}: AnnouncementImageUploadProps) {
+  const uploadIcon = uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />
+  const uploadLabel = uploading ? '上传中...' : '点击或拖拽上传图片'
+
+  return (
+    <label
+      className={cn(
+        'flex items-center justify-center w-full h-20 border-2 border-dashed rounded-md cursor-pointer transition-colors',
+        isDragging ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50 hover:bg-muted/50'
+      )}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDrop={(event) => void onDrop(event)}
+    >
+      <div className="flex items-center gap-2 text-muted-foreground">
+        {uploadIcon}
+        <span>{uploadLabel}</span>
+      </div>
+      <input
+        type="file"
+        accept="image/*"
+        onChange={(event) => void onUpload(event)}
+        disabled={uploading}
+        className="hidden"
+      />
+    </label>
+  )
+}
+
+function AnnouncementFormFields({
+  dialogStateModel,
+  dialogActions,
+  upload,
+}: {
+  dialogStateModel: ReturnType<typeof useAnnouncementDialogStateModel>
+  dialogActions: ReturnType<typeof useAnnouncementDialogActions>
+  upload: AnnouncementImageUploadProps
+}) {
+  return (
+    <div className="grid gap-4">
+      <div>
+        <Label htmlFor="announcement_title" className={LABEL_STYLES.base}>
+          标题 <span className="text-destructive">*</span>
+        </Label>
+        <Input
+          id="announcement_title"
+          value={dialogStateModel.formData.title}
+          onChange={(event) => dialogStateModel.handleFormFieldChange('title', event.target.value)}
+          placeholder="请输入公告标题"
+          className={cn(INPUT_STYLES.lg, dialogStateModel.formErrors.title && 'border-destructive')}
+        />
+        {dialogStateModel.formErrors.title && <p className="text-sm text-destructive mt-1">{dialogStateModel.formErrors.title}</p>}
+      </div>
+
+      <div>
+        <Label htmlFor="announcement_content" className={LABEL_STYLES.base}>
+          内容 <span className="text-destructive">*</span>
+        </Label>
+        <Textarea
+          id="announcement_content"
+          value={dialogStateModel.formData.content}
+          onChange={(event) => dialogStateModel.handleFormFieldChange('content', event.target.value)}
+          placeholder="请输入公告内容"
+          rows={5}
+          className={cn(dialogStateModel.formErrors.content && 'border-destructive')}
+        />
+        {dialogStateModel.formErrors.content && <p className="text-sm text-destructive mt-1">{dialogStateModel.formErrors.content}</p>}
+      </div>
+
+      <div>
+        <Label className={LABEL_STYLES.base}>图片</Label>
+        <div className="mt-2 space-y-2">
+          <AnnouncementImageList
+            images={dialogStateModel.formData.images}
+            onRemoveImage={dialogActions.handleRemoveImage}
+          />
+          <AnnouncementImageUploader
+            {...upload}
+          />
+          <p className="text-sm text-muted-foreground">支持 jpg, png, gif, webp 格式，最大 5MB</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AnnouncementFormDialog({
+  dialogStateModel,
+  dialogActions,
+  upload,
+}: {
+  dialogStateModel: ReturnType<typeof useAnnouncementDialogStateModel>
+  dialogActions: ReturnType<typeof useAnnouncementDialogActions>
+  upload: AnnouncementImageUploadProps
+}) {
+  const isOpen =
+    dialogStateModel.dialogState === 'create' || dialogStateModel.dialogState === 'edit'
+  const dialogTitle = getAnnouncementDialogTitle(dialogStateModel.dialogState)
+  const submitLabel = getAnnouncementSubmitLabel(
+    dialogStateModel.dialogState,
+    dialogStateModel.formLoading
+  )
+
+  return (
+    <Dialog open={isOpen} onOpenChange={dialogStateModel.handleDialogChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{dialogTitle}</DialogTitle>
+        </DialogHeader>
+        <AnnouncementFormFields
+          dialogStateModel={dialogStateModel}
+          dialogActions={dialogActions}
+          upload={upload}
+        />
+        <div className="flex gap-3 mt-6">
+          <Button variant="modern" onClick={() => dialogStateModel.handleDialogChange(false)} size="lg" className="flex-1">
+            取消
+          </Button>
+          <Button onClick={dialogActions.handleSubmit} disabled={dialogStateModel.formLoading} size="lg" className="flex-1">
+            {submitLabel}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function AnnouncementDeleteDialog({
+  dialogStateModel,
+  dialogActions,
+}: {
+  dialogStateModel: ReturnType<typeof useAnnouncementDialogStateModel>
+  dialogActions: ReturnType<typeof useAnnouncementDialogActions>
+}) {
+  return (
+    <Dialog
+      open={dialogStateModel.dialogState === 'delete'}
+      onOpenChange={dialogStateModel.handleDeleteDialogChange}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>确认删除公告</DialogTitle>
+        </DialogHeader>
+        <div>
+          <p>确定要删除这条公告吗？</p>
+          <p className="text-sm text-muted-foreground mt-1">此操作不可恢复，关联的图片也将被删除。</p>
+        </div>
+        <div className="flex gap-3 mt-8">
+          <Button variant="destructive" onClick={dialogActions.handleDelete} disabled={dialogStateModel.deleteLoading} size="lg" className="flex-1">
+            {dialogStateModel.deleteLoading ? '处理中...' : '确认删除'}
+          </Button>
+          <Button variant="modern" onClick={() => dialogStateModel.handleDeleteDialogChange(false)} size="lg" className="flex-1">
+            取消
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// 列表 controller 负责查询、筛选、表格装配和刷新，不直接管理弹窗本地状态。
+function useAnnouncementListController({ onEdit, onDelete }: AnnouncementListControllerParams) {
+  const queryClient = useQueryClient()
+  const [sorting] = useState<SortingState>([])
+  const [visibilityFilter, setVisibilityFilter] = useState<VisibilityFilter>('all')
+  const [pinnedFilter, setPinnedFilter] = useState<PinnedFilter>('all')
+
   const { data: announcements = [], isLoading } = useQuery({
     queryKey: ['announcements'],
     queryFn: async () => {
@@ -75,7 +717,6 @@ export function AnnouncementManagement() {
     placeholderData: keepPreviousData,
   })
 
-  // 使用 React Query 获取存储信息
   const { data: storageInfo } = useQuery({
     queryKey: ['announcementStorageInfo'],
     queryFn: async () => {
@@ -84,13 +725,12 @@ export function AnnouncementManagement() {
     },
   })
 
-  // 刷新数据函数
   const refetchAnnouncements = useCallback(() => {
+    // 列表和存储占用条来自不同 query，刷新时必须一起失效，避免 UI 显示不同步。
     queryClient.invalidateQueries({ queryKey: ['announcements'] })
     queryClient.invalidateQueries({ queryKey: ['announcementStorageInfo'] })
   }, [queryClient])
 
-  // 处理置顶切换
   const handleTogglePin = useCallback(async (id: number) => {
     try {
       await announcementAPI.togglePin(id)
@@ -101,7 +741,6 @@ export function AnnouncementManagement() {
     }
   }, [refetchAnnouncements])
 
-  // 处理显示/隐藏切换
   const handleToggleVisibility = useCallback(async (id: number) => {
     try {
       await announcementAPI.toggleVisibility(id)
@@ -112,7 +751,65 @@ export function AnnouncementManagement() {
     }
   }, [refetchAnnouncements])
 
-  // 打开编辑弹窗
+  const filteredAnnouncements = useMemo(
+    // 先在内存里按双筛选条件过滤，再交给表格做排序与渲染，避免重复请求后端。
+    () => filterAnnouncements(announcements, visibilityFilter, pinnedFilter),
+    [announcements, visibilityFilter, pinnedFilter]
+  )
+
+  const columns = useMemo(
+    () =>
+      buildAnnouncementColumns({
+        onTogglePin: handleTogglePin,
+        onToggleVisibility: handleToggleVisibility,
+        onEdit,
+        onDelete,
+      }),
+    [handleTogglePin, handleToggleVisibility, onDelete, onEdit]
+  )
+
+  // 这里直接在当前 hook 内消费 table 实例，没有额外 memo 边界，按项目约定定点忽略。
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const table = useReactTable({
+    data: filteredAnnouncements,
+    columns,
+    columnResizeMode: 'onChange',
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    state: { sorting },
+  })
+
+  return {
+    visibilityFilter,
+    pinnedFilter,
+    storageInfo,
+    filteredAnnouncements,
+    isLoading,
+    table,
+    setVisibilityFilter,
+    setPinnedFilter,
+    refetchAnnouncements,
+  }
+}
+
+// 弹窗 state model 只维护本地表单、删除目标和开关状态，不承载副作用提交。
+function useAnnouncementDialogStateModel() {
+  const [dialogState, setDialogState] = useDialogState<AnnouncementDialogMode>()
+  const [formData, setFormData] = useState<AnnouncementFormState>(() => getEmptyAnnouncementFormState())
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [formLoading, setFormLoading] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [deleteId, setDeleteId] = useState<number | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const resetForm = useCallback(() => {
+    setFormData(getEmptyAnnouncementFormState())
+    setFormErrors({})
+    setEditingId(null)
+  }, [])
+
   const openEditModal = useCallback((announcement: Announcement) => {
     setEditingId(announcement.id)
     setFormData({
@@ -126,245 +823,90 @@ export function AnnouncementManagement() {
     setDialogState('edit')
   }, [setDialogState])
 
-  // 打开删除弹窗
   const openDeleteModal = useCallback((announcement: Announcement) => {
     setDeleteId(announcement.id)
     setDialogState('delete')
   }, [setDialogState])
 
-  // 重置表单
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      content: '',
-      images: [],
-      is_pinned: false,
-      is_visible: true,
-    })
-    setFormErrors({})
-    setEditingId(null)
+  const handleFormFieldChange = useCallback(<K extends keyof AnnouncementFormState>(
+    field: K,
+    value: AnnouncementFormState[K]
+  ) => {
+    setFormData((prev) => ({ ...prev, [field]: value }))
+  }, [])
+
+  const handleDialogChange = useCallback((open: boolean) => {
+    if (!open) {
+      // create/edit 关闭时重置草稿，防止上次未提交内容污染下一次打开。
+      setDialogState(null)
+      resetForm()
+    }
+  }, [resetForm, setDialogState])
+
+  const handleDeleteDialogChange = useCallback((open: boolean) => {
+    setDialogState(open ? 'delete' : null)
+    if (!open) {
+      setDeleteId(null)
+    }
+  }, [setDialogState])
+
+  return {
+    dialogState,
+    formData,
+    formErrors,
+    formLoading,
+    editingId,
+    deleteId,
+    deleteLoading,
+    uploading,
+    isDragging,
+    setDialogState,
+    setFormData,
+    setFormErrors,
+    setFormLoading,
+    setDeleteLoading,
+    setUploading,
+    setIsDragging,
+    setDeleteId,
+    resetForm,
+    openEditModal,
+    openDeleteModal,
+    handleFormFieldChange,
+    handleDialogChange,
+    handleDeleteDialogChange,
   }
+}
 
-  // 表格列定义
-  const columns = useMemo(() => [
-    columnHelper.accessor('title', {
-      header: '标题',
-      size: 200,
-      cell: info => {
-        const isPinned = info.row.original.is_pinned
-        const isVisible = info.row.original.is_visible
-        const title = info.getValue()
-        return (
-          <div className="flex items-center gap-2 min-w-0">
-            {isPinned && <Pin className="size-4 text-amber-600 dark:text-amber-500 shrink-0" />}
-            <span className={cn("truncate", !isVisible && "text-muted-foreground")} title={title}>
-              {title}
-            </span>
-            {!isVisible && (
-              <span className="text-sm text-muted-foreground shrink-0">(已隐藏)</span>
-            )}
-          </div>
-        )
-      },
-    }),
-    columnHelper.accessor('content', {
-      header: '内容',
-      size: 300,
-      cell: info => {
-        return (
-          <div className="truncate" title={info.getValue()}>
-            {info.getValue()}
-          </div>
-        );
-      },
-    }),
-    columnHelper.accessor('images', {
-      header: '图片',
-      size: 80,
-      cell: info => {
-        const images = info.getValue()
-        return images && images.length > 0 ? (
-          <div className="flex items-center gap-1">
-            <ImageIcon className="w-4 h-4" />
-            <span>{images.length}</span>
-          </div>
-        ) : '-'
-      },
-    }),
-    columnHelper.accessor('created_at', {
-      header: '创建时间',
-      size: 150,
-      cell: info => formatDate(info.getValue()),
-    }),
-    columnHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 180,
-      cell: info => {
-        const announcement = info.row.original
-
-        return (
-          <div className="flex items-center gap-1">
-            {/* 置顶按钮 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="modern"
-                  size="sm"
-                  className="h-8 w-8 p-0"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleTogglePin(announcement.id)
-                  }}
-                >
-                  {announcement.is_pinned ? (
-                    <PinOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-500" />
-                  ) : (
-                    <Pin className="w-3.5 h-3.5" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>{announcement.is_pinned ? "取消置顶" : "置顶"}</p>
-              </TooltipContent>
-            </Tooltip>
-
-            {/* 显示/隐藏按钮 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="modern"
-                  size="sm"
-                  className="h-8 w-8 p-0"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleToggleVisibility(announcement.id)
-                  }}
-                >
-                  {announcement.is_visible ? (
-                    <Eye className="w-3.5 h-3.5" />
-                  ) : (
-                    <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>{announcement.is_visible ? "隐藏" : "显示"}</p>
-              </TooltipContent>
-            </Tooltip>
-
-            {/* 编辑按钮 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="modern"
-                  size="sm"
-                  className="h-8 w-8 p-0"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    openEditModal(announcement)
-                  }}
-                >
-                  <Edit className="w-3.5 h-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>编辑</p>
-              </TooltipContent>
-            </Tooltip>
-
-            {/* 删除按钮 */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="modern"
-                  size="sm"
-                  className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    openDeleteModal(announcement)
-                  }}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>删除</p>
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        )
-      },
-    }),
-  ], [handleTogglePin, handleToggleVisibility, openDeleteModal, openEditModal])
-
-  // 筛选后的公告数据（必须在 table 定义之前）
-  const filteredAnnouncements = useMemo(() => {
-    return announcements.filter(announcement => {
-      // 显示状态筛选
-      if (visibilityFilter === 'visible' && !announcement.is_visible) return false
-      if (visibilityFilter === 'hidden' && announcement.is_visible) return false
-      // 置顶状态筛选
-      if (pinnedFilter === 'pinned' && !announcement.is_pinned) return false
-      if (pinnedFilter === 'unpinned' && announcement.is_pinned) return false
-      return true
-    })
-  }, [announcements, visibilityFilter, pinnedFilter])
-
-  // Table definition
-  const table = useReactTable({
-    data: filteredAnnouncements,
-    columns,
-    columnResizeMode: 'onChange',
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    state: {
-      sorting,
-    },
-  })
-
-  const validateForm = useCallback((): boolean => {
-    const errors: Record<string, string> = {}
-
-    if (!formData.title.trim()) {
-      errors.title = '请输入公告标题'
-    } else if (formData.title.length > 200) {
-      errors.title = '标题不能超过200字符'
-    }
-
-    if (!formData.content.trim()) {
-      errors.content = '请输入公告内容'
-    } else if (formData.content.length > 10000) {
-      errors.content = '内容不能超过10000字符'
-    }
-
+// dialog actions 负责提交、删除、上传和拖拽等副作用；仅提交与删除成功后刷新列表，图片相关操作不触发表格刷新。
+function useAnnouncementDialogActions({
+  formData,
+  editingId,
+  deleteId,
+  setFormData,
+  setFormErrors,
+  setFormLoading,
+  setDeleteLoading,
+  setUploading,
+  setIsDragging,
+  setDialogState,
+  setDeleteId,
+  resetForm,
+  refetchAnnouncements,
+}: AnnouncementDialogActionsParams) {
+  const handleSubmit = useCallback(async () => {
+    const errors = validateAnnouncementForm(formData)
     setFormErrors(errors)
-    return Object.keys(errors).length === 0
-  }, [formData])
-
-  // 处理创建/更新提交
-  const handleSubmit = async () => {
-    if (!validateForm()) return
+    if (Object.keys(errors).length > 0) {
+      return
+    }
 
     setFormLoading(true)
     try {
       if (editingId) {
-        await announcementAPI.update(editingId, {
-          title: formData.title,
-          content: formData.content,
-          images: formData.images,
-          is_pinned: formData.is_pinned,
-          is_visible: formData.is_visible,
-        })
+        await announcementAPI.update(editingId, formData)
         toast.success('公告更新成功')
       } else {
-        await announcementAPI.create({
-          title: formData.title,
-          content: formData.content,
-          images: formData.images,
-          is_pinned: formData.is_pinned,
-          is_visible: formData.is_visible,
-        })
+        await announcementAPI.create(formData)
         toast.success('公告创建成功')
       }
 
@@ -376,11 +918,12 @@ export function AnnouncementManagement() {
     } finally {
       setFormLoading(false)
     }
-  }
+  }, [editingId, formData, refetchAnnouncements, resetForm, setDialogState, setFormErrors, setFormLoading])
 
-  // 处理删除
-  const handleDelete = async () => {
-    if (!deleteId) return
+  const handleDelete = useCallback(async () => {
+    if (!deleteId) {
+      return
+    }
 
     setDeleteLoading(true)
     try {
@@ -394,371 +937,167 @@ export function AnnouncementManagement() {
     } finally {
       setDeleteLoading(false)
     }
-  }
+  }, [deleteId, refetchAnnouncements, setDeleteId, setDeleteLoading, setDialogState])
 
-  // 关闭弹窗时清空表单
-  const handleModalClose = (open: boolean) => {
-    if (!open) {
-      setDialogState(null)
-      resetForm()
-    }
-  }
+  const appendUploadedImage = useCallback((url: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      images: [...prev.images, url],
+    }))
+  }, [setFormData])
 
-  // 处理图片上传
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    // 验证文件类型
-    if (!file.type.startsWith('image/')) {
-      toast.error('请选择图片文件')
-      return
-    }
-
-    // 验证文件大小 (最大 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('图片大小不能超过 5MB')
-      return
+  const uploadSingleImage = useCallback(async (file: File, skipValidation = false) => {
+    if (!skipValidation) {
+      const validationMessage = validateAnnouncementImageFile(file)
+      if (validationMessage) {
+        toast.error(validationMessage)
+        return
+      }
     }
 
     setUploading(true)
     try {
       const url = await announcementAPI.uploadImage(file)
-      setFormData(prev => ({
-        ...prev,
-        images: [...prev.images, url]
-      }))
+      appendUploadedImage(url)
       toast.success('图片上传成功')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '图片上传失败'))
     } finally {
       setUploading(false)
-      // 清空 input 值，允许重复选择同一文件
-      e.target.value = ''
     }
-  }
+  }, [appendUploadedImage, setUploading])
 
-  // 处理移除图片
-  const handleRemoveImage = async (url: string) => {
+  const handleUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+
+    const validationMessage = validateAnnouncementImageFile(file)
+    if (validationMessage) {
+      toast.error(validationMessage)
+      return
+    }
+
+    await uploadSingleImage(file, true)
+    event.target.value = ''
+  }, [uploadSingleImage])
+
+  const handleRemoveImage = useCallback(async (url: string) => {
     try {
-      // 提取文件名
       const filename = url.split('/').pop()
       if (filename) {
         await announcementAPI.deleteImage(filename)
       }
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
-        images: prev.images.filter(img => img !== url)
+        images: prev.images.filter((imageUrl) => imageUrl !== url),
       }))
       toast.success('图片已移除')
     } catch {
-      // 即使删除远程文件失败，也从表单中移除
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
-        images: prev.images.filter(img => img !== url)
+        images: prev.images.filter((imageUrl) => imageUrl !== url),
       }))
     }
-  }
+  }, [setFormData])
 
-  // 处理拖拽事件
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
+  const handleDragEnter = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
     setIsDragging(true)
-  }
+  }, [setIsDragging])
 
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
     setIsDragging(false)
-  }
+  }, [setIsDragging])
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+  }, [])
 
-  // 处理拖拽释放
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
+  const handleDrop = useCallback(async (event: React.DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
     setIsDragging(false)
 
-    const files = Array.from(e.dataTransfer.files)
-    if (files.length === 0) return
-
-    // 处理每个拖拽的文件
-    for (const file of files) {
-      // 验证文件类型
-      if (!file.type.startsWith('image/')) {
-        toast.error('请选择图片文件')
-        continue
-      }
-
-      // 验证文件大小 (最大 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error('图片大小不能超过 5MB')
-        continue
-      }
-
-      setUploading(true)
-      try {
-        const url = await announcementAPI.uploadImage(file)
-        setFormData(prev => ({
-          ...prev,
-          images: [...prev.images, url]
-        }))
-        toast.success('图片上传成功')
-      } catch (error) {
-        toast.error(getApiErrorMessage(error, '图片上传失败'))
-      } finally {
-        setUploading(false)
-      }
+    const files = Array.from(event.dataTransfer.files)
+    if (files.length === 0) {
+      return
     }
+
+    for (const file of files) {
+      await uploadSingleImage(file)
+    }
+  }, [setIsDragging, uploadSingleImage])
+
+  return {
+    handleSubmit,
+    handleDelete,
+    handleUpload,
+    handleRemoveImage,
+    handleDragEnter,
+    handleDragLeave,
+    handleDragOver,
+    handleDrop,
+  }
+}
+
+export function AnnouncementManagement() {
+  const dialogStateModel = useAnnouncementDialogStateModel()
+  const listController = useAnnouncementListController({
+    onEdit: dialogStateModel.openEditModal,
+    onDelete: dialogStateModel.openDeleteModal,
+  })
+  const dialogActions = useAnnouncementDialogActions({
+    formData: dialogStateModel.formData,
+    editingId: dialogStateModel.editingId,
+    deleteId: dialogStateModel.deleteId,
+    setFormData: dialogStateModel.setFormData,
+    setFormErrors: dialogStateModel.setFormErrors,
+    setFormLoading: dialogStateModel.setFormLoading,
+    setDeleteLoading: dialogStateModel.setDeleteLoading,
+    setUploading: dialogStateModel.setUploading,
+    setIsDragging: dialogStateModel.setIsDragging,
+    setDialogState: dialogStateModel.setDialogState,
+    setDeleteId: dialogStateModel.setDeleteId,
+    resetForm: dialogStateModel.resetForm,
+    refetchAnnouncements: listController.refetchAnnouncements,
+  })
+  const formUploadProps: AnnouncementImageUploadProps = {
+    uploading: dialogStateModel.uploading,
+    isDragging: dialogStateModel.isDragging,
+    onUpload: dialogActions.handleUpload,
+    onDragEnter: dialogActions.handleDragEnter,
+    onDragLeave: dialogActions.handleDragLeave,
+    onDragOver: dialogActions.handleDragOver,
+    onDrop: dialogActions.handleDrop,
   }
 
   return (
     <div className="space-y-6">
-
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">公告管理</h1>
-        <Button onClick={() => setDialogState('create')} size="lg">
+        <Button onClick={() => dialogStateModel.setDialogState('create')} size="lg">
           <Plus className="w-4 h-4 mr-1.5" />
           创建公告
         </Button>
       </div>
 
-      {/* Storage Info and Filters */}
-      <div className="flex items-center gap-3">
-        
-        {/* Storage Info - 背景融合进度条风格 (高度严格保持 h-10) */}
-        {/* 始终显示存储信息，使用默认值0，数据加载后平滑过渡 */}
-        <div className="relative flex-1 h-10 rounded-md border border-input bg-card overflow-hidden flex items-center">
-          {/* 底层：动态推进的背景色 (充当进度条) */}
-          <div
-            className="absolute inset-y-0 left-0 bg-muted transition-all duration-500 ease-in-out"
-            style={{ width: `${Math.min(storageInfo?.usage_percent ?? 0, 100)}%` }}
-          />
+      <AnnouncementFiltersBar listController={listController} />
 
-          {/* 上层内容：Relative + z-10 确保文字始终在色块上方 */}
-          <div className="relative z-10 flex items-center justify-between w-full px-3 gap-3">
-            {/* 左侧：图标 + 容量信息 */}
-            <div className="flex items-center gap-2.5 min-w-0">
-              <HardDrive className="w-4 h-4 text-muted-foreground shrink-0" />
-              <span className="text-base text-foreground truncate">
-                存储: <span>{storageInfo?.used_mb ?? 0}</span> / {storageInfo?.max_mb ?? 50} MB
-              </span>
-            </div>
-          </div>
-        </div>
+      <AnnouncementTableCard listController={listController} />
 
-        {/* Filter Selects - 将 min-h-10 改为 h-10 确保完美对齐 */}
-        <Select value={visibilityFilter} onValueChange={(value: 'all' | 'visible' | 'hidden') => setVisibilityFilter(value)}>
-          <SelectTrigger className="w-30 min-h-10">
-            <SelectValue placeholder="显示状态" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部状态</SelectItem>
-            <SelectItem value="visible">显示</SelectItem>
-            <SelectItem value="hidden">隐藏</SelectItem>
-          </SelectContent>
-        </Select>
+      <AnnouncementFormDialog
+        dialogStateModel={dialogStateModel}
+        dialogActions={dialogActions}
+        upload={formUploadProps}
+      />
 
-        <Select value={pinnedFilter} onValueChange={(value: 'all' | 'pinned' | 'unpinned') => setPinnedFilter(value)}>
-          <SelectTrigger className="w-30 min-h-10">
-            <SelectValue placeholder="置顶状态" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部状态</SelectItem>
-            <SelectItem value="pinned">置顶</SelectItem>
-            <SelectItem value="unpinned">未置顶</SelectItem>
-          </SelectContent>
-        </Select>
-        
-      </div>
-
-      {/* Announcements Table */}
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
-            <Megaphone className="w-5 h-5" />
-            公告列表 <span className="text-muted-foreground font-normal">(&thinsp;{filteredAnnouncements.length}&thinsp;)</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading && filteredAnnouncements.length === 0 ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : filteredAnnouncements.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              暂无公告数据
-            </div>
-          ) : (
-            <div className="px-6 rounded-md overflow-auto">
-              <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                <thead>
-                  {table.getHeaderGroups().map(headerGroup => (
-                    <tr key={headerGroup.id} className="border-b-2 border-border">
-                      {headerGroup.headers.map(header => (
-                        <th
-                          key={header.id}
-                          className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
-                          style={{ width: header.getSize() }}
-                        >
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.map(row => (
-                    <tr key={row.id} className="border-b border-border hover:bg-muted/30">
-                      {row.getVisibleCells().map(cell => (
-                        <td
-                          key={cell.id}
-                          className="p-3 align-middle text-base"
-                          style={{ width: cell.column.getSize() }}
-                        >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Create/Edit Announcement Modal */}
-      <Dialog open={dialogState === 'create' || dialogState === 'edit'} onOpenChange={handleModalClose}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{dialogState === 'create' ? '创建公告' : '编辑公告'}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div>
-              <Label htmlFor="announcement_title" className={LABEL_STYLES.base}>
-                标题 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="announcement_title"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="请输入公告标题"
-                className={cn(INPUT_STYLES.lg, formErrors.title && 'border-destructive')}
-              />
-              {formErrors.title && (
-                <p className="text-sm text-destructive mt-1">{formErrors.title}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="announcement_content" className={LABEL_STYLES.base}>
-                内容 <span className="text-destructive">*</span>
-              </Label>
-              <Textarea
-                id="announcement_content"
-                value={formData.content}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                placeholder="请输入公告内容"
-                rows={5}
-                className={cn(formErrors.content && 'border-destructive')}
-              />
-              {formErrors.content && (
-                <p className="text-sm text-destructive mt-1">{formErrors.content}</p>
-              )}
-            </div>
-            <div>
-              <Label className={LABEL_STYLES.base}>图片</Label>
-              <div className="mt-2 space-y-2">
-                {/* 已上传的图片预览 */}
-                {formData.images.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {formData.images.map((url, index) => (
-                      <div key={url} className="relative group">
-                        <img
-                          src={getFullImageUrl(url)}
-                          alt={`图片 ${index + 1}`}
-                          className="w-20 h-20 object-cover rounded-md border border-input"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveImage(url)}
-                          className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X className="size-3.5 stroke-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {/* 上传按钮 - 支持点击和拖拽 */}
-                <label
-                  className={cn(
-                    "flex items-center justify-center w-full h-20 border-2 border-dashed rounded-md cursor-pointer transition-colors",
-                    isDragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-muted/50"
-                  )}
-                  onDragEnter={handleDragEnter}
-                  onDragLeave={handleDragLeave}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                >
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    {uploading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Upload className="w-5 h-5" />
-                    )}
-                    <span>{uploading ? '上传中...' : '点击或拖拽上传图片'}</span>
-                  </div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleUpload}
-                    disabled={uploading}
-                    className="hidden"
-                  />
-                </label>
-                <p className="text-sm text-muted-foreground">支持 jpg, png, gif, webp 格式，最大 5MB</p>
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-3 mt-6">
-            <Button variant="modern" onClick={() => handleModalClose(false)} size="lg" className="flex-1">
-              取消
-            </Button>
-            <Button onClick={handleSubmit} disabled={formLoading} size="lg" className="flex-1">
-              {formLoading ? (dialogState === 'create' ? '创建中...' : '保存中...') : (dialogState === 'create' ? '创建' : '保存')}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation Modal */}
-      <Dialog open={dialogState === 'delete'} onOpenChange={(open) => setDialogState(open ? 'delete' : null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>确认删除公告</DialogTitle>
-          </DialogHeader>
-          <div>
-            <p>确定要删除这条公告吗？</p>
-            <p className="text-sm text-muted-foreground mt-1">此操作不可恢复，关联的图片也将被删除。</p>
-          </div>
-          <div className="flex gap-3 mt-8">
-            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg" className="flex-1">
-              {deleteLoading ? '处理中...' : '确认删除'}
-            </Button>
-            <Button variant="modern" onClick={() => setDialogState(null)} size="lg" className="flex-1">
-              取消
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <AnnouncementDeleteDialog dialogStateModel={dialogStateModel} dialogActions={dialogActions} />
     </div>
   )
 }

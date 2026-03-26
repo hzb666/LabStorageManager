@@ -19,16 +19,16 @@ interface MemoizedExpandedRowProps<TData> {
   renderExpandedRow: (row: TData) => React.ReactNode
 }
 
-/** 包装展开内容，避免同一行的展开区在原始数据未变化时重复渲染。 */
+// 包装展开内容，避免同一行的展开区在原始数据未变化时重复渲染。
 const MemoizedExpandedRow = memo(
-  /** 仅在展开行原始数据变化时重新渲染展开内容。 */
+  // 仅在展开行原始数据变化时重新渲染展开内容。
   <TData,>({ original, renderExpandedRow }: MemoizedExpandedRowProps<TData>) => {
     return <>{renderExpandedRow(original)}</>
   },
   (prevProps, nextProps) => prevProps.original === nextProps.original
 ) as <TData>(props: MemoizedExpandedRowProps<TData>) => React.JSX.Element
 
-/** 渲染单行数据及其展开区，并处理强调标记和点击展开逻辑。 */
+// 渲染单行数据及其展开区，并处理强调标记和点击展开逻辑。
 function InnerRowComponent<TData>({
   row,
   isExpanded,
@@ -127,7 +127,7 @@ function InnerRowComponent<TData>({
   )
 }
 
-/** 记忆化行组件，减少表格滚动和展开时的重复渲染。 */
+// 记忆化行组件，减少表格滚动和展开时的重复渲染。
 const InnerRow = memo(InnerRowComponent, (prevProps, nextProps) => {
   return (
     prevProps.row.id === nextProps.row.id &&
@@ -158,7 +158,7 @@ interface DataTableBodyProps<TData> {
   searchKeyword?: string
 }
 
-/** 解析表格底部提示文案，避免在已有结果时误显示空状态。 */
+// 解析表格底部提示文案，避免在已有结果时误显示空状态。
 function getFooterMessage(rowCount: number, total?: number, searchKeyword?: string): string | null {
   if (rowCount === 0) {
     if (searchKeyword) {
@@ -175,7 +175,7 @@ function getFooterMessage(rowCount: number, total?: number, searchKeyword?: stri
   return null
 }
 
-/** 在虚拟化和普通渲染之间切换，并负责空态与分页加载态展示。 */
+// 在虚拟化和普通渲染之间切换，并负责空态与分页加载态展示。
 export function DataTableBody<TData>({
   rows,
   renderExpandedRow,

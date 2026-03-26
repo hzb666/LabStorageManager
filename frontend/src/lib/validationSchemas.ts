@@ -166,9 +166,7 @@ export const createPriceSchema = (min = 0, max = 999999) =>
 // 2. 复杂业务字段验证
 // ==========================================
 
-/**
- * 用户名验证 - 替代 validateUsername
- */
+// 用户名验证 - 替代 validateUsername
 export const UsernameSchema = v.pipe(
   v.string('用户名不能为空'),
   v.trim(),
@@ -251,9 +249,7 @@ export const CasNumberSchema = v.pipe(
   v.check((input) => isSpecialCasValue(input) || validateCASLogic(input), 'CAS号校验码错误')
 )
 
-/**
- * CAS 输入预校验（用于自动识别按钮）
- */
+// CAS 输入预校验（用于自动识别按钮）
 export const validateAndNormalizeCASInput = (
   casValue: string
 ): { normalized: string } | { error: string } => {
@@ -341,9 +337,7 @@ export const InventoryFormSchema = v.object({
   is_running_short: v.optional(v.boolean('快用完标记必须是布尔值')),
 })
 
-/**
- * 库存表单 Schema 类型
- */
+// 库存表单 Schema 类型
 export type InventoryFormData = v.InferOutput<typeof InventoryFormSchema>
 export type InventoryFormInputData = v.InferInput<typeof InventoryFormSchema>
 
@@ -371,9 +365,7 @@ export const ReagentOrderSchema = v.object({
   notes: createMaxLengthSchema('备注', 500)
 })
 
-/**
- * 耗材订单 Schema
- */
+// 耗材订单 Schema
 export const ConsumableOrderSchema = v.object({
   name: createStringLengthSchema('名称', 1, 200),
   english_name: createMaxLengthSchema('英文名称', 200),
@@ -386,9 +378,7 @@ export const ConsumableOrderSchema = v.object({
   notes: createMaxLengthSchema('备注', 500)
 })
 
-/**
- * 订单表单 Schema 类型
- */
+// 订单表单 Schema 类型
 export type ReagentOrderFormData = v.InferOutput<typeof ReagentOrderSchema>
 export type ConsumableOrderFormData = v.InferOutput<typeof ConsumableOrderSchema>
 export type ReagentOrderFormInputData = v.InferInput<typeof ReagentOrderSchema>
@@ -398,24 +388,18 @@ export type ConsumableOrderFormInputData = v.InferInput<typeof ConsumableOrderSc
 // 6. 用户模块 Schema
 // ==========================================
 
-/**
- * 登录 Schema
- */
+// 登录 Schema
 export const LoginSchema = v.object({
   username: UsernameSchema,
   password: createStringLengthSchema('密码', 6, 50)
 })
 
-/**
- * 锁屏模式 Schema（只需密码）
- */
+// 锁屏模式 Schema（只需密码）
 export const LockScreenSchema = v.object({
   password: createStringLengthSchema('密码', 6, 50)
 })
 
-/**
- * 登录表单类型
- */
+// 登录表单类型
 export type LoginFormData = v.InferOutput<typeof LoginSchema>
 
 
@@ -423,9 +407,7 @@ export type LoginFormData = v.InferOutput<typeof LoginSchema>
 // 7. 用户管理模块 Schema (Admin)
 // ==========================================
 
-/**
- * 创建用户 Schema (AdminUsers 页面用)
- */
+// 创建用户 Schema (AdminUsers 页面用)
 export const UserCreateSchema = v.object({
   username: UsernameSchema,
   password: v.pipe(
@@ -437,9 +419,7 @@ export const UserCreateSchema = v.object({
   role: v.optional(v.picklist(['admin', 'user', 'public']))
 })
 
-/**
- * 更新用户 Schema (AdminUsers 页面用)
- */
+// 更新用户 Schema (AdminUsers 页面用)
 export const UserUpdateSchema = v.object({
   username: UsernameSchema,  // 用户名必填
   full_name: createStringLengthSchema('姓名', 1, 100),  // 必填
@@ -447,9 +427,7 @@ export const UserUpdateSchema = v.object({
 })
 
 
-/**
- * 修改密码 Schema
- */
+// 修改密码 Schema
 export const ChangePasswordSchema = v.object({
   old_password: createStringLengthSchema('原密码', 6, 50),
   new_password: v.pipe(
@@ -460,9 +438,7 @@ export const ChangePasswordSchema = v.object({
   confirm_password: createStringLengthSchema('确认密码', 6, 50)
 })
 
-/**
- * 带确认的密码 Schema (验证两次密码一致)
- */
+// 带确认的密码 Schema (验证两次密码一致)
 export const ChangePasswordWithConfirmSchema = v.pipe(
   ChangePasswordSchema,
   v.forward(
@@ -471,19 +447,13 @@ export const ChangePasswordWithConfirmSchema = v.pipe(
   )
 )
 
-/**
- * 用户创建表单类型
- */
+// 用户创建表单类型
 export type UserCreateFormData = v.InferOutput<typeof UserCreateSchema>
 
-/**
- * 用户更新表单类型
- */
+// 用户更新表单类型
 export type UserUpdateFormData = v.InferOutput<typeof UserUpdateSchema>
 
-/**
- * 修改密码表单类型
- */
+// 修改密码表单类型
 export type ChangePasswordFormData = v.InferOutput<typeof ChangePasswordWithConfirmSchema>
 
 // ==========================================
@@ -505,9 +475,7 @@ export const createReturnQuantitySchema = (fieldName: string, maxValue: number) 
     v.maxValue(maxValue, `${fieldName}不能超过原借用时剩余量 (${maxValue})`)
   )
 
-/**
- * 归还表单 Schema
- */
+// 归还表单 Schema
 export const ReturnFormSchema = v.object({
   return_mode: v.picklist(['used', 'remaining'], '归还模式不能为空'),
   return_quantity: v.pipe(
@@ -521,9 +489,7 @@ export const ReturnFormSchema = v.object({
 export type ReturnFormData = v.InferOutput<typeof ReturnFormSchema>
 export type ReturnFormInputData = v.InferInput<typeof ReturnFormSchema>
 
-/**
- * 入库表单 Schema
- */
+// 入库表单 Schema
 export const StockInFormSchema = v.object({
   remaining_quantity: createQuantitySchema('剩余量'),
   storage_location: createRequiredStringSchema('库存位置'),

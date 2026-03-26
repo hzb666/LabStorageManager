@@ -8,6 +8,7 @@
     "preview": "vitepress preview ."
   },
   "devDependencies": {
+    "@leelaa/vitepress-plugin-extended": "1.0.5",
     "vitepress": "1.6.4"
   }
 }

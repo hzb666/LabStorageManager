@@ -31,24 +31,24 @@ export interface UseListSSEOptions {
 
 type AnyRecord = Record<string, unknown>
 
-/** 从 SSE 载荷中提取统一的条目 id。 */
+// 从 SSE 载荷中提取统一的条目 id。
 function toItemId(data: AnyRecord): number | null {
   const candidate = data.item_id ?? data.id
   return typeof candidate === 'number' ? candidate : null
 }
 
-/** 判断事件载荷中是否包含当前搜索或排序会关注的字段。 */
+// 判断事件载荷中是否包含当前搜索或排序会关注的字段。
 function containsAnyField(data: AnyRecord, fields: string[]): boolean {
   if (fields.length === 0) return false
   return fields.some((field) => Object.prototype.hasOwnProperty.call(data, field))
 }
 
-/** 标记新增或删除事件，这类事件统一走 stale 刷新策略。 */
+// 标记新增或删除事件，这类事件统一走 stale 刷新策略。
 function isCreateOrDeleteEvent(eventType: string): boolean {
   return eventType.includes('.created') || eventType.includes('.deleted')
 }
 
-/** 判断当前事件是否已经超出安全局部 patch 的边界。 */
+// 判断当前事件是否已经超出安全局部 patch 的边界。
 function shouldMarkContextStale(
   context: ListSSEContext,
   itemId: number,
@@ -69,7 +69,7 @@ function shouldMarkContextStale(
   return false
 }
 
-/** 仅更新单页列表中命中的那一行数据。 */
+// 只 patch 已加载页里命中的那一行，避免在前端凭空改动未取回的分页快照。
 function patchPageRows(
   rows: ListResponseData['data'],
   itemId: number,
@@ -84,7 +84,7 @@ function patchPageRows(
   })
 }
 
-/** 对 InfiniteData 的所有分页结果执行安全的单行 patch。 */
+// 维持分页结构不变，只做安全的单行替换，避免把局部更新扩散成列表重排。
 function patchListResponseData(
   oldData: InfiniteData<ListResponseData> | undefined,
   itemId: number,
@@ -103,7 +103,6 @@ function patchListResponseData(
   }
 }
 
-/** 把多个事件类型映射到同一个列表事件处理器。 */
 function createHandlers(
   eventTypes: string[],
   handler: SSEEventHandler
@@ -111,7 +110,6 @@ function createHandlers(
   return Object.fromEntries(eventTypes.map((type) => [type, handler]))
 }
 
-/** 管理列表页的 SSE 局部更新与 stale 标记逻辑。 */
 export function useListSSE({
   room,
   queryKey,

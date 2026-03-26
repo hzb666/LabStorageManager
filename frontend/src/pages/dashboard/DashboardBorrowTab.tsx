@@ -7,6 +7,7 @@ import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
+import type { UseFormReturn } from 'react-hook-form'
 import * as v from 'valibot'
 import { Package } from 'lucide-react'
 
@@ -37,11 +38,13 @@ import {
   type DashboardParams,
   BORROW_SEARCH_FIELDS,
   buildLocalListData,
+  requestDashboardCountsRefresh,
 } from '../../lib/dashboardUtils'
 
 const borrowColumnHelper = createColumnHelper<MyBorrowItem>()
+type BorrowReturnMode = 'used' | 'remaining'
 
-// 借用记录展开行 - Dashboard 独有（展示借用详情 + 分子结构）
+// 展开行会补拉 inventory 详情，并把列表行数据与详情合并后展示分子结构、入库信息和最近借用人。
 const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRow({
   item,
 }: Readonly<{ item: MyBorrowItem }>) {
@@ -53,6 +56,7 @@ const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRo
     const loadDetail = async () => {
       try {
         const response = await inventoryAPI.get(item.inventory_id)
+        // 展开行可能在请求返回前被收起或替换，取消标记用于阻止过期结果回写。
         if (!cancelled) {
           setDetail((response.data ?? {}) as Partial<MyBorrowItem>)
         }
@@ -94,84 +98,26 @@ const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRo
   )
 })
 
-export function DashboardBorrowTab() {
-  const queryClient = useQueryClient()
-
-  const [showReturnModal, setShowReturnModal] = useState(false)
-  const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
-  const [returnMode, setReturnMode] = useState<'used' | 'remaining'>('used')
-  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
-
-  const returnForm = useForm({
-    resolver: createValibotResolver(ReturnFormSchema),
-    defaultValues: defaultReturnValues,
-    shouldFocusError: false,
-  })
-
-  const refreshTables = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['dashboard', 'borrows'] }),
-      queryClient.invalidateQueries({ queryKey: ['inventory'] }),
-    ])
-  }, [queryClient])
-
-  const borrowDashboardAPI: FilterAPI = useMemo(() => ({
+// 这里只请求一次我的借用列表，再交给 `buildLocalListData` 做前端筛选和分页适配 `FilterTable`。
+function createBorrowDashboardAPI(): FilterAPI {
+  return {
     list: async (params) => {
       const response = await inventoryAPI.getMyBorrows()
       const rows = (response.data?.data ?? []) as MyBorrowItem[]
-      const local = buildLocalListData(rows as unknown as Record<string, unknown>[], params as DashboardParams, ['name', 'cas_number'])
+      const local = buildLocalListData(
+        rows as unknown as Record<string, unknown>[],
+        params as DashboardParams,
+        ['name', 'cas_number']
+      )
       return { data: local as { data: unknown[]; total: number } }
     },
-  }), [])
+  }
+}
 
-  const openReturnModal = useCallback((item: MyBorrowItem) => {
-    setSelectedBorrow(item)
-    setReturnMode('used')
-    returnForm.reset({ return_mode: 'used', return_quantity: '' })
-    setShowReturnModal(true)
-  }, [returnForm])
-
-  const handleReturn = returnForm.handleSubmit(async (formData) => {
-    if (!selectedBorrow) return
-
-    const inputValue = formData.return_quantity
-    const fieldName = returnMode === 'remaining' ? '剩余量' : '使用量'
-    const maxValue = selectedBorrow.remaining_quantity
-
-    const schema = createReturnQuantitySchema(fieldName, maxValue)
-    const result = v.safeParse(schema, inputValue)
-
-    if (!result.success) {
-      returnForm.setError('return_quantity', { message: result.issues[0]?.message || '输入无效' })
-      return
-    }
-
-    const numValue = result.output
-    const finalQuantity = returnMode === 'remaining'
-      ? numValue
-      : maxValue - numValue
-
-    setIsSubmittingReturn(true)
-    try {
-      await inventoryAPI.return(selectedBorrow.inventory_id, {
-        remaining_quantity: finalQuantity,
-        unit: selectedBorrow.unit,
-      })
-      setShowReturnModal(false)
-      setSelectedBorrow(null)
-      returnForm.reset(defaultReturnValues)
-      await refreshTables()
-      toast.success('归还成功')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '归还失败'))
-    } finally {
-      setIsSubmittingReturn(false)
-    }
-  }, (errors) => {
-    console.log('Form validation errors:', errors)
-  })
-
-  const borrowColumns = useMemo(() => [
+function createBorrowColumns(
+  openReturnModal: (item: MyBorrowItem) => void
+): ColumnDef<Record<string, unknown>, unknown>[] {
+  return [
     borrowColumnHelper.accessor('name', {
       header: '名称',
       size: 160,
@@ -204,8 +150,8 @@ export function DashboardBorrowTab() {
         <Button
           size="sm"
           className="h-8 text-sm leading-4"
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={(event) => {
+            event.stopPropagation()
             openReturnModal(info.row.original)
           }}
         >
@@ -213,7 +159,231 @@ export function DashboardBorrowTab() {
         </Button>
       ),
     }),
-  ] as ColumnDef<Record<string, unknown>, unknown>[], [openReturnModal])
+  ] as ColumnDef<Record<string, unknown>, unknown>[]
+}
+
+// 根据 `used / remaining` 两种模式，把输入解释成不同含义并统一生成归还后剩余量预览。
+function getReturnPreviewText(
+  selectedBorrow: MyBorrowItem | null,
+  returnMode: BorrowReturnMode,
+  returnQuantity: string
+): string | null {
+  if (!selectedBorrow || !returnQuantity) {
+    return null
+  }
+
+  const quantity = parseFloat(returnQuantity) || 0
+  const formattedQuantity =
+    returnMode === 'used'
+      ? Math.max(0, selectedBorrow.remaining_quantity - quantity).toFixed(2)
+      : quantity.toFixed(2)
+
+  return `归还后剩余: ${formattedQuantity} ${selectedBorrow.unit} (原借用时剩余量: ${selectedBorrow.remaining_quantity} ${selectedBorrow.unit})`
+}
+
+function DashboardBorrowReturnDialog({
+  dialog,
+}: Readonly<{
+  dialog: {
+    selectedBorrow: MyBorrowItem | null
+    returnMode: BorrowReturnMode
+    returnForm: ReturnForm
+    isSubmittingReturn: boolean
+    onReturnModeChange: (value: BorrowReturnMode) => void
+    onSubmit: () => void
+    onOpenChange: (open: boolean) => void
+  }
+}>) {
+  const {
+    selectedBorrow,
+    returnMode,
+    returnForm,
+    isSubmittingReturn,
+    onReturnModeChange,
+    onSubmit,
+    onOpenChange,
+  } = dialog
+  const returnPreviewText = getReturnPreviewText(
+    selectedBorrow,
+    returnMode,
+    String(returnForm.watch('return_quantity') ?? '')
+  )
+
+  return (
+    <Dialog open={selectedBorrow !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>归还试剂</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <p>{selectedBorrow?.name}</p>
+            <p className="text-muted-foreground">
+              CAS: {selectedBorrow?.cas_number} • 当前剩余 {selectedBorrow?.remaining_quantity} {selectedBorrow?.unit}
+            </p>
+          </div>
+
+          <div>
+            <RadioGroup
+              value={returnMode}
+              onValueChange={(value) => onReturnModeChange(value as BorrowReturnMode)}
+              className="flex flex-row gap-4"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="used" id="returnMode-used" />
+                <Label htmlFor="returnMode-used" className="cursor-pointer text-base">填写使用量</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="remaining" id="returnMode-remaining" />
+                <Label htmlFor="returnMode-remaining" className="cursor-pointer text-base">填写剩余量</Label>
+              </div>
+            </RadioGroup>
+          </div>
+
+          <div className="space-y-1">
+            <BaseForm
+              form={returnForm}
+              fields={getReturnFormFields(
+                returnMode,
+                selectedBorrow?.remaining_quantity ?? 0,
+                selectedBorrow?.unit
+              )}
+              layout="stack"
+            />
+
+            {returnPreviewText && (
+              <p className="text-sm text-muted-foreground mt-1">{returnPreviewText}</p>
+            )}
+          </div>
+
+          <div className="flex gap-3 mt-8">
+            <Button
+              variant="modern"
+              onClick={() => onOpenChange(false)}
+              className="flex-1"
+              size="lg"
+            >
+              取消
+            </Button>
+            <LoadingButton
+              onClick={onSubmit}
+              isLoading={isSubmittingReturn}
+              loadingText="处理中..."
+              className="flex-1"
+              size="lg"
+            >
+              确认归还
+            </LoadingButton>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+type ReturnForm = UseFormReturn<typeof defaultReturnValues>
+
+export function DashboardBorrowTab() {
+  const queryClient = useQueryClient()
+
+  const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
+  const [returnMode, setReturnMode] = useState<BorrowReturnMode>('used')
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
+
+  const returnForm = useForm({
+    resolver: createValibotResolver(ReturnFormSchema),
+    defaultValues: defaultReturnValues,
+    shouldFocusError: false,
+  })
+
+  const refreshTables = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'borrows'] }),
+      queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+    ])
+    requestDashboardCountsRefresh()
+  }, [queryClient])
+
+  const borrowDashboardAPI = useMemo(() => createBorrowDashboardAPI(), [])
+
+  // 每次打开归还弹窗都强制回到 `used` 模式并清空数量输入，避免沿用上一条记录的表单状态。
+  const openReturnModal = useCallback((item: MyBorrowItem) => {
+    setSelectedBorrow(item)
+    setReturnMode('used')
+    returnForm.reset({ return_mode: 'used', return_quantity: '' })
+  }, [returnForm])
+
+  // 提交时按当前模式校验并换算最终剩余量；成功后失效借用/库存查询并刷新统计卡片。
+  const handleReturn = returnForm.handleSubmit(async (formData) => {
+    if (!selectedBorrow) return
+
+    const inputValue = formData.return_quantity
+    const fieldName = returnMode === 'remaining' ? '剩余量' : '使用量'
+    const maxValue = selectedBorrow.remaining_quantity
+
+    const schema = createReturnQuantitySchema(fieldName, maxValue)
+    const result = v.safeParse(schema, inputValue)
+
+    if (!result.success) {
+      // `used` 和 `remaining` 模式共享输入框，但校验边界不同，错误需要即时切换。
+      returnForm.setError('return_quantity', { message: result.issues[0]?.message || '输入无效' })
+      return
+    }
+
+    const numValue = result.output
+    const finalQuantity = returnMode === 'remaining'
+      ? numValue
+      : maxValue - numValue
+
+    setIsSubmittingReturn(true)
+    try {
+      await inventoryAPI.return(selectedBorrow.inventory_id, {
+        remaining_quantity: finalQuantity,
+        unit: selectedBorrow.unit,
+      })
+      setSelectedBorrow(null)
+      returnForm.reset(defaultReturnValues)
+      await refreshTables()
+      toast.success('归还成功')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '归还失败'))
+    } finally {
+      setIsSubmittingReturn(false)
+    }
+  }, (errors) => {
+    console.log('Form validation errors:', errors)
+  })
+
+  // 切换填写模式时清空数量和字段错误，避免把“使用量”的输入带到“剩余量”校验里。
+  const handleReturnModeChange = useCallback((value: BorrowReturnMode) => {
+    setReturnMode(value)
+    returnForm.setError('return_quantity', { message: '' })
+    returnForm.resetField('return_quantity')
+  }, [returnForm])
+
+  // 关闭弹窗时统一清空选中记录、恢复默认模式并重置表单。
+  const handleReturnDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setSelectedBorrow(null)
+      setReturnMode('used')
+      returnForm.reset(defaultReturnValues)
+    }
+  }, [returnForm])
+
+  const borrowColumns = useMemo(
+    () => createBorrowColumns(openReturnModal),
+    [openReturnModal]
+  )
+  const returnDialog = {
+    selectedBorrow,
+    returnMode,
+    returnForm,
+    isSubmittingReturn,
+    onReturnModeChange: handleReturnModeChange,
+    onSubmit: handleReturn,
+    onOpenChange: handleReturnDialogOpenChange,
+  }
 
   return (
     <>
@@ -232,95 +402,9 @@ export function DashboardBorrowTab() {
           return <BorrowDashboardExpandedRow item={item} />
         }}
       />
-
-      <Dialog
-        open={showReturnModal}
-        onOpenChange={(open) => {
-          setShowReturnModal(open)
-          if (!open) {
-            setSelectedBorrow(null)
-            setReturnMode('used')
-            returnForm.reset(defaultReturnValues)
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>归还试剂</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div>
-              <p>{selectedBorrow?.name}</p>
-              <p className="text-muted-foreground">
-                CAS: {selectedBorrow?.cas_number} • 当前剩余 {selectedBorrow?.remaining_quantity} {selectedBorrow?.unit}
-              </p>
-            </div>
-
-            <div>
-              <RadioGroup
-                value={returnMode}
-                onValueChange={(value) => {
-                  setReturnMode(value as 'used' | 'remaining')
-                  returnForm.setError('return_quantity', { message: '' })
-                  returnForm.resetField('return_quantity')
-                }}
-                className="flex flex-row gap-4"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="used" id="returnMode-used" />
-                  <Label htmlFor="returnMode-used" className="cursor-pointer text-base">填写使用量</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="remaining" id="returnMode-remaining" />
-                  <Label htmlFor="returnMode-remaining" className="cursor-pointer text-base">填写剩余量</Label>
-                </div>
-              </RadioGroup>
-            </div>
-            <div className="space-y-1">
-              <BaseForm
-                form={returnForm}
-                fields={getReturnFormFields(
-                  returnMode,
-                  selectedBorrow?.remaining_quantity ?? 0,
-                  selectedBorrow?.unit
-                )}
-                layout="stack"
-              />
-
-              {returnMode === 'used' && returnForm.watch('return_quantity') && selectedBorrow && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  归还后剩余: {Math.max(0, selectedBorrow.remaining_quantity - (parseFloat(returnForm.watch('return_quantity') as string) || 0)).toFixed(2)} {selectedBorrow.unit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {selectedBorrow.unit})
-                </p>
-              )}
-              {returnMode === 'remaining' && returnForm.watch('return_quantity') && selectedBorrow && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  归还后剩余: {(parseFloat(returnForm.watch('return_quantity') as string) || 0).toFixed(2)} {selectedBorrow.unit} (原借用时剩余量: {selectedBorrow.remaining_quantity} {selectedBorrow.unit})
-                </p>
-              )}
-            </div>
-            <div className="flex gap-3 mt-8">
-              <Button
-                variant="modern"
-                onClick={() => setShowReturnModal(false)}
-                className="flex-1"
-                size="lg"
-              >
-                取消
-              </Button>
-              <LoadingButton
-                onClick={handleReturn}
-                isLoading={isSubmittingReturn}
-                loadingText="处理中..."
-                className="flex-1"
-                size="lg"
-              >
-                确认归还
-              </LoadingButton>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DashboardBorrowReturnDialog
+        dialog={returnDialog}
+      />
     </>
   )
 }

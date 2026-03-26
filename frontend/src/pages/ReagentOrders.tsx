@@ -1,11 +1,9 @@
-/**
- * 试剂订单页面
- * 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、入库
- * 参考 Inventory 页面实现，使用 FilterTable 组件
- */
+// 试剂订单页面 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、入库 参考 Inventory 页面实现，使用 FilterTable 组件
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
+import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
+import type { UseFormReturn } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 
 // UI 组件
@@ -21,7 +19,7 @@ import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
 import { REAGENT_STATUS_MAP, UserRoles } from '@/lib/constants'
-import { useTableState, type FilterAPI } from '@/hooks/useTableState'
+import type { FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import {
@@ -86,6 +84,8 @@ interface ReagentOrder {
   updated_at: string
 }
 
+type ReagentOrderDialogState = 'edit' | 'add' | null
+
 const columnHelper = createColumnHelper<ReagentOrder>()
 
 // 试剂订单状态筛选选项
@@ -108,58 +108,162 @@ const REAGENT_SEARCH_FIELD_OPTIONS = [
   { value: 'created_at', label: '订购时间' },
 ]
 
+// 返回试剂订单状态的展示文案。 把页面、展开行和重复弹窗中的状态映射维持在同一套规则上。
 function getReagentOrderStatusLabel(status: string): string {
   return REAGENT_STATUS_MAP[status] || status
 }
 
 // ============================================================================
-// 主组件
+// 页面辅助函数
 // ============================================================================
 
-export function ReagentOrdersPage() {
-  const navigate = useNavigate()
-  const currentUser = useAuthStore((state) => state.user)
-  const isAdmin = currentUser?.role === UserRoles.ADMIN
-  const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
+// 将试剂订单数据回填到表单中。 让编辑入口复用同一套字段归一化规则，避免表单回填逻辑散落在页面中。
+function createReagentOrderFormValues(item: ReagentOrder): ReagentOrderFormInputData {
+  return {
+    name: item.name || '',
+    cas_number: item.cas_number || '',
+    english_name: item.english_name || '',
+    alias: item.alias || '',
+    category: item.category || '',
+    brand: item.brand || '',
+    specification: item.specification || '',
+    quantity: item.quantity || 1,
+    price: item.price || undefined,
+    order_reason: (item.order_reason as ReagentOrderReason) || ('' as ReagentOrderFormData['order_reason']),
+    is_hazardous: item.is_hazardous || false,
+    notes: item.notes || '',
+  }
+}
 
-  // ---------------------------------------------------------------------------
-  // 状态管理
-  // ---------------------------------------------------------------------------
-  // 使用 useTableState 管理表格状态
-  const filter = useTableState({
-    api: reagentOrderAPI,
-    queryKey: ['reagent-orders'],
-    tableId: 'reagent-orders-table',
-    statusOptions: REAGENT_ORDER_STATUS_OPTIONS,
-    searchFieldOptions: REAGENT_SEARCH_FIELD_OPTIONS,
+// 生成新增试剂订单的请求体。 把表单值转换与接口契约绑定到单点，减少提交处理器内的分支噪音。
+function createReagentOrderCreatePayload(formData: ReagentOrderFormData) {
+  return {
+    name: formData.name,
+    cas_number: formData.cas_number,
+    english_name: formData.english_name || undefined,
+    alias: formData.alias || undefined,
+    category: formData.category || undefined,
+    brand: formData.brand || undefined,
+    specification: formData.specification,
+    quantity: formData.quantity,
+    price: formData.price,
+    order_reason: formData.order_reason as ReagentOrderReason,
+    is_hazardous: formData.is_hazardous,
+    notes: processNotes(formData.notes),
+  }
+}
+
+// 生成编辑试剂订单的请求体。 保留当前更新接口的空字符串语义，同时把字段组装从提交流程中抽离。
+function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
+  return {
+    name: formData.name,
+    english_name: formData.english_name || '',
+    alias: formData.alias || '',
+    category: formData.category || '',
+    brand: formData.brand || '',
+    specification: formData.specification || '',
+    quantity: formData.quantity,
+    price: formData.price,
+    order_reason: formData.order_reason,
+    is_hazardous: formData.is_hazardous,
+    notes: processNotes(formData.notes),
+  }
+}
+
+// 将后端字段校验错误映射回试剂订单表单。 避免在提交失败时重复书写相同的错误遍历逻辑。
+function applyReagentValidationErrors(
+  form: UseFormReturn<ReagentOrderFormInputData, unknown, ReagentOrderFormData>,
+  validationErrors: ValidationError[],
+): boolean {
+  if (validationErrors.length === 0) {
+    return false
+  }
+
+  validationErrors.forEach((errorItem) => {
+    if (errorItem.loc?.[1]) {
+      form.setError(errorItem.loc[1] as keyof ReagentOrderFormData, {
+        message: errorItem.msg || '输入不合法',
+      })
+    }
   })
+  return true
+}
 
-  // Dialog 状态
-  const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
-  const [editingItem, setEditingItem] = useState<ReagentOrder | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+// 按当前弹窗模式执行试剂订单的新增或编辑请求。 把接口分支从提交流程里拿走，让主提交处理器只保留编排职责。
+async function submitReagentOrderRequest(params: {
+  dialogState: ReagentOrderDialogState
+  editingItem: ReagentOrder | null
+  formData: ReagentOrderFormData
+}) {
+  const { dialogState, editingItem, formData } = params
+
+  if (dialogState === 'edit' && editingItem) {
+    await reagentOrderAPI.update(editingItem.id, createReagentOrderUpdatePayload(formData))
+    return
+  }
+
+  if (dialogState === 'add') {
+    await reagentOrderAPI.create(createReagentOrderCreatePayload(formData))
+  }
+}
+
+// 返回试剂订单提交成功后的提示语。 把新增与编辑的提示分支收口，保持主提交流程简短。
+function getReagentSubmitSuccessMessage(dialogState: ReagentOrderDialogState): string | null {
+  if (dialogState === 'edit') {
+    return '订单信息已更新'
+  }
+  if (dialogState === 'add') {
+    return '试剂订单创建成功'
+  }
+  return null
+}
+
+// 生成试剂订单表单字段配置。 把 CAS 自动识别按钮与 onBlur 检查逻辑收口到单点，避免 JSX 内嵌复杂映射。
+function createReagentOrderFormFields(params: {
+  dialogState: ReagentOrderDialogState
+  handleCasLookup: () => Promise<void>
+  isCasLookupLoading: boolean
+  checkCASWarning: (casNumber: string, options?: { force?: boolean }) => Promise<void>
+}) {
+  const { dialogState, handleCasLookup, isCasLookupLoading, checkCASWarning } = params
+  const fields = getReagentOrderFormFields()
+
+  if (dialogState !== 'add') {
+    return fields
+  }
+
+  return fields.map((field) =>
+    field.name === 'cas_number'
+      ? {
+        ...field,
+        onBlur: (value: unknown) => {
+          if (typeof value === 'string') {
+            checkCASWarning(value)
+          }
+        },
+        prefixButton: {
+          onClick: handleCasLookup,
+          loading: isCasLookupLoading,
+          title: '识别 CAS 号',
+          icon: ScanSearch,
+        },
+      }
+      : field,
+  )
+}
+
+// 管理试剂订单弹窗里的 CAS 联动与重复检查。 把 CAS 专项逻辑从弹窗控制器中拆开，避免单个 hook 继续膨胀。
+function useReagentOrderCasController(params: {
+  dialogState: ReagentOrderDialogState
+  editingItemId?: number
+  form: UseFormReturn<ReagentOrderFormInputData, unknown, ReagentOrderFormData>
+  navigate: (path: string) => void
+  setDialogState: (state: ReagentOrderDialogState) => void
+}) {
+  const { dialogState, editingItemId, form, navigate, setDialogState } = params
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
-  const {
-    casWarning,
-    casLoading,
-    checkCASWarning,
-    clearCASWarning,
-    handleCasValueChange,
-  } = useReagentCasDuplicateCheck()
+  const { casWarning, casLoading, checkCASWarning, clearCASWarning, handleCasValueChange } = useReagentCasDuplicateCheck()
 
-  // ---------------------------------------------------------------------------
-  // 表单逻辑
-  // ---------------------------------------------------------------------------
-
-  // 表单实例
-  const form = useForm<ReagentOrderFormInputData, unknown, ReagentOrderFormData>({
-    resolver: createValibotResolver(ReagentOrderSchema),
-    defaultValues: defaultReagentOrderValues,
-    shouldFocusError: false,
-  })
-
-  // CAS 号变化时仅清除旧结果，不触发实时搜索
   useEffect(() => {
     const subscription = form.watch((value, field) => {
       if (field.name === 'cas_number') {
@@ -179,118 +283,8 @@ export function ReagentOrdersPage() {
     if (currentCas) {
       checkCASWarning(currentCas)
     }
-  }, [dialogState, editingItem?.id, form, checkCASWarning])
+  }, [dialogState, editingItemId, form, checkCASWarning])
 
-  // 加载数据
-  const loadOrders = useCallback(async () => {
-    await Promise.resolve(filter.invalidate())
-  }, [filter])
-
-  // 点击添加按钮
-  const handleAddClick = useCallback(() => {
-    setEditingItem(null)
-    setDeleteConfirm(false)
-    form.reset(defaultReagentOrderValues)
-    clearCASWarning()
-    setDialogState('add')
-  }, [clearCASWarning, form, setDialogState])
-
-  // 点击编辑按钮
-  const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
-    const item = itemRaw as unknown as ReagentOrder
-    setEditingItem(item)
-    setDeleteConfirm(false)
-    form.reset({
-      name: item.name || '',
-      cas_number: item.cas_number || '',
-      english_name: item.english_name || '',
-      alias: item.alias || '',
-      category: item.category || '',
-      brand: item.brand || '',
-      specification: item.specification || '',
-      quantity: item.quantity || 1,
-      price: item.price || undefined,
-      order_reason: (item.order_reason as ReagentOrderReason) || ('' as ReagentOrderFormData['order_reason']),
-      is_hazardous: item.is_hazardous || false,
-      notes: item.notes || ''
-    })
-    setDialogState('edit')
-  }, [form, setDialogState])
-
-  // 表单提交
-  const handleFormSubmit = form.handleSubmit(
-    async (formData) => {
-      setIsSubmitting(true)
-      try {
-        if (dialogState === 'edit' && editingItem) {
-          await reagentOrderAPI.update(editingItem.id, {
-            name: formData.name,
-            english_name: formData.english_name || '',
-            alias: formData.alias || '',
-            category: formData.category || '',
-            brand: formData.brand || '',
-            specification: formData.specification || '',
-            quantity: formData.quantity,
-            price: formData.price,
-            order_reason: formData.order_reason,
-            is_hazardous: formData.is_hazardous,
-            notes: processNotes(formData.notes)
-          })
-        } else if (dialogState === 'add') {
-          await reagentOrderAPI.create({
-            name: formData.name,
-            cas_number: formData.cas_number,
-            english_name: formData.english_name || undefined,
-            alias: formData.alias || undefined,
-            category: formData.category || undefined,
-            brand: formData.brand || undefined,
-            specification: formData.specification,
-            quantity: formData.quantity,
-            price: formData.price,
-            order_reason: formData.order_reason as ReagentOrderReason,
-            is_hazardous: formData.is_hazardous,
-            notes: processNotes(formData.notes)
-          })
-        }
-        // 先刷新数据，再弹出 toast，确保数据已加载完成
-        await loadOrders()
-        if (dialogState === 'edit') {
-          toast.success('订单信息已更新')
-        } else if (dialogState === 'add') {
-          toast.success('试剂订单创建成功')
-        }
-        setDeleteConfirm(false)
-        setDialogState(null)
-      } catch (err) {
-        const errorDetail = extractApiErrorDetail(err)
-        const validationErrors = toValidationErrors(errorDetail)
-        if (validationErrors.length > 0) {
-          validationErrors.forEach((e: ValidationError) => {
-            if (e.loc?.[1]) {
-              form.setError(e.loc[1] as keyof ReagentOrderFormData, { message: e.msg || '输入不合法' })
-            }
-          })
-          return
-        }
-
-        toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
-      } finally {
-        setIsSubmitting(false)
-      }
-    }
-  )
-
-  // 导出订单
-  const handleExport = useCallback(async () => {
-    try {
-      const response = await reagentOrderAPI.exportOrders()
-      downloadBlobResponse(response, `reagent_orders_${new Date().toISOString().slice(0, 10)}.xlsx`)
-    } catch {
-      toast.error('导出失败')
-    }
-  }, [])
-
-  // CAS 号自动识别回调
   const handleCasLookup = useCallback(async () => {
     const isValidCas = await form.trigger('cas_number')
     if (!isValidCas) {
@@ -341,27 +335,6 @@ export function ReagentOrdersPage() {
     await checkCASWarning(casValidation.normalized, { force: true })
   }, [clearCASWarning, form, checkCASWarning])
 
-  const handleDeleteClick = useCallback(async () => {
-    if (!editingItem) return
-
-    if (!deleteConfirm) {
-      setDeleteConfirm(true)
-      return
-    }
-
-    try {
-      await reagentOrderAPI.delete(editingItem.id)
-      setDeleteConfirm(false)
-      setEditingItem(null)
-      setDialogState(null)
-      clearCASWarning()
-      await loadOrders()
-      toast.success('试剂订单已删除')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '删除失败'))
-    }
-  }, [clearCASWarning, deleteConfirm, editingItem, loadOrders, setDialogState])
-
   const navigateToCasSearch = useCallback((path: string, field: string) => {
     if (!casWarning?.cas_number) {
       return
@@ -376,57 +349,206 @@ export function ReagentOrdersPage() {
     navigate(`${path}?${query.toString()}`)
   }, [casWarning?.cas_number, clearCASWarning, navigate, setDialogState])
 
-  // ---------------------------------------------------------------------------
-  // 表格列配置
-  // ---------------------------------------------------------------------------
-  // 表格列配置
-  const columns = useMemo(() => {
-    const baseColumns = getReagentOrderTableColumns()
-    if (!isAdmin) {
-      return baseColumns as ColumnDef<Record<string, unknown>, unknown>[]
+  const formFields = useMemo(() => {
+    return createReagentOrderFormFields({
+      dialogState,
+      handleCasLookup,
+      isCasLookupLoading,
+      checkCASWarning,
+    })
+  }, [dialogState, handleCasLookup, isCasLookupLoading, checkCASWarning])
+
+  return {
+    casWarning,
+    casLoading,
+    clearCASWarning,
+    formFields,
+    navigateToCasSearch,
+  }
+}
+
+// 管理试剂订单弹窗、CAS 联动与提交删除流程。 把页面主组件收回成列表编排层，同时保持 CAS 相关交互集中在一个局部控制器里。
+function useReagentOrderDialogController(
+  refreshOrders: () => void | Promise<void>,
+  navigate: (path: string) => void,
+) {
+  const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
+  const [editingItem, setEditingItem] = useState<ReagentOrder | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const form = useForm<ReagentOrderFormInputData, unknown, ReagentOrderFormData>({
+    resolver: createValibotResolver(ReagentOrderSchema),
+    defaultValues: defaultReagentOrderValues,
+    shouldFocusError: false,
+  })
+  const casController = useReagentOrderCasController({
+    dialogState,
+    editingItemId: editingItem?.id,
+    form,
+    navigate,
+    setDialogState,
+  })
+
+  const handleAddClick = useCallback(() => {
+    setEditingItem(null)
+    setDeleteConfirm(false)
+    form.reset(defaultReagentOrderValues)
+    casController.clearCASWarning()
+    setDialogState('add')
+  }, [casController, form, setDialogState])
+
+  const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
+    const item = itemRaw as unknown as ReagentOrder
+    setEditingItem(item)
+    setDeleteConfirm(false)
+    form.reset(createReagentOrderFormValues(item))
+    setDialogState('edit')
+  }, [form, setDialogState])
+
+  const handleFormSubmit = form.handleSubmit(async (formData) => {
+    setIsSubmitting(true)
+    try {
+      await submitReagentOrderRequest({ dialogState, editingItem, formData })
+      await Promise.resolve(refreshOrders())
+      const successMessage = getReagentSubmitSuccessMessage(dialogState)
+      if (successMessage) {
+        toast.success(successMessage)
+      }
+      setDeleteConfirm(false)
+      setDialogState(null)
+    } catch (err) {
+      const errorDetail = extractApiErrorDetail(err)
+      const validationErrors = toValidationErrors(errorDetail)
+      if (applyReagentValidationErrors(form, validationErrors)) {
+        return
+      }
+      toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
+    } finally {
+      setIsSubmitting(false)
+    }
+  })
+
+  const handleDeleteClick = useCallback(async () => {
+    if (!editingItem) return
+
+    if (!deleteConfirm) {
+      setDeleteConfirm(true)
+      return
     }
 
-    const actionColumn = columnHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 100,
-      minSize: 100,
-      maxSize: 100,
-      cell: info => {
-        const meta = info.table.options.meta
-        return (
-          <ActionButtons
-            item={info.row.original as unknown as Record<string, unknown>}
-            onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
-            onRefresh={filter.invalidate}
-          />
-        )
-      },
-    })
+    try {
+      await reagentOrderAPI.delete(editingItem.id)
+      setDeleteConfirm(false)
+      setEditingItem(null)
+      setDialogState(null)
+      casController.clearCASWarning()
+      await Promise.resolve(refreshOrders())
+      toast.success('试剂订单已删除')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '删除失败'))
+    }
+  }, [casController, deleteConfirm, editingItem, refreshOrders, setDialogState])
 
-    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
-  }, [isAdmin, filter.invalidate])
+  const handleDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setDialogState(null)
+      setDeleteConfirm(false)
+      form.reset()
+      casController.clearCASWarning()
+    }
+  }, [casController, form, setDialogState])
 
-  // ---------------------------------------------------------------------------
-  // 渲染相关回调
-  // ---------------------------------------------------------------------------
-  // 展开行渲染
+  return {
+    dialogState,
+    editingItem,
+    deleteConfirm,
+    isSubmitting,
+    casWarning: casController.casWarning,
+    casLoading: casController.casLoading,
+    form,
+    formFields: casController.formFields,
+    handleAddClick,
+    handleEditClick,
+    handleFormSubmit,
+    handleDeleteClick,
+    handleDialogOpenChange,
+    navigateToCasSearch: casController.navigateToCasSearch,
+    setDialogState,
+  }
+}
+
+// 创建试剂订单页的表格列。 把管理员操作列的拼装从页面中抽离，降低页面函数的结构噪音。
+function createReagentOrderColumns(
+  isAdmin: boolean,
+  onRefresh: () => void | Promise<void>,
+): ColumnDef<Record<string, unknown>, unknown>[] {
+  const baseColumns = getReagentOrderTableColumns()
+  if (!isAdmin) {
+    return baseColumns as ColumnDef<Record<string, unknown>, unknown>[]
+  }
+
+  const actionColumn = columnHelper.display({
+    id: 'actions',
+    header: '操作',
+    size: 100,
+    minSize: 100,
+    maxSize: 100,
+    cell: (info) => {
+      const meta = info.table.options.meta
+      return (
+        <ActionButtons
+          item={info.row.original as unknown as Record<string, unknown>}
+          onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
+          onRefresh={onRefresh}
+        />
+      )
+    },
+  })
+
+  return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
+}
+
+// ============================================================================
+// 主组件
+// ============================================================================
+
+// 直接组合列表、页头和叶子组件，避免继续保留只转发参数的壳层。
+export function ReagentOrdersPage() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const currentUser = useAuthStore((state) => state.user)
+  const isAdmin = currentUser?.role === UserRoles.ADMIN
+  const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
+  const refreshOrders = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['reagent-orders'] })
+  }, [queryClient])
+  const dialogController = useReagentOrderDialogController(refreshOrders, navigate)
+
+  const handleExport = useCallback(async () => {
+    try {
+      const response = await reagentOrderAPI.exportOrders()
+      downloadBlobResponse(response, `reagent_orders_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } catch {
+      toast.error('导出失败')
+    }
+  }, [])
+
+  const columns = useMemo(() => {
+    return createReagentOrderColumns(isAdmin, refreshOrders)
+  }, [isAdmin, refreshOrders])
+
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ReagentOrder
     return <ReagentOrderExpandedRow item={item} />
   }, [])
 
-  // ============================================================================
-  // 渲染
-  // ============================================================================
   return (
     <div className="space-y-6">
-      {/* 头部区域 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">试剂订购</h1>
         <div className="flex flex-wrap gap-2">
           {canCreateOrder && (
-            <Button onClick={handleAddClick} size="lg">
+            <Button onClick={dialogController.handleAddClick} size="lg">
               <Plus className="w-4 h-4 mr-1.5" /> 创建订单
             </Button>
           )}
@@ -437,72 +559,35 @@ export function ReagentOrdersPage() {
           )}
         </div>
       </div>
-
-      {/* 创建/编辑对话框 */}
-      <Dialog
-        open={dialogState !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDialogState(null)
-            setDeleteConfirm(false)
-            form.reset()
-            clearCASWarning()
-          }
-        }}
-      >
+      <Dialog open={dialogController.dialogState !== null} onOpenChange={dialogController.handleDialogOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{dialogState === 'edit' ? '编辑订单' : '创建订单'}</DialogTitle>
+            <DialogTitle>{dialogController.dialogState === 'edit' ? '编辑订单' : '创建订单'}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleFormSubmit}>
-            <BaseForm
-              form={form}
-              fields={useMemo(() => {
-                const fields = getReagentOrderFormFields()
-                // 为 CAS 号字段添加自动识别按钮（仅在新增模式时显示）
-                if (dialogState === 'add') {
-                  return fields.map(field =>
-                    field.name === 'cas_number'
-                      ? {
-                        ...field,
-                        onBlur: (value) => {
-                          if (typeof value === 'string') {
-                            checkCASWarning(value)
-                          }
-                        },
-                        prefixButton: {
-                          onClick: handleCasLookup,
-                          loading: isCasLookupLoading,
-                          title: '识别 CAS 号',
-                          icon: ScanSearch
-                        }
-                      }
-                      : field
-                  )
-                }
-                return fields
-              }, [dialogState, handleCasLookup, isCasLookupLoading, checkCASWarning])}
-            />
-            {/* CAS 警告显示 */}
-            {dialogState === 'add' && (
+          <form onSubmit={dialogController.handleFormSubmit}>
+            <BaseForm form={dialogController.form} fields={dialogController.formFields} />
+            {dialogController.dialogState === 'add' && (
               <ReagentCasDuplicateWarning
-                casWarning={casWarning}
+                casWarning={dialogController.casWarning}
                 className="mt-4 -mb-2 rounded-md bg-orange-50 p-3 dark:bg-orange-950"
-                onOpenOrders={() => navigateToCasSearch('/reagents', 'cas')}
-                onOpenInventory={() => navigateToCasSearch('/inventory', 'cas_number')}
+                onOpenOrders={() => dialogController.navigateToCasSearch('/reagents', 'cas')}
+                onOpenInventory={() => dialogController.navigateToCasSearch('/inventory', 'cas_number')}
                 getOrderStatusLabel={getReagentOrderStatusLabel}
               />
             )}
-
             <EditDialogActions
-              mode={dialogState ?? 'add'}
-              onCancel={() => setDialogState(null)}
-              onDelete={dialogState === 'edit' && editingItem ? handleDeleteClick : undefined}
-              deleteConfirm={deleteConfirm}
+              mode={dialogController.dialogState ?? 'add'}
+              onCancel={() => dialogController.setDialogState(null)}
+              onDelete={
+                dialogController.dialogState === 'edit' && dialogController.editingItem
+                  ? dialogController.handleDeleteClick
+                  : undefined
+              }
+              deleteConfirm={dialogController.deleteConfirm}
               submitLabelEdit="保存"
               submitLabelAdd="提交订单"
-              isSubmitting={isSubmitting}
-              leadingContent={casLoading && dialogState === 'add' ? (
+              isSubmitting={dialogController.isSubmitting}
+              leadingContent={dialogController.casLoading && dialogController.dialogState === 'add' ? (
                 <div className="text-sm text-muted-foreground flex items-center">
                   <Loader2 className="w-3 h-3 animate-spin mr-1" />
                   检查CAS号中
@@ -512,8 +597,6 @@ export function ReagentOrdersPage() {
           </form>
         </DialogContent>
       </Dialog>
-
-      {/* 数据表格区域 */}
       <FilterTable
         api={reagentOrderAPI as FilterAPI}
         queryKey={['reagent-orders']}
@@ -521,7 +604,7 @@ export function ReagentOrdersPage() {
         statusOptions={REAGENT_ORDER_STATUS_OPTIONS}
         searchFieldOptions={REAGENT_SEARCH_FIELD_OPTIONS}
         customColumns={columns}
-        onEdit={handleEditClick}
+        onEdit={dialogController.handleEditClick}
         title={<><FlaskConical className="w-5 h-5" /> 试剂订单列表</>}
         searchPlaceholder="搜索名称、CAS号、订购人、订购时间..."
         renderExpandedRow={renderExpandedRow}
@@ -535,6 +618,7 @@ export function ReagentOrdersPage() {
 // 表格操作按钮组件
 // ============================================================================
 
+// 渲染试剂订单行级操作。 把审批与驳回逻辑封装在表格单元内，避免页面主组件直接承载行级动作细节。
 const ActionButtons = React.memo(function ActionButtons({
   item,
   onEdit,

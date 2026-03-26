@@ -1,25 +1,19 @@
 import { cn } from '@/lib/utils'
 
 interface QuantityIndicatorProps {
-  /** 剩余数量 */
   remaining: number
-  /** 初始数量 */
   initial: number
-  /** 单位 */
   unit?: string
-  /** 规格（已格式化字符串，如 "500 mL"），优先级高于 unit */
+  // 已含完整展示单位与格式时直接覆盖 unit，避免再重复拼装一次。
   specification?: string
-  /** 自定义类名 */
   className?: string
-  /** 是否显示进度条 */
   showBar?: boolean
-  /** 进度条宽度 */
   barWidth?: string
 }
 
 const NARROW_SPACE = '\u200A'
 
-/** 统一组装剩余量文本，优先展示已格式化规格。 */
+// 统一组装剩余量文本，优先展示已格式化规格。
 const getDisplayText = ({
   initial,
   remaining,
@@ -37,7 +31,6 @@ const getDisplayText = ({
   return `${remaining}${NARROW_SPACE}/${NARROW_SPACE}${initial}`
 }
 
-/** 根据剩余百分比返回数量文本的强调颜色。 */
 const getQuantityTextClassName = (percentage: number): string | undefined => {
   if (percentage === 0) {
     return 'text-destructive'
@@ -50,7 +43,7 @@ const getQuantityTextClassName = (percentage: number): string | undefined => {
   return undefined
 }
 
-/** 根据剩余百分比返回进度条轨道颜色。 */
+// 根据剩余百分比返回进度条轨道颜色。
 const getProgressTrackClassName = (percentage: number): string => {
   if (percentage === 0) {
     return 'bg-destructive/20'
@@ -59,7 +52,7 @@ const getProgressTrackClassName = (percentage: number): string => {
   return 'bg-amber-500/20'
 }
 
-/** 根据剩余百分比返回进度条填充颜色。 */
+// 根据剩余百分比返回进度条填充颜色。
 const getProgressFillClassName = (percentage: number): string => {
   if (percentage === 0) {
     return 'bg-destructive'
@@ -68,7 +61,7 @@ const getProgressFillClassName = (percentage: number): string => {
   return 'bg-amber-500'
 }
 
-/** 计算进度条宽度，并为极小值保留最小可见宽度。 */
+// 计算进度条宽度，并为极小值保留最小可见宽度。
 const getProgressWidth = (percentage: number): string => {
   if (percentage === 0) {
     return '0%'
@@ -77,14 +70,7 @@ const getProgressWidth = (percentage: number): string => {
   return `${Math.max(percentage, 5)}%`
 }
 
-/**
- * 库存剩余量指示器组件
- * 显示剩余量/初始量，并根据剩余百分比显示不同颜色
- * - 0%: 红色（用完）
- * - 0-20%: 琥珀色（快用完）
- * - >20%: 正常颜色
- * - initial 为 0 时：显示 "-"
- */
+// 初始量为 0 时显示 `-`，其余沿用红/琥珀阈值表达“用完/偏低”的库存语义。
 export function QuantityIndicator({
   remaining,
   initial,

@@ -1,53 +1,106 @@
 # 运行时与入口
 
-## 应用从哪里开始
+本页说明后端启动时如何把配置、数据库、Redis、SSE 和安全中间件串起来。它不是业务文档，重点是运行边界、初始化顺序和修改时的联动关系。
 
-后端入口是 `app/main.py`。这里做了几件关键事情：
+## 入口与配置
 
-- 创建 FastAPI 应用
-- 在 `lifespan` 中初始化数据库
-- 注入请求日志、上传体积限制、HTTPS 跳转等中间件
-- 挂载 API 路由、静态资源和文档入口
+后端入口是 [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)。应用启动时会先读取 `app.core.config.settings`，再根据 `use_secure_runtime()` 决定日志级别、文档是否开放，以及是否启用更严格的安全行为。`FastAPI` 实例在创建时统一注入 `lifespan`、标题、版本和描述，保证启动与关闭阶段走同一条路径。
 
-## 生命周期
+`[app/core/config.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/config.py)` 负责运行时配置的集中管理。当前约束是：
 
-启动时最重要的动作是 `init_db()`。这意味着数据库结构、索引、WAL 和相关初始化逻辑不是离线脚本先跑，而是应用启动阶段主动兜底。
+- 生产环境默认使用 `RS256`，并要求 RSA key 可用。
+- 开发环境在缺失 key 时可以生成临时密钥并写入 `.keys/`。
+- `use_secure_runtime()` 会反向影响调试开关、代理头信任、HSTS 和静态目录准备。
 
-## 中间件链路
+## 启动初始化
 
-当前实现至少包含这些横切能力：
+`lifespan` 是 `asynccontextmanager`。启动阶段会打印 banner、执行 `init_db()`，并在关闭阶段停止 `sse_manager` 监听器，避免后台任务残留。
 
-- 请求日志与请求 ID
-- 上传请求体积限制
-- HTTPS 重定向
-- 安全响应头注入
-- 静态资源缓存控制
+`init_db()` 的顺序不能打乱：
 
-这类逻辑都收在入口文件中，所以排查跨接口问题时应优先看这里。
+1. `SQLModel.metadata.create_all(engine)` 注册模型。
+2. `ensure_sqlite_performance_indexes` 创建性能索引。
+3. `ensure_sqlite_inventory_fts` 建立 FTS 表与触发器。
+4. `check_sqlite_schema_consistency` 校验表结构与索引一致性。
+5. 创建默认管理员。
 
-## 文档与公开入口
+这意味着数据库结构、索引、全文检索和基础账号都属于启动期职责，而不是事后补齐的运维动作。
 
-当前实现保留了 FastAPI 自带的：
+## SQLite 与 WAL
 
-- `/docs`
-- `/redoc`
-- `/openapi.json`
+[app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py) 维护 SQLite 引擎和连接行为。每次新建连接都会通过 `event.listen` 执行：
 
-但在 secure runtime 下会关闭这些入口。
+- `PRAGMA journal_mode=WAL;`
+- `PRAGMA foreign_keys=ON;`
 
-## 为什么这里值得优先看
+这里的约束很明确：
 
-因为这里同时决定了：
+- WAL 是并发写入的基础，不应去掉。
+- 外键约束必须始终开启，否则模型关系会失真。
 
-- 系统启动行为
-- 安全边界
-- 与 Nginx 的路径配合
-- `/docs` 是否开放
+`ensure_sqlite_performance_indexes` 负责创建复合索引，覆盖库存、订单、借还日志和会话等高频查询路径。`ensure_sqlite_inventory_fts` 则负责 `inventory_fts`、`reagent_order_fts`、`consumable_order_fts`、`users_fts` 以及对应触发器的创建与重建。启动结束后还会执行 `ANALYZE`、`PRAGMA optimize` 和一致性检查。
+
+如果需要重建搜索索引，`reset_db()` 可以跳过触发器后重新初始化，但它会清空数据，必须谨慎使用。
+
+## Redis 与断路器
+
+[app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py) 提供全局 Redis 客户端和简易断路器。`get_redis()` 在最近一次错误后的冷却期内会直接返回 `None`，连接成功时会先 `ping()` 以确认可用性。所有键都通过 `redis_key()` 加上 `settings.redis_key_prefix`，避免命名空间冲突。
+
+Redis 相关封装主要承担三件事：
+
+- `cache_session` / `get_cached_session` / `delete_cached_session` 处理会话缓存、TTL 和异常复位。
+- `session_service` 和 `auth.get_current_user` 复用会话缓存与数据库回退。
+- `sse_redis` 负责 pub/sub，在 Redis 不可用时会自动退回本地队列。
+
+降级策略也已经固定：
+
+- 登录限流在安全运行时更偏向 fail-closed，开发环境可回退到内存窗口。
+- 会话校验继续走数据库，不因为 Redis 故障直接中断。
+- SSE 在 Redis 不可用时只保留单进程内可见的广播。
+
+## 列表缓存与静态资源
+
+运行时还维护两类轻量缓存：
+
+- `api_utils.py` 中的短 TTL 内存缓存，用于高频列表请求削峰。
+- `CachedStaticFiles` 为 `/static` 资源写入长期缓存头，减少图片和导出文件的重复下载。
+
+前者只适合短时间重复查询，写操作后必须清理对应缓存前缀。后者只负责静态传输，不承担权限判断或业务状态缓存。
+
+## SSE 与中间件
+
+`/api/events` 暴露统一 SSE 入口。请求会先校验允许房间，再由 `sse_manager` 生成客户端、订阅房间并启动监听。返回的 `StreamingResponse` 会设置 `Cache-Control: no-cache`、`Connection: keep-alive`、`X-Accel-Buffering: no`，并通过 heartbeat 防止代理层把连接视为闲置。
+
+`app/main.py` 的中间件顺序也有明确边界：
+
+1. 请求日志，生成 `X-Request-ID` 并掩码化路径。
+2. 上传体积拦截，只对上传路径做 `content-length` 限制。
+3. HTTPS 重定向。
+4. CSRF 原点检查，对 Cookie 认证写请求校验 `Origin` / `Referer`。
+5. 安全头注入。
+6. CORS。
+7. 路由。
+
+静态文件由 `CachedStaticFiles` 挂载，并会统一携带缓存头与安全头。上传目录和缩略图目录缺失时，启动阶段会自动创建。
+
+## 二次开发提示
+
+- 修改模型或搜索字段时，先同步更新 `app/database.py` 的索引和 FTS 初始化逻辑，再运行初始化流程核对结果。
+- 新增配置项时，需要同步写入 `Settings`，并确认它在 `use_secure_runtime()` 下的默认行为。
+- 修改 SSE 房间、模板或序号逻辑时，要同时更新 `ALLOWED_SSE_ROOMS`、`SSERoom`、`sse_manager` 和关闭阶段的清理逻辑。
+- 新增上传接口时，要确认它被 `_is_upload_request` 覆盖，否则可能绕过体积限制。
+
+## 验证建议
+
+- 启动后访问 `/health`，确认应用能正常完成初始化。
+- 手工请求 `/api/events`，确认能持续收到 heartbeat。
+- 发送超限上传请求，确认返回 413。
+- 在安全运行时访问 `/docs`、`/openapi.json`，确认可见性符合预期。
 
 ## 参考代码
 
-- `app/main.py:167`
-- `app/main.py:179`
-- `app/main.py:191`
-- `app/main.py:150`
-- `pyproject.toml:1`
+- [.env.example](https://github.com/hzb666/LabStorageManager/blob/main/.env.example)
+- [app/core/config.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/config.py)
+- [app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py)
+- [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
+- [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)

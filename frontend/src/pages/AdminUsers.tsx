@@ -21,14 +21,13 @@ import { userAdminAPI } from '@/api/client'
 import { toast } from '@/lib/toast'
 import { getApiErrorMessage } from '@/lib/validationSchemas'
 import { useAuthStore } from '@/store/useStore'
-// 注意这里引入了我们需要的图标
 import {
   Users,
   Loader2,
   UserPlus,
   FileText,
   UserCheck,
-  UserX
+  UserX,
 } from 'lucide-react'
 import useDialogState from '@/hooks/useDialogState'
 import { BaseForm } from '@/components/BaseForm'
@@ -39,13 +38,13 @@ import {
 } from '@/lib/validationSchemas'
 import { defaultUserValues, getUserCreateFormFields, USER_ROLE_OPTIONS } from '@/lib/formConfigs'
 import type { PaginationParams } from '@/api/client'
-
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { SEARCH_MAX_LENGTH, TableEmptyState, TableSearchInput } from '@/components/ui/TableFilters'
 import { getAdminUsersTableColumns } from '@/lib/tableConfigs'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 
+// 用户列表请求共用分页、关键字、角色和状态筛选字段。
 interface UserListParams extends PaginationParams {
   role?: string
   is_active?: boolean
@@ -53,143 +52,153 @@ interface UserListParams extends PaginationParams {
   full_name?: string
 }
 
+// 弹窗状态只允许 `create / edit / delete` 三种模式。
+type AdminUsersDialogMode = 'create' | 'edit' | 'delete'
+
+// 为用户表格列定义保留字段级类型推导。
 const columnHelper = createColumnHelper<User>()
 
-export function AdminUsersPage() {
-  const { user: currentUser } = useAuthStore()
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const [sorting, setSorting] = useState<SortingState>([])
-  const [inputValue, setInputValue] = useState('') // 仅用于输入框实时显示
-  const [debouncedFilter, setDebouncedFilter] = useState('') // 用于 API 请求和表格高亮
+// 统一管理搜索输入、防抖筛选和分页重置。
+function useAdminUsersFilterState() {
+  const [inputValue, setInputValue] = useState('')
+  const [debouncedFilter, setDebouncedFilter] = useState('')
+  const [roleFilter, setRoleFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+
   const normalizedInputValue = inputValue.trim()
 
-  // 防抖 effect - 300ms 延迟
-  useEffect(() => {
-    if (!normalizedInputValue && debouncedFilter) {
+  const handleInputValueChange = useCallback((value: string) => {
+    const normalizedValue = value.trim()
+    setInputValue(value)
+    if (!normalizedValue) {
       setDebouncedFilter('')
+      setCurrentPage(1)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!normalizedInputValue) {
       return
     }
 
     const timer = setTimeout(() => {
       if (inputValue.length <= SEARCH_MAX_LENGTH) {
         setDebouncedFilter(normalizedInputValue)
+        setCurrentPage(1)
       }
     }, 300)
+
     return () => clearTimeout(timer)
-  }, [inputValue, normalizedInputValue, debouncedFilter])
+  }, [inputValue, normalizedInputValue])
 
-  const [roleFilter, setRoleFilter] = useState<string>('all')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
-
-  // 分页状态
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
-
-  // 当搜索词、角色过滤、状态过滤发生变化时，重置回第一页
-  useEffect(() => {
-    setCurrentPage(1)
-  }, [debouncedFilter, roleFilter, statusFilter])
-
-  // 获取不带筛选的总数（缓存5分钟）
-  const { data: totalWithoutFilterData } = useQuery({
-    queryKey: ['adminUsers', 'count'],
-    queryFn: async () => {
-      const params: UserListParams = { skip: 0, limit: 0 }
-      const response = await userAdminAPI.list(params)
-      return response.data.total || 0
-    },
-    staleTime: 5 * 60 * 1000, // 缓存5分钟
-  })
-
-  // 使用单一 React Query 获取用户列表及总数，配合 keepPreviousData 避免闪烁
-  const { data: queryResult, isLoading, isPlaceholderData } = useQuery({
-    queryKey: ['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize],
-    queryFn: async () => {
-      const params: UserListParams = {
-        skip: (currentPage - 1) * pageSize,
-        limit: pageSize,
-      }
-      if (roleFilter !== 'all') params.role = roleFilter
-      if (statusFilter !== 'all') params.is_active = statusFilter === 'active'
-      if (debouncedFilter) {
-        params.username = debouncedFilter
-        params.full_name = debouncedFilter
-      }
-
-      const response = await userAdminAPI.list(params)
-      return {
-        data: response.data.data || [],
-        total: response.data.total || 0
-      }
-    },
-    placeholderData: keepPreviousData,
-  })
-
-  // 派生出 total
-  const total = queryResult?.total || 0
-  const totalPages = Math.ceil(total / pageSize)
-  const totalWithoutFilter = totalWithoutFilterData || 0
-  
-  // 判断是否有筛选条件
-  const hasFilter = Boolean(debouncedFilter || roleFilter !== 'all' || statusFilter !== 'all')
-  const shouldShowGrandTotal = hasFilter
-    && totalWithoutFilter > 0
-    && (!isPlaceholderData || total !== totalWithoutFilter)
-  const displayCount = shouldShowGrandTotal ? `${total}/${totalWithoutFilter}` : `${total}`
-
-  // 将当前管理员账户置顶显示
-  const data = useMemo(() => {
-    const userData = queryResult?.data || []
-    if (!currentUser) return userData
-    const currentUserId = currentUser.id
-    const currentUserIndex = userData.findIndex((user: User) => user.id === currentUserId)
-    if (currentUserIndex === -1 || currentUserIndex === 0) return userData
-
-    // 将当前用户移到数组最前面
-    const result = [...userData]
-    const [currentUserItem] = result.splice(currentUserIndex, 1)
-    result.unshift(currentUserItem)
-    return result
-  }, [queryResult, currentUser])
-
-  // 刷新数据函数
-  const refetchUsers = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['adminUsers'] })
-  }, [queryClient])
-
-  // 分页变化处理
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page)
-  }
-
-  const handlePageSizeChange = (size: number) => {
+  const handlePageSizeChange = useCallback((size: number) => {
     setPageSize(size)
-    setCurrentPage(1) // 重置到第一页
+    setCurrentPage(1)
+  }, [])
+
+  const handleRoleFilterChange = useCallback((value: string) => {
+    setRoleFilter(value)
+    setCurrentPage(1)
+  }, [])
+
+  const handleStatusFilterChange = useCallback((value: string) => {
+    setStatusFilter(value)
+    setCurrentPage(1)
+  }, [])
+
+  return {
+    inputValue,
+    debouncedFilter,
+    roleFilter,
+    statusFilter,
+    currentPage,
+    pageSize,
+    setInputValue: handleInputValueChange,
+    setRoleFilter: handleRoleFilterChange,
+    setStatusFilter: handleStatusFilterChange,
+    setCurrentPage,
+    handlePageSizeChange,
+  }
+}
+
+// 查询参数会裁掉空筛选项，避免把“全部”状态继续传给接口。
+function buildUserListParams(
+  currentPage: number,
+  pageSize: number,
+  roleFilter: string,
+  statusFilter: string,
+  debouncedFilter: string
+): UserListParams {
+  const params: UserListParams = {
+    skip: (currentPage - 1) * pageSize,
+    limit: pageSize,
   }
 
-  // Dialog state - 使用 useDialogState 管理 create/edit/delete 对话框
-  const [dialogState, setDialogState] = useDialogState<"create" | "edit" | "delete">()
+  if (roleFilter !== 'all') {
+    params.role = roleFilter
+  }
 
-  // 创建用户表单 - 使用 useForm + BaseForm
+  if (statusFilter !== 'all') {
+    params.is_active = statusFilter === 'active'
+  }
+
+  if (debouncedFilter) {
+    params.username = debouncedFilter
+    params.full_name = debouncedFilter
+  }
+
+  return params
+}
+
+// 当前登录管理员固定显示在列表顶部，其余用户保持原有顺序。
+function moveCurrentUserToTop(userData: User[], currentUser: User | null | undefined) {
+  if (!currentUser) {
+    return userData
+  }
+
+  const currentUserIndex = userData.findIndex((user) => user.id === currentUser.id)
+  if (currentUserIndex <= 0) {
+    return userData
+  }
+
+  const result = [...userData]
+  const [currentUserItem] = result.splice(currentUserIndex, 1)
+  result.unshift(currentUserItem)
+  return result
+}
+
+// 存在筛选、总数可用且不是占位数据时显示“当前 / 总计”；其余场景只显示当前总数。
+function getUserDisplayCount(
+  total: number,
+  totalWithoutFilter: number,
+  hasFilter: boolean,
+  isPlaceholderData: boolean
+) {
+  const shouldShowGrandTotal =
+    hasFilter &&
+    totalWithoutFilter > 0 &&
+    (!isPlaceholderData || total !== totalWithoutFilter)
+
+  return shouldShowGrandTotal ? `${total}/${totalWithoutFilter}` : `${total}`
+}
+
+// 集中管理用户创建、启用/禁用和弹窗状态，提交成功后统一刷新列表。
+function useAdminUsersDialogState(
+  setDialogState: (value: AdminUsersDialogMode | null) => void,
+  refetchUsers: () => void
+) {
   const createForm = useForm<UserCreateFormData>({
     resolver: valibotResolver(UserCreateSchema),
     defaultValues: defaultUserValues,
   })
   const { reset: resetCreateForm } = createForm
   const [createLoading, setCreateLoading] = useState(false)
-
-  // 创建用户表单字段配置
-  const createFormFields = getUserCreateFormFields()
-
-  // Edit user modal
   const [editUser, setEditUser] = useState<User | null>(null)
-
-  // Delete confirmation
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
 
-  // Handlers 使用 useCallback 包裹以优化传给 ActionButtons 的引用
   const openEditModal = useCallback((user: User) => {
     setEditUser(user)
     setDialogState('edit')
@@ -210,56 +219,10 @@ export function AdminUsersPage() {
     }
   }, [refetchUsers])
 
-  const handleViewLogs = useCallback(async (user: User) => {
-    try {
-      const response = await userAdminAPI.generateLogsToken(user.id)
-      const token = response.data.token
-      navigate('/admin/logs', { state: { logsToken: token } })
-    } catch {
-      toast.error('获取日志访问失败')
+  const handleDelete = useCallback(async () => {
+    if (!deleteUser) {
+      return
     }
-  }, [navigate])
-
-  // 表格列定义
-  const columns = useMemo(() => {
-    const baseColumns = getAdminUsersTableColumns()
-    const actionColumn = columnHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 200,
-      cell: (info) => {
-        const row = info.row
-        return (
-          <ActionButtons
-            user={row.original}
-            currentUser={currentUser ? { ...currentUser, is_active: true } : null}
-            onEdit={openEditModal}
-            onViewLogs={handleViewLogs}
-            onActivate={handleActivate}
-            onDelete={openDeleteModal}
-          />
-        )
-      },
-    })
-
-    return [...baseColumns, actionColumn] as ColumnDef<User, unknown>[]
-  }, [currentUser, openEditModal, handleViewLogs, handleActivate, openDeleteModal])
-
-  const table = useReactTable({
-    data,
-    columns,
-    columnResizeMode: 'onChange',
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    onSortingChange: setSorting,
-    state: {
-      sorting,
-      globalFilter: debouncedFilter, // 👈 核心修改：表格高亮也使用防抖后的值
-    },
-  })
-
-  const handleDelete = async () => {
-    if (!deleteUser) return
 
     setDeleteLoading(true)
     try {
@@ -273,17 +236,15 @@ export function AdminUsersPage() {
     } finally {
       setDeleteLoading(false)
     }
-  }
+  }, [deleteUser, refetchUsers, setDialogState])
 
-  // Create user handlers
-  const handleCreate = createForm.handleSubmit(async (formData) => {
-    const userData = {
-      ...formData,
-      role: formData.role || 'user' as const,
-    }
+  const handleCreate = useCallback(async (formData: UserCreateFormData) => {
     setCreateLoading(true)
     try {
-      await userAdminAPI.create(userData)
+      await userAdminAPI.create({
+        ...formData,
+        role: formData.role || 'user',
+      })
       setDialogState(null)
       resetCreateForm(defaultUserValues)
       refetchUsers()
@@ -293,263 +254,465 @@ export function AdminUsersPage() {
     } finally {
       setCreateLoading(false)
     }
-  })
+  }, [refetchUsers, resetCreateForm, setDialogState])
 
-  // 关闭创建弹窗时清空表单
-  const handleCreateModalClose = (open: boolean) => {
+  const handleCreateDialogChange = useCallback((open: boolean) => {
     setDialogState(open ? 'create' : null)
     if (!open) {
       resetCreateForm(defaultUserValues)
     }
+  }, [resetCreateForm, setDialogState])
+
+  const handleDeleteDialogChange = useCallback((open: boolean) => {
+    setDialogState(open ? 'delete' : null)
+    if (!open) {
+      setDeleteUser(null)
+    }
+  }, [setDialogState])
+
+  return {
+    createForm,
+    createLoading,
+    editUser,
+    deleteUser,
+    deleteLoading,
+    openEditModal,
+    openDeleteModal,
+    handleActivate,
+    handleDelete,
+    handleCreate,
+    handleCreateDialogChange,
+    handleDeleteDialogChange,
   }
+}
 
+// 筛选栏同时驱动关键字、角色和状态三个过滤维度。
+function AdminUsersFilters({
+  filters,
+}: {
+  filters: ReturnType<typeof useAdminUsersFilterState>
+}) {
   return (
-    <div className="space-y-6">
-
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary">用户管理</h1>
-        <Button onClick={() => setDialogState('create')} size="lg">
-          <UserPlus className="w-4 h-4 mr-1.5" />
-          创建用户
-        </Button>
-      </div>
-
-      {/* Search & Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-        <TableSearchInput
-          value={inputValue}
-          onChange={setInputValue}
-          placeholder="搜索用户名、姓名..."
-          inputClassName="h-10"
-        />
-        <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value)}>
-          <SelectTrigger className="w-30 min-h-10">
-            <SelectValue placeholder="全部角色" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部角色</SelectItem>
-            <SelectItem value="admin">管理员</SelectItem>
-            <SelectItem value="user">用户</SelectItem>
-            <SelectItem value="public">公用</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
-          <SelectTrigger className="w-30 min-h-10">
-            <SelectValue placeholder="已启用" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部状态</SelectItem>
-            <SelectItem value="active">已启用</SelectItem>
-            <SelectItem value="inactive">已禁用</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Users Table */}
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
-            <Users className="w-5 h-5" />
-            用户列表 
-            <span className="text-muted-foreground font-normal">(&thinsp;{displayCount}&thinsp;)</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading && data.length === 0 && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          )}
-          {!isLoading && data.length === 0 && (
-            <TableEmptyState
-              searchKeyword={debouncedFilter}
-              hasFilter={hasFilter}
-              emptyText="没有符合条件的用户"
-            />
-          )}
-          {data.length > 0 && (
-            <div className="px-6 rounded-md overflow-auto">
-              <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
-                <thead>
-                  {table.getHeaderGroups().map(headerGroup => (
-                    <tr key={headerGroup.id} className="border-b-2 border-border">
-                      {headerGroup.headers.map(header => (
-                        <th
-                          key={header.id}
-                          className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
-                          style={{ width: header.getSize() }}
-                        >
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.map(row => (
-                    <MemoizedTableRow key={row.id} row={row} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-        {/* 分页组件 - 数据大于20条时显示 */}
-        {total > 20 && (
-          <div className="flex items-center justify-between px-6 py-4 mt-2">
-            <PaginationInfo
-              currentPage={currentPage}
-              pageSize={pageSize}
-              total={total}
-            />
-            <Pagination
-              currentPage={currentPage}
-              totalPages={totalPages}
-              pageSize={pageSize}
-              onPageChange={handlePageChange}
-              onPageSizeChange={handlePageSizeChange}
-            />
-          </div>
-        )}
-      </Card>
-
-      {/* Create User Modal */}
-      <Dialog open={dialogState === 'create'} onOpenChange={handleCreateModalClose}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>创建用户</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <BaseForm
-              form={createForm}
-              fields={createFormFields}
-              layout="stack"
-            />
-              {/* 角色选择 - 使用 RadioGroup */}
-            <div>
-              <Label className="text-base">角色</Label>
-              <RadioGroup
-                value={createForm.watch('role')}
-                onValueChange={(value) => createForm.setValue('role', value as 'admin' | 'user' | 'public')}
-                className="flex gap-4 mt-2"
-              >
-                {USER_ROLE_OPTIONS.map((option) => (
-                  <div key={option.value} className="flex items-center space-x-2">
-                    <RadioGroupItem value={option.value} id={`create_role_${option.value}`} />
-                    <Label htmlFor={`create_role_${option.value}`} className="text-base cursor-pointer">{option.label}</Label>
-                  </div>
-                ))}
-              </RadioGroup>
-            </div>
-          </div>
-          <div className="flex gap-3 mt-8">
-            <Button variant="modern" onClick={() => handleCreateModalClose(false)} size="lg" className="flex-1">
-              取消
-            </Button>
-            <LoadingButton onClick={handleCreate} isLoading={createLoading} size="lg" className="flex-1">
-              {createLoading ? '创建中...' : '创建'}
-            </LoadingButton>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit User Modal */}
-      <UserEditDialog
-        open={dialogState === 'edit'}
-        onOpenChange={(open) => setDialogState(open ? 'edit' : null)}
-        user={editUser}
-        mode="admin"
-        onSuccess={() => refetchUsers()}
+    <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+      <TableSearchInput
+        value={filters.inputValue}
+        onChange={filters.setInputValue}
+        placeholder="搜索用户名、姓名..."
+        inputClassName="h-10"
       />
-
-      {/* Delete Confirmation Modal */}
-      <Dialog open={dialogState === 'delete'} onOpenChange={(open) => setDialogState(open ? 'delete' : null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>确认禁用用户</DialogTitle>
-          </DialogHeader>
-          <div className="pb-4">
-            <p>确定要禁用用户 <strong>{deleteUser?.username}</strong> 吗？</p>
-            <p className="text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
-          </div>
-          <div className="flex mt-4 gap-2">
-            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} size="lg">
-              {deleteLoading ? '处理中...' : '确认禁用'}
-            </Button>
-            <Button variant="modern" onClick={() => setDialogState(null)} size="lg" className="text-base">
-              取消
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <Select value={filters.roleFilter} onValueChange={filters.setRoleFilter}>
+        <SelectTrigger className="w-30 min-h-10">
+          <SelectValue placeholder="全部角色" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部角色</SelectItem>
+          <SelectItem value="admin">管理员</SelectItem>
+          <SelectItem value="user">用户</SelectItem>
+          <SelectItem value="public">公用</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select value={filters.statusFilter} onValueChange={filters.setStatusFilter}>
+        <SelectTrigger className="w-30 min-h-10">
+          <SelectValue placeholder="已启用" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部状态</SelectItem>
+          <SelectItem value="active">已启用</SelectItem>
+          <SelectItem value="inactive">已禁用</SelectItem>
+        </SelectContent>
+      </Select>
     </div>
   )
 }
 
-// ============================================================================
-// 表格操作按钮组件 - 从主组件中提取出来，避免重复定义
-// ============================================================================
-
-interface ActionButtonsProps {
-  user: User;
-  currentUser: User | null;
-  onEdit: (user: User) => void;
-  onViewLogs: (user: User) => void;
-  onActivate: (userId: number) => void;
-  onDelete: (user: User) => void;
+// 表格卡片统一承载加载态、空态、列表和分页切换。
+function AdminUsersTableCard({
+  tableState,
+}: {
+  tableState: {
+    isLoading: boolean
+    rowCount: number
+    debouncedFilter: string
+    hasFilter: boolean
+    displayCount: string
+    total: number
+    currentPage: number
+    totalPages: number
+    pageSize: number
+    table: ReturnType<typeof useReactTable<User>>
+    onPageChange: (page: number) => void
+    onPageSizeChange: (size: number) => void
+  }
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
+          <Users className="w-5 h-5" />
+          用户列表
+          <span className="text-muted-foreground font-normal">(&thinsp;{tableState.displayCount}&thinsp;)</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {tableState.isLoading && tableState.rowCount === 0 && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {!tableState.isLoading && tableState.rowCount === 0 && (
+          <TableEmptyState
+            searchKeyword={tableState.debouncedFilter}
+            hasFilter={tableState.hasFilter}
+            emptyText="没有符合条件的用户"
+          />
+        )}
+        {tableState.rowCount > 0 && (
+          <div className="px-6 rounded-md overflow-auto">
+            <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
+              <thead>
+                {tableState.table.getHeaderGroups().map((headerGroup) => (
+                  <tr key={headerGroup.id} className="border-b-2 border-border">
+                    {headerGroup.headers.map((header) => (
+                      <th
+                        key={header.id}
+                        className="h-11 px-3 font-bold text-foreground text-left align-middle text-base"
+                        style={{ width: header.getSize() }}
+                      >
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(header.column.columnDef.header, header.getContext())}
+                      </th>
+                    ))}
+                  </tr>
+                ))}
+              </thead>
+              <tbody>
+                {tableState.table.getRowModel().rows.map((row) => (
+                  <TableRow key={row.id} row={row} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+      {tableState.total > 20 && (
+        <div className="flex items-center justify-between px-6 py-4 mt-2">
+          <PaginationInfo
+            currentPage={tableState.currentPage}
+            pageSize={tableState.pageSize}
+            total={tableState.total}
+          />
+          <Pagination
+            currentPage={tableState.currentPage}
+            totalPages={tableState.totalPages}
+            pageSize={tableState.pageSize}
+            onPageChange={tableState.onPageChange}
+            onPageSizeChange={tableState.onPageSizeChange}
+          />
+        </div>
+      )}
+    </Card>
+  )
 }
 
+// 创建弹窗复用 `BaseForm`，字段和校验继续沿用原有创建用户流程。
+function CreateUserDialog({
+  open,
+  dialogs,
+  onSubmit,
+}: {
+  open: boolean
+  dialogs: ReturnType<typeof useAdminUsersDialogState>
+  onSubmit: () => Promise<void>
+}) {
+  const roleValue = dialogs.createForm.watch('role')
+
+  return (
+    <Dialog open={open} onOpenChange={dialogs.handleCreateDialogChange}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>创建用户</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <BaseForm
+            form={dialogs.createForm}
+            fields={getUserCreateFormFields()}
+            layout="stack"
+          />
+          <div>
+            <Label className="text-base">角色</Label>
+            <RadioGroup
+              value={roleValue}
+              onValueChange={(value) => dialogs.createForm.setValue('role', value as 'admin' | 'user' | 'public')}
+              className="flex gap-4 mt-2"
+            >
+              {USER_ROLE_OPTIONS.map((option) => (
+                <div key={option.value} className="flex items-center space-x-2">
+                  <RadioGroupItem value={option.value} id={`create_role_${option.value}`} />
+                  <Label htmlFor={`create_role_${option.value}`} className="text-base cursor-pointer">
+                    {option.label}
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+          </div>
+        </div>
+        <div className="flex gap-3 mt-8">
+          <Button variant="modern" onClick={() => dialogs.handleCreateDialogChange(false)} size="lg" className="flex-1">
+            取消
+          </Button>
+          <LoadingButton onClick={onSubmit} isLoading={dialogs.createLoading} size="lg" className="flex-1">
+            {dialogs.createLoading ? '创建中...' : '创建'}
+          </LoadingButton>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// 禁用确认弹窗只展示目标用户名，并复用原有确认文案和提交动作。
+function DeleteUserDialog({
+  open,
+  dialogs,
+}: {
+  open: boolean
+  dialogs: ReturnType<typeof useAdminUsersDialogState>
+}) {
+  return (
+    <Dialog open={open} onOpenChange={dialogs.handleDeleteDialogChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>确认禁用用户</DialogTitle>
+        </DialogHeader>
+        <div className="pb-4">
+          <p>确定要禁用用户 <strong>{dialogs.deleteUser?.username}</strong> 吗？</p>
+          <p className="text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
+        </div>
+        <div className="flex mt-4 gap-2">
+          <Button variant="destructive" onClick={dialogs.handleDelete} disabled={dialogs.deleteLoading} size="lg">
+            {dialogs.deleteLoading ? '处理中...' : '确认禁用'}
+          </Button>
+          <Button variant="modern" onClick={() => dialogs.handleDeleteDialogChange(false)} size="lg" className="text-base">
+            取消
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// 页头只负责标题和“添加用户”入口，不承载筛选或表格状态。
+function AdminUsersHeader({ onCreate }: { onCreate: () => void }) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <h1 className="text-3xl font-bold text-primary">用户管理</h1>
+      <Button onClick={onCreate} size="lg">
+        <UserPlus className="w-4 h-4 mr-1.5" />
+        创建用户
+      </Button>
+    </div>
+  )
+}
+
+// 用户管理页主组件只编排查询、创建、编辑、禁用和日志跳转流程。
+export function AdminUsersPage() {
+  const { user: currentUser } = useAuthStore()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [sorting, setSorting] = useState<SortingState>([])
+  const [dialogState, setDialogState] = useDialogState<AdminUsersDialogMode>()
+  const filters = useAdminUsersFilterState()
+
+  const { data: totalWithoutFilterData } = useQuery({
+    queryKey: ['adminUsers', 'count'],
+    queryFn: async () => {
+      // limit=0 只拿 total，用于筛选态下展示“当前/总计”而不重复请求整页数据。
+      const response = await userAdminAPI.list({ skip: 0, limit: 0 })
+      return response.data.total || 0
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: queryResult, isLoading, isPlaceholderData } = useQuery({
+    // 把分页与筛选条件全部纳入 queryKey，避免不同筛选态之间缓存串页。
+    queryKey: ['adminUsers', filters.roleFilter, filters.statusFilter, filters.debouncedFilter, filters.currentPage, filters.pageSize],
+    queryFn: async () => {
+      const response = await userAdminAPI.list(
+        buildUserListParams(
+          filters.currentPage,
+          filters.pageSize,
+          filters.roleFilter,
+          filters.statusFilter,
+          filters.debouncedFilter
+        )
+      )
+      return {
+        data: response.data.data || [],
+        total: response.data.total || 0,
+      }
+    },
+    placeholderData: keepPreviousData,
+  })
+
+  const total = queryResult?.total || 0
+  const totalPages = Math.ceil(total / filters.pageSize)
+  const totalWithoutFilter = totalWithoutFilterData || 0
+  const hasFilter = Boolean(
+    filters.debouncedFilter || filters.roleFilter !== 'all' || filters.statusFilter !== 'all'
+  )
+  const displayCount = getUserDisplayCount(total, totalWithoutFilter, hasFilter, isPlaceholderData)
+  const data = useMemo(
+    () => moveCurrentUserToTop(queryResult?.data || [], currentUser),
+    [queryResult?.data, currentUser]
+  )
+
+  const refetchUsers = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['adminUsers'] })
+  }, [queryClient])
+  const dialogs = useAdminUsersDialogState(setDialogState, refetchUsers)
+
+  const handleViewLogs = useCallback(async (user: User) => {
+    try {
+      const response = await userAdminAPI.generateLogsToken(user.id)
+      navigate('/admin/logs', { state: { logsToken: response.data.token } })
+    } catch {
+      toast.error('获取日志访问失败')
+    }
+  }, [navigate])
+
+  const columns = useMemo(() => {
+    const actionColumn = columnHelper.display({
+      id: 'actions',
+      header: '操作',
+      size: 200,
+      cell: (info) => (
+        <ActionButtons
+          user={info.row.original}
+          currentUserId={currentUser?.id}
+          onEdit={dialogs.openEditModal}
+          onViewLogs={handleViewLogs}
+          onActivate={dialogs.handleActivate}
+          onDelete={dialogs.openDeleteModal}
+        />
+      ),
+    })
+
+    return [...getAdminUsersTableColumns(), actionColumn] as ColumnDef<User, unknown>[]
+  }, [currentUser, dialogs.handleActivate, dialogs.openDeleteModal, dialogs.openEditModal, handleViewLogs])
+
+  // 这里不会把 table 实例再交给 memo comparator 缓存，按项目约定定点忽略编译器告警。
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const table = useReactTable({
+    data,
+    columns,
+    columnResizeMode: 'onChange',
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
+    state: {
+      sorting,
+      globalFilter: filters.debouncedFilter,
+    },
+  })
+
+  return (
+    <div className="space-y-6">
+      <AdminUsersHeader onCreate={() => setDialogState('create')} />
+
+      <AdminUsersFilters filters={filters} />
+
+      <AdminUsersTableCard
+        tableState={{
+          isLoading,
+          rowCount: data.length,
+          debouncedFilter: filters.debouncedFilter,
+          hasFilter,
+          displayCount,
+          total,
+          currentPage: filters.currentPage,
+          totalPages,
+          pageSize: filters.pageSize,
+          table,
+          onPageChange: filters.setCurrentPage,
+          onPageSizeChange: filters.handlePageSizeChange,
+        }}
+      />
+
+      <CreateUserDialog
+        open={dialogState === 'create'}
+        dialogs={dialogs}
+        onSubmit={dialogs.createForm.handleSubmit(dialogs.handleCreate)}
+      />
+
+      <UserEditDialog
+        open={dialogState === 'edit'}
+        onOpenChange={(open) => setDialogState(open ? 'edit' : null)}
+        user={dialogs.editUser}
+        mode="admin"
+        onSuccess={refetchUsers}
+      />
+
+      <DeleteUserDialog open={dialogState === 'delete'} dialogs={dialogs} />
+    </div>
+  )
+}
+
+// 行操作继续保留编辑、日志、启用和禁用入口，并按当前用户和目标状态控制可用性。
 const ActionButtons = React.memo(function ActionButtons({
   user,
-  currentUser,
+  currentUserId,
   onEdit,
   onViewLogs,
   onActivate,
-  onDelete
-}: ActionButtonsProps) {
-  const isSelf = user.id === currentUser?.id;
+  onDelete,
+}: {
+  user: User
+  currentUserId?: number
+  onEdit: (user: User) => void
+  onViewLogs: (user: User) => void
+  onActivate: (userId: number) => void
+  onDelete: (user: User) => void
+}) {
+  const isSelf = user.id === currentUserId
 
-  const actions = useMemo(() => {
-    return [
-      {
-        id: 'logs',
-        label: '查看日志',
-        icon: <FileText className="size-4" />,
-        variant: 'modern' as const,
-        className: 'text-blue-600/90 hover:text-blue-700 dark:text-blue-400/70 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30',
-        onClick: () => onViewLogs(user)
-      },
-      {
-        id: 'activate',
-        label: '激活',
-        icon: <UserCheck className="size-4" />,
-        variant: 'modern' as const,
-        className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
-        showWhen: (u: User) => !u.is_active, 
-        disableWhen: () => isSelf,           // 是自己账号时禁用
-        onClick: () => onActivate(user.id)
-      },
-      {
-        id: 'deactivate',
-        label: '禁用',
-        icon: <UserX className="size-4" />,
-        variant: 'modern' as const,
-        className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
-        showWhen: (u: User) => u.is_active,  
-        disableWhen: () => isSelf,           // 是自己账号时禁用
-        onClick: () => onDelete(user)
-      }
-    ]
-  }, [isSelf, user, onViewLogs, onActivate, onDelete])
+  // 自身账号禁止启用/禁用，避免管理员误把自己踢出可登录状态。
+  const actions = useMemo(() => [
+    {
+      id: 'logs',
+      label: '查看日志',
+      icon: <FileText className="size-4" />,
+      variant: 'modern' as const,
+      className: 'text-blue-600/90 hover:text-blue-700 dark:text-blue-400/70 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30',
+      onClick: () => onViewLogs(user),
+    },
+    {
+      id: 'activate',
+      label: '激活',
+      icon: <UserCheck className="size-4" />,
+      variant: 'modern' as const,
+      className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
+      showWhen: (currentItem: User) => !currentItem.is_active,
+      disableWhen: () => isSelf,
+      onClick: () => onActivate(user.id),
+    },
+    {
+      id: 'deactivate',
+      label: '禁用',
+      icon: <UserX className="size-4" />,
+      variant: 'modern' as const,
+      className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
+      showWhen: (currentItem: User) => currentItem.is_active,
+      disableWhen: () => isSelf,
+      onClick: () => onDelete(user),
+    },
+  ], [isSelf, onActivate, onDelete, onViewLogs, user])
 
   return (
     <TableActionButtonsMemo
       item={user}
       actions={actions}
       showEdit={true}
-      disableEdit={isSelf} // 禁用编辑自己的功能
+      disableEdit={isSelf}
       onEdit={onEdit}
     />
   )
@@ -559,24 +722,28 @@ const ActionButtons = React.memo(function ActionButtons({
     prevProps.onViewLogs !== nextProps.onViewLogs ||
     prevProps.onActivate !== nextProps.onActivate ||
     prevProps.onDelete !== nextProps.onDelete ||
-    prevProps.currentUser?.id !== nextProps.currentUser?.id
+    prevProps.currentUserId !== nextProps.currentUserId
   ) {
-    return false;
+    return false
   }
 
   const prevUser = prevProps.user as unknown as Record<string, unknown>
   const nextUser = nextProps.user as unknown as Record<string, unknown>
-
-  if (prevUser === nextUser) return true
+  if (prevUser === nextUser) {
+    return true
+  }
 
   const prevKeys = Object.keys(prevUser)
   const nextKeys = Object.keys(nextUser)
-  if (prevKeys.length !== nextKeys.length) return false
+  if (prevKeys.length !== nextKeys.length) {
+    return false
+  }
 
   return prevKeys.every((key) => prevUser[key] === nextUser[key])
 })
 
-const MemoizedTableRow = React.memo(({ row }: { row: Row<User> }) => {
+// 行渲染依赖 TanStack Table 的运行时上下文，不能只按 `row.original` 做 memo。
+function TableRow({ row }: { row: Row<User> }) {
   return (
     <tr className="border-b border-border hover:bg-muted/30">
       {row.getVisibleCells().map((cell: Cell<User, unknown>) => (
@@ -590,7 +757,4 @@ const MemoizedTableRow = React.memo(({ row }: { row: Row<User> }) => {
       ))}
     </tr>
   )
-}, (prevProps, nextProps) => {
-  // 当整行数据没有变化时阻止重渲染
-  return prevProps.row.original === nextProps.row.original
-})
+}

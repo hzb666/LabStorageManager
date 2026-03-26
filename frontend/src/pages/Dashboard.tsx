@@ -1,7 +1,6 @@
 /**
- * 仪表盘页面
- * 轻量级 Tab 容器：显示统计卡片 + 按需加载对应 Tab
- * activeTab 通过 localStorage 持久化
+ * 组织仪表盘页签、统计卡片和按需加载的子页。
+ * `activeTab` 会持久化到 localStorage，并按当前角色校验可见范围。
  */
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { ShoppingCart, Package, ArrowRightLeft, Loader2 } from 'lucide-react'
@@ -14,6 +13,7 @@ import { useAuthStore } from '@/store/useStore'
 import {
   type DashboardTab,
   DASHBOARD_TAB_STORAGE_KEY,
+  subscribeDashboardCountsRefresh,
 } from '../lib/dashboardUtils'
 import { DashboardReagentTab } from './dashboard/DashboardReagentTab'
 import { DashboardConsumableTab } from './dashboard/DashboardConsumableTab'
@@ -34,6 +34,18 @@ type DashboardCountsCache = {
   counts: DashboardCounts
 }
 
+type DashboardCountsState = {
+  counts: DashboardCounts
+  isLoading: boolean
+}
+
+type DashboardCardItem = {
+  tab: DashboardTab
+  title: string
+  icon: React.ElementType
+  value: React.ReactNode
+}
+
 const EMPTY_COUNTS: DashboardCounts = {
   reagentCount: 0,
   consumableCount: 0,
@@ -43,6 +55,7 @@ const EMPTY_COUNTS: DashboardCounts = {
 
 let dashboardCountsCache: DashboardCountsCache | null = null
 
+// 判断统计卡片数字是否真正发生变化，避免同值 `setState` 触发无效更新。
 function isCountsEqual(a: DashboardCounts, b: DashboardCounts): boolean {
   return (
     a.reagentCount === b.reagentCount &&
@@ -52,6 +65,7 @@ function isCountsEqual(a: DashboardCounts, b: DashboardCounts): boolean {
   )
 }
 
+// 统计卡片只负责展示标题、图标、数值和激活态，不参与数据获取或权限判断。
 function StatCard({
   title,
   icon: Icon,
@@ -86,6 +100,7 @@ function StatCard({
 
 const ALL_TABS: DashboardTab[] = ['reagents', 'consumables', 'borrows', 'stockin']
 
+// `localStorage` 里的 tab 值不可信，角色切换后若旧值已不可见则回退到首个允许页签。
 function getSavedTab(allowedTabs: DashboardTab[]): DashboardTab {
   try {
     const saved = localStorage.getItem(DASHBOARD_TAB_STORAGE_KEY)
@@ -98,53 +113,73 @@ function getSavedTab(allowedTabs: DashboardTab[]): DashboardTab {
   return allowedTabs[0] ?? 'borrows'
 }
 
+// 持久化当前激活的页签；写入失败只影响下次恢复，不影响当前选中态。
 function saveTab(tab: DashboardTab) {
   try {
     localStorage.setItem(DASHBOARD_TAB_STORAGE_KEY, tab)
   } catch {
-    // ignore localStorage errors
+    // 持久化失败时保留当前内存状态，不额外打断交互。
   }
 }
 
-export function Dashboard() {
-  const currentUser = useAuthStore((state) => state.user)
-  const isPublicUser = currentUser?.role === UserRoles.PUBLIC
-  const userKey = `${currentUser?.id ?? 'anonymous'}-${currentUser?.role ?? 'unknown'}`
-  const cachedCountsForUser = dashboardCountsCache?.userKey === userKey ? dashboardCountsCache.counts : null
-  const allowedTabs = useMemo(
-    () => (isPublicUser ? (['borrows'] as DashboardTab[]) : ALL_TABS),
-    [isPublicUser]
-  )
+// 订单接口返回 `{ [status]: { orders: [] } }`；这里只累计每组 `orders.length`，不依赖状态键名。
+function countGroupedOrders(grouped: Record<string, { orders: unknown[] }>): number {
+  return Object.values(grouped).reduce((sum, item) => sum + (item.orders?.length ?? 0), 0)
+}
 
-  const [selectedTab, setSelectedTab] = useState<DashboardTab>(() => getSavedTab(allowedTabs))
+// `public` 角色只请求借用列表，其余统计固定为 `0`，避免触发无权限或无意义的请求。
+async function loadPublicDashboardCounts(): Promise<DashboardCounts> {
+  const borrowRes = await inventoryAPI.getMyBorrows()
+  return {
+    reagentCount: 0,
+    consumableCount: 0,
+    borrowCount: (borrowRes.data?.data ?? []).length,
+    stockinCount: 0,
+  }
+}
+
+// 成员角色的四项统计来自 4 个接口；试剂和耗材结果需要先按分组对象聚合。
+async function loadMemberDashboardCounts(): Promise<DashboardCounts> {
+  const [reagentRes, consumableRes, borrowRes, stockinRes] = await Promise.all([
+    reagentOrderAPI.getMyReagentOrders(),
+    consumableOrderAPI.getMyConsumableOrders(),
+    inventoryAPI.getMyBorrows(),
+    inventoryAPI.getPendingStockin(),
+  ])
+
+  const reagentGrouped = (reagentRes.data?.data ?? {}) as Record<string, { orders: unknown[] }>
+  const consumableGrouped = (consumableRes.data?.data ?? {}) as Record<string, { orders: unknown[] }>
+
+  return {
+    reagentCount: countGroupedOrders(reagentGrouped),
+    consumableCount: countGroupedOrders(consumableGrouped),
+    borrowCount: (borrowRes.data?.data ?? []).length,
+    stockinCount: (stockinRes.data?.data ?? []).length,
+  }
+}
+
+// 把角色分支收口在这一层，`effect` 不直接处理 public / member 分叉。
+function loadDashboardCountsByRole(isPublicUser: boolean): Promise<DashboardCounts> {
+  return isPublicUser ? loadPublicDashboardCounts() : loadMemberDashboardCounts()
+}
+
+// 模块级缓存按 `userKey` 隔离；有缓存时先显示缓存再后台刷新，无缓存时才显示 loading。
+function useDashboardCounts(userKey: string, isPublicUser: boolean, refreshToken: number): DashboardCountsState {
+  const cachedCountsForUser = dashboardCountsCache?.userKey === userKey ? dashboardCountsCache.counts : null
   const [countsState, setCountsState] = useState<DashboardCountsCache | null>(() =>
     cachedCountsForUser ? { userKey, counts: cachedCountsForUser } : null
-  )
-  const activeTab = useMemo(
-    () => (allowedTabs.includes(selectedTab) ? selectedTab : getSavedTab(allowedTabs)),
-    [allowedTabs, selectedTab]
   )
   const counts = countsState?.userKey === userKey ? countsState.counts : cachedCountsForUser ?? EMPTY_COUNTS
   const isLoading = cachedCountsForUser === null && countsState?.userKey !== userKey
 
-  const handleTabChange = useCallback((tab: DashboardTab) => {
-    if (!allowedTabs.includes(tab)) {
-      return
-    }
-    setSelectedTab(tab)
-  }, [allowedTabs])
-
-  useEffect(() => {
-    saveTab(activeTab)
-  }, [activeTab])
-
-  // 加载统计数量：返回页面时优先复用缓存，只有首次或数据变化时才显示 loading
   useEffect(() => {
     let cancelled = false
     const cachedCounts = dashboardCountsCache?.userKey === userKey ? dashboardCountsCache.counts : null
 
     const applyCounts = (nextCounts: DashboardCounts) => {
-      if (cancelled) return
+      if (cancelled) {
+        return
+      }
 
       dashboardCountsCache = {
         userKey,
@@ -159,58 +194,137 @@ export function Dashboard() {
       })
     }
 
-    const loadCounts = async () => {
+    const syncCounts = async () => {
       try {
-        if (isPublicUser) {
-          const borrowRes = await inventoryAPI.getMyBorrows()
-          if (cancelled) return
-
-          const borrowCount = (borrowRes.data?.data ?? []).length
-          applyCounts({
-            reagentCount: 0,
-            consumableCount: 0,
-            borrowCount,
-            stockinCount: 0,
-          })
-          return
-        }
-
-        const [reagentRes, consumableRes, borrowRes, stockinRes] = await Promise.all([
-          reagentOrderAPI.getMyReagentOrders(),
-          consumableOrderAPI.getMyConsumableOrders(),
-          inventoryAPI.getMyBorrows(),
-          inventoryAPI.getPendingStockin(),
-        ])
-
-        if (cancelled) return
-
-        const reagentGrouped = (reagentRes.data?.data ?? {}) as Record<string, { orders: unknown[] }>
-        const consumableGrouped = (consumableRes.data?.data ?? {}) as Record<string, { orders: unknown[] }>
-
-        const reagentCount = Object.values(reagentGrouped).reduce(
-          (sum, item) => sum + (item.orders?.length ?? 0), 0
-        )
-        const consumableCount = Object.values(consumableGrouped).reduce(
-          (sum, item) => sum + (item.orders?.length ?? 0), 0
-        )
-        const borrowCount = (borrowRes.data?.data ?? []).length
-        const stockinCount = (stockinRes.data?.data ?? []).length
-
-        applyCounts({ reagentCount, consumableCount, borrowCount, stockinCount })
+        const nextCounts = await loadDashboardCountsByRole(isPublicUser)
+        applyCounts(nextCounts)
       } catch {
-        if (cancelled) return
-
         if (cachedCounts !== null) {
           return
         }
-
         applyCounts(EMPTY_COUNTS)
       }
     }
 
-    void loadCounts()
-    return () => { cancelled = true }
-  }, [activeTab, isPublicUser, userKey])
+    void syncCounts()
+    return () => {
+      cancelled = true
+    }
+  }, [isPublicUser, refreshToken, userKey])
+
+  return { counts, isLoading }
+}
+
+// 子 Tab 的增删改不会自动刷新顶部统计，这里把跨组件刷新事件折叠成 `refreshToken`。
+function useDashboardRefreshToken(): number {
+  const [refreshToken, setRefreshToken] = useState(0)
+
+  useEffect(() => subscribeDashboardCountsRefresh(() => {
+    setRefreshToken((value) => value + 1)
+  }), [])
+
+  return refreshToken
+}
+
+// `public` 只展示借用卡片；非 `public` 才展示订单和待入库卡片，loading 时 `value` 可以是节点。
+function getDashboardCardItems(
+  isPublicUser: boolean,
+  counts: DashboardCounts,
+  isLoading: boolean
+): DashboardCardItem[] {
+  const loadingValue = <Loader2 className="size-5 animate-spin text-muted-foreground" />
+  const borrowCard: DashboardCardItem = {
+    tab: 'borrows',
+    title: '当前借用',
+    icon: Package,
+    value: isLoading ? loadingValue : counts.borrowCount,
+  }
+
+  if (isPublicUser) {
+    return [borrowCard]
+  }
+
+  return [
+    {
+      tab: 'reagents',
+      title: '试剂订单',
+      icon: ShoppingCart,
+      value: isLoading ? loadingValue : counts.reagentCount,
+    },
+    {
+      tab: 'consumables',
+      title: '耗材订单',
+      icon: ShoppingCart,
+      value: isLoading ? loadingValue : counts.consumableCount,
+    },
+    borrowCard,
+    {
+      tab: 'stockin',
+      title: '待入库',
+      icon: ArrowRightLeft,
+      value: isLoading ? loadingValue : counts.stockinCount,
+    },
+  ]
+}
+
+// `cards.length` 决定统计区网格列数，单卡片布局与多卡片布局沿用同一套点击行为。
+function DashboardStats({
+  cards,
+  activeTab,
+  onTabChange,
+}: Readonly<{
+  cards: DashboardCardItem[]
+  activeTab: DashboardTab
+  onTabChange: (tab: DashboardTab) => void
+}>) {
+  return (
+    <div className={cn('grid gap-3', cards.length === 1 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 lg:grid-cols-4')}>
+      {cards.map((card) => (
+        <StatCard
+          key={card.tab}
+          title={card.title}
+          icon={card.icon}
+          value={card.value}
+          onClick={() => onTabChange(card.tab)}
+          isActive={activeTab === card.tab}
+        />
+      ))}
+    </div>
+  )
+}
+
+// 仪表盘主组件只做权限、Tab 持久化、统计缓存和子页切换编排。
+export function Dashboard() {
+  const currentUser = useAuthStore((state) => state.user)
+  const isPublicUser = currentUser?.role === UserRoles.PUBLIC
+  const userKey = `${currentUser?.id ?? 'anonymous'}-${currentUser?.role ?? 'unknown'}`
+  const refreshToken = useDashboardRefreshToken()
+  const allowedTabs = useMemo(
+    () => (isPublicUser ? (['borrows'] as DashboardTab[]) : ALL_TABS),
+    [isPublicUser]
+  )
+
+  const [selectedTab, setSelectedTab] = useState<DashboardTab>(() => getSavedTab(allowedTabs))
+  const activeTab = useMemo(
+    () => (allowedTabs.includes(selectedTab) ? selectedTab : getSavedTab(allowedTabs)),
+    [allowedTabs, selectedTab]
+  )
+  const { counts, isLoading } = useDashboardCounts(userKey, isPublicUser, refreshToken)
+  const cards = useMemo(
+    () => getDashboardCardItems(isPublicUser, counts, isLoading),
+    [counts, isLoading, isPublicUser]
+  )
+
+  const handleTabChange = useCallback((tab: DashboardTab) => {
+    if (!allowedTabs.includes(tab)) {
+      return
+    }
+    setSelectedTab(tab)
+  }, [allowedTabs])
+
+  useEffect(() => {
+    saveTab(activeTab)
+  }, [activeTab])
 
   return (
     <div className="space-y-6">
@@ -218,47 +332,15 @@ export function Dashboard() {
         <h1 className="text-3xl font-bold text-primary card-title-placeholder">仪表盘</h1>
       </div>
 
-      <div className={cn('grid gap-3', isPublicUser ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 lg:grid-cols-4')}>
-        {!isPublicUser && (
-          <StatCard
-            title="试剂订单"
-            icon={ShoppingCart}
-            value={isLoading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : counts.reagentCount}
-            onClick={() => handleTabChange('reagents')}
-            isActive={activeTab === 'reagents'}
-          />
-        )}
-        {!isPublicUser && (
-          <StatCard
-            title="耗材订单"
-            icon={ShoppingCart}
-            value={isLoading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : counts.consumableCount}
-            onClick={() => handleTabChange('consumables')}
-            isActive={activeTab === 'consumables'}
-          />
-        )}
-        <StatCard
-          title="当前借用"
-          icon={Package}
-          value={isLoading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : counts.borrowCount}
-          onClick={() => handleTabChange('borrows')}
-          isActive={activeTab === 'borrows'}
-        />
-        {!isPublicUser && (
-          <StatCard
-            title="待入库"
-            icon={ArrowRightLeft}
-            value={isLoading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : counts.stockinCount}
-            onClick={() => handleTabChange('stockin')}
-            isActive={activeTab === 'stockin'}
-          />
-        )}
-      </div>
-
-      {!isPublicUser && activeTab === 'reagents' && <DashboardReagentTab />}
-      {!isPublicUser && activeTab === 'consumables' && <DashboardConsumableTab />}
-      {activeTab === 'borrows' && <DashboardBorrowTab />}
-      {!isPublicUser && activeTab === 'stockin' && <DashboardStockinTab />}
+      <DashboardStats
+        cards={cards}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+      />
+      {!isPublicUser && activeTab === 'reagents' ? <DashboardReagentTab /> : null}
+      {!isPublicUser && activeTab === 'consumables' ? <DashboardConsumableTab /> : null}
+      {activeTab === 'borrows' ? <DashboardBorrowTab /> : null}
+      {!isPublicUser && activeTab === 'stockin' ? <DashboardStockinTab /> : null}
     </div>
   )
 }

@@ -1,14 +1,14 @@
-﻿import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface HazardousIconProps {
-  /** 是否显示危险品图标 */
+  // 是否显示危险品图标
   isHazardous?: boolean
-  /** 自定义类名 */
+  // 自定义类名
   className?: string
-  /** 图标尺寸 */
+  // 图标尺寸
   size?: 'sm' | 'md' | 'lg'
-  /** 是否显示文字标签 */
+  // 是否显示文字标签
   showLabel?: boolean
 }
 

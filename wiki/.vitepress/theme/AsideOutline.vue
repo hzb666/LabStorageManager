@@ -5,7 +5,7 @@ import {
   resolveTitle,
 } from 'vitepress/dist/client/theme-default/composables/outline.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import Menu from './Menu.vue'
+import OutlineTree from './OutlineTree.vue'
 
 type OutlineItem = {
   element?: HTMLElement
@@ -309,7 +309,7 @@ function getAbsoluteTop(element: HTMLElement) {
         {{ outlineTitle }}
       </div>
 
-      <Menu
+      <OutlineTree
         :headers="headers"
         :expanded-links="expandedLinks"
         :active-hash="activeHash"

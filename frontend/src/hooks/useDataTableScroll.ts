@@ -6,10 +6,10 @@ import { useRef, useCallback, useEffect } from 'react'
 import type { Row } from '@tanstack/react-table'
 import type { Virtualizer } from '@tanstack/react-virtual'
 
-/** 提供展开滚动动画使用的缓出曲线。 */
+// 提供展开滚动动画使用的缓出曲线。
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
 
-/** 平滑滚动到目标位置 */
+// 平滑滚动到目标位置
 function animateScrollTo(el: HTMLDivElement, targetY: number, duration: number) {
   const startY = el.scrollTop
   const distance = targetY - startY
@@ -40,7 +40,7 @@ interface UseDataTableScrollOptions {
   fetchNextPage?: () => void
 }
 
-/** 管理无限滚动触发与点击展开时的滚动修正。 */
+// 管理无限滚动触发与点击展开时的滚动修正。
 export function useDataTableScroll<TData>({
   bodyScrollRef,
   hasNextPage,
@@ -99,9 +99,7 @@ export function useDataTableScroll<TData>({
   }
 }
 
-/**
- * 同步 virtualizer 实例到滚动逻辑内部的 ref，避免点击行时拿到旧引用。
- */
+// 同步 virtualizer 实例到滚动逻辑内部的 ref，避免点击行时拿到旧引用。
 export function useSyncVirtualizerRef(
   rowVirtualizer: Virtualizer<HTMLDivElement, Element>,
   setVirtualizerForScroll: (v: Virtualizer<HTMLDivElement, Element>) => void,

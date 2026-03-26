@@ -12,7 +12,7 @@ export interface ConsumableOrderExpandedRowProps {
   product_number?: string | null
   price?: number | null
   notes?: string | null
-  /** 以下字段仅在完整模式（ConsumableOrders 页面）下显示 */
+  // 以下字段仅在完整模式（ConsumableOrders 页面）下显示
   created_at?: string | null
   applicant_name?: string | null
 }

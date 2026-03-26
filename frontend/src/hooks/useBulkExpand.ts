@@ -19,6 +19,13 @@ interface UseBulkExpandOptions<TData> {
   bodyScrollRef: React.RefObject<HTMLDivElement | null>
 }
 
+interface BulkAnimationControls {
+  frameRef: React.MutableRefObject<number | null>
+  runId: number
+  runIdRef: React.MutableRefObject<number>
+  timerRef: React.MutableRefObject<number | null>
+}
+
 /**
  * 批量展开动画完成后的多帧测量和锚点恢复
  * 提取为独立函数以避免嵌套回调过深
@@ -26,31 +33,35 @@ interface UseBulkExpandOptions<TData> {
 function scheduleBulkAnimationComplete(
   virtualizerRef: React.RefObject<Virtualizer<HTMLDivElement, Element> | null>,
   bulkAnchorRef: React.MutableRefObject<BulkAnchor | null>,
-  bulkAnimationTimerRef: React.MutableRefObject<number | null>,
+  bulkAnimationControls: BulkAnimationControls,
   restoreBulkAnchor: (anchor: BulkAnchor | null) => void,
   setIsBulkAnimating: (v: boolean) => void,
 ) {
   // 第一帧：测量
-  requestAnimationFrame(() => {
+  bulkAnimationControls.frameRef.current = window.requestAnimationFrame(() => {
+    if (bulkAnimationControls.runIdRef.current !== bulkAnimationControls.runId) return
     virtualizerRef.current?.measure()
 
     // 第二帧：再次测量 + 恢复锚点
-    requestAnimationFrame(() => {
+    bulkAnimationControls.frameRef.current = window.requestAnimationFrame(() => {
+      if (bulkAnimationControls.runIdRef.current !== bulkAnimationControls.runId) return
       virtualizerRef.current?.measure()
       restoreBulkAnchor(bulkAnchorRef.current)
 
       // 第三帧：最终恢复 + 清理状态
-      requestAnimationFrame(() => {
+      bulkAnimationControls.frameRef.current = window.requestAnimationFrame(() => {
+        if (bulkAnimationControls.runIdRef.current !== bulkAnimationControls.runId) return
         restoreBulkAnchor(bulkAnchorRef.current)
         setIsBulkAnimating(false)
         bulkAnchorRef.current = null
-        bulkAnimationTimerRef.current = null
+        bulkAnimationControls.timerRef.current = null
+        bulkAnimationControls.frameRef.current = null
       })
     })
   })
 }
 
-/** 管理批量展开/折叠时的锚点捕获、虚拟列表测量和动画状态。 */
+// 管理批量展开/折叠时的锚点捕获、虚拟列表测量和动画状态。
 export function useBulkExpand<TData>({
   table,
   rows,
@@ -61,6 +72,8 @@ export function useBulkExpand<TData>({
   const [isBulkAnimating, setIsBulkAnimating] = useState(false)
 
   const bulkAnimationTimerRef = useRef<number | null>(null)
+  const bulkAnimationFrameRef = useRef<number | null>(null)
+  const bulkAnimationRunIdRef = useRef(0)
   const hasMountedExpandAllRef = useRef(false)
   const prevIsAllExpandedRef = useRef<boolean | undefined>(undefined)
 
@@ -75,6 +88,13 @@ export function useBulkExpand<TData>({
     virtualizerRef.current = v
   }, [])
 
+  const cancelBulkAnimationFrame = useCallback(() => {
+    if (bulkAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(bulkAnimationFrameRef.current)
+      bulkAnimationFrameRef.current = null
+    }
+  }, [])
+
   // 清理定时器
   useEffect(() => {
     return () => {
@@ -82,8 +102,10 @@ export function useBulkExpand<TData>({
         window.clearTimeout(bulkAnimationTimerRef.current)
         bulkAnimationTimerRef.current = null
       }
+      bulkAnimationRunIdRef.current += 1
+      cancelBulkAnimationFrame()
     }
-  }, [])
+  }, [cancelBulkAnimationFrame])
 
   // 捕获当前视口顶部附近的锚点行，供批量展开/折叠后恢复滚动位置。
   const captureBulkAnchor = useCallback((): BulkAnchor | null => {
@@ -146,6 +168,8 @@ export function useBulkExpand<TData>({
 
     if (prevIsAllExpandedRef.current === isAllExpanded) return
     prevIsAllExpandedRef.current = isAllExpanded
+    bulkAnimationRunIdRef.current += 1
+    const currentRunId = bulkAnimationRunIdRef.current
 
     bulkAnchorRef.current = captureBulkAnchor()
     bulkExpandedSnapshotRef.current = new Set(
@@ -159,13 +183,19 @@ export function useBulkExpand<TData>({
     if (bulkAnimationTimerRef.current) {
       window.clearTimeout(bulkAnimationTimerRef.current)
     }
+    cancelBulkAnimationFrame()
 
     bulkAnimationTimerRef.current = window.setTimeout(() => {
       bulkExpandedSnapshotRef.current = null
       scheduleBulkAnimationComplete(
         virtualizerRef,
         bulkAnchorRef,
-        bulkAnimationTimerRef,
+        {
+          timerRef: bulkAnimationTimerRef,
+          frameRef: bulkAnimationFrameRef,
+          runIdRef: bulkAnimationRunIdRef,
+          runId: currentRunId,
+        },
         restoreBulkAnchor,
         setIsBulkAnimating,
       )
@@ -183,6 +213,7 @@ export function useBulkExpand<TData>({
     table,
     rows,
     captureBulkAnchor,
+    cancelBulkAnimationFrame,
     restoreBulkAnchor,
   ])
 

@@ -14,33 +14,32 @@ const READ_KEY = 'announcement_read'
 const ANNOUNCEMENT_DROPDOWN_ITEM_CLASS_NAME =
   'px-4 py-3 cursor-pointer hover:bg-accent dark:hover:bg-input/50 transition-colors'
 
-/** 统一生成公告已读态在本地存储中的索引键。 */
 const getAnnouncementStorageKey = (id: number): string => id.toString()
 
-// 获取已读状态存储对象
 const getReadStorage = (): Record<string, number> => {
   try {
     const data = localStorage.getItem(READ_KEY)
     return data ? JSON.parse(data) : {}
   } catch {
+    // 本地存储异常时回退为空，避免公告入口因解析失败不可用。
     return {}
   }
 }
 
-// 设置公告为已读 - 只存储时间戳（用户点击时间）
+// 已读态存时间戳而不是布尔值，这样公告更新后可以自动重新变成未读。
 const setAnnouncementRead = (id: number) => {
   const storage = getReadStorage()
   storage[getAnnouncementStorageKey(id)] = Date.now()
   localStorage.setItem(READ_KEY, JSON.stringify(storage))
 }
 
-/** 解析后端返回的 UTC 时间文本，并兼容缺失 `Z` 的旧格式。 */
+// 解析后端返回的 UTC 时间文本，并兼容缺失 `Z` 的旧格式。
 const parseUtcTimestamp = (dateStr: string): number => {
   const normalized = dateStr.endsWith('Z') ? dateStr : `${dateStr}Z`
   return new Date(normalized).getTime()
 }
 
-/** 线性移除摘要中的 HTML 标签，同时保留未闭合标签后的原始文本。 */
+// 线性移除摘要中的 HTML 标签，同时保留未闭合标签后的原始文本。
 const stripHtmlTags = (content: string): string => {
   let result = ''
   let currentIndex = 0
@@ -65,7 +64,7 @@ const stripHtmlTags = (content: string): string => {
   return result
 }
 
-// 检查公告是否已读
+// `updated_at` 晚于已读时间时就视为新内容，避免用户错过后来编辑过的公告。
 const checkAnnouncementRead = (id: number, currentUpdatedAt: string): boolean => {
   const storage = getReadStorage()
   const key = getAnnouncementStorageKey(id)
@@ -83,7 +82,7 @@ const checkAnnouncementRead = (id: number, currentUpdatedAt: string): boolean =>
   return true
 }
 
-/** 渲染公告按钮、未读角标、下拉列表与详情弹窗。 */
+// 渲染公告按钮、未读角标、下拉列表与详情弹窗。
 export function AnnouncementButton({ announcements }: Readonly<AnnouncementButtonProps>) {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
@@ -102,11 +101,12 @@ export function AnnouncementButton({ announcements }: Readonly<AnnouncementButto
         setIsOpen(false)
       }
     }
+    // 仅在展开期间绑定全局监听，减少常驻事件并避免无关页面点击被消费。
     if (isOpen) document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isOpen])
 
-  /** 打开公告详情并在同一时刻标记为已读。 */
+  // 详情一旦打开就立即标已读，保证角标状态和“用户已看过内容”保持一致。
   const handleAnnouncementClick = (announcement: Announcement) => {
     setAnnouncementRead(announcement.id)
     setSelectedAnnouncement(announcement)
@@ -114,7 +114,7 @@ export function AnnouncementButton({ announcements }: Readonly<AnnouncementButto
     setIsOpen(false)
   }
 
-  /** 根据未读态返回下拉项样式，保持已读与未读视觉区分。 */
+  // 根据未读态返回下拉项样式，保持已读与未读视觉区分。
   const getAnnouncementItemClassName = (unread: boolean): string => {
     if (unread) {
       return `${ANNOUNCEMENT_DROPDOWN_ITEM_CLASS_NAME} bg-accent/30`
@@ -199,8 +199,6 @@ export function AnnouncementButton({ announcements }: Readonly<AnnouncementButto
           </div>
         </div>
       )}
-
-      {/* 父组件不用再传 hasImages 了，最干净的调用方式 */}
       <AnnouncementDetail
         announcement={selectedAnnouncement}
         open={isDetailOpen}

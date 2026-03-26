@@ -87,6 +87,7 @@ export type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
 // ============================================================================
 
 export const DASHBOARD_TAB_STORAGE_KEY = 'dashboard-active-tab'
+const DASHBOARD_COUNTS_REFRESH_EVENT = 'dashboard-counts-refresh'
 
 /**
  * 清除 Dashboard Tab 持久化状态
@@ -135,6 +136,32 @@ export const BORROW_SEARCH_FIELDS = [
   { value: 'name', label: '名称' },
   { value: 'cas_number', label: 'CAS号' },
 ]
+
+/**
+ * 广播“仪表盘统计需要刷新”的信号。
+ * 存在原因：统计卡片使用轻量缓存，子 Tab 完成变更后需要显式通知顶部卡片同步更新。
+ */
+export function requestDashboardCountsRefresh(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(new Event(DASHBOARD_COUNTS_REFRESH_EVENT))
+}
+
+/**
+ * 订阅“仪表盘统计需要刷新”的信号，并返回清理函数。
+ * 存在原因：让 Dashboard 容器可以在子 Tab 触发变更后重新拉取统计数字。
+ */
+export function subscribeDashboardCountsRefresh(listener: () => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => {}
+  }
+
+  window.addEventListener(DASHBOARD_COUNTS_REFRESH_EVENT, listener)
+  return () => {
+    window.removeEventListener(DASHBOARD_COUNTS_REFRESH_EVENT, listener)
+  }
+}
 
 // ============================================================================
 // 工具函数

@@ -362,9 +362,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
   ]
 }
 
-/**
- * 常用货架表格列配置（不含操作列）
- */
+// 常用货架表格列配置（不含操作列）
 export function getCommonShelfTableColumns(): ColumnDef<TableRowData, unknown>[] {
   return [
     columnHelper.accessor('cas_number', {

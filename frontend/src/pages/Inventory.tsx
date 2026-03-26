@@ -1,13 +1,11 @@
-﻿// Inventory.tsx
-/**
- * 库存管理页面
- * 功能：库存列表展示、搜索筛选、手动入库、编辑、删除、借用、导出
- */
+// Inventory.tsx
+// 库存管理页面 功能：库存列表展示、搜索筛选、手动入库、编辑、删除、借用、导出
 import React, { useState, useMemo, useCallback } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
+import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 
 // UI 组件
 import { Button } from '@/components/ui/Button'
@@ -87,33 +85,195 @@ export interface InventoryItem {
   last_borrower_name?: string | null
 }
 
+type InventoryDialogState = 'edit' | 'add' | null
+
 const columnHelper = createColumnHelper<InventoryItem>()
 
 // ============================================================================
-// 主组件
+// 页面辅助函数
 // ============================================================================
 
-export function InventoryPage() {
-  const queryClient = useQueryClient()
+// 将库存行数据回填到表单中。 让编辑入口复用统一的字段归一化规则，并保留 `null`/`0` 的原始展示语义。
+function createInventoryFormValues(item: InventoryItem): InventoryFormInputData {
+  const remainingQty = item.remaining_quantity
+  return {
+    name: item.name || '',
+    cas_number: item.cas_number || '',
+    english_name: item.english_name || '',
+    alias: item.alias || '',
+    specification: item.specification || '',
+    category: item.category || '',
+    brand: item.brand || '',
+    storage_location: item.storage_location || '',
+    quantity_bottles: 1,
+    initial_quantity: item.initial_quantity ?? undefined,
+    remaining_quantity: remainingQty === null ? undefined : (remainingQty ?? 0),
+    is_hazardous: item.is_hazardous || false,
+    notes: item.notes || '',
+  }
+}
 
-  // ---------------------------------------------------------------------------
-  // 状态管理
-  // ---------------------------------------------------------------------------
-  const [dialogState, setDialogState] = useDialogState<"edit" | "add">()
+// 根据规格文本推导编辑态的初始量上限。 把规格解析和剩余量校验拆开，避免提交处理器内出现嵌套分支。
+function resolveInventoryInitialQuantity(editingItem: InventoryItem, specification: string | undefined): number {
+  const parsedValue = specification ? parseSpecification(specification) : null
+  return parsedValue ?? editingItem.initial_quantity
+}
+
+// 校验编辑态的剩余量上限。 维持原有业务判断不变，同时让提交逻辑只保留流程编排。
+function validateInventoryRemainingQuantity(params: {
+  dialogState: InventoryDialogState
+  editingItem: InventoryItem | null
+  formData: InventoryFormData
+  form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>
+}): boolean {
+  const { dialogState, editingItem, formData, form } = params
+  if (dialogState !== 'edit' || !editingItem) {
+    return true
+  }
+
+  const remaining = formData.remaining_quantity
+  const initial = resolveInventoryInitialQuantity(editingItem, formData.specification)
+  if (remaining !== undefined && remaining !== null && remaining > initial) {
+    form.setError('remaining_quantity', { message: `剩余量不能超过规格 (${initial})` })
+    return false
+  }
+  return true
+}
+
+// 在编辑态校验失败时补上剩余量必填错误。 保持当前“Schema 之外仍补做剩余量必填检查”的行为，而不让提交回调继续膨胀。
+function ensureInventoryRemainingQuantityError(params: {
+  dialogState: InventoryDialogState
+  editingItem: InventoryItem | null
+  form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>
+  errors: FieldErrors<InventoryFormInputData>
+}) {
+  const { dialogState, editingItem, form, errors } = params
+  if (dialogState !== 'edit' || !editingItem) {
+    return
+  }
+
+  const remainingValue = form.getValues('remaining_quantity')
+  if ((remainingValue === undefined || remainingValue === null) && !errors.remaining_quantity) {
+    form.setError('remaining_quantity', { message: '剩余数量不能为空' })
+  }
+}
+
+// 生成库存编辑请求体。 把字段默认值与备注清洗收口，避免更新逻辑散落在提交流程里。
+function createInventoryUpdatePayload(formData: InventoryFormData) {
+  return {
+    name: formData.name || '',
+    cas_number: formData.cas_number || '',
+    english_name: formData.english_name || '',
+    alias: formData.alias || '',
+    category: formData.category || '',
+    storage_location: formData.storage_location || '',
+    remaining_quantity: formData.remaining_quantity,
+    brand: formData.brand || '',
+    is_hazardous: formData.is_hazardous,
+    notes: processNotes(formData.notes),
+    specification: formData.specification || '',
+  }
+}
+
+// 生成手动入库请求体。 把新增模式的 `undefined` 语义和瓶数参数收口到单点。
+function createInventoryCreatePayload(formData: InventoryFormData) {
+  return {
+    cas_number: formData.cas_number,
+    name: formData.name,
+    english_name: formData.english_name || undefined,
+    alias: formData.alias || undefined,
+    specification: formData.specification || '',
+    quantity_bottles: formData.quantity_bottles as number,
+    brand: formData.brand || undefined,
+    category: formData.category || undefined,
+    storage_location: formData.storage_location || undefined,
+    is_hazardous: formData.is_hazardous,
+    notes: processNotes(formData.notes),
+  }
+}
+
+// 将后端字段校验错误写回库存表单。 让提交异常处理只保留一次判断，而不重复遍历错误数组。
+function applyInventoryValidationErrors(
+  form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>,
+  validationErrors: ValidationError[],
+): boolean {
+  if (validationErrors.length === 0) {
+    return false
+  }
+
+  validationErrors.forEach((errorItem) => {
+    if (errorItem.loc?.[1]) {
+      form.setError(errorItem.loc[1] as keyof InventoryFormData, {
+        message: errorItem.msg || '输入不合法',
+      })
+    }
+  })
+  return true
+}
+
+// 按当前弹窗模式执行库存新增或编辑请求。 把接口调用分支从提交流程中抽离，让主提交处理器只保留业务编排。
+async function submitInventoryRequest(params: {
+  dialogState: InventoryDialogState
+  editingItem: InventoryItem | null
+  formData: InventoryFormData
+}) {
+  const { dialogState, editingItem, formData } = params
+  if (dialogState === 'edit' && editingItem) {
+    await inventoryAPI.update(editingItem.id, createInventoryUpdatePayload(formData))
+    return
+  }
+
+  if (dialogState === 'add') {
+    await inventoryAPI.manualAdd(createInventoryCreatePayload(formData))
+  }
+}
+
+// 生成库存弹窗的表单字段配置。 把 CAS 自动识别按钮的挂载逻辑从 JSX 中拿开，减少页面渲染分支。
+function createInventoryFormFields(params: {
+  dialogState: InventoryDialogState
+  initialQuantity?: number
+  handleCasLookup: () => Promise<void>
+  isCasLookupLoading: boolean
+}) {
+  const { dialogState, initialQuantity, handleCasLookup, isCasLookupLoading } = params
+  const fields = getInventoryFormFields(dialogState === 'edit', initialQuantity)
+  if (dialogState !== 'add') {
+    return fields
+  }
+
+  return fields.map((field) =>
+    field.name === 'cas_number'
+      ? {
+        ...field,
+        prefixButton: {
+          onClick: handleCasLookup,
+          loading: isCasLookupLoading,
+          title: '识别 CAS 号',
+          icon: ScanSearch,
+        },
+      }
+      : field,
+  )
+}
+
+// 格式化库存展开行里的“上次借用”展示文本。 消除 JSX 中的嵌套三元表达式，同时保持原有文案与状态语义不变。
+function formatInventoryBorrowerDisplay(item: InventoryItem): string {
+  if (item.borrower_name) {
+    return `${item.borrower_name} (未归还)`
+  }
+  if (item.last_borrower_name) {
+    return `${item.last_borrower_name} (已归还)`
+  }
+  return '-'
+}
+
+// 管理库存弹窗、表单与删除/CAS 联动。 把页面主组件收束成列表编排层，并把库存特有的表单规则集中在一个局部控制器中。
+function useInventoryDialogController(refreshInventory: () => void | Promise<void>) {
+  const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
-
-  // 刷新库存数据
-  const loadInventory = useCallback(async () => {
-    // 使缓存失效，后端已清除服务器缓存，会获取最新数据
-    await queryClient.invalidateQueries({ queryKey: ['inventory'] })
-  }, [queryClient])
-
-  // ---------------------------------------------------------------------------
-  // 表单逻辑
-  // ---------------------------------------------------------------------------
   const form = useForm<InventoryFormInputData, unknown, InventoryFormData>({
     resolver: createValibotResolver(InventoryFormSchema),
     defaultValues: defaultInventoryValues,
@@ -131,147 +291,10 @@ export function InventoryPage() {
     const item = itemRaw as unknown as InventoryItem
     setEditingItem(item)
     setDeleteConfirm(false)
-    // 区分 null 和 0：null 显示为空让用户填写，0 显示为 "0"
-    const remainingQty = item.remaining_quantity
-    form.reset({
-      name: item.name || '',
-      cas_number: item.cas_number || '',
-      english_name: item.english_name || '',
-      alias: item.alias || '',
-      specification: item.specification || '',
-      category: item.category || '',
-      brand: item.brand || '',
-      storage_location: item.storage_location || '',
-      quantity_bottles: 1,
-      initial_quantity: item.initial_quantity ?? undefined,
-      // null → undefined（显示为空），0 → 0（显示为"0"）
-      remaining_quantity: remainingQty === null ? undefined : (remainingQty ?? 0),
-      is_hazardous: item.is_hazardous || false,
-      notes: item.notes || ''
-    })
+    form.reset(createInventoryFormValues(item))
     setDialogState('edit')
-  }, [setDialogState, form])
+  }, [form, setDialogState])
 
-  const handleFormSubmit = form.handleSubmit(
-    async (formData) => {
-      // 编辑模式：remaining_quantity 额外验证（Schema 中是可选的）
-      if (dialogState === 'edit' && editingItem) {
-        const remaining = formData.remaining_quantity
-
-        let initial = editingItem.initial_quantity
-        if (formData.specification) {
-          const specValue = parseSpecification(formData.specification)
-          if (specValue !== null) {
-            initial = specValue
-          }
-        }
-
-        // 验证剩余量不超过初始量
-        if (remaining !== undefined && remaining !== null && remaining > initial) {
-          form.setError('remaining_quantity', { message: `剩余量不能超过规格 (${initial})` })
-          return
-        }
-      }
-
-      setIsSubmitting(true)
-      try {
-        if (dialogState === 'edit' && editingItem) {
-          // 直接传递 specification 字符串，后端使用 parse_specification 解析
-          // 使用 processNotes 处理备注：如果只有标签前缀但没有内容，则返回空字符串
-          await inventoryAPI.update(editingItem.id, {
-            name: formData.name || '',
-            cas_number: formData.cas_number || '',
-            english_name: formData.english_name || '',
-            alias: formData.alias || '',
-            category: formData.category || '',
-            storage_location: formData.storage_location || '',
-            remaining_quantity: formData.remaining_quantity,
-            brand: formData.brand || '',
-            is_hazardous: formData.is_hazardous,
-            notes: processNotes(formData.notes),
-            specification: formData.specification || ''
-          })
-          await loadInventory()
-          toast.success('库存信息已更新')
-        } else if (dialogState === 'add') {
-          const spec = formData.specification || ''
-          const bottles = formData.quantity_bottles as number
-          await inventoryAPI.manualAdd({
-            cas_number: formData.cas_number,
-            name: formData.name,
-            english_name: formData.english_name || undefined,
-            alias: formData.alias || undefined,
-            specification: spec,
-            quantity_bottles: bottles,
-            brand: formData.brand || undefined,
-            category: formData.category || undefined,
-            storage_location: formData.storage_location || undefined,
-            is_hazardous: formData.is_hazardous,
-            notes: processNotes(formData.notes)
-          })
-        }
-        await loadInventory()
-        if (dialogState === 'add') {
-          toast.success('手动入库成功！')
-        }
-        setDialogState(null)
-      } catch (err) {
-        const errorDetail = extractApiErrorDetail(err)
-        const validationErrors = toValidationErrors(errorDetail)
-        if (validationErrors.length > 0) {
-          validationErrors.forEach((e: ValidationError) => {
-            if (e.loc?.[1]) {
-              form.setError(e.loc[1] as keyof InventoryFormData, { message: e.msg || '输入不合法' })
-            }
-          })
-          return
-        }
-
-        toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
-      } finally {
-        setIsSubmitting(false)
-      }
-    },
-    (errors) => {
-      // 编辑模式下：即使 Schema 验证失败，也手动检查 remaining_quantity 是否填写
-      if (dialogState === 'edit' && editingItem) {
-        const remainingValue = form.getValues('remaining_quantity')
-        if (remainingValue === undefined || remainingValue === null) {
-          // 只有当还没有 remaining_quantity 错误时才设置
-          if (!errors.remaining_quantity) {
-            form.setError('remaining_quantity', { message: '剩余数量不能为空' })
-          }
-        }
-      }
-    }
-  )
-
-  const handleDeleteClick = async () => {
-    if (!editingItem) return
-    if (deleteConfirm) {
-      try {
-        await inventoryAPI.delete(editingItem.id)
-        setDialogState(null)
-        await loadInventory()
-        toast.success('库存已删除')
-      } catch (error) {
-        toast.error(getApiErrorMessage(error, '删除失败'))
-      }
-    } else {
-      setDeleteConfirm(true)
-    }
-  }
-
-  const handleExport = useCallback(async () => {
-    try {
-      const response = await inventoryAPI.exportInventory()
-      downloadBlobResponse(response, `inventory_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
-    } catch {
-      toast.error('导出失败')
-    }
-  }, [])
-
-  // CAS 号自动识别回调
   const handleCasLookup = useCallback(async () => {
     const casValue = form.getValues('cas_number')
     const casValidation = validateAndNormalizeCASInput(casValue || '')
@@ -308,71 +331,162 @@ export function InventoryPage() {
     }
   }, [form])
 
-  // ---------------------------------------------------------------------------
-  // 表格列配置
-  // ---------------------------------------------------------------------------
-  const columns = useMemo(() => {
-    // 获取抽离的基础列配置
-    const baseColumns = getInventoryTableColumns()
+  const handleFormSubmit = form.handleSubmit(async (formData) => {
+    if (!validateInventoryRemainingQuantity({ dialogState, editingItem, formData, form })) {
+      return
+    }
 
-    // 追加页面特定的操作列
-    const actionColumn = columnHelper.display({
-      id: 'actions',
-      header: '操作',
-      size: 120,
-      minSize: 120,
-      maxSize: 150,
-      cell: info => {
-        const meta = info.table.options.meta
-        return (
-          <ActionButtons
-            item={{ ...(info.row.original as unknown as InventoryItem) }}
-            onEdit={meta?.onEdit as (item: InventoryItem) => void}
-            onBorrowSuccess={meta?.onBorrowSuccess as () => void}
-          />
-        )
-      },
+    setIsSubmitting(true)
+    try {
+      await submitInventoryRequest({ dialogState, editingItem, formData })
+      await Promise.resolve(refreshInventory())
+      if (dialogState === 'edit') {
+        toast.success('库存信息已更新')
+      } else if (dialogState === 'add') {
+        toast.success('手动入库成功！')
+      }
+      setDialogState(null)
+    } catch (err) {
+      const errorDetail = extractApiErrorDetail(err)
+      const validationErrors = toValidationErrors(errorDetail)
+      if (applyInventoryValidationErrors(form, validationErrors)) {
+        return
+      }
+      toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, (errors) => {
+    ensureInventoryRemainingQuantityError({ dialogState, editingItem, form, errors })
+  })
+
+  const handleDeleteClick = useCallback(async () => {
+    if (!editingItem) return
+
+    if (!deleteConfirm) {
+      setDeleteConfirm(true)
+      return
+    }
+
+    try {
+      await inventoryAPI.delete(editingItem.id)
+      setDialogState(null)
+      await Promise.resolve(refreshInventory())
+      toast.success('库存已删除')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '删除失败'))
+    }
+  }, [deleteConfirm, editingItem, refreshInventory, setDialogState])
+
+  const handleDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setDialogState(null)
+      form.reset()
+      setDeleteConfirm(false)
+    }
+  }, [form, setDialogState])
+
+  const formFields = useMemo(() => {
+    return createInventoryFormFields({
+      dialogState,
+      initialQuantity: editingItem?.initial_quantity,
+      handleCasLookup,
+      isCasLookupLoading,
     })
+  }, [dialogState, editingItem?.initial_quantity, handleCasLookup, isCasLookupLoading])
 
-    return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
+  return {
+    dialogState,
+    deleteConfirm,
+    editingItem,
+    isSubmitting,
+    form,
+    formFields,
+    handleAddClick,
+    handleEditClick,
+    handleFormSubmit,
+    handleDeleteClick,
+    handleDialogOpenChange,
+    setDialogState,
+  }
+}
+
+// 创建库存页的表格列。 把操作列拼装从页面主函数中拿开，减少页面承担的表格细节。
+function createInventoryColumns(): ColumnDef<Record<string, unknown>, unknown>[] {
+  const baseColumns = getInventoryTableColumns()
+  const actionColumn = columnHelper.display({
+    id: 'actions',
+    header: '操作',
+    size: 120,
+    minSize: 120,
+    maxSize: 150,
+    cell: (info) => {
+      const meta = info.table.options.meta
+      return (
+        <ActionButtons
+          item={{ ...(info.row.original as unknown as InventoryItem) }}
+          onEdit={meta?.onEdit as (item: InventoryItem) => void}
+          onBorrowSuccess={meta?.onBorrowSuccess as () => void}
+        />
+      )
+    },
+  })
+
+  return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
+}
+
+// 渲染库存展开行内容。 把扩展信息展示从页面主组件中拆出，并显式消除嵌套条件表达式。
+function InventoryExpandedRow({ item }: { item: InventoryItem }) {
+  return (
+    <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
+      <div className="hidden md:block shrink-0">
+        <MoleculeStructure casNumber={item.cas_number} width={150} height={100} />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
+        <div>英文名称：{item.english_name || '-'}</div>
+        <div>别名：{item.alias || '-'}</div>
+        <div>入库时间：{formatDate(item.created_at)}</div>
+        <div>入库用户：{item.created_by_name || '-'}</div>
+        <div>上次借用：{formatInventoryBorrowerDisplay(item)}</div>
+        <NoteDisplay label="备注" text={item.notes ?? undefined} />
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// 主组件
+// ============================================================================
+
+// 直接组合列表、页头和叶子组件，避免继续保留只转发参数的壳层。
+export function InventoryPage() {
+  const queryClient = useQueryClient()
+  const loadInventory = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['inventory'] })
+  }, [queryClient])
+  const dialogController = useInventoryDialogController(loadInventory)
+
+  const handleExport = useCallback(async () => {
+    try {
+      const response = await inventoryAPI.exportInventory()
+      downloadBlobResponse(response, `inventory_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } catch {
+      toast.error('导出失败')
+    }
   }, [])
 
-  // ---------------------------------------------------------------------------
-  // 渲染相关回调
-  // ---------------------------------------------------------------------------
-
-  // 🚀 性能优化：将内联函数提取为稳定的回调，防止穿透导致表格行全部重渲染
+  const columns = useMemo(() => createInventoryColumns(), [])
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as InventoryItem
-    return (
-      <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
-        {/* 左侧：分子结构式 - 桌面端显示，移动端隐藏 */}
-        <div className="hidden md:block shrink-0">
-          <MoleculeStructure casNumber={item.cas_number} width={150} height={100} />
-        </div>
-        {/* 右侧：信息网格 */}
-        <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
-          <div>英文名称：{item.english_name || '-'}</div>
-          <div>别名：{item.alias || '-'}</div>
-          <div>入库时间：{formatDate(item.created_at)}</div>
-          <div>入库用户：{item.created_by_name || '-'}</div>
-          <div>上次借用：{item.borrower_name ? `${item.borrower_name} (未归还)` : (item.last_borrower_name ? `${item.last_borrower_name} (已归还)` : '-')}</div>
-          <NoteDisplay label="备注" text={item.notes ?? undefined} />
-        </div>
-      </div>
-    )
+    return <InventoryExpandedRow item={item} />
   }, [])
 
-  // ---------------------------------------------------------------------------
-  // 渲染
-  // ---------------------------------------------------------------------------
   return (
     <div className="space-y-6">
-      {/* 头部区域 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">库存管理</h1>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={handleAddClick} size="lg">
+          <Button onClick={dialogController.handleAddClick} size="lg">
             <Plus className="w-4 h-4 mr-1.5" /> 手动入库
           </Button>
           <Button variant="modern" size="lg" onClick={handleExport}>
@@ -380,54 +494,35 @@ export function InventoryPage() {
           </Button>
         </div>
       </div>
-
-      {/* 统一复用弹窗（新增 & 编辑） */}
-      <Dialog
-        open={dialogState !== null}
-        onOpenChange={(open) => {
-          if (!open) { setDialogState(null); form.reset(); setDeleteConfirm(false) }
-        }}
-      >
+      <Dialog open={dialogController.dialogState !== null} onOpenChange={dialogController.handleDialogOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{dialogState === 'edit' ? '编辑库存' : '手动入库'}</DialogTitle>
+            <DialogTitle>{dialogController.dialogState === 'edit' ? '编辑库存' : '手动入库'}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleFormSubmit}>
-            <BaseForm
-              form={form}
-              fields={useMemo(() => {
-                const fields = getInventoryFormFields(dialogState === 'edit', editingItem?.initial_quantity)
-                // 为 CAS 号字段添加自动识别按钮（仅在新增模式时显示）
-                if (dialogState === 'add') {
-                  return fields.map(field => 
-                    field.name === 'cas_number' 
-                      ? { ...field, prefixButton: { onClick: handleCasLookup, loading: isCasLookupLoading, title: '识别 CAS 号', icon: ScanSearch } }
-                      : field
-                  )
-                }
-                return fields
-              }, [dialogState, editingItem?.initial_quantity, handleCasLookup, isCasLookupLoading])}
-            />
+          <form onSubmit={dialogController.handleFormSubmit}>
+            <BaseForm form={dialogController.form} fields={dialogController.formFields} />
             <EditDialogActions
-              mode={dialogState ?? 'add'}
-              onCancel={() => setDialogState(null)}
-              onDelete={dialogState === 'edit' && editingItem ? handleDeleteClick : undefined}
-              deleteConfirm={deleteConfirm}
+              mode={dialogController.dialogState ?? 'add'}
+              onCancel={() => dialogController.setDialogState(null)}
+              onDelete={
+                dialogController.dialogState === 'edit' && dialogController.editingItem
+                  ? dialogController.handleDeleteClick
+                  : undefined
+              }
+              deleteConfirm={dialogController.deleteConfirm}
               submitLabelEdit="保存"
               submitLabelAdd="确认入库"
-              isSubmitting={isSubmitting}
+              isSubmitting={dialogController.isSubmitting}
             />
           </form>
         </DialogContent>
       </Dialog>
-
-      {/* 数据表格区域 */}
       <FilterTable
         api={inventoryAPI as FilterAPI}
         queryKey={['inventory']}
         tableId="inventory-table"
         customColumns={columns}
-        onEdit={handleEditClick}
+        onEdit={dialogController.handleEditClick}
         onBorrowSuccess={loadInventory}
         title={<><Package className="w-5 h-5" /> 库存列表</>}
         searchPlaceholder="搜索名称、CAS号、位置..."
@@ -442,6 +537,7 @@ export function InventoryPage() {
 // 表格操作按钮组件
 // ============================================================================
 
+// 渲染库存行级操作。 把借用、编辑等动作限制在表格单元内，避免页面主组件承担行级业务细节。
 const ActionButtons = React.memo(function ActionButtons({
   item,
   onEdit,

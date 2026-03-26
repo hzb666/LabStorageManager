@@ -1,14 +1,13 @@
 import * as React from "react"
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-// 统一从配置文件导入
 import { defaultInputStyles, inputConfigs, type InputStyles, type InputTagConfig } from "@/lib/inputConfigs"
 
 export interface PrefixButtonConfig {
   onClick: () => void
   title?: string
   loading?: boolean
-  icon?: React.ElementType // 支持自定义图标
+  icon?: React.ElementType
 }
 
 export interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "prefix"> {
@@ -20,7 +19,7 @@ export interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElem
   tag?: string
   enableTagToggle?: boolean
   prefixButton?: PrefixButtonConfig
-  styles?: Partial<InputStyles> // 接收外部传入的自定义样式
+  styles?: Partial<InputStyles>
 }
 
 const DEFAULT_TAG = "[强调]"
@@ -92,7 +91,7 @@ const getInputClassName = ({
   )
 }
 
-// 渲染输入框左侧区域，按优先级处理前缀按钮、标签切换按钮和普通前缀内容。
+// 左侧只保留一个槽位，优先级固定为 prefixButton > tagToggle > prefix，避免多个入口抢位置。
 const renderLeftArea = ({
   DefaultIcon,
   activeConfig,
@@ -253,7 +252,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
     const { activeConfig, DefaultIcon, displayValue, isActive, isControlled, isNumber } =
       getInputValueState(type, value, enableTagToggle, tag)
 
-    // 将内部的纯文本值重新组装成外部期望的最终输入值并透传给 onChange。
+    // 输入框里只展示纯文本，真正对外回传时再按当前 tag 状态重组值，避免 UI 和存储格式耦在一起。
     const emitChange = (nextPlainText: string, shouldHaveTag: boolean) => {
       const finalValue = shouldHaveTag ? `${tag}${nextPlainText}` : nextPlainText
       onChange?.({
@@ -261,7 +260,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       } as unknown as React.ChangeEvent<HTMLInputElement>)
     }
 
-    // 处理输入变化，在开启标签切换时维持显示值与实际存储值的分离。
+    // 标签模式下，显示值和最终存储值是两套表示，这里负责把它们重新对齐。
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!enableTagToggle) {
         return onChange?.(e)
@@ -282,13 +281,13 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       emitChange(nextValue, isActive)
     }
 
-    // 切换标签激活态，同时保留当前可见输入内容不变。
+    // 切标签只改存储前缀，不重写当前可见文本，避免用户刚输入的内容被清空。
     const handleStatusToggle = (e: React.MouseEvent) => {
       e.preventDefault()
       emitChange(displayValue, !isActive)
     }
 
-    // 处理数字步进，先把非法数字兜底为 0，再按最小值和最大值钳制结果。
+    // 数字步进先兜底异常输入，再做 min/max 钳制，避免空值或脏值把步进器带坏。
     const handleNumberChange = (delta: number) => {
       const parsedValue = displayValue === "" ? 0 : Number(displayValue)
       const currentNum = Number.isFinite(parsedValue) ? parsedValue : 0
