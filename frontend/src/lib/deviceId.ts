@@ -1,14 +1,7 @@
-/**
- * Device ID Management
- * 生成并管理客户端设备唯一标识符
- */
 const DEVICE_ID_KEY = 'lab_device_id';
 const DEVICE_NAME_KEY = 'lab_device_name';
 let fallbackIdCounter = 0;
-/**
- * 获取或生成设备 ID
- * 优先复用 localStorage 中的持久值；若存储不可用则退化为当前会话可用值
- */
+// 存储不可用时也要保留当前会话级标识，避免审计链路直接失去设备维度。
 export function getDeviceId(): string {
   let deviceId: string | null = null;
   try {
@@ -18,21 +11,18 @@ export function getDeviceId(): string {
   }
   
   if (!deviceId) {
-    // 生成 UUID v4
     deviceId = generateUUID();
     try {
       localStorage.setItem(DEVICE_ID_KEY, deviceId);
     } catch {
-      // 忽略 localStorage 失败，保证设备 ID 仍可用
+      // 设备 ID 的核心是“能返回一个稳定值”，持久化失败不该让调用方拿不到标识。
     }
   }
   
   return deviceId;
 }
-/**
- * 获取设备名称
- * 从 User-Agent 解析设备信息
- */
+
+// 设备名称只用于展示和审计，首次解析后缓存下来，避免 UA 细节变化导致名称来回跳。
 export function getDeviceName(): string {
   let deviceName: string | null = null;
   try {
@@ -46,18 +36,14 @@ export function getDeviceName(): string {
     try {
       localStorage.setItem(DEVICE_NAME_KEY, deviceName);
     } catch {
-      // 忽略 localStorage 失败，保证设备名称仍可返回
+      // 名称缓存失败仍然返回当前解析结果，不阻断登录和审计展示。
     }
   }
   
   return deviceName;
 }
-/**
- * 解析 User-Agent 获取设备名称
- * 先按浏览器特征命名，未命中时再按操作系统兜底，保持历史口径稳定
- */
+// 先按浏览器特征命名，再按系统兜底，尽量维持历史设备名称口径不漂移。
 function parseDeviceName(userAgent: string): string {
-  // 浏览器检测
   if (userAgent.includes('Firefox')) {
     return 'Firefox Browser';
   }
@@ -71,7 +57,6 @@ function parseDeviceName(userAgent: string): string {
     return 'Safari Browser';
   }
   
-  // 操作系统检测
   if (userAgent.includes('Windows')) {
     return 'Windows PC';
   }
@@ -90,9 +75,7 @@ function parseDeviceName(userAgent: string): string {
   
   return 'Unknown Device';
 }
-/**
- * 生成 UUID v4
- */
+
 function generateUUID(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
@@ -102,10 +85,8 @@ function generateUUID(): string {
   }
   return generateFallbackUUID();
 }
-/**
- * 使用 Web Crypto 随机字节生成 UUID v4
- * 目的：消除伪随机告警并保持 RFC4122 格式
- */
+
+// 没有 `randomUUID` 时仍优先走 Web Crypto，继续保持 RFC4122 形态并避开伪随机实现。
 function generateUUIDFromCryptoValues(): string {
   const bytes = new Uint8Array(16);
   globalThis.crypto.getRandomValues(bytes);
@@ -115,10 +96,8 @@ function generateUUIDFromCryptoValues(): string {
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
-/**
- * 在极端无 crypto 环境下生成可追踪 UUID
- * 目的：保留唯一标识能力，避免依赖伪随机数
- */
+
+// 极端环境下退化为可追踪的确定性标识，重点是不断供，而不是继续伪造“随机”语义。
 function generateFallbackUUID(): string {
   fallbackIdCounter = (fallbackIdCounter + 1) % 0xffff;
   const timestampHex = Date.now().toString(16).padStart(12, '0');
@@ -129,14 +108,12 @@ function generateFallbackUUID(): string {
   const hex = raw.join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
-/**
- * 清除设备信息（用于调试）
- */
+// 仅供调试或重置设备身份流程使用，不参与正常业务链路。
 export function clearDeviceInfo(): void {
   try {
     localStorage.removeItem(DEVICE_ID_KEY);
     localStorage.removeItem(DEVICE_NAME_KEY);
   } catch {
-    // 忽略 localStorage 失败
+    // 本地清理失败不需要再抛错，调试入口不该影响页面主流程。
   }
 }

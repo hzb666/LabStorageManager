@@ -50,7 +50,7 @@ function scheduleBulkAnimationComplete(
   })
 }
 
-/** 管理批量展开/折叠时的锚点捕获、虚拟列表测量和动画状态。 */
+// 管理批量展开/折叠时的锚点捕获、虚拟列表测量和动画状态。
 export function useBulkExpand<TData>({
   table,
   rows,

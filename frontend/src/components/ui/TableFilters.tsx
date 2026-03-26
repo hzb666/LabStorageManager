@@ -1,7 +1,3 @@
-/**
- * 表格筛选组件
- * 独立渲染筛选栏和空状态提示
- */
 import React, { startTransition, useMemo } from 'react'
 import { Search, X } from 'lucide-react'
 import { Input } from './Input'
@@ -13,12 +9,7 @@ import { DEFAULT_STATUS_OPTIONS, DEFAULT_SEARCH_FIELD_OPTIONS } from '@/hooks/us
 export const SEARCH_MAX_LENGTH = 100
 const DEFAULT_SEARCH_FIELD_ALL_VALUE = 'all'
 
-// ============================================================================
-// 类型定义
-// ============================================================================
-
 export interface TableFiltersProps {
-  // 搜索相关
   searchInput: string
   onSearchInputChange: (value: string) => void
   searchPlaceholder?: string
@@ -38,7 +29,6 @@ export interface TableFiltersProps {
   onStatusFilterChange?: (value: string) => void
   statusOptions?: FilterOption[]
   
-  // className
   className?: string
 }
 
@@ -51,11 +41,7 @@ export interface TableSearchInputProps {
   containerClassName?: string
 }
 
-// ============================================================================
-// 空状态组件（暴露给 FilterTable 使用）
-// ============================================================================
-
-/** 根据搜索与筛选上下文渲染统一的表格空状态文案。 */
+// 把搜索词和状态筛选的空态文案集中在这里，避免每个表格各写一版组合提示。
 export function TableEmptyState({
   searchKeyword,
   statusFilter,
@@ -71,10 +57,9 @@ export function TableEmptyState({
 }>) {
   const normalizedKeyword = (searchKeyword ?? '').trim()
 
-  /** 根据搜索词与状态筛选生成空状态文案。 */
+  // 根据搜索词与状态筛选生成空状态文案。
   const getMessage = () => {
     if (normalizedKeyword && statusFilter && statusFilter !== 'all') {
-      // 从 statusOptions 中查找对应的中文标签
       const statusOption = statusOptions.find(opt => opt.value === statusFilter)
       const statusLabel = statusOption?.label || statusFilter
       return `未找到匹配"${normalizedKeyword}"的"${statusLabel}"记录`
@@ -98,7 +83,7 @@ export function TableEmptyState({
   )
 }
 
-/** 渲染表格搜索输入框，并处理超长校验与一键清空交互。 */
+// 渲染表格搜索输入框，并处理超长校验与一键清空交互。
 export function TableSearchInput({
   value,
   onChange,
@@ -111,6 +96,7 @@ export function TableSearchInput({
   const searchErrorText = `不能超过 ${maxLength} 个字符` // 稍微缩短文案
   let inputPaddingClassName = 'pr-3'
   if (isSearchTooLong) {
+    // 错误文案和清空按钮会共占右侧空间，不提前留白就会压住输入文本。
     inputPaddingClassName =
       'pr-45 border-destructive! focus-visible:border-destructive! focus-visible:ring-destructive/20!'
   } else if (value) {
@@ -147,11 +133,6 @@ export function TableSearchInput({
   )
 }
 
-// ============================================================================
-// 主组件 - 仅渲染过滤控件，不包裹子元素
-// ============================================================================
-
-/** 渲染表格搜索、状态、字段与模糊搜索等筛选控件。 */
 export function TableFilters({
   searchInput,
   onSearchInputChange,
@@ -167,19 +148,14 @@ export function TableFilters({
   statusOptions = DEFAULT_STATUS_OPTIONS,
   className = '',
 }: Readonly<TableFiltersProps>) {
-  /** 透传搜索输入变化，保留后续扩展节流或埋点的落点。 */
-  const handleSearchChange = (value: string) => {
-    onSearchInputChange(value)
-  }
-
-  /** 在低优先级任务中切换模糊搜索，避免阻塞主输入交互。 */
   const handleFuzzySearchChange = (checked: boolean) => {
+    // 把筛选重计算放到 transition，降低输入过程中主线程阻塞感。
     startTransition(() => {
       onFuzzySearchChange(checked === true)
     })
   }
 
-  /** 根据当前搜索字段动态计算输入框占位文案。 */
+  // 搜索字段变化时同步改占位文案，减少用户误判当前到底在搜哪一列。
   const resolvedSearchPlaceholder = useMemo(() => {
     const normalizedField = searchField.trim()
     if (!normalizedField || normalizedField === DEFAULT_SEARCH_FIELD_ALL_VALUE) {
@@ -201,16 +177,13 @@ export function TableFilters({
 
   return (
     <div className={`flex flex-col sm:flex-row gap-3 items-stretch sm:items-center ${className}`}>
-      {/* 搜索输入框 */}
       <TableSearchInput
         value={searchInput}
-        onChange={handleSearchChange}
+        onChange={onSearchInputChange}
         placeholder={resolvedSearchPlaceholder}
       />
       
-      {/* 筛选控件 */}
       <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">
-        {/* 模糊搜索开关 */}
         {showFuzzySearch && (
           <label className="flex items-center gap-2 text-base cursor-pointer whitespace-nowrap">
             <Checkbox
@@ -221,9 +194,8 @@ export function TableFilters({
           </label>
         )}
 
-        {/* 搜索字段选择 */}
         {searchFieldOptions && searchFieldOptions.length > 1 && (
-          <Select value={searchField} onValueChange={(val) => { onSearchFieldChange(val) }}>
+          <Select value={searchField} onValueChange={onSearchFieldChange}>
             <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
               <SelectValue placeholder="全部" />
             </SelectTrigger>
@@ -237,7 +209,6 @@ export function TableFilters({
           </Select>
         )}
 
-        {/* 状态筛选选择 */}
         {statusOptions && statusOptions.length > 0 && onStatusFilterChange && (
           <Select value={statusFilter} onValueChange={onStatusFilterChange}>
             <SelectTrigger className="w-1/3 sm:w-30 min-h-10">

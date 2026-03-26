@@ -1,6 +1,3 @@
-// 化学属性查询工具 - 使用 PubChem PUG REST 获取基础属性
-// 缓存: localStorage，10年有效期
-
 import { isSpecialCasValue } from './validationSchemas'
 import {
   CHEMICAL_PROPERTIES_CACHE_MAX_SIZE,
@@ -9,10 +6,7 @@ import {
   PUBCHEM_RATE_WINDOW_MS,
 } from './constants'
 
-// ============ 类型定义 ============
-
 export interface ChemicalProperties {
-  // 基本属性 (PUG REST)
   smiles?: string
   iupacName?: string
 }
@@ -32,22 +26,17 @@ interface ChemicalPropertiesStorage {
   data: Record<string, CachedChemicalProperties>
 }
 
-// ============ 缓存配置 ============
-
 const CACHE_KEY = 'chemical_properties_cache'
 const CHEMICAL_PROPERTIES_STORAGE_VERSION = 1
 
-// 内存缓存
 const memoryCache = new Map<string, CachedChemicalProperties>()
 const inFlightRequests = new Map<string, Promise<ChemicalProperties | null>>()
 
-// PubChem 全局限流状态：1 秒最多 5 个请求
+// 进程内所有 PubChem 查询都走同一套时间窗，避免并发请求各自绕过限流。
 const recentPubChemRequestTimestamps: number[] = []
 let rateLimitQueue: Promise<void> = Promise.resolve()
 
-// ============ 缓存工具函数 ============
-
-/** 归一化化学属性对象，确保缓存中仅保留受支持字段。 */
+// 归一化化学属性对象，确保缓存中仅保留受支持字段。
 function normalizeChemicalProperties(value: Record<string, unknown>): ChemicalProperties {
   return {
     smiles: typeof value.smiles === 'string' ? value.smiles : undefined,
@@ -55,7 +44,7 @@ function normalizeChemicalProperties(value: Record<string, unknown>): ChemicalPr
   }
 }
 
-/** 解析 localStorage 中的缓存快照，兼容异常数据并给出空回退。 */
+// 解析 localStorage 中的缓存快照，兼容异常数据并给出空回退。
 function parseStorageSnapshot(stored: string | null): ChemicalPropertiesStorage | null {
   if (!stored) return null
 
@@ -71,7 +60,7 @@ function parseStorageSnapshot(stored: string | null): ChemicalPropertiesStorage 
   return parsed
 }
 
-/** 归一化并校验单条缓存记录，返回可用条目和是否需要回写标记。 */
+// 归一化并校验单条缓存记录，返回可用条目和是否需要回写标记。
 function normalizeStorageEntry(
   rawEntry: unknown,
   now: number
@@ -105,7 +94,7 @@ function normalizeStorageEntry(
   }
 }
 
-/** 裁剪缓存大小到上限，并返回是否触发了删除。 */
+// 恢复历史缓存时也要做容量治理，避免旧快照把内存和 localStorage 一起撑大。
 function trimHydratedCache(cache: Map<string, CachedChemicalProperties>): boolean {
   let trimmed = false
   while (cache.size > CHEMICAL_PROPERTIES_CACHE_MAX_SIZE) {
@@ -117,7 +106,7 @@ function trimHydratedCache(cache: Map<string, CachedChemicalProperties>): boolea
   return trimmed
 }
 
-/** 从 localStorage 读取并恢复缓存，必要时清洗后回写。 */
+// 从 localStorage 读取并恢复缓存，必要时清洗后回写。
 function loadFromStorage(): Map<string, CachedChemicalProperties> {
   try {
     const parsed = parseStorageSnapshot(localStorage.getItem(CACHE_KEY))
@@ -150,7 +139,7 @@ function loadFromStorage(): Map<string, CachedChemicalProperties> {
   }
 }
 
-/** 持久化缓存快照，用于跨刷新复用查询结果。 */
+// 持久化缓存快照，用于跨刷新复用查询结果。
 function saveToStorage(cache: Map<string, CachedChemicalProperties>): void {
   try {
     const data = Object.fromEntries(cache)
@@ -163,7 +152,7 @@ function saveToStorage(cache: Map<string, CachedChemicalProperties>): void {
   }
 }
 
-/** 读取单条缓存并执行过期清理，同时维持 LRU 顺序。 */
+// 读取单条缓存并执行过期清理，同时维持 LRU 顺序。
 function getCachedProperties(casNumber: string): ChemicalProperties | null {
   const cached = memoryCache.get(casNumber)
   if (!cached) return null
@@ -179,7 +168,7 @@ function getCachedProperties(casNumber: string): ChemicalProperties | null {
   return cached.value
 }
 
-/** 写入单条缓存，统一做字段归一化与容量裁剪。 */
+// 写入单条缓存，统一做字段归一化与容量裁剪。
 function setCachedProperties(casNumber: string, data: ChemicalProperties): void {
   const normalizedData = normalizeChemicalProperties(data as Record<string, unknown>)
 
@@ -200,12 +189,12 @@ function setCachedProperties(casNumber: string, data: ChemicalProperties): void 
   saveToStorage(memoryCache)
 }
 
-/** 提供可 await 的延时工具，用于限流等待窗口。 */
+// 提供可 await 的延时工具，用于限流等待窗口。
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** 获取 PubChem 请求令牌，确保窗口期内请求数不超过限制。 */
+// 获取 PubChem 请求令牌，确保窗口期内请求数不超过限制。
 async function acquirePubChemSlot(): Promise<void> {
   while (true) {
     const now = Date.now()
@@ -228,7 +217,7 @@ async function acquirePubChemSlot(): Promise<void> {
   }
 }
 
-/** 串行化限流队列，避免并发请求绕过速率窗口。 */
+// 串行化限流队列，避免并发请求绕过速率窗口。
 async function withPubChemRateLimit<T>(task: () => Promise<T>): Promise<T> {
   const slotReady = rateLimitQueue.then(async () => {
     await acquirePubChemSlot()
@@ -243,21 +232,14 @@ async function withPubChemRateLimit<T>(task: () => Promise<T>): Promise<T> {
   return task()
 }
 
-// 初始化内存缓存
 const storageCache = loadFromStorage()
 storageCache.forEach((entry, key) => memoryCache.set(key, entry))
 
-// ============ 主要查询函数 ============
-
-/**
- * 通过 CAS 号获取化合物基础属性
- * 流程: PUG REST (获取 SMILES, IUPACName)
- */
+// 这里只查并缓存 SMILES/IUPACName；特殊 CAS 直接跳过，避免无意义外部查询。
 export async function queryCompoundData(casNumber: string): Promise<ChemicalProperties | null> {
   if (!casNumber) return null
   if (isSpecialCasValue(casNumber)) return null
 
-  // 检查内存缓存
   const cached = getCachedProperties(casNumber)
   if (cached) {
     return cached
@@ -268,7 +250,6 @@ export async function queryCompoundData(casNumber: string): Promise<ChemicalProp
 
   const requestPromise = (async () => {
     try {
-      // ============ 步骤1: PUG REST 获取基本属性 ============
       const restUrl = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(casNumber)}/property/SMILES,IUPACName/JSON`
       const restRes = await withPubChemRateLimit(() =>
         fetch(restUrl, { headers: { Accept: 'application/json' } })
@@ -279,7 +260,6 @@ export async function queryCompoundData(casNumber: string): Promise<ChemicalProp
       const props: PUGRestProperty = restData?.PropertyTable?.Properties?.[0]
       if (!props) throw new Error('未找到化合物')
 
-      // 基本属性
       const result: ChemicalProperties = {
         smiles: props.SMILES,
         iupacName: props.IUPACName,
@@ -302,13 +282,12 @@ export async function queryCompoundData(casNumber: string): Promise<ChemicalProp
   return requestPromise
 }
 
-/** 获取 SMILES */
+// 获取 SMILES
 export async function querySmiles(casNumber: string): Promise<string | null> {
   const data = await queryCompoundData(casNumber)
   return data?.smiles ?? null
 }
 
-/** 获取所有基础属性 */
 export async function queryChemicalProperties(casNumber: string): Promise<ChemicalProperties | null> {
   return queryCompoundData(casNumber)
 }

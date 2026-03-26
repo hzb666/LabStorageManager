@@ -21,7 +21,6 @@ type RDKitModule = {
   version: string
 }
 
-// RDKit 模块类型定义扩展
 declare global {
   var RDKit: RDKitModule | undefined
   var initRDKitModule: (() => Promise<RDKitModule>) | undefined
@@ -56,18 +55,17 @@ type MoleculeSvgState = {
 
 let rdkitLoaderPromise: Promise<RDKitModule> | null = null
 
-// SVG缓存：内存Map（刷新丢失）
+// 这里只做内存级缓存，刷新后自然失效，避免把大段 SVG 持久化到存储层。
 const SVG_MAX_CACHE_SIZE = 100
 const svgCache = new Map<string, MoleculeSvgCacheValue>()
 
-/** 统一处理 SVG 内部 id，避免多实例渲染时出现定义引用冲突。 */
 function processSvgId(str: string, id: string): string {
   return str
     .replaceAll(/id=['"](.+?)['"]/g, `id="${id}_$1"`)
     .replaceAll(/url\(#(.+?)\)/g, `url(#${id}_$1)`)
 }
 
-/** 从 RDKit 输出的 SVG 字符串中提取原始宽高，用于判断是否可放大。 */
+// 从 RDKit 输出的 SVG 字符串中提取原始宽高，用于判断是否可放大。
 function extractNaturalSize(svgString: string): { w: number; h: number } {
   const widthMatch = /width='([\d.]+)px'/.exec(svgString)
   const heightMatch = /height='([\d.]+)px'/.exec(svgString)
@@ -77,24 +75,24 @@ function extractNaturalSize(svgString: string): { w: number; h: number } {
   }
 }
 
-/** 将 SVG 文本安全编码为 data URI，供 img 标签直接渲染。 */
+// 将 SVG 文本安全编码为 data URI，供 img 标签直接渲染。
 function svgToDataUri(svgString: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgString)}`
 }
 
-/** 基于当前结构复杂度选择渲染延时，避免高复杂分子瞬时计算卡顿。 */
+// 基于当前结构复杂度选择渲染延时，避免高复杂分子瞬时计算卡顿。
 function getMoleculeRenderDelay(smiles: string): number {
   if (smiles.length > 45) return 250
   if (smiles.length > 20) return 180
   return 100
 }
 
-/** 生成缓存键，确保同一结构在相同尺寸下复用渲染结果。 */
+// 生成缓存键，确保同一结构在相同尺寸下复用渲染结果。
 function createCacheKey(smiles: string, width: number, height: number): string {
   return `${smiles}_${width}_${height}`
 }
 
-/** 读取缓存并刷新 LRU 顺序，命中时直接返回可渲染数据。 */
+// 读取缓存并刷新 LRU 顺序，命中时直接返回可渲染数据。
 function readCachedSvgState(
   cacheKey: string,
   componentId: string,
@@ -113,7 +111,7 @@ function readCachedSvgState(
   }
 }
 
-/** 写入渲染缓存并在超限时淘汰最早条目，控制内存上限。 */
+// 写入渲染缓存并在超限时淘汰最早条目，控制内存上限。
 function writeCachedSvgState(cacheKey: string, value: MoleculeSvgCacheValue): void {
   if (svgCache.size >= SVG_MAX_CACHE_SIZE) {
     const oldest = svgCache.keys().next()
@@ -124,12 +122,10 @@ function writeCachedSvgState(cacheKey: string, value: MoleculeSvgCacheValue): vo
   svgCache.set(cacheKey, value)
 }
 
-/** Promise 化延时工具，供渲染节流链路复用。 */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** 加载 RDKit 运行时脚本，保证后续模块初始化可用。 */
 async function loadRDKitScript(): Promise<void> {
   if (document.querySelector('#rdkit-script')) return
   await new Promise<void>((resolve, reject) => {
@@ -143,7 +139,6 @@ async function loadRDKitScript(): Promise<void> {
   })
 }
 
-/** 初始化 RDKit 模块并挂载到全局，供多处渲染链路复用。 */
 async function initRDKit(): Promise<RDKitModule> {
   await loadRDKitScript()
 
@@ -162,7 +157,7 @@ async function initRDKit(): Promise<RDKitModule> {
   return rdkit
 }
 
-/** 获取 RDKit 模块实例并复用进行中的初始化 Promise，避免并发重复初始化。 */
+// RDKit 初始化要 single-flight，避免多个结构图首屏并发时重复拉脚本和重复 init。
 async function loadRDKitModule(): Promise<RDKitModule> {
   if (globalThis.RDKit) return globalThis.RDKit
   if (rdkitLoaderPromise) return rdkitLoaderPromise
@@ -174,7 +169,7 @@ async function loadRDKitModule(): Promise<RDKitModule> {
   return rdkitLoaderPromise
 }
 
-/** 调用 RDKit 产出基础图与放大图，并返回可复用的尺寸信息。 */
+// 调用 RDKit 产出基础图与放大图，并返回可复用的尺寸信息。
 function renderMoleculeSvgWithRDKit(
   rdkit: RDKitModule,
   smiles: string,
@@ -210,7 +205,7 @@ function renderMoleculeSvgWithRDKit(
   }
 }
 
-/** 基于 CAS 查询 SMILES，并同步维护加载态、错误态与渲染前置数据。 */
+// 基于 CAS 查询 SMILES，并同步维护加载态、错误态与渲染前置数据。
 function useMoleculeSourceState(casNumber: string) {
   const [smiles, setSmiles] = useState('')
   const [loadingState, setLoadingState] = useState<LoadingState>('idle')
@@ -221,14 +216,12 @@ function useMoleculeSourceState(casNumber: string) {
 
     let cancelled = false
 
-    /** 写入“特殊 CAS 不适用”状态，保持展示语义和历史实现一致。 */
     const applySpecialCasState = () => {
       setSmiles('')
       setError('生物试剂不适用')
       setLoadingState('error')
     }
 
-    /** 拉取 SMILES 并兜底异常，避免未处理拒绝让界面卡在加载中。 */
     const fetchSmiles = async () => {
       if (isSpecialCasValue(casNumber)) {
         if (!cancelled) {
@@ -267,7 +260,7 @@ function useMoleculeSourceState(casNumber: string) {
   return { smiles, loadingState, setLoadingState, error, setError }
 }
 
-/** 根据 SMILES 渲染 SVG 并结合缓存/错误态回填视图数据。 */
+// 根据 SMILES 渲染 SVG 并结合缓存/错误态回填视图数据。
 function useMoleculeSvgState(args: {
   smiles: string
   width: number
@@ -287,7 +280,6 @@ function useMoleculeSvgState(args: {
     let isActive = true
     const cacheKey = createCacheKey(smiles, width, height)
 
-    /** 统一把渲染结果写入状态，减少重复赋值分支。 */
     const applySvgState = (state: MoleculeSvgState) => {
       setSvg(state.svg)
       setZoomSvg(state.zoomSvg)
@@ -295,7 +287,6 @@ function useMoleculeSvgState(args: {
       setLoadingState('ready')
     }
 
-    /** 优先命中缓存，否则执行 RDKit 渲染并统一落到 ready/error 状态。 */
     const renderMolecule = async () => {
       try {
         const cachedState = readCachedSvgState(cacheKey, componentId, width, height)
@@ -331,10 +322,15 @@ function useMoleculeSvgState(args: {
     }
   }, [smiles, width, height, componentId, setLoadingState, setError])
 
-  return { svg, zoomSvg, canZoom, setSvg, setZoomSvg, setCanZoom }
+  if (!smiles) {
+    // CAS 切换后先清空旧图，避免下一次查询完成前短暂闪出上一条结构。
+    return { svg: '', zoomSvg: '', canZoom: false }
+  }
+
+  return { svg, zoomSvg, canZoom }
 }
 
-/** 统一管理悬浮放大层交互，保持主组件只关心渲染组合。 */
+// 统一管理悬浮放大层交互，保持主组件只关心渲染组合。
 function useMoleculeZoom(canZoom: boolean) {
   const [isOpen, setIsOpen] = useState(false)
   const { refs, floatingStyles, context } = useFloating({
@@ -391,20 +387,19 @@ function useMoleculeZoom(canZoom: boolean) {
   }
 }
 
-/** 根据深浅色强制策略生成结构图滤镜 class，避免 JSX 内多层条件。 */
+// 根据深浅色强制策略生成结构图滤镜 class，避免 JSX 内多层条件。
 function getFilterClass(isDark: boolean | undefined): string {
   if (isDark === true) return '[filter:invert(0.93)_hue-rotate(180deg)]'
   if (isDark === false) return ''
   return 'dark:[filter:invert(0.93)_hue-rotate(180deg)]'
 }
 
-/** 生成结构图区块背景 class，确保加载态和错误态视觉保持一致。 */
 function getBaseSurfaceClass(isDark: boolean | undefined): string {
   const darkClass = isDark === true ? 'bg-[#121212]' : ''
   return `flex items-center justify-center rounded-md bg-white dark:bg-[#121212] ${darkClass}`
 }
 
-/** 渲染加载占位，复用统一背景和尺寸布局。 */
+// 渲染加载占位，复用统一背景和尺寸布局。
 function MoleculeLoadingView(props: { width: number; height: number; isDark?: boolean }) {
   const { width, height, isDark } = props
   return (
@@ -417,7 +412,7 @@ function MoleculeLoadingView(props: { width: number; height: number; isDark?: bo
   )
 }
 
-/** 渲染错误占位，集中处理失败文案的展示容器。 */
+// 渲染错误占位，集中处理失败文案的展示容器。
 function MoleculeErrorView(props: {
   width: number
   height: number
@@ -432,7 +427,7 @@ function MoleculeErrorView(props: {
   )
 }
 
-/** 渲染可点击的结构图主体，并绑定提示与悬浮交互。 */
+// 渲染可点击的结构图主体，并绑定提示与悬浮交互。
 function MoleculePreview(props: {
   width: number
   height: number
@@ -445,7 +440,7 @@ function MoleculePreview(props: {
 }) {
   const { width, height, svg, filterClass, canZoom, casNumber, setReference, referenceProps } = props
 
-  /** 打开 ChemicalBook 详情页，保持原有点击行为不变。 */
+  // 打开 ChemicalBook 详情页，保持原有点击行为不变。
   const handleClick = () => {
     if (casNumber) {
       window.open(
@@ -479,7 +474,7 @@ function MoleculePreview(props: {
   )
 }
 
-/** 渲染悬浮放大层，复用浮层定位样式并保持原过渡效果。 */
+// 渲染悬浮放大层，复用浮层定位样式并保持原过渡效果。
 function MoleculeZoomPortal(props: {
   shouldRender: boolean
   setFloating: (node: Element | null) => void
@@ -562,7 +557,7 @@ function MoleculeZoomPortal(props: {
   )
 }
 
-/** 渲染 CAS 对应分子结构，并在可放大时提供悬浮放大预览。 */
+// 渲染 CAS 对应分子结构，并在可放大时提供悬浮放大预览。
 export function MoleculeStructure({
   casNumber,
   width = 300,
@@ -572,7 +567,7 @@ export function MoleculeStructure({
   const componentId = useId().replaceAll(':', '')
   const { smiles, loadingState, setLoadingState, error, setError } =
     useMoleculeSourceState(casNumber)
-  const { svg, zoomSvg, canZoom, setSvg, setZoomSvg, setCanZoom } =
+  const { svg, zoomSvg, canZoom } =
     useMoleculeSvgState({
       smiles,
       width,
@@ -583,13 +578,6 @@ export function MoleculeStructure({
     })
   const zoom = useMoleculeZoom(canZoom)
   const filterClass = getFilterClass(isDark)
-
-  useEffect(() => {
-    if (!casNumber) return
-    setSvg('')
-    setZoomSvg('')
-    setCanZoom(false)
-  }, [casNumber, setSvg, setZoomSvg, setCanZoom])
 
   if (!casNumber) return null
   if (loadingState === 'loading') {

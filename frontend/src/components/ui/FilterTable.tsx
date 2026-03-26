@@ -1,7 +1,3 @@
-/**
- * 通用筛选表格组件
- * 集成搜索/筛选、分页、表格列配置、展开/收起等功能
- */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   getCoreRowModel,
@@ -57,7 +53,7 @@ export interface FilterTableProps {
   emptyText?: string
 }
 
-/** 从地址栏解析初始搜索词与搜索字段，作为表格首屏状态来源。 */
+// 从地址栏解析初始搜索词与搜索字段，作为表格首屏状态来源。
 function getInitialUrlSearchState({
   defaultSearchField,
   locationSearch,
@@ -87,7 +83,7 @@ function getInitialUrlSearchState({
   }
 }
 
-/** 为表格生成稳定行 id，优先使用业务主键，其次回退到索引。 */
+// 为表格生成稳定行 id，优先使用业务主键，其次回退到索引。
 function getTableRowId(row: Record<string, unknown>, index: number): string {
   if (typeof row.id === 'string' || typeof row.id === 'number') {
     return String(row.id)
@@ -100,7 +96,7 @@ function getTableRowId(row: Record<string, unknown>, index: number): string {
   return String(index)
 }
 
-/** 根据行数与显式配置推导表格滚动容器高度。 */
+// 短列表用 `auto` 避免空白滚动容器，长列表再撑满视口高度。
 function getScrollHeight(rowCount: number, scrollHeight?: number | string): number | string {
   if (scrollHeight !== undefined) {
     return scrollHeight
@@ -113,7 +109,7 @@ function getScrollHeight(rowCount: number, scrollHeight?: number | string): numb
   return 'calc(100vh - 112px - 16px)'
 }
 
-/** 通过 ref 持有外部动作回调，避免表格 meta 因函数引用变化而频繁重建。 */
+// 通过 ref 持有外部动作回调，避免表格 meta 因函数引用变化而频繁重建。
 function useActionRefs({
   onBorrowSuccess,
   onEdit,
@@ -129,7 +125,7 @@ function useActionRefs({
   return { onEditRef, onBorrowSuccessRef }
 }
 
-/** 监听地址栏搜索参数变化，并把 URL 中的搜索态同步回表格状态。 */
+// 只在地址栏搜索态真的变化后回流，避免本地搜索更新再次把自己触发一遍。
 function useLocationSearchSync({
   applySearchImmediate,
   defaultSearchField,
@@ -166,7 +162,7 @@ function useLocationSearchSync({
   ])
 }
 
-/** 在筛选条件变化后重置展开态，避免旧展开行与新结果集错位。 */
+// 在筛选条件变化后重置展开态，避免旧展开行与新结果集错位。
 function useExpandedResetOnFilterChange({
   enableExpandAll,
   filter,
@@ -236,7 +232,7 @@ interface FilterTableHeaderProps {
   title?: React.ReactNode
 }
 
-/** 渲染筛选表格卡片头部与“展开全部”控制区。 */
+// 渲染筛选表格卡片头部与“展开全部”控制区。
 function FilterTableHeader({
   disableExpandAll,
   displayCount,
@@ -291,7 +287,7 @@ interface FilterTableContentProps {
   tableId: string
 }
 
-/** 根据加载态、空态和数据态切换表格主体内容。 */
+// 根据加载态、空态和数据态切换表格主体内容。
 function FilterTableContent({
   emptyText,
   enableExpandAll,
@@ -346,7 +342,7 @@ function FilterTableContent({
   )
 }
 
-/** 组合筛选栏、表格状态与数据表格渲染，是 FilterTable 的总入口。 */
+// 组合筛选栏、表格状态与数据表格渲染，是 FilterTable 的总入口。
 export function FilterTable({
   api,
   queryKey = ['list'],
@@ -448,6 +444,7 @@ export function FilterTable({
     return getScrollHeight(filter.data.length, scrollHeight)
   }, [filter.data.length, scrollHeight])
 
+  // 当列表已下滚时，阻止“展开全部”，避免用户在中段展开后产生强烈跳动。
   const disableExpandAll = !filter.isAllExpanded && !isTableAtTop
 
   return (

@@ -1,4 +1,3 @@
-// DataTable.tsx
 import React, { useRef, useCallback, useState, useEffect } from 'react'
 import type { Table as TableType } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -34,7 +33,7 @@ type ColumnCssVariableKey =
 
 type ColumnCssVariables = Partial<Record<ColumnCssVariableKey, string>>
 
-/** 计算 CSS 变量样式对象 */
+// 用 CSS 变量共享列宽和隐藏态，避免表头与表体各算一套布局。
 function computeCssVariables<TData>(
   visibleColumns: ReturnType<TableType<TData>['getVisibleLeafColumns']>,
 ): React.CSSProperties & ColumnCssVariables {
@@ -49,7 +48,7 @@ function computeCssVariables<TData>(
   return styles
 }
 
-/** 组合表头、表体和行为 hooks，负责渲染完整的数据表格容器。 */
+// 组合表头、表体和行为 hooks，负责渲染完整的数据表格容器。
 export function DataTable<TData>({
   table,
   renderExpandedRow,
@@ -83,6 +82,7 @@ export function DataTable<TData>({
   const sortingState = table.getState().sorting
 
   useEffect(() => {
+    // 受控展开态由外层驱动；这里只回写非受控场景，避免本地存储与父级双写冲突。
     if (!isControlled && enableExpandAll && expandAllStorageKey) {
       setExpandAllState(expandAllStorageKey, isAllExpanded)
     }
@@ -105,7 +105,7 @@ export function DataTable<TData>({
     return () => observer.disconnect()
   }, [])
 
-  // 排序变化时滚动到顶部
+  // 排序后回到顶部，避免用户停在旧滚动位置看到重排后的中段内容。
   useEffect(() => {
     if (bodyScrollRef.current) bodyScrollRef.current.scrollTop = 0
   }, [sortingState])
@@ -116,7 +116,6 @@ export function DataTable<TData>({
   const minTableWidth = visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
   const cssVariableStyles = computeCssVariables(visibleColumns)
 
-  // ========== Hooks ==========
   const { resizingColId, handleCustomResize } = useColumnResize({
     table, visibleColumns, totalWeight, minTableWidth, bodyScrollRef,
   })
@@ -129,7 +128,6 @@ export function DataTable<TData>({
     bodyScrollRef, hasNextPage, isFetchingNextPage, fetchNextPage,
   })
 
-  // ========== Virtualizer ==========
   const shouldUseVirtualization = scrollHeight !== 'auto'
 
   // 根据展开态和批量动画快照估算当前行高，保证虚拟列表测量稳定。
@@ -160,19 +158,16 @@ export function DataTable<TData>({
     getItemKey: getRowItemKey,
   })
 
-  // 同步 virtualizer 到 hooks
+  // 批量展开和滚动逻辑必须消费同一个 virtualizer，否则测量和滚动基准会分叉。
   useEffect(() => { setVirtualizer(rowVirtualizer) }, [rowVirtualizer, setVirtualizer])
   useSyncVirtualizerRef(rowVirtualizer, setVirtualizerForScroll)
 
-  // ========== 容器滚动 ==========
-  // 同步表头横向滚动、向上状态和无限加载触发。
   const handleContainerScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (headerScrollRef.current) headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft
     if (onIsAtTopChange) onIsAtTopChange(e.currentTarget.scrollTop <= 2)
     handleInfiniteScroll()
   }, [handleInfiniteScroll, onIsAtTopChange])
 
-  // ========== Render ==========
   return (
     <div
       ref={scrollContainerRef}

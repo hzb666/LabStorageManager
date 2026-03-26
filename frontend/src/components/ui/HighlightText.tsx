@@ -2,11 +2,9 @@ import React from 'react'
 import { pinyin as toPinyin } from 'pinyin-pro'
 
 interface HighlightTextProps {
-  /** 要展示和匹配的文本，支持传入数字或可空类型 */
   text?: string | number | null
-  /** 当前的搜索高亮词 */
   highlight?: string
-  /** 是否开启模糊匹配 */
+  // 允许忽略分隔符，并在精确命中失败时回退到拼音/首字母匹配。
   fuzzy?: boolean
 }
 

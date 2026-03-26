@@ -1,7 +1,3 @@
-/**
- * 表格状态综合 Hook
- * 整合 useFilterList、useTableSettings、useTableExpand 的功能
- */
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query'
@@ -13,30 +9,25 @@ import {
   setFuzzySearchState,
 } from '@/lib/tableExpandStorage'
 
-// API 响应数据类型
 export interface ListResponseData {
   data: unknown[]
   total: number
 }
 
-// API 客户端类型
 export interface FilterAPI {
   list: (params: Record<string, unknown>) => Promise<{ data: ListResponseData }>
 }
 
-// 筛选选项配置
 export interface FilterOption {
   value: string
   label: string
 }
 
-// 搜索字段选项
 export interface SearchFieldOption {
   value: string
   label: string
 }
 
-// Hook 配置参数
 export interface UseTableStateOptions {
   // API 客户端（必传）
   api: FilterAPI
@@ -74,48 +65,29 @@ export interface UseTableStateOptions {
 
 type TableQueryResult = UseInfiniteQueryResult<InfiniteData<ListResponseData>, unknown>
 
-// Hook 返回值
 export interface UseTableStateReturn {
-  // ========== 筛选状态 ==========
-  // 搜索输入（未防抖）
   searchInput: string
   setSearchInput: (value: string) => void
   // 立即应用搜索（同步更新输入框和查询条件）
   applySearchImmediate: (value: string, field?: string) => void
   // 防抖后的搜索关键词
   globalFilter: string
-  // 状态筛选值
   statusFilter: string
   setStatusFilter: (value: string) => void
-  // 搜索字段值
   searchField: string
   setSearchField: (value: string) => void
-  // 是否模糊搜索
   fuzzySearch: boolean
   setFuzzySearch: (value: boolean) => void
-  // 排序状态
   sorting: SortingState
   setSorting: (sorting: SortingState | ((prev: SortingState) => SortingState)) => void
-  // 是否有筛选条件
   hasFilter: boolean
-  // 显示的数量
   displayCount: string
-
-  // ========== 表格状态 ==========
-  // 列宽状态
   columnSizing: ColumnSizingState
   setColumnSizing: (updater: ColumnSizingState | ((prev: ColumnSizingState) => ColumnSizingState)) => void
-  // 是否全部展开
   isAllExpanded: boolean
-  // 切换全部展开状态
   toggleExpandAll: () => void
-  // 重置单行展开占位回调（实际重置由外层表格实例实现）
   resetExpanded: () => void
-
-  // ========== 数据 ==========
-  // 数据
   data: unknown[]
-  // 总数
   total: number
   // 加载状态
   isLoading: boolean
@@ -125,7 +97,6 @@ export interface UseTableStateReturn {
   hasNextPage: boolean
   // 加载更多数据
   fetchNextPage: TableQueryResult['fetchNextPage']
-  // 刷新数据
   refetch: TableQueryResult['refetch']
   // 手动使缓存失效
   invalidate: () => void
@@ -133,7 +104,6 @@ export interface UseTableStateReturn {
   resetFilters: () => void
 }
 
-// 默认状态选项
 export const DEFAULT_STATUS_OPTIONS: FilterOption[] = [
   { value: 'all', label: '全部状态' },
   { value: 'in_stock', label: '在库' },
@@ -142,7 +112,6 @@ export const DEFAULT_STATUS_OPTIONS: FilterOption[] = [
   { value: 'consumed', label: '已用完' },
 ]
 
-// 默认搜索字段选项
 export const DEFAULT_SEARCH_FIELD_OPTIONS: SearchFieldOption[] = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
@@ -163,19 +132,6 @@ type FilterStateOptions = {
   expandStorageId: string
 }
 
-type TableQueryArgs = {
-  api: FilterAPI
-  queryKey: string[]
-  pageSize: number
-  extraParams: Record<string, unknown>
-  statusFilter: string
-  defaultStatus: string
-  globalFilter: string
-  searchField: string
-  fuzzySearch: boolean
-  sorting: SortingState
-}
-
 type TableQueryState = {
   data: unknown[]
   total: number
@@ -187,29 +143,30 @@ type TableQueryState = {
   isPlaceholderData: boolean
 }
 
-/** 组装列表查询参数，保证筛选规则集中在一个纯函数内。 */
-function buildListParams(args: {
-  pageParam: number
-  pageSize: number
-  extraParams: Record<string, unknown>
+type TableQueryFilters = {
   statusFilter: string
-  defaultStatus: string
   globalFilter: string
   searchField: string
   fuzzySearch: boolean
   sorting: SortingState
+}
+
+// 默认状态和 `all` 都不进请求参数，尽量让“无筛选”请求保持稳定形态。
+function buildListParams(args: {
+  pageParam: number
+  pageSize: number
+  extraParams: Record<string, unknown>
+  defaultStatus: string
+  filters: TableQueryFilters
 }): Record<string, unknown> {
   const {
     pageParam,
     pageSize,
     extraParams,
-    statusFilter,
     defaultStatus,
-    globalFilter,
-    searchField,
-    fuzzySearch,
-    sorting,
+    filters,
   } = args
+  const { statusFilter, globalFilter, searchField, fuzzySearch, sorting } = filters
   const params: Record<string, unknown> = {
     skip: pageParam,
     limit: pageSize,
@@ -235,7 +192,7 @@ function buildListParams(args: {
   return params
 }
 
-/** 读取列宽缓存，集中处理浏览器环境与 JSON 解析异常。 */
+// 列宽缓存只是一层偏好设置；读失败时回退默认布局，别让表格因此不可用。
 function readColumnSizingStorage(storageKey: string): ColumnSizingState {
   if (globalThis.window === undefined) return {}
   try {
@@ -246,7 +203,7 @@ function readColumnSizingStorage(storageKey: string): ColumnSizingState {
   }
 }
 
-/** 管理列宽状态并执行防抖持久化，避免主 Hook 混入存储细节。 */
+// 管理列宽状态并执行防抖持久化，避免主 Hook 混入存储细节。
 function useColumnSizingState(
   storageKey: string,
   columnSizingDebounceMs: number
@@ -262,14 +219,14 @@ function useColumnSizingState(
           localStorage.setItem(storageKey, JSON.stringify(columnSizing))
         }
       } catch {
-        // 忽略 localStorage 错误
+        // 列宽偏好不值得阻塞表格交互，存储失败时直接退回内存态。
       }
     }, columnSizingDebounceMs)
 
     return () => clearTimeout(timer)
   }, [columnSizing, storageKey, columnSizingDebounceMs])
 
-  /** 兼容对象与函数两种更新器，保证调用方 API 不变。 */
+  // 兼容对象与函数两种更新器，保证调用方 API 不变。
   const handleColumnSizingChange = useCallback(
     (updater: ColumnSizingState | ((prev: ColumnSizingState) => ColumnSizingState)) => {
       setColumnSizing((prev) => (typeof updater === 'function' ? updater(prev) : updater))
@@ -280,7 +237,7 @@ function useColumnSizingState(
   return { columnSizing, handleColumnSizingChange }
 }
 
-/** 管理“展开全部”状态并做本地持久化，隔离 UI 存储细节。 */
+// 管理“展开全部”状态并做本地持久化，隔离 UI 存储细节。
 function useExpandAllState(expandStorageId: string, defaultExpanded: boolean) {
   const [isAllExpanded, setIsAllExpanded] = useState<boolean>(() =>
     getExpandAllState(expandStorageId, defaultExpanded)
@@ -290,20 +247,19 @@ function useExpandAllState(expandStorageId: string, defaultExpanded: boolean) {
     setExpandAllState(expandStorageId, isAllExpanded)
   }, [isAllExpanded, expandStorageId])
 
-  /** 切换全部展开状态，供表格工具栏复用。 */
+  // 切换全部展开状态，供表格工具栏复用。
   const toggleExpandAll = useCallback(() => {
     setIsAllExpanded((prev) => !prev)
   }, [])
 
-  /** 占位回调：保持返回契约不变，实际行展开重置由外层表格实例执行。 */
   const resetExpanded = useCallback(() => {
-    // 这个回调供外部调用，用于重置展开状态
+    // 这里故意保留空实现，只是维持返回契约；真正的单行展开重置仍由外层表格实例处理。
   }, [])
 
   return { isAllExpanded, toggleExpandAll, resetExpanded }
 }
 
-/** 管理筛选、搜索、排序状态，并统一防抖与模糊搜索持久化逻辑。 */
+// 管理筛选、搜索、排序状态，并统一防抖与模糊搜索持久化逻辑。
 function useFilterState(options: FilterStateOptions) {
   const {
     defaultStatus,
@@ -342,7 +298,7 @@ function useFilterState(options: FilterStateOptions) {
     return () => clearTimeout(timer)
   }, [searchInput, normalizedSearchInput, globalFilter, debounceMs])
 
-  /** 处理搜索输入变化，并在清空时立即同步全局筛选。 */
+  // 处理搜索输入变化，并在清空时立即同步全局筛选。
   const handleSearchInputChange = useCallback(
     (value: string) => {
       setSearchInput(value)
@@ -353,7 +309,7 @@ function useFilterState(options: FilterStateOptions) {
     [globalFilter]
   )
 
-  /** 立即应用搜索值，绕过首次防抖以支持 URL 直达等场景。 */
+  // URL 直达和地址栏回流都要立刻生效，不能再额外等一轮输入防抖。
   const applySearchImmediate = useCallback((value: string, field?: string) => {
     const nextValue = value.trim()
     setSearchInput(nextValue)
@@ -365,7 +321,7 @@ function useFilterState(options: FilterStateOptions) {
     }
   }, [])
 
-  /** 对外暴露排序更新器，保持兼容 React Table 回调签名。 */
+  // 对外暴露排序更新器，保持兼容 React Table 回调签名。
   const handleSortingChange = useCallback(
     (updater: SortingState | ((prev: SortingState) => SortingState)) => {
       setSorting(updater)
@@ -373,7 +329,7 @@ function useFilterState(options: FilterStateOptions) {
     []
   )
 
-  /** 一键重置筛选状态，供页面“清空筛选”按钮复用。 */
+  // 一键重置筛选状态，供页面“清空筛选”按钮复用。
   const resetFilters = useCallback(() => {
     setSearchInput('')
     setGlobalFilter('')
@@ -406,7 +362,7 @@ function useFilterState(options: FilterStateOptions) {
   }
 }
 
-/** 计算表头显示数量，在筛选态下按“当前/总量”格式展示。 */
+// 计算表头显示数量，在筛选态下按“当前/总量”格式展示。
 function getDisplayCount(args: {
   hasFilter: boolean
   grandTotal: number | undefined
@@ -421,7 +377,7 @@ function getDisplayCount(args: {
   return shouldShowGrandTotal ? `${total}/${grandTotal}` : `${total}`
 }
 
-/** 构建基础查询 key，用于读取“无筛选”缓存总数。 */
+// 这个 key 顺序必须和 useInfiniteQuery 的无筛选场景完全一致，否则会读不到总数缓存。
 function buildBaseQueryKey(
   queryKey: string[],
   defaultStatus: string,
@@ -430,7 +386,7 @@ function buildBaseQueryKey(
   return [...queryKey, defaultStatus, '', defaultSearchField, false, []]
 }
 
-/** 计算下一页偏移量，供无限查询统一复用。 */
+// 计算下一页偏移量，供无限查询统一复用。
 function getNextPageOffset(lastPage: ListResponseData, allPages: ListResponseData[]): number | null {
   const currentLoadedCount = allPages.reduce(
     (acc, page) => acc + page.data.length,
@@ -441,20 +397,23 @@ function getNextPageOffset(lastPage: ListResponseData, allPages: ListResponseDat
     : null
 }
 
-/** 组装列表查询与分页状态，隔离 useInfiniteQuery 的细节复杂度。 */
-function useTableQueryData(args: TableQueryArgs): TableQueryState {
+function useTableQueryData(args: {
+  api: FilterAPI
+  queryKey: string[]
+  pageSize: number
+  extraParams: Record<string, unknown>
+  defaultStatus: string
+  filters: TableQueryFilters
+}): TableQueryState {
   const {
     api,
     queryKey,
     pageSize,
     extraParams,
-    statusFilter,
     defaultStatus,
-    globalFilter,
-    searchField,
-    fuzzySearch,
-    sorting,
+    filters,
   } = args
+  const { statusFilter, globalFilter, searchField, fuzzySearch, sorting } = filters
 
   const queryFn = useCallback(
     async ({ pageParam = 0 }: { pageParam?: number }) => {
@@ -462,12 +421,8 @@ function useTableQueryData(args: TableQueryArgs): TableQueryState {
         pageParam,
         pageSize,
         extraParams,
-        statusFilter,
         defaultStatus,
-        globalFilter,
-        searchField,
-        fuzzySearch,
-        sorting,
+        filters,
       })
       const response = await api.list(params)
       return response.data
@@ -476,12 +431,8 @@ function useTableQueryData(args: TableQueryArgs): TableQueryState {
       api,
       pageSize,
       extraParams,
-      statusFilter,
       defaultStatus,
-      globalFilter,
-      searchField,
-      fuzzySearch,
-      sorting,
+      filters,
     ]
   )
 
@@ -523,10 +474,6 @@ function useTableQueryData(args: TableQueryArgs): TableQueryState {
   }
 }
 
-/**
- * 表格状态综合 Hook
- * 整合筛选、排序、分页、列宽持久化、展开状态管理
- */
 export function useTableState(options: UseTableStateOptions): UseTableStateReturn {
   const {
     api,
@@ -564,22 +511,36 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     expandStorageId,
     defaultExpanded
   )
+  // 先把筛选条件固化成稳定快照，再交给 queryFn 和 queryKey 共享，避免两边各自拼一套依赖。
+  const queryFilters = useMemo<TableQueryFilters>(
+    () => ({
+      statusFilter: filterState.statusFilter,
+      globalFilter: filterState.globalFilter,
+      searchField: filterState.searchField,
+      fuzzySearch: filterState.fuzzySearch,
+      sorting: filterState.sorting,
+    }),
+    [
+      filterState.statusFilter,
+      filterState.globalFilter,
+      filterState.searchField,
+      filterState.fuzzySearch,
+      filterState.sorting,
+    ]
+  )
   const queryState = useTableQueryData({
     api,
     queryKey,
     pageSize,
     extraParams,
-    statusFilter: filterState.statusFilter,
     defaultStatus,
-    globalFilter: filterState.globalFilter,
-    searchField: filterState.searchField,
-    fuzzySearch: filterState.fuzzySearch,
-    sorting: filterState.sorting,
+    filters: queryFilters,
   })
   const baseQueryKey = useMemo(
     () => buildBaseQueryKey(queryKey, defaultStatus, defaultSearchField),
     [queryKey, defaultStatus, defaultSearchField]
   )
+  // 表头在筛选态下还要显示总量，所以这里读取“无筛选”缓存的第一页总数，不额外发请求。
   const cachedBaseData = queryClient.getQueryData<InfiniteData<ListResponseData>>(baseQueryKey)
   const grandTotal = cachedBaseData?.pages[0]?.total
   const displayCount = getDisplayCount({
@@ -589,7 +550,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     isPlaceholderData: queryState.isPlaceholderData,
   })
 
-  /** 手动使列表缓存失效，便于外部在提交后强制刷新。 */
+  // 提交完成后统一打失效，让列表和依赖它的统计卡片一起回到最新快照。
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey })
   }, [queryClient, queryKey])

@@ -23,14 +23,14 @@ interface DataTableHeaderProps<TData> {
   handleCustomResize: (e: React.MouseEvent | React.TouchEvent, header: HeaderType<TData, unknown>) => void
 }
 
-/** 排序方向 → 图标映射 */
+// 排序方向 → 图标映射
 function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
   if (direction === 'asc') return <ArrowUp className="w-3.5 h-3.5" />
   if (direction === 'desc') return <ArrowDown className="w-3.5 h-3.5" />
   return <ArrowUpDown className="w-3.5 h-3.5" />
 }
 
-/** 列宽调整手柄的 className */
+// 列宽调整手柄的 className
 function getResizeHandleClassName(isResizing: boolean, header: HeaderType<unknown, unknown>): string {
   const minSize = header.column.columnDef.minSize ?? 50
   const maxSize = header.column.columnDef.maxSize
@@ -46,7 +46,7 @@ function getResizeHandleClassName(isResizing: boolean, header: HeaderType<unknow
   )
 }
 
-/** 单个表头单元格 */
+// 单个表头单元格
 function HeaderCell<TData>({
   header,
   index,
@@ -120,7 +120,7 @@ function HeaderCell<TData>({
   )
 }
 
-/** 负责渲染表头区域、排序图标和列宽拖拽手柄。 */
+// 负责渲染表头区域、排序图标和列宽拖拽手柄。
 export function DataTableHeader<TData>({
   table,
   headerScrollRef,

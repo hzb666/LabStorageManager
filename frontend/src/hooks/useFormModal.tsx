@@ -13,11 +13,11 @@ export type ValidationRule<T> = {
  * useFormModal 配置选项
  */
 export interface UseFormModalOptions<T> {
-  /** 初始表单数据 */
+  // 初始表单数据
   initialData: T
-  /** 验证规则数组 */
+  // 验证规则数组
   validationRules?: ValidationRule<T>[]
-  /** 表单提交回调 */
+  // 表单提交回调
   onSubmit?: (data: T) => Promise<void>
 }
 
@@ -25,23 +25,23 @@ export interface UseFormModalOptions<T> {
  * useFormModal 返回值
  */
 export interface UseFormModalReturn<T> {
-  /** 表单数据 */
+  // 表单数据
   formData: T
-  /** 表单错误信息 */
+  // 表单错误信息
   formErrors: Partial<Record<keyof T, string>>
-  /** 是否正在提交 */
+  // 是否正在提交
   submitting: boolean
-  /** 设置表单数据 */
+  // 设置表单数据
   setFormData: React.Dispatch<React.SetStateAction<T>>
-  /** 字段变更处理函数 */
+  // 字段变更处理函数
   handleChange: (field: keyof T, value: string | number | boolean) => void
-  /** 验证表单 */
+  // 验证表单
   validateForm: () => boolean
-  /** 重置表单 */
+  // 重置表单
   resetForm: () => void
-  /** 提交表单 */
+  // 提交表单
   handleSubmit: (e?: React.FormEvent) => Promise<void>
-  /** 清除单个字段错误 */
+  // 清除单个字段错误
   clearFieldError: (field: keyof T) => void
 }
 

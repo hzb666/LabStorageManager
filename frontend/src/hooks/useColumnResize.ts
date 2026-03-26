@@ -22,7 +22,7 @@ interface ColumnSizeBounds {
   rightMax: number
 }
 
-/** 根据拖拽偏移量计算新的列宽，并应用 min/max 约束 */
+// 根据拖拽偏移量计算新的列宽，并应用 min/max 约束
 function computeNewSizes(deltaWeight: number, bounds: ColumnSizeBounds): [number, number] {
   const { startLeftSize, startRightSize, leftMin, leftMax, rightMin, rightMax } = bounds
 
@@ -49,7 +49,7 @@ function computeNewSizes(deltaWeight: number, bounds: ColumnSizeBounds): [number
   return [newLeft, newRight]
 }
 
-/** 处理相邻两列的拖拽分配，并保证列宽始终落在合法边界内。 */
+// 处理相邻两列的拖拽分配，并保证列宽始终落在合法边界内。
 export function useColumnResize<TData>({
   table,
   visibleColumns,

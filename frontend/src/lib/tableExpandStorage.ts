@@ -19,12 +19,12 @@ type StorageLock = {
   expiresAt: number
 }
 
-/** 判断值是否为普通对象，避免把数组或原始值当作存储快照。 */
+// 判断值是否为普通对象，避免把数组或原始值当作存储快照。
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** 解析表格 UI 存储快照并兼容旧版本格式。 */
+// 解析表格 UI 存储快照并兼容旧版本格式。
 function parseTableUIStorage(raw: string | null): TableUIStorage {
   if (!raw) return { version: 0, tables: {} }
 
@@ -38,20 +38,20 @@ function parseTableUIStorage(raw: string | null): TableUIStorage {
     }
 
     if (isRecord(parsed)) {
-      // backward compatibility: old format is a plain state map object
+      // 老版本直接把 state map 存在根对象里，这里继续兼容，避免升级后一键丢偏好。
       return {
         version: 0,
         tables: parsed as TableUIStateMap,
       }
     }
   } catch {
-    // ignore localStorage/JSON errors
+    // 偏好存储损坏时回退空快照，不能让表格因为一份脏 JSON 无法渲染。
   }
 
   return { version: 0, tables: {} }
 }
 
-/** 读取并解析表格 UI 存储，屏蔽 localStorage 异常。 */
+// 读取并解析表格 UI 存储，屏蔽 localStorage 异常。
 function readTableUIStorage(): TableUIStorage {
   try {
     return parseTableUIStorage(localStorage.getItem(TABLE_UI_STORAGE_KEY))
@@ -60,7 +60,7 @@ function readTableUIStorage(): TableUIStorage {
   }
 }
 
-/** 解析锁对象，确保 token 与过期时间字段类型正确。 */
+// 解析锁对象，确保 token 与过期时间字段类型正确。
 function parseStorageLock(raw: string | null): StorageLock | null {
   if (!raw) return null
   try {
@@ -69,12 +69,12 @@ function parseStorageLock(raw: string | null): StorageLock | null {
       return { token: parsed.token, expiresAt: parsed.expiresAt }
     }
   } catch {
-    // ignore lock parse errors
+    // 锁数据损坏时直接视为无锁，优先保证表格状态还能继续写。
   }
   return null
 }
 
-/** 生成锁 token，优先使用 Web Crypto，避免伪随机实现。 */
+// 生成锁 token，优先使用 Web Crypto，避免伪随机实现。
 function generateStorageLockToken(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
     return globalThis.crypto.randomUUID()
@@ -90,7 +90,7 @@ function generateStorageLockToken(): string {
   return `${Date.now().toString(16)}${fallbackLockCounter.toString(16).padStart(4, '0')}`
 }
 
-/** 获取存储写锁；若锁不可用会返回 null，由上层按兼容语义继续写入。 */
+// 获取存储写锁；若锁不可用会返回 null，由上层按兼容语义继续写入。
 function acquireStorageLock(): string | null {
   if (globalThis.window === undefined) return null
 
@@ -122,7 +122,7 @@ function acquireStorageLock(): string | null {
   return null
 }
 
-/** 释放当前进程持有的写锁，避免残留锁影响后续写入。 */
+// 释放当前进程持有的写锁，避免残留锁影响后续写入。
 function releaseStorageLock(token: string | null): void {
   if (!token || globalThis.window === undefined) return
 
@@ -132,31 +132,31 @@ function releaseStorageLock(token: string | null): void {
       localStorage.removeItem(TABLE_UI_STORAGE_LOCK_KEY)
     }
   } catch {
-    // ignore storage errors
+    // 释放锁失败最多留下短 TTL 的残锁，不值得为此打断当前写流程。
   }
 }
 
-/** 归一化“展开态”输入值，兼容历史字符串和布尔值。 */
+// 归一化“展开态”输入值，兼容历史字符串和布尔值。
 function normalizeExpandValue(value: unknown): boolean | undefined {
   if (value === 'expanded' || value === true || value === 'true') return true
   if (value === 'collapsed' || value === false || value === 'false') return false
   return undefined
 }
 
-/** 归一化布尔输入值，屏蔽字符串化布尔历史数据。 */
+// 归一化布尔输入值，屏蔽字符串化布尔历史数据。
 function normalizeBooleanValue(value: unknown): boolean | undefined {
   if (value === true || value === 'true') return true
   if (value === false || value === 'false') return false
   return undefined
 }
 
-/** 把布尔展开态转换为存储枚举，去掉内联嵌套三元。 */
+// 存储层统一用显式枚举，兼容旧格式时不会再和布尔/字符串布尔混在一起。
 function toExpandStatus(value: boolean | undefined): ExpandStatus | undefined {
   if (value === undefined) return undefined
   return value ? 'expanded' : 'collapsed'
 }
 
-/** 解析单表 UI 状态并执行字段归一化。 */
+// 解析单表 UI 状态并执行字段归一化。
 function parseTableState(raw: unknown): TableUIState {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const state = raw as Record<string, unknown>
@@ -170,7 +170,7 @@ function parseTableState(raw: unknown): TableUIState {
   return {}
 }
 
-/** 以“读-改-写”更新单表 UI 状态；未拿到锁时维持历史兼容行为继续写入。 */
+// 以“读-改-写”更新单表 UI 状态；未拿到锁时维持历史兼容行为继续写入。
 function writeTableState(tableKey: string, updater: (current: TableUIState) => TableUIState): void {
   const lockToken = acquireStorageLock()
   try {
@@ -190,7 +190,7 @@ function writeTableState(tableKey: string, updater: (current: TableUIState) => T
   }
 }
 
-/** 读取“展开全部”状态，缺失时回退到调用方默认值。 */
+// 读取“展开全部”状态，缺失时回退到调用方默认值。
 export function getExpandAllState(
   tableKey: string,
   defaultValue = false
@@ -203,13 +203,13 @@ export function getExpandAllState(
     const mapValue = normalizeExpandValue(current.expandAll)
     if (mapValue !== undefined) return mapValue
   } catch {
-    // ignore localStorage errors
+    // 读取偏好失败时回退默认值，别让 localStorage 状态反噬展开交互。
   }
 
   return defaultValue
 }
 
-/** 写入“展开全部”状态，供表格展开按钮统一持久化。 */
+// 写入“展开全部”状态，供表格展开按钮统一持久化。
 export function setExpandAllState(tableKey: string, isExpanded: boolean): void {
   if (globalThis.window === undefined) return
 
@@ -219,11 +219,11 @@ export function setExpandAllState(tableKey: string, isExpanded: boolean): void {
       expandAll: isExpanded ? 'expanded' : 'collapsed',
     }))
   } catch {
-    // ignore localStorage errors
+    // 持久化失败不影响当前 UI 切换，最多只是刷新后回不到上次状态。
   }
 }
 
-/** 读取模糊搜索开关，缺失时回退到调用方默认值。 */
+// 读取模糊搜索开关，缺失时回退到调用方默认值。
 export function getFuzzySearchState(tableKey: string, defaultValue = false): boolean {
   if (globalThis.window === undefined) return defaultValue
 
@@ -233,13 +233,13 @@ export function getFuzzySearchState(tableKey: string, defaultValue = false): boo
     const mapValue = normalizeBooleanValue(current.fuzzySearch)
     if (mapValue !== undefined) return mapValue
   } catch {
-    // ignore localStorage errors
+    // 模糊搜索偏好只是增强项，读取失败时退默认值即可。
   }
 
   return defaultValue
 }
 
-/** 持久化模糊搜索开关，保持与展开状态同一存储协议。 */
+// 持久化模糊搜索开关，保持与展开状态同一存储协议。
 export function setFuzzySearchState(tableKey: string, fuzzySearch: boolean): void {
   if (globalThis.window === undefined) return
 
@@ -249,6 +249,6 @@ export function setFuzzySearchState(tableKey: string, fuzzySearch: boolean): voi
       fuzzySearch,
     }))
   } catch {
-    // ignore localStorage errors
+    // 模糊搜索偏好写失败不该阻断当前筛选行为。
   }
 }

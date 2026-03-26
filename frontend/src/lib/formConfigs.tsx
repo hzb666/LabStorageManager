@@ -23,7 +23,7 @@ import {
 // 库存表单配置
 // ============================================================================
 
-/** 库存表单默认值 */
+// 库存表单默认值
 export const defaultInventoryValues: InventoryFormInputData = {
   name: '',
   cas_number: '',
@@ -191,7 +191,7 @@ export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormInputDa
 // 用户管理表单配置
 // ============================================================================
 
-/** 角色选项 */
+// 角色选项
 export const USER_ROLE_OPTIONS: { label: string; value: string }[] = [
   { label: '用户', value: 'user' },
   { label: '管理员', value: 'admin' },
@@ -260,7 +260,7 @@ export function getConsumableOrderFormFields(): FieldSchema<ConsumableOrderFormI
 // 归还表单配置
 // ============================================================================
 
-/** 归还表单默认值 */
+// 归还表单默认值
 export const defaultReturnValues = {
   return_mode: 'used' as const,
   return_quantity: '',
@@ -295,7 +295,7 @@ export function getReturnFormFields(
 // 入库表单配置
 // ============================================================================
 
-/** 入库表单默认值 */
+// 入库表单默认值
 export const defaultStockInValues: StockInFormInputData = {
   remaining_quantity: '',
   storage_location: '',
@@ -328,7 +328,7 @@ export function getStockInFormFields(unit?: string): FieldSchema<StockInFormInpu
 // 设备名称表单配置
 // ============================================================================
 
-/** 设备名称表单默认值 */
+// 设备名称表单默认值
 export const defaultDeviceNameValues = {
   device_name: ''
 }

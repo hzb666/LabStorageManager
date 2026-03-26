@@ -10,7 +10,7 @@ type Listener = (toast: ToastData) => void
 const listeners = new Set<Listener>()
 let fallbackToastCounter = 0
 
-/** 生成 toast 唯一标识，优先使用 Web Crypto，避免伪随机告警。 */
+// 生成 toast 唯一标识，优先使用 Web Crypto，避免伪随机告警。
 function generateToastId(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
     return globalThis.crypto.randomUUID()
@@ -28,7 +28,7 @@ function generateToastId(): string {
   return `${Date.now().toString(16)}-${counter}`
 }
 
-/** 暴露订阅接口，供 ToastContainer 监听并渲染通知事件。 */
+// 这里是极轻量事件总线，让非组件代码也能沿用同一条 toast 派发通道。
 export const subscribeToToasts = (listener: Listener) => {
   listeners.add(listener)
   return () => {
@@ -36,7 +36,7 @@ export const subscribeToToasts = (listener: Listener) => {
   }
 }
 
-/** 统一分发 toast 事件，保持原有调用签名和通知时序。 */
+// 所有 sugar 方法都复用这条分发路径，避免 success/error/info 后续行为逐渐漂移。
 export function toast(message: string, type: ToastType = 'info') {
   const id = generateToastId()
   listeners.forEach((listener) => listener({ id, message, type }))

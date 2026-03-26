@@ -15,7 +15,7 @@ const WARNING_ACTION_CLASS_NAME =
   'font-bold transition-colors hover:text-orange-950 dark:hover:text-orange-100'
 const DISPLAY_NAME_MAX_LENGTH = 10
 
-/** 限制展示名称长度，避免告警区被超长名称撑坏。 */
+// 限制展示名称长度，避免告警区被超长名称撑坏。
 const truncateDisplayName = (displayName?: string | null): string => {
   if (!displayName) {
     return ''
@@ -26,7 +26,7 @@ const truncateDisplayName = (displayName?: string | null): string => {
     : displayName
 }
 
-/** 解析订单状态展示文案，并兼容外部传入的状态映射函数。 */
+// 优先使用页面传入的状态映射，没提供时再回退原始状态值，避免这里复制一套状态表。
 const getOrderStatusText = (
   status: string,
   getOrderStatusLabel?: (status: string) => string
@@ -37,7 +37,6 @@ interface WarningSectionLabelProps {
   onClick?: () => void
 }
 
-/** 根据是否可点击渲染告警分段标题。 */
 function WarningSectionLabel({ label, onClick }: Readonly<WarningSectionLabelProps>) {
   if (onClick) {
     return (
@@ -54,7 +53,7 @@ function WarningSectionLabel({ label, onClick }: Readonly<WarningSectionLabelPro
   return <span className="font-bold">{label}</span>
 }
 
-/** 展示同 CAS 订单与库存冲突告警，不改动原有业务判定。 */
+// 这里只消费后端给出的 has_warning 结果，不在前端重复推导冲突规则。
 export function ReagentCasDuplicateWarning({
   casWarning,
   className,
