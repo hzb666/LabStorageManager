@@ -28,29 +28,10 @@ import { AUTH_NOTICE_KEY } from '@/lib/constants'
 import { BaseForm, type FieldSchema } from '@/components/BaseForm'
 import { getFullImageUrl } from '@/lib/utils'
 
-/**
- * 复用登录表单的字段类型。
- * 存在原因：让普通登录相关类型命名与锁屏模式区分开，便于页面内部阅读。
- */
-type NormalLoginForm = LoginFormData
-
-/**
- * 描述锁屏模式下只提交密码的表单结构。
- * 存在原因：锁屏登录不需要用户名字段，单独建模可以避免和普通登录混淆。
- */
+// 锁屏复验阶段沿用 remembered user，只允许重新输入密码，不在这里切换用户名。
 type LockScreenForm = { password: string }
 
-/**
- * 复用锁屏模式的校验规则。
- * 存在原因：把 schema 绑定到当前页面语义，避免直接在组件内部散落引用。
- */
-const lockScreenSchema = LockScreenSchema
-
-/**
- * 定义普通登录表单字段配置。
- * 存在原因：让 BaseForm 通过稳定配置渲染输入项，避免 JSX 内重复声明字段元数据。
- */
-const normalLoginFields: FieldSchema<NormalLoginForm>[] = [
+const normalLoginFields: FieldSchema<LoginFormData>[] = [
   {
     name: 'username',
     label: '用户名',
@@ -71,10 +52,7 @@ const normalLoginFields: FieldSchema<NormalLoginForm>[] = [
   },
 ]
 
-/**
- * 定义锁屏模式表单字段配置。
- * 存在原因：锁屏模式只展示密码输入框，单独配置后可以和普通登录表单共用渲染组件。
- */
+// 锁屏阶段禁止改用户名，切换账号走独立按钮流程，因此这里只保留密码输入。
 const lockScreenFields: FieldSchema<LockScreenForm>[] = [
   {
     name: 'password',
@@ -87,10 +65,7 @@ const lockScreenFields: FieldSchema<LockScreenForm>[] = [
   },
 ]
 
-/**
- * 描述登录接口返回后当前页面真正关心的用户字段。
- * 存在原因：记住用户逻辑只依赖少量字段，单独收口可以避免直接耦合更大的用户类型。
- */
+// 这里只保留 remembered user 持久化和同步所需字段，而不是完整 user 结构。
 type LoginUser = {
   id: number
   username: string
@@ -98,59 +73,7 @@ type LoginUser = {
   avatar_url?: string | null
 }
 
-/**
- * 描述主题切换按钮所需的入参。
- * 存在原因：把主题状态和切换动作收口到独立组件，减少主页面耦合。
- */
-interface ThemeToggleButtonProps {
-  theme: string
-  toggleTheme: () => void
-}
-
-/**
- * 描述通用错误提示组件的入参。
- * 存在原因：普通登录和锁屏登录都需要同一套错误展示结构，统一接口更清晰。
- */
-interface AuthErrorNoticeProps {
-  error: string
-}
-
-/**
- * 描述锁屏模式用户摘要组件的入参。
- * 存在原因：该区域只依赖记住的用户信息，单独定义便于和表单逻辑解耦。
- */
-interface LockScreenSummaryProps {
-  rememberedUser: RememberedUser
-}
-
-/**
- * 描述锁屏登录表单组件的入参。
- * 存在原因：把锁屏模式的错误、提交和切换用户动作显式化，方便复用独立视图。
- */
-interface LockScreenFormViewProps {
-  error: string
-  form: ReturnType<typeof useForm<LockScreenForm>>
-  rememberedUser: RememberedUser
-  loading: boolean
-  onSubmit: (event?: BaseSyntheticEvent) => Promise<void>
-  onSwitchUser: () => void
-}
-
-/**
- * 描述普通登录表单组件的入参。
- * 存在原因：让普通登录视图只消费必要状态，避免直接依赖页面内部实现细节。
- */
-interface NormalLoginFormViewProps {
-  error: string
-  form: ReturnType<typeof useForm<NormalLoginForm>>
-  loading: boolean
-  onSubmit: (event?: BaseSyntheticEvent) => Promise<void>
-}
-
-/**
- * 计算当前是否应该展示锁屏模式，避免登录成功后导航过程中短暂闪回。
- * 这个函数存在是为了把锁屏判定从页面主体中抽离，降低主组件复杂度。
- */
+// remembered user 存在，且当前不在普通登录提交流程、也不在页面跳转中时，才显示锁屏界面。
 function shouldShowLockScreen(
   rememberedUser: RememberedUser | null,
   isLoggingIn: boolean,
@@ -159,10 +82,7 @@ function shouldShowLockScreen(
   return Boolean(rememberedUser) && !isLoggingIn && !isNavigating
 }
 
-/**
- * 统一保存登录成功后的记住用户信息，确保普通登录路径复用同一组字段映射。
- * 这个函数存在是为了避免页面内重复拼装 remembered user 对象。
- */
+// 登录成功后把接口返回用户映射为 remembered user 持久化结构。
 function saveRememberedLoginUser(
   saveRememberedUser: (user: RememberedUser) => void,
   user: LoginUser
@@ -175,10 +95,7 @@ function saveRememberedLoginUser(
   })
 }
 
-/**
- * 同步锁屏登录后的记住用户信息，保持用户名变更与头像更新逻辑不变。
- * 这个函数存在是为了把锁屏模式的分支判断收敛到单一位置。
- */
+// 锁屏登录后，若用户名变了就重建 remembered user；否则只同步头像和姓名。
 function syncRememberedUserAfterLockLogin(
   rememberedUser: RememberedUser,
   user: LoginUser,
@@ -200,21 +117,14 @@ function syncRememberedUserAfterLockLogin(
   })
 }
 
-/**
- * 统一处理登录响应里的 Redis 状态提示，避免普通登录和锁屏登录重复判断。
- * 这个函数存在是为了保持提醒文案与行为一致，同时压缩提交流程代码。
- */
+// 响应头 `x-redis-status=unavailable` 时提示 Redis 服务不可用。
 function showRedisUnavailableNotice(headers?: Record<string, unknown>) {
   if (headers?.['x-redis-status'] === 'unavailable') {
     toast.warning('Redis 服务未连接')
   }
 }
 
-/**
- * 渲染通用的错误提示区域。
- * 这个函数存在是为了让普通登录和锁屏登录共享同一份错误展示结构。
- */
-function AuthErrorNotice({ error }: AuthErrorNoticeProps) {
+function AuthErrorNotice({ error }: Readonly<{ error: string }>) {
   if (!error) {
     return null
   }
@@ -226,11 +136,10 @@ function AuthErrorNotice({ error }: AuthErrorNoticeProps) {
   )
 }
 
-/**
- * 渲染登录页的主题切换按钮。
- * 这个函数存在是为了把头部小交互从主页面 JSX 中拆开，减少页面主体噪音。
- */
-function ThemeToggleButton({ theme, toggleTheme }: ThemeToggleButtonProps) {
+function ThemeToggleButton({ theme, toggleTheme }: Readonly<{
+  theme: string
+  toggleTheme: () => void
+}>) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -251,11 +160,7 @@ function ThemeToggleButton({ theme, toggleTheme }: ThemeToggleButtonProps) {
   )
 }
 
-/**
- * 渲染锁屏模式下的用户摘要。
- * 这个函数存在是为了把头像与欢迎文案从表单主体中独立出来，缩短登录页主函数。
- */
-function LockScreenSummary({ rememberedUser }: LockScreenSummaryProps) {
+function LockScreenSummary({ rememberedUser }: Readonly<{ rememberedUser: RememberedUser }>) {
   return (
     <div className="flex flex-col items-center py-4">
       <Avatar className="h-24 w-24 mb-4">
@@ -278,10 +183,7 @@ function LockScreenSummary({ rememberedUser }: LockScreenSummaryProps) {
   )
 }
 
-/**
- * 渲染锁屏模式登录表单。
- * 这个函数存在是为了把锁屏模式的独立 UI 拆出，降低 Login 主组件长度。
- */
+// 锁屏视图必须保留切换用户入口，避免 remembered user 失效时只能刷新页面退出锁屏。
 function LockScreenFormView({
   error,
   form,
@@ -289,7 +191,14 @@ function LockScreenFormView({
   loading,
   onSubmit,
   onSwitchUser,
-}: LockScreenFormViewProps) {
+}: Readonly<{
+  error: string
+  form: ReturnType<typeof useForm<LockScreenForm>>
+  rememberedUser: RememberedUser
+  loading: boolean
+  onSubmit: (event?: BaseSyntheticEvent) => Promise<void>
+  onSwitchUser: () => void
+}>) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <AuthErrorNotice error={error} />
@@ -334,16 +243,18 @@ function LockScreenFormView({
   )
 }
 
-/**
- * 渲染普通登录表单。
- * 这个函数存在是为了让主页面只负责模式切换，而不是同时承载两套表单结构。
- */
+// 普通登录视图不渲染 remembered user 摘要，避免把锁屏态入口和首次登录入口混在一起。
 function NormalLoginFormView({
   error,
   form,
   loading,
   onSubmit,
-}: NormalLoginFormViewProps) {
+}: Readonly<{
+  error: string
+  form: ReturnType<typeof useForm<LoginFormData>>
+  loading: boolean
+  onSubmit: (event?: BaseSyntheticEvent) => Promise<void>
+}>) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <AuthErrorNotice error={error} />
@@ -369,10 +280,7 @@ function NormalLoginFormView({
   )
 }
 
-/**
- * 登录页负责普通登录与锁屏登录两种模式的编排。
- * 这个函数存在是为了复用记住用户体验，同时保持原有登录成功、提示和跳转行为不变。
- */
+// 页面根据 remembered user 与登录/跳转瞬时状态，在普通登录和锁屏登录之间切换。
 export function Login() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -389,12 +297,12 @@ export function Login() {
 
   const isLockScreen = shouldShowLockScreen(rememberedUser, isLoggingIn, isNavigating)
 
-  const formNormal = useForm<NormalLoginForm>({
+  const formNormal = useForm<LoginFormData>({
     resolver: valibotResolver(LoginSchema),
   })
 
   const formLock = useForm<LockScreenForm>({
-    resolver: valibotResolver(lockScreenSchema),
+    resolver: valibotResolver(LockScreenSchema),
   })
 
   useEffect(() => {
@@ -424,7 +332,7 @@ export function Login() {
     }
   }, [location.state])
 
-  const onNormalSubmit = async (data: NormalLoginForm) => {
+  const onNormalSubmit = async (data: LoginFormData) => {
     setLoading(true)
     setIsLoggingIn(true)
     setError('')

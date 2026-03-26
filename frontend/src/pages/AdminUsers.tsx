@@ -44,10 +44,7 @@ import { SEARCH_MAX_LENGTH, TableEmptyState, TableSearchInput } from '@/componen
 import { getAdminUsersTableColumns } from '@/lib/tableConfigs'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 
-/**
- * 定义用户列表请求参数结构。
- * 这个类型存在是为了统一分页与筛选入参，避免调用接口时拼错字段。
- */
+// 用户列表请求共用分页、关键字、角色和状态筛选字段。
 interface UserListParams extends PaginationParams {
   role?: string
   is_active?: boolean
@@ -55,153 +52,14 @@ interface UserListParams extends PaginationParams {
   full_name?: string
 }
 
-/**
- * 约束用户管理页弹窗模式。
- * 这个类型存在是为了限制弹窗状态取值，避免使用任意字符串导致分支失效。
- */
+// 弹窗状态只允许 `create / edit / delete` 三种模式。
 type AdminUsersDialogMode = 'create' | 'edit' | 'delete'
 
-/**
- * 定义筛选栏组件的入参。
- * 这个接口存在是为了明确筛选展示数据与回调契约，降低父子组件耦合风险。
- */
-interface AdminUsersFiltersProps {
-  inputValue: string
-  roleFilter: string
-  statusFilter: string
-  onInputChange: (value: string) => void
-  onRoleChange: (value: string) => void
-  onStatusChange: (value: string) => void
-}
-
-/**
- * 定义用户表格卡片组件的入参。
- * 这个接口存在是为了集中描述列表、分页和表格实例依赖，避免 props 语义分散。
- */
-interface AdminUsersTableCardProps {
-  isLoading: boolean
-  data: User[]
-  debouncedFilter: string
-  hasFilter: boolean
-  displayCount: string
-  total: number
-  currentPage: number
-  totalPages: number
-  pageSize: number
-  table: ReturnType<typeof useReactTable<User>>
-  onPageChange: (page: number) => void
-  onPageSizeChange: (size: number) => void
-}
-
-/**
- * 定义创建用户弹窗组件的入参。
- * 这个接口存在是为了固定创建流程所需状态与行为，保证表单与弹窗联动一致。
- */
-interface CreateUserDialogProps {
-  open: boolean
-  form: ReturnType<typeof useForm<UserCreateFormData>>
-  createLoading: boolean
-  onOpenChange: (open: boolean) => void
-  onSubmit: () => Promise<void>
-}
-
-/**
- * 定义禁用用户弹窗组件的入参。
- * 这个接口存在是为了统一确认弹窗的数据与回调协议，避免删除链路参数漂移。
- */
-interface DeleteUserDialogProps {
-  open: boolean
-  user: User | null
-  deleteLoading: boolean
-  onOpenChange: (open: boolean) => void
-  onConfirm: () => void
-}
-
-/**
- * 描述用户管理页筛选状态 Hook 的返回结构。
- * 这个接口存在是为了把筛选状态与操作函数打包成稳定契约，便于主页面消费。
- */
-interface AdminUsersFilterState {
-  inputValue: string
-  debouncedFilter: string
-  roleFilter: string
-  statusFilter: string
-  currentPage: number
-  pageSize: number
-  setInputValue: (value: string) => void
-  setRoleFilter: (value: string) => void
-  setStatusFilter: (value: string) => void
-  setCurrentPage: (page: number) => void
-  handlePageSizeChange: (size: number) => void
-}
-
-/**
- * 描述用户管理页弹窗与 CRUD 状态 Hook 的返回结构。
- * 这个接口存在是为了明确弹窗流转和异步操作能力边界，方便主页面按需组合。
- */
-interface AdminUsersDialogState {
-  createForm: ReturnType<typeof useForm<UserCreateFormData>>
-  createLoading: boolean
-  editUser: User | null
-  deleteUser: User | null
-  deleteLoading: boolean
-  openEditModal: (user: User) => void
-  openDeleteModal: (user: User) => void
-  handleActivate: (userId: number) => Promise<void>
-  handleDelete: () => Promise<void>
-  handleCreate: (formData: UserCreateFormData) => Promise<void>
-  handleCreateDialogChange: (open: boolean) => void
-  handleDeleteDialogChange: (open: boolean) => void
-}
-
-/**
- * 定义用户管理页展示层组件的入参。
- * 这个接口存在是为了收敛页面展示依赖，避免主页面 JSX 与状态编排相互缠绕。
- */
-interface AdminUsersPageContentProps {
-  inputValue: string
-  roleFilter: string
-  statusFilter: string
-  isLoading: boolean
-  data: User[]
-  debouncedFilter: string
-  hasFilter: boolean
-  displayCount: string
-  total: number
-  currentPage: number
-  totalPages: number
-  pageSize: number
-  table: ReturnType<typeof useReactTable<User>>
-  dialogState: AdminUsersDialogMode | null
-  createForm: ReturnType<typeof useForm<UserCreateFormData>>
-  createLoading: boolean
-  editUser: User | null
-  deleteUser: User | null
-  deleteLoading: boolean
-  onSetDialogState: (value: AdminUsersDialogMode | null) => void
-  onInputChange: (value: string) => void
-  onRoleChange: (value: string) => void
-  onStatusChange: (value: string) => void
-  onPageChange: (page: number) => void
-  onPageSizeChange: (size: number) => void
-  onCreateDialogChange: (open: boolean) => void
-  onDeleteDialogChange: (open: boolean) => void
-  onCreateSubmit: () => Promise<void>
-  onDeleteSubmit: () => Promise<void>
-  onRefetchUsers: () => void
-}
-
-/**
- * 创建用户表格列辅助器。
- * 这个常量存在是为了复用列定义构建能力，减少手写列类型推导。
- */
+// 为用户表格列定义保留字段级类型推导。
 const columnHelper = createColumnHelper<User>()
 
-/**
- * 维护用户管理页的搜索、筛选和分页状态。
- * 这个函数存在是为了把页面级筛选状态从主组件中拆出，压缩主函数长度和语句数。
- */
-function useAdminUsersFilterState(): AdminUsersFilterState {
+// 统一管理搜索输入、防抖筛选和分页重置。
+function useAdminUsersFilterState() {
   const [inputValue, setInputValue] = useState('')
   const [debouncedFilter, setDebouncedFilter] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('all')
@@ -265,10 +123,7 @@ function useAdminUsersFilterState(): AdminUsersFilterState {
   }
 }
 
-/**
- * 构建用户列表查询参数，保持筛选条件与分页逻辑一致。
- * 这个函数存在是为了把接口参数拼装从页面主函数中抽离出来，减少重复判断。
- */
+// 查询参数会裁掉空筛选项，避免把“全部”状态继续传给接口。
 function buildUserListParams(
   currentPage: number,
   pageSize: number,
@@ -297,10 +152,7 @@ function buildUserListParams(
   return params
 }
 
-/**
- * 将当前登录管理员置顶，保持原有列表展示习惯不变。
- * 这个函数存在是为了把列表展示策略独立出来，避免页面主体混入数据重排细节。
- */
+// 当前登录管理员固定显示在列表顶部，其余用户保持原有顺序。
 function moveCurrentUserToTop(userData: User[], currentUser: User | null | undefined) {
   if (!currentUser) {
     return userData
@@ -317,10 +169,7 @@ function moveCurrentUserToTop(userData: User[], currentUser: User | null | undef
   return result
 }
 
-/**
- * 计算用户列表展示计数，统一过滤前后总数的显示规则。
- * 这个函数存在是为了复用计数字符串逻辑，减少页面主函数里的条件分支。
- */
+// 存在筛选、总数可用且不是占位数据时显示“当前 / 总计”；其余场景只显示当前总数。
 function getUserDisplayCount(
   total: number,
   totalWithoutFilter: number,
@@ -335,14 +184,11 @@ function getUserDisplayCount(
   return shouldShowGrandTotal ? `${total}/${totalWithoutFilter}` : `${total}`
 }
 
-/**
- * 维护用户管理页的创建、启用、禁用与弹窗状态。
- * 这个函数存在是为了把 CRUD 编排从主页面中抽离，避免主页面继续膨胀。
- */
+// 集中管理用户创建、启用/禁用和弹窗状态，提交成功后统一刷新列表。
 function useAdminUsersDialogState(
   setDialogState: (value: AdminUsersDialogMode | null) => void,
   refetchUsers: () => void
-): AdminUsersDialogState {
+) {
   const createForm = useForm<UserCreateFormData>({
     resolver: valibotResolver(UserCreateSchema),
     defaultValues: defaultUserValues,
@@ -440,27 +286,21 @@ function useAdminUsersDialogState(
   }
 }
 
-/**
- * 渲染用户管理页的筛选栏。
- * 这个函数存在是为了把搜索和筛选结构从页面主体中拆出，缩短主页面长度。
- */
+// 筛选栏同时驱动关键字、角色和状态三个过滤维度。
 function AdminUsersFilters({
-  inputValue,
-  roleFilter,
-  statusFilter,
-  onInputChange,
-  onRoleChange,
-  onStatusChange,
-}: AdminUsersFiltersProps) {
+  filters,
+}: {
+  filters: ReturnType<typeof useAdminUsersFilterState>
+}) {
   return (
     <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
       <TableSearchInput
-        value={inputValue}
-        onChange={onInputChange}
+        value={filters.inputValue}
+        onChange={filters.setInputValue}
         placeholder="搜索用户名、姓名..."
         inputClassName="h-10"
       />
-      <Select value={roleFilter} onValueChange={onRoleChange}>
+      <Select value={filters.roleFilter} onValueChange={filters.setRoleFilter}>
         <SelectTrigger className="w-30 min-h-10">
           <SelectValue placeholder="全部角色" />
         </SelectTrigger>
@@ -471,7 +311,7 @@ function AdminUsersFilters({
           <SelectItem value="public">公用</SelectItem>
         </SelectContent>
       </Select>
-      <Select value={statusFilter} onValueChange={onStatusChange}>
+      <Select value={filters.statusFilter} onValueChange={filters.setStatusFilter}>
         <SelectTrigger className="w-30 min-h-10">
           <SelectValue placeholder="已启用" />
         </SelectTrigger>
@@ -485,51 +325,52 @@ function AdminUsersFilters({
   )
 }
 
-/**
- * 渲染用户列表卡片与分页区。
- * 这个函数存在是为了让主组件只负责数据编排，而不是直接承载整段表格 UI。
- */
+// 表格卡片统一承载加载态、空态、列表和分页切换。
 function AdminUsersTableCard({
-  isLoading,
-  data,
-  debouncedFilter,
-  hasFilter,
-  displayCount,
-  total,
-  currentPage,
-  totalPages,
-  pageSize,
-  table,
-  onPageChange,
-  onPageSizeChange,
-}: AdminUsersTableCardProps) {
+  tableState,
+}: {
+  tableState: {
+    isLoading: boolean
+    rowCount: number
+    debouncedFilter: string
+    hasFilter: boolean
+    displayCount: string
+    total: number
+    currentPage: number
+    totalPages: number
+    pageSize: number
+    table: ReturnType<typeof useReactTable<User>>
+    onPageChange: (page: number) => void
+    onPageSizeChange: (size: number) => void
+  }
+}) {
   return (
     <Card className="overflow-hidden">
       <CardHeader className="pb-4">
         <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
           <Users className="w-5 h-5" />
           用户列表
-          <span className="text-muted-foreground font-normal">(&thinsp;{displayCount}&thinsp;)</span>
+          <span className="text-muted-foreground font-normal">(&thinsp;{tableState.displayCount}&thinsp;)</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        {isLoading && data.length === 0 && (
+        {tableState.isLoading && tableState.rowCount === 0 && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>
         )}
-        {!isLoading && data.length === 0 && (
+        {!tableState.isLoading && tableState.rowCount === 0 && (
           <TableEmptyState
-            searchKeyword={debouncedFilter}
-            hasFilter={hasFilter}
+            searchKeyword={tableState.debouncedFilter}
+            hasFilter={tableState.hasFilter}
             emptyText="没有符合条件的用户"
           />
         )}
-        {data.length > 0 && (
+        {tableState.rowCount > 0 && (
           <div className="px-6 rounded-md overflow-auto">
             <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
               <thead>
-                {table.getHeaderGroups().map((headerGroup) => (
+                {tableState.table.getHeaderGroups().map((headerGroup) => (
                   <tr key={headerGroup.id} className="border-b-2 border-border">
                     {headerGroup.headers.map((header) => (
                       <th
@@ -546,7 +387,7 @@ function AdminUsersTableCard({
                 ))}
               </thead>
               <tbody>
-                {table.getRowModel().rows.map((row) => (
+                {tableState.table.getRowModel().rows.map((row) => (
                   <MemoizedTableRow key={row.id} row={row} />
                 ))}
               </tbody>
@@ -554,19 +395,19 @@ function AdminUsersTableCard({
           </div>
         )}
       </CardContent>
-      {total > 20 && (
+      {tableState.total > 20 && (
         <div className="flex items-center justify-between px-6 py-4 mt-2">
           <PaginationInfo
-            currentPage={currentPage}
-            pageSize={pageSize}
-            total={total}
+            currentPage={tableState.currentPage}
+            pageSize={tableState.pageSize}
+            total={tableState.total}
           />
           <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            pageSize={pageSize}
-            onPageChange={onPageChange}
-            onPageSizeChange={onPageSizeChange}
+            currentPage={tableState.currentPage}
+            totalPages={tableState.totalPages}
+            pageSize={tableState.pageSize}
+            onPageChange={tableState.onPageChange}
+            onPageSizeChange={tableState.onPageSizeChange}
           />
         </div>
       )}
@@ -574,28 +415,27 @@ function AdminUsersTableCard({
   )
 }
 
-/**
- * 渲染创建用户弹窗。
- * 这个函数存在是为了把创建表单结构从主页面中拆开，并复用原有 BaseForm 方案。
- */
+// 创建弹窗复用 `BaseForm`，字段和校验继续沿用原有创建用户流程。
 function CreateUserDialog({
   open,
-  form,
-  createLoading,
-  onOpenChange,
+  dialogs,
   onSubmit,
-}: CreateUserDialogProps) {
-  const roleValue = form.watch('role')
+}: {
+  open: boolean
+  dialogs: ReturnType<typeof useAdminUsersDialogState>
+  onSubmit: () => Promise<void>
+}) {
+  const roleValue = dialogs.createForm.watch('role')
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={dialogs.handleCreateDialogChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>创建用户</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
           <BaseForm
-            form={form}
+            form={dialogs.createForm}
             fields={getUserCreateFormFields()}
             layout="stack"
           />
@@ -603,7 +443,7 @@ function CreateUserDialog({
             <Label className="text-base">角色</Label>
             <RadioGroup
               value={roleValue}
-              onValueChange={(value) => form.setValue('role', value as 'admin' | 'user' | 'public')}
+              onValueChange={(value) => dialogs.createForm.setValue('role', value as 'admin' | 'user' | 'public')}
               className="flex gap-4 mt-2"
             >
               {USER_ROLE_OPTIONS.map((option) => (
@@ -618,11 +458,11 @@ function CreateUserDialog({
           </div>
         </div>
         <div className="flex gap-3 mt-8">
-          <Button variant="modern" onClick={() => onOpenChange(false)} size="lg" className="flex-1">
+          <Button variant="modern" onClick={() => dialogs.handleCreateDialogChange(false)} size="lg" className="flex-1">
             取消
           </Button>
-          <LoadingButton onClick={onSubmit} isLoading={createLoading} size="lg" className="flex-1">
-            {createLoading ? '创建中...' : '创建'}
+          <LoadingButton onClick={onSubmit} isLoading={dialogs.createLoading} size="lg" className="flex-1">
+            {dialogs.createLoading ? '创建中...' : '创建'}
           </LoadingButton>
         </div>
       </DialogContent>
@@ -630,32 +470,29 @@ function CreateUserDialog({
   )
 }
 
-/**
- * 渲染禁用用户确认弹窗。
- * 这个函数存在是为了把禁用确认 UI 从主页面中拆开，降低主页面长度和语句数。
- */
+// 禁用确认弹窗只展示目标用户名，并复用原有确认文案和提交动作。
 function DeleteUserDialog({
   open,
-  user,
-  deleteLoading,
-  onOpenChange,
-  onConfirm,
-}: DeleteUserDialogProps) {
+  dialogs,
+}: {
+  open: boolean
+  dialogs: ReturnType<typeof useAdminUsersDialogState>
+}) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={dialogs.handleDeleteDialogChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>确认禁用用户</DialogTitle>
         </DialogHeader>
         <div className="pb-4">
-          <p>确定要禁用用户 <strong>{user?.username}</strong> 吗？</p>
+          <p>确定要禁用用户 <strong>{dialogs.deleteUser?.username}</strong> 吗？</p>
           <p className="text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
         </div>
         <div className="flex mt-4 gap-2">
-          <Button variant="destructive" onClick={onConfirm} disabled={deleteLoading} size="lg">
-            {deleteLoading ? '处理中...' : '确认禁用'}
+          <Button variant="destructive" onClick={dialogs.handleDelete} disabled={dialogs.deleteLoading} size="lg">
+            {dialogs.deleteLoading ? '处理中...' : '确认禁用'}
           </Button>
-          <Button variant="modern" onClick={() => onOpenChange(false)} size="lg" className="text-base">
+          <Button variant="modern" onClick={() => dialogs.handleDeleteDialogChange(false)} size="lg" className="text-base">
             取消
           </Button>
         </div>
@@ -664,130 +501,32 @@ function DeleteUserDialog({
   )
 }
 
-/**
- * 渲染用户管理页主体结构。
- * 这个函数存在是为了把主页面的展示层抽离出去，让页面主函数更聚焦于状态编排。
- */
-function AdminUsersPageContent({
-  inputValue,
-  roleFilter,
-  statusFilter,
-  isLoading,
-  data,
-  debouncedFilter,
-  hasFilter,
-  displayCount,
-  total,
-  currentPage,
-  totalPages,
-  pageSize,
-  table,
-  dialogState,
-  createForm,
-  createLoading,
-  editUser,
-  deleteUser,
-  deleteLoading,
-  onSetDialogState,
-  onInputChange,
-  onRoleChange,
-  onStatusChange,
-  onPageChange,
-  onPageSizeChange,
-  onCreateDialogChange,
-  onDeleteDialogChange,
-  onCreateSubmit,
-  onDeleteSubmit,
-  onRefetchUsers,
-}: AdminUsersPageContentProps) {
+// 页头只负责标题和“添加用户”入口，不承载筛选或表格状态。
+function AdminUsersHeader({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary">用户管理</h1>
-        <Button onClick={() => onSetDialogState('create')} size="lg">
-          <UserPlus className="w-4 h-4 mr-1.5" />
-          创建用户
-        </Button>
-      </div>
-
-      <AdminUsersFilters
-        inputValue={inputValue}
-        roleFilter={roleFilter}
-        statusFilter={statusFilter}
-        onInputChange={onInputChange}
-        onRoleChange={onRoleChange}
-        onStatusChange={onStatusChange}
-      />
-
-      <AdminUsersTableCard
-        isLoading={isLoading}
-        data={data}
-        debouncedFilter={debouncedFilter}
-        hasFilter={hasFilter}
-        displayCount={displayCount}
-        total={total}
-        currentPage={currentPage}
-        totalPages={totalPages}
-        pageSize={pageSize}
-        table={table}
-        onPageChange={onPageChange}
-        onPageSizeChange={onPageSizeChange}
-      />
-
-      <CreateUserDialog
-        open={dialogState === 'create'}
-        form={createForm}
-        createLoading={createLoading}
-        onOpenChange={onCreateDialogChange}
-        onSubmit={onCreateSubmit}
-      />
-
-      <UserEditDialog
-        open={dialogState === 'edit'}
-        onOpenChange={(open) => onSetDialogState(open ? 'edit' : null)}
-        user={editUser}
-        mode="admin"
-        onSuccess={onRefetchUsers}
-      />
-
-      <DeleteUserDialog
-        open={dialogState === 'delete'}
-        user={deleteUser}
-        deleteLoading={deleteLoading}
-        onOpenChange={onDeleteDialogChange}
-        onConfirm={onDeleteSubmit}
-      />
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <h1 className="text-3xl font-bold text-primary">用户管理</h1>
+      <Button onClick={onCreate} size="lg">
+        <UserPlus className="w-4 h-4 mr-1.5" />
+        创建用户
+      </Button>
     </div>
   )
 }
 
-/**
- * 用户管理页负责用户查询、创建、编辑和禁用的编排。
- * 这个函数存在是为了复用现有接口与交互行为，同时降低页面主函数复杂度。
- */
+// 用户管理页主组件只编排查询、创建、编辑、禁用和日志跳转流程。
 export function AdminUsersPage() {
   const { user: currentUser } = useAuthStore()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
   const [dialogState, setDialogState] = useDialogState<AdminUsersDialogMode>()
-  const {
-    inputValue,
-    debouncedFilter,
-    roleFilter,
-    statusFilter,
-    currentPage,
-    pageSize,
-    setInputValue,
-    setRoleFilter,
-    setStatusFilter,
-    setCurrentPage,
-    handlePageSizeChange,
-  } = useAdminUsersFilterState()
+  const filters = useAdminUsersFilterState()
 
   const { data: totalWithoutFilterData } = useQuery({
     queryKey: ['adminUsers', 'count'],
     queryFn: async () => {
+      // limit=0 只拿 total，用于筛选态下展示“当前/总计”而不重复请求整页数据。
       const response = await userAdminAPI.list({ skip: 0, limit: 0 })
       return response.data.total || 0
     },
@@ -795,10 +534,17 @@ export function AdminUsersPage() {
   })
 
   const { data: queryResult, isLoading, isPlaceholderData } = useQuery({
-    queryKey: ['adminUsers', roleFilter, statusFilter, debouncedFilter, currentPage, pageSize],
+    // 把分页与筛选条件全部纳入 queryKey，避免不同筛选态之间缓存串页。
+    queryKey: ['adminUsers', filters.roleFilter, filters.statusFilter, filters.debouncedFilter, filters.currentPage, filters.pageSize],
     queryFn: async () => {
       const response = await userAdminAPI.list(
-        buildUserListParams(currentPage, pageSize, roleFilter, statusFilter, debouncedFilter)
+        buildUserListParams(
+          filters.currentPage,
+          filters.pageSize,
+          filters.roleFilter,
+          filters.statusFilter,
+          filters.debouncedFilter
+        )
       )
       return {
         data: response.data.data || [],
@@ -809,9 +555,11 @@ export function AdminUsersPage() {
   })
 
   const total = queryResult?.total || 0
-  const totalPages = Math.ceil(total / pageSize)
+  const totalPages = Math.ceil(total / filters.pageSize)
   const totalWithoutFilter = totalWithoutFilterData || 0
-  const hasFilter = Boolean(debouncedFilter || roleFilter !== 'all' || statusFilter !== 'all')
+  const hasFilter = Boolean(
+    filters.debouncedFilter || filters.roleFilter !== 'all' || filters.statusFilter !== 'all'
+  )
   const displayCount = getUserDisplayCount(total, totalWithoutFilter, hasFilter, isPlaceholderData)
   const data = useMemo(
     () => moveCurrentUserToTop(queryResult?.data || [], currentUser),
@@ -821,20 +569,7 @@ export function AdminUsersPage() {
   const refetchUsers = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['adminUsers'] })
   }, [queryClient])
-  const {
-    createForm,
-    createLoading,
-    editUser,
-    deleteUser,
-    deleteLoading,
-    openEditModal,
-    openDeleteModal,
-    handleActivate,
-    handleDelete,
-    handleCreate,
-    handleCreateDialogChange,
-    handleDeleteDialogChange,
-  } = useAdminUsersDialogState(setDialogState, refetchUsers)
+  const dialogs = useAdminUsersDialogState(setDialogState, refetchUsers)
 
   const handleViewLogs = useCallback(async (user: User) => {
     try {
@@ -853,17 +588,17 @@ export function AdminUsersPage() {
       cell: (info) => (
         <ActionButtons
           user={info.row.original}
-          currentUser={currentUser ? { ...currentUser, is_active: true } : null}
-          onEdit={openEditModal}
+          currentUserId={currentUser?.id}
+          onEdit={dialogs.openEditModal}
           onViewLogs={handleViewLogs}
-          onActivate={handleActivate}
-          onDelete={openDeleteModal}
+          onActivate={dialogs.handleActivate}
+          onDelete={dialogs.openDeleteModal}
         />
       ),
     })
 
     return [...getAdminUsersTableColumns(), actionColumn] as ColumnDef<User, unknown>[]
-  }, [currentUser, handleActivate, handleViewLogs, openDeleteModal, openEditModal])
+  }, [currentUser, dialogs.handleActivate, dialogs.openDeleteModal, dialogs.openEditModal, handleViewLogs])
 
   const table = useReactTable({
     data,
@@ -874,73 +609,71 @@ export function AdminUsersPage() {
     onSortingChange: setSorting,
     state: {
       sorting,
-      globalFilter: debouncedFilter,
+      globalFilter: filters.debouncedFilter,
     },
   })
 
   return (
-    <AdminUsersPageContent
-      inputValue={inputValue}
-      roleFilter={roleFilter}
-      statusFilter={statusFilter}
-      isLoading={isLoading}
-      data={data}
-      debouncedFilter={debouncedFilter}
-      hasFilter={hasFilter}
-      displayCount={displayCount}
-      total={total}
-      currentPage={currentPage}
-      totalPages={totalPages}
-      pageSize={pageSize}
-      table={table}
-      dialogState={dialogState}
-      createForm={createForm}
-      createLoading={createLoading}
-      editUser={editUser}
-      deleteUser={deleteUser}
-      deleteLoading={deleteLoading}
-      onSetDialogState={setDialogState}
-      onInputChange={setInputValue}
-      onRoleChange={setRoleFilter}
-      onStatusChange={setStatusFilter}
-      onPageChange={setCurrentPage}
-      onPageSizeChange={handlePageSizeChange}
-      onCreateDialogChange={handleCreateDialogChange}
-      onDeleteDialogChange={handleDeleteDialogChange}
-      onCreateSubmit={createForm.handleSubmit(handleCreate)}
-      onDeleteSubmit={handleDelete}
-      onRefetchUsers={refetchUsers}
-    />
+    <div className="space-y-6">
+      <AdminUsersHeader onCreate={() => setDialogState('create')} />
+
+      <AdminUsersFilters filters={filters} />
+
+      <AdminUsersTableCard
+        tableState={{
+          isLoading,
+          rowCount: data.length,
+          debouncedFilter: filters.debouncedFilter,
+          hasFilter,
+          displayCount,
+          total,
+          currentPage: filters.currentPage,
+          totalPages,
+          pageSize: filters.pageSize,
+          table,
+          onPageChange: filters.setCurrentPage,
+          onPageSizeChange: filters.handlePageSizeChange,
+        }}
+      />
+
+      <CreateUserDialog
+        open={dialogState === 'create'}
+        dialogs={dialogs}
+        onSubmit={dialogs.createForm.handleSubmit(dialogs.handleCreate)}
+      />
+
+      <UserEditDialog
+        open={dialogState === 'edit'}
+        onOpenChange={(open) => setDialogState(open ? 'edit' : null)}
+        user={dialogs.editUser}
+        mode="admin"
+        onSuccess={refetchUsers}
+      />
+
+      <DeleteUserDialog open={dialogState === 'delete'} dialogs={dialogs} />
+    </div>
   )
 }
 
-/**
- * 定义用户表格操作按钮组件的入参。
- * 这个接口存在是为了约束按钮行为回调签名，保证操作列行为可预测。
- */
-interface ActionButtonsProps {
-  user: User
-  currentUser: User | null
-  onEdit: (user: User) => void
-  onViewLogs: (user: User) => void
-  onActivate: (userId: number) => void
-  onDelete: (user: User) => void
-}
-
-/**
- * 渲染用户行操作按钮，保持日志、启用和禁用行为不变。
- * 这个函数存在是为了隔离表格操作配置，避免主页面和列定义重复嵌套。
- */
+// 行操作继续保留编辑、日志、启用和禁用入口，并按当前用户和目标状态控制可用性。
 const ActionButtons = React.memo(function ActionButtons({
   user,
-  currentUser,
+  currentUserId,
   onEdit,
   onViewLogs,
   onActivate,
   onDelete,
-}: ActionButtonsProps) {
-  const isSelf = user.id === currentUser?.id
+}: {
+  user: User
+  currentUserId?: number
+  onEdit: (user: User) => void
+  onViewLogs: (user: User) => void
+  onActivate: (userId: number) => void
+  onDelete: (user: User) => void
+}) {
+  const isSelf = user.id === currentUserId
 
+  // 自身账号禁止启用/禁用，避免管理员误把自己踢出可登录状态。
   const actions = useMemo(() => [
     {
       id: 'logs',
@@ -987,7 +720,7 @@ const ActionButtons = React.memo(function ActionButtons({
     prevProps.onViewLogs !== nextProps.onViewLogs ||
     prevProps.onActivate !== nextProps.onActivate ||
     prevProps.onDelete !== nextProps.onDelete ||
-    prevProps.currentUser?.id !== nextProps.currentUser?.id
+    prevProps.currentUserId !== nextProps.currentUserId
   ) {
     return false
   }
@@ -1007,10 +740,7 @@ const ActionButtons = React.memo(function ActionButtons({
   return prevKeys.every((key) => prevUser[key] === nextUser[key])
 })
 
-/**
- * 渲染用户表格的单行内容，避免列表区重复创建整段 tr 结构。
- * 这个函数存在是为了降低表格主体 JSX 嵌套层级，并保留原有 memo 行为。
- */
+// 单行内容保持原有 `memo` 边界，避免分页或筛选变化时无关行重复渲染。
 const MemoizedTableRow = React.memo(({ row }: { row: Row<User> }) => {
   return (
     <tr className="border-b border-border hover:bg-muted/30">

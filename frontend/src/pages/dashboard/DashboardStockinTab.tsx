@@ -41,10 +41,7 @@ import {
 
 const pendingStockinColumnHelper = createColumnHelper<PendingStockinItem>()
 
-/**
- * 创建待入库列表的本地筛选 API 适配器。
- * 存在原因：Dashboard 只拉取一次待入库数据，再交给通用表格做本地搜索和分页。
- */
+// 待入库列表只请求一次接口，再包装成 `FilterTable` 需要的本地搜索和分页结构。
 function createPendingStockinDashboardAPI(): FilterAPI {
   return {
     list: async (params) => {
@@ -60,10 +57,6 @@ function createPendingStockinDashboardAPI(): FilterAPI {
   }
 }
 
-/**
- * 构造待入库列表列定义。
- * 存在原因：把列渲染与入库按钮配置从页面主体中抽离，降低主函数长度。
- */
 function createStockinColumns(
   openStockinModal: (item: PendingStockinItem) => void
 ): ColumnDef<Record<string, unknown>, unknown>[] {
@@ -100,27 +93,28 @@ function createStockinColumns(
   ] as ColumnDef<Record<string, unknown>, unknown>[]
 }
 
-/**
- * 渲染待入库弹窗。
- * 存在原因：主页面只保留状态与提交逻辑，弹窗表单结构单独收口。
- */
+// 弹窗展示当前待入库记录名称、CAS、数量，并承载统一的入库表单。
 function DashboardStockinDialog({
-  open,
-  selectedStockin,
-  stockinForm,
-  stockinLoading,
-  onClose,
-  onSubmit,
+  dialog,
 }: Readonly<{
-  open: boolean
-  selectedStockin: PendingStockinItem | null
-  stockinForm: ReturnType<typeof useForm<StockInFormInputData>>
-  stockinLoading: boolean
-  onClose: () => void
-  onSubmit: () => void
+  dialog: {
+    selectedStockin: PendingStockinItem | null
+    stockinForm: ReturnType<typeof useForm<StockInFormInputData>>
+    stockinLoading: boolean
+    onClose: () => void
+    onSubmit: () => void
+  }
 }>) {
+  const {
+    selectedStockin,
+    stockinForm,
+    stockinLoading,
+    onClose,
+    onSubmit,
+  } = dialog
+
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose() }}>
+    <Dialog open={selectedStockin !== null} onOpenChange={(nextOpen) => { if (!nextOpen) onClose() }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>入库</DialogTitle>
@@ -166,14 +160,10 @@ function DashboardStockinDialog({
   )
 }
 
-/**
- * 管理仪表盘中的待入库列表与入库弹窗。
- * 存在原因：把“本地筛选列表 + 入库提交”组合在一个轻量容器里，避免页面函数继续膨胀。
- */
+// 负责待入库列表本地筛选、入库弹窗状态，以及入库成功后的库存和统计缓存刷新。
 export function DashboardStockinTab() {
   const queryClient = useQueryClient()
 
-  const [showStockinModal, setShowStockinModal] = useState(false)
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
   const [stockinLoading, setStockinLoading] = useState(false)
 
@@ -196,20 +186,13 @@ export function DashboardStockinTab() {
     []
   )
 
-  /**
-   * 打开入库弹窗并重置默认表单值。
-   * 存在原因：避免上一次提交失败后的输入残留到下一条待入库记录。
-   */
+  // 每次打开待入库弹窗都恢复 `defaultStockInValues`，避免上一条记录的输入残留到下一次。
   const openStockinModal = useCallback((item: PendingStockinItem) => {
     setSelectedStockin(item)
     stockinForm.reset(defaultStockInValues)
-    setShowStockinModal(true)
   }, [stockinForm])
 
-  /**
-   * 提交待入库记录的入库请求。
-   * 存在原因：保留前端剩余量校验，并在成功后刷新 Dashboard 与库存缓存。
-   */
+  // 提交前先在前端校验 `remaining_quantity` 上限；成功后失效 `dashboard/stockin`、`inventory` 并刷新统计。
   const handleStockin = stockinForm.handleSubmit(async (formData) => {
     if (!selectedStockin) return
     if (!selectedStockin.order_id) {
@@ -234,7 +217,6 @@ export function DashboardStockinTab() {
         storage_location: formData.storage_location,
         remaining_quantity: remaining,
       })
-      setShowStockinModal(false)
       setSelectedStockin(null)
       stockinForm.reset(defaultStockInValues)
       await refreshTables()
@@ -256,12 +238,8 @@ export function DashboardStockinTab() {
     }
   })
 
-  /**
-   * 关闭入库弹窗并恢复默认表单状态。
-   * 存在原因：统一管理弹窗关闭时的记录与表单清理动作。
-   */
+  // 关闭弹窗时清空 `selectedStockin` 并恢复 `defaultStockInValues`。
   const closeStockinModal = useCallback(() => {
-    setShowStockinModal(false)
     setSelectedStockin(null)
     stockinForm.reset(defaultStockInValues)
   }, [stockinForm])
@@ -270,6 +248,13 @@ export function DashboardStockinTab() {
     () => createStockinColumns(openStockinModal),
     [openStockinModal]
   )
+  const stockinDialog = {
+    selectedStockin,
+    stockinForm,
+    stockinLoading,
+    onClose: closeStockinModal,
+    onSubmit: handleStockin,
+  }
 
   return (
     <>
@@ -285,12 +270,7 @@ export function DashboardStockinTab() {
         enableExpandAll={true}
       />
       <DashboardStockinDialog
-        open={showStockinModal}
-        selectedStockin={selectedStockin}
-        stockinForm={stockinForm}
-        stockinLoading={stockinLoading}
-        onClose={closeStockinModal}
-        onSubmit={handleStockin}
+        dialog={stockinDialog}
       />
     </>
   )

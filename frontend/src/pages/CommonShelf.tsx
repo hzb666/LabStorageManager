@@ -33,10 +33,7 @@ import {
 } from '@/lib/validationSchemas'
 import type { InventoryFormData, InventoryFormInputData, ValidationError } from '@/lib/validationSchemas'
 
-/**
- * 定义常用货架单项数据结构。
- * 这个接口存在是为了统一表格行数据字段，避免编辑、展示与操作时字段不一致。
- */
+// 表格展示、编辑弹窗和操作列都依赖这一组常用货架字段。
 interface CommonShelfItem {
   id: number
   sample_inventory_id: number
@@ -62,51 +59,10 @@ interface CommonShelfItem {
   other_names?: string[]
 }
 
-/**
- * 约束常用货架弹窗模式。
- * 这个类型存在是为了限制弹窗状态取值，避免状态分支出现无效字符串。
- */
+// 常用货架弹窗只允许 `add / edit` 两种模式。
 type CommonShelfDialogMode = 'edit' | 'add'
 
-/**
- * 描述常用货架弹窗状态 Hook 的返回结构。
- * 这个接口存在是为了固定弹窗、提交和表单字段编排契约，便于页面统一消费。
- */
-interface CommonShelfDialogState {
-  dialogState: CommonShelfDialogMode | null
-  editingItem: CommonShelfItem | null
-  deleteConfirm: boolean
-  isSubmitting: boolean
-  isCasLookupLoading: boolean
-  formFields: ReturnType<typeof getInventoryFormFields>
-  handleAddClick: () => void
-  handleEditClick: (itemRaw: Record<string, unknown>) => void
-  handleDeleteClick: () => Promise<void>
-  handleSubmit: () => Promise<void>
-  handleDialogChange: (open: boolean) => void
-}
-
-/**
- * 定义常用货架页面展示层组件的入参。
- * 这个接口存在是为了让展示组件只关注渲染，不关心外部状态管理细节。
- */
-interface CommonShelfPageContentProps {
-  dialogState: CommonShelfDialogMode | null
-  deleteConfirm: boolean
-  isSubmitting: boolean
-  form: ReturnType<typeof useForm<InventoryFormInputData, unknown, InventoryFormData>>
-  formFields: ReturnType<typeof getInventoryFormFields>
-  onAddClick: () => void
-  onExport: () => Promise<void>
-  onDialogChange: (open: boolean) => void
-  onDelete: () => Promise<void>
-  onSubmit: () => Promise<void>
-}
-
-/**
- * 定义常用货架状态筛选选项。
- * 这个常量存在是为了集中维护状态枚举与文案映射，避免筛选配置散落在页面中。
- */
+// 状态筛选的 value 和文案映射必须与后端状态语义保持一致。
 const STATUS_OPTIONS = [
   { value: 'all', label: '全部状态' },
   { value: 'in_stock', label: '有库存' },
@@ -114,10 +70,7 @@ const STATUS_OPTIONS = [
   { value: 'consumed', label: '已耗尽' },
 ]
 
-/**
- * 定义常用货架搜索字段选项。
- * 这个常量存在是为了统一搜索字段范围，保证筛选组件与后端字段语义一致。
- */
+// 搜索字段范围和后端可搜索字段保持一致，避免前后端搜索语义漂移。
 const SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
@@ -128,10 +81,7 @@ const SEARCH_FIELD_OPTIONS = [
   { value: 'storage_location', label: '位置' },
 ]
 
-/**
- * 声明需要监听的常用货架 SSE 事件列表。
- * 这个常量存在是为了集中管理实时刷新事件来源，减少事件名硬编码。
- */
+// 这些 SSE 事件任一触发都需要重新拉取常用货架列表。
 const COMMON_SHELF_SSE_EVENTS = [
   'common_shelf.created',
   'common_shelf.updated',
@@ -139,24 +89,15 @@ const COMMON_SHELF_SSE_EVENTS = [
   'common_shelf.consumed',
 ] as const
 
-/**
- * 创建常用货架表格列辅助器。
- * 这个常量存在是为了复用列定义构建能力并保留类型推导。
- */
+// 为常用货架列定义保留字段级类型推导。
 const columnHelper = createColumnHelper<CommonShelfItem>()
 
-/**
- * 将行数据安全转换成常用货架项。
- * 这个函数存在是为了把类型断言集中到一处，避免多个处理器重复做同样的转换。
- */
+// 把表格行数据统一收口成 `CommonShelfItem`，避免各处理器重复断言。
 function toCommonShelfItem(itemRaw: Record<string, unknown>) {
   return itemRaw as unknown as CommonShelfItem
 }
 
-/**
- * 重置常用货架表单，保证新增和关闭弹窗时使用同一套初始状态。
- * 这个函数存在是为了统一表单重置语义，减少页面里散落的 reset 逻辑。
- */
+// 统一处理新增默认值与编辑回填；关闭弹窗时走无 `item` 分支回到默认值。
 function resetCommonShelfForm(
   form: ReturnType<typeof useForm<InventoryFormInputData, unknown, InventoryFormData>>,
   item?: CommonShelfItem
@@ -184,10 +125,7 @@ function resetCommonShelfForm(
   })
 }
 
-/**
- * 构建常用货架编辑请求体，保持接口字段与旧实现一致。
- * 这个函数存在是为了把编辑路径的字段映射从提交处理器中拆出，降低复杂度。
- */
+// 编辑请求只组装接口需要的字段，避免把表格展示字段带入提交。
 function buildCommonShelfEditPayload(formData: InventoryFormData) {
   return {
     name: formData.name || '',
@@ -204,10 +142,7 @@ function buildCommonShelfEditPayload(formData: InventoryFormData) {
   }
 }
 
-/**
- * 构建常用货架新增请求体，保持接口字段与旧实现一致。
- * 这个函数存在是为了把新增路径的字段映射独立出来，避免提交逻辑继续膨胀。
- */
+// 新增请求体复用共同字段映射，并保留新增路径自己的库存初始化字段。
 function buildCommonShelfAddPayload(formData: InventoryFormData) {
   return {
     cas_number: formData.cas_number,
@@ -224,10 +159,7 @@ function buildCommonShelfAddPayload(formData: InventoryFormData) {
   }
 }
 
-/**
- * 将后端返回的校验错误回填到表单字段。
- * 这个函数存在是为了复用错误映射逻辑，并把提交处理器中的分支数量压下来。
- */
+// 后端字段级校验错误继续回填到表单，而不是转成 toast。
 function applyCommonShelfValidationErrors(
   form: ReturnType<typeof useForm<InventoryFormInputData, unknown, InventoryFormData>>,
   validationErrors: ValidationError[]
@@ -239,10 +171,7 @@ function applyCommonShelfValidationErrors(
   })
 }
 
-/**
- * 提交常用货架表单，保持新增、编辑与错误提示行为不变。
- * 这个函数存在是为了把主要副作用链路从页面组件中抽离，降低主组件和回调复杂度。
- */
+// 提交入口同时覆盖新增、编辑和错误回填，成功后统一刷新列表和关闭弹窗。
 async function submitCommonShelfForm(params: {
   dialogState: CommonShelfDialogMode | null
   editingItem: CommonShelfItem | null
@@ -279,10 +208,7 @@ async function submitCommonShelfForm(params: {
   }
 }
 
-/**
- * 构建常用货架表单字段配置，保持编辑/新增模式的字段差异不变。
- * 这个函数存在是为了把字段配置映射从页面主体中拆出，降低页面复杂度。
- */
+// 新增和编辑共用同一套字段配置，只在必要处保留模式差异。
 function buildCommonShelfFormFields(
   dialogState: CommonShelfDialogMode | null,
   isCasLookupLoading: boolean,
@@ -323,10 +249,7 @@ function buildCommonShelfFormFields(
   })
 }
 
-/**
- * 生成常用货架 SSE 处理器映射，保持所有事件统一刷新列表。
- * 这个函数存在是为了把事件映射细节从页面组件中抽离，减少主组件代码量。
- */
+// 所有相关 SSE 事件最终都指向同一份列表刷新逻辑。
 function createCommonShelfSSEHandlers(
   handleCommonShelfSSEEvent: SSEEventHandler
 ): Record<string, SSEEventHandler> {
@@ -336,10 +259,7 @@ function createCommonShelfSSEHandlers(
   }, {})
 }
 
-/**
- * 渲染常用货架展开行内容。
- * 这个函数存在是为了把展开区块的展示结构从主页面中拆出，减少页面主体长度。
- */
+// 展开行补充英文名、别名、分类、品牌、创建信息、库存统计和备注等明细字段。
 function renderCommonShelfExpandedRow(itemRaw: Record<string, unknown>) {
   const item = toCommonShelfItem(itemRaw)
 
@@ -364,10 +284,7 @@ function renderCommonShelfExpandedRow(itemRaw: Record<string, unknown>) {
   )
 }
 
-/**
- * 创建常用货架操作列，保持编辑和“拿一瓶”行为不变。
- * 这个函数存在是为了把操作列装配从页面组件中拆出，降低主组件复杂度。
- */
+// 操作列继续保留编辑和“拿一瓶”入口，并复用原有禁用/确认语义。
 function createCommonShelfActionColumn(): ColumnDef<CommonShelfItem, unknown> {
   return columnHelper.display({
     id: 'actions',
@@ -388,14 +305,11 @@ function createCommonShelfActionColumn(): ColumnDef<CommonShelfItem, unknown> {
   })
 }
 
-/**
- * 维护常用货架页面的弹窗状态、提交流程和表单字段。
- * 这个函数存在是为了把表单与副作用编排从主页面中拆出，压缩主函数长度。
- */
+// 集中管理弹窗状态、表单实例、提交动作和字段配置。
 function useCommonShelfDialogState(
   form: ReturnType<typeof useForm<InventoryFormInputData, unknown, InventoryFormData>>,
   refreshCommonShelf: () => Promise<void>
-): CommonShelfDialogState {
+) {
   const [dialogState, internalSetDialogState] = useDialogState<CommonShelfDialogMode>()
   const [editingItem, setEditingItem] = useState<CommonShelfItem | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
@@ -504,10 +418,8 @@ function useCommonShelfDialogState(
 
   return {
     dialogState,
-    editingItem,
     deleteConfirm,
     isSubmitting,
-    isCasLookupLoading,
     formFields,
     handleAddClick,
     handleEditClick,
@@ -517,66 +429,7 @@ function useCommonShelfDialogState(
   }
 }
 
-/**
- * 渲染常用货架页面主体结构。
- * 这个函数存在是为了把展示层从页面主函数中拆出，让主函数专注于状态和数据编排。
- */
-function CommonShelfPageContent({
-  dialogState,
-  deleteConfirm,
-  isSubmitting,
-  form,
-  formFields,
-  onAddClick,
-  onExport,
-  onDialogChange,
-  onDelete,
-  onSubmit,
-}: CommonShelfPageContentProps) {
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary card-title-placeholder">常用货架</h1>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={onAddClick} size="lg">
-            <Plus className="w-4 h-4 mr-1.5" /> 手动添加
-          </Button>
-          <Button variant="modern" size="lg" onClick={onExport}>
-            <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
-          </Button>
-        </div>
-      </div>
-
-      <Dialog open={dialogState !== null} onOpenChange={onDialogChange}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{dialogState === 'edit' ? '编辑常用货架分组' : '手动加入常用货架'}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onSubmit}>
-            <BaseForm
-              form={form}
-              fields={formFields}
-            />
-            <EditDialogActions
-              mode={dialogState ?? 'add'}
-              onCancel={() => onDialogChange(false)}
-              onDelete={dialogState === 'edit' ? onDelete : undefined}
-              deleteConfirm={deleteConfirm}
-              submitLabelEdit="保存分组"
-              submitLabelAdd="确认添加"
-              isSubmitting={isSubmitting}
-            />
-          </form>
-        </DialogContent>
-      </Dialog>
-    </div>
-  )
-}
-
-/**
- * 常用货架页负责弹窗、SSE 刷新和表格组合。
- * 这个函数存在是为了保持原有接口和交互不变的前提下，压缩页面主函数复杂度。
- */
+// 页面主组件负责编排弹窗、SSE 刷新和表格查询。
 export function CommonShelfPage() {
   const queryClient = useQueryClient()
 
@@ -630,18 +483,40 @@ export function CommonShelfPage() {
 
   return (
     <div className="space-y-6">
-      <CommonShelfPageContent
-        dialogState={dialogState}
-        deleteConfirm={deleteConfirm}
-        isSubmitting={isSubmitting}
-        form={form}
-        formFields={formFields}
-        onAddClick={handleAddClick}
-        onExport={handleExport}
-        onDialogChange={handleDialogChange}
-        onDelete={handleDeleteClick}
-        onSubmit={handleSubmit}
-      />
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-3xl font-bold text-primary card-title-placeholder">常用货架</h1>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={handleAddClick} size="lg">
+            <Plus className="w-4 h-4 mr-1.5" /> 手动添加
+          </Button>
+          <Button variant="modern" size="lg" onClick={handleExport}>
+            <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
+          </Button>
+        </div>
+      </div>
+
+      <Dialog open={dialogState !== null} onOpenChange={handleDialogChange}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{dialogState === 'edit' ? '编辑常用货架分组' : '手动加入常用货架'}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit}>
+            <BaseForm
+              form={form}
+              fields={formFields}
+            />
+            <EditDialogActions
+              mode={dialogState ?? 'add'}
+              onCancel={() => handleDialogChange(false)}
+              onDelete={dialogState === 'edit' ? handleDeleteClick : undefined}
+              deleteConfirm={deleteConfirm}
+              submitLabelEdit="保存分组"
+              submitLabelAdd="确认添加"
+              isSubmitting={isSubmitting}
+            />
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <FilterTable
         api={commonShelfAPI as FilterAPI}
@@ -661,10 +536,7 @@ export function CommonShelfPage() {
   )
 }
 
-/**
- * 渲染常用货架操作按钮，保持“拿一瓶”和编辑行为不变。
- * 这个函数存在是为了隔离表格操作配置，避免操作列继续膨胀。
- */
+// 行操作按钮继续保留“拿一瓶”和编辑，两者都沿用原有表格交互语义。
 const CommonShelfActionButtons = React.memo(function CommonShelfActionButtons({
   item,
   onEdit,

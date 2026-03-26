@@ -144,9 +144,7 @@ export const defaultConsumableOrderValues: ConsumableOrderFormInputData = {
   notes: '',
 }
 
-/**
- * 获取试剂订单表单字段配置
- */
+// 获取试剂订单表单字段配置
 export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormInputData>[] {
   return [
     { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
@@ -206,9 +204,7 @@ export const defaultUserValues = {
   role: 'user' as 'admin' | 'user' | 'public'
 }
 
-/**
- * 获取用户创建表单字段配置
- */
+// 获取用户创建表单字段配置
 export function getUserCreateFormFields(): FieldSchema<{ username: string; password: string; full_name: string}>[] {
   return [
     { name: 'username' as const, label: '用户名', type: 'input' as const, required: true, placeholder: '请输入用户名' },
@@ -217,9 +213,7 @@ export function getUserCreateFormFields(): FieldSchema<{ username: string; passw
   ]
 }
 
-/**
- * 获取用户编辑表单字段配置
- */
+// 获取用户编辑表单字段配置
 export function getUserEditFormFields(): FieldSchema<UserUpdateFormData>[] {
   return [
     { name: 'username' as const, label: '用户名', type: 'input' as const, required: true, placeholder: '请输入用户名' },
@@ -231,9 +225,7 @@ export function getUserEditFormFields(): FieldSchema<UserUpdateFormData>[] {
 // 耗材订单表单配置
 // ============================================================================
 
-/**
- * 获取耗材订单表单字段配置
- */
+// 获取耗材订单表单字段配置
 export function getConsumableOrderFormFields(): FieldSchema<ConsumableOrderFormInputData>[] {
   return [
     { name: 'name' as const, label: '耗材名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 一次性手套' },
@@ -301,9 +293,7 @@ export const defaultStockInValues: StockInFormInputData = {
   storage_location: '',
 }
 
-/**
- * 获取入库表单字段配置
- */
+// 获取入库表单字段配置
 export function getStockInFormFields(unit?: string): FieldSchema<StockInFormInputData>[] {
   return [
     {
@@ -333,9 +323,7 @@ export const defaultDeviceNameValues = {
   device_name: ''
 }
 
-/**
- * 获取设备名称表单字段配置
- */
+// 获取设备名称表单字段配置
 export function getDeviceNameFormFields(): FieldSchema<typeof defaultDeviceNameValues>[] {
   return [
     { name: 'device_name' as const, label: '新设备名称', type: 'input' as const, required: true, placeholder: '请输入设备名称' }

@@ -32,16 +32,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { SidebarLogo } from '@/components/SidebarLogo'
 
-/**
- * 导航分组类型，区分侧边栏中的功能区与管理区。
- * 存在原因是收敛分组可选值，避免分组名称在多处硬编码产生不一致。
- */
 type NavGroup = '功能' | '管理'
 
-/**
- * 单个导航项的数据结构定义。
- * 存在原因是统一菜单标题、路由、图标和权限标记字段，便于导航渲染与权限过滤复用。
- */
 interface NavItem {
   title: string
   href: string
@@ -50,33 +42,9 @@ interface NavItem {
   adminOnly?: boolean
 }
 
-/**
- * 布局视图组件的入参定义。
- * 存在原因是集中声明布局层所需状态和事件回调，保证壳层组件与状态编排层契约清晰。
- */
-interface LayoutViewProps {
-  locationPathname: string
-  user: ReturnType<typeof useAuthStore>['user']
-  sidebarCollapsed: boolean
-  toggleSidebar: () => void
-  theme: string
-  toggleTheme: () => void
-  isMobile: boolean
-  mobileMenuOpen: boolean
-  setMobileMenuOpen: (open: boolean) => void
-  logoutConfirming: boolean
-  onLogout: () => void
-  onLogoutBlur: () => void
-  announcements: Announcement[]
-  filteredNavItems: NavItem[]
-  showBugButton: boolean
-  onBugButtonRightClick: () => void
-}
+type LayoutUser = ReturnType<typeof useAuthStore>['user']
 
-/**
- * 全站侧边栏导航配置常量。
- * 存在原因是把菜单元数据集中管理，便于统一维护导航顺序、路由和权限控制规则。
- */
+// 全站侧边栏的顺序、路由和 `adminOnly` 权限标记都集中在这里维护。
 const navItems: NavItem[] = [
   { title: '仪表盘', href: '/', icon: LayoutDashboard, group: '功能' },
   { title: '试剂订单', href: '/reagents', icon: FlaskConical, group: '功能' },
@@ -88,18 +56,12 @@ const navItems: NavItem[] = [
   { title: '公告管理', href: '/admin/announcements', icon: Megaphone, adminOnly: true, group: '管理' },
 ]
 
-/**
- * 根据当前用户角色过滤导航项，保持管理员菜单的权限逻辑不变。
- * 这个函数存在是为了把权限过滤规则从页面主体中拆出，降低主组件复杂度。
- */
+// 只有 `ADMIN` 能看到 `adminOnly` 导航项，权限过滤统一在这里做。
 function getFilteredNavItems(userRole?: string) {
   return navItems.filter((item) => !item.adminOnly || userRole === UserRoles.ADMIN)
 }
 
-/**
- * 计算侧边栏文字的展开收起 class，保持原有动画表现不变。
- * 这个函数存在是为了把多处重复的 class 选择收敛到同一入口。
- */
+// 桌面侧边栏折叠时通过 `opacity / max-width / ml` 组合隐藏文字，避免布局跳动。
 function getSidebarLabelClassName(sidebarCollapsed: boolean, expandedClassName: string) {
   return cn(
     'whitespace-nowrap overflow-hidden transition-[max-width,opacity,margin] duration-300',
@@ -107,10 +69,7 @@ function getSidebarLabelClassName(sidebarCollapsed: boolean, expandedClassName: 
   )
 }
 
-/**
- * 计算导航链接样式，保持激活态与 hover 态表现不变。
- * 这个函数存在是为了避免桌面端和移动端在多个位置重复拼接 class。
- */
+// 统一导航激活态和非激活态 class；移动端额外补文字 hover 颜色，桌面端主要靠背景层。
 function getNavLinkClassName(
   isActive: boolean,
   baseClassName: string,
@@ -126,10 +85,6 @@ function getNavLinkClassName(
   )
 }
 
-/**
- * 渲染桌面侧边栏中的单个导航项。
- * 这个函数存在是为了把导航项结构从侧边栏主体中拆出，降低组合层复杂度。
- */
 function DesktopSidebarNavItem({
   item,
   pathname,
@@ -168,10 +123,6 @@ function DesktopSidebarNavItem({
   )
 }
 
-/**
- * 渲染移动端侧边栏中的单个导航项。
- * 这个函数存在是为了把移动端导航项结构从菜单容器中拆出，降低移动菜单复杂度。
- */
 function MobileSidebarNavItem({
   item,
   pathname,
@@ -201,10 +152,6 @@ function MobileSidebarNavItem({
   )
 }
 
-/**
- * 渲染桌面侧边栏的导航分组。
- * 这个函数存在是为了把“功能/管理”分组结构从侧边栏主体中拆出，缩短组件长度。
- */
 function DesktopSidebarGroup({
   title,
   items,
@@ -239,16 +186,13 @@ function DesktopSidebarGroup({
   )
 }
 
-/**
- * 渲染桌面端账户入口。
- * 这个函数存在是为了把账户展示与激活态样式从侧边栏主体中拆出，减少主组件噪音。
- */
+// 桌面端账户入口跳到 `/devices`，并用右侧高亮条标识设备页激活态。
 function DesktopUserLink({
   user,
   sidebarCollapsed,
   isDevicesActive,
 }: {
-  user: LayoutViewProps['user']
+  user: LayoutUser
   sidebarCollapsed: boolean
   isDevicesActive: boolean
 }) {
@@ -281,10 +225,7 @@ function DesktopUserLink({
   )
 }
 
-/**
- * 渲染桌面侧边栏。
- * 这个函数存在是为了把桌面端导航、账户区和操作区从 Layout 主组件中拆出。
- */
+// 桌面侧边栏承载权限过滤后的分组导航、账户入口、主题切换和退出入口。
 function DesktopSidebar({
   pathname,
   user,
@@ -297,7 +238,7 @@ function DesktopSidebar({
   filteredNavItems,
 }: {
   pathname: string
-  user: LayoutViewProps['user']
+  user: LayoutUser
   sidebarCollapsed: boolean
   theme: string
   toggleTheme: () => void
@@ -413,10 +354,6 @@ function DesktopSidebar({
   )
 }
 
-/**
- * 渲染移动侧边栏中的导航分组。
- * 这个函数存在是为了把移动端分组渲染从菜单主体中拆出，降低 MobileSidebar 复杂度。
- */
 function MobileSidebarSection({
   title,
   items,
@@ -449,10 +386,7 @@ function MobileSidebarSection({
   )
 }
 
-/**
- * 渲染移动侧边栏底部账户区。
- * 这个函数存在是为了把账户展示与操作按钮从 MobileSidebar 中拆出，降低其复杂度。
- */
+// 移动端把账户入口与主题/退出动作固定在底部，和滚动导航区分离。
 function MobileSidebarFooter({
   pathname,
   user,
@@ -464,7 +398,7 @@ function MobileSidebarFooter({
   onLogoutBlur,
 }: {
   pathname: string
-  user: LayoutViewProps['user']
+  user: LayoutUser
   closeMobileMenu: () => void
   theme: string
   toggleTheme: () => void
@@ -490,17 +424,14 @@ function MobileSidebarFooter({
   )
 }
 
-/**
- * 渲染移动侧边栏中的账户入口。
- * 这个函数存在是为了把账户展示从 MobileSidebarFooter 中拆出，进一步降低复杂度。
- */
+// 移动端账户入口点击后关闭菜单，并沿用 `/devices` 的激活标识。
 function MobileUserLink({
   pathname,
   user,
   closeMobileMenu,
 }: {
   pathname: string
-  user: LayoutViewProps['user']
+  user: LayoutUser
   closeMobileMenu: () => void
 }) {
   const isDevicesActive = pathname.startsWith('/devices')
@@ -532,10 +463,7 @@ function MobileUserLink({
   )
 }
 
-/**
- * 渲染移动侧边栏中的主题和退出按钮。
- * 这个函数存在是为了把按钮交互从 MobileSidebarFooter 中拆出，进一步降低复杂度。
- */
+// 移动端保留主题切换和二次确认退出入口。
 function MobileSidebarActions({
   theme,
   toggleTheme,
@@ -578,10 +506,7 @@ function MobileSidebarActions({
   )
 }
 
-/**
- * 渲染移动侧边栏。
- * 这个函数存在是为了把移动端菜单与账户区从 Layout 主组件中拆出，降低组合复杂度。
- */
+// 移动端通过遮罩和抽屉展示权限过滤后的导航，点击遮罩关闭菜单。
 function MobileSidebar({
   pathname,
   user,
@@ -595,7 +520,7 @@ function MobileSidebar({
   filteredNavItems,
 }: {
   pathname: string
-  user: LayoutViewProps['user']
+  user: LayoutUser
   mobileMenuOpen: boolean
   setMobileMenuOpen: (open: boolean) => void
   theme: string
@@ -662,10 +587,7 @@ function MobileSidebar({
   )
 }
 
-/**
- * 计算主内容区域的桌面端左侧偏移 class。
- * 这个函数存在是为了移除布局组件中的嵌套三元表达式，降低渲染复杂度。
- */
+// 把桌面侧边栏状态映射成主内容 `md:ml-16 / md:ml-64`，移动端不偏移。
 function getMainContentShiftClass(showDesktopSidebar: boolean, sidebarCollapsed: boolean) {
   if (!showDesktopSidebar) {
     return ''
@@ -674,10 +596,7 @@ function getMainContentShiftClass(showDesktopSidebar: boolean, sidebarCollapsed:
   return sidebarCollapsed ? 'md:ml-16' : 'md:ml-64'
 }
 
-/**
- * 渲染主内容页头。
- * 这个函数存在是为了把页头的侧栏切换、公告区和移动端按钮从主布局中拆出。
- */
+// 页头统一放桌面侧栏开关、公告横幅/公告按钮，以及移动端菜单和主题入口。
 function LayoutHeader({
   showDesktopSidebar,
   sidebarCollapsed,
@@ -767,94 +686,7 @@ function LayoutHeader({
   )
 }
 
-/**
- * 渲染布局页的整体视图。
- * 这个函数存在是为了把主 Layout 组件收缩成状态编排层，避免继续承担大段 JSX。
- */
-function LayoutView({
-  locationPathname,
-  user,
-  sidebarCollapsed,
-  toggleSidebar,
-  theme,
-  toggleTheme,
-  isMobile,
-  mobileMenuOpen,
-  setMobileMenuOpen,
-  logoutConfirming,
-  onLogout,
-  onLogoutBlur,
-  announcements,
-  filteredNavItems,
-  showBugButton,
-  onBugButtonRightClick,
-}: LayoutViewProps) {
-  const showDesktopSidebar = !isMobile
-
-  return (
-    <div className="flex min-h-screen w-full bg-sidebar">
-      {showDesktopSidebar && (
-        <DesktopSidebar
-          pathname={locationPathname}
-          user={user}
-          sidebarCollapsed={sidebarCollapsed}
-          theme={theme}
-          toggleTheme={toggleTheme}
-          logoutConfirming={logoutConfirming}
-          onLogout={onLogout}
-          onLogoutBlur={onLogoutBlur}
-          filteredNavItems={filteredNavItems}
-        />
-      )}
-
-      <MobileSidebar
-        pathname={locationPathname}
-        user={user}
-        mobileMenuOpen={mobileMenuOpen}
-        setMobileMenuOpen={setMobileMenuOpen}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        logoutConfirming={logoutConfirming}
-        onLogout={onLogout}
-        onLogoutBlur={onLogoutBlur}
-        filteredNavItems={filteredNavItems}
-      />
-
-      <div
-        className={cn(
-          'flex-1 flex flex-col min-h-screen min-w-0 w-full transition-[margin-left] duration-300 ease-in-out',
-          getMainContentShiftClass(showDesktopSidebar, sidebarCollapsed)
-        )}
-      >
-        <main className="flex-1 py-2 md:py-3 lg:py-4 ml-2 pr-2 md:ml-3 md:pr-3 lg:ml-3 lg:pr-4">
-          <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
-            <LayoutHeader
-              showDesktopSidebar={showDesktopSidebar}
-              sidebarCollapsed={sidebarCollapsed}
-              toggleSidebar={toggleSidebar}
-              showBugButton={showBugButton}
-              onBugButtonRightClick={onBugButtonRightClick}
-              mobileMenuOpen={mobileMenuOpen}
-              setMobileMenuOpen={setMobileMenuOpen}
-              announcements={announcements}
-              theme={theme}
-              toggleTheme={toggleTheme}
-            />
-
-            <div className="px-4 py-6 md:px-6">
-              <Outlet />
-            </div>
-          </div>
-        </main>
-      </div>
-    </div>
-  )
-}
-
-/**
- * 布局页负责公告数据、侧边栏状态和全局壳层编排。
- * 这个函数存在是为了保持原有导航、公告和退出行为不变，同时收缩主组件复杂度。
- */
+// 布局页负责拉取公告、维护桌面/移动侧栏状态、处理退出确认和移动端滚动锁定。
 export function Layout() {
   const location = useLocation()
   const { user, logout } = useAuthStore()
@@ -869,6 +701,7 @@ export function Layout() {
   useEffect(() => {
     let cancelled = false
 
+    // 只在布局层拉一次公告；用取消标记兜住卸载场景，避免异步回写已卸载组件。
     const fetchAnnouncements = async () => {
       try {
         const response = await announcementAPI.getPublic()
@@ -894,6 +727,7 @@ export function Layout() {
   }, [])
 
   const handleLogout = useCallback(() => {
+    // 二次确认期间不立即登出，避免误触；确认后再清理隐藏状态和仪表盘持久化页签。
     if (logoutConfirming) {
       clearBugButtonHidden()
       clearDashboardTab()
@@ -925,30 +759,71 @@ export function Layout() {
   }, [handleKeyDown])
 
   useEffect(() => {
+    // 移动端侧栏打开时锁 body 滚动，防止背景内容跟随滚动造成“抽屉 + 页面”双滚动。
     document.body.style.overflow = mobileMenuOpen ? 'hidden' : ''
     return () => {
       document.body.style.overflow = ''
     }
   }, [mobileMenuOpen])
 
+  const showDesktopSidebar = !isMobile
+
   return (
-    <LayoutView
-      locationPathname={location.pathname}
-      user={user}
-      sidebarCollapsed={sidebarCollapsed}
-      toggleSidebar={toggleSidebar}
-      theme={theme}
-      toggleTheme={toggleTheme}
-      isMobile={isMobile}
-      mobileMenuOpen={mobileMenuOpen}
-      setMobileMenuOpen={setMobileMenuOpen}
-      logoutConfirming={logoutConfirming}
-      onLogout={handleLogout}
-      onLogoutBlur={handleLogoutBlur}
-      announcements={announcements}
-      filteredNavItems={filteredNavItems}
-      showBugButton={showBugButton}
-      onBugButtonRightClick={handleBugButtonRightClick}
-    />
+    <div className="flex min-h-screen w-full bg-sidebar">
+      {showDesktopSidebar && (
+        <DesktopSidebar
+          pathname={location.pathname}
+          user={user}
+          sidebarCollapsed={sidebarCollapsed}
+          theme={theme}
+          toggleTheme={toggleTheme}
+          logoutConfirming={logoutConfirming}
+          onLogout={handleLogout}
+          onLogoutBlur={handleLogoutBlur}
+          filteredNavItems={filteredNavItems}
+        />
+      )}
+
+      <MobileSidebar
+        pathname={location.pathname}
+        user={user}
+        mobileMenuOpen={mobileMenuOpen}
+        setMobileMenuOpen={setMobileMenuOpen}
+        theme={theme}
+        toggleTheme={toggleTheme}
+        logoutConfirming={logoutConfirming}
+        onLogout={handleLogout}
+        onLogoutBlur={handleLogoutBlur}
+        filteredNavItems={filteredNavItems}
+      />
+
+      <div
+        className={cn(
+          'flex-1 flex flex-col min-h-screen min-w-0 w-full transition-[margin-left] duration-300 ease-in-out',
+          getMainContentShiftClass(showDesktopSidebar, sidebarCollapsed)
+        )}
+      >
+        <main className="flex-1 py-2 md:py-3 lg:py-4 ml-2 pr-2 md:ml-3 md:pr-3 lg:ml-3 lg:pr-4">
+          <div className="bg-page-card rounded-lg page-card-shadow-light dark:page-card-shadow-dark min-h-full flex flex-col">
+            <LayoutHeader
+              showDesktopSidebar={showDesktopSidebar}
+              sidebarCollapsed={sidebarCollapsed}
+              toggleSidebar={toggleSidebar}
+              showBugButton={showBugButton}
+              onBugButtonRightClick={handleBugButtonRightClick}
+              mobileMenuOpen={mobileMenuOpen}
+              setMobileMenuOpen={setMobileMenuOpen}
+              announcements={announcements}
+              theme={theme}
+              toggleTheme={toggleTheme}
+            />
+
+            <div className="px-4 py-6 md:px-6">
+              <Outlet />
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
   )
 }

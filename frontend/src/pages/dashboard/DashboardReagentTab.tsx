@@ -1,7 +1,4 @@
-/**
- * 仪表盘 - 试剂订单 Tab
- * 展示当前用户的试剂订单列表，支持编辑和确认到货
- */
+// 仪表盘中的试剂订单页签，承载本地筛选、编辑、到货确认和入库流程。
 import { useMemo, useState, useCallback } from 'react'
 import * as v from 'valibot'
 import { createColumnHelper } from '@tanstack/react-table'
@@ -61,10 +58,7 @@ const reagentColumnHelper = createColumnHelper<DashboardReagentOrder>()
 
 type StockinMode = 'quick' | 'arrived'
 
-/**
- * 创建试剂仪表盘列表的本地筛选 API 适配器。
- * 存在原因：Dashboard 接口返回的是按状态分组的订单，需要先拍平再交给 FilterTable。
- */
+// Dashboard 接口返回按状态分组的订单，这里先拍平成 `FilterTable` 需要的本地列表。
 function createReagentDashboardAPI(currentUserId?: number): FilterAPI {
   return {
     list: async (params) => {
@@ -83,10 +77,7 @@ function createReagentDashboardAPI(currentUserId?: number): FilterAPI {
   }
 }
 
-/**
- * 计算当前记录是否禁止编辑，并返回保持原有提示文案的原因。
- * 存在原因：把权限判断和表单填充解耦，降低编辑回调的复杂度。
- */
+// `public` 不能编辑，非管理员只能编辑本人订单，管理员不受 `applicant_id` 限制。
 function getReagentEditBlockMessage(
   item: DashboardReagentOrder,
   currentUserRole: string | undefined,
@@ -102,10 +93,7 @@ function getReagentEditBlockMessage(
   return null
 }
 
-/**
- * 把试剂订单转换成编辑表单默认值。
- * 存在原因：编辑表单字段较多，单独提取可以避免点击处理器承载过多赋值细节。
- */
+// 映射编辑表单需要回填的订单字段，其中 `cas_number` 仅用于展示与回填，不参与更新提交。
 function buildReagentFormValues(item: DashboardReagentOrder): ReagentOrderFormInputData {
   return {
     name: String(item.name ?? ''),
@@ -123,10 +111,7 @@ function buildReagentFormValues(item: DashboardReagentOrder): ReagentOrderFormIn
   }
 }
 
-/**
- * 生成入库弹窗的默认表单值。
- * 存在原因：一键入库与到货后入库的默认剩余量不同，需要集中管理初始化规则。
- */
+// `quick` 模式默认用 `initial_quantity` 填充 `remaining_quantity`，`arrived` 模式默认留空。
 function buildStockinFormValues(item: DashboardReagentOrder, mode: StockinMode): StockInFormInputData {
   return {
     remaining_quantity: mode === 'quick' ? (item.initial_quantity ?? '') : '',
@@ -134,10 +119,7 @@ function buildStockinFormValues(item: DashboardReagentOrder, mode: StockinMode):
   }
 }
 
-/**
- * 组装试剂订单的操作按钮配置。
- * 存在原因：操作列的状态分支较多，抽出后可让列定义保持线性。
- */
+// `approved` 状态显示“到货 / 一键入库”，`arrived` 状态显示“入库”。
 function createReagentActions(
   refreshTables: () => Promise<void>,
   openStockinDialog: (item: DashboardReagentOrder, mode: StockinMode) => void
@@ -180,10 +162,7 @@ function createReagentActions(
   ]
 }
 
-/**
- * 构造试剂订单列表列定义和操作列。
- * 存在原因：把表格列逻辑从页面主体移出，便于主组件专注于数据与弹窗状态。
- */
+// 复用通用列、移除申请人列，并按角色和申请人归属决定编辑按钮是否禁用。
 function createReagentColumns({
   currentUserId,
   currentUserRole,
@@ -228,31 +207,26 @@ function createReagentColumns({
   return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
 }
 
-/**
- * 渲染试剂订单编辑弹窗。
- * 存在原因：编辑表单较长，独立后能显著缩短页面主函数。
- */
+// `approved` / `rejected` 状态只允许删除，不允许保存编辑。
 function DashboardReagentEditDialog({
-  editingReagent,
-  isReagentEditLocked,
-  deleteConfirm,
-  reagentForm,
-  isSubmittingReagent,
-  onDelete,
-  onClose,
-  onSubmit,
+  dialog,
 }: Readonly<{
-  editingReagent: DashboardReagentOrder | null
-  isReagentEditLocked: boolean
-  deleteConfirm: boolean
-  reagentForm: ReturnType<typeof useForm<ReagentOrderFormInputData, unknown, ReagentOrderFormData>>
-  isSubmittingReagent: boolean
-  onDelete: () => void
-  onClose: () => void
-  onSubmit: () => void
+  dialog: ReturnType<typeof useReagentEditDialog>
 }>) {
+  const {
+    editingReagent,
+    deleteConfirm,
+    reagentForm,
+    isSubmittingReagent,
+    handleDeleteReagent,
+    closeReagentDialog,
+    submitReagentEdit,
+  } = dialog
+  const isReagentEditLocked =
+    editingReagent?.status === 'approved' || editingReagent?.status === 'rejected'
+
   return (
-    <Dialog open={editingReagent !== null} onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog open={editingReagent !== null} onOpenChange={(open) => { if (!open) closeReagentDialog() }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between gap-3">
@@ -260,12 +234,12 @@ function DashboardReagentEditDialog({
             {isReagentEditLocked ? <span className="text-base text-muted-foreground">当前状态仅支持删除</span> : null}
           </DialogTitle>
         </DialogHeader>
-        <form onSubmit={onSubmit}>
-          <BaseForm form={reagentForm} fields={getReagentOrderFormFields()} disabled={isReagentEditLocked} />
+        <form onSubmit={submitReagentEdit}>
+            <BaseForm form={reagentForm} fields={getReagentOrderFormFields()} disabled={isReagentEditLocked} />
           <EditDialogActions
             mode="edit"
-            onCancel={onClose}
-            onDelete={onDelete}
+            onCancel={closeReagentDialog}
+            onDelete={handleDeleteReagent}
             deleteConfirm={deleteConfirm}
             submitLabelEdit="保存"
             submitLabelAdd="保存"
@@ -278,33 +252,29 @@ function DashboardReagentEditDialog({
   )
 }
 
-/**
- * 渲染试剂入库弹窗。
- * 存在原因：一键入库与到货后入库共用一套 UI，但不应该继续占据页面主体长度。
- */
+// 同一弹窗承载 `quick / arrived` 两种入库流程，标题与默认值随 `stockinMode` 变化。
 function DashboardReagentStockinDialog({
-  stockinTarget,
-  stockinMode,
-  stockinForm,
-  isSubmittingStockin,
-  onClose,
-  onSubmit,
+  dialog,
 }: Readonly<{
-  stockinTarget: DashboardReagentOrder | null
-  stockinMode: StockinMode
-  stockinForm: ReturnType<typeof useForm<StockInFormInputData>>
-  isSubmittingStockin: boolean
-  onClose: () => void
-  onSubmit: () => void
+  dialog: ReturnType<typeof useReagentStockinDialog>
 }>) {
+  const {
+    stockinTarget,
+    stockinMode,
+    stockinForm,
+    isSubmittingStockin,
+    closeStockinDialog,
+    submitStockin,
+  } = dialog
+
   return (
-    <Dialog open={stockinTarget !== null} onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog open={stockinTarget !== null} onOpenChange={(open) => { if (!open) closeStockinDialog() }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{stockinMode === 'quick' ? '一键入库' : '入库'}</DialogTitle>
         </DialogHeader>
 
-        <form className="space-y-4" onSubmit={onSubmit}>
+        <form className="space-y-4" onSubmit={submitStockin}>
           <div>
             <p>{stockinTarget?.name}</p>
             <p className="text-sm text-muted-foreground">
@@ -319,7 +289,7 @@ function DashboardReagentStockinDialog({
           />
 
           <div className="flex gap-3 mt-8">
-            <Button type="button" variant="modern" onClick={onClose} className="flex-1" size="lg" disabled={isSubmittingStockin}>
+            <Button type="button" variant="modern" onClick={closeStockinDialog} className="flex-1" size="lg" disabled={isSubmittingStockin}>
               取消
             </Button>
             <LoadingButton
@@ -338,10 +308,7 @@ function DashboardReagentStockinDialog({
   )
 }
 
-/**
- * 管理试剂订单编辑弹窗的状态、表单与提交流程。
- * 存在原因：编辑链路字段多、校验分支多，需要从主页面中下沉为局部 hook。
- */
+// 统一管理编辑目标、删除确认、表单实例、提交后的刷新和字段错误回填。
 function useReagentEditDialog({
   currentUserId,
   currentUserRole,
@@ -363,12 +330,7 @@ function useReagentEditDialog({
     shouldFocusError: false,
   })
 
-  const isReagentEditLocked = editingReagent?.status === 'approved' || editingReagent?.status === 'rejected'
-
-  /**
-   * 打开试剂编辑弹窗，并在进入前执行权限校验与表单重置。
-   * 存在原因：避免把权限分支和字段赋值全部塞进点击处理器。
-   */
+  // 进入编辑前先做角色和归属校验，通过后再重置表单并清空删除确认态。
   const handleReagentEdit = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as DashboardReagentOrder
     const blockMessage = getReagentEditBlockMessage(item, currentUserRole, currentUserId, isAdmin)
@@ -382,10 +344,7 @@ function useReagentEditDialog({
     reagentForm.reset(buildReagentFormValues(item))
   }, [currentUserId, currentUserRole, isAdmin, reagentForm])
 
-  /**
-   * 提交试剂订单编辑。
-   * 存在原因：保存后需要同时刷新 Dashboard、订单列表和库存相关缓存。
-   */
+  // 编辑成功后同时刷新 Dashboard、订单列表和库存缓存；字段级错误回填表单而不是 toast。
   const submitReagentEdit = reagentForm.handleSubmit(async (formData) => {
     if (!editingReagent) return
     setIsSubmittingReagent(true)
@@ -424,10 +383,7 @@ function useReagentEditDialog({
     }
   })
 
-  /**
-   * 处理试剂订单删除的二次确认与实际删除。
-   * 存在原因：保留既有交互节奏，同时把删除逻辑集中到一个入口。
-   */
+  // 删除走二次确认：第一次只切换确认态，第二次才真正调用删除接口。
   const handleDeleteReagent = useCallback(async () => {
     if (!editingReagent) return
 
@@ -448,10 +404,7 @@ function useReagentEditDialog({
     }
   }, [deleteConfirm, editingReagent, reagentForm, refreshTables])
 
-  /**
-   * 关闭试剂编辑弹窗并恢复默认表单状态。
-   * 存在原因：让关闭逻辑统一处理编辑记录、删除确认和表单重置。
-   */
+  // 关闭编辑弹窗时统一清空当前记录、删除确认和表单默认值。
   const closeReagentDialog = useCallback(() => {
     setEditingReagent(null)
     setDeleteConfirm(false)
@@ -462,7 +415,6 @@ function useReagentEditDialog({
     editingReagent,
     deleteConfirm,
     isSubmittingReagent,
-    isReagentEditLocked,
     reagentForm,
     handleReagentEdit,
     submitReagentEdit,
@@ -471,10 +423,7 @@ function useReagentEditDialog({
   }
 }
 
-/**
- * 管理试剂入库弹窗的状态、表单与提交流程。
- * 存在原因：一键入库与到货入库共享一套弹窗，适合独立为局部 hook。
- */
+// 统一管理入库目标、入库模式、表单默认值、关闭保护和提交后的重置。
 function useReagentStockinDialog(refreshTables: () => Promise<void>) {
   const [stockinTarget, setStockinTarget] = useState<DashboardReagentOrder | null>(null)
   const [stockinMode, setStockinMode] = useState<StockinMode>('quick')
@@ -486,38 +435,26 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
     shouldFocusError: false,
   })
 
-  /**
-   * 清空入库弹窗的选中记录与表单状态。
-   * 存在原因：提交成功后的程序化关闭与用户手动关闭需要共享同一份清理逻辑。
-   */
+  // 提交成功和手动关闭共用同一套入库重置逻辑。
   const resetStockinDialog = useCallback(() => {
     setStockinTarget(null)
     stockinForm.reset(defaultStockInValues)
   }, [stockinForm])
 
-  /**
-   * 打开入库弹窗并根据入库模式设置默认剩余量。
-   * 存在原因：一键入库和到货后入库共享弹窗，但默认表单值不同。
-   */
+  // 打开入库弹窗时按 `mode` 设置默认剩余量。
   const openStockinDialog = useCallback((item: DashboardReagentOrder, mode: StockinMode) => {
     setStockinTarget(item)
     setStockinMode(mode)
     stockinForm.reset(buildStockinFormValues(item, mode))
   }, [stockinForm])
 
-  /**
-   * 关闭入库弹窗并恢复默认表单状态。
-   * 存在原因：防止处理中被关闭，同时避免上次输入残留到下一次入库。
-   */
+  // 提交中禁止关闭；关闭时重置记录和表单，避免上次输入残留到下一次入库。
   const closeStockinDialog = useCallback(() => {
     if (isSubmittingStockin) return
     resetStockinDialog()
   }, [isSubmittingStockin, resetStockinDialog])
 
-  /**
-   * 提交试剂入库。
-   * 存在原因：入库前既要保留前端剩余量校验，也要复用后端错误映射逻辑。
-   */
+  // 入库前先按 `initial_quantity` 校验 `remaining_quantity` 上限，后端字段错误继续映射回表单。
   const submitStockin = stockinForm.handleSubmit(async (formData) => {
     if (!stockinTarget) return
     const remaining = Number(formData.remaining_quantity)
@@ -569,10 +506,7 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
   }
 }
 
-/**
- * 管理仪表盘中的试剂订单列表、编辑和入库流程。
- * 存在原因：试剂订单动作最多，主组件需要退回到“状态编排 + 组件组合”的职责。
- */
+// 页面只负责任务列表查询刷新、列配置，以及编辑/入库弹窗编排。
 export function DashboardReagentTab() {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
@@ -592,32 +526,16 @@ export function DashboardReagentTab() {
     [currentUser?.id]
   )
 
-  const {
-    editingReagent,
-    deleteConfirm,
-    isSubmittingReagent,
-    isReagentEditLocked,
-    reagentForm,
-    handleReagentEdit,
-    submitReagentEdit,
-    handleDeleteReagent,
-    closeReagentDialog,
-  } = useReagentEditDialog({
+  const reagentEditDialog = useReagentEditDialog({
     currentUserId: currentUser?.id,
     currentUserRole: currentUser?.role,
     isAdmin,
     refreshTables,
   })
 
-  const {
-    stockinTarget,
-    stockinMode,
-    stockinForm,
-    isSubmittingStockin,
-    openStockinDialog,
-    closeStockinDialog,
-    submitStockin,
-  } = useReagentStockinDialog(refreshTables)
+  const stockinDialog = useReagentStockinDialog(refreshTables)
+  const handleReagentEdit = reagentEditDialog.handleReagentEdit
+  const openStockinDialog = stockinDialog.openStockinDialog
 
   const reagentColumns = useMemo(
     () => createReagentColumns({
@@ -628,7 +546,14 @@ export function DashboardReagentTab() {
       onEdit: (item) => handleReagentEdit(item as unknown as Record<string, unknown>),
       openStockinDialog,
     }),
-    [currentUser?.id, currentUser?.role, handleReagentEdit, isAdmin, openStockinDialog, refreshTables]
+    [
+      currentUser?.id,
+      currentUser?.role,
+      isAdmin,
+      handleReagentEdit,
+      refreshTables,
+      openStockinDialog,
+    ]
   )
 
   return (
@@ -650,22 +575,10 @@ export function DashboardReagentTab() {
         }}
       />
       <DashboardReagentEditDialog
-        editingReagent={editingReagent}
-        isReagentEditLocked={isReagentEditLocked}
-        deleteConfirm={deleteConfirm}
-        reagentForm={reagentForm}
-        isSubmittingReagent={isSubmittingReagent}
-        onDelete={handleDeleteReagent}
-        onClose={closeReagentDialog}
-        onSubmit={submitReagentEdit}
+        dialog={reagentEditDialog}
       />
       <DashboardReagentStockinDialog
-        stockinTarget={stockinTarget}
-        stockinMode={stockinMode}
-        stockinForm={stockinForm}
-        isSubmittingStockin={isSubmittingStockin}
-        onClose={closeStockinDialog}
-        onSubmit={submitStockin}
+        dialog={stockinDialog}
       />
     </>
   )

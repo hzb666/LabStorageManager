@@ -1,7 +1,4 @@
-/**
- * 仪表盘 - 耗材订单 Tab
- * 展示当前用户的耗材订单列表，支持编辑和确认收货
- */
+// 仪表盘中的耗材订单页签，承载本地筛选、编辑和确认收货流程。
 import { useMemo, useState, useCallback } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -47,10 +44,7 @@ import {
 
 const consumableColumnHelper = createColumnHelper<DashboardConsumableOrder>()
 
-/**
- * 创建耗材仪表盘列表的本地筛选 API 适配器。
- * 存在原因：Dashboard 接口返回的是分组订单结构，需要先拍平再复用通用表格能力。
- */
+// Dashboard 接口返回分组订单，这里先拍平成 `FilterTable` 可消费的本地列表结构。
 function createConsumableDashboardAPI(currentUserId?: number): FilterAPI {
   return {
     list: async (params) => {
@@ -63,10 +57,7 @@ function createConsumableDashboardAPI(currentUserId?: number): FilterAPI {
   }
 }
 
-/**
- * 计算当前记录是否禁止编辑，并返回保持原文案的提示。
- * 存在原因：把权限判断从点击处理器中抽出，降低页面主流程分支。
- */
+// `public` 账户永远不能编辑，非管理员只能编辑本人订单；返回值直接复用为提示文案。
 function getConsumableEditBlockMessage(
   item: DashboardConsumableOrder,
   currentUserRole: string | undefined,
@@ -82,10 +73,7 @@ function getConsumableEditBlockMessage(
   return null
 }
 
-/**
- * 把耗材订单转换成编辑表单默认值。
- * 存在原因：页面点击编辑时需要重置较多字段，独立函数能避免回调过长。
- */
+// 把后端可空字段收口成 RHF 可控输入默认值，避免编辑弹窗拿到 `undefined` 或 `null`。
 function buildConsumableFormValues(item: DashboardConsumableOrder): ConsumableOrderFormInputData {
   return {
     name: String(item.name ?? ''),
@@ -99,10 +87,7 @@ function buildConsumableFormValues(item: DashboardConsumableOrder): ConsumableOr
   }
 }
 
-/**
- * 构造耗材订单列表列定义和操作列。
- * 存在原因：把表格列拼装从页面主体移出，让页面只负责状态和事件编排。
- */
+// “我的耗材订单”会移除申请人列；仅 `approved` 状态显示确认收货，编辑按钮按角色和归属禁用。
 function createConsumableColumns({
   currentUserId,
   currentUserRole,
@@ -158,29 +143,32 @@ function createConsumableColumns({
   return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
 }
 
-/**
- * 渲染耗材订单编辑弹窗。
- * 存在原因：弹窗表单和删除确认流程较长，独立出来后页面主体更聚焦。
- */
+// `approved` / `rejected` 订单仍可进入弹窗，但只能删除，不能再提交编辑。
 function DashboardConsumableEditDialog({
-  editingConsumable,
-  isConsumableEditLocked,
-  deleteConfirm,
-  consumableForm,
-  isSubmittingConsumable,
-  onDelete,
-  onClose,
-  onSubmit,
+  dialog,
 }: Readonly<{
-  editingConsumable: DashboardConsumableOrder | null
-  isConsumableEditLocked: boolean
-  deleteConfirm: boolean
-  consumableForm: ReturnType<typeof useForm<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>>
-  isSubmittingConsumable: boolean
-  onDelete: () => void
-  onClose: () => void
-  onSubmit: () => void
+  dialog: {
+    editingConsumable: DashboardConsumableOrder | null
+    deleteConfirm: boolean
+    consumableForm: ReturnType<typeof useForm<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>>
+    isSubmittingConsumable: boolean
+    onDelete: () => void
+    onClose: () => void
+    onSubmit: () => void
+  }
 }>) {
+  const {
+    editingConsumable,
+    deleteConfirm,
+    consumableForm,
+    isSubmittingConsumable,
+    onDelete,
+    onClose,
+    onSubmit,
+  } = dialog
+  const isConsumableEditLocked =
+    editingConsumable?.status === 'approved' || editingConsumable?.status === 'rejected'
+
   return (
     <Dialog open={editingConsumable !== null} onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -208,10 +196,6 @@ function DashboardConsumableEditDialog({
   )
 }
 
-/**
- * 管理仪表盘中的耗材订单列表、编辑和确认收货流程。
- * 存在原因：这是耗材订单页的轻量容器，负责把通用表格、弹窗和权限判断组合起来。
- */
 export function DashboardConsumableTab() {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
@@ -235,17 +219,12 @@ export function DashboardConsumableTab() {
     requestDashboardCountsRefresh()
   }, [queryClient])
 
-  const isConsumableEditLocked = editingConsumable?.status === 'approved' || editingConsumable?.status === 'rejected'
-
   const consumableDashboardAPI = useMemo(
     () => createConsumableDashboardAPI(currentUser?.id),
     [currentUser?.id]
   )
 
-  /**
-   * 打开耗材编辑弹窗并按当前订单内容重置表单。
-   * 存在原因：编辑前需要统一执行权限检查与表单填充，避免逻辑散落在操作列里。
-   */
+  // 打开编辑前先做权限拦截，拦截失败直接 toast，不进入弹窗状态。
   const handleConsumableEdit = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as DashboardConsumableOrder
     const blockMessage = getConsumableEditBlockMessage(item, currentUser?.role, currentUser?.id, isAdmin)
@@ -259,10 +238,7 @@ export function DashboardConsumableTab() {
     consumableForm.reset(buildConsumableFormValues(item))
   }, [isAdmin, currentUser?.id, currentUser?.role, consumableForm])
 
-  /**
-   * 提交耗材订单编辑。
-   * 存在原因：保存成功后需要同时刷新 Dashboard 与订单页缓存。
-   */
+  // 提交成功后同时失效 Dashboard 列表和订单列表缓存；字段级校验错误回填表单而不是 toast。
   const submitConsumableEdit = consumableForm.handleSubmit(async (formData) => {
     if (!editingConsumable) return
     setIsSubmittingConsumable(true)
@@ -298,10 +274,7 @@ export function DashboardConsumableTab() {
     }
   })
 
-  /**
-   * 处理耗材订单删除的二次确认与实际删除。
-   * 存在原因：保持原有“第一次点删除只切换确认态”的交互不变。
-   */
+  // 删除采用两段式确认：第一次只切确认态，第二次才真正调用删除接口。
   const handleDeleteConsumable = useCallback(async () => {
     if (!editingConsumable) return
 
@@ -322,10 +295,7 @@ export function DashboardConsumableTab() {
     }
   }, [consumableForm, deleteConfirm, editingConsumable, refreshTables])
 
-  /**
-   * 关闭编辑弹窗并恢复默认表单状态。
-   * 存在原因：让关闭动作只有一个出口，避免遗漏 deleteConfirm 清理。
-   */
+  // 关闭弹窗时同时清理 `editingConsumable`、`deleteConfirm` 和表单默认值。
   const closeConsumableDialog = useCallback(() => {
     setEditingConsumable(null)
     setDeleteConfirm(false)
@@ -342,6 +312,15 @@ export function DashboardConsumableTab() {
     }),
     [currentUser?.id, currentUser?.role, handleConsumableEdit, isAdmin, refreshTables]
   )
+  const consumableEditDialog = {
+    editingConsumable,
+    deleteConfirm,
+    consumableForm,
+    isSubmittingConsumable,
+    onDelete: handleDeleteConsumable,
+    onClose: closeConsumableDialog,
+    onSubmit: submitConsumableEdit,
+  }
 
   return (
     <>
@@ -362,14 +341,7 @@ export function DashboardConsumableTab() {
         }}
       />
       <DashboardConsumableEditDialog
-        editingConsumable={editingConsumable}
-        isConsumableEditLocked={isConsumableEditLocked}
-        deleteConfirm={deleteConfirm}
-        consumableForm={consumableForm}
-        isSubmittingConsumable={isSubmittingConsumable}
-        onDelete={handleDeleteConsumable}
-        onClose={closeConsumableDialog}
-        onSubmit={submitConsumableEdit}
+        dialog={consumableEditDialog}
       />
     </>
   )

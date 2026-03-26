@@ -27,22 +27,13 @@ import { toast } from '@/lib/toast'
 import { getApiErrorMessage, normalizeApiErrorMessage } from '@/lib/validationSchemas'
 import { cn } from '@/lib/utils'
 
-/**
- * 定义单个导入文件允许的最大体积。
- * 存在原因：上传校验和错误提示都依赖同一阈值，集中定义能避免魔法数字散落。
- */
+// 单文件大小上限为 `2 MB`，超限时 toast 会展示当前文件的 MB 大小。
 const MAX_FILE_SIZE = 2 * 1024 * 1024
 
-/**
- * 定义当前导入页支持的文件扩展名白名单。
- * 存在原因：点击上传和拖拽上传需要共用同一套文件类型判断规则。
- */
+// `.csv /.xlsx /.xls` 是上传白名单，拖拽校验和 `input accept` 共用这组扩展名。
 const IMPORT_FILE_EXTENSIONS = ['.csv', '.xlsx', '.xls']
 
-/**
- * 描述导入接口返回的结果结构。
- * 存在原因：结果面板、成功提示和错误列表都依赖这一响应形态，单独定义便于约束使用方。
- */
+// 结果面板和成功提示都依赖这组字段，错误明细按 `row + error` 展示。
 interface ImportResult {
   success: boolean
   total_rows: number
@@ -51,42 +42,7 @@ interface ImportResult {
   errors: { row: number; error: string }[] | null
 }
 
-/**
- * 描述模板说明区组件的入参。
- * 存在原因：模板下载动作被拆到独立展示块中，需要显式声明它只依赖下载回调。
- */
-type ImportTemplateSectionProps = Readonly<{
-  onDownloadTemplate: () => void
-}>
-
-/**
- * 描述文件拖拽上传区组件的入参。
- * 存在原因：上传区同时承载文件展示、拖拽交互和清空动作，独立接口能避免页面主体混乱。
- */
-type ImportFileDropzoneProps = Readonly<{
-  file: File | null
-  isDragging: boolean
-  fileInputRef: React.RefObject<HTMLInputElement | null>
-  onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
-  onDragOver: (event: DragEvent<HTMLDivElement>) => void
-  onDragLeave: (event: DragEvent<HTMLDivElement>) => void
-  onDrop: (event: DragEvent<HTMLDivElement>) => void
-  onOpenFileDialog: () => void
-  onClearFile: () => void
-}>
-
-/**
- * 描述导入结果面板组件的入参。
- * 存在原因：结果区只依赖导入结果本身，单独建模后能保持展示组件职责单一。
- */
-type ImportResultPanelProps = Readonly<{
-  result: ImportResult | null
-}>
-
-/**
- * 解析模板下载接口返回的 Blob 错误体。
- * 存在原因：模板下载接口返回二进制流，失败时需要兼容 Blob/JSON 两种错误形态。
- */
+// 模板下载失败时接口可能返回 Blob；若文本可解析为 JSON，则优先读取其中的 `detail`。
 async function parseBlobErrorDetail(error: AxiosError): Promise<unknown> {
   const responseData = error.response?.data
   if (!responseData) {
@@ -113,27 +69,16 @@ async function parseBlobErrorDetail(error: AxiosError): Promise<unknown> {
   return undefined
 }
 
-/**
- * 校验导入文件后缀是否合法。
- * 存在原因：上传入口支持拖拽与点击两种来源，需要共用同一份后缀规则。
- */
+// 拖拽上传和点击上传共用同一份扩展名白名单。
 function isSupportedImportFile(fileName: string): boolean {
   const extension = fileName.substring(fileName.lastIndexOf('.')).toLowerCase()
   return IMPORT_FILE_EXTENSIONS.includes(extension)
 }
 
-/**
- * 格式化文件大小文本。
- * 存在原因：上传区和已选文件摘要都需要展示统一的大小文案。
- */
 function formatFileSize(fileSize: number): string {
   return `${(fileSize / 1024).toFixed(1)} KB`
 }
 
-/**
- * 根据文件扩展名返回对应图标。
- * 存在原因：让上传区的文件摘要逻辑与页面主体解耦。
- */
 function getFileIcon(fileName: string): ReactNode {
   const extension = fileName.substring(fileName.lastIndexOf('.')).toLowerCase()
   if (extension === '.csv') {
@@ -142,10 +87,6 @@ function getFileIcon(fileName: string): ReactNode {
   return <File className="w-8 h-8 text-blue-500" />
 }
 
-/**
- * 根据导入结果生成标题图标。
- * 存在原因：避免在结果面板头部继续堆叠嵌套条件渲染。
- */
 function getResultTitleIcon(result: ImportResult | null): ReactNode {
   if (result?.success) {
     return <CheckCircle className="w-5 h-5 text-green-500" />
@@ -156,10 +97,6 @@ function getResultTitleIcon(result: ImportResult | null): ReactNode {
   return <FileSpreadsheet className="w-5 h-5" />
 }
 
-/**
- * 根据导入结果生成状态区图标。
- * 存在原因：让结果摘要区只依赖单一状态入口，而不是重复判断 success。
- */
 function getResultStatusIcon(success: boolean): ReactNode {
   if (success) {
     return <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
@@ -167,10 +104,6 @@ function getResultStatusIcon(success: boolean): ReactNode {
   return <XCircle className="w-5 h-5 text-destructive" />
 }
 
-/**
- * 根据导入结果生成摘要区配色。
- * 存在原因：结果展示区同时复用背景、边框和标题颜色，集中封装更稳。
- */
 function getResultTone(success: boolean): { container: string; title: string } {
   if (success) {
     return {
@@ -185,10 +118,7 @@ function getResultTone(success: boolean): { container: string; title: string } {
   }
 }
 
-/**
- * 根据拖拽态和选中文件态计算上传区样式。
- * 存在原因：把上传区的样式分支从 JSX 中提取成命名逻辑，降低主页面复杂度。
- */
+// 拖入时显示高亮态；已有文件时保留弱高亮，提示当前已有待导入文件。
 function getDropzoneClassName(isDragging: boolean, hasFile: boolean): string {
   return cn(
     'relative border-2 border-dashed rounded-lg p-6 transition-all duration-200 cursor-pointer',
@@ -198,10 +128,6 @@ function getDropzoneClassName(isDragging: boolean, hasFile: boolean): string {
   )
 }
 
-/**
- * 触发模板文件下载。
- * 存在原因：模板下载和库存导入都在当前页面，下载逻辑独立后更易复用错误处理。
- */
 function downloadTemplateBlob(data: BlobPart): void {
   const blob = new Blob([data], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -216,13 +142,11 @@ function downloadTemplateBlob(data: BlobPart): void {
   document.body.removeChild(anchor)
 }
 
-/**
- * 渲染模板字段说明区。
- * 存在原因：模板说明是稳定展示块，独立后能显著缩短页面主组件长度。
- */
 function ImportTemplateSection({
   onDownloadTemplate,
-}: ImportTemplateSectionProps) {
+}: Readonly<{
+  onDownloadTemplate: () => void
+}>) {
   return (
     <div className="rounded-lg my-4">
       <div className="flex items-center justify-between mb-4">
@@ -251,21 +175,33 @@ function ImportTemplateSection({
   )
 }
 
-/**
- * 渲染文件上传区。
- * 存在原因：拖拽上传区内部的交互与展示较多，拆出后页面主体只保留状态编排。
- */
 function ImportFileDropzone({
-  file,
-  isDragging,
-  fileInputRef,
-  onFileChange,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-  onOpenFileDialog,
-  onClearFile,
-}: ImportFileDropzoneProps) {
+  upload,
+}: Readonly<{
+  upload: {
+    file: File | null
+    isDragging: boolean
+    fileInputRef: React.RefObject<HTMLInputElement | null>
+    onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
+    onDragOver: (event: DragEvent<HTMLDivElement>) => void
+    onDragLeave: (event: DragEvent<HTMLDivElement>) => void
+    onDrop: (event: DragEvent<HTMLDivElement>) => void
+    onOpenFileDialog: () => void
+    onClearFile: () => void
+  }
+}>) {
+  const {
+    file,
+    isDragging,
+    fileInputRef,
+    onFileChange,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+    onOpenFileDialog,
+    onClearFile,
+  } = upload
+
   return (
     <div>
       <label className="block text-base mb-2 mt-10">上传文件</label>
@@ -320,13 +256,12 @@ function ImportFileDropzone({
   )
 }
 
-/**
- * 渲染导入结果区。
- * 存在原因：结果展示包含摘要、错误表格和空态，独立后能避免主页面继续膨胀。
- */
+// 结果摘要固定展示 `total_rows / created / errors_count`；错误明细最多展示前 50 条。
 function ImportResultPanel({
   result,
-}: ImportResultPanelProps) {
+}: Readonly<{
+  result: ImportResult | null
+}>) {
   if (!result) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
@@ -412,10 +347,7 @@ function ImportResultPanel({
   )
 }
 
-/**
- * 组织库存批量导入页面的模板下载、文件上传和结果展示。
- * 存在原因：当前页面是导入热点页，主组件应退回到状态编排层而不是承载全部展示细节。
- */
+// 导入页主组件只负责模板下载、文件上传和结果展示的状态编排。
 export function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
@@ -423,10 +355,7 @@ export function ImportPage() {
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  /**
-   * 校验文件类型与大小，并保持原有错误提示文案。
-   * 存在原因：拖拽与点击选择都会进入这条链路，需要统一校验规则。
-   */
+  // 拖拽与点击选择共用同一套大小和扩展名校验规则。
   const validateFile = useCallback((selectedFile: File): boolean => {
     if (!isSupportedImportFile(selectedFile.name)) {
       toast.warning('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
@@ -443,10 +372,7 @@ export function ImportPage() {
     return true
   }, [])
 
-  /**
-   * 接管文件选择后的状态写入。
-   * 存在原因：无论来自文件选择框还是拖拽，都需要统一重置旧导入结果。
-   */
+  // 文件来自点击或拖拽都走同一条状态写入链路，并在选中新文件时清空旧导入结果。
   const applySelectedFile = useCallback((selectedFile: File | null) => {
     if (!selectedFile || !validateFile(selectedFile)) {
       return
@@ -456,46 +382,30 @@ export function ImportPage() {
     setResult(null)
   }, [validateFile])
 
-  /**
-   * 处理文件选择框变更。
-   * 存在原因：把 DOM 事件和文件处理逻辑解耦，降低主组件复杂度。
-   */
   const handleFileChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     applySelectedFile(event.target.files?.[0] ?? null)
   }, [applySelectedFile])
 
-  /**
-   * 处理拖拽进入上传区。
-   * 存在原因：保持拖拽高亮态与浏览器默认行为隔离。
-   */
+  // `preventDefault()` 允许 drop，并在拖入时切换上传区高亮态。
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(true)
   }, [])
 
-  /**
-   * 处理拖拽离开上传区。
-   * 存在原因：让拖拽态在离开时及时回退，避免残留高亮样式。
-   */
+  // 拖拽离开时取消高亮，避免上传区残留拖拽态样式。
   const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(false)
   }, [])
 
-  /**
-   * 处理拖拽释放文件。
-   * 存在原因：拖拽上传和点击上传共享同一套文件写入逻辑。
-   */
+  // 放下文件后取消高亮，并沿用与点击上传相同的文件选择和校验流程。
   const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(false)
     applySelectedFile(event.dataTransfer.files?.[0] ?? null)
   }, [applySelectedFile])
 
-  /**
-   * 清空当前文件选择和导入结果。
-   * 存在原因：允许用户在不刷新页面的前提下重新选择文件。
-   */
+  // 清空当前文件、导入结果和原生 file input 值，允许用户重新选择同名文件。
   const handleClearFile = useCallback(() => {
     setFile(null)
     setResult(null)
@@ -504,10 +414,7 @@ export function ImportPage() {
     }
   }, [])
 
-  /**
-   * 提交当前文件到导入接口。
-   * 存在原因：导入成功与失败都需要统一复位 loading 态并保留原有提示。
-   */
+  // 导入开始前先清空旧结果；无论成功还是失败都在 `finally` 里复位 loading。
   const handleImport = useCallback(async () => {
     if (!file) {
       return
@@ -522,6 +429,7 @@ export function ImportPage() {
 
       const response = await inventoryAPI.importExcel(formData)
       setResult(response.data)
+      // 只在后端明确 success 时弹成功提示，避免“部分失败”被误认为完全导入成功。
       if (response.data.success) {
         toast.success(`导入成功！共 ${response.data.created} 条记录`)
       }
@@ -532,10 +440,7 @@ export function ImportPage() {
     }
   }, [file])
 
-  /**
-   * 下载导入模板，并兼容 Blob 错误体解析。
-   * 存在原因：模板下载是导入页的核心辅助动作，需要单独管理频控与错误提示。
-   */
+  // 模板下载接口返回 `429` 时固定提示“2 秒后重试”，其余失败走 Blob / JSON 兼容解析。
   const handleDownloadTemplate = useCallback(async () => {
     try {
       const response = await inventoryAPI.downloadTemplate()
@@ -551,6 +456,18 @@ export function ImportPage() {
       toast.error(normalizeApiErrorMessage(errorDetail, '下载模板失败'))
     }
   }, [])
+  // 上传区参数打包后统一透传，减少 JSX 中重复的事件线缆。
+  const upload = {
+    file,
+    isDragging,
+    fileInputRef,
+    onFileChange: handleFileChange,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDrop: handleDrop,
+    onOpenFileDialog: () => fileInputRef.current?.click(),
+    onClearFile: handleClearFile,
+  }
 
   return (
     <div className="space-y-6">
@@ -569,15 +486,7 @@ export function ImportPage() {
           <CardContent className="space-y-6">
             <ImportTemplateSection onDownloadTemplate={handleDownloadTemplate} />
             <ImportFileDropzone
-              file={file}
-              isDragging={isDragging}
-              fileInputRef={fileInputRef}
-              onFileChange={handleFileChange}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onOpenFileDialog={() => fileInputRef.current?.click()}
-              onClearFile={handleClearFile}
+              upload={upload}
             />
             <Button
               onClick={handleImport}

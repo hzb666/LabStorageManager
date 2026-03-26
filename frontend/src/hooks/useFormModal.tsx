@@ -9,9 +9,7 @@ export type ValidationRule<T> = {
   validator: (value: unknown, formData?: T) => { isValid: boolean; error?: string }
 }
 
-/**
- * useFormModal 配置选项
- */
+// useFormModal 配置选项
 export interface UseFormModalOptions<T> {
   // 初始表单数据
   initialData: T
@@ -21,9 +19,7 @@ export interface UseFormModalOptions<T> {
   onSubmit?: (data: T) => Promise<void>
 }
 
-/**
- * useFormModal 返回值
- */
+// useFormModal 返回值
 export interface UseFormModalReturn<T> {
   // 表单数据
   formData: T
@@ -80,17 +76,13 @@ export function useFormModal<T>({
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof T, string>>>({})
   const [submitting, setSubmitting] = useState(false)
 
-  /**
-   * 重置表单
-   */
+  // 重置表单
   const resetForm = useCallback(() => {
     setFormData(initialData)
     setFormErrors({})
   }, [initialData])
 
-  /**
-   * 清除单个字段错误
-   */
+  // 清除单个字段错误
   const clearFieldError = useCallback((field: keyof T) => {
     setFormErrors(prev => {
       const newErrors = { ...prev }
@@ -99,9 +91,7 @@ export function useFormModal<T>({
     })
   }, [])
 
-  /**
-   * 字段变更处理
-   */
+  // 字段变更处理
   const handleChange = useCallback((field: keyof T, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     // 清除该字段的错误提示
@@ -128,9 +118,7 @@ export function useFormModal<T>({
     return Object.keys(errors).length === 0
   }, [formData, validationRules])
 
-  /**
-   * 提交表单
-   */
+  // 提交表单
   const handleSubmit = useCallback(async (e?: React.FormEvent) => {
     if (e) {
       e.preventDefault()

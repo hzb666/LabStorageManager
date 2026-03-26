@@ -1,7 +1,6 @@
 /**
- * 仪表盘页面
- * 轻量级 Tab 容器：显示统计卡片 + 按需加载对应 Tab
- * activeTab 通过 localStorage 持久化
+ * 组织仪表盘页签、统计卡片和按需加载的子页。
+ * `activeTab` 会持久化到 localStorage，并按当前角色校验可见范围。
  */
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { ShoppingCart, Package, ArrowRightLeft, Loader2 } from 'lucide-react'
@@ -56,10 +55,7 @@ const EMPTY_COUNTS: DashboardCounts = {
 
 let dashboardCountsCache: DashboardCountsCache | null = null
 
-/**
- * 判断统计卡片数字是否真正发生变化，避免重复写入缓存和状态。
- * 存在原因：统计数据来自多个接口汇总，结构固定，适合做轻量浅比较。
- */
+// 判断统计卡片数字是否真正发生变化，避免同值 `setState` 触发无效更新。
 function isCountsEqual(a: DashboardCounts, b: DashboardCounts): boolean {
   return (
     a.reagentCount === b.reagentCount &&
@@ -69,10 +65,7 @@ function isCountsEqual(a: DashboardCounts, b: DashboardCounts): boolean {
   )
 }
 
-/**
- * 渲染单个统计卡片，并统一处理高亮态样式。
- * 存在原因：让页面主体只负责组织卡片数据，不再堆叠重复 JSX。
- */
+// 统计卡片只负责展示标题、图标、数值和激活态，不参与数据获取或权限判断。
 function StatCard({
   title,
   icon: Icon,
@@ -107,10 +100,7 @@ function StatCard({
 
 const ALL_TABS: DashboardTab[] = ['reagents', 'consumables', 'borrows', 'stockin']
 
-/**
- * 读取上次保存的仪表盘 Tab，并确保结果仍在当前允许范围内。
- * 存在原因：public/admin 用户可见 Tab 不同，直接复用旧值会落到非法页签。
- */
+// `localStorage` 里的 tab 值不可信，角色切换后若旧值已不可见则回退到首个允许页签。
 function getSavedTab(allowedTabs: DashboardTab[]): DashboardTab {
   try {
     const saved = localStorage.getItem(DASHBOARD_TAB_STORAGE_KEY)
@@ -123,30 +113,21 @@ function getSavedTab(allowedTabs: DashboardTab[]): DashboardTab {
   return allowedTabs[0] ?? 'borrows'
 }
 
-/**
- * 持久化当前激活的仪表盘 Tab。
- * 存在原因：返回仪表盘时需要尽量恢复用户上次停留位置。
- */
+// 持久化当前激活的页签；写入失败只影响下次恢复，不影响当前选中态。
 function saveTab(tab: DashboardTab) {
   try {
     localStorage.setItem(DASHBOARD_TAB_STORAGE_KEY, tab)
   } catch {
-    // ignore localStorage errors
+    // 持久化失败时保留当前内存状态，不额外打断交互。
   }
 }
 
-/**
- * 汇总分组订单数量。
- * 存在原因：试剂和耗材接口都返回按状态分组的数据结构，页面只关心总条数。
- */
+// 订单接口返回 `{ [status]: { orders: [] } }`；这里只累计每组 `orders.length`，不依赖状态键名。
 function countGroupedOrders(grouped: Record<string, { orders: unknown[] }>): number {
   return Object.values(grouped).reduce((sum, item) => sum + (item.orders?.length ?? 0), 0)
 }
 
-/**
- * 加载公用账户所需的统计数字。
- * 存在原因：public 账户只展示借用数据，单独拆出可减少主流程分支。
- */
+// `public` 角色只请求借用列表，其余统计固定为 `0`，避免触发无权限或无意义的请求。
 async function loadPublicDashboardCounts(): Promise<DashboardCounts> {
   const borrowRes = await inventoryAPI.getMyBorrows()
   return {
@@ -157,10 +138,7 @@ async function loadPublicDashboardCounts(): Promise<DashboardCounts> {
   }
 }
 
-/**
- * 加载普通账户所需的全部统计数字。
- * 存在原因：试剂、耗材、借用、待入库分别来自不同接口，集中封装后更易复用缓存逻辑。
- */
+// 成员角色的四项统计来自 4 个接口；试剂和耗材结果需要先按分组对象聚合。
 async function loadMemberDashboardCounts(): Promise<DashboardCounts> {
   const [reagentRes, consumableRes, borrowRes, stockinRes] = await Promise.all([
     reagentOrderAPI.getMyReagentOrders(),
@@ -180,18 +158,12 @@ async function loadMemberDashboardCounts(): Promise<DashboardCounts> {
   }
 }
 
-/**
- * 统一按账户角色选择统计加载方式。
- * 存在原因：把“public / 非 public”分叉留在一处，降低 effect 内部复杂度。
- */
+// 把角色分支收口在这一层，`effect` 不直接处理 public / member 分叉。
 function loadDashboardCountsByRole(isPublicUser: boolean): Promise<DashboardCounts> {
   return isPublicUser ? loadPublicDashboardCounts() : loadMemberDashboardCounts()
 }
 
-/**
- * 基于当前用户和缓存读取仪表盘统计数字。
- * 存在原因：页面返回时希望优先复用已有统计，避免每次切换页签都闪动 loading。
- */
+// 模块级缓存按 `userKey` 隔离；有缓存时先显示缓存再后台刷新，无缓存时才显示 loading。
 function useDashboardCounts(userKey: string, isPublicUser: boolean, refreshToken: number): DashboardCountsState {
   const cachedCountsForUser = dashboardCountsCache?.userKey === userKey ? dashboardCountsCache.counts : null
   const [countsState, setCountsState] = useState<DashboardCountsCache | null>(() =>
@@ -243,10 +215,7 @@ function useDashboardCounts(userKey: string, isPublicUser: boolean, refreshToken
   return { counts, isLoading }
 }
 
-/**
- * 订阅子 Tab 发出的统计刷新信号，并将其转成可依赖的计数器。
- * 存在原因：统计卡片使用本地缓存后，需要一个显式刷新入口而不是依赖切 Tab 隐式触发。
- */
+// 子 Tab 的增删改不会自动刷新顶部统计，这里把跨组件刷新事件折叠成 `refreshToken`。
 function useDashboardRefreshToken(): number {
   const [refreshToken, setRefreshToken] = useState(0)
 
@@ -257,10 +226,7 @@ function useDashboardRefreshToken(): number {
   return refreshToken
 }
 
-/**
- * 构造当前可见的统计卡片配置。
- * 存在原因：把角色判断和卡片数据从 JSX 中提到命名结构，降低页面渲染分支密度。
- */
+// `public` 只展示借用卡片；非 `public` 才展示订单和待入库卡片，loading 时 `value` 可以是节点。
 function getDashboardCardItems(
   isPublicUser: boolean,
   counts: DashboardCounts,
@@ -301,27 +267,18 @@ function getDashboardCardItems(
   ]
 }
 
-/**
- * 渲染统计卡片网格。
- * 存在原因：页面主体只保留状态编排，卡片布局细节独立收口。
- */
+// `cards.length` 决定统计区网格列数，单卡片布局与多卡片布局沿用同一套点击行为。
 function DashboardStats({
-  isPublicUser,
+  cards,
   activeTab,
-  counts,
-  isLoading,
   onTabChange,
 }: Readonly<{
-  isPublicUser: boolean
+  cards: DashboardCardItem[]
   activeTab: DashboardTab
-  counts: DashboardCounts
-  isLoading: boolean
   onTabChange: (tab: DashboardTab) => void
 }>) {
-  const cards = getDashboardCardItems(isPublicUser, counts, isLoading)
-
   return (
-    <div className={cn('grid gap-3', isPublicUser ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 lg:grid-cols-4')}>
+    <div className={cn('grid gap-3', cards.length === 1 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 lg:grid-cols-4')}>
       {cards.map((card) => (
         <StatCard
           key={card.tab}
@@ -336,36 +293,7 @@ function DashboardStats({
   )
 }
 
-/**
- * 根据当前页签渲染对应的仪表盘子页面。
- * 存在原因：把页面内容分派从主组件中抽离，降低 JSX 条件分支数量。
- */
-function DashboardTabContent({
-  isPublicUser,
-  activeTab,
-}: Readonly<{
-  isPublicUser: boolean
-  activeTab: DashboardTab
-}>) {
-  if (!isPublicUser && activeTab === 'reagents') {
-    return <DashboardReagentTab />
-  }
-  if (!isPublicUser && activeTab === 'consumables') {
-    return <DashboardConsumableTab />
-  }
-  if (activeTab === 'borrows') {
-    return <DashboardBorrowTab />
-  }
-  if (!isPublicUser && activeTab === 'stockin') {
-    return <DashboardStockinTab />
-  }
-  return null
-}
-
-/**
- * 组织仪表盘页签、统计与对应子页面。
- * 存在原因：仪表盘是多个热点子页的容器，主组件应只保留权限、页签和缓存编排。
- */
+// 仪表盘主组件只做权限、Tab 持久化、统计缓存和子页切换编排。
 export function Dashboard() {
   const currentUser = useAuthStore((state) => state.user)
   const isPublicUser = currentUser?.role === UserRoles.PUBLIC
@@ -382,6 +310,10 @@ export function Dashboard() {
     [allowedTabs, selectedTab]
   )
   const { counts, isLoading } = useDashboardCounts(userKey, isPublicUser, refreshToken)
+  const cards = useMemo(
+    () => getDashboardCardItems(isPublicUser, counts, isLoading),
+    [counts, isLoading, isPublicUser]
+  )
 
   const handleTabChange = useCallback((tab: DashboardTab) => {
     if (!allowedTabs.includes(tab)) {
@@ -401,13 +333,14 @@ export function Dashboard() {
       </div>
 
       <DashboardStats
-        isPublicUser={isPublicUser}
+        cards={cards}
         activeTab={activeTab}
-        counts={counts}
-        isLoading={isLoading}
         onTabChange={handleTabChange}
       />
-      <DashboardTabContent isPublicUser={isPublicUser} activeTab={activeTab} />
+      {!isPublicUser && activeTab === 'reagents' ? <DashboardReagentTab /> : null}
+      {!isPublicUser && activeTab === 'consumables' ? <DashboardConsumableTab /> : null}
+      {activeTab === 'borrows' ? <DashboardBorrowTab /> : null}
+      {!isPublicUser && activeTab === 'stockin' ? <DashboardStockinTab /> : null}
     </div>
   )
 }

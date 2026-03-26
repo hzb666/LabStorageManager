@@ -44,10 +44,7 @@ import {
 const borrowColumnHelper = createColumnHelper<MyBorrowItem>()
 type BorrowReturnMode = 'used' | 'remaining'
 
-/**
- * 渲染借用记录展开行，并补充分子结构与最近借用信息。
- * 存在原因：Dashboard 的借用列表需要比通用表格行展示更多上下文详情。
- */
+// 展开行会补拉 inventory 详情，并把列表行数据与详情合并后展示分子结构、入库信息和最近借用人。
 const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRow({
   item,
 }: Readonly<{ item: MyBorrowItem }>) {
@@ -59,6 +56,7 @@ const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRo
     const loadDetail = async () => {
       try {
         const response = await inventoryAPI.get(item.inventory_id)
+        // 展开行可能在请求返回前被收起或替换，取消标记用于阻止过期结果回写。
         if (!cancelled) {
           setDetail((response.data ?? {}) as Partial<MyBorrowItem>)
         }
@@ -100,10 +98,7 @@ const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRo
   )
 })
 
-/**
- * 创建借用列表的本地筛选 API 适配器。
- * 存在原因：Dashboard 只拿一次完整列表，再在前端复用 FilterTable 的筛选与分页能力。
- */
+// 这里只请求一次我的借用列表，再交给 `buildLocalListData` 做前端筛选和分页适配 `FilterTable`。
 function createBorrowDashboardAPI(): FilterAPI {
   return {
     list: async (params) => {
@@ -119,10 +114,6 @@ function createBorrowDashboardAPI(): FilterAPI {
   }
 }
 
-/**
- * 构造借用列表列定义。
- * 存在原因：把表格列渲染从页面主体中拆开，避免主组件同时处理表格和弹窗逻辑。
- */
 function createBorrowColumns(
   openReturnModal: (item: MyBorrowItem) => void
 ): ColumnDef<Record<string, unknown>, unknown>[] {
@@ -171,10 +162,7 @@ function createBorrowColumns(
   ] as ColumnDef<Record<string, unknown>, unknown>[]
 }
 
-/**
- * 生成归还表单下方的剩余量预览文本。
- * 存在原因：把“使用量/剩余量”两套展示逻辑从 JSX 中拆出来，减少条件渲染复杂度。
- */
+// 根据 `used / remaining` 两种模式，把输入解释成不同含义并统一生成归还后剩余量预览。
 function getReturnPreviewText(
   selectedBorrow: MyBorrowItem | null,
   returnMode: BorrowReturnMode,
@@ -193,29 +181,28 @@ function getReturnPreviewText(
   return `归还后剩余: ${formattedQuantity} ${selectedBorrow.unit} (原借用时剩余量: ${selectedBorrow.remaining_quantity} ${selectedBorrow.unit})`
 }
 
-/**
- * 渲染借用归还弹窗。
- * 存在原因：主页面只负责状态编排，弹窗内部的表单和说明文本独立收口。
- */
 function DashboardBorrowReturnDialog({
-  open,
-  selectedBorrow,
-  returnMode,
-  returnForm,
-  isSubmittingReturn,
-  onReturnModeChange,
-  onSubmit,
-  onOpenChange,
+  dialog,
 }: Readonly<{
-  open: boolean
-  selectedBorrow: MyBorrowItem | null
-  returnMode: BorrowReturnMode
-  returnForm: ReturnForm
-  isSubmittingReturn: boolean
-  onReturnModeChange: (value: BorrowReturnMode) => void
-  onSubmit: () => void
-  onOpenChange: (open: boolean) => void
+  dialog: {
+    selectedBorrow: MyBorrowItem | null
+    returnMode: BorrowReturnMode
+    returnForm: ReturnForm
+    isSubmittingReturn: boolean
+    onReturnModeChange: (value: BorrowReturnMode) => void
+    onSubmit: () => void
+    onOpenChange: (open: boolean) => void
+  }
 }>) {
+  const {
+    selectedBorrow,
+    returnMode,
+    returnForm,
+    isSubmittingReturn,
+    onReturnModeChange,
+    onSubmit,
+    onOpenChange,
+  } = dialog
   const returnPreviewText = getReturnPreviewText(
     selectedBorrow,
     returnMode,
@@ -223,7 +210,7 @@ function DashboardBorrowReturnDialog({
   )
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={selectedBorrow !== null} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>归还试剂</DialogTitle>
@@ -297,14 +284,9 @@ function DashboardBorrowReturnDialog({
 
 type ReturnForm = UseFormReturn<typeof defaultReturnValues>
 
-/**
- * 管理仪表盘中的借用列表与归还弹窗。
- * 存在原因：页面需要同时组合 FilterTable、本地筛选和归还流程，但主体应保持为编排层。
- */
 export function DashboardBorrowTab() {
   const queryClient = useQueryClient()
 
-  const [showReturnModal, setShowReturnModal] = useState(false)
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
   const [returnMode, setReturnMode] = useState<BorrowReturnMode>('used')
   const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
@@ -325,21 +307,14 @@ export function DashboardBorrowTab() {
 
   const borrowDashboardAPI = useMemo(() => createBorrowDashboardAPI(), [])
 
-  /**
-   * 打开归还弹窗并重置为默认输入模式。
-   * 存在原因：避免上一次归还流程留下的表单态串到下一条记录。
-   */
+  // 每次打开归还弹窗都强制回到 `used` 模式并清空数量输入，避免沿用上一条记录的表单状态。
   const openReturnModal = useCallback((item: MyBorrowItem) => {
     setSelectedBorrow(item)
     setReturnMode('used')
     returnForm.reset({ return_mode: 'used', return_quantity: '' })
-    setShowReturnModal(true)
   }, [returnForm])
 
-  /**
-   * 处理归还提交，并在成功后刷新相关列表缓存。
-   * 存在原因：归还既会影响 Dashboard 借用列表，也会影响库存列表。
-   */
+  // 提交时按当前模式校验并换算最终剩余量；成功后失效借用/库存查询并刷新统计卡片。
   const handleReturn = returnForm.handleSubmit(async (formData) => {
     if (!selectedBorrow) return
 
@@ -351,6 +326,7 @@ export function DashboardBorrowTab() {
     const result = v.safeParse(schema, inputValue)
 
     if (!result.success) {
+      // `used` 和 `remaining` 模式共享输入框，但校验边界不同，错误需要即时切换。
       returnForm.setError('return_quantity', { message: result.issues[0]?.message || '输入无效' })
       return
     }
@@ -366,7 +342,6 @@ export function DashboardBorrowTab() {
         remaining_quantity: finalQuantity,
         unit: selectedBorrow.unit,
       })
-      setShowReturnModal(false)
       setSelectedBorrow(null)
       returnForm.reset(defaultReturnValues)
       await refreshTables()
@@ -380,22 +355,15 @@ export function DashboardBorrowTab() {
     console.log('Form validation errors:', errors)
   })
 
-  /**
-   * 切换归还模式时清空旧的数量输入和错误信息。
-   * 存在原因：使用量与剩余量的校验规则不同，保留旧值会误导用户。
-   */
+  // 切换填写模式时清空数量和字段错误，避免把“使用量”的输入带到“剩余量”校验里。
   const handleReturnModeChange = useCallback((value: BorrowReturnMode) => {
     setReturnMode(value)
     returnForm.setError('return_quantity', { message: '' })
     returnForm.resetField('return_quantity')
   }, [returnForm])
 
-  /**
-   * 在弹窗关闭时统一清理选中记录和表单状态。
-   * 存在原因：让关闭行为只保留一个出口，避免多个回调遗漏重置步骤。
-   */
+  // 关闭弹窗时统一清空选中记录、恢复默认模式并重置表单。
   const handleReturnDialogOpenChange = useCallback((open: boolean) => {
-    setShowReturnModal(open)
     if (!open) {
       setSelectedBorrow(null)
       setReturnMode('used')
@@ -407,6 +375,15 @@ export function DashboardBorrowTab() {
     () => createBorrowColumns(openReturnModal),
     [openReturnModal]
   )
+  const returnDialog = {
+    selectedBorrow,
+    returnMode,
+    returnForm,
+    isSubmittingReturn,
+    onReturnModeChange: handleReturnModeChange,
+    onSubmit: handleReturn,
+    onOpenChange: handleReturnDialogOpenChange,
+  }
 
   return (
     <>
@@ -426,14 +403,7 @@ export function DashboardBorrowTab() {
         }}
       />
       <DashboardBorrowReturnDialog
-        open={showReturnModal}
-        selectedBorrow={selectedBorrow}
-        returnMode={returnMode}
-        returnForm={returnForm}
-        isSubmittingReturn={isSubmittingReturn}
-        onReturnModeChange={handleReturnModeChange}
-        onSubmit={handleReturn}
-        onOpenChange={handleReturnDialogOpenChange}
+        dialog={returnDialog}
       />
     </>
   )

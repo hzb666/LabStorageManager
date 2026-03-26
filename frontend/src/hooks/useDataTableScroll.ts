@@ -99,9 +99,7 @@ export function useDataTableScroll<TData>({
   }
 }
 
-/**
- * 同步 virtualizer 实例到滚动逻辑内部的 ref，避免点击行时拿到旧引用。
- */
+// 同步 virtualizer 实例到滚动逻辑内部的 ref，避免点击行时拿到旧引用。
 export function useSyncVirtualizerRef(
   rowVirtualizer: Virtualizer<HTMLDivElement, Element>,
   setVirtualizerForScroll: (v: Virtualizer<HTMLDivElement, Element>) => void,
