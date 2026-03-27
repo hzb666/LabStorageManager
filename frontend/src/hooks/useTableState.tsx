@@ -7,7 +7,9 @@ import {
   getFuzzySearchState,
   setExpandAllState,
   setFuzzySearchState,
-} from '@/lib/tableExpandStorage'
+  getTableColumnSizing,
+  setTableColumnSizing,
+} from '@/lib/storage/appTableStorage'
 
 export interface ListResponseData {
   data: unknown[]
@@ -55,7 +57,7 @@ export interface UseTableStateOptions {
   initialSearch?: string
   // 初始化搜索字段
   initialSearchField?: string
-  // localStorage 键名前缀
+  // 历史兼容参数（新实现已统一写入 app-table.columnSizing）
   storageKeyPrefix?: string
   // 展开状态 localStorage 标识（统一存储到单个 key 的 JSON 中）
   expandStorageKey?: string
@@ -193,11 +195,10 @@ function buildListParams(args: {
 }
 
 // 列宽缓存只是一层偏好设置；读失败时回退默认布局，别让表格因此不可用。
-function readColumnSizingStorage(storageKey: string): ColumnSizingState {
+function readColumnSizingStorage(tableId: string): ColumnSizingState {
   if (globalThis.window === undefined) return {}
   try {
-    const stored = localStorage.getItem(storageKey)
-    return stored ? (JSON.parse(stored) as ColumnSizingState) : {}
+    return getTableColumnSizing(tableId) as ColumnSizingState
   } catch {
     return {}
   }
@@ -205,18 +206,18 @@ function readColumnSizingStorage(storageKey: string): ColumnSizingState {
 
 // 管理列宽状态并执行防抖持久化，避免主 Hook 混入存储细节。
 function useColumnSizingState(
-  storageKey: string,
+  tableId: string,
   columnSizingDebounceMs: number
 ) {
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() =>
-    readColumnSizingStorage(storageKey)
+    readColumnSizingStorage(tableId)
   )
 
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
         if (Object.keys(columnSizing).length > 0) {
-          localStorage.setItem(storageKey, JSON.stringify(columnSizing))
+          setTableColumnSizing(tableId, columnSizing as Record<string, number>)
         }
       } catch {
         // 列宽偏好不值得阻塞表格交互，存储失败时直接退回内存态。
@@ -224,7 +225,7 @@ function useColumnSizingState(
     }, columnSizingDebounceMs)
 
     return () => clearTimeout(timer)
-  }, [columnSizing, storageKey, columnSizingDebounceMs])
+  }, [columnSizing, tableId, columnSizingDebounceMs])
 
   // 兼容对象与函数两种更新器，保证调用方 API 不变。
   const handleColumnSizingChange = useCallback(
@@ -487,13 +488,11 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     extraParams = {},
     initialSearch = '',
     initialSearchField,
-    storageKeyPrefix = 'table-col-sizes',
     expandStorageKey,
     defaultExpanded = false,
   } = options
   const queryClient = useQueryClient()
   const expandStorageId = expandStorageKey || tableId
-  const columnSizingStorageKey = `${storageKeyPrefix}-${tableId}`
 
   const filterState = useFilterState({
     defaultStatus,
@@ -504,7 +503,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     expandStorageId,
   })
   const { columnSizing, handleColumnSizingChange } = useColumnSizingState(
-    columnSizingStorageKey,
+    tableId,
     columnSizingDebounceMs
   )
   const { isAllExpanded, toggleExpandAll, resetExpanded } = useExpandAllState(

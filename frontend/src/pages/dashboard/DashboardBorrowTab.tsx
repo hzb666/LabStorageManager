@@ -30,6 +30,8 @@ import {
   createValibotResolver,
   getApiErrorMessage,
   createReturnQuantitySchema,
+  type ReturnFormData,
+  type ReturnFormInputData,
 } from '@/lib/validationSchemas'
 import { getReturnFormFields, defaultReturnValues } from '@/lib/formConfigs'
 
@@ -282,7 +284,7 @@ function DashboardBorrowReturnDialog({
   )
 }
 
-type ReturnForm = UseFormReturn<typeof defaultReturnValues>
+type ReturnForm = UseFormReturn<ReturnFormInputData, unknown, ReturnFormData>
 
 export function DashboardBorrowTab() {
   const queryClient = useQueryClient()
@@ -291,7 +293,7 @@ export function DashboardBorrowTab() {
   const [returnMode, setReturnMode] = useState<BorrowReturnMode>('used')
   const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
 
-  const returnForm = useForm({
+  const returnForm = useForm<ReturnFormInputData, unknown, ReturnFormData>({
     resolver: createValibotResolver(ReturnFormSchema),
     defaultValues: defaultReturnValues,
     shouldFocusError: false,
@@ -381,7 +383,9 @@ export function DashboardBorrowTab() {
     returnForm,
     isSubmittingReturn,
     onReturnModeChange: handleReturnModeChange,
-    onSubmit: handleReturn,
+    onSubmit: () => {
+      void handleReturn()
+    },
     onOpenChange: handleReturnDialogOpenChange,
   }
 

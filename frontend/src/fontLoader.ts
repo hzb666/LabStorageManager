@@ -1,10 +1,14 @@
 import { FONT_TIMEOUT_MS } from './lib/constants'
+import {
+  clearPreferredFontSource,
+  getPreferredFontSource,
+  setPreferredFontSource,
+} from '@/lib/storage/appUiStorage'
 
 const FONT_READY_CLASS = 'web-fonts-ready'
 const FONT_STATE_ATTRIBUTE = 'data-font-state'
 const FONT_STYLESHEET_ID = 'app-web-fonts'
 const LOCAL_FONT_STYLE_ID = 'app-local-web-fonts'
-const LOCAL_FONT_PREFERENCE_KEY = 'preferred-font-source'
 const LOCAL_FONT_PREFERENCE_VALUE = 'source-han-sans-cn-vf-v1'
 const GOOGLE_FONT_FAMILY = 'Noto Sans SC'
 const LOCAL_FONT_FAMILY = 'SourceHanSansCN-VF-Local'
@@ -30,27 +34,15 @@ function delay(ms: number) {
 }
 
 function shouldPreferLocalFont() {
-  try {
-    return localStorage.getItem(LOCAL_FONT_PREFERENCE_KEY) === LOCAL_FONT_PREFERENCE_VALUE
-  } catch {
-    return false
-  }
+  return getPreferredFontSource() === LOCAL_FONT_PREFERENCE_VALUE
 }
 
 function rememberLocalFontPreference() {
-  try {
-    localStorage.setItem(LOCAL_FONT_PREFERENCE_KEY, LOCAL_FONT_PREFERENCE_VALUE)
-  } catch {
-    // ignore localStorage errors
-  }
+  setPreferredFontSource(LOCAL_FONT_PREFERENCE_VALUE)
 }
 
 function clearLocalFontPreference() {
-  try {
-    localStorage.removeItem(LOCAL_FONT_PREFERENCE_KEY)
-  } catch {
-    // ignore localStorage errors
-  }
+  clearPreferredFontSource()
 }
 
 function ensureFontStylesheet() {

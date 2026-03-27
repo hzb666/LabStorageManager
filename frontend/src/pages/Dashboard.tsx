@@ -9,10 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { cn } from '@/lib/utils'
 import { UserRoles } from '@/lib/constants'
 import { useAuthStore } from '@/store/useStore'
+import { getDashboardActiveTab, setDashboardActiveTab } from '@/lib/storage/appUiStorage'
 
 import {
   type DashboardTab,
-  DASHBOARD_TAB_STORAGE_KEY,
   subscribeDashboardCountsRefresh,
 } from '../lib/dashboardUtils'
 import { DashboardReagentTab } from './dashboard/DashboardReagentTab'
@@ -103,7 +103,7 @@ const ALL_TABS: DashboardTab[] = ['reagents', 'consumables', 'borrows', 'stockin
 // `localStorage` 里的 tab 值不可信，角色切换后若旧值已不可见则回退到首个允许页签。
 function getSavedTab(allowedTabs: DashboardTab[]): DashboardTab {
   try {
-    const saved = localStorage.getItem(DASHBOARD_TAB_STORAGE_KEY)
+    const saved = getDashboardActiveTab()
     if (saved && allowedTabs.includes(saved as DashboardTab)) {
       return saved as DashboardTab
     }
@@ -116,7 +116,7 @@ function getSavedTab(allowedTabs: DashboardTab[]): DashboardTab {
 // 持久化当前激活的页签；写入失败只影响下次恢复，不影响当前选中态。
 function saveTab(tab: DashboardTab) {
   try {
-    localStorage.setItem(DASHBOARD_TAB_STORAGE_KEY, tab)
+    setDashboardActiveTab(tab)
   } catch {
     // 持久化失败时保留当前内存状态，不额外打断交互。
   }

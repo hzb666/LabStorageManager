@@ -117,7 +117,7 @@ function buildReagentFormValues(
     brand: String(item.brand ?? ""),
     specification: String(item.specification ?? ""),
     quantity: Number(item.quantity ?? 1),
-    price: (item.price as number | undefined) ?? undefined,
+    price: item.price ?? "",
     order_reason: String(
       item.order_reason ?? "",
     ) as ReagentOrderFormData["order_reason"],

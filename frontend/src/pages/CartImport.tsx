@@ -22,6 +22,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import {
     ConsumableOrderSchema,
     ReagentOrderSchema,
+    applyValidationErrors,
     createValibotResolver,
     extractApiErrorDetail,
     getApiErrorMessage,
@@ -38,6 +39,7 @@ import {
 import {
     defaultConsumableOrderValues,
     defaultReagentOrderValues,
+    enhanceCasLookupField,
     getConsumableOrderFormFields,
     getReagentOrderFormFields,
 } from '@/lib/formConfigs'
@@ -96,6 +98,22 @@ type BatchLoadResult =
     | { type: 'loaded'; items: ImportItem[] }
     | { type: 'redirect'; message: string; clearStorage?: boolean }
     | { type: 'retry' }
+
+function readCartImportBatchStorageRaw(): string | null {
+    try {
+        return localStorage.getItem(CART_STORAGE_KEY)
+    } catch {
+        return null
+    }
+}
+
+function clearCartImportBatchStorage(): void {
+    try {
+        localStorage.removeItem(CART_STORAGE_KEY)
+    } catch {
+        // ignore storage errors
+    }
+}
 
 // 判断插件批次是否已经过期。 把 2 小时有效期规则固定在单点，避免批次加载链路散落重复判断。
 function isExpiredBatch(batch: StoredBatch): boolean {
@@ -195,7 +213,7 @@ function readCartImportBatchFromStorage(batchId: string, importFlag: boolean): B
         return { type: 'redirect', message: '缺少导入参数，请从浏览器插件重新发起导入' }
     }
 
-    const raw = localStorage.getItem(CART_STORAGE_KEY)
+    const raw = readCartImportBatchStorageRaw()
     if (!raw) {
         return { type: 'retry' }
     }
@@ -243,7 +261,7 @@ function createCartImportReagentFormValues(item: ImportItem): ReagentOrderFormIn
         brand: item.brand,
         specification: normalizeReagentSpecification(item.specification),
         quantity: item.quantity,
-        price: item.price,
+        price: item.price ?? '',
         is_hazardous: item.is_hazardous,
     }
 }
@@ -290,24 +308,15 @@ function createCartImportReagentFormFields(params: {
     isCasLookupLoading: boolean
 }) {
     const { checkCASWarning, handleCasLookup, isCasLookupLoading } = params
-    return getReagentOrderFormFields().map((field) =>
-        field.name === 'cas_number'
-            ? {
-                ...field,
-                onBlur: (value: unknown) => {
-                    if (typeof value === 'string') {
-                        checkCASWarning(value)
-                    }
-                },
-                prefixButton: {
-                    onClick: handleCasLookup,
-                    loading: isCasLookupLoading,
-                    title: '识别 CAS 号',
-                    icon: ScanSearch,
-                },
-            }
-            : field,
-    )
+    return enhanceCasLookupField(getReagentOrderFormFields(), {
+        onCasBlur: checkCASWarning,
+        prefixButton: {
+            onClick: handleCasLookup,
+            loading: isCasLookupLoading,
+            title: '识别 CAS 号',
+            icon: ScanSearch,
+        },
+    })
 }
 
 // 将购物车导入时的字段校验错误写回当前表单。 让提交流程只保留一次错误分流，而不重复遍历试剂/耗材两套表单。
@@ -318,27 +327,14 @@ function applyCartImportValidationErrors(params: {
     consumableForm: UseFormReturn<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>
 }): boolean {
     const { orderType, validationErrors, reagentForm, consumableForm } = params
-    if (validationErrors.length === 0) {
-        return false
-    }
-
-    validationErrors.forEach((errorItem) => {
-        if (!errorItem.loc?.[1]) {
-            return
-        }
-
+    return applyValidationErrors(validationErrors, (fieldName, message) => {
         if (orderType === 'reagent') {
-            reagentForm.setError(errorItem.loc[1] as keyof ReagentOrderFormData, {
-                message: errorItem.msg || '输入不合法',
-            })
+            reagentForm.setError(fieldName as keyof ReagentOrderFormData, { message })
             return
         }
 
-        consumableForm.setError(errorItem.loc[1] as keyof ConsumableOrderFormData, {
-            message: errorItem.msg || '输入不合法',
-        })
+        consumableForm.setError(fieldName as keyof ConsumableOrderFormData, { message })
     })
-    return true
 }
 
 // 提交当前试剂导入项。 把 `handleSubmit` 的执行细节从当前项提交器中拆出，降低主提交流程的语句数。
@@ -434,7 +430,7 @@ function useCartImportBatchController() {
 
         if (result.type === 'redirect') {
             if (result.clearStorage) {
-                localStorage.removeItem(CART_STORAGE_KEY)
+                clearCartImportBatchStorage()
             }
             toast.error(result.message)
             navigate('/reagents')
@@ -699,7 +695,7 @@ function useCartImportActions(params: {
         setItems(nextItems)
         if (nextItems.length === 0) {
             toast.success('已删除全部条目，即将返回试剂页')
-            localStorage.removeItem(CART_STORAGE_KEY)
+            clearCartImportBatchStorage()
             scheduleCartImportReturn(navigate)
             return
         }
@@ -736,7 +732,7 @@ function useCartImportActions(params: {
 
             if (nextSubmitted.size >= items.length) {
                 toast.success('全部导入完成，即将返回试剂页')
-                localStorage.removeItem(CART_STORAGE_KEY)
+                clearCartImportBatchStorage()
                 scheduleCartImportReturn(navigate)
             }
         } catch (error) {

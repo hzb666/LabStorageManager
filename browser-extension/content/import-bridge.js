@@ -39,7 +39,11 @@
       }
     } catch (error) {
       console.warn('[ImportBridge] 清理页面缓存失败:', error);
-      localStorage.removeItem(PAGE_STORAGE_KEY);
+      try {
+        localStorage.removeItem(PAGE_STORAGE_KEY);
+      } catch {
+        // ignore storage cleanup errors
+      }
     }
   }
 

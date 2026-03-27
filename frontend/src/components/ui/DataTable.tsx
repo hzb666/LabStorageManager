@@ -1,7 +1,7 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react'
 import type { Table as TableType } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { getExpandAllState, setExpandAllState } from '@/lib/tableExpandStorage'
+import { getExpandAllState, setExpandAllState } from '@/lib/storage/appTableStorage'
 import { useColumnResize } from '@/hooks/useColumnResize'
 import { useBulkExpand } from '@/hooks/useBulkExpand'
 import { useDataTableScroll, useSyncVirtualizerRef } from '@/hooks/useDataTableScroll'

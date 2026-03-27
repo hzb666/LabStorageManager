@@ -5,12 +5,16 @@ import { AnnouncementDetail } from './AnnouncementDetail'
 import { Button } from './ui/Button'
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/Tooltip'
 import { formatDate } from '@/lib/utils'
+import {
+  getAnnouncementReadState,
+  markAnnouncementRead,
+  setAnnouncementReadState,
+} from '@/lib/storage/appUiStorage'
 
 interface AnnouncementButtonProps {
   announcements: Announcement[]
 }
 
-const READ_KEY = 'announcement_read'
 const ANNOUNCEMENT_DROPDOWN_ITEM_CLASS_NAME =
   'px-4 py-3 cursor-pointer hover:bg-accent dark:hover:bg-input/50 transition-colors'
 
@@ -18,8 +22,7 @@ const getAnnouncementStorageKey = (id: number): string => id.toString()
 
 const getReadStorage = (): Record<string, number> => {
   try {
-    const data = localStorage.getItem(READ_KEY)
-    return data ? JSON.parse(data) : {}
+    return getAnnouncementReadState()
   } catch {
     // 本地存储异常时回退为空，避免公告入口因解析失败不可用。
     return {}
@@ -28,9 +31,7 @@ const getReadStorage = (): Record<string, number> => {
 
 // 已读态存时间戳而不是布尔值，这样公告更新后可以自动重新变成未读。
 const setAnnouncementRead = (id: number) => {
-  const storage = getReadStorage()
-  storage[getAnnouncementStorageKey(id)] = Date.now()
-  localStorage.setItem(READ_KEY, JSON.stringify(storage))
+  markAnnouncementRead(getAnnouncementStorageKey(id))
 }
 
 // 解析后端返回的 UTC 时间文本，并兼容缺失 `Z` 的旧格式。
@@ -76,7 +77,7 @@ const checkAnnouncementRead = (id: number, currentUpdatedAt: string): boolean =>
 
   if (updatedTime > timestamp) {
     delete storage[key]
-    localStorage.setItem(READ_KEY, JSON.stringify(storage))
+    setAnnouncementReadState(storage)
     return false
   }
   return true

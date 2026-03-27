@@ -101,6 +101,7 @@ function buildConsumableFormValues(
   return {
     name: String(item.name ?? ""),
     english_name: String(item.english_name ?? ""),
+    product_number: "",
     specification: String(item.specification ?? ""),
     unit: toText(item.unit),
     quantity: Number(item.quantity ?? 1),

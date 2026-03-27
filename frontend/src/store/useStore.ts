@@ -6,7 +6,12 @@ import { AUTH_STORAGE_EXPIRY_MS } from '@/lib/constants'
 // 自定义存储，带有过期时间支持 (3天)
 const createExpireStorage = <T>(expiresInMs: number): PersistStorage<T> => ({
   getItem: (name: string): StorageValue<T> | null => {
-    const value = localStorage.getItem(name)
+    let value: string | null = null
+    try {
+      value = localStorage.getItem(name)
+    } catch {
+      return null
+    }
     if (!value) return null
     
     try {
@@ -14,7 +19,11 @@ const createExpireStorage = <T>(expiresInMs: number): PersistStorage<T> => ({
       if (parsed.expiresAt) {
         const now = Date.now()
         if (now > parsed.expiresAt) {
-          localStorage.removeItem(name)
+          try {
+            localStorage.removeItem(name)
+          } catch {
+            // ignore storage errors
+          }
           return null
         }
       }
@@ -27,10 +36,18 @@ const createExpireStorage = <T>(expiresInMs: number): PersistStorage<T> => ({
   setItem: (name: string, value: StorageValue<T>): void => {
     const expiresAt = Date.now() + expiresInMs
     const valueWithExpiry = { ...value, expiresAt }
-    localStorage.setItem(name, JSON.stringify(valueWithExpiry))
+    try {
+      localStorage.setItem(name, JSON.stringify(valueWithExpiry))
+    } catch {
+      // ignore storage errors
+    }
   },
   removeItem: (name: string): void => {
-    localStorage.removeItem(name)
+    try {
+      localStorage.removeItem(name)
+    } catch {
+      // ignore storage errors
+    }
   },
 })
 

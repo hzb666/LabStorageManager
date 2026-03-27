@@ -1,6 +1,7 @@
 ﻿import React from 'react'
 import { CircleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { getTheme } from '@/lib/storage/appUiStorage'
 import {
   Card,
   CardContent,
@@ -28,7 +29,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   private ensureErrorTheme() {
-    const savedTheme = localStorage.getItem('theme') || 'light'
+    const savedTheme = getTheme()
     const root = document.documentElement
     if (savedTheme === 'dark') {
       root.classList.add('dark')

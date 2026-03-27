@@ -2,7 +2,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
-import type { UseFormReturn } from 'react-hook-form'
 
 // UI 组件
 import { Button } from '@/components/ui/Button'
@@ -25,18 +24,20 @@ import { downloadBlobResponse, processNotes } from '@/lib/utils'
 import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import {
   ConsumableOrderSchema,
+  applyValidationErrors,
   createValibotResolver,
   extractApiErrorDetail,
   getApiErrorMessage,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { ConsumableOrderFormData, ConsumableOrderFormInputData, ValidationError } from '@/lib/validationSchemas'
+import type { ConsumableOrderFormData, ConsumableOrderFormInputData } from '@/lib/validationSchemas'
 import { getConsumableOrderTableColumns } from '@/lib/tableConfigs'
 import {
   getConsumableOrderFormFields,
   defaultConsumableOrderValues
 } from '@/lib/formConfigs'
+import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderSubmitHelpers'
 
 // 图标
 import {
@@ -134,54 +135,6 @@ function createConsumableOrderUpdatePayload(formData: ConsumableOrderFormData) {
   }
 }
 
-// 将后端字段级校验错误写回表单。 让提交异常处理只保留流程判断，不再重复遍历错误数组。
-function applyConsumableValidationErrors(
-  form: UseFormReturn<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>,
-  validationErrors: ValidationError[],
-): boolean {
-  if (validationErrors.length === 0) {
-    return false
-  }
-
-  validationErrors.forEach((errorItem) => {
-    if (errorItem.loc?.[1]) {
-      form.setError(errorItem.loc[1] as keyof ConsumableOrderFormData, {
-        message: errorItem.msg || '输入不合法',
-      })
-    }
-  })
-  return true
-}
-
-// 按当前弹窗模式执行新增或编辑请求。 把请求分支从提交处理器中拆出，直接降低主提交流程的复杂度。
-async function submitConsumableOrderRequest(params: {
-  dialogState: 'edit' | 'add' | null
-  editingItem: ConsumableOrder | null
-  formData: ConsumableOrderFormData
-}) {
-  const { dialogState, editingItem, formData } = params
-
-  if (dialogState === 'edit' && editingItem) {
-    await consumableOrderAPI.update(editingItem.id, createConsumableOrderUpdatePayload(formData))
-    return
-  }
-
-  if (dialogState === 'add') {
-    await consumableOrderAPI.create(createConsumableOrderCreatePayload(formData))
-  }
-}
-
-// 统一返回提交成功提示语。 让提交逻辑只关心“何时提示”，而不是反复判断文案分支。
-function getConsumableSubmitSuccessMessage(dialogState: 'edit' | 'add' | null): string | null {
-  if (dialogState === 'edit') {
-    return '订单信息已更新'
-  }
-  if (dialogState === 'add') {
-    return '耗材订单创建成功'
-  }
-  return null
-}
-
 // 管理耗材订单弹窗、表单与提交删除流程。 把页面主组件收回成列表编排层，只保留筛选、表格和入口按钮。
 function useConsumableOrderDialogController(refreshOrders: () => void | Promise<void>) {
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
@@ -220,9 +173,20 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
   const handleFormSubmit = form.handleSubmit(async (formData) => {
     setIsSubmitting(true)
     try {
-      await submitConsumableOrderRequest({ dialogState, editingItem, formData })
+      await submitByDialogState({
+        dialogState,
+        editingItem,
+        formData,
+        onUpdate: (currentEditingItem, currentFormData) =>
+          consumableOrderAPI.update(currentEditingItem.id, createConsumableOrderUpdatePayload(currentFormData)),
+        onCreate: (currentFormData) =>
+          consumableOrderAPI.create(createConsumableOrderCreatePayload(currentFormData)),
+      })
       await Promise.resolve(refreshOrders())
-      const successMessage = getConsumableSubmitSuccessMessage(dialogState)
+      const successMessage = getDialogSubmitSuccessMessage(dialogState, {
+        edit: '订单信息已更新',
+        add: '耗材订单创建成功',
+      })
       if (successMessage) {
         toast.success(successMessage)
       }
@@ -231,7 +195,9 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(errorDetail)
-      if (applyConsumableValidationErrors(form, validationErrors)) {
+      if (applyValidationErrors(validationErrors, (fieldName, message) => {
+        form.setError(fieldName as keyof ConsumableOrderFormData, { message })
+      })) {
         return
       }
       toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))

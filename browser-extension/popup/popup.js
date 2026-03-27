@@ -362,12 +362,22 @@ async function getSystemTheme() {
     const results = await chrome.scripting.executeScript({
       target: { tabId: targetTab.id },
       func: () => {
-        const theme = localStorage.getItem('theme');
-        if (theme === 'dark') {
-          return { darkMode: true };
+        const appUiRaw = localStorage.getItem('app-ui');
+        if (!appUiRaw) {
+          return null;
         }
-        if (theme === 'light') {
-          return { darkMode: false };
+
+        try {
+          const appUi = JSON.parse(appUiRaw);
+          const appUiTheme = appUi?.theme;
+          if (appUiTheme === 'dark') {
+            return { darkMode: true };
+          }
+          if (appUiTheme === 'light') {
+            return { darkMode: false };
+          }
+        } catch {
+          // ignore malformed app-ui
         }
         return null;
       }

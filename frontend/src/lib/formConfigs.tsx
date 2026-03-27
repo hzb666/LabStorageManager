@@ -5,19 +5,51 @@
 
 import React from 'react'
 import { AlertTriangle } from 'lucide-react'
+import type { FieldValues } from 'react-hook-form'
 import type { FieldSchema } from '../components/BaseForm'
+import type { PrefixButtonConfig } from '../components/ui/Input'
 import type {
   ReagentOrderFormInputData,
   ConsumableOrderFormInputData,
   InventoryFormInputData,
   UserUpdateFormData,
-  StockInFormInputData
+  StockInFormInputData,
+  ReturnFormInputData,
 } from './validationSchemas'
 import {
   ORDER_REASON_OPTIONS,
   REAGENT_CATEGORY_OPTIONS,
   REAGENT_BRAND_OPTIONS,
 } from './options'
+
+// 为 `cas_number` 字段统一挂载识别按钮与可选 blur 检查，避免页面重复 map 字段。
+export function enhanceCasLookupField<T extends FieldValues>(
+  fields: FieldSchema<T>[],
+  params: {
+    prefixButton: PrefixButtonConfig
+    onCasBlur?: (casValue: string) => void
+  },
+): FieldSchema<T>[] {
+  const { prefixButton, onCasBlur } = params
+
+  return fields.map((field) => {
+    if (field.name !== 'cas_number') {
+      return field
+    }
+
+    const originalOnBlur = field.onBlur
+    return {
+      ...field,
+      onBlur: (value: unknown) => {
+        originalOnBlur?.(value)
+        if (typeof value === 'string') {
+          onCasBlur?.(value)
+        }
+      },
+      prefixButton,
+    }
+  })
+}
 
 // ============================================================================
 // 库存表单配置
@@ -268,7 +300,7 @@ export function getReturnFormFields(
   mode: 'remaining' | 'used',
   maxQuantity: number,
   unit?: string
-): FieldSchema<typeof defaultReturnValues>[] {
+): FieldSchema<ReturnFormInputData>[] {
   const baseLabel = mode === 'remaining' ? '剩余量' : '使用量'
   const label = unit ? `${baseLabel} (${unit})` : baseLabel
   return [

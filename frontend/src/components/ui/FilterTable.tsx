@@ -225,7 +225,7 @@ function useExpandedResetOnFilterChange({
 
 interface FilterTableHeaderProps {
   disableExpandAll: boolean
-  displayCount: number
+  displayCount: string | number
   enableExpandAll: boolean
   isAllExpanded: boolean
   onToggleExpandAll: () => void

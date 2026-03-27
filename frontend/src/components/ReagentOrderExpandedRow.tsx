@@ -145,16 +145,16 @@ function CasOverviewDetails({
     <>
       <div className={CAS_OVERVIEW_GRID_CLASS_NAME}>
         <span>订单：{getOrderCountLabel(loadingOverview, casOverview)}</span>
-        <span>，最近订单：{getLatestOrderText(latestOrder)}</span>
+        <span>，最近订单：{getLatestOrderText(latestOrder ?? null)}</span>
       </div>
       <div className={CAS_OVERVIEW_GRID_CLASS_NAME}>
         <span>
           库存：{getInventoryCountLabel(loadingOverview, casOverview)}
         </span>
         <span>
-          ，最近库存剩余量：{getInventoryQuantityText(inventoryLatest)}
+          ，最近库存剩余量：{getInventoryQuantityText(inventoryLatest ?? null)}
         </span>
-        <span>，库存位置：{getInventoryLocationText(inventoryLatest)}</span>
+        <span>，库存位置：{getInventoryLocationText(inventoryLatest ?? null)}</span>
       </div>
     </>
   );

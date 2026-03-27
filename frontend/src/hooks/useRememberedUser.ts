@@ -1,14 +1,12 @@
 import { useState, useCallback } from 'react'
+import {
+  clearRememberedUser as clearRememberedUserStorage,
+  getRememberedUser as getRememberedUserStorage,
+  setRememberedUser as setRememberedUserStorage,
+  type RememberedUser,
+} from '@/lib/storage/appAuthMetaStorage'
 
-// 记住的用户信息类型
-export interface RememberedUser {
-  userId: number
-  username: string
-  full_name: string
-  avatar_url?: string
-}
-
-const STORAGE_KEY = 'remembered-user'
+export type { RememberedUser }
 
 /**
  * Hook: 记住用户信息
@@ -20,20 +18,17 @@ const STORAGE_KEY = 'remembered-user'
 export function useRememberedUser() {
   const [rememberedUser, setRememberedUserState] = useState<RememberedUser | null>(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored) {
-        return JSON.parse(stored) as RememberedUser
-      }
+      return getRememberedUserStorage()
     } catch (error) {
       console.error('Failed to parse remembered user:', error)
+      return null
     }
-    return null
   })
 
   // 保存记住的用户信息
   const saveRememberedUser = useCallback((user: RememberedUser) => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(user))
+      setRememberedUserStorage(user)
       setRememberedUserState(user)
     } catch (error) {
       console.error('Failed to save remembered user:', error)
@@ -43,7 +38,7 @@ export function useRememberedUser() {
   // 清除记住的用户信息
   const clearRememberedUser = useCallback(() => {
     try {
-      localStorage.removeItem(STORAGE_KEY)
+      clearRememberedUserStorage()
       setRememberedUserState(null)
     } catch (error) {
       console.error('Failed to clear remembered user:', error)
@@ -53,10 +48,10 @@ export function useRememberedUser() {
   // 更新记住的用户信息（用于登录成功后自动更新头像）
   const updateRememberedUser = useCallback((updates: Partial<RememberedUser>) => {
     if (!rememberedUser) return
-    
+
     const updated = { ...rememberedUser, ...updates }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      setRememberedUserStorage(updated)
       setRememberedUserState(updated)
     } catch (error) {
       console.error('Failed to update remembered user:', error)

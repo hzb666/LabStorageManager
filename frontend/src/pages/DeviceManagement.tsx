@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import StatusBadge from '@/components/ui/StatusBadge'
 import { sessionAPI, authAPI, type SessionInfo } from '@/api/client'
 import { formatDateTime } from '@/lib/utils'
-import { getDeviceId } from '@/lib/deviceId'
+import { getDeviceId } from '@/lib/storage/appAuthMetaStorage'
 import { type User } from '@/lib/constants'
 import useDialogState from '@/hooks/useDialogState'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
@@ -400,7 +400,7 @@ function useDeviceTableModel({
   globalFilter: string
   isLoading: boolean
   sorting: SortingState
-  setSorting: (updater: SortingState) => void
+  setSorting: (updater: SortingState | ((prev: SortingState) => SortingState)) => void
   setGlobalFilter: (value: string) => void
   currentDeviceId: string
   handleOpenRenameDialog: (session: SessionInfo) => void

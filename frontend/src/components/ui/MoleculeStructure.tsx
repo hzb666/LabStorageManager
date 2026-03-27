@@ -435,7 +435,7 @@ function MoleculePreview(props: {
   filterClass: string
   canZoom: boolean
   casNumber: string
-  setReference: (node: Element | null) => void
+  setReference: (node: HTMLElement | null) => void
   referenceProps: HTMLAttributes<HTMLDivElement>
 }) {
   const { width, height, svg, filterClass, canZoom, casNumber, setReference, referenceProps } = props
@@ -477,7 +477,7 @@ function MoleculePreview(props: {
 // 渲染悬浮放大层，复用浮层定位样式并保持原过渡效果。
 function MoleculeZoomPortal(props: {
   shouldRender: boolean
-  setFloating: (node: Element | null) => void
+  setFloating: (node: HTMLElement | null) => void
   floatingProps: HTMLAttributes<HTMLDivElement>
   floatingStyles: CSSProperties
   transitionStyles: CSSProperties

@@ -543,6 +543,27 @@ export const toValidationErrors = (detail: unknown): ValidationError[] => {
   return detail.filter((item): item is ValidationError => typeof item === 'object' && item !== null)
 }
 
+// 统一把后端字段级校验错误映射到表单字段，避免页面重复实现遍历逻辑。
+export const applyValidationErrors = (
+  validationErrors: ValidationError[],
+  setFieldError: (fieldName: string, message: string) => void,
+): boolean => {
+  if (validationErrors.length === 0) {
+    return false
+  }
+
+  validationErrors.forEach((errorItem) => {
+    const fieldName = errorItem.loc?.[1]
+    if (typeof fieldName !== 'string' && typeof fieldName !== 'number') {
+      return
+    }
+
+    setFieldError(String(fieldName), errorItem.msg || '输入不合法')
+  })
+
+  return true
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null
 }

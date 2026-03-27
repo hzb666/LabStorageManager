@@ -23,6 +23,7 @@
 - [环境变量](#环境变量)
 - [常用命令](#常用命令)
 - [系统架构](#系统架构)
+- [前端本地存储](#前端本地存储)
 - [关键业务规则](#关键业务规则)
 - [目录结构](#目录结构)
 - [部署说明](#部署说明)
@@ -186,8 +187,6 @@ npm run dev
 
 ## 环境变量
 
-以下内容基于 `.env.example` 与当前代码整理，便于快速核对。
-
 ### 必填项
 
 | 变量 | 示例 | 说明 |
@@ -333,6 +332,18 @@ SQLite (WAL) + Redis + static/
 - 会话可按设备名称、IP 等信息追踪。
 - 401 会统一触发前端登出与跳转。
 
+## 前端本地存储
+
+| Key | 用途 |
+| --- | --- |
+| `app-ui` | 主题、字体来源、Dashboard 页签、公告已读/关闭、Bug 按钮隐藏 |
+| `app-table` | 表格 `expandAll`、`fuzzySearch`、列宽 |
+| `app-auth-meta` | 设备 `id/name`、remembered user |
+| `auth-storage` | Zustand 登录态持久化，带 TTL |
+| `sidebar-storage` | Zustand 侧栏状态持久化，带 TTL |
+| `chemical_properties_cache` | 化学属性缓存，独立长 TTL |
+| `cart_import_batch_latest` | 扩展导入桥接批次，2 小时 TTL |
+
 ### 搜索与性能
 
 - `inventory`、`reagent_order`、`consumable_order`、`users` 建有 SQLite FTS5 虚表。
@@ -355,22 +366,16 @@ SQLite (WAL) + Redis + static/
 
 CAS 号等关键字段会在服务端清洗，避免由于大小写、空格、分隔符差异导致重复数据。
 
-### 4. 图片不入数据库
-
-- 原图 / 压缩图保存在 `static/` 目录
-- 数据库仅存 URL
-- 文件命名走 UUID 方案
-
-### 5. 数据写接口必须带权限控制
+### 4. 数据写接口必须带权限控制
 
 涉及写操作的接口需要校验当前用户身份，管理员能力与普通用户能力分离。
 
-### 6. 错误反馈分层
+### 5. 错误反馈分层
 
 - 输入校验错误应在表单字段旁展示
 - toast 主要用于非字段级错误
 
-### 7. 生产环境有额外约束
+### 6. 生产环境有额外约束
 
 - 生产环境必须使用 `RS256`
 - Cookie 场景下会启用更严格的 CSRF 与 HTTPS 策略
@@ -488,17 +493,6 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 3. 启动前端 `vite`
 4. 前端通过 `CORS_ORIGINS` 与 API 基地址访问后端
 
-### 数据备份
-
-如果使用默认 SQLite：
-
-```bash
-# Docker 场景示例
-docker compose exec backend sh -c 'cp /data/lab_inventory.db /data/lab_inventory_backup_$(date +%Y%m%d_%H%M%S).db'
-```
-
-恢复前建议先停止后端，避免数据库文件处于写入中。
-
 ## 附属模块
 
 ### 浏览器扩展
@@ -568,32 +562,6 @@ docker compose exec backend sh -c 'cp /data/lab_inventory.db /data/lab_inventory
 - 数据库初始化是否完整执行
 - FTS 虚表和触发器是否存在
 - 是否误删了 SQLite 索引或数据库文件
-
-## 开发约定
-
-- 后端改动后优先运行：
-
-```bash
-ruff check app/
-```
-
-- 前端改动后优先运行：
-
-```bash
-cd frontend
-npm run lint
-```
-
-- 复杂前端改动建议进一步运行：
-
-```bash
-cd frontend
-npm run build
-```
-
-- 不要读取真实 `.env` 或提交敏感配置。
-- 不要修改已有迁移目录中的历史文件。
-- 前端展示优先中文，后端存储字段优先规范化英文或结构化值。
 
 ## 许可证
 

@@ -28,6 +28,7 @@ import { inventoryAPI, chemicalAPI } from '@/api/client'
 import { downloadBlobResponse, formatDate, processNotes } from '@/lib/utils'
 import {
   InventoryFormSchema,
+  applyValidationErrors,
   parseSpecification,
   createValibotResolver,
   validateAndNormalizeCASInput,
@@ -37,13 +38,13 @@ import {
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { InventoryFormData, InventoryFormInputData, ValidationError } from '@/lib/validationSchemas'
+import type { InventoryFormData, InventoryFormInputData } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 import { UserRoles } from '@/lib/constants'
 import { useAuthStore } from '@/store/useStore'
 
 // 表单配置
-import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfigs'
+import { defaultInventoryValues, enhanceCasLookupField, getInventoryFormFields } from '@/lib/formConfigs'
 
 // 图标
 import {
@@ -192,25 +193,6 @@ function createInventoryCreatePayload(formData: InventoryFormData) {
   }
 }
 
-// 将后端字段校验错误写回库存表单。 让提交异常处理只保留一次判断，而不重复遍历错误数组。
-function applyInventoryValidationErrors(
-  form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>,
-  validationErrors: ValidationError[],
-): boolean {
-  if (validationErrors.length === 0) {
-    return false
-  }
-
-  validationErrors.forEach((errorItem) => {
-    if (errorItem.loc?.[1]) {
-      form.setError(errorItem.loc[1] as keyof InventoryFormData, {
-        message: errorItem.msg || '输入不合法',
-      })
-    }
-  })
-  return true
-}
-
 // 按当前弹窗模式执行库存新增或编辑请求。 把接口调用分支从提交流程中抽离，让主提交处理器只保留业务编排。
 async function submitInventoryRequest(params: {
   dialogState: InventoryDialogState
@@ -241,19 +223,14 @@ function createInventoryFormFields(params: {
     return fields
   }
 
-  return fields.map((field) =>
-    field.name === 'cas_number'
-      ? {
-        ...field,
-        prefixButton: {
-          onClick: handleCasLookup,
-          loading: isCasLookupLoading,
-          title: '识别 CAS 号',
-          icon: ScanSearch,
-        },
-      }
-      : field,
-  )
+  return enhanceCasLookupField(fields, {
+    prefixButton: {
+      onClick: handleCasLookup,
+      loading: isCasLookupLoading,
+      title: '识别 CAS 号',
+      icon: ScanSearch,
+    },
+  })
 }
 
 // 格式化库存展开行里的“上次借用”展示文本。 消除 JSX 中的嵌套三元表达式，同时保持原有文案与状态语义不变。
@@ -349,7 +326,9 @@ function useInventoryDialogController(refreshInventory: () => void | Promise<voi
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(errorDetail)
-      if (applyInventoryValidationErrors(form, validationErrors)) {
+      if (applyValidationErrors(validationErrors, (fieldName, message) => {
+        form.setError(fieldName as keyof InventoryFormData, { message })
+      })) {
         return
       }
       toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))

@@ -35,6 +35,7 @@ import {
 import { useReagentCasDuplicateCheck } from '@/hooks/useReagentCasDuplicateCheck'
 import {
   ReagentOrderSchema,
+  applyValidationErrors,
   createValibotResolver,
   validateAndNormalizeCASInput,
   extractApiErrorDetail,
@@ -43,12 +44,14 @@ import {
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { ReagentOrderFormData, ReagentOrderFormInputData, ValidationError } from '@/lib/validationSchemas'
+import type { ReagentOrderFormData, ReagentOrderFormInputData } from '@/lib/validationSchemas'
 import { getReagentOrderTableColumns } from '@/lib/tableConfigs'
 import {
   getReagentOrderFormFields,
-  defaultReagentOrderValues
+  defaultReagentOrderValues,
+  enhanceCasLookupField,
 } from '@/lib/formConfigs'
+import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderSubmitHelpers'
 
 // 图标
 import {
@@ -128,7 +131,7 @@ function createReagentOrderFormValues(item: ReagentOrder): ReagentOrderFormInput
     brand: item.brand || '',
     specification: item.specification || '',
     quantity: item.quantity || 1,
-    price: item.price || undefined,
+    price: item.price ?? '',
     order_reason: (item.order_reason as ReagentOrderReason) || ('' as ReagentOrderFormData['order_reason']),
     is_hazardous: item.is_hazardous || false,
     notes: item.notes || '',
@@ -170,54 +173,6 @@ function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
   }
 }
 
-// 将后端字段校验错误映射回试剂订单表单。 避免在提交失败时重复书写相同的错误遍历逻辑。
-function applyReagentValidationErrors(
-  form: UseFormReturn<ReagentOrderFormInputData, unknown, ReagentOrderFormData>,
-  validationErrors: ValidationError[],
-): boolean {
-  if (validationErrors.length === 0) {
-    return false
-  }
-
-  validationErrors.forEach((errorItem) => {
-    if (errorItem.loc?.[1]) {
-      form.setError(errorItem.loc[1] as keyof ReagentOrderFormData, {
-        message: errorItem.msg || '输入不合法',
-      })
-    }
-  })
-  return true
-}
-
-// 按当前弹窗模式执行试剂订单的新增或编辑请求。 把接口分支从提交流程里拿走，让主提交处理器只保留编排职责。
-async function submitReagentOrderRequest(params: {
-  dialogState: ReagentOrderDialogState
-  editingItem: ReagentOrder | null
-  formData: ReagentOrderFormData
-}) {
-  const { dialogState, editingItem, formData } = params
-
-  if (dialogState === 'edit' && editingItem) {
-    await reagentOrderAPI.update(editingItem.id, createReagentOrderUpdatePayload(formData))
-    return
-  }
-
-  if (dialogState === 'add') {
-    await reagentOrderAPI.create(createReagentOrderCreatePayload(formData))
-  }
-}
-
-// 返回试剂订单提交成功后的提示语。 把新增与编辑的提示分支收口，保持主提交流程简短。
-function getReagentSubmitSuccessMessage(dialogState: ReagentOrderDialogState): string | null {
-  if (dialogState === 'edit') {
-    return '订单信息已更新'
-  }
-  if (dialogState === 'add') {
-    return '试剂订单创建成功'
-  }
-  return null
-}
-
 // 生成试剂订单表单字段配置。 把 CAS 自动识别按钮与 onBlur 检查逻辑收口到单点，避免 JSX 内嵌复杂映射。
 function createReagentOrderFormFields(params: {
   dialogState: ReagentOrderDialogState
@@ -232,24 +187,15 @@ function createReagentOrderFormFields(params: {
     return fields
   }
 
-  return fields.map((field) =>
-    field.name === 'cas_number'
-      ? {
-        ...field,
-        onBlur: (value: unknown) => {
-          if (typeof value === 'string') {
-            checkCASWarning(value)
-          }
-        },
-        prefixButton: {
-          onClick: handleCasLookup,
-          loading: isCasLookupLoading,
-          title: '识别 CAS 号',
-          icon: ScanSearch,
-        },
-      }
-      : field,
-  )
+  return enhanceCasLookupField(fields, {
+    onCasBlur: checkCASWarning,
+    prefixButton: {
+      onClick: handleCasLookup,
+      loading: isCasLookupLoading,
+      title: '识别 CAS 号',
+      icon: ScanSearch,
+    },
+  })
 }
 
 // 管理试剂订单弹窗里的 CAS 联动与重复检查。 把 CAS 专项逻辑从弹窗控制器中拆开，避免单个 hook 继续膨胀。
@@ -408,9 +354,20 @@ function useReagentOrderDialogController(
   const handleFormSubmit = form.handleSubmit(async (formData) => {
     setIsSubmitting(true)
     try {
-      await submitReagentOrderRequest({ dialogState, editingItem, formData })
+      await submitByDialogState({
+        dialogState,
+        editingItem,
+        formData,
+        onUpdate: (currentEditingItem, currentFormData) =>
+          reagentOrderAPI.update(currentEditingItem.id, createReagentOrderUpdatePayload(currentFormData)),
+        onCreate: (currentFormData) =>
+          reagentOrderAPI.create(createReagentOrderCreatePayload(currentFormData)),
+      })
       await Promise.resolve(refreshOrders())
-      const successMessage = getReagentSubmitSuccessMessage(dialogState)
+      const successMessage = getDialogSubmitSuccessMessage(dialogState, {
+        edit: '订单信息已更新',
+        add: '试剂订单创建成功',
+      })
       if (successMessage) {
         toast.success(successMessage)
       }
@@ -419,7 +376,9 @@ function useReagentOrderDialogController(
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(errorDetail)
-      if (applyReagentValidationErrors(form, validationErrors)) {
+      if (applyValidationErrors(validationErrors, (fieldName, message) => {
+        form.setError(fieldName as keyof ReagentOrderFormData, { message })
+      })) {
         return
       }
       toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))

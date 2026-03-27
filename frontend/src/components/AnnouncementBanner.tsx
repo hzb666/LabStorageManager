@@ -3,6 +3,11 @@ import { X } from "lucide-react";
 
 import { type Announcement } from "@/api/client";
 import { ANNOUNCEMENT_CLOSED_DURATION_MS } from "@/lib/constants";
+import {
+  dismissAnnouncement as persistDismissedAnnouncement,
+  getAnnouncementClosedState,
+  setAnnouncementClosedState,
+} from "@/lib/storage/appUiStorage";
 import { cn } from "@/lib/utils";
 import { AnnouncementDetail } from "./AnnouncementDetail";
 
@@ -10,7 +15,6 @@ interface AnnouncementBannerProps {
   announcements: Announcement[];
 }
 
-const CLOSED_KEY = "announcement_closed";
 const BANNER_ITEM_CLASS_NAME = cn(
   "inline-flex items-center mx-4 px-4 py-1.5 h-9 cursor-pointer transition-all duration-200 rounded-md border border-transparent group/item shrink-0",
   "hover:bg-card hover:border-input hover:shadow-xs",
@@ -25,8 +29,7 @@ const getAnnouncementStorageKey = (id: number): string => id.toString();
 // 本地关闭态可能被旧数据或手改污染，读取失败时直接回退为空，别让横幅整体挂掉。
 const getClosedStorage = (): ClosedAnnouncementStorage => {
   try {
-    const data = localStorage.getItem(CLOSED_KEY);
-    return data ? JSON.parse(data) : {};
+    return getAnnouncementClosedState();
   } catch {
     return {};
   }
@@ -34,7 +37,7 @@ const getClosedStorage = (): ClosedAnnouncementStorage => {
 
 // 持久化整个公告关闭态存储对象。
 const setClosedStorage = (storage: ClosedAnnouncementStorage): void => {
-  localStorage.setItem(CLOSED_KEY, JSON.stringify(storage));
+  setAnnouncementClosedState(storage);
 };
 
 // 删除指定公告的关闭态记录，并同步写回本地存储。
@@ -48,9 +51,7 @@ const removeClosedAnnouncement = (
 
 // 记录关闭时间而不是布尔值，这样过期和 updated_at 变更都能自动让关闭态失效。
 const dismissAnnouncement = (id: number): void => {
-  const storage = getClosedStorage();
-  storage[getAnnouncementStorageKey(id)] = Date.now();
-  setClosedStorage(storage);
+  persistDismissedAnnouncement(getAnnouncementStorageKey(id));
 };
 
 // 解析后端返回的 UTC 时间文本，并兼容缺失 `Z` 的旧格式。

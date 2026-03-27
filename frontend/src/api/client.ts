@@ -1,6 +1,6 @@
 ﻿import axios from 'axios'
 import { useAuthStore } from '@/store/useStore'
-import { getDeviceId, getDeviceName } from '@/lib/deviceId'
+import { getDeviceId, getDeviceName } from '@/lib/storage/appAuthMetaStorage'
 import { getApiBaseUrl } from '@/lib/apiConfig'
 import { AUTH_NOTICE_KEY } from '@/lib/constants'
 import { toast } from '@/lib/toast'

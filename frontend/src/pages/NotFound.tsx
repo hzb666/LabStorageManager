@@ -2,6 +2,7 @@
 import { Link } from 'react-router-dom'
 import { CircleQuestionMark } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { getTheme } from '@/lib/storage/appUiStorage'
 import {
   Card,
   CardContent,
@@ -14,7 +15,7 @@ import {
 function ThemeInitializer() {
   useEffect(() => {
     // 读取保存的主题设置
-    const savedTheme = localStorage.getItem('theme') || 'light'
+    const savedTheme = getTheme()
     const root = document.documentElement
     if (savedTheme === 'dark') {
       root.classList.add('dark')
