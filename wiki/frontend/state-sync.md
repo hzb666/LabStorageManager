@@ -22,9 +22,16 @@
 
 ## 主题与其他全局状态
 
-- `useTheme` 负责初始化主题、同步 `localStorage`，并更新 `document.documentElement` 的 `dark` 类
+- `useTheme` 负责初始化主题、同步 `app-ui.theme`，并更新 `document.documentElement` 的 `dark` 类
 - `ToastContainer`、`TooltipProvider` 等全局容器在 `App.tsx` 统一挂载
 - SSE 相关 store 不依赖页面卸载，保证跨路由持续运行
+
+## 本地存储分层
+
+- `app-ui`：主题、字体来源、Dashboard 页签、公告已读/关闭、Bug 按钮隐藏
+- `app-table`：表格 `expandAll`、`fuzzySearch`、列宽
+- `app-auth-meta`：设备 `id/name`、remembered user
+- 独立保留：`auth-storage`、`sidebar-storage`、`chemical_properties_cache`、`cart_import_batch_latest`
 
 ## 状态模型
 
@@ -45,7 +52,7 @@
 
 ## 验证建议
 
-- `localStorage` 中的过期状态是否按预期刷新
+- `auth-storage` / `sidebar-storage` 的 TTL 是否按预期刷新
 - 断网后重连是否会进入 stale 流程
 - 同一条列表数据在局部更新和全量刷新下是否保持一致
 - 多筛选、多排序场景是否避免错误 patch

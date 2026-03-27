@@ -6,7 +6,7 @@
 
 - 插件 manifest（<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json" />）声明了 `tabs`、`storage` 和 `scripting` 权限，以及对 `https://reagent.bjmu.edu.cn/*`、`http://localhost:5173/*`、`http://127.0.0.1:5173/*` 的 `host_permissions`。
 - 持久数据写入 `chrome.storage.local.import_batch_latest` 和导入页 `localStorage.cart_import_batch_latest`。
-- 两端都使用 2 小时 TTL，过期后必须由 popup 重新生成批次。
+- 两端都使用 2 小时 TTL，过期后由 popup 重新生成批次。
 
 ## 数据链路
 
@@ -25,7 +25,7 @@
 ## 安全与边界
 
 - 插件不持有后端凭证，也不直接调用 `/api/cart-sync`。
-- 数据在浏览器内通过 `localStorage` 和 `postMessage` 传递，和后台会话隔离。
+- 数据在浏览器内通过 `localStorage.cart_import_batch_latest` 和 `postMessage` 传递，和后台会话隔离。
 - `chrome.storage.local` 中的 JSON 必须包含 `created_at`，`import-bridge` 会据此刷新 TTL，并在过期时清理缓存。
 - 如果 `cart-import` 地址或参数缺失，桥接脚本会退回，用户需要从 popup 重新跳转。
 

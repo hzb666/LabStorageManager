@@ -4,7 +4,7 @@
 
 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" /> 是前端应用骨架的集中装配点，负责把全局能力一次性挂载到根树上：
 
-- `useTheme()` 在启动阶段恢复主题状态，并同步 `localStorage` 与 `document.documentElement` 的 `dark` 类
+- `useTheme()` 在启动阶段通过 `app-ui.theme` 恢复主题状态，并同步 `document.documentElement` 的 `dark` 类
 - `ErrorBoundary` 兜底运行时异常，避免局部错误扩散为整页白屏
 - `ToastContainer`、`TooltipProvider`、`BrowserRouter` 作为全局基础设施统一注入
 - `Routes` 配合 `<Suspense>` 组织懒加载页面，降低首屏下载成本
