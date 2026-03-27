@@ -1,12 +1,12 @@
-"""
-Consumable Order API Routes - Consumables Purchase Order Management
-Separated from Reagent orders (no stock-in needed)
-"""
+# 耗材订单 API 路由：耗材申购流程管理。
+# 与试剂订单分离（耗材无需入库流程）。
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
@@ -88,82 +88,137 @@ CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP = {
     'communication': ["communication"],
 }
 
+
+@dataclass(frozen=True)
+class ConsumableOrderFTSState:
+    # 封装耗材订单 FTS 构建结果，减少筛选主流程的分支数量。
+
+    fts_clause: Any
+    fts_rowid_subquery: Any
+
+
+@dataclass(frozen=True)
+class ConsumableOrderSingleFieldSearchOptions:
+    # 封装耗材订单单字段搜索参数，避免 helper 参数过多。
+
+    search_field: Optional[str]
+    search_value: str
+    fuzzy: bool
+    applicant_id_subquery: Any
+    fts_clause: Any
+
+
+class ConsumableOrderListQuery(BaseModel):
+    # 定义耗材订单列表查询参数，保持 API 查询契约并收口路由签名。
+
+    skip: int = 0
+    limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
+    status_filter: Optional[ConsumableOrderStatus] = None
+    search: Optional[str] = Query(default=None, max_length=100)
+    search_field: Optional[str] = None
+    fuzzy: bool = False
+    sort_by: Optional[str] = None
+    sort_order: Optional[str] = "desc"
+
+
 def _add_specification(item_dict: dict) -> dict:
-    """Add specification field to order response dict
-    注意：specification 是用户直接输入的完整规格字符串，无需拼接
-    """
+    # 补充 specification 展示字段。
+    # specification 为用户直接输入的完整规格字符串，无需拼接。
     # specification 字段已包含在 model_dump 中，无需额外处理
     return item_dict
 
 
 def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[ConsumableOrder]:
-    """Get consumable order by ID"""
+    # Get consumable order by ID
     return db.get(ConsumableOrder, order_id)
 
 
-def _apply_consumable_order_filters(
-    base,
-    status_filter: Optional[ConsumableOrderStatus],
-    search: Optional[str],
-    search_field: Optional[str],
-    fuzzy: bool,
-):
-    """Apply shared list filters for consumable order listing."""
-    if status_filter:
-        base = base.where(ConsumableOrder.status == status_filter)
+def _normalize_order_search_value(search: Optional[str], *, fuzzy: bool) -> Optional[str]:
+    # 标准化耗材订单搜索词，统一 fuzzy 与空输入处理。
 
     if not search:
-        return base
+        return None
+    raw_search = search.strip()
+    if not raw_search:
+        return None
+    if fuzzy:
+        return normalize_search_term(raw_search)
+    return raw_search
 
-    search_value = normalize_search_term(search.strip()) if fuzzy else search.strip()
-    if not search_value:
-        return base
 
-    applicant_id_subquery = build_applicant_id_subquery(search_value, fuzzy=fuzzy)
+def _build_consumable_order_fts_state(
+    *,
+    search_value: str,
+    search_field: Optional[str],
+    fuzzy: bool,
+) -> ConsumableOrderFTSState:
+    # 构建耗材订单 FTS 条件，失败时返回空状态并回退 SQL LIKE。
 
-    fts_clause = None
-    fts_rowid_subquery = None
     use_fts = (not fuzzy) and should_use_order_fts(search_value)
-    if use_fts:
-        try:
-            fts_clause = build_order_fts_id_clause(
+    if not use_fts:
+        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
+    try:
+        return ConsumableOrderFTSState(
+            fts_clause=build_order_fts_id_clause(
                 ConsumableOrder.id,
                 fts_table="consumable_order_fts",
                 search_value=search_value,
                 search_field=search_field,
                 field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
-            )
-            fts_rowid_subquery = build_order_fts_rowid_subquery(
+            ),
+            fts_rowid_subquery=build_order_fts_rowid_subquery(
                 fts_table="consumable_order_fts",
                 search_value=search_value,
                 search_field='all',
                 field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
-            )
-        except OrderFTSError:
-            fts_clause = None
-            fts_rowid_subquery = None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Consumable order FTS fallback to SQL LIKE due to runtime error: %s",
-                exc,
-            )
-            fts_clause = None
-            fts_rowid_subquery = None
+            ),
+        )
+    except OrderFTSError:
+        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Consumable order FTS fallback to SQL LIKE due to runtime error: %s",
+            exc,
+        )
+        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
 
-    if search_field and search_field != 'all':
-        if search_field in APPLICANT_SEARCH_KEYS:
-            return base.where(ConsumableOrder.applicant_id.in_(applicant_id_subquery))
-        if search_field == 'created_at':
-            return base.where(build_date_search_clause(ConsumableOrder.created_at, search_value))
-        if fts_clause is not None and search_field in CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP:
-            return base.where(fts_clause)
-        if search_field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP:
-            return base.where(
-                combine_or_clauses(
-                    build_text_search_clause(field, search_value, fuzzy=fuzzy)
-                    for field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
-                )
+
+def _apply_consumable_order_single_field_search(
+    base,
+    *,
+    options: ConsumableOrderSingleFieldSearchOptions,
+):
+    # 处理耗材订单单字段搜索，按 applicant/date/fts/like 分支执行。
+
+    filtered = base
+    matched = True
+    search_field = options.search_field
+    if search_field in APPLICANT_SEARCH_KEYS:
+        filtered = base.where(ConsumableOrder.applicant_id.in_(options.applicant_id_subquery))
+    elif search_field == 'created_at':
+        filtered = base.where(build_date_search_clause(ConsumableOrder.created_at, options.search_value))
+    elif options.fts_clause is not None and search_field in CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP:
+        filtered = base.where(options.fts_clause)
+    elif search_field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP:
+        filtered = base.where(
+            combine_or_clauses(
+                build_text_search_clause(field, options.search_value, fuzzy=options.fuzzy)
+                for field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
             )
+        )
+    else:
+        matched = False
+    return filtered, matched
+
+
+def _build_consumable_order_all_id_subquery(
+    *,
+    search_value: str,
+    fuzzy: bool,
+    applicant_id_subquery,
+    fts_rowid_subquery,
+):
+    # 构建耗材订单 ALL 搜索候选 ID 子查询，统一 applicant/date/fts/like 召回。
 
     all_candidates = [
         select(ConsumableOrder.id).where(
@@ -192,8 +247,52 @@ def _apply_consumable_order_filters(
                     )
                 )
             )
+    return union_id_subqueries(all_candidates)
 
-    all_id_subquery = union_id_subqueries(all_candidates)
+
+def _apply_consumable_order_filters(
+    base,
+    status_filter: Optional[ConsumableOrderStatus],
+    search: Optional[str],
+    search_field: Optional[str],
+    fuzzy: bool,
+):
+    # 应用耗材订单列表筛选，保持搜索语义并降低主流程复杂度。
+
+    if status_filter:
+        base = base.where(ConsumableOrder.status == status_filter)
+
+    search_value = _normalize_order_search_value(search, fuzzy=fuzzy)
+    if not search_value:
+        return base
+
+    applicant_id_subquery = build_applicant_id_subquery(search_value, fuzzy=fuzzy)
+    fts_state = _build_consumable_order_fts_state(
+        search_value=search_value,
+        search_field=search_field,
+        fuzzy=fuzzy,
+    )
+
+    if search_field and search_field != 'all':
+        single_field_filtered, matched = _apply_consumable_order_single_field_search(
+            base,
+            options=ConsumableOrderSingleFieldSearchOptions(
+                search_field=search_field,
+                search_value=search_value,
+                fuzzy=fuzzy,
+                applicant_id_subquery=applicant_id_subquery,
+                fts_clause=fts_state.fts_clause,
+            ),
+        )
+        if matched:
+            return single_field_filtered
+
+    all_id_subquery = _build_consumable_order_all_id_subquery(
+        search_value=search_value,
+        fuzzy=fuzzy,
+        applicant_id_subquery=applicant_id_subquery,
+        fts_rowid_subquery=fts_state.fts_rowid_subquery,
+    )
     if all_id_subquery is None:
         return base
     return base.where(ConsumableOrder.id.in_(all_id_subquery))
@@ -205,7 +304,7 @@ async def create_consumable_order(
     current_user: CurrentUser,
     db: DBSession,
 ):
-    """Create a new consumable order"""
+    # Create a new consumable order
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
@@ -243,16 +342,18 @@ async def create_consumable_order(
 @router.get("/", dependencies=[Depends(get_current_user)])
 def list_consumable_orders(
     db: DBSession,
-    skip: int = 0,
-    limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
-    status_filter: Optional[ConsumableOrderStatus] = None,
-    search: Annotated[Optional[str], Query(max_length=100)] = None,
-    search_field: Optional[str] = None,
-    fuzzy: bool = False,
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = 'desc',
+    query: Annotated[ConsumableOrderListQuery, Depends()],
 ):
-    """List consumable orders with optional filters, pagination, search, sort and applicant name"""
+    # 按查询参数返回耗材订单列表，保持分页/搜索/排序行为兼容。
+
+    skip = query.skip
+    limit = query.limit
+    status_filter = query.status_filter
+    search = query.search
+    search_field = query.search_field
+    fuzzy = query.fuzzy
+    sort_by = query.sort_by
+    sort_order = query.sort_order
 
     if sort_by and sort_by not in VALID_CONSUMABLE_SORT_FIELDS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
@@ -356,7 +457,7 @@ def list_consumable_orders(
 def export_consumable_orders(
     db: DBSession,
 ):
-    """Export consumable orders as a downloadable XLSX file."""
+    # Export consumable orders as a downloadable XLSX file.
     from app.services.xlsx_export import export_consumable_orders_xlsx
 
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
@@ -374,7 +475,7 @@ def get_consumable_order(
     order_id: int,
     db: DBSession,
 ):
-    """Get consumable order by ID"""
+    # Get consumable order by ID
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -391,7 +492,7 @@ async def update_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """Update consumable order information"""
+    # Update consumable order information
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -464,7 +565,7 @@ async def approve_consumable_order(
     order_id: int,
     db: DBSession,
 ):
-    """Approve a consumable order (Admin only)"""
+    # Approve a consumable order (Admin only)
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -497,7 +598,7 @@ async def reject_consumable_order(
     order_id: int,
     db: DBSession,
 ):
-    """Reject a consumable order (Admin only). Does not modify notes."""
+    # Reject a consumable order (Admin only). Does not modify notes.
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -525,10 +626,8 @@ async def complete_consumable_order(
     current_user: CurrentUser,
     db: DBSession,
 ):
-    """
-    Complete consumable order (consumables don't need stock-in)
-    Only order applicant or admin can complete.
-    """
+    # 完成耗材订单（耗材不需要入库）。
+    # 仅申请人或管理员可执行该操作。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -573,7 +672,7 @@ def get_my_consumable_orders(
     current_user: CurrentUser,
     db: DBSession,
 ):
-    """Get current user's consumable order progress"""
+    # Get current user's consumable order progress
     dashboard_statuses = [
         ConsumableOrderStatus.PENDING,
         ConsumableOrderStatus.APPROVED,
@@ -629,7 +728,7 @@ async def delete_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """Delete a consumable order (only applicant or admin can delete)"""
+    # Delete a consumable order (only applicant or admin can delete)
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(

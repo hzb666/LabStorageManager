@@ -1,4 +1,4 @@
-"""Extended inventory routes extracted from inventory.py to keep modules maintainable."""
+# 从 inventory.py 拆出的扩展库存路由，用于降低模块维护复杂度。
 import logging
 import os
 import tempfile
@@ -6,6 +6,7 @@ from typing import Any, Annotated, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlmodel import Session, select, func, update as sql_update
 
 from app.core.auth import CurrentUser, get_current_user
@@ -53,6 +54,13 @@ from app.services.user_utils import batch_get_user_names
 INVENTORY_NOT_FOUND = "Inventory item not found"
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
 logger = logging.getLogger(__name__)
+
+
+class InventoryImportQuery(BaseModel):
+    # 库存导入接口查询参数，收口路由签名并保持参数语义。
+
+    default_storage_location: Optional[str] = None
+    default_is_hazardous: bool = False
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -169,7 +177,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
 
     @router.get("/export", dependencies=[Depends(get_current_user)])
     def export_inventory(db: DBSession):
-        """Export inventory workbook with regular and common-shelf sheets."""
+        # 导出库存工作簿，包含常规库存与 common shelf 两个工作表。
         statement = regular_inventory_query().order_by(Inventory.created_at.desc())
         items = db.exec(statement).all()
         common_items = db.exec(common_inventory_query().order_by(Inventory.created_at.desc())).all()
@@ -310,7 +318,7 @@ def _register_import_routes(
 
     @router.get("/import/template")
     def get_import_template(current_user: CurrentUser):
-        """Download Excel import template with text format for CAS column"""
+        # 下载导入模板，CAS 列按文本格式保存。
         from app.services.excel_service import generate_excel_template
 
         enforce_rate_limit(
@@ -335,8 +343,7 @@ def _register_import_routes(
         request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
-        default_storage_location: Optional[str] = None,
-        default_is_hazardous: bool = False,
+        query: Annotated[InventoryImportQuery, Depends()],
     ):
         from app.services.excel_service import import_inventory_from_excel
 
@@ -358,8 +365,8 @@ def _register_import_routes(
             result = import_inventory_from_excel(
                 db=db,
                 file_path=tmp_file_path,
-                default_storage_location=default_storage_location,
-                default_is_hazardous=default_is_hazardous,
+                default_storage_location=query.default_storage_location,
+                default_is_hazardous=query.default_is_hazardous,
                 user_id=current_user.id,
             )
 
@@ -382,12 +389,105 @@ def _register_import_routes(
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
 
 
-def _register_borrow_return_routes(
+# 解析借用人上下文，保证 public 账号借用时的代借人校验语义不变。
+def _resolve_borrower_context(
+    db: Session,
+    *,
+    current_user: User,
+    borrow_data: Optional[InventoryBorrowRequest],
+) -> tuple[int, Optional[int]]:
+    actual_borrower_id: Optional[int] = None
+    borrower_id = current_user.id
+    if current_user.role != UserRole.PUBLIC:
+        return borrower_id, actual_borrower_id
+
+    actual_borrower_id = borrow_data.actual_borrower_id if borrow_data else None
+    if not actual_borrower_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Public account must select a borrower when borrowing")
+
+    actual_borrower = db.get(User, actual_borrower_id)
+    if not actual_borrower or not actual_borrower.is_active or actual_borrower.role == UserRole.PUBLIC:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please select a valid borrower")
+    return actual_borrower_id, actual_borrower_id
+
+
+# 统一借用数量计算，避免在借用端点重复判空与正数校验。
+def _resolve_borrow_quantity(item: Inventory) -> float:
+    borrow_quantity = item.remaining_quantity if item.remaining_quantity is not None else item.initial_quantity
+    if borrow_quantity is None or borrow_quantity <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid inventory quantity: cannot borrow item with null or non-positive quantity",
+        )
+    return borrow_quantity
+
+
+# 校验归还请求参数与权限，保证原错误语义和顺序一致。
+def _validate_return_request(item: Inventory, return_data: InventoryBorrowReturn, current_user: User) -> None:
+    if item.status != InventoryStatus.BORROWED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Item is not borrowed, current status: {item.status}",
+        )
+    if item.borrower_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the borrower of this item")
+    if return_data.remaining_quantity is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="remaining_quantity is required",
+        )
+    if return_data.remaining_quantity < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="remaining_quantity must be greater than or equal to 0",
+        )
+    if item.initial_quantity is not None and return_data.remaining_quantity > item.initial_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Remaining quantity ({return_data.remaining_quantity}) cannot exceed initial quantity ({item.initial_quantity})",
+        )
+
+
+# 获取当前未归还的最近借用日志，确保归还时日志回写口径一致。
+def _get_latest_active_borrow_log(db: Session, inventory_id: int) -> Optional[BorrowLog]:
+    return db.exec(
+        select(BorrowLog)
+        .where(
+            BorrowLog.inventory_id == inventory_id,
+            BorrowLog.is_consume.is_(False),
+            BorrowLog.return_time.is_(None),
+        )
+        .order_by(BorrowLog.borrow_time.desc())
+    ).first()
+
+
+# 应用归还后的库存状态变更，并返回低库存提示文案（若有）。
+def _apply_return_to_inventory_item(item: Inventory, return_data: InventoryBorrowReturn) -> Optional[str]:
+    item.remaining_quantity = return_data.remaining_quantity
+    item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
+    item.unit = return_data.unit if return_data.unit else item.unit
+    item.last_borrower_id = item.borrower_id
+    item.borrower_id = None
+
+    low_quantity_warning = None
+    if return_data.remaining_quantity > 0:
+        item.status = InventoryStatus.IN_STOCK
+        if item.initial_quantity and item.initial_quantity > 0:
+            percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
+            if percentage < (LOW_STOCK_PERCENT * 100):
+                low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
+    else:
+        item.status = InventoryStatus.CONSUMED
+    return low_quantity_warning
+
+
+# 注册借用接口，保持并发借用冲突语义和日志写入行为。
+def _register_borrow_route(
     router: APIRouter,
     search_cache: Dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
-
+    # 借用库存项。
     @router.post("/{inventory_id}/borrow", response_model=InventoryResponse)
     async def borrow_item(
         inventory_id: int,
@@ -395,31 +495,17 @@ def _register_borrow_return_routes(
         db: Annotated[Session, Depends(get_db)],
         borrow_data: Optional[InventoryBorrowRequest] = None,
     ):
+        # 借用库存项并写入借用日志。
         item = _get_by_id(db, inventory_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
 
-        actual_borrower_id: Optional[int] = None
-        borrower_id = current_user.id
-        if current_user.role == UserRole.PUBLIC:
-            actual_borrower_id = borrow_data.actual_borrower_id if borrow_data else None
-            if not actual_borrower_id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Public account must select a borrower when borrowing")
-
-            actual_borrower = db.get(User, actual_borrower_id)
-            if not actual_borrower or not actual_borrower.is_active or actual_borrower.role == UserRole.PUBLIC:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please select a valid borrower")
-            borrower_id = actual_borrower_id
-
-        borrow_quantity = item.remaining_quantity
-        if borrow_quantity is None:
-            borrow_quantity = item.initial_quantity
-        if borrow_quantity is None or borrow_quantity <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid inventory quantity: cannot borrow item with null or non-positive quantity",
-            )
-
+        borrower_id, actual_borrower_id = _resolve_borrower_context(
+            db,
+            current_user=current_user,
+            borrow_data=borrow_data,
+        )
+        borrow_quantity = _resolve_borrow_quantity(item)
 
         update_statement = (
             sql_update(Inventory)
@@ -435,7 +521,6 @@ def _register_borrow_return_routes(
 
         result = db.exec(update_statement)
         db.commit()
-
         if result.rowcount == 0:
             latest_item = _get_by_id(db, inventory_id)
             if latest_item and latest_item.status == InventoryStatus.BORROWED:
@@ -472,6 +557,14 @@ def _register_borrow_return_routes(
         )
         return response
 
+
+# 注册归还接口，拆分参数校验与状态计算后保持原响应结构。
+def _register_return_route(
+    router: APIRouter,
+    search_cache: Dict[str, tuple[Any, Any]],
+    list_cache_prefix: str,
+) -> None:
+    # 归还库存项。
     @router.post("/{inventory_id}/return", response_model=dict)
     async def return_item(
         inventory_id: int,
@@ -479,67 +572,18 @@ def _register_borrow_return_routes(
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
+        # 归还库存项并更新状态。
         item = _get_by_id(db, inventory_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
 
-        if item.status != InventoryStatus.BORROWED:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Item is not borrowed, current status: {item.status}",
-            )
-
-        if item.borrower_id != current_user.id and current_user.role != UserRole.ADMIN:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the borrower of this item")
-
-        if return_data.remaining_quantity is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="remaining_quantity is required",
-            )
-
-        if return_data.remaining_quantity < 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="remaining_quantity must be greater than or equal to 0",
-            )
-
-        if item.initial_quantity is not None and return_data.remaining_quantity > item.initial_quantity:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Remaining quantity ({return_data.remaining_quantity}) cannot exceed initial quantity ({item.initial_quantity})",
-            )
-
-        borrow_log = db.exec(
-            select(BorrowLog)
-            .where(
-                BorrowLog.inventory_id == inventory_id,
-                BorrowLog.is_consume.is_(False),
-                BorrowLog.return_time.is_(None),
-            )
-            .order_by(BorrowLog.borrow_time.desc())
-        ).first()
-
+        _validate_return_request(item, return_data, current_user)
+        borrow_log = _get_latest_active_borrow_log(db, inventory_id)
         if borrow_log:
             borrow_log.return_time = get_utc_now()
             borrow_log.quantity_returned = return_data.remaining_quantity
 
-        item.remaining_quantity = return_data.remaining_quantity
-        item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
-        item.unit = return_data.unit if return_data.unit else item.unit
-        item.last_borrower_id = item.borrower_id
-        item.borrower_id = None
-
-        low_quantity_warning = None
-        if return_data.remaining_quantity > 0:
-            item.status = InventoryStatus.IN_STOCK
-            if item.initial_quantity and item.initial_quantity > 0:
-                percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
-                if percentage < (LOW_STOCK_PERCENT * 100):
-                    low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
-        else:
-            item.status = InventoryStatus.CONSUMED
-
+        low_quantity_warning = _apply_return_to_inventory_item(item, return_data)
         db.commit()
         db.refresh(item)
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
@@ -555,6 +599,10 @@ def _register_borrow_return_routes(
             result["warning"] = low_quantity_warning
         return result
 
+
+# 注册借用历史接口，保留原权限校验和最近 10 条日志返回逻辑。
+def _register_borrow_history_route(router: APIRouter) -> None:
+    # 返回借用历史。
     @router.get("/{inventory_id}/borrow-history", dependencies=[Depends(get_current_user)])
     def get_borrow_history(
         inventory_id: int,
@@ -610,6 +658,17 @@ def _register_borrow_return_routes(
                 for log in logs
             ],
         }
+
+
+# 汇总借还相关路由注册。
+def _register_borrow_return_routes(
+    router: APIRouter,
+    search_cache: Dict[str, tuple[Any, Any]],
+    list_cache_prefix: str,
+) -> None:
+    _register_borrow_route(router, search_cache, list_cache_prefix)
+    _register_return_route(router, search_cache, list_cache_prefix)
+    _register_borrow_history_route(router)
 
 
 def register_inventory_extended_routes(
