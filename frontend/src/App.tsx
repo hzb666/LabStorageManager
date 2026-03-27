@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { lazy, Suspense, useEffect } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
+import { CartImportLoadingScreen } from '@/components/CartImportLoadingScreen'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
 import { TooltipProvider } from '@/components/ui/Tooltip'
@@ -28,12 +29,18 @@ function AuthCheckingScreen() {
   return <div className="min-h-svh flex items-center justify-center text-muted-foreground">正在验证登录状态...</div>
 }
 
-function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
+function ProtectedRoute({
+  children,
+  checkingFallback,
+}: Readonly<{
+  children: React.ReactNode
+  checkingFallback?: React.ReactNode
+}>) {
   const authStatus = useAuthStore((state) => state.authStatus)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const location = useLocation()
   if (authStatus === 'checking') {
-    return <AuthCheckingScreen />
+    return <>{checkingFallback ?? <AuthCheckingScreen />}</>
   }
   if (!isAuthenticated) {
     return (
@@ -110,7 +117,7 @@ function AppContent() {
           <Route
             path="/cart-import"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute checkingFallback={<CartImportLoadingScreen />}>
                 <Suspense>
                   <CartImportPage />
                 </Suspense>

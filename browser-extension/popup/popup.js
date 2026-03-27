@@ -14,6 +14,16 @@ const DEFAULT_SYSTEM_CONFIG = {
 };
 
 let systemConfig = { ...DEFAULT_SYSTEM_CONFIG };
+const orderTypeDetectionApi = globalThis.OrderTypeDetection;
+if (!orderTypeDetectionApi) {
+  throw new Error('订单类型识别模块加载失败');
+}
+const {
+  detectOrderClassification,
+  extractFieldByLabels,
+  extractLeadingSpecificationValue,
+  normalizePageText,
+} = orderTypeDetectionApi;
 
 const BATCH_TTL_MS = 2 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
@@ -41,13 +51,12 @@ async function sendMessageWithAutoInject(tabId, message) {
   }
 }
 
-function extractFirstCasNumber(input) {
-  const match = /\b\d{2,7}-\d{2}-\d\b/.exec(String(input || ''));
-  return match ? match[0] : '';
-}
-
-function detectOrderType(casNumber) {
-  return extractFirstCasNumber(casNumber) ? 'reagent' : 'consumable';
+async function sendRuntimeMessage(message) {
+  const response = await chrome.runtime.sendMessage(message);
+  if (!response?.success) {
+    throw new Error(response?.error || '扩展后台通信失败');
+  }
+  return response;
 }
 
 function isCartPageUrl(url) {
@@ -141,6 +150,8 @@ function createBasicItem(productId, detailFetchStatus = 'fallback') {
     detail_url: '',
     is_hazardous: false,
     detail_fetch_status: detailFetchStatus,
+    suggested_order_type: 'consumable',
+    classification_reason: '未识别到详情页信息，默认归为耗材',
   };
 }
 
@@ -161,11 +172,17 @@ async function saveImportBatch(items) {
   await cleanupExpiredBatches();
 
   const batchId = generateBatchId();
-  const normalizedItems = items.map((item) => ({
-    ...item,
-    order_type: detectOrderType(item.cas_number),
-    selected: true,
-  }));
+  const normalizedItems = items.map((item) => {
+    const classification = detectOrderClassification(item);
+    return {
+      ...item,
+      cas_number: classification.cas_number || item.cas_number || '',
+      suggested_order_type: classification.suggested_order_type,
+      order_type: classification.order_type,
+      classification_reason: classification.classification_reason,
+      selected: true,
+    };
+  });
 
   const payload = {
     batch_id: batchId,
@@ -191,112 +208,51 @@ function extractFieldFromHtml(html, pattern) {
 }
 
 function extractFieldFromLines(pageText, labels) {
-  const lines = String(pageText || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  for (const label of labels) {
-    const found = lines.find((line) => line.toLowerCase().startsWith(label.toLowerCase()));
-    if (found) {
-      return sanitizeExtractedValue(found.slice(label.length));
-    }
-  }
-
-  return '';
-}
-
-function extractLeadingSpecificationValue(specificationText) {
-  const source = sanitizeExtractedValue(specificationText);
-  if (!source) {
-    return '';
-  }
-
-  const start = /^\d+(?:\.\d+)?\s*/.exec(source);
-  if (!start) {
-    return source;
-  }
-
-  let result = start[0];
-  let index = result.length;
-
-  while (index < source.length) {
-    const char = source[index];
-    if (/[A-Za-zμµ]/.test(char)) {
-      result += char;
-      index += 1;
-      continue;
-    }
-
-    if (/\s/.test(char)) {
-      const next = source[index + 1] || '';
-      if (/[A-Za-zμµ]/.test(next)) {
-        result += char;
-        index += 1;
-        continue;
-      }
-    }
-
-    // 字母段结束后，遇到汉字、斜杠、数字等后缀信息即停止。
-    break;
-  }
-
-  return sanitizeExtractedValue(result) || source;
-}
-
-function extractCasFromDoc(doc) {
-  const candidates = [];
-  const labelRegex = /(cas\s*no|casno|cas号|cas)/i;
-
-  doc.querySelectorAll('td,th,li,div,span,p').forEach((element) => {
-    const text = (element.textContent || '').replaceAll(/\s+/g, ' ').trim();
-    if (!text || !labelRegex.test(text)) {
-      return;
-    }
-    candidates.push(text);
-    if (element.nextElementSibling?.textContent) {
-      candidates.push(element.nextElementSibling.textContent);
-    }
-    if (element.parentElement?.textContent) {
-      candidates.push(element.parentElement.textContent);
-    }
-  });
-
-  for (const candidate of candidates) {
-    const extracted = extractFirstCasNumber(candidate);
-    if (extracted) {
-      return extracted;
-    }
-  }
-
-  return '';
+  return extractFieldByLabels(pageText, labels);
 }
 
 function parseProductDetail(html) {
+  const pageText = normalizePageText(html);
   // 表格结构固定，直接匹配 td-2 中的内容
   // 注意：</td> 和 <td> 之间可能有换行和空格
   const name = extractFieldFromHtml(html, /中文名称：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '未知';
   const englishName = extractFieldFromHtml(html, /英文名称：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
   const brand = extractFieldFromHtml(html, /品牌：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
   const specificationRaw = extractFieldFromHtml(html, /包装规格：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
-  const casNumber = extractFirstCasNumber(extractFieldFromHtml(html, /casno：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '') || '';
+  const productNumber =
+    extractFieldFromHtml(html, /货号：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) ||
+    extractFieldFromLines(pageText, ['货号', '产品编号', '订货号']) ||
+    '';
+  const classification = detectOrderClassification({
+    name,
+    english_name: englishName,
+    specification: specificationRaw,
+    brand,
+    product_number: productNumber,
+    detail_text: pageText,
+    detail_html: html,
+  });
 
-  const specification = extractLeadingSpecificationValue(specificationRaw);
+  const specification = extractLeadingSpecificationValue(specificationRaw, {
+    ignoreLeadingLetters: classification.suggested_order_type === 'reagent',
+  });
 
   return {
     name: name.trim(),
     english_name: englishName.trim(),
     specification: specification.trim(),
     brand: brand.trim(),
-    cas_number: casNumber,
-    product_number: '',
+    cas_number: classification.cas_number,
+    product_number: productNumber.trim(),
     alias: '',
+    suggested_order_type: classification.suggested_order_type,
+    classification_reason: classification.classification_reason,
   };
 }
 
 async function findCartTab() {
-  const tabs = await chrome.tabs.query({ url: `${systemConfig.reagentSiteUrl}/*` });
-  return tabs.find((tab) => isCartPageUrl(tab.url));
+  const response = await sendRuntimeMessage({ type: 'RESOLVE_CART_TAB' });
+  return response.tab || null;
 }
 
 async function fetchProductDetail(detailUrl) {
