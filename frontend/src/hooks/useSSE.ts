@@ -8,6 +8,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { getApiBaseUrl } from '@/lib/apiConfig'
+import {
+  resolveAuthNoticeByCode,
+  resolveAuthNoticeByReason,
+  triggerSessionInvalidation,
+} from '@/lib/authSession'
+import { registerSSEDisconnect, unregisterSSEDisconnect } from '@/lib/sseRuntime'
 import { useSSEStore } from '@/store/sseStore'
 
 export interface SSEEventEnvelope {
@@ -93,6 +99,24 @@ export function useSSE({
       }
     })
 
+    es.addEventListener('auth.invalid', (evt) => {
+      let reason = 'session_revoke'
+      let code = ''
+      try {
+        const payload = JSON.parse(String(evt.data)) as { reason?: string; code?: string }
+        reason = payload.reason || reason
+        code = payload.code || ''
+      } catch {
+        // keep fallback reason
+      }
+
+      const noticeByReason = resolveAuthNoticeByReason(reason, '登录状态已失效，请重新登录')
+      const notice = resolveAuthNoticeByCode(code || undefined, noticeByReason)
+
+      disconnect()
+      void triggerSessionInvalidation({ notice, skipApi: true })
+    })
+
     Object.entries(handlers).forEach(([eventType, handler]) => {
       es.addEventListener(eventType, (evt) => {
         try {
@@ -136,10 +160,12 @@ export function useSSE({
   ])
 
   useEffect(() => {
+    registerSSEDisconnect(disconnect)
     if (autoConnect) {
       connect()
     }
     return () => {
+      unregisterSSEDisconnect(disconnect)
       disconnect()
     }
   }, [autoConnect, connect, disconnect])

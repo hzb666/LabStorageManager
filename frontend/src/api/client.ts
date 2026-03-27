@@ -1,10 +1,8 @@
 ﻿import axios from 'axios'
-import { useAuthStore } from '@/store/useStore'
 import { getDeviceId, getDeviceName } from '@/lib/storage/appAuthMetaStorage'
 import { getApiBaseUrl } from '@/lib/apiConfig'
-import { AUTH_NOTICE_KEY } from '@/lib/constants'
-import { toast } from '@/lib/toast'
 import { getApiErrorMessage } from '@/lib/validationSchemas'
+import { resolveAuthNoticeByCode, triggerSessionInvalidation } from '@/lib/authSession'
 
 const API_BASE_URL = getApiBaseUrl()
 
@@ -16,6 +14,33 @@ export const api = axios.create({
   // 允许发送 Cookie
   withCredentials: true,
 })
+
+const readHeaderValue = (headers: unknown, headerName: string): unknown => {
+  if (!headers || typeof headers !== 'object') {
+    return undefined
+  }
+
+  const record = headers as Record<string, unknown>
+  if (headerName in record) {
+    return record[headerName]
+  }
+
+  const maybeGet = (record as { get?: unknown }).get
+  if (typeof maybeGet === 'function') {
+    return (maybeGet as (name: string) => unknown)(headerName)
+  }
+  return undefined
+}
+
+const hasSkipAuthInvalidationHeader = (headers: unknown): boolean => {
+  // 允许少量请求（如应用启动探测）在 401 时静默回落，不弹全局失效提示。
+  const raw = String(
+    readHeaderValue(headers, 'x-skip-auth-invalidation')
+    ?? readHeaderValue(headers, 'X-Skip-Auth-Invalidation')
+    ?? ''
+  )
+  return raw === '1'
+}
 
 // Request interceptor — 不再从 localStorage 读取 token，改为使用 Cookie
 api.interceptors.request.use(
@@ -32,18 +57,18 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // 排除登录接口的 401 错误，避免页面刷新导致登录页错误信息丢失
-    const isLoginRequest = error.config?.url?.includes('/users/login')
-    if (error.response?.status === 401 && !isLoginRequest) {
-      // 获取错误详情并转换为中文
-      const message = getApiErrorMessage(error, '会话已失效，请重新登录')
-      try {
-        sessionStorage.setItem(AUTH_NOTICE_KEY, message)
-      } catch {
-        toast.error(message)
-      }
-      useAuthStore.getState().logout()
-      globalThis.location.href = '/login'
+    const requestUrl = String(error.config?.url ?? '')
+    const isLoginRequest = requestUrl.includes('/users/login')
+    const isLogoutRequest = requestUrl.includes('/users/logout')
+    const skipAuthInvalidation = hasSkipAuthInvalidationHeader(error.config?.headers)
+    const status = error.response?.status
+    const authErrorCode = String(error.response?.headers?.['x-auth-error-code'] ?? '')
+    const isDisabled403 = status === 403 && authErrorCode === 'AUTH_USER_DISABLED'
+
+    if ((status === 401 || isDisabled403) && !isLoginRequest && !isLogoutRequest && !skipAuthInvalidation) {
+      const fallbackNotice = getApiErrorMessage(error, '会话已失效，请重新登录')
+      const notice = resolveAuthNoticeByCode(authErrorCode || undefined, fallbackNotice)
+      void triggerSessionInvalidation({ notice, skipApi: true })
     }
     return Promise.reject(error)
   }

@@ -15,6 +15,7 @@ from sqlmodel import Session, select, func, or_
 import redis
 
 from app.core.auth import (
+    extract_access_token,
     get_current_user,
     require_admin,
     create_access_token,
@@ -27,7 +28,11 @@ from app.core.constants import (
     LOGIN_WINDOW_SECONDS,
     MAX_LOGIN_ATTEMPTS,
     PASSWORD_MAX_LENGTH,
+    PASSWORD_CHANGE_RATE_LIMIT,
+    PASSWORD_CHANGE_RATE_WINDOW_SECONDS,
     PASSWORD_MIN_LENGTH,
+    PASSWORD_RESET_RATE_LIMIT,
+    PASSWORD_RESET_RATE_WINDOW_SECONDS,
     SECONDS_PER_HOUR,
     UNKNOWN_DEVICE,
     USERNAME_MAX_LENGTH,
@@ -35,7 +40,7 @@ from app.core.constants import (
 )
 from app.core.time_utils import utc_iso_str
 from app.core.request_utils import get_client_ip, get_request_id
-from app.core.redis import delete_cached_session, get_redis, redis_key
+from app.core.redis import get_redis, redis_key
 from app.database import get_db, DBSession
 from app.models.user import (
     PublicUserResponse,
@@ -58,6 +63,9 @@ from app.services.session_service import (
     _check_ip_limit,
     _evict_oldest_session,
     _create_user_session,
+    finalize_revoked_sessions,
+    revoke_session,
+    stage_revoke_user_sessions,
     LOGIN_ATTEMPTS,
     _login_attempts_lock,
 )
@@ -67,6 +75,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 DUMMY_PASSWORD_HASH = get_password_hash("constant-timing-placeholder")
+
+
+def _password_change_rate_limit_key(user_id: int, client_ip: str) -> str:
+    return f"user:{user_id}:ip:{client_ip}"
+
+
+def _password_reset_rate_limit_key(actor_user_id: int, target_user_id: int, client_ip: str) -> str:
+    return f"actor:{actor_user_id}:target:{target_user_id}:ip:{client_ip}"
 
 def _rate_limit_key(client_ip: str) -> str:
     """生成速率限制的 Redis Key"""
@@ -125,33 +141,6 @@ def _record_failed_login(client_ip: str) -> None:
         if settings.use_secure_runtime():
             return
         _record_failed_login_memory(client_ip)
-        return
-    
-    key = _rate_limit_key(client_ip)
-    
-    try:
-        # 使用 INCR 增加计数，EXPIRE 设置过期时间
-        pipe = redis_client.pipeline()
-        pipe.incr(key)
-        # 设置过期时间（如果尚未设置）
-        pipe.expire(key, LOGIN_WINDOW_SECONDS)
-        pipe.execute()
-    except redis.RedisError:
-        # 生产环境 fail-closed，开发环境使用内存后备
-        if settings.use_secure_runtime():
-            return
-        _record_failed_login_memory(client_ip)
-
-
-def _reset_login_attempts(client_ip: str) -> None:
-    """登录成功后重置计数
-    
-    直接跳过删除，依赖 Redis key 的 5 分钟 TTL 自动过期。
-    这是工程化最优解：减少一次 Redis 操作，同时保持速率限制有效性。
-    """
-    with _login_attempts_lock:
-        LOGIN_ATTEMPTS.pop(client_ip, None)
-
 
 def _check_rate_limit_memory(client_ip: str) -> None:
     """检查内存后备中的登录失败次数。"""
@@ -276,9 +265,6 @@ def login(
                 detail="User account is disabled"
             )
         
-        # 登录成功，重置速率限制（已优化：跳过 Redis delete，依赖 TTL 自动过期）
-        _reset_login_attempts(client_ip)
-        
         # 检查 IP 限制
         if not _check_ip_limit(db, user.id, client_ip):
             raise HTTPException(
@@ -368,24 +354,20 @@ def logout(
 ):
     """Logout endpoint - clears the authentication cookie and session"""
     # 获取 token 并删除会话
-    token = http_request.cookies.get("access_token")
+    token = extract_access_token(http_request)
     client_ip = get_client_ip(http_request)
     request_id = get_request_id(http_request)
     actor_user_id: int | None = None
     if token:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        
-        # 从数据库删除会话
+
+        # 从数据库删除会话，并同步断开 SSE
         session = db.exec(
             select(UserSession).where(UserSession.token_hash == token_hash)
         ).first()
         if session:
             actor_user_id = session.user_id
-            db.delete(session)
-            db.commit()
-        
-        # 从 Redis 删除缓存
-        delete_cached_session(token_hash)
+            revoke_session(db, session, reason="logout", commit=True)
     
     response = JSONResponse(content={"message": "Logged out successfully"})
     
@@ -414,6 +396,14 @@ def change_password(
     db: DBSession,
 ):
     """Change password for current user"""
+    client_ip = get_client_ip(http_request)
+    enforce_rate_limit(
+        scope="change_password",
+        identifier=_password_change_rate_limit_key(current_user.id, client_ip),
+        limit=PASSWORD_CHANGE_RATE_LIMIT,
+        window_seconds=PASSWORD_CHANGE_RATE_WINDOW_SECONDS,
+    )
+
     # Verify old password
     if not verify_password(password_request.old_password, current_user.password_hash):
         raise HTTPException(
@@ -428,15 +418,17 @@ def change_password(
             detail="New password cannot be the same as old password"
         )
     
-    # Update password
+    # 先在同一事务中提交“密码变更 + 会话删除”，再做缓存/SSE 通知。
     current_user.password_hash = get_password_hash(password_request.new_password)
+    revoked_hashes = stage_revoke_user_sessions(db, current_user.id)
     db.commit()
+    finalize_revoked_sessions(revoked_hashes, reason="password_changed")
 
     log_audit_event(
         "change_password",
         actor_user_id=current_user.id,
         target_user_id=current_user.id,
-        client_ip=get_client_ip(http_request),
+        client_ip=client_ip,
         request_id=get_request_id(http_request),
     )
     
@@ -668,6 +660,16 @@ def update_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin can update role"
         )
+
+    if (
+        "is_active" in update_data
+        and update_data["is_active"] is False
+        and current_user.id == user_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot deactivate yourself"
+        )
     
     # Handle username change (user can change their own username, admin can change any)
     username_changed = False
@@ -692,6 +694,9 @@ def update_user(
         if user.username != update_data["username"]:
             username_changed = True
     
+    old_role = user.role
+    old_is_active = user.is_active
+
     for field, value in update_data.items():
         setattr(user, field, value)
 
@@ -701,19 +706,28 @@ def update_user(
         user.full_name_pinyin = pinyin_fields.get("full_name_pinyin")
         user.full_name_pinyin_initials = pinyin_fields.get("full_name_pinyin_initials")
 
-    # If username changed, increment version and invalidate all sessions
+    revoke_reason: str | None = None
     if username_changed:
         user.username_version = (user.username_version or 0) + 1
-        # Delete all sessions for this user (both DB records and Redis cache)
-        sessions = db.exec(
-            select(UserSession).where(UserSession.user_id == user_id)
-        ).all()
-        for session in sessions:
-            delete_cached_session(session.token_hash)
-            db.delete(session)
-    
+        revoke_reason = "username_changed"
+
+    role_changed = "role" in update_data and user.role != old_role
+    if role_changed:
+        revoke_reason = "role_changed"
+
+    is_active_changed = "is_active" in update_data and user.is_active != old_is_active
+    if is_active_changed and user.is_active is False:
+        revoke_reason = "user_deactivated"
+
+    staged_revoked_hashes: list[str] = []
+    if revoke_reason:
+        staged_revoked_hashes = stage_revoke_user_sessions(db, user_id)
+
     db.commit()
     db.refresh(user)
+
+    if revoke_reason:
+        finalize_revoked_sessions(staged_revoked_hashes, reason=revoke_reason)
 
     if any(field in update_data for field in ("role", "is_active", "username")):
         log_audit_event(
@@ -789,15 +803,9 @@ def delete_user(
     # Soft delete: set is_active to False
     user.is_active = False
 
-    # 清理该用户的所有 Redis Session 缓存
-    active_sessions = db.exec(
-        select(UserSession).where(UserSession.user_id == user_id)
-    ).all()
-
-    for session in active_sessions:
-        delete_cached_session(session.token_hash)
-
+    staged_revoked_hashes = stage_revoke_user_sessions(db, user_id)
     db.commit()
+    finalize_revoked_sessions(staged_revoked_hashes, reason="user_deactivated")
 
     log_audit_event(
         "deactivate_user",
@@ -824,6 +832,7 @@ def update_user_role(
             detail="User not found"
         )
     
+    old_role = user.role
     # Validate role
     try:
         user.role = UserRole(role)
@@ -832,9 +841,14 @@ def update_user_role(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid role: {role}. Must be 'admin', 'user' or 'public'"
         )
-    
+
+    staged_revoked_hashes: list[str] = []
+    if user.role != old_role:
+        staged_revoked_hashes = stage_revoke_user_sessions(db, user_id)
+
     db.commit()
     db.refresh(user)
+    finalize_revoked_sessions(staged_revoked_hashes, reason="role_changed")
 
     log_audit_event(
         "update_user_role",
@@ -874,42 +888,39 @@ def reset_user_password(
             detail="User not found"
         )
 
-    # If target user is admin, require old password verification
+    client_ip = get_client_ip(request)
+    enforce_rate_limit(
+        scope="reset_password",
+        identifier=_password_reset_rate_limit_key(current_user.id, user_id, client_ip),
+        limit=PASSWORD_RESET_RATE_LIMIT,
+        window_seconds=PASSWORD_RESET_RATE_WINDOW_SECONDS,
+    )
+
+    # 重置管理员密码时，要求当前操作者再次验证自己的口令，而不是目标管理员旧口令。
+    # 否则该接口会退化成“在线探测目标管理员密码是否正确”的 oracle。
     if user.role == UserRole.ADMIN:
         if not password_request.old_password:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Old password required to modify admin password"
+                detail="Current password required to reset an admin password"
             )
-        # Verify old password
-        if not verify_password(password_request.old_password, user.password_hash):
+        if not verify_password(password_request.old_password, current_user.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Incorrect old password"
-            )
-        # Verify new password is different from old password
-        if verify_password(password_request.new_password, user.password_hash):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New password cannot be the same as old password"
-            )
-    else:
-        # For non-admin users, also check if new password is same as old
-        if verify_password(password_request.new_password, user.password_hash):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New password cannot be the same as old password"
+                detail="Incorrect current password"
             )
 
-    # Update password
+    # 在同一事务中提交“密码变更 + 会话删除”，提交成功后再做缓存/SSE 通知。
     user.password_hash = get_password_hash(password_request.new_password)
+    staged_revoked_hashes = stage_revoke_user_sessions(db, user.id)
     db.commit()
+    finalize_revoked_sessions(staged_revoked_hashes, reason="password_reset")
 
     log_audit_event(
         "reset_user_password",
         actor_user_id=current_user.id,
         target_user_id=user.id,
-        client_ip=get_client_ip(request),
+        client_ip=client_ip,
         request_id=get_request_id(request),
     )
 

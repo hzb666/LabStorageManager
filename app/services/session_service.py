@@ -7,7 +7,7 @@ Includes session cleanup, device/IP limits, and session creation.
 import hashlib
 import secrets
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Dict
 
 from sqlmodel import Session, delete, func, select
@@ -16,12 +16,12 @@ from app.core.config import settings
 from app.core.constants import (
     ANONYMOUS_DEVICE_PREFIX,
     ANONYMOUS_DEVICE_TOKEN_HEX_LENGTH,
-    SECONDS_PER_HOUR,
     UNKNOWN_DEVICE,
 )
 from app.core.redis import cache_session, delete_cached_session, delete_cached_sessions
 from app.core.time_utils import get_utc_now
 from app.models.user_session import UserSession
+from app.services.sse_manager import sse_manager
 
 # ==================== Memory Fallback Rate Limiting ====================
 # 内存后备速率限制（Redis 不可用时使用）
@@ -64,6 +64,164 @@ def cleanup_expired_sessions(db: Session) -> int:
     db.commit()
 
     return len(expired_token_hashes)
+
+
+def _session_ttl_seconds(session: UserSession, now_utc: datetime | None = None) -> int:
+    base_time = now_utc or get_utc_now()
+    return int((session.expires_at - base_time).total_seconds())
+
+
+def build_session_cache_payload(
+    *,
+    user_id: int,
+    username: str,
+    is_active: bool,
+    session: UserSession,
+) -> dict:
+    return {
+        "session_id": session.id,
+        "user_id": user_id,
+        "username": username,
+        "is_active": is_active,
+        "device_id": session.device_id,
+        "device_name": session.device_name,
+        "ip_address": session.ip_address,
+        "last_ip_address": session.last_ip_address,
+        "user_agent": session.user_agent,
+        "expires_at": session.expires_at.isoformat(),
+        "last_active_at": session.last_active_at.isoformat() if session.last_active_at else None,
+    }
+
+
+def sync_session_cache(
+    *,
+    session: UserSession,
+    user_id: int,
+    username: str,
+    is_active: bool,
+    now_utc: datetime | None = None,
+) -> None:
+    ttl_seconds = _session_ttl_seconds(session, now_utc=now_utc)
+    if ttl_seconds <= 0:
+        delete_cached_session(session.token_hash)
+        return
+
+    cache_session(
+        session.token_hash,
+        build_session_cache_payload(
+            user_id=user_id,
+            username=username,
+            is_active=is_active,
+            session=session,
+        ),
+        ttl_seconds,
+    )
+
+
+def revoke_session(
+    db: Session,
+    session: UserSession,
+    *,
+    reason: str,
+    commit: bool = True,
+) -> None:
+    token_hash = session.token_hash
+    db.delete(session)
+    if commit:
+        db.commit()
+        # 先提交数据库，再删缓存/通知 SSE，避免事务回滚时把仍然有效的 session 缓存提前删掉。
+        finalize_revoked_sessions([token_hash], reason=reason)
+
+
+def revoke_user_sessions(
+    db: Session,
+    user_id: int,
+    *,
+    reason: str,
+    except_token_hash: str | None = None,
+    commit: bool = True,
+) -> int:
+    statement = select(UserSession).where(UserSession.user_id == user_id)
+    if except_token_hash:
+        statement = statement.where(UserSession.token_hash != except_token_hash)
+
+    sessions = db.exec(statement).all()
+    if not sessions:
+        return 0
+
+    token_hashes = [session.token_hash for session in sessions]
+    for session in sessions:
+        db.delete(session)
+    if commit:
+        db.commit()
+        finalize_revoked_sessions(token_hashes, reason=reason)
+    return len(token_hashes)
+
+
+def stage_revoke_user_sessions(
+    db: Session,
+    user_id: int,
+    *,
+    except_token_hash: str | None = None,
+) -> list[str]:
+    """
+    Stage user-session revocation in current DB transaction.
+    Caller must commit/rollback and then call finalize_revoked_sessions on success.
+    """
+    statement = select(UserSession).where(UserSession.user_id == user_id)
+    if except_token_hash:
+        statement = statement.where(UserSession.token_hash != except_token_hash)
+
+    sessions = db.exec(statement).all()
+    if not sessions:
+        return []
+
+    token_hashes = [session.token_hash for session in sessions]
+    for session in sessions:
+        db.delete(session)
+    return token_hashes
+
+
+def finalize_revoked_sessions(token_hashes: list[str], *, reason: str) -> None:
+    if not token_hashes:
+        return
+
+    # 缓存删除和 SSE 失效通知都属于“提交成功后的副作用”，集中放在这里统一收口。
+    delete_cached_sessions(token_hashes)
+    for token_hash in token_hashes:
+        sse_manager.notify_session_revoked(token_hash=token_hash, reason=reason)
+
+
+def refresh_session_expiry(
+    db: Session,
+    *,
+    user_id: int,
+    username: str,
+    is_active: bool,
+    session: UserSession,
+    new_token: str | None = None,
+) -> UserSession:
+    now_utc = get_utc_now()
+    old_token_hash = session.token_hash
+    session.expires_at = now_utc + timedelta(hours=settings.session_expire_hours)
+    if new_token:
+        session.token_hash = hashlib.sha256(new_token.encode()).hexdigest()
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    if session.token_hash != old_token_hash:
+        delete_cached_session(old_token_hash)
+        sse_manager.notify_session_revoked(token_hash=old_token_hash, reason="session_refreshed")
+
+    sync_session_cache(
+        session=session,
+        user_id=user_id,
+        username=username,
+        is_active=is_active,
+        now_utc=now_utc,
+    )
+    return session
 
 
 # ==================== Device Session Management ====================
@@ -116,11 +274,7 @@ def _evict_oldest_session(db: Session, user_id: int) -> None:
     ).first()
     
     if oldest:
-        # 删除 Redis 缓存
-        delete_cached_session(oldest.token_hash)
-        # 删除数据库记录
-        db.delete(oldest)
-        db.commit()
+        revoke_session(db, oldest, reason="device_limit_evict", commit=True)
 
 
 def _create_user_session(
@@ -150,6 +304,7 @@ def _create_user_session(
 
     if existing_session:
         # 更新现有会话
+        old_token_hash = existing_session.token_hash
         existing_session.token_hash = token_hash
         existing_session.ip_address = ip_address
         existing_session.last_ip_address = ip_address
@@ -159,6 +314,9 @@ def _create_user_session(
         db.commit()
         db.refresh(existing_session)
         session = existing_session
+        if old_token_hash != token_hash:
+            delete_cached_session(old_token_hash)
+            sse_manager.notify_session_revoked(token_hash=old_token_hash, reason="device_relogin")
     else:
         # 创建新会话
         # 如果没有 device_id，生成唯一的匿名设备 ID，避免冲突
@@ -176,24 +334,14 @@ def _create_user_session(
         db.add(session)
         db.commit()
         db.refresh(session)
-    
+
     # 缓存到 Redis（使用 session 对象中的实际值，避免 device_id 为 None）
-    cache_session(
-        token_hash,
-        {
-            "session_id": session.id,
-            "user_id": user_id,
-            "username": username,
-            "is_active": True,
-            "device_id": session.device_id,
-            "device_name": session.device_name,
-            "ip_address": ip_address,
-            "last_ip_address": ip_address,
-            "user_agent": user_agent,
-            "expires_at": expires_at.isoformat(),
-            "last_active_at": session.last_active_at.isoformat(),
-        },
-        settings.session_expire_hours * SECONDS_PER_HOUR
+    sync_session_cache(
+        session=session,
+        user_id=user_id,
+        username=username,
+        is_active=True,
+        now_utc=get_utc_now(),
     )
-    
+
     return session

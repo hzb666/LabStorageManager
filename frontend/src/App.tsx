@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { lazy, Suspense, useEffect, useRef } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
 import { useAuthStore } from '@/store/useStore'
@@ -8,7 +8,6 @@ import { TooltipProvider } from '@/components/ui/Tooltip'
 import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { UserRoles } from '@/lib/constants'
-import { authAPI } from '@/api/client'
 
 // 懒加载页面组件 - 使用默认导出
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
@@ -25,9 +24,17 @@ const DeviceManagement = lazy(() => import('@/pages/DeviceManagement').then(m =>
 const AnnouncementManagement = lazy(() => import('@/pages/AnnouncementManagement').then(m => ({ default: m.AnnouncementManagement })))
 const OperationLogsPage = lazy(() => import('@/pages/OperationLogs').then(m => ({ default: m.default })))
 
+function AuthCheckingScreen() {
+  return <div className="min-h-svh flex items-center justify-center text-muted-foreground">正在验证登录状态...</div>
+}
+
 function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
+  const authStatus = useAuthStore((state) => state.authStatus)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const location = useLocation()
+  if (authStatus === 'checking') {
+    return <AuthCheckingScreen />
+  }
   if (!isAuthenticated) {
     return (
       <Navigate
@@ -40,6 +47,31 @@ function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   return <>{children}</>
 }
 
+function ProtectedLayoutRoute() {
+  const authStatus = useAuthStore((state) => state.authStatus)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const location = useLocation()
+
+  if (authStatus === 'checking' && isAuthenticated) {
+    // 保留 Layout 外壳，避免硬刷新时整页白屏；只延后真正的业务内容区。
+    return <Layout deferOutlet />
+  }
+  if (authStatus === 'checking') {
+    return <AuthCheckingScreen />
+  }
+  if (!isAuthenticated) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ authNotice: '登录状态已失效，请重新登录', from: location.pathname }}
+      />
+    )
+  }
+
+  return <Layout />
+}
+
 function AdminRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = useAuthStore((state) => state.user)
   if (user?.role !== UserRoles.ADMIN) {
@@ -48,30 +80,33 @@ function AdminRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   return <>{children}</>
 }
 
+function LoginRoute() {
+  const authStatus = useAuthStore((state) => state.authStatus)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  if (authStatus === 'checking' && isAuthenticated) {
+    return <AuthCheckingScreen />
+  }
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />
+  }
+  return <Login />
+}
+
 function AppContent() {
   // 初始化主题
   useTheme()
 
-  const setAuth = useAuthStore((state) => state.setAuth)
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  const hasFetchedUser = useRef(false)
-
-  // 刷新页面时获取最新用户信息（包括头像）
+  const bootstrapAuth = useAuthStore((state) => state.bootstrapAuth)
   useEffect(() => {
-    if (isAuthenticated && !hasFetchedUser.current) {
-      hasFetchedUser.current = true
-      authAPI.getProfile().then((res) => {
-        setAuth(res.data)
-      }).catch(console.error)
-    }
-  }, [isAuthenticated, setAuth])
+    void bootstrapAuth()
+  }, [bootstrapAuth])
 
   return (
     <TooltipProvider>
       <BrowserRouter>
         <ToastContainer />
         <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={<LoginRoute />} />
           <Route
             path="/cart-import"
             element={
@@ -86,11 +121,7 @@ function AppContent() {
           <Route path="*" element={<NotFoundPage />} />
           <Route
             path="/"
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
+            element={<ProtectedLayoutRoute />}
           >
             <Route index element={
               <Suspense>

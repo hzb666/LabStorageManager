@@ -82,6 +82,11 @@ export default defineConfig(({ mode }) => ({
     sourcemap: false,
     // 块大小警告限制
     chunkSizeWarningLimit: 500,
+    rolldownOptions: {
+      checks: {
+        pluginTimings: false,
+      },
+    },
     rollupOptions: {
       output: {
         // 手动分割代码块

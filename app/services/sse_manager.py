@@ -44,6 +44,11 @@ class SSEClient:
     last_seq_by_room: dict[str, int] = field(default_factory=dict)
     queue_full_streak: int = 0
     dropped_events: int = 0
+    user_id: int | None = None
+    session_id: int | None = None
+    token_hash: str | None = None
+    revoked: bool = False
+    revoke_reason: str | None = None
 
 
 @dataclass
@@ -75,6 +80,7 @@ class SSEManager:
         self._rooms: dict[str, SSERoom] = {}
         self._manager_lock = asyncio.Lock()
         self._listener_task: Optional[asyncio.Task[None]] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._origin = secrets.token_hex(SSE_ORIGIN_TOKEN_HEX_LENGTH)
         self._slow_client_disconnects = 0
         self._initialized = True
@@ -90,7 +96,16 @@ class SSEManager:
                 self._rooms[room] = SSERoom(name=room)
             return self._rooms[room]
 
-    async def subscribe(self, client_id: str, rooms: list[str], last_seq: int = 0) -> SSEClient:
+    async def subscribe(
+        self,
+        client_id: str,
+        rooms: list[str],
+        last_seq: int = 0,
+        *,
+        user_id: int | None = None,
+        session_id: int | None = None,
+        token_hash: str | None = None,
+    ) -> SSEClient:
         """Subscribe client to multiple rooms.
 
         last_seq is accepted for integration compatibility. Current implementation
@@ -100,7 +115,13 @@ class SSEManager:
         if not normalized_rooms:
             normalized_rooms = ["inventory"]
 
-        client = SSEClient(client_id=client_id, rooms=set(normalized_rooms))
+        client = SSEClient(
+            client_id=client_id,
+            rooms=set(normalized_rooms),
+            user_id=user_id,
+            session_id=session_id,
+            token_hash=token_hash,
+        )
         for room in normalized_rooms:
             client.last_seq_by_room[room] = last_seq
 
@@ -185,6 +206,9 @@ class SSEManager:
             client = self._clients.get(client_id)
             if client is None:
                 continue
+            if client.revoked:
+                # 会话已撤销的连接不再接收业务事件，防止“被踢后仍收流”。
+                continue
 
             try:
                 client.queue.put_nowait(sse_message)
@@ -224,8 +248,77 @@ class SSEManager:
         )
         await self.unsubscribe(client)
 
+    @staticmethod
+    def _map_auth_code(reason: str) -> str:
+        if reason in {"user_deactivated"}:
+            return "AUTH_USER_DISABLED"
+        if reason in {"session_revalidation_failed", "session_expired_cleanup"}:
+            return "AUTH_SESSION_EXPIRED"
+        return "AUTH_SESSION_REVOKED"
+
+    @classmethod
+    def build_auth_invalid_message(cls, reason: str) -> str:
+        payload = json.dumps(
+            {"reason": reason, "code": cls._map_auth_code(reason)},
+            ensure_ascii=False,
+        )
+        return f"event: auth.invalid\ndata: {payload}\n\n"
+
+    def _mark_client_revoked(self, client: SSEClient, reason: str) -> None:
+        if client.revoked:
+            return
+        client.revoked = True
+        client.revoke_reason = reason
+
+        # Drop already-buffered business events so revocation is the next thing the
+        # client sees. Otherwise a kicked session can still consume stale messages.
+        with suppress(asyncio.QueueEmpty):
+            while True:
+                client.queue.get_nowait()
+
+        try:
+            client.queue.put_nowait(self.build_auth_invalid_message(reason))
+        except asyncio.QueueFull:
+            with suppress(asyncio.QueueFull):
+                client.queue.put_nowait(self.build_auth_invalid_message(reason))
+
+    async def _disconnect_clients_by_token_hash(self, token_hash: str, reason: str) -> None:
+        if not token_hash:
+            return
+
+        async with self._manager_lock:
+            candidates = [client for client in self._clients.values() if client.token_hash == token_hash]
+
+        for client in candidates:
+            self._mark_client_revoked(client, reason)
+
+    def notify_session_revoked(self, *, token_hash: str, reason: str = "session_revoked") -> None:
+        """Publish cross-process revoke signal and close local SSE clients quickly.
+
+        设计目标：普通 API 已拒绝后，长连接也应尽快表现为失效。
+        """
+        event = {
+            "kind": "session_revoked",
+            "token_hash": token_hash,
+            "reason": reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "origin": self._origin,
+        }
+        channel = redis_key("sse:control")
+        try:
+            redis_pubsub.publish(channel, event)
+        except Exception:  # noqa: BLE001
+            logger.exception("SSE revoke publish failed token_hash=%s", token_hash)
+
+        if self._loop and self._loop.is_running():
+            def _schedule_revoke() -> None:
+                asyncio.create_task(self._disconnect_clients_by_token_hash(token_hash, reason))
+
+            self._loop.call_soon_threadsafe(_schedule_revoke)
+
     async def start_listener(self) -> None:
         """Start a single background Redis listener task."""
+        self._loop = asyncio.get_running_loop()
         async with self._manager_lock:
             if self._listener_task and not self._listener_task.done():
                 return
@@ -239,6 +332,7 @@ class SSEManager:
         async with self._manager_lock:
             task = self._listener_task
             self._listener_task = None
+            self._loop = None
 
         if task is None:
             return
@@ -287,8 +381,41 @@ class SSEManager:
             room = str(event.get("room") or "")
         if not room:
             return None
+        if room == "control":
+            return None
 
         return room, event_type, event
+
+    def _parse_control_message(self, message: dict[str, Any]) -> Optional[dict[str, Any]]:
+        raw_channel = message.get("channel")
+        channel = self._decode_pubsub_value(raw_channel)
+        if ":sse:control" not in channel and channel != "sse:control":
+            return None
+
+        raw_data = message.get("data")
+        text_data = self._decode_pubsub_value(raw_data)
+        try:
+            event = json.loads(text_data)
+        except json.JSONDecodeError:
+            logger.warning("Invalid SSE control payload on %s", channel)
+            return None
+
+        if not isinstance(event, dict):
+            return None
+        if event.get("origin") == self._origin:
+            return None
+        if event.get("kind") != "session_revoked":
+            return None
+        token_hash = event.get("token_hash")
+        if not isinstance(token_hash, str) or not token_hash:
+            return None
+
+        return event
+
+    async def _handle_control_message(self, event: dict[str, Any]) -> None:
+        token_hash = str(event.get("token_hash") or "")
+        reason = str(event.get("reason") or "session_revoked")
+        await self._disconnect_clients_by_token_hash(token_hash, reason)
 
     @staticmethod
     def _pubsub_reader_worker(
@@ -338,6 +465,10 @@ class SSEManager:
 
                 if queue_get_task in done:
                     message = queue_get_task.result()
+                    control_event = self._parse_control_message(message)
+                    if control_event is not None:
+                        await self._handle_control_message(control_event)
+                        continue
                     parsed = self._parse_pubsub_event(message)
                     if parsed is not None:
                         room, event_type, event = parsed
@@ -389,12 +520,18 @@ class SSEManager:
                 # Stop stream quickly when client is removed (e.g., slow client governance).
                 if self._clients.get(client.client_id) is not client:
                     break
+                if client.revoked and client.queue.empty():
+                    break
 
                 try:
                     message = await asyncio.wait_for(client.queue.get(), timeout=heartbeat_seconds)
                     yield message
+                    if client.revoked and client.queue.empty():
+                        break
                 except asyncio.TimeoutError:
                     if self._clients.get(client.client_id) is not client:
+                        break
+                    if client.revoked:
                         break
                     yield ": heartbeat\n\n"
         except (GeneratorExit, asyncio.CancelledError):

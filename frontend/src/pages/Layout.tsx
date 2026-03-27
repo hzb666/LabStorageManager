@@ -735,8 +735,65 @@ function LayoutHeader({
   )
 }
 
+function DashboardDeferredOutlet() {
+  return (
+    <div className="space-y-6">
+      <div className="h-9 w-40 rounded-md bg-muted/70 animate-pulse" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div
+            key={index}
+            className="h-28 rounded-xl border border-border bg-muted/35 animate-pulse"
+          />
+        ))}
+      </div>
+      <div className="h-80 rounded-xl border border-border bg-muted/25 animate-pulse" />
+    </div>
+  )
+}
+
+function TableDeferredOutlet() {
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="h-9 w-40 rounded-md bg-muted/70 animate-pulse" />
+        <div className="flex gap-2">
+          <div className="h-10 w-24 rounded-md bg-muted/50 animate-pulse" />
+          <div className="h-10 w-24 rounded-md bg-muted/50 animate-pulse" />
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="h-10 flex-1 rounded-md bg-muted/35 animate-pulse" />
+        <div className="h-10 w-28 rounded-md bg-muted/35 animate-pulse" />
+      </div>
+      <div className="overflow-hidden rounded-xl border border-border">
+        <div className="border-b border-border bg-muted/25 px-4 py-4">
+          <div className="h-5 w-32 rounded-md bg-muted/60 animate-pulse" />
+        </div>
+        <div className="space-y-3 px-4 py-4">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div
+              key={index}
+              className="h-12 rounded-md bg-muted/25 animate-pulse"
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LayoutDeferredOutlet({ pathname }: Readonly<{ pathname: string }>) {
+  // 骨架按页面类型区分到“仪表盘/列表页”两档，避免为每个页面单独维护一份占位布局。
+  if (pathname === '/') {
+    return <DashboardDeferredOutlet />
+  }
+
+  return <TableDeferredOutlet />
+}
+
 // 布局页负责拉取公告、维护桌面/移动侧栏状态、处理退出确认和移动端滚动锁定。
-export function Layout() {
+export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean }>) {
   const location = useLocation()
   const { user, logout } = useAuthStore()
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
@@ -864,7 +921,7 @@ export function Layout() {
             />
 
             <div className="px-4 py-6 md:px-6">
-              <Outlet />
+              {deferOutlet ? <LayoutDeferredOutlet pathname={location.pathname} /> : <Outlet />}
             </div>
           </div>
         </main>
