@@ -16,8 +16,8 @@ import {
   useCartImportActions,
   useCartImportBatchController,
   useCartImportFormController,
-} from "./cartImportControllers";
-import type { ImportItem, OrderType } from "./cartImportModel";
+} from "./cartimport/cartImportControllers";
+import type { ImportItem, OrderType } from "./cartimport/cartImportModel";
 
 function CartImportItemList(
   props: Readonly<{

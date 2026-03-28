@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
 import { CartImportLoadingScreen } from '@/components/CartImportLoadingScreen'
+import { AuthDeferredShell } from '@/components/AuthDeferredShell'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
 import { TooltipProvider } from '@/components/ui/Tooltip'
@@ -131,32 +132,32 @@ function AppContent() {
             element={<ProtectedLayoutRoute />}
           >
             <Route index element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/" />}>
                 <Dashboard />
               </Suspense>
             } />
             <Route path="reagents" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/reagents" />}>
                 <ReagentOrdersPage />
               </Suspense>
             } />
             <Route path="consumables" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/consumables" />}>
                 <ConsumableOrdersPage />
               </Suspense>
             } />
             <Route path="inventory" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/inventory" />}>
                 <InventoryPage />
               </Suspense>
             } />
             <Route path="common-shelf" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/common-shelf" />}>
                 <CommonShelfPage />
               </Suspense>
             } />
             <Route path="import" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/import" />}>
                 <ImportPage />
               </Suspense>
             } />
@@ -164,7 +165,7 @@ function AppContent() {
               path="admin/users"
               element={
                 <AdminRoute>
-                  <Suspense>
+                  <Suspense fallback={<AuthDeferredShell pathname="/admin/users" />}>
                     <AdminUsersPage />
                   </Suspense>
                 </AdminRoute>
@@ -174,14 +175,14 @@ function AppContent() {
               path="admin/announcements"
               element={
                 <AdminRoute>
-                  <Suspense>
+                  <Suspense fallback={<AuthDeferredShell pathname="/admin/announcements" />}>
                     <AnnouncementManagement />
                   </Suspense>
                 </AdminRoute>
               }
             />
             <Route path="devices" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/devices" />}>
                 <DeviceManagement />
               </Suspense>
             } />
@@ -189,7 +190,7 @@ function AppContent() {
               path="admin/logs"
               element={
                 <AdminRoute>
-                  <Suspense>
+                  <Suspense fallback={<AuthDeferredShell pathname="/admin/logs" />}>
                     <OperationLogsPage />
                   </Suspense>
                 </AdminRoute>
