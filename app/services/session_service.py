@@ -168,6 +168,27 @@ def revoke_user_sessions(
     return len(token_hashes)
 
 
+def revoke_all_sessions(
+    db: Session,
+    *,
+    reason: str,
+    commit: bool = True,
+) -> int:
+    sessions = db.exec(select(UserSession)).all()
+    if not sessions:
+        return 0
+
+    token_hashes = [session.token_hash for session in sessions]
+    for session in sessions:
+        db.delete(session)
+
+    if commit:
+        db.commit()
+        finalize_revoked_sessions(token_hashes, reason=reason)
+
+    return len(token_hashes)
+
+
 def stage_revoke_user_sessions(
     db: Session,
     user_id: int,

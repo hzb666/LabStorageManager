@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Application
     app_name: str = "Lab Storage Manager"
     app_version: str = "0.1.0"
+    cache_version: str = ""
     debug: bool = False
     env: str = "development"  # development or production
     
@@ -192,6 +193,8 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance"""
     settings = Settings()
+    settings.app_version = settings.app_version.strip() or "0.1.0"
+    settings.cache_version = settings.cache_version.strip() or settings.app_version
 
     # 生产环境禁止 HS256，避免对称密钥模式的降级风险
     if settings.use_secure_runtime() and settings.algorithm != "RS256":

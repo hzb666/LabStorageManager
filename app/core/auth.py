@@ -302,8 +302,6 @@ def _schedule_activity_refresh(
         background_tasks.add_task(_update_user_activity_task, token_hash, client_ip)
     else:
         _update_user_activity_task(token_hash, client_ip)
-    session.last_active_at = now_utc
-    session.last_ip_address = client_ip
 
 
 def _delete_session_and_raise(

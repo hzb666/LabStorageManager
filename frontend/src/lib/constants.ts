@@ -111,6 +111,8 @@ export const ORDER_REASON_COLORS: Record<string, BadgeColor> = {
 
 // === Session Storage Keys ===
 export const AUTH_NOTICE_KEY = 'auth_notice'
+export const CACHE_VERSION_STORAGE_KEY = 'app_cache_version'
+export const CACHE_VERSION_RESET_NOTICE = '系统已更新，请重新登录'
 
 // === Order Status (Reagent) ===
 export const REAGENT_STATUS_MAP: Record<string, string> = {

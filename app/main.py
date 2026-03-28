@@ -31,6 +31,7 @@ from app.core.request_utils import get_client_ip, get_request_id
 from app.database import init_db
 from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, announcements, error_logs, events
 from app.services import chemical_info
+from app.services.cache_reset_service import apply_startup_cache_reset_if_needed
 from app.services.sse_manager import sse_manager
 
 
@@ -170,6 +171,15 @@ async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
     init_db()
     logger.info("Database initialized (WAL mode enabled)")
+    try:
+        cache_reset_result = apply_startup_cache_reset_if_needed()
+        if cache_reset_result.applied:
+            logger.info(
+                "Startup cache reset applied for cache version %s",
+                cache_reset_result.current_version,
+            )
+    except Exception:
+        logger.exception("Startup cache reset failed; continue without version-based reset")
     print_banner()
     yield
     await sse_manager.stop_listener()
@@ -384,12 +394,20 @@ def health_check():
     return {
         "status": "healthy",
         "version": settings.app_version,
+        "cache_version": settings.cache_version,
         "database": "connected",
     }
 
+
+@app.get("/api/runtime/cache-version")
+def get_runtime_cache_version(response: Response) -> dict[str, str]:
+    """Expose current cache invalidation version for frontend startup checks."""
+    response.headers["Cache-Control"] = "no-store"
+    return {"cache_version": settings.cache_version}
+
 # Import models to ensure tables are created
 # This is needed for SQLModel to register all models
-from app.models import User, Inventory, BorrowLog, ReagentOrder, ConsumableOrder, Announcement  # noqa: E402, F401
+from app.models import User, Inventory, BorrowLog, ReagentOrder, ConsumableOrder, Announcement, RuntimeState  # noqa: E402, F401
 
 
 @app.get("/cart-import")
