@@ -20,11 +20,13 @@ import { ConsumableOrderExpandedRow } from "@/components/ConsumableOrderExpanded
 import { toast } from "@/lib/toast";
 import { processNotes, toText } from "@/lib/utils";
 import { UserRoles } from "@/lib/constants";
+import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from "@/store/useStore";
 
 import { consumableOrderAPI } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
 import { getConsumableOrderTableColumns } from "@/lib/tableConfigs";
+import { CONSUMABLE_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
 import {
   ConsumableOrderSchema,
   createValibotResolver,
@@ -377,6 +379,7 @@ function useDashboardConsumableDialogController({
 
 export function DashboardConsumableTab() {
   const currentUser = useAuthStore((state) => state.user);
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale);
   const isAdmin = currentUser?.role === UserRoles.ADMIN;
   const queryClient = useQueryClient();
 
@@ -395,8 +398,9 @@ export function DashboardConsumableTab() {
       queryClient.invalidateQueries({ queryKey: ["dashboard", "consumables"] }),
       queryClient.invalidateQueries({ queryKey: ["consumable-orders"] }),
     ]);
+    clearRoomStale('consumable_orders');
     requestDashboardCountsRefresh();
-  }, [queryClient]);
+  }, [clearRoomStale, queryClient]);
 
   const consumableDashboardAPI = useMemo(
     () => createConsumableDashboardAPI(currentUser?.id),
@@ -436,6 +440,34 @@ export function DashboardConsumableTab() {
         api={consumableDashboardAPI}
         queryKey={["dashboard", "consumables"]}
         tableId="dashboard-consumable-orders"
+        realtime={{
+          room: 'consumable_orders',
+          eventTypes: CONSUMABLE_ORDER_SSE_EVENTS,
+          onRefresh: refreshTables,
+          onSafePatch: () => {
+            requestDashboardCountsRefresh();
+          },
+          shouldHandleEvent: (event, context) => {
+            const payload = event.data as Record<string, unknown>;
+            const item = payload.item as Record<string, unknown> | undefined;
+            let itemId: number | null = null;
+            if (typeof payload.id === "number") {
+              itemId = payload.id;
+            } else if (typeof item?.id === "number") {
+              itemId = item.id;
+            }
+
+            if (itemId !== null && context.loadedIds.has(itemId)) {
+              return true;
+            }
+
+            if (!item || typeof currentUser?.id !== "number") {
+              return false;
+            }
+
+            return item.applicant_id === currentUser.id;
+          },
+        }}
         customColumns={consumableColumns}
         statusOptions={CONSUMABLE_STATUS_OPTIONS}
         searchFieldOptions={DASHBOARD_CONSUMABLE_SEARCH_FIELDS}

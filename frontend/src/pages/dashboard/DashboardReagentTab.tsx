@@ -23,11 +23,13 @@ import { ReagentOrderExpandedRow } from "@/components/ReagentOrderExpandedRow";
 import { toast } from "@/lib/toast";
 import { processNotes } from "@/lib/utils";
 import { UserRoles } from "@/lib/constants";
+import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from "@/store/useStore";
 
 import { reagentOrderAPI } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
 import { getReagentOrderTableColumns } from "@/lib/tableConfigs";
+import { REAGENT_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
 import {
   ReagentOrderSchema,
   StockInFormSchema,
@@ -591,6 +593,7 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
 // 页面只负责任务列表查询刷新、列配置，以及编辑/入库弹窗编排。
 export function DashboardReagentTab() {
   const currentUser = useAuthStore((state) => state.user);
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale);
   const isAdmin = currentUser?.role === UserRoles.ADMIN;
   const queryClient = useQueryClient();
 
@@ -600,8 +603,9 @@ export function DashboardReagentTab() {
       queryClient.invalidateQueries({ queryKey: ["reagent-orders"] }),
       queryClient.invalidateQueries({ queryKey: ["inventory"] }),
     ]);
+    clearRoomStale('reagent_orders');
     requestDashboardCountsRefresh();
-  }, [queryClient]);
+  }, [clearRoomStale, queryClient]);
 
   const reagentDashboardAPI = useMemo(
     () => createReagentDashboardAPI(currentUser?.id),
@@ -646,6 +650,34 @@ export function DashboardReagentTab() {
         api={reagentDashboardAPI}
         queryKey={["dashboard", "reagents"]}
         tableId="dashboard-reagent-orders"
+        realtime={{
+          room: 'reagent_orders',
+          eventTypes: REAGENT_ORDER_SSE_EVENTS,
+          onRefresh: refreshTables,
+          onSafePatch: () => {
+            requestDashboardCountsRefresh();
+          },
+          shouldHandleEvent: (event, context) => {
+            const payload = event.data as Record<string, unknown>;
+            const item = payload.item as Record<string, unknown> | undefined;
+            let itemId: number | null = null;
+            if (typeof payload.id === "number") {
+              itemId = payload.id;
+            } else if (typeof item?.id === "number") {
+              itemId = item.id;
+            }
+
+            if (itemId !== null && context.loadedIds.has(itemId)) {
+              return true;
+            }
+
+            if (!item || typeof currentUser?.id !== "number") {
+              return false;
+            }
+
+            return item.applicant_id === currentUser.id;
+          },
+        }}
         customColumns={reagentColumns}
         statusOptions={REAGENT_STATUS_OPTIONS}
         searchFieldOptions={DASHBOARD_REAGENT_SEARCH_FIELDS}

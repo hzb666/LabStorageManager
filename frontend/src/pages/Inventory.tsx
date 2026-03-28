@@ -41,7 +41,9 @@ import {
 import type { InventoryFormData, InventoryFormInputData } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 import { UserRoles } from '@/lib/constants'
+import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from '@/store/useStore'
+import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 
 // 表单配置
 import { defaultInventoryValues, enhanceCasLookupField, getInventoryFormFields } from '@/lib/formConfigs'
@@ -440,9 +442,11 @@ function InventoryExpandedRow({ item }: { item: InventoryItem }) {
 // 直接组合列表、页头和叶子组件，避免继续保留只转发参数的壳层。
 export function InventoryPage() {
   const queryClient = useQueryClient()
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const loadInventory = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['inventory'] })
-  }, [queryClient])
+    clearRoomStale('inventory')
+  }, [clearRoomStale, queryClient])
   const dialogController = useInventoryDialogController(loadInventory)
 
   const handleExport = useCallback(async () => {
@@ -500,6 +504,11 @@ export function InventoryPage() {
         api={inventoryAPI as FilterAPI}
         queryKey={['inventory']}
         tableId="inventory-table"
+        realtime={{
+          room: 'inventory',
+          eventTypes: INVENTORY_SSE_EVENTS,
+          onRefresh: loadInventory,
+        }}
         customColumns={columns}
         onEdit={dialogController.handleEditClick}
         onBorrowSuccess={loadInventory}

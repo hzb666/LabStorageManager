@@ -186,6 +186,14 @@ def _add_specification(item_dict: dict) -> dict:
     item_dict["specification"] = format_specification(initial, unit)
     return item_dict
 
+
+def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]:
+    users_map = batch_get_user_names(db, {order.applicant_id} if order.applicant_id else set())
+    return _add_specification({
+        **ReagentOrderResponse.model_validate(order).model_dump(mode="json"),
+        "applicant_name": users_map.get(order.applicant_id, ""),
+    })
+
 def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
     # Get reagent order by ID
     return db.get(ReagentOrder, order_id)
@@ -442,7 +450,7 @@ async def create_reagent_order(
     await sse_manager.broadcast(
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_CREATED,
-        {"id": db_order.id},
+        {"id": db_order.id, "item": _serialize_reagent_order(db_order, db)},
     )
     
     return db_order
@@ -744,7 +752,7 @@ async def update_reagent_order(
     await sse_manager.broadcast(
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_UPDATED,
-        {"id": order_id},
+        {"id": order_id, "item": _serialize_reagent_order(order, db)},
     )
     
     return order

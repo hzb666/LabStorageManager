@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Dict, Any, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
@@ -57,6 +57,7 @@ from app.services.spec_utils import parse_specification, SpecificationError, for
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
 from app.api.common_shelf import register_common_shelf
+from app.core.request_utils import get_sse_client_id
 
 logger = logging.getLogger(__name__)
 
@@ -428,7 +429,7 @@ def _attach_user_names(db: Session, items: list[Inventory]) -> list[dict]:
     users_map = batch_get_user_names(db, user_ids)
     result_data = []
     for item in items:
-        item_dict = InventoryResponse.model_validate(item).model_dump()
+        item_dict = InventoryResponse.model_validate(item).model_dump(mode="json")
         item_dict = _add_specification(item_dict)
         item_dict["borrower_name"] = users_map.get(item.borrower_id)
         item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
@@ -562,6 +563,7 @@ def get_inventory(inventory_id: int, db: DBSession):
 async def update_inventory(
     inventory_id: int,
     update: InventoryUpdate,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
 ):
     # 更新库存记录，保持权限、字段标准化与状态联动语义不变。
@@ -595,12 +597,12 @@ async def update_inventory(
     db.refresh(item)
     _clear_list_cache()
 
-    response = InventoryResponse.model_validate(item).model_dump()
-    response = _add_specification(response)
+    response = _attach_user_names(db, [item])[0]
     await sse_manager.broadcast(
         SSERoom.INVENTORY,
         SSEEventType.INVENTORY_UPDATED,
         {"id": inventory_id, "item": response},
+        actor_client_id=get_sse_client_id(request),
     )
     return response
 
@@ -680,6 +682,7 @@ def _apply_inventory_pinyin_updates(item: Inventory, *, update_data: dict) -> No
 @router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_user)])
 async def delete_inventory(
     inventory_id: int,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
 ):
     item = _get_by_id(db, inventory_id)
@@ -692,4 +695,5 @@ async def delete_inventory(
         SSERoom.INVENTORY,
         SSEEventType.INVENTORY_DELETED,
         {"id": inventory_id},
+        actor_client_id=get_sse_client_id(request),
     )

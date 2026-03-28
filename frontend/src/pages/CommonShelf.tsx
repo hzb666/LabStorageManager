@@ -13,12 +13,13 @@ import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { chemicalAPI, commonShelfAPI } from '@/api/client'
-import { useSSE, type SSEEventHandler } from '@/hooks/useSSE'
 import type { FilterAPI } from '@/hooks/useTableState'
 import useDialogState from '@/hooks/useDialogState'
 import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfigs'
 import { getCommonShelfTableColumns } from '@/lib/tableConfigs'
 import { COMMON_SHELF_BRAND_OPTIONS, COMMON_SHELF_CATEGORY_OPTIONS } from '@/lib/options'
+import { COMMON_SHELF_SSE_EVENTS } from '@/lib/sseEvents'
+import { useSSEStore } from '@/store/sseStore'
 import { downloadBlobResponse, formatDate } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import {
@@ -80,14 +81,6 @@ const SEARCH_FIELD_OPTIONS = [
   { value: 'category', label: '分类' },
   { value: 'storage_location', label: '位置' },
 ]
-
-// 这些 SSE 事件任一触发都需要重新拉取常用货架列表。
-const COMMON_SHELF_SSE_EVENTS = [
-  'common_shelf.created',
-  'common_shelf.updated',
-  'common_shelf.deleted',
-  'common_shelf.consumed',
-] as const
 
 // 为常用货架列定义保留字段级类型推导。
 const columnHelper = createColumnHelper<CommonShelfItem>()
@@ -230,6 +223,7 @@ function buildCommonShelfFormFields(
         ...field,
         enableTagToggle: true,
         tag: '[std]',
+        placeholder: '输入名称或点击左侧图标标记为标准名',
       }
     }
 
@@ -247,16 +241,6 @@ function buildCommonShelfFormFields(
 
     return field
   })
-}
-
-// 所有相关 SSE 事件最终都指向同一份列表刷新逻辑。
-function createCommonShelfSSEHandlers(
-  handleCommonShelfSSEEvent: SSEEventHandler
-): Record<string, SSEEventHandler> {
-  return COMMON_SHELF_SSE_EVENTS.reduce<Record<string, SSEEventHandler>>((acc, eventType) => {
-    acc[eventType] = handleCommonShelfSSEEvent
-    return acc
-  }, {})
 }
 
 // 展开行补充英文名、别名、分类、品牌、创建信息、库存统计和备注等明细字段。
@@ -432,6 +416,7 @@ function useCommonShelfDialogState(
 // 页面主组件负责编排弹窗、SSE 刷新和表格查询。
 export function CommonShelfPage() {
   const queryClient = useQueryClient()
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
 
   const form = useForm<InventoryFormInputData, unknown, InventoryFormData>({
     resolver: createValibotResolver(InventoryFormSchema),
@@ -441,19 +426,8 @@ export function CommonShelfPage() {
 
   const refreshCommonShelf = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['common-shelf'] })
-  }, [queryClient])
-
-  const handleCommonShelfSSEEvent = useCallback<SSEEventHandler>(() => {
-    void refreshCommonShelf()
-  }, [refreshCommonShelf])
-
-  useSSE({
-    rooms: ['common_shelf'],
-    handlers: useMemo(
-      () => createCommonShelfSSEHandlers(handleCommonShelfSSEEvent),
-      [handleCommonShelfSSEEvent]
-    ),
-  })
+    clearRoomStale('common_shelf')
+  }, [clearRoomStale, queryClient])
 
   const {
     dialogState,
@@ -522,6 +496,12 @@ export function CommonShelfPage() {
         api={commonShelfAPI as FilterAPI}
         queryKey={['common-shelf']}
         tableId="common-shelf-table"
+        realtime={{
+          room: 'common_shelf',
+          eventTypes: COMMON_SHELF_SSE_EVENTS,
+          staleOnly: true,
+          onRefresh: refreshCommonShelf,
+        }}
         customColumns={columns}
         onEdit={handleEditClick}
         onBorrowSuccess={refreshCommonShelf}

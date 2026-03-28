@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { lazy, Suspense, useEffect } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
@@ -39,18 +39,11 @@ function ProtectedRoute({
 }>) {
   const authStatus = useAuthStore((state) => state.authStatus)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  const location = useLocation()
   if (authStatus === 'checking') {
     return <>{checkingFallback ?? <AuthCheckingScreen />}</>
   }
   if (!isAuthenticated) {
-    return (
-      <Navigate
-        to="/login"
-        replace
-        state={{ authNotice: '登录状态已失效，请重新登录', from: location.pathname }}
-      />
-    )
+    return <Navigate to="/login" replace />
   }
   return <>{children}</>
 }
@@ -58,7 +51,6 @@ function ProtectedRoute({
 function ProtectedLayoutRoute() {
   const authStatus = useAuthStore((state) => state.authStatus)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  const location = useLocation()
 
   if (authStatus === 'checking' && isAuthenticated) {
     // 保留 Layout 外壳，避免硬刷新时整页白屏；只延后真正的业务内容区。
@@ -68,13 +60,7 @@ function ProtectedLayoutRoute() {
     return <AuthCheckingScreen />
   }
   if (!isAuthenticated) {
-    return (
-      <Navigate
-        to="/login"
-        replace
-        state={{ authNotice: '登录状态已失效，请重新登录', from: location.pathname }}
-      />
-    )
+    return <Navigate to="/login" replace />
   }
 
   return <Layout />

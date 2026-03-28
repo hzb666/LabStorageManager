@@ -22,6 +22,7 @@ from app.core.constants import (
     SSE_REDIS_SUBSCRIBE_RETRY_SECONDS,
     SSE_SLOW_CLIENT_QUEUE_FULL_STREAK_LIMIT,
 )
+from app.core.request_utils import get_current_sse_client_id
 from app.core.redis import redis_key, REDIS_KEY_PREFIX
 from app.services.sse_redis import redis_pubsub
 
@@ -148,7 +149,17 @@ class SSEManager:
             local_room.fallback_seq += 1
             return local_room.fallback_seq
 
-    async def broadcast(self, room: str, event_type: str, data: dict[str, Any]) -> int:
+    async def broadcast(
+        self,
+        room: str,
+        event_type: str,
+        data: dict[str, Any],
+        *,
+        actor_client_id: str | None = None,
+    ) -> int:
+        if actor_client_id is None:
+            actor_client_id = get_current_sse_client_id()
+
         seq = await self._next_seq(room)
         event = {
             "room": room,
@@ -157,6 +168,7 @@ class SSEManager:
             "data": data,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "origin": self._origin,
+            "actor_client_id": actor_client_id,
         }
 
         local_delivered = await self._push_local(room, event_type, event)

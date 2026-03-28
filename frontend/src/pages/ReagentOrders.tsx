@@ -18,6 +18,7 @@ import { BaseForm } from '@/components/BaseForm'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
+import { useSSEStore } from '@/store/sseStore'
 import { REAGENT_STATUS_MAP, UserRoles } from '@/lib/constants'
 import type { FilterAPI } from '@/hooks/useTableState'
 
@@ -52,6 +53,7 @@ import {
   enhanceCasLookupField,
 } from '@/lib/formConfigs'
 import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderSubmitHelpers'
+import { REAGENT_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
 
 // 图标
 import {
@@ -110,6 +112,11 @@ const REAGENT_SEARCH_FIELD_OPTIONS = [
   { value: 'applicant', label: '订购人' },
   { value: 'created_at', label: '订购时间' },
 ]
+
+const REAGENT_SSE_SEARCH_FIELD_MAP = {
+  cas: ['cas_number'],
+  applicant: ['applicant_name'],
+} satisfies Partial<Record<string, string[]>>
 
 // 返回试剂订单状态的展示文案。 把页面、展开行和重复弹窗中的状态映射维持在同一套规则上。
 function getReagentOrderStatusLabel(status: string): string {
@@ -476,11 +483,13 @@ export function ReagentOrdersPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
   const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
   const refreshOrders = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['reagent-orders'] })
-  }, [queryClient])
+    clearRoomStale('reagent_orders')
+  }, [clearRoomStale, queryClient])
   const dialogController = useReagentOrderDialogController(refreshOrders, navigate)
 
   const handleExport = useCallback(async () => {
@@ -560,6 +569,12 @@ export function ReagentOrdersPage() {
         api={reagentOrderAPI as FilterAPI}
         queryKey={['reagent-orders']}
         tableId="reagent-orders-table"
+        realtime={{
+          room: 'reagent_orders',
+          eventTypes: REAGENT_ORDER_SSE_EVENTS,
+          onRefresh: refreshOrders,
+          searchFieldMap: REAGENT_SSE_SEARCH_FIELD_MAP,
+        }}
         statusOptions={REAGENT_ORDER_STATUS_OPTIONS}
         searchFieldOptions={REAGENT_SEARCH_FIELD_OPTIONS}
         customColumns={columns}

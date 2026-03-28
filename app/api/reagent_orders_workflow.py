@@ -10,8 +10,13 @@ from app.database import DBSession
 from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.time_utils import utc_iso_str
 from app.models.user import UserRole
-from app.models.reagent_order import ReagentOrder, ReagentOrderStatus, ReagentOrderReason
-from app.models.inventory import Inventory, InventoryStatus
+from app.models.reagent_order import (
+    ReagentOrder,
+    ReagentOrderReason,
+    ReagentOrderResponse,
+    ReagentOrderStatus,
+)
+from app.models.inventory import Inventory, InventoryResponse, InventoryStatus
 from app.core.constants import SSEEventType, SSERoom
 from app.services.api_utils import clear_cache_by_prefix
 from app.services.internal_code import generate_internal_code
@@ -20,6 +25,7 @@ from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.shelf_utils import normalize_storage_location
 from app.services.spec_utils import format_specification
 from app.services.sse_manager import sse_manager
+from app.services.user_utils import batch_get_user_names
 
 ORDER_NOT_FOUND = "Order not found"
 LIST_CACHE_PREFIX = "list:"
@@ -62,6 +68,49 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
 
 def _get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
     return db.get(ReagentOrder, order_id)
+
+
+def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]:
+    users_map = batch_get_user_names(db, {order.applicant_id} if order.applicant_id else set())
+    return {
+        **ReagentOrderResponse.model_validate(order).model_dump(mode="json"),
+        "specification": format_specification(order.initial_quantity, order.unit),
+        "applicant_name": users_map.get(order.applicant_id, ""),
+    }
+
+
+def _serialize_inventory_items(db: Session, items: list[Inventory]) -> list[dict[str, Any]]:
+    user_ids = set()
+    for item in items:
+        if item.borrower_id:
+            user_ids.add(item.borrower_id)
+        if item.last_borrower_id:
+            user_ids.add(item.last_borrower_id)
+        if item.created_by_id:
+            user_ids.add(item.created_by_id)
+        if item.temporary_keeper_id:
+            user_ids.add(item.temporary_keeper_id)
+
+    users_map = batch_get_user_names(db, user_ids)
+    serialized_items: list[dict[str, Any]] = []
+    for item in items:
+        item_dict = InventoryResponse.model_validate(item).model_dump(mode="json")
+        item_dict["specification"] = format_specification(item.initial_quantity, item.unit)
+        item_dict["borrower_name"] = users_map.get(item.borrower_id)
+        item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
+        item_dict["created_by_name"] = users_map.get(item.created_by_id)
+        item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
+        serialized_items.append(item_dict)
+    return serialized_items
+
+
+def _clear_inventory_projection_cache() -> None:
+    from app.api.inventory import (
+        LIST_CACHE_PREFIX as INVENTORY_LIST_CACHE_PREFIX,
+        SEARCH_CACHE as INVENTORY_SEARCH_CACHE,
+    )
+
+    clear_cache_by_prefix(INVENTORY_SEARCH_CACHE, prefix=INVENTORY_LIST_CACHE_PREFIX)
 
 
 def _create_inventory_items_from_order(
@@ -129,6 +178,25 @@ def _create_inventory_items_from_order(
     return inventory_items
 
 
+async def _broadcast_inventory_projection_events(
+    db: Session,
+    items: list[Inventory],
+    *,
+    created: bool,
+) -> None:
+    if not items:
+        return
+
+    serialized_items = _serialize_inventory_items(db, items)
+    for item, serialized_item in zip(items, serialized_items):
+        room = SSERoom.COMMON_SHELF if item.is_common else SSERoom.INVENTORY
+        if item.is_common:
+            event_type = SSEEventType.COMMON_SHELF_CREATED if created else SSEEventType.COMMON_SHELF_UPDATED
+        else:
+            event_type = SSEEventType.INVENTORY_CREATED if created else SSEEventType.INVENTORY_UPDATED
+        await sse_manager.broadcast(room, event_type, {"id": item.id, "item": serialized_item})
+
+
 def _register_approval_routes(
     router: APIRouter,
     search_cache: Dict[str, tuple[Any, Any]],
@@ -153,7 +221,7 @@ def _register_approval_routes(
         await sse_manager.broadcast(
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
-            {"id": order_id},
+            {"id": order_id, "item": _serialize_reagent_order(order, db)},
         )
 
         return order
@@ -178,7 +246,7 @@ def _register_approval_routes(
         await sse_manager.broadcast(
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
-            {"id": order_id},
+            {"id": order_id, "item": _serialize_reagent_order(order, db)},
         )
 
         return order
@@ -269,8 +337,10 @@ def _register_arrival_routes(
         await sse_manager.broadcast(
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
-            {"id": order_id},
+            {"id": order_id, "item": _serialize_reagent_order(order, db)},
         )
+        _clear_inventory_projection_cache()
+        await _broadcast_inventory_projection_events(db, inventory_items, created=True)
 
         return {
             "message": message,
@@ -512,7 +582,7 @@ async def _finalize_stock_in_order(
     await sse_manager.broadcast(
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_UPDATED,
-        {"id": order_id},
+        {"id": order_id, "item": _serialize_reagent_order(order, db)},
     )
 
 
@@ -580,6 +650,8 @@ def _register_stock_in_route(
                 stock_context=stock_context,
             )
             await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
+            _clear_inventory_projection_cache()
+            await _broadcast_inventory_projection_events(db, inventory_items, created=True)
             for item in inventory_items:
                 db.refresh(item)
             return {
@@ -598,6 +670,8 @@ def _register_stock_in_route(
             is_common=is_common,
         )
         await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
+        _clear_inventory_projection_cache()
+        await _broadcast_inventory_projection_events(db, target_items, created=False)
         return {
             "message": "已入库",
             "order_id": order.id,

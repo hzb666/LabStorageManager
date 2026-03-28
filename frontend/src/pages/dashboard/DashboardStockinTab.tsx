@@ -20,6 +20,9 @@ import { formatDateTime } from '@/lib/utils'
 
 import { inventoryAPI, reagentOrderAPI } from '@/api/client'
 import type { FilterAPI } from '@/hooks/useTableState'
+import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
+import { useSSEStore } from '@/store/sseStore'
+import { useAuthStore } from '@/store/useStore'
 import {
   StockInFormSchema,
   type StockInFormInputData,
@@ -162,6 +165,8 @@ function DashboardStockinDialog({
 
 // 负责待入库列表本地筛选、入库弹窗状态，以及入库成功后的库存和统计缓存刷新。
 export function DashboardStockinTab() {
+  const currentUser = useAuthStore((state) => state.user)
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const queryClient = useQueryClient()
 
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
@@ -178,8 +183,9 @@ export function DashboardStockinTab() {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'stockin'] }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
     ])
+    clearRoomStale('inventory')
     requestDashboardCountsRefresh()
-  }, [queryClient])
+  }, [clearRoomStale, queryClient])
 
   const pendingStockinDashboardAPI = useMemo(
     () => createPendingStockinDashboardAPI(),
@@ -262,6 +268,32 @@ export function DashboardStockinTab() {
         api={pendingStockinDashboardAPI}
         queryKey={['dashboard', 'stockin']}
         tableId="dashboard-stockin"
+        realtime={{
+          room: 'inventory',
+          eventTypes: INVENTORY_SSE_EVENTS,
+          staleOnly: true,
+          onRefresh: refreshTables,
+          shouldHandleEvent: (event, context) => {
+            const payload = event.data as Record<string, unknown>
+            const item = payload.item as Record<string, unknown> | undefined
+            let itemId: number | null = null
+            if (typeof payload.id === 'number') {
+              itemId = payload.id
+            } else if (typeof item?.id === 'number') {
+              itemId = item.id
+            }
+
+            if (itemId !== null && context.loadedIds.has(itemId)) {
+              return true
+            }
+
+            if (!item || typeof currentUser?.id !== 'number') {
+              return false
+            }
+
+            return item.temporary_keeper_id === currentUser.id
+          },
+        }}
         customColumns={stockinColumns}
         statusOptions={[{ value: 'all', label: '全部' }]}
         searchFieldOptions={BORROW_SEARCH_FIELDS}

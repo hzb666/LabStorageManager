@@ -27,7 +27,13 @@ from app.core.constants import (
     UPLOAD_PATHS,
 )
 from app.core.banner import print_banner
-from app.core.request_utils import get_client_ip, get_request_id
+from app.core.request_utils import (
+    get_client_ip,
+    get_request_id,
+    get_sse_client_id,
+    reset_current_sse_client_id,
+    set_current_sse_client_id,
+)
 from app.database import init_db
 from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, announcements, error_logs, events
 from app.services import chemical_info
@@ -196,6 +202,19 @@ app = FastAPI(
     redoc_url=None if settings.use_secure_runtime() else "/redoc",
     openapi_url=None if settings.use_secure_runtime() else "/openapi.json",
 )
+
+
+@app.middleware("http")
+async def sse_client_context_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Expose current request's SSE client id to downstream broadcast code."""
+    token = set_current_sse_client_id(get_sse_client_id(request))
+    try:
+        return await call_next(request)
+    finally:
+        reset_current_sse_client_id(token)
 
 
 @app.middleware("http")

@@ -1,8 +1,10 @@
 ﻿import axios from 'axios'
 import { getDeviceId, getDeviceName } from '@/lib/storage/appAuthMetaStorage'
+import { AxiosHeaders } from 'axios'
 import { getApiBaseUrl } from '@/lib/apiConfig'
 import { getApiErrorMessage } from '@/lib/validationSchemas'
 import { resolveAuthNoticeByCode, triggerSessionInvalidation } from '@/lib/authSession'
+import { useSSEStore } from '@/store/sseStore'
 
 const API_BASE_URL = getApiBaseUrl()
 
@@ -45,6 +47,13 @@ const hasSkipAuthInvalidationHeader = (headers: unknown): boolean => {
 // Request interceptor — 不再从 localStorage 读取 token，改为使用 Cookie
 api.interceptors.request.use(
   (config) => {
+    const sseClientId = useSSEStore.getState().clientId
+    if (sseClientId) {
+      const headers = AxiosHeaders.from(config.headers)
+      headers.set('X-SSE-Client-Id', sseClientId)
+      config.headers = headers
+    }
+
     // Token 现在通过 httpOnly Cookie 自动发送，不需要手动设置
     return config
   },

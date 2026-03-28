@@ -23,7 +23,7 @@ from app.core.constants import (
     TEMPLATE_DOWNLOAD_WINDOW_SECONDS,
 )
 from app.services.sse_manager import sse_manager
-from app.core.request_utils import get_client_ip
+from app.core.request_utils import get_client_ip, get_sse_client_id
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.database import DBSession, get_db
 from app.models.inventory import (
@@ -100,6 +100,35 @@ def _add_specification(item_dict: dict) -> dict:
     unit = item_dict.get("unit", "")
     item_dict["specification"] = format_specification(initial, unit)
     return item_dict
+
+
+def _serialize_inventory_items(db: Session, items: list[Inventory]) -> list[dict[str, Any]]:
+    user_ids = set()
+    for item in items:
+        if item.borrower_id:
+            user_ids.add(item.borrower_id)
+        if item.last_borrower_id:
+            user_ids.add(item.last_borrower_id)
+        if item.created_by_id:
+            user_ids.add(item.created_by_id)
+        if item.temporary_keeper_id:
+            user_ids.add(item.temporary_keeper_id)
+
+    users_map = batch_get_user_names(db, user_ids)
+    serialized_items: list[dict[str, Any]] = []
+    for item in items:
+        item_dict = InventoryResponse.model_validate(item).model_dump(mode="json")
+        item_dict = _add_specification(item_dict)
+        item_dict["borrower_name"] = users_map.get(item.borrower_id)
+        item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
+        item_dict["created_by_name"] = users_map.get(item.created_by_id)
+        item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
+        serialized_items.append(item_dict)
+    return serialized_items
+
+
+def _serialize_inventory_item(db: Session, item: Inventory) -> dict[str, Any]:
+    return _serialize_inventory_items(db, [item])[0]
 
 
 def _register_cas_and_export_routes(router: APIRouter) -> None:
@@ -194,6 +223,7 @@ def _register_manual_and_dashboard_routes(
     @router.post("/manual-add", response_model=dict)
     async def manual_add_inventory(
         item_data: ManualInventoryCreate,
+        request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
@@ -205,11 +235,14 @@ def _register_manual_and_dashboard_routes(
         )
 
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
-        for ci in created_items:
+        serialized_items = _serialize_inventory_items(db, created_items)
+        actor_client_id = get_sse_client_id(request)
+        for ci, serialized_item in zip(created_items, serialized_items):
             await sse_manager.broadcast(
                 SSERoom.INVENTORY,
                 SSEEventType.INVENTORY_CREATED,
-                {"id": ci.id},
+                {"id": ci.id, "item": serialized_item},
+                actor_client_id=actor_client_id,
             )
 
         return {
@@ -491,6 +524,7 @@ def _register_borrow_route(
     @router.post("/{inventory_id}/borrow", response_model=InventoryResponse)
     async def borrow_item(
         inventory_id: int,
+        request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
         borrow_data: Optional[InventoryBorrowRequest] = None,
@@ -548,12 +582,12 @@ def _register_borrow_route(
         db.refresh(item)
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
 
-        response = InventoryResponse.model_validate(item).model_dump()
-        response = _add_specification(response)
+        response = _serialize_inventory_item(db, item)
         await sse_manager.broadcast(
             SSERoom.INVENTORY,
             SSEEventType.INVENTORY_BORROWED,
             {"id": inventory_id, "item": response},
+            actor_client_id=get_sse_client_id(request),
         )
         return response
 
@@ -569,6 +603,7 @@ def _register_return_route(
     async def return_item(
         inventory_id: int,
         return_data: InventoryBorrowReturn,
+        request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
@@ -587,14 +622,16 @@ def _register_return_route(
         db.commit()
         db.refresh(item)
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        response = _serialize_inventory_item(db, item)
 
         await sse_manager.broadcast(
             SSERoom.INVENTORY,
             SSEEventType.INVENTORY_RETURNED,
-            {"id": inventory_id, "item": item.model_dump()},
+            {"id": inventory_id, "item": response},
+            actor_client_id=get_sse_client_id(request),
         )
 
-        result = item.model_dump()
+        result = dict(response)
         if low_quantity_warning:
             result["warning"] = low_quantity_warning
         return result

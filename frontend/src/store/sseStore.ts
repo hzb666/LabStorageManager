@@ -28,6 +28,9 @@ export interface SSEState {
 
   markRoomStale: (room: string) => void
   clearRoomStale: (room: string) => void
+  markStaleKey: (key: string) => void
+  clearStaleKey: (key: string) => void
+  hasStaleKey: (key: string) => boolean
   clearAllStale: () => void
 
   processSeq: (room: string, seq: number) => SeqProcessResult
@@ -71,9 +74,27 @@ export const useSSEStore = create<SSEState>((set, get) => ({
   clearRoomStale: (room) =>
     set((state) => {
       const next = new Set(state.staleRooms)
-      next.delete(room)
+      for (const key of state.staleRooms) {
+        if (key === room || key.startsWith(`${room}::`)) {
+          next.delete(key)
+        }
+      }
       return { staleRooms: next }
     }),
+
+  markStaleKey: (key) =>
+    set((state) => ({
+      staleRooms: new Set([...state.staleRooms, key]),
+    })),
+
+  clearStaleKey: (key) =>
+    set((state) => {
+      const next = new Set(state.staleRooms)
+      next.delete(key)
+      return { staleRooms: next }
+    }),
+
+  hasStaleKey: (key) => get().staleRooms.has(key),
 
   clearAllStale: () =>
     set(() => ({

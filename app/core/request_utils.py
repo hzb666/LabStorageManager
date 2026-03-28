@@ -4,10 +4,13 @@ Request-related helpers.
 
 import ipaddress
 import uuid
+from contextvars import ContextVar, Token
 
 from fastapi import Request
 
 from app.core.config import settings
+
+_current_sse_client_id: ContextVar[str | None] = ContextVar("current_sse_client_id", default=None)
 
 
 def _normalize_ip_candidate(raw_value: str) -> str:
@@ -77,3 +80,24 @@ def get_request_id(request: Request) -> str:
         return header_request_id.strip()
 
     return str(uuid.uuid4())
+
+
+def get_sse_client_id(request: Request) -> str | None:
+    """Read current tab SSE client id from request headers when provided."""
+    client_id = request.headers.get("X-SSE-Client-Id", "").strip()
+    return client_id or None
+
+
+def set_current_sse_client_id(client_id: str | None) -> Token[str | None]:
+    """Bind current request's SSE client id into context for downstream broadcasts."""
+    return _current_sse_client_id.set(client_id)
+
+
+def reset_current_sse_client_id(token: Token[str | None]) -> None:
+    """Clear request-scoped SSE client id context."""
+    _current_sse_client_id.reset(token)
+
+
+def get_current_sse_client_id() -> str | None:
+    """Return request-scoped SSE client id for the active mutation request."""
+    return _current_sse_client_id.get()

@@ -15,6 +15,7 @@ import { BaseForm } from '@/components/BaseForm'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
+import { useSSEStore } from '@/store/sseStore'
 import { UserRoles } from '@/lib/constants'
 import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
@@ -38,6 +39,7 @@ import {
   defaultConsumableOrderValues
 } from '@/lib/formConfigs'
 import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderSubmitHelpers'
+import { CONSUMABLE_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
 
 // 图标
 import {
@@ -85,6 +87,10 @@ const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
   { value: 'applicant', label: '订购人' },
   { value: 'created_at', label: '订购时间' },
 ]
+
+const CONSUMABLE_SSE_SEARCH_FIELD_MAP = {
+  applicant: ['applicant_name'],
+} satisfies Partial<Record<string, string[]>>
 
 // ============================================================================
 // 页面辅助函数
@@ -279,6 +285,7 @@ function createConsumableOrderColumns(
 // 直接组合列表、筛选与叶子组件，避免继续保留只转发参数的头部和弹窗壳层。
 export function ConsumableOrdersPage() {
   const currentUser = useAuthStore((state) => state.user)
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
   const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
   const filter = useTableState({
@@ -289,6 +296,10 @@ export function ConsumableOrdersPage() {
     searchFieldOptions: CONSUMABLE_SEARCH_FIELD_OPTIONS,
   })
   const dialogController = useConsumableOrderDialogController(filter.invalidate)
+  const refreshOrders = useCallback(async () => {
+    await filter.invalidate()
+    clearRoomStale('consumable_orders')
+  }, [clearRoomStale, filter])
 
   const handleExport = useCallback(async () => {
     try {
@@ -300,8 +311,8 @@ export function ConsumableOrdersPage() {
   }, [])
 
   const columns = useMemo(() => {
-    return createConsumableOrderColumns(isAdmin, filter.invalidate)
-  }, [isAdmin, filter.invalidate])
+    return createConsumableOrderColumns(isAdmin, refreshOrders)
+  }, [isAdmin, refreshOrders])
 
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
@@ -352,6 +363,12 @@ export function ConsumableOrdersPage() {
         api={consumableOrderAPI as FilterAPI}
         queryKey={['consumable-orders']}
         tableId="consumable-orders-table"
+        realtime={{
+          room: 'consumable_orders',
+          eventTypes: CONSUMABLE_ORDER_SSE_EVENTS,
+          onRefresh: refreshOrders,
+          searchFieldMap: CONSUMABLE_SSE_SEARCH_FIELD_MAP,
+        }}
         statusOptions={CONSUMABLE_ORDER_STATUS_OPTIONS}
         searchFieldOptions={CONSUMABLE_SEARCH_FIELD_OPTIONS}
         customColumns={columns}
