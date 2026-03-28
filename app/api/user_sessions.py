@@ -1,6 +1,4 @@
-"""
-User Sessions API - Device Management
-"""
+# 用户会话与设备管理接口。
 import re
 from datetime import datetime
 from typing import List, Annotated
@@ -18,20 +16,19 @@ from app.models import BaseResponse
 from app.models.user import User
 from app.models.user_session import UserSession
 from app.services.session_service import (
+    SessionCacheIdentity,
     refresh_session_expiry,
     revoke_session,
     revoke_user_sessions,
     sync_session_cache,
 )
 
-# 导入 get_current_session 用于获取当前会话
 from app.api.deps import get_current_session
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 
 class SessionResponse(BaseResponse):
-    """Session response model"""
     id: int
     device_id: str
     device_name: str
@@ -48,13 +45,12 @@ def list_sessions(
     db: Annotated[Session, Depends(get_db)],
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)],
 ):
-    """List all sessions for current user (excluding expired)"""
     current_user, _ = current
     now = get_utc_now()
     sessions = db.exec(
         select(UserSession)
         .where(UserSession.user_id == current_user.id)
-        .where(UserSession.expires_at > now)  # 过滤掉过期的会话
+        .where(UserSession.expires_at > now)
         .order_by(UserSession.last_active_at.desc())
     ).all()
 
@@ -67,7 +63,6 @@ def delete_session(
     db: Annotated[Session, Depends(get_db)],
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)],
 ):
-    """Delete a specific session (kick user off a device)"""
     current_user, _ = current
     session = db.exec(
         select(UserSession)
@@ -91,7 +86,6 @@ def delete_all_sessions(
     db: Annotated[Session, Depends(get_db)],
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)]
 ):
-    """Delete all sessions for current user except the current session"""
     current_user, current_session = current
 
     deleted_count = revoke_user_sessions(
@@ -110,10 +104,8 @@ def refresh_session(
     db: Annotated[Session, Depends(get_db)],
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)]
 ):
-    """Refresh current session expiration time"""
-    # 解包 tuple
     current_user, current_session = current
-    # 获取当前会话（通过 token_hash 精确匹配当前会话）
+    # 重新从数据库取当前会话，避免依赖依赖项里已过期的快照。
     session = db.get(UserSession, current_session.id)
     
     if not session:
@@ -136,9 +128,11 @@ def refresh_session(
 
     refreshed = refresh_session_expiry(
         db,
-        user_id=current_user.id,
-        username=current_user.username,
-        is_active=current_user.is_active,
+        identity=SessionCacheIdentity(
+            user_id=current_user.id,
+            username=current_user.username,
+            is_active=current_user.is_active,
+        ),
         session=session,
         new_token=access_token,
     )
@@ -157,26 +151,21 @@ def refresh_session(
 
 
 class SessionUpdateRequest(BaseModel):
-    """Request model for updating session"""
     device_name: str = Field(..., min_length=1, max_length=50)
 
     @field_validator("device_name", mode="before")
     @classmethod
     def normalize_device_name(cls, value: str) -> str:
-        """标准化并清洗设备名称：strip + 非空校验 + XSS 过滤"""
         if value is None:
             raise ValueError("Device name is required")
-        # 标准化：去除前后空格
         value = value.strip()
-        # strip 后再次验证，防止全空格输入
         if not value:
             raise ValueError("Device name cannot be empty after trimming")
-        # XSS 过滤：移除危险字符
         return cls._sanitize(value)
 
     @staticmethod
     def _sanitize(text: str) -> str:
-        """设备名白名单清洗，避免依赖可绕过的黑名单替换。"""
+        # 这里走白名单，避免黑名单替换被变体字符绕过。
         sanitized = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff _\-().#]", "", text)
         sanitized = re.sub(r"\s+", " ", sanitized).strip()
         if not sanitized:
@@ -191,7 +180,6 @@ def update_session(
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)],
     request: SessionUpdateRequest
 ):
-    """Update a session's device name"""
     current_user, _ = current
     session = db.exec(
         select(UserSession)
@@ -217,16 +205,17 @@ def update_session(
             },
         )
 
-    # 更新设备名称
     session.device_name = request.device_name
     db.add(session)
     db.commit()
     db.refresh(session)
     sync_session_cache(
         session=session,
-        user_id=current_user.id,
-        username=current_user.username,
-        is_active=current_user.is_active,
+        identity=SessionCacheIdentity(
+            user_id=current_user.id,
+            username=current_user.username,
+            is_active=current_user.is_active,
+        ),
         now_utc=now_utc,
     )
 

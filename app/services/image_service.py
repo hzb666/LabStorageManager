@@ -1,8 +1,4 @@
-"""
-Image Service - Upload and Compression
-Critical Rule #3: 
-Images are stored in filesystem, database only stores URL/path
-"""
+# 图片上传、压缩与静态文件删除。
 import uuid
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -27,7 +23,7 @@ from app.core.time_utils import get_utc_now
 
 
 def _resolve_static_path(file_path: str, required_subdir: str | None = None) -> Path | None:
-    """Resolve user-supplied path safely under static (or a static subdirectory)."""
+    # 用户传入的是 URL/相对路径，不允许跳出 static 根目录。
     relative_path = _sanitize_static_relative_path(file_path)
     if relative_path is None:
         return None
@@ -61,7 +57,6 @@ def _resolve_static_path(file_path: str, required_subdir: str | None = None) -> 
 
 
 def _sanitize_static_relative_path(file_path: str) -> Path | None:
-    """Normalize and validate a static-relative path from user input."""
     raw_path = (file_path or "").strip()
     if not raw_path:
         return None
@@ -75,38 +70,23 @@ def _sanitize_static_relative_path(file_path: str) -> Path | None:
         return None
 
     normalized = normalized.replace("\\", "/").lstrip("/")
-    if not normalized:
-        return None
-
     if normalized.startswith("static/"):
         normalized = normalized[len("static/"):]
     if not normalized:
         return None
 
     relative_path = PurePosixPath(normalized)
-    if relative_path.is_absolute():
-        return None
-    if any(part in {"", ".", ".."} for part in relative_path.parts):
+    if relative_path.is_absolute() or any(part in {"", ".", ".."} for part in relative_path.parts):
         return None
 
     return Path(*relative_path.parts)
 
 
 def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
-    """
-    Validate uploaded file is an allowed image type and return file content.
-    Also validates by reading file content to prevent malicious extension spoofing.
-    
-    Args:
-        file: Uploaded file object
-        
-    Returns:
-        Tuple of (is_valid, file_content_bytes)
-    """
     if file.content_type not in settings.allowed_image_types:
         return False, b''
     
-    # Ensure we read from the beginning and restore the pointer afterwards
+    # 读取后要把文件指针复位，避免后续保存拿到空内容。
     file.file.seek(0)
     content = file.file.read()
     file.file.seek(0)
@@ -127,31 +107,11 @@ def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
 
 
 def validate_image_size_from_bytes(content: bytes, max_size_mb: float = DEFAULT_IMAGE_MAX_MB) -> bool:
-    """
-    Validate file size from bytes content.
-    
-    Args:
-        content: File content in bytes
-        max_size_mb: Maximum size in MB (default 1MB)
-        
-    Returns:
-        True if valid size, False otherwise
-    """
     max_size_bytes = int(max_size_mb * 1024 * 1024)
     return len(content) <= max_size_bytes
 
 
 def validate_image_type(file: UploadFile) -> bool:
-    """
-    Validate uploaded file is an allowed image type.
-    Also validates by reading file content to prevent malicious extension spoofing.
-    
-    Args:
-        file: Uploaded file object
-        
-    Returns:
-        True if valid image type, False otherwise
-    """
     if file.content_type not in settings.allowed_image_types:
         return False
     
@@ -174,16 +134,6 @@ def validate_image_type(file: UploadFile) -> bool:
 
 
 def validate_image_size(file: UploadFile, max_size_mb: float = DEFAULT_IMAGE_MAX_MB) -> bool:
-    """
-    Validate uploaded file size is within limits.
-    
-    Args:
-        file: Uploaded file object
-        max_size_mb: Maximum size in MB (default 1MB)
-        
-    Returns:
-        True if valid size, False otherwise
-    """
     max_size_bytes = int(max_size_mb * 1024 * 1024)
     
     file.file.seek(0, 2)  
@@ -199,20 +149,7 @@ def compress_image(
     max_width: int = None,
     max_height: int = None
 ) -> Image.Image:
-    """
-    Compress image to target size using Pillow.
-    
-    Critical: Ensure output is <100KB
-    
-    Args:
-        image: PIL Image object
-        max_size_kb: Target maximum size in KB (default from settings)
-        max_width: Target maximum width (default from settings)
-        max_height: Target maximum height (default from settings)
-        
-    Returns:
-        Compressed PIL Image object
-    """
+    # 头像压缩优先满足体积约束，其次再保留更多画质。
     if max_size_kb is None:
         max_size_kb = settings.max_image_size_kb
     if max_width is None:
@@ -244,16 +181,6 @@ def compress_image(
 
 
 def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:
-    """
-    Save uploaded file to filesystem with UUID rename.
-    
-    Args:
-        file: Uploaded file object
-        subfolder: Subfolder within uploads directory
-        
-    Returns:
-        Relative URL path for database storage
-    """
     file_ext = Path(file.filename).suffix.lower() if file.filename else ".bin"
     unique_id = str(uuid.uuid4())[:UPLOAD_FILENAME_UUID_PREFIX_LEN]
     timestamp = get_utc_now().strftime(TIMESTAMP_FILENAME_FORMAT)
@@ -271,24 +198,10 @@ def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:
 
 
 def delete_file(file_path: str, required_subdir: str | None = None) -> bool:
-    """
-    Delete file from filesystem.
-    
-    Path validation is performed by _resolve_static_path (no need to repeat here).
-    
-    Args:
-        file_path: Relative path from static directory
-        required_subdir: Optional static subdirectory constraint
-        
-    Returns:
-        True if deleted successfully, False otherwise
-    """
     full_path = _resolve_static_path(file_path, required_subdir=required_subdir)
     if full_path is None:
-        # Path validation failed in _resolve_static_path
         return False
 
-    # Path is already validated, just check existence and delete
     if full_path.exists() and full_path.is_file():
         full_path.unlink()
         return True
@@ -296,15 +209,6 @@ def delete_file(file_path: str, required_subdir: str | None = None) -> bool:
 
 
 def get_file_size_kb(file_path: str) -> float:
-    """
-    Get file size in KB.
-
-    Args:
-        file_path: Relative path from static directory
-
-    Returns:
-        File size in KB
-    """
     full_path = _resolve_static_path(file_path)
     if full_path is None:
         return 0.0
@@ -315,15 +219,6 @@ def get_file_size_kb(file_path: str) -> float:
 
 
 def get_directory_storage_info(subdir: str) -> dict:
-    """
-    Get storage usage information for a subdirectory.
-
-    Args:
-        subdir: Subdirectory name under static/ (e.g., 'announcements', 'avatars')
-
-    Returns:
-        Dictionary with used_bytes, used_mb, max_bytes, max_mb, usage_percent, image_count
-    """
     static_dir = BASE_DIR / "static" / subdir
     max_mb = DIRECTORY_STORAGE_MAX_MB
     max_bytes = int(max_mb * 1024 * 1024)
@@ -357,16 +252,6 @@ def get_directory_storage_info(subdir: str) -> dict:
 
 
 def save_avatar(file: UploadFile, user_id: int) -> str:
-    """
-    Save user avatar image (compressed to <100KB, max 200x200).
-
-    Args:
-        file: Uploaded file object
-        user_id: User ID for naming
-
-    Returns:
-        Relative URL path for database storage
-    """
     is_valid, file_content = validate_image_type_and_get_bytes(file)
 
     if not is_valid:
@@ -398,15 +283,6 @@ def save_avatar(file: UploadFile, user_id: int) -> str:
 
 
 def save_announcement_image(file: UploadFile) -> str:
-    """
-    Validate and save an announcement image (No compression applied based on original logic).
-    
-    Args:
-        file: Uploaded file object
-
-    Returns:
-        Relative URL path for database storage
-    """
     is_valid, content = validate_image_type_and_get_bytes(file)
     if not is_valid:
         raise HTTPException(

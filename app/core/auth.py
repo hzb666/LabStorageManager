@@ -1,7 +1,4 @@
-"""
-JWT Authentication Module
-Critical Rule #3: All data modification endpoints must check current_user
-"""
+# JWT 鉴权与 session 校验入口。
 import hashlib
 import logging
 from datetime import datetime, timedelta
@@ -21,7 +18,7 @@ from app.core.redis import delete_cached_session, get_cached_session
 from app.database import get_db, engine
 from app.models.user import User, UserRole
 from app.models.user_session import UserSession
-from app.services.session_service import sync_session_cache
+from app.services.session_service import SessionCacheIdentity, sync_session_cache
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +30,6 @@ AUTH_ERROR_CODE_HEADER = "X-Auth-Error-Code"
 
 
 class AuthErrorCode:
-    """Stable machine-readable auth/session error codes."""
-
     MISSING_TOKEN = "AUTH_MISSING_TOKEN"
     INVALID_TOKEN = "AUTH_INVALID_TOKEN"
     USER_NOT_FOUND = "AUTH_USER_NOT_FOUND"
@@ -60,7 +55,7 @@ def _auth_exception(
 
 
 def extract_access_token(request: Request) -> str | None:
-    """Extract JWT from cookie first, then Authorization bearer header."""
+    # 先取 cookie，保持浏览器端和 API 客户端共用一套鉴权入口。
     cookie_token = request.cookies.get("access_token")
     if cookie_token:
         return cookie_token
@@ -128,7 +123,7 @@ def _should_update_activity(*, session: UserSession, client_ip: str, now_utc: da
 
 
 def _update_user_activity_task(token_hash: str, client_ip: str) -> None:
-    """Background activity updater: keep DB + Redis activity state in sync."""
+    # 活跃度刷新放到后台，避免每个受保护请求都同步写 DB/Redis。
     now_utc = get_utc_now()
     with Session(engine) as db:
         session = db.exec(
@@ -161,9 +156,11 @@ def _update_user_activity_task(token_hash: str, client_ip: str) -> None:
         db.refresh(session)
         sync_session_cache(
             session=session,
-            user_id=user.id,
-            username=user.username,
-            is_active=user.is_active,
+            identity=SessionCacheIdentity(
+                user_id=user.id,
+                username=user.username,
+                is_active=user.is_active,
+            ),
             now_utc=now_utc,
         )
 
@@ -184,8 +181,202 @@ def _load_user_and_session_by_token_hash(
     return user, session
 
 
+def _resolve_access_identity(request: Request) -> tuple[str, dict, int]:
+    token = extract_access_token(request)
+    if not token:
+        raise _auth_exception(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            code=AuthErrorCode.MISSING_TOKEN,
+            include_www_authenticate=True,
+        )
+
+    payload = decode_token(token)
+    if payload.get("type") != "access":
+        raise _auth_exception(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            code=AuthErrorCode.INVALID_TOKEN,
+            include_www_authenticate=True,
+        )
+
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError) as exc:
+        raise _auth_exception(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            code=AuthErrorCode.INVALID_TOKEN,
+            include_www_authenticate=True,
+        ) from exc
+
+    return token, payload, user_id
+
+
+def _load_cached_session_candidate(
+    token_hash: str,
+    cached_data: dict | None,
+    *,
+    user_id: int,
+    client_ip: str,
+    now_utc: datetime,
+) -> UserSession | None:
+    # 缓存命中也要做最小可信校验，避免把脏缓存直接当真值。
+    if not cached_data:
+        return None
+
+    cached_session = _build_cached_session(token_hash, cached_data)
+    cached_user_id = cached_data.get("user_id")
+    should_invalidate = (
+        cached_session is None
+        or cached_user_id != user_id
+        or cached_session.expires_at <= now_utc
+        or (settings.session_strict_ip and cached_session.ip_address != client_ip)
+        or cached_data.get("is_active") is False
+    )
+    if should_invalidate:
+        delete_cached_session(token_hash)
+        return None
+
+    return cached_session
+
+
+def _validate_token_username_version(payload: dict, user: User) -> None:
+    token_version = payload.get("username_version")
+    if token_version is None:
+        return
+
+    try:
+        token_version_int = int(token_version)
+    except (TypeError, ValueError) as exc:
+        raise _auth_exception(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            code=AuthErrorCode.INVALID_TOKEN,
+            include_www_authenticate=True,
+        ) from exc
+
+    if token_version_int != user.username_version:
+        raise _auth_exception(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired, please login again",
+            code=AuthErrorCode.SESSION_VERSION_MISMATCH,
+            include_www_authenticate=True,
+        )
+
+
+def _ensure_active_user(user: User) -> None:
+    if not user.is_active:
+        raise _auth_exception(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled",
+            code=AuthErrorCode.USER_DISABLED,
+        )
+
+
+def _get_cached_session_user_or_raise(db: Session, user_id: int, token_hash: str) -> User:
+    user = db.get(User, user_id)
+    if user is None:
+        delete_cached_session(token_hash)
+        raise _auth_exception(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            code=AuthErrorCode.INVALID_TOKEN,
+            include_www_authenticate=True,
+        )
+    return user
+
+
+def _schedule_activity_refresh(
+    *,
+    background_tasks: BackgroundTasks | None,
+    token_hash: str,
+    client_ip: str,
+    session: UserSession,
+    now_utc: datetime,
+) -> None:
+    if not _should_update_activity(session=session, client_ip=client_ip, now_utc=now_utc):
+        return
+
+    if background_tasks is not None:
+        background_tasks.add_task(_update_user_activity_task, token_hash, client_ip)
+    else:
+        _update_user_activity_task(token_hash, client_ip)
+    session.last_active_at = now_utc
+    session.last_ip_address = client_ip
+
+
+def _delete_session_and_raise(
+    db: Session,
+    session: UserSession,
+    token_hash: str,
+    *,
+    detail: str,
+    code: str,
+) -> None:
+    db.delete(session)
+    db.commit()
+    delete_cached_session(token_hash)
+    raise _auth_exception(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        code=code,
+        include_www_authenticate=True,
+    )
+
+
+def _load_current_session_from_db(
+    db: Session,
+    *,
+    token_hash: str,
+    user_id: int,
+    client_ip: str,
+    now_utc: datetime,
+) -> tuple[User, UserSession]:
+    loaded = _load_user_and_session_by_token_hash(db, token_hash)
+    if loaded is None:
+        delete_cached_session(token_hash)
+        raise _auth_exception(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked, please login again",
+            code=AuthErrorCode.SESSION_REVOKED,
+            include_www_authenticate=True,
+        )
+
+    user, session = loaded
+    if user.id != user_id or session.user_id != user_id:
+        _delete_session_and_raise(
+            db,
+            session,
+            token_hash,
+            detail="Session has been revoked, please login again",
+            code=AuthErrorCode.SESSION_REVOKED,
+        )
+
+    _ensure_active_user(user)
+
+    if session.expires_at <= now_utc:
+        _delete_session_and_raise(
+            db,
+            session,
+            token_hash,
+            detail="Session expired",
+            code=AuthErrorCode.SESSION_EXPIRED,
+        )
+
+    if settings.session_strict_ip and session.ip_address != client_ip:
+        _delete_session_and_raise(
+            db,
+            session,
+            token_hash,
+            detail="IP address changed",
+            code=AuthErrorCode.SESSION_IP_CHANGED,
+        )
+
+    return user, session
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify password against hash"""
     try:
         return bcrypt.checkpw(
             plain_password.encode('utf-8'),
@@ -196,7 +387,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def get_password_hash(password: str) -> str:
-    """Hash password"""
     return bcrypt.hashpw(
         password.encode('utf-8'),
         bcrypt.gensalt()
@@ -204,18 +394,6 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(user_id: int, username: str, role: str, username_version: int = 1) -> str:
-    """
-    Create JWT access token
-    
-    Args:
-        user_id: User ID
-        username: Username
-        role: User role (admin/user)
-        username_version: Username version for session invalidation
-    
-    Returns:
-        JWT token string
-    """
     expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
     
     payload = {
@@ -247,18 +425,6 @@ def create_access_token(user_id: int, username: str, role: str, username_version
 
 
 def decode_token(token: str) -> dict:
-    """
-    Decode and verify JWT token
-    
-    Args:
-        token: JWT token string
-    
-    Returns:
-        Decoded payload dict
-    
-    Raises:
-        HTTPException: If token is invalid or expired
-    """
     try:
         # Production must use RS256; HS256 branch is for development fallback only.
         if settings.algorithm == "RS256":
@@ -289,210 +455,63 @@ def resolve_current_session(
     background_tasks: BackgroundTasks | None,
     db: Session,
 ) -> tuple[User, UserSession]:
-    """
-    Unified auth/session validator used by all protected endpoints.
-
-    Checks:
-    - token extraction (cookie first, bearer fallback)
-    - JWT decode and claim validity
-    - user existence / active state
-    - username_version consistency
-    - session existence / expiration
-    - optional strict IP binding
-    """
-    # 统一凭证入口：先 Cookie，后 Bearer，避免多依赖分叉语义。
-    token = extract_access_token(request)
-    if not token:
-        raise _auth_exception(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            code=AuthErrorCode.MISSING_TOKEN,
-            include_www_authenticate=True,
-        )
-
-    payload = decode_token(token)
-    token_type = payload.get("type")
-    if token_type != "access":
-        raise _auth_exception(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            code=AuthErrorCode.INVALID_TOKEN,
-            include_www_authenticate=True,
-        )
-
-    subject = payload.get("sub")
-    try:
-        user_id = int(subject)
-    except (TypeError, ValueError) as exc:
-        raise _auth_exception(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            code=AuthErrorCode.INVALID_TOKEN,
-            include_www_authenticate=True,
-        ) from exc
+    # 所有受保护接口统一走这里，保证 token、user、session 的错误语义一致。
+    token, payload, user_id = _resolve_access_identity(request)
 
     token_hash = _compute_token_hash(token)
     now_utc = get_utc_now()
     client_ip = get_client_ip(request)
-    cached_data = get_cached_session(token_hash)
-    cached_session: UserSession | None = None
-    if cached_data:
-        cached_session = _build_cached_session(token_hash, cached_data)
-        cached_user_id = cached_data.get("user_id")
-        if cached_session is None or cached_user_id != user_id:
-            delete_cached_session(token_hash)
-            cached_session = None
-        else:
-            if cached_session.expires_at <= now_utc:
-                delete_cached_session(token_hash)
-                cached_session = None
-            elif settings.session_strict_ip and cached_session.ip_address != client_ip:
-                delete_cached_session(token_hash)
-                cached_session = None
-            elif cached_data.get("is_active") is False:
-                delete_cached_session(token_hash)
-                cached_session = None
+    cached_session = _load_cached_session_candidate(
+        token_hash,
+        get_cached_session(token_hash),
+        user_id=user_id,
+        client_ip=client_ip,
+        now_utc=now_utc,
+    )
 
     if cached_session is not None:
         # 命中 session 缓存时仍查询一次 User，确保禁用账号/用户名版本变更能立即生效，
         # 同时避免每次都回源联表查询 session。
-        user = db.get(User, user_id)
-        if user is None:
-            delete_cached_session(token_hash)
-            raise _auth_exception(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                code=AuthErrorCode.INVALID_TOKEN,
-                include_www_authenticate=True,
-            )
-
-        if not user.is_active:
-            raise _auth_exception(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is disabled",
-                code=AuthErrorCode.USER_DISABLED,
-            )
-
-        token_version = payload.get("username_version")
-        if token_version is not None:
-            try:
-                token_version_int = int(token_version)
-            except (TypeError, ValueError) as exc:
-                raise _auth_exception(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Could not validate credentials",
-                    code=AuthErrorCode.INVALID_TOKEN,
-                    include_www_authenticate=True,
-                ) from exc
-
-            if token_version_int != user.username_version:
-                raise _auth_exception(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Session expired, please login again",
-                    code=AuthErrorCode.SESSION_VERSION_MISMATCH,
-                    include_www_authenticate=True,
-                )
-
-        if _should_update_activity(session=cached_session, client_ip=client_ip, now_utc=now_utc):
-            if background_tasks is not None:
-                background_tasks.add_task(_update_user_activity_task, token_hash, client_ip)
-            else:
-                _update_user_activity_task(token_hash, client_ip)
-            cached_session.last_active_at = now_utc
-            cached_session.last_ip_address = client_ip
-
+        user = _get_cached_session_user_or_raise(db, user_id, token_hash)
+        _ensure_active_user(user)
+        _validate_token_username_version(payload, user)
+        _schedule_activity_refresh(
+            background_tasks=background_tasks,
+            token_hash=token_hash,
+            client_ip=client_ip,
+            session=cached_session,
+            now_utc=now_utc,
+        )
         return user, cached_session
 
     # 只有缓存缺失或被判定为脏缓存时，才回源查询 session 真值。
-    loaded = _load_user_and_session_by_token_hash(db, token_hash)
-    if loaded is None:
-        delete_cached_session(token_hash)
-        raise _auth_exception(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has been revoked, please login again",
-            code=AuthErrorCode.SESSION_REVOKED,
-            include_www_authenticate=True,
-        )
-
-    user, session = loaded
-
-    if user.id != user_id or session.user_id != user_id:
-        db.delete(session)
-        db.commit()
-        delete_cached_session(token_hash)
-        raise _auth_exception(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has been revoked, please login again",
-            code=AuthErrorCode.SESSION_REVOKED,
-            include_www_authenticate=True,
-        )
-
-    if not user.is_active:
-        raise _auth_exception(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled",
-            code=AuthErrorCode.USER_DISABLED,
-        )
-
-    token_version = payload.get("username_version")
-    if token_version is not None:
-        try:
-            token_version_int = int(token_version)
-        except (TypeError, ValueError) as exc:
-            raise _auth_exception(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                code=AuthErrorCode.INVALID_TOKEN,
-                include_www_authenticate=True,
-            ) from exc
-
-        if token_version_int != user.username_version:
-            raise _auth_exception(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session expired, please login again",
-                code=AuthErrorCode.SESSION_VERSION_MISMATCH,
-                include_www_authenticate=True,
-            )
-
-    if session.expires_at <= now_utc:
-        db.delete(session)
-        db.commit()
-        delete_cached_session(token_hash)
-        raise _auth_exception(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired",
-            code=AuthErrorCode.SESSION_EXPIRED,
-            include_www_authenticate=True,
-        )
-
-    if settings.session_strict_ip and session.ip_address != client_ip:
-        db.delete(session)
-        db.commit()
-        delete_cached_session(token_hash)
-        raise _auth_exception(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="IP address changed",
-            code=AuthErrorCode.SESSION_IP_CHANGED,
-            include_www_authenticate=True,
-        )
+    user, session = _load_current_session_from_db(
+        db,
+        token_hash=token_hash,
+        user_id=user_id,
+        client_ip=client_ip,
+        now_utc=now_utc,
+    )
+    _validate_token_username_version(payload, user)
 
     # 缓存缺失时按 DB 真值回填；命中路径只在活跃度变动时写回，避免每次鉴权都写 Redis。
     sync_session_cache(
         session=session,
-        user_id=user.id,
-        username=user.username,
-        is_active=user.is_active,
+        identity=SessionCacheIdentity(
+            user_id=user.id,
+            username=user.username,
+            is_active=user.is_active,
+        ),
         now_utc=now_utc,
     )
 
-    if _should_update_activity(session=session, client_ip=client_ip, now_utc=now_utc):
-        if background_tasks is not None:
-            background_tasks.add_task(_update_user_activity_task, token_hash, client_ip)
-        else:
-            _update_user_activity_task(token_hash, client_ip)
-        # 同步当前请求内对象，保持返回数据一致
-        session.last_active_at = now_utc
-        session.last_ip_address = client_ip
+    _schedule_activity_refresh(
+        background_tasks=background_tasks,
+        token_hash=token_hash,
+        client_ip=client_ip,
+        session=session,
+        now_utc=now_utc,
+    )
 
     return user, session
 
@@ -502,14 +521,11 @@ def get_current_session(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> tuple[User, UserSession]:
-    """Dependency returning both authenticated user and current session."""
     return resolve_current_session(request=request, background_tasks=background_tasks, db=db)
 
 
 def is_token_session_active(token_hash: str, *, client_ip: str | None = None) -> bool:
-    """
-    Lightweight runtime session validity probe for long-lived connections (e.g., SSE).
-    """
+    # SSE 周期复检只关心 session 是否仍可用，不需要完整 user 对象。
     now_utc = get_utc_now()
     cached_data = get_cached_session(token_hash)
     if cached_data:
@@ -560,39 +576,11 @@ def get_current_user(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ) -> User:
-    """
-    Dependency to get current authenticated user from JWT token (supports Cookie or Bearer)
-
-    Critical Rule #3: All data modification endpoints must check current_user
-
-    Args:
-        request: HTTP request
-        background_tasks: FastAPI background tasks for updating user activity
-        db: Database session
-
-    Returns:
-        Current User object
-
-    Raises:
-        HTTPException: If not authenticated
-    """
     user, _ = resolve_current_session(request=request, background_tasks=background_tasks, db=db)
     return user
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    """
-    Dependency to require admin role
-    
-    Args:
-        current_user: Current authenticated user
-    
-    Returns:
-        User if admin
-    
-    Raises:
-        HTTPException: If not admin
-    """
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -602,10 +590,7 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-# Annotated type aliases for dependency injection
-# Usage in endpoints:
-#   @app.get("/items")
-#   def read_items(user: CurrentUser): ...
+# 常用依赖类型别名，避免在路由里重复写 Depends。
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_admin)]
 CurrentSession = Annotated[tuple[User, UserSession], Depends(get_current_session)]
