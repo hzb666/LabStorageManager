@@ -59,13 +59,16 @@ function trackCartTabActivity(details) {
     return;
   }
 
-  chrome.tabs.get(details.tabId, (tab) => {
-    if (chrome.runtime.lastError || !isCartPageUrl(tab?.url)) {
-      return;
-    }
+  // Only process main-frame navigations to avoid high-frequency subresource overhead.
+  if (details.type && details.type !== 'main_frame') {
+    return;
+  }
 
-    cartTabActivityById[details.tabId] = Date.now();
-  });
+  if (!details.url || !isCartPageUrl(details.url)) {
+    return;
+  }
+
+  cartTabActivityById[details.tabId] = Date.now();
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {

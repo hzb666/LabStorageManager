@@ -227,10 +227,24 @@ class SSEManager:
 
     @staticmethod
     def _map_auth_code(reason: str) -> str:
-        if reason in {"user_deactivated"}:
+        if reason == "user_deactivated":
             return "AUTH_USER_DISABLED"
         if reason in {"session_revalidation_failed", "session_expired_cleanup"}:
             return "AUTH_SESSION_EXPIRED"
+        if reason == "password_changed":
+            return "AUTH_PASSWORD_CHANGED"
+        if reason == "password_reset":
+            return "AUTH_PASSWORD_RESET"
+        if reason == "username_changed":
+            return "AUTH_USERNAME_CHANGED"
+        if reason == "role_changed":
+            return "AUTH_ROLE_CHANGED"
+        if reason == "device_relogin":
+            return "AUTH_DEVICE_RELOGIN"
+        if reason == "device_limit_evict":
+            return "AUTH_DEVICE_LIMIT_EVICT"
+        if reason == "session_kicked":
+            return "AUTH_SESSION_KICKED"
         return "AUTH_SESSION_REVOKED"
 
     @classmethod

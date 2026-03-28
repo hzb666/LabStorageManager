@@ -19,6 +19,13 @@ const AUTH_CODE_NOTICE_MAP: Record<string, string> = {
   AUTH_SESSION_VERSION_MISMATCH: '账号信息已变更，请重新登录',
   AUTH_SESSION_IP_CHANGED: '登录环境变化，请重新登录',
   AUTH_SESSION_USER_MISMATCH: '登录状态异常，请重新登录',
+  AUTH_PASSWORD_CHANGED: '密码已修改，请重新登录',
+  AUTH_PASSWORD_RESET: '密码已重置，请重新登录',
+  AUTH_USERNAME_CHANGED: '账号信息已变更，请重新登录',
+  AUTH_ROLE_CHANGED: '账号权限已变更，请重新登录',
+  AUTH_DEVICE_RELOGIN: '当前设备登录已在其他端刷新，请重新登录',
+  AUTH_DEVICE_LIMIT_EVICT: '登录设备数已超出限制，当前会话已被踢出',
+  AUTH_SESSION_KICKED: '当前设备已被踢出，请重新登录',
 }
 
 const AUTH_REASON_NOTICE_MAP: Record<string, string> = {
