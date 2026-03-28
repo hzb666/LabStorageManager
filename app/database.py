@@ -1,9 +1,7 @@
-"""
-Database module - SQLModel Engine Configuration
-Critical Rule #1: SQLite must enable WAL Mode for concurrency
-"""
+# SQLModel 引擎与 SQLite 初始化。
 import logging
 import os
+from dataclasses import dataclass
 from typing import Annotated, Generator
 
 from sqlalchemy import Connection, event, inspect, text
@@ -15,13 +13,13 @@ from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
 
-# Ensure data directory exists
+# 确保数据库文件目录存在。
 data_dir = os.path.dirname(os.path.dirname(__file__))
 db_path = os.path.join(data_dir, "lab_inventory.db")
 
 sqlite_url = f"sqlite:///{db_path}"
 
-# Create engine
+# SQLite 仍使用单文件库，但必须开启 WAL 才能承受并发读写。
 engine = create_engine(
     sqlite_url,
     echo=False,
@@ -31,7 +29,7 @@ engine = create_engine(
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):
-    """Critical Rule #1: Enable WAL mode on every new connection."""
+    # 每个新连接都显式打开 WAL 和外键校验，避免驱动默认值漂移。
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("PRAGMA foreign_keys=ON;")
@@ -39,13 +37,11 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Database session dependency for FastAPI"""
     with Session(engine) as session:
         yield session
 
 
-# Annotated type alias for database session dependency
-# Usage: def endpoint(db: DBSession): ...
+# 路由层统一用这个别名拿 DB session。
 DBSession = Annotated[Session, Depends(get_db)]
 
 
@@ -572,6 +568,15 @@ SQLITE_SAFE_DROP_TRIGGER_STATEMENTS: dict[str, str] = {
 }
 
 
+@dataclass(frozen=True)
+class SQLiteFTSTableConfig:
+    source_table: str
+    fts_table: str
+    setup_statements: tuple[str, ...]
+    rebuild_sql: str
+    trigger_names: tuple[str, str, str]
+
+
 def _get_safe_count_statement(table_name: str) -> str:
     statement = SQLITE_SAFE_COUNT_STATEMENTS.get(table_name)
     if statement is None:
@@ -594,7 +599,6 @@ def _get_safe_drop_trigger_statement(trigger_name: str) -> str:
 
 
 def check_sqlite_schema_consistency(connection: Connection) -> None:
-    """Check whether SQLite schema matches current SQLModel definitions."""
     inspector = inspect(connection)
     metadata = SQLModel.metadata
 
@@ -667,11 +671,10 @@ def check_sqlite_schema_consistency(connection: Connection) -> None:
 
 
 def ensure_sqlite_performance_indexes(connection: Connection) -> None:
-    """Ensure current SQLite performance indexes exist."""
     for statement in SQLITE_PERFORMANCE_INDEX_UPGRADES:
         connection.execute(text(statement))
 
-    # Refresh planner stats so SQLite can pick the intended composite indexes.
+    # 建索引后立刻刷新统计信息，避免查询计划继续沿用旧分布。
     connection.execute(text("ANALYZE"))
     connection.execute(text("PRAGMA optimize"))
 
@@ -679,43 +682,39 @@ def ensure_sqlite_performance_indexes(connection: Connection) -> None:
 def _ensure_sqlite_fts_table(
     connection: Connection,
     *,
-    source_table: str,
-    fts_table: str,
-    setup_statements: tuple[str, ...],
-    rebuild_sql: str,
-    trigger_names: tuple[str, str, str],
+    config: SQLiteFTSTableConfig,
 ) -> None:
     table_exists = connection.execute(
         text(
             "SELECT 1 FROM sqlite_master "
             "WHERE type='table' AND name=:table_name"
         ),
-        {"table_name": fts_table},
+        {"table_name": config.fts_table},
     ).first() is not None
 
-    for trigger_name in trigger_names:
+    for trigger_name in config.trigger_names:
         drop_statement = _get_safe_drop_trigger_statement(trigger_name)
         connection.execute(text(drop_statement))
 
-    for statement in setup_statements:
+    for statement in config.setup_statements:
         connection.execute(text(statement))
 
-    source_count_statement = _get_safe_count_statement(source_table)
-    fts_count_statement = _get_safe_count_statement(fts_table)
+    source_count_statement = _get_safe_count_statement(config.source_table)
+    fts_count_statement = _get_safe_count_statement(config.fts_table)
     source_count = connection.execute(text(source_count_statement)).scalar_one()
     fts_count = connection.execute(text(fts_count_statement)).scalar_one()
     needs_rebuild = (not table_exists) or (source_count != fts_count)
     if not needs_rebuild:
         return
 
-    delete_statement = _get_safe_delete_statement(fts_table)
+    delete_statement = _get_safe_delete_statement(config.fts_table)
     connection.execute(text(delete_statement))
-    connection.execute(text(rebuild_sql))
+    connection.execute(text(config.rebuild_sql))
     fts_count_after = connection.execute(text(fts_count_statement)).scalar_one()
     logger.info(
         "Rebuilt %s data (%s rows=%s, fts rows before=%s, after=%s)",
-        fts_table,
-        source_table,
+        config.fts_table,
+        config.source_table,
         source_count,
         fts_count,
         fts_count_after,
@@ -723,54 +722,61 @@ def _ensure_sqlite_fts_table(
 
 
 def ensure_sqlite_inventory_fts(connection: Connection) -> None:
-    """Create inventory/order/user FTS tables and triggers for fast substring search."""
     try:
         _ensure_sqlite_fts_table(
             connection,
-            source_table="inventory",
-            fts_table="inventory_fts",
-            setup_statements=SQLITE_INVENTORY_FTS_SETUP,
-            rebuild_sql=SQLITE_INVENTORY_FTS_REBUILD_SQL,
-            trigger_names=(
-                "trg_inventory_fts_ai",
-                "trg_inventory_fts_ad",
-                "trg_inventory_fts_au",
+            config=SQLiteFTSTableConfig(
+                source_table="inventory",
+                fts_table="inventory_fts",
+                setup_statements=SQLITE_INVENTORY_FTS_SETUP,
+                rebuild_sql=SQLITE_INVENTORY_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_inventory_fts_ai",
+                    "trg_inventory_fts_ad",
+                    "trg_inventory_fts_au",
+                ),
             ),
         )
         _ensure_sqlite_fts_table(
             connection,
-            source_table="reagent_order",
-            fts_table="reagent_order_fts",
-            setup_statements=SQLITE_REAGENT_ORDER_FTS_SETUP,
-            rebuild_sql=SQLITE_REAGENT_ORDER_FTS_REBUILD_SQL,
-            trigger_names=(
-                "trg_reagent_order_fts_ai",
-                "trg_reagent_order_fts_ad",
-                "trg_reagent_order_fts_au",
+            config=SQLiteFTSTableConfig(
+                source_table="reagent_order",
+                fts_table="reagent_order_fts",
+                setup_statements=SQLITE_REAGENT_ORDER_FTS_SETUP,
+                rebuild_sql=SQLITE_REAGENT_ORDER_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_reagent_order_fts_ai",
+                    "trg_reagent_order_fts_ad",
+                    "trg_reagent_order_fts_au",
+                ),
             ),
         )
         _ensure_sqlite_fts_table(
             connection,
-            source_table="consumable_order",
-            fts_table="consumable_order_fts",
-            setup_statements=SQLITE_CONSUMABLE_ORDER_FTS_SETUP,
-            rebuild_sql=SQLITE_CONSUMABLE_ORDER_FTS_REBUILD_SQL,
-            trigger_names=(
-                "trg_consumable_order_fts_ai",
-                "trg_consumable_order_fts_ad",
-                "trg_consumable_order_fts_au",
+            config=SQLiteFTSTableConfig(
+                source_table="consumable_order",
+                fts_table="consumable_order_fts",
+                setup_statements=SQLITE_CONSUMABLE_ORDER_FTS_SETUP,
+                rebuild_sql=SQLITE_CONSUMABLE_ORDER_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_consumable_order_fts_ai",
+                    "trg_consumable_order_fts_ad",
+                    "trg_consumable_order_fts_au",
+                ),
             ),
         )
         _ensure_sqlite_fts_table(
             connection,
-            source_table="users",
-            fts_table="users_fts",
-            setup_statements=SQLITE_USERS_FTS_SETUP,
-            rebuild_sql=SQLITE_USERS_FTS_REBUILD_SQL,
-            trigger_names=(
-                "trg_users_fts_ai",
-                "trg_users_fts_ad",
-                "trg_users_fts_au",
+            config=SQLiteFTSTableConfig(
+                source_table="users",
+                fts_table="users_fts",
+                setup_statements=SQLITE_USERS_FTS_SETUP,
+                rebuild_sql=SQLITE_USERS_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_users_fts_ai",
+                    "trg_users_fts_ad",
+                    "trg_users_fts_au",
+                ),
             ),
         )
     except Exception as exc:  # noqa: BLE001
@@ -783,10 +789,7 @@ def ensure_sqlite_inventory_fts(connection: Connection) -> None:
 
 
 def init_db() -> None:
-    """Initialize database and create all tables"""
-    # Ensure all SQLModel tables are registered before create_all.
-    # This guarantees fresh database initialization includes the latest columns
-    # such as inventory.remaining_percent.
+    # create_all 前先导入模型，避免新字段漏进初始化库。
     import app.models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
@@ -797,24 +800,19 @@ def init_db() -> None:
         ensure_sqlite_inventory_fts(connection)
         check_sqlite_schema_consistency(connection)
 
-    # Create default admin user if no users exist
     _create_default_admin()
 
 
 def _create_default_admin() -> None:
-    """确保始终至少有一个管理员账户"""
-    # Import here to avoid circular import
     from app.core.auth import get_password_hash
     from app.core.config import get_settings
     
     settings = get_settings()
     
-    # Get config or use defaults
     default_username = settings.default_admin_username
     default_password = settings.default_admin_password
     default_full_name = settings.default_admin_full_name
     
-    # Always require password from environment variable
     if not default_password:
         raise ValueError(
             "DEFAULT_ADMIN_PASSWORD must be set. "
@@ -822,13 +820,11 @@ def _create_default_admin() -> None:
         )
     
     with Session(engine) as session:
-        # Check if any admin users exist (only check for admins, not all users)
         statement = select(User).where(User.role == UserRole.ADMIN)
         admin_exists = session.exec(statement).first()
         
         if admin_exists is None:
             pinyin_fields = pinyin_utils.compute_pinyin_fields(full_name=default_full_name)
-            # Create default admin user
             admin = User(
                 username=default_username,
                 password_hash=get_password_hash(default_password),
@@ -845,7 +841,6 @@ def _create_default_admin() -> None:
 
 
 def reset_db() -> None:
-    """Drop all tables and recreate (use with caution!)"""
     with engine.begin() as connection:
         connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_ai"))
         connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_ad"))

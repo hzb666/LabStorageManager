@@ -1,8 +1,4 @@
-"""
-化学物质信息查询服务
-- 中文名：从 chemblink.com 爬取，如未获取到则翻译 PubChem 的英文名
-- 英文名：从 PubChem API 获取
-"""
+# 化学物质信息查询服务。
 import re
 import time
 import random
@@ -52,7 +48,6 @@ _ALLOWED_OUTBOUND_HOSTS = {
 
 
 def _get_headers() -> Dict[str, str]:
-    """获取随机请求头"""
     return {
         'User-Agent': random.choice(USER_AGENTS),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -62,21 +57,20 @@ def _get_headers() -> Dict[str, str]:
 
 
 def _safe_get(url: str, timeout: float):
-    """Outbound GET with redirect disabled to reduce SSRF abuse surface."""
+    # 禁止跟随重定向，避免白名单域名再跳到非预期目标。
     if not _is_safe_outbound_url(url):
         raise requests.RequestException(f"Unsafe outbound URL blocked: {url}")
     return requests.get(url, headers=_get_headers(), timeout=timeout, allow_redirects=False)
 
 
 def _safe_post(url: str, data: Dict[str, str], timeout: float):
-    """Outbound POST with redirect disabled to reduce SSRF abuse surface."""
+    # 禁止跟随重定向，避免白名单域名再跳到非预期目标。
     if not _is_safe_outbound_url(url):
         raise requests.RequestException(f"Unsafe outbound URL blocked: {url}")
     return requests.post(url, data=data, timeout=timeout, allow_redirects=False)
 
 
 def _is_safe_outbound_url(url: str) -> bool:
-    """Validate outbound URL against protocol/host allowlist restrictions."""
     try:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"}:
@@ -92,7 +86,6 @@ def _is_safe_outbound_url(url: str) -> bool:
 
 
 def _format_exception_message(exc: Exception) -> str:
-    """Format exception details for end-user warning without losing root cause."""
     message = str(exc).strip()
     if message:
         return f"{exc.__class__.__name__}: {message}"
@@ -100,17 +93,14 @@ def _format_exception_message(exc: Exception) -> str:
 
 
 def _get_cached(cas_number: str) -> Optional[Dict[str, Any]]:
-    """从缓存获取"""
     if cas_number in _CACHE:
         cached_data, cached_time = _CACHE[cas_number]
         if time.time() - cached_time < CHEMICAL_INFO_CACHE_TTL_SECONDS:
-            # 更新访问顺序（移到末尾）
             if cas_number in _CACHE_ORDER:
                 _CACHE_ORDER.remove(cas_number)
             _CACHE_ORDER.append(cas_number)
             return cached_data
         else:
-            # 缓存过期，删除
             del _CACHE[cas_number]
             if cas_number in _CACHE_ORDER:
                 _CACHE_ORDER.remove(cas_number)
@@ -118,20 +108,16 @@ def _get_cached(cas_number: str) -> Optional[Dict[str, Any]]:
 
 
 def _set_cached(cas_number: str, data: Dict[str, Any]) -> None:
-    """设置缓存"""
-    # 如果已存在，先删除（更新）
     if cas_number in _CACHE:
         del _CACHE[cas_number]
         if cas_number in _CACHE_ORDER:
             _CACHE_ORDER.remove(cas_number)
 
-    # 如果缓存已满，删除最旧的条目
     while len(_CACHE) >= CHEMICAL_INFO_CACHE_MAX_SIZE and _CACHE_ORDER:
         oldest = _CACHE_ORDER.pop(0)
         if oldest in _CACHE:
             del _CACHE[oldest]
 
-    # 添加新条目
     _CACHE[cas_number] = (data, time.time())
     _CACHE_ORDER.append(cas_number)
 
@@ -140,26 +126,22 @@ def _remaining_timeout(deadline: float) -> Optional[float]:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return None
-    # requests 要求 timeout > 0
+    # requests 要求 timeout > 0。
     return max(MIN_REQUEST_TIMEOUT_SECONDS, remaining)
 
 
 def _parse_chinese_name(content: str) -> Optional[str]:
-    """从页面内容中解析中文名"""
     if '404' in content[:500] or 'File Not Found' in content[:500]:
         return None
 
-    # 方法1: 匹配 <h1>中文名<br>[CAS#...]</h1> 结构
     match = re.search(r'<h1[^>]*>\s*([^<\n]+?)\s*<br>', content)
     if match:
         return match.group(1).strip()
 
-    # 方法2: 从标题提取
     match = re.search(r'<title>\s*CAS 登录号：([^,]+),\s*([^,]+),\s*([^-]+)\s*- chemBlink', content)
     if match:
         return match.group(2).strip()
 
-    # 方法3: 从表格的"产品名称"行提取
     match = re.search(r'产品名称</td>\s*<td>([^<]+)</td>', content)
     if match:
         return match.group(1).strip()
@@ -168,14 +150,10 @@ def _parse_chinese_name(content: str) -> Optional[str]:
 
 
 def query_chinese_name(cas_number: str) -> Optional[str]:
-    """
-    从 chemblink.com 获取中文名（主站和备用站并行查询）
-    """
     cas = str(cas_number).strip()
     if not cas:
         return None
 
-    # 检查缓存
     cached = _get_cached(cas)
     if cached and cached.get('chinese_name'):
         return cached['chinese_name']
@@ -187,7 +165,6 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
 
     chinese_name: Optional[str] = None
 
-    # 并行查询两个站点
     def fetch_and_parse(url: str) -> Optional[str]:
         try:
             response = _safe_get(url, timeout=3)
@@ -201,139 +178,125 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(fetch_and_parse, urls))
 
-    # 优先使用主站点的结果
     chinese_name = results[0] if results else None
-    # 如果主站点没有，尝试备用站点
     if not chinese_name and len(results) > 1:
         chinese_name = results[1]
 
-    # 短暂延迟，避免请求过快
+    # 保持轻微节流，避免被外部站点按高频抓取封禁。
     time.sleep(CHEMICAL_INFO_RATE_LIMIT_DELAY_SECONDS)
 
     return chinese_name
 
 
+def _extract_iupac_name(data: Dict[str, Any]) -> Optional[str]:
+    properties = data.get('PropertyTable', {}).get('Properties', [])
+    if properties and properties[0].get('IUPACName'):
+        return properties[0]['IUPACName']
+    return None
+
+
+def _query_pubchem_primary(cas: str, encoded_cas: str) -> tuple[Optional[str], Optional[str]]:
+    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_cas}/property/IUPACName/JSON"
+    try:
+        response = _safe_get(url, timeout=PUBCHEM_PRIMARY_TIMEOUT_SECONDS)
+        if response.status_code != 200:
+            return None, f"主查询 HTTP {response.status_code}"
+
+        english_name = _extract_iupac_name(response.json())
+        if english_name:
+            return english_name, None
+        return None, "主查询返回成功但未包含 IUPACName"
+    except Exception as exc:
+        logger.warning(f"Failed to query PubChem for CAS {cas}: {exc}")
+        return None, f"主查询异常：{_format_exception_message(exc)}"
+
+
+def _safe_get_with_deadline(url: str, deadline: float) -> tuple[Optional[requests.Response], Optional[str]]:
+    timeout = _remaining_timeout(deadline)
+    if timeout is None:
+        return None, f"补充查询超时（最多 {PUBCHEM_FALLBACK_BUDGET_SECONDS} 秒）"
+    return _safe_get(url, timeout=timeout), None
+
+
+def _query_pubchem_fallback(cas: str, encoded_cas: str) -> tuple[Optional[str], Optional[str]]:
+    deadline = time.monotonic() + PUBCHEM_FALLBACK_BUDGET_SECONDS
+    cid_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_cas}/cids/JSON"
+    english_name: Optional[str] = None
+    failure_reason: Optional[str] = None
+
+    try:
+        cid_response, failure_reason = _safe_get_with_deadline(cid_url, deadline)
+        if failure_reason is None and cid_response is not None:
+            if cid_response.status_code != 200:
+                failure_reason = f"补充 CID 查询 HTTP {cid_response.status_code}"
+            else:
+                cids = cid_response.json().get('IdentifierList', {}).get('CID', [])
+                if not cids:
+                    failure_reason = "补充 CID 查询成功但未返回 CID"
+                else:
+                    property_url = (
+                        f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cids[0]}/property/IUPACName/JSON"
+                    )
+                    property_response, failure_reason = _safe_get_with_deadline(property_url, deadline)
+                    if failure_reason is None and property_response is not None:
+                        if property_response.status_code != 200:
+                            failure_reason = f"补充属性查询 HTTP {property_response.status_code}"
+                        else:
+                            english_name = _extract_iupac_name(property_response.json())
+                            if english_name is None:
+                                failure_reason = "补充查询返回成功但未包含 IUPACName"
+        elif failure_reason is None:
+            failure_reason = "补充 CID 查询失败"
+    except Exception as exc:
+        logger.warning(f"Failed to query PubChem CID for CAS {cas}: {exc}")
+        failure_reason = f"补充查询异常：{_format_exception_message(exc)}"
+
+    return english_name, failure_reason
+
+def _build_pubchem_warning(*failure_reasons: Optional[str]) -> str:
+    warning_parts = [reason for reason in failure_reasons if reason]
+    if not warning_parts:
+        warning_parts.append("未命中可用结果")
+    return "PubChem 未获取英文名：" + "；".join(warning_parts)
+
+
 def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
-    """
-    从 PubChem API 获取英文名
-    """
     cas = str(cas_number).strip()
     if not cas:
         return None, None
     
-    # 检查缓存
     cached = _get_cached(cas)
     if cached and cached.get('english_name'):
         return cached['english_name'], None
-    
-    english_name = ""
-    primary_failure_reason: Optional[str] = None
-    fallback_failure_reason: Optional[str] = None
-    
+
     encoded_cas = quote(cas, safe="")
 
-    # 使用 PubChem REST API
-    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_cas}/property/IUPACName/JSON"
-    
-    try:
-        response = _safe_get(url, timeout=PUBCHEM_PRIMARY_TIMEOUT_SECONDS)
-        if response.status_code == 200:
-            data = response.json()
-            properties = data.get('PropertyTable', {}).get('Properties', [])
-            if properties and properties[0].get('IUPACName'):
-                english_name = properties[0]['IUPACName']
-            else:
-                primary_failure_reason = "主查询返回成功但未包含 IUPACName"
-        else:
-            primary_failure_reason = f"主查询 HTTP {response.status_code}"
-    except Exception as e:
-        logger.warning(f"Failed to query PubChem for CAS {cas}: {e}")
-        primary_failure_reason = f"主查询异常：{_format_exception_message(e)}"
-    
-    # 如果 IUPACName 失败，尝试在 1 秒总预算内 fallback
+    english_name, primary_failure_reason = _query_pubchem_primary(cas, encoded_cas)
+    fallback_failure_reason: Optional[str] = None
     if not english_name:
-        deadline = time.monotonic() + PUBCHEM_FALLBACK_BUDGET_SECONDS
-        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_cas}/cids/JSON"
-        try:
-            fallback_timeout = _remaining_timeout(deadline)
-            if fallback_timeout is None:
-                fallback_failure_reason = (
-                    f"补充查询超时（最多 {PUBCHEM_FALLBACK_BUDGET_SECONDS} 秒）"
-                )
-                return None, (
-                    f"PubChem 未获取英文名：{primary_failure_reason or '主查询无结果'}；{fallback_failure_reason}"
-                )
+        english_name, fallback_failure_reason = _query_pubchem_fallback(cas, encoded_cas)
 
-            response = _safe_get(url, timeout=fallback_timeout)
-            if response.status_code == 200:
-                data = response.json()
-                identifier_list = data.get('IdentifierList', {})
-                cids = identifier_list.get('CID', [])
-                if cids:
-                    cid = cids[0]
-                    # 用 CID 获取英文名
-                    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/IUPACName/JSON"
-                    property_timeout = _remaining_timeout(deadline)
-                    if property_timeout is None:
-                        fallback_failure_reason = (
-                            f"补充查询超时（最多 {PUBCHEM_FALLBACK_BUDGET_SECONDS} 秒）"
-                        )
-                        return None, (
-                            f"PubChem 未获取英文名：{primary_failure_reason or '主查询无结果'}；{fallback_failure_reason}"
-                        )
-
-                    response = _safe_get(url, timeout=property_timeout)
-                    if response.status_code == 200:
-                        data = response.json()
-                        properties = data.get('PropertyTable', {}).get('Properties', [])
-                        if properties and properties[0].get('IUPACName'):
-                            english_name = properties[0]['IUPACName']
-                        else:
-                            fallback_failure_reason = "补充查询返回成功但未包含 IUPACName"
-                    else:
-                        fallback_failure_reason = f"补充属性查询 HTTP {response.status_code}"
-                else:
-                    fallback_failure_reason = "补充 CID 查询成功但未返回 CID"
-            else:
-                fallback_failure_reason = f"补充 CID 查询 HTTP {response.status_code}"
-        except Exception as e:
-            logger.warning(f"Failed to query PubChem CID for CAS {cas}: {e}")
-            fallback_failure_reason = f"补充查询异常：{_format_exception_message(e)}"
-    
-    # 短暂延迟
+    # 保持轻微节流，避免被外部站点按高频抓取封禁。
     time.sleep(CHEMICAL_INFO_RATE_LIMIT_DELAY_SECONDS)
 
-    warning_message: Optional[str] = None
+    warning_message = None
     if not english_name:
-        warning_parts = []
-        if primary_failure_reason:
-            warning_parts.append(primary_failure_reason)
-        if fallback_failure_reason:
-            warning_parts.append(fallback_failure_reason)
-        if not warning_parts:
-            warning_parts.append("未命中可用结果")
-        warning_message = "PubChem 未获取英文名：" + "；".join(warning_parts)
+        warning_message = _build_pubchem_warning(primary_failure_reason, fallback_failure_reason)
 
     return (english_name if english_name else None), warning_message
 
 
 def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Optional[str]:
-    """
-    使用 niutrans API 翻译文本
-    """
     if not text:
         return None
     
-    # 检查 API 配置
     if not settings.niutrans_appid or not settings.niutrans_apikey:
         logger.warning("Niutrans API credentials not configured")
         return None
     
     try:
-        # 生成 authStr
         timestamp = str(int(time.time() * 1000))
         
-        # 构建参数字典（不包括 authStr 本身）
         params = {
             "appId": settings.niutrans_appid,
             "from": from_lang,
@@ -342,17 +305,13 @@ def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Opt
             "timestamp": timestamp
         }
         
-        # 按参数名排序并拼接
         sorted_params = sorted(list(params.items()) + [("apikey", settings.niutrans_apikey)], key=lambda x: x[0])
         param_str = "&".join([f"{key}={value}" for key, value in sorted_params])
         
-        # MD5 加密
         auth_str = hashlib.md5(param_str.encode("utf-8")).hexdigest()
         
-        # 添加 authStr
         params["authStr"] = auth_str
         
-        # 发送请求
         url = "https://api.niutrans.com/v2/text/translate"
         response = _safe_post(url, data=params, timeout=2)
         
@@ -372,15 +331,10 @@ def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Opt
 
 
 def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
-    """
-    综合查询化学物质信息（并行查询）
-    返回: { "name": "中文名", "english_name": "英文名" }
-    """
     cas = str(cas_number).strip()
     if not cas:
         return {"name": None, "english_name": None}
     
-    # 先检查缓存
     cached = _get_cached(cas)
     if cached:
         return {
@@ -443,13 +397,6 @@ def get_chemical_info(
     cas_number: str,
     skip_chinese: bool = False,
 ):
-    """
-    根据 CAS 号查询化学物质信息
-    
-    返回:
-    - name: 中文名（从 chemblink.com 获取；skip_chinese=true 时不查询）
-    - english_name: 英文名（从 PubChem API 获取）
-    """
     is_valid, error_msg, normalized_cas = validate_and_normalize_cas(cas_number)
     if not is_valid:
         raise HTTPException(

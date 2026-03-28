@@ -1,6 +1,5 @@
-"""
-Excel Import Service - Parse Excel files for inventory bulk import
-"""
+# Excel 批量导入与模板生成。
+from dataclasses import dataclass
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,7 +23,6 @@ from app.core.time_utils import get_utc_now
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
-    """Compute remaining percentage for persisted sorting field."""
     if initial is None or initial <= 0:
         return None
     if remaining is None:
@@ -52,14 +50,38 @@ FILE_MAGIC_BYTES = {
 
 # 最大文件大小 (2MB)
 MAX_FILE_SIZE = EXCEL_FILE_MAX_BYTES
+BOOLEAN_FALSE_STRINGS = {"false", "0", "no", "n"}
+BOOLEAN_TRUE_STRINGS = {"true", "1", "yes", "y"}
+EXCEL_IMPORT_COLUMN_MAPPING = {
+    'cas_number': ['cas_number', 'cas', 'cas号'],
+    'name': ['name', '名称', '品名'],
+    'english_name': ['english_name', '英文名', 'englishname'],
+    'alias': ['alias', '别名'],
+    'category': ['category', '分类', '类别'],
+    'brand': ['brand', '品牌', '厂商', 'manufacturer'],
+    'specification': ['specification', '规格', 'spec'],
+    'remaining_quantity': ['remaining_quantity', '剩余数量', '剩余量'],
+    'storage_location': ['storage_location', 'location', '位置', '存放位置'],
+    'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
+    'notes': ['notes', '备注', 'remark'],
+    'created_at': ['created_at', '入库时间', '创建时间', 'stock_in_date'],
+}
+
+
+@dataclass
+class ExcelImportContext:
+    db: Session
+    sequence_tracker: dict[tuple[str, str], int]
+    default_storage_location: Optional[str]
+    default_is_hazardous: bool
+    user_id: int
+
+
+REQUIRED_IMPORT_COLUMNS = {"cas_number", "name", "specification"}
 
 
 def validate_uploaded_file(file: UploadFile) -> None:
-    """
-    验证上传的文件类型和内容
-    包括：文件扩展名、MIME类型、文件魔数、文件大小
-    """
-    # 1. 检查文件扩展名
+    # 导入入口先拦截伪造扩展名和超大文件，避免后续解析库处理恶意输入。
     ext = Path(file.filename).suffix.lower() if file.filename else ""
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -67,7 +89,6 @@ def validate_uploaded_file(file: UploadFile) -> None:
             detail="Invalid file type. Only .xlsx, .xls, .csv are allowed"
         )
 
-    # 2. 检查文件大小
     file.file.seek(0, 2)  # Seek to end
     file_size = file.file.tell()
     file.file.seek(0)  # Reset to start
@@ -84,66 +105,46 @@ def validate_uploaded_file(file: UploadFile) -> None:
             detail="File is empty"
         )
 
-    # 3. 检查文件魔数
     header = file.file.read(8)
     file.file.seek(0)  # Reset to start
 
     if ext == ".xlsx":
-        # XLSX is ZIP-based, check for PK\x03\x04
         if not header.startswith(b"PK\x03\x04"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid XLSX file format"
             )
     elif ext == ".xls":
-        # XLS is OLE2 compound document
         if not header.startswith(b"\xd0\xcf\x11\xe0"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid XLS file format"
             )
-    # CSV doesn't need magic bytes check (it's plain text)
+    # CSV 是纯文本格式，不依赖文件头魔数。
 
 
 def _parse_boolean(value, default: bool = False) -> bool:
-    """
-    Parse boolean value from various input types.
-    Handles: true/false, TRUE/FALSE, 0/1, True/False, empty strings, None, NaN
-    
-    Args:
-        value: The value to parse
-        default: Default value if parsing fails or value is empty/null
-    
-    Returns:
-        Boolean value
-    """
-    # Handle empty/null values (including NaN from pandas)
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return default
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped == '':
-            return default
-        # Parse string boolean representations
-        lower = stripped.lower()
-        if lower in ('false', '0', 'no', 'n'):
-            return False
-        if lower in ('true', '1', 'yes', 'y'):
-            return True
-        # Unknown string - return default
-        return default
-    # Handle numeric types (but not NaN which is handled above)
-    if isinstance(value, (int, float)):
-        return bool(value)
-    # Handle boolean type
+    result = default
     if isinstance(value, bool):
         return value
-    # Fallback
-    return default
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return result
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if not isinstance(value, str):
+        return result
+
+    stripped = value.strip().lower()
+    if not stripped:
+        return result
+    if stripped in BOOLEAN_FALSE_STRINGS:
+        result = False
+    elif stripped in BOOLEAN_TRUE_STRINGS:
+        result = True
+    return result
 
 
 class ExcelImportError(Exception):
-    """Custom exception for Excel import errors"""
     def __init__(self, row: int, message: str):
         self.row = row
         self.message = message
@@ -156,25 +157,9 @@ def _generate_internal_code_with_tracking(
     sequence_tracker: dict[tuple[str, str], int],
     created_at: Optional[datetime] = None
 ) -> str:
-    """
-    Generate internal code with transaction-level tracking to handle batch imports.
-    
-    This function solves the problem where multiple rows with the same CAS number
-    in a single import transaction would get the same internal_code, causing
-    UNIQUE constraint violations.
-    
-    Args:
-        db: Database session
-        cas_number: Normalized CAS number
-        sequence_tracker: Dictionary tracking next sequence number for each (cas_number, date) pair
-        created_at: Optional custom created_at datetime (for backdated imports)
-    
-    Returns:
-        Internal code string (e.g., "10203084-260224-001")
-    """
     from sqlmodel import select
     
-    # Determine date string - use created_at if provided, otherwise use current date
+    # 同一批次里相同 CAS 也要拿到不同流水号，否则会撞内部编码唯一约束。
     if created_at:
         date_str = created_at.strftime("%y%m%d")
     else:
@@ -183,9 +168,7 @@ def _generate_internal_code_with_tracking(
     cas_code = cas_number.replace("-", "")
     tracker_key = (cas_code, date_str)
     
-    # Check if we already have a sequence tracked for this CAS+date in this transaction
     if tracker_key in sequence_tracker:
-        # Use the tracked sequence and increment AFTER
         seq = sequence_tracker[tracker_key]
         if seq > INTERNAL_CODE_MAX_SEQUENCE:
             raise ValueError(
@@ -194,8 +177,6 @@ def _generate_internal_code_with_tracking(
             )
         sequence_tracker[tracker_key] = seq + 1
     else:
-        # First time seeing this CAS+date combination in this transaction
-        # Query database for existing max sequence using ORM
         prefix = f"{cas_code}-{date_str}-"
         
         statement = select(Inventory).where(
@@ -203,7 +184,6 @@ def _generate_internal_code_with_tracking(
         )
         results = db.exec(statement).all()
         
-        # Start from max existing + 1, or 1 if none exist
         max_seq = 0
         prefix_len = len(prefix)
         for item in results:
@@ -221,43 +201,29 @@ def _generate_internal_code_with_tracking(
                 f"Internal code sequence limit reached for {cas_number} on {date_str}: "
                 f"max is {INTERNAL_CODE_MAX_SEQUENCE}"
             )
-        # Store next sequence for subsequent calls
         sequence_tracker[tracker_key] = seq + 1
     
-    # Generate the internal code
     return f"{cas_code}-{date_str}-{str(seq).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)}"
 
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
-    """
-    Parse Excel or CSV file and return DataFrame.
-    Supports .xlsx, .xls, and .csv formats.
-    """
     if file_path.endswith('.csv'):
-        # Try multiple encodings for CSV
         for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312']:
             try:
                 return pd.read_csv(file_path, encoding=encoding)
             except UnicodeDecodeError:
                 continue
-        # Last resort: try with error handling
         return pd.read_csv(file_path, encoding='utf-8-sig', encoding_errors='replace')
     return pd.read_excel(file_path)
 
 
 def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
-    """
-    Validate a single row of Excel data.
-    Returns (is_valid, error_message).
-    """
-    # Required fields
     required_fields = ['cas_number', 'name', 'specification']
     
     for field in required_fields:
         if field not in row or pd.isna(row[field]) or str(row[field]).strip() == '':
             return False, f"Missing required field: {field}"
     
-    # Validate CAS format
     cas_raw = str(row['cas_number']).strip()
     normalized_cas = normalize_cas(cas_raw)
     is_valid, error = validate_cas_format(normalized_cas)
@@ -265,14 +231,12 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     if not is_valid:
         return False, f"Invalid CAS format: {error}"
     
-    # Validate specification (will parse to get quantity and unit)
     try:
         spec_value, _ = parse_specification(str(row['specification']))
     except ValueError as e:
         return False, f"Invalid specification format: {str(e)}"
 
-    # Validate remaining_quantity when provided:
-    # remaining_quantity must be numeric and cannot exceed specification value
+    # 剩余量不能超过规格解析出的初始量，否则导入后库存状态立刻失真。
     remaining_raw = row.get('remaining_quantity')
     if pd.notna(remaining_raw):
         remaining_text = str(remaining_raw).strip()
@@ -291,6 +255,124 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def _parse_import_dataframe(file_path: str) -> pd.DataFrame:
+    try:
+        return parse_excel_file(file_path)
+    except Exception as exc:
+        raise ExcelImportError(1, f"Failed to parse Excel file: {str(exc)}") from exc
+
+
+def _normalize_import_columns(df: pd.DataFrame) -> pd.DataFrame:
+    normalized_df = pd.DataFrame()
+    for standard_col, possible_cols in EXCEL_IMPORT_COLUMN_MAPPING.items():
+        possible_names = {candidate.lower() for candidate in possible_cols}
+        for col in df.columns:
+            if str(col).lower() in possible_names:
+                normalized_df[standard_col] = df[col]
+                break
+    return normalized_df
+
+
+def _validate_required_import_columns(df: pd.DataFrame, normalized_df: pd.DataFrame) -> None:
+    if df.empty:
+        return
+
+    missing_columns = sorted(REQUIRED_IMPORT_COLUMNS - set(normalized_df.columns))
+    if missing_columns:
+        raise ExcelImportError(1, f"Missing required columns: {', '.join(missing_columns)}")
+
+
+def _parse_remaining_quantity(row: dict, initial_quantity: float) -> float:
+    remaining_qty = initial_quantity
+    remaining_raw = row.get('remaining_quantity')
+    if pd.notna(remaining_raw):
+        remaining_text = str(remaining_raw).strip()
+        if remaining_text:
+            remaining_qty = float(remaining_text)
+    return remaining_qty
+
+
+def _normalize_import_optional_fields(row: dict, default_storage_location: Optional[str]) -> dict[str, Optional[str]]:
+    all_optional_fields = {
+        'storage_location': row.get('storage_location'),
+        'alias': row.get('alias'),
+        'english_name': row.get('english_name'),
+        'category': row.get('category'),
+        'brand': row.get('brand'),
+        'notes': row.get('notes'),
+    }
+    normalized_optional = empty_to_none(all_optional_fields, list(all_optional_fields.keys()))
+    normalized_optional['storage_location'] = normalize_storage_location(
+        normalized_optional['storage_location'] or default_storage_location
+    )
+    return normalized_optional
+
+
+def _parse_import_created_at(value: object) -> Optional[datetime]:
+    if pd.isna(value):
+        return None
+
+    try:
+        date_str = str(value).strip()
+        if date_str.isdigit():
+            if len(date_str) == 5:
+                date_str = str(EXCEL_DATE_EPOCH + timedelta(days=int(date_str)))
+            elif len(date_str) == 8:
+                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+            elif len(date_str) == 6:
+                date_str = f"20{date_str[:2]}-{date_str[2:4]}-{date_str[4:6]}"
+        return pd.to_datetime(date_str).to_pydatetime()
+    except (ValueError, TypeError):
+        return None
+
+
+def _build_inventory_from_import_row(
+    context: ExcelImportContext,
+    row: dict,
+) -> Inventory:
+    normalized_cas = normalize_cas(str(row['cas_number']))
+    spec_value, unit = parse_specification(str(row['specification']))
+    initial_quantity = spec_value
+    remaining_qty = _parse_remaining_quantity(row, initial_quantity)
+    optional_fields = _normalize_import_optional_fields(row, context.default_storage_location)
+    created_at = _parse_import_created_at(row.get('created_at'))
+    internal_code = _generate_internal_code_with_tracking(
+        context.db,
+        normalized_cas,
+        context.sequence_tracker,
+        created_at,
+    )
+    name = str(row['name']).strip()
+    pinyin_fields = compute_pinyin_fields(
+        name=name,
+        category=optional_fields['category'],
+        brand=optional_fields['brand'],
+        storage_location=optional_fields['storage_location'],
+    )
+
+    return Inventory(
+        internal_code=internal_code,
+        cas_number=normalized_cas,
+        name=name,
+        english_name=optional_fields['english_name'],
+        alias=optional_fields['alias'],
+        category=optional_fields['category'],
+        brand=optional_fields['brand'],
+        storage_location=optional_fields['storage_location'],
+        is_common=False,
+        initial_quantity=initial_quantity,
+        remaining_quantity=remaining_qty,
+        remaining_percent=_compute_remaining_percent(remaining_qty, initial_quantity),
+        unit=unit,
+        is_hazardous=_parse_boolean(row.get('is_hazardous'), context.default_is_hazardous),
+        status=InventoryStatus.IN_STOCK,
+        notes=optional_fields['notes'],
+        created_at=created_at,
+        created_by_id=context.user_id,
+        **pinyin_fields,
+    )
+
+
 def import_inventory_from_excel(
     db: Session,
     file_path: str,
@@ -298,189 +380,38 @@ def import_inventory_from_excel(
     default_is_hazardous: bool = False,
     user_id: int = 1
 ) -> dict:
-    """
-    Import inventory items from Excel or CSV file.
-    
-    Expected columns:
-    - cas_number: CAS号 (required)
-    - name: 名称 (required)
-    - english_name: 英文名 (optional)
-    - alias: 别名 (optional)
-    - category: 分类 (optional)
-    - brand: 品牌/厂商 (optional)
-    - specification: 规格，如 "500ml" (required)
-    - initial_quantity: 初始数量 (required)
-    - storage_location: 存放位置 (optional, uses default if not provided)
-    - is_hazardous: 是否危险品 (optional, defaults to False)
-    - price: 单价 (optional)
-    - notes: 备注 (optional)
-    
-    Returns:
-    Dictionary with import results:
-    - success: True if import completed
-    - total_rows: Total rows processed
-    - created: Number of items created
-    - errors: List of row errors
-    """
-    # Track sequence numbers within the transaction for same CAS numbers
-    # Key: (cas_number, date_str), Value: next sequence number
     sequence_tracker: dict[tuple[str, str], int] = {}
-    # Parse Excel file
-    try:
-        df = parse_excel_file(file_path)
-    except Exception as e:
-        raise Exception(f"Failed to parse Excel file: {str(e)}")
-    
-    # Normalize column names (case-insensitive)
-    column_mapping = {
-        'cas_number': ['cas_number', 'cas', 'cas号'],
-        'name': ['name', '名称', '品名'],
-        'english_name': ['english_name', '英文名', 'englishname'],
-        'alias': ['alias', '别名'],
-        'category': ['category', '分类', '类别'],
-        'brand': ['brand', '品牌', '厂商', 'manufacturer'],
-        'specification': ['specification', '规格', 'spec'],
-        'remaining_quantity': ['remaining_quantity', '剩余数量', '剩余量'],
-        'storage_location': ['storage_location', 'location', '位置', '存放位置'],
-        'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
-        'notes': ['notes', '备注', 'remark'],
-        'created_at': ['created_at', '入库时间', '创建时间', 'stock_in_date'],
-    }
-    
-    # Normalize columns
-    normalized_df = pd.DataFrame()
-    for standard_col, possible_cols in column_mapping.items():
-        for col in df.columns:
-            if col.lower() in [c.lower() for c in possible_cols]:
-                normalized_df[standard_col] = df[col]
-                break
-    
-    # Process each row
+    import_context = ExcelImportContext(
+        db=db,
+        sequence_tracker=sequence_tracker,
+        default_storage_location=default_storage_location,
+        default_is_hazardous=default_is_hazardous,
+        user_id=user_id,
+    )
+    df = _parse_import_dataframe(file_path)
+    normalized_df = _normalize_import_columns(df)
+    _validate_required_import_columns(df, normalized_df)
     created_count = 0
     errors = []
-    
+
     for idx, row in normalized_df.iterrows():
-        row_num = idx + 2  # Excel row number (1-indexed, header at row 1)
-        
-        # Validate row
+        row_num = idx + 2
         is_valid, error = validate_row_data(row)
         if not is_valid:
             errors.append({"row": row_num, "error": error})
             continue
-        
+
         try:
-            # Normalize CAS
-            normalized_cas = normalize_cas(str(row['cas_number']))
-            
-            # Parse specification to get value and unit
-            # specification like "500ml" -> initial_quantity=500, unit="mL"
-            spec_value, unit = parse_specification(str(row['specification']))
-            
-            # Get initial_quantity: use spec_value as default
-            initial_quantity = spec_value
-            
-            # Get remaining_quantity: use row value if provided, otherwise default to initial_quantity
-            remaining_qty = initial_quantity
-            if pd.notna(row.get('remaining_quantity')):
-                remaining_text = str(row.get('remaining_quantity')).strip()
-                if remaining_text:
-                    remaining_qty = float(remaining_text)
-            
-            # Get or use default values
-            # Use empty_to_none to convert empty/whitespace strings to None
-            all_optional_fields = {
-                'storage_location': row.get('storage_location'),
-                'alias': row.get('alias'),
-                'english_name': row.get('english_name'),
-                'category': row.get('category'),
-                'brand': row.get('brand'),
-                'notes': row.get('notes'),
-            }
-            normalized_optional = empty_to_none(all_optional_fields, list(all_optional_fields.keys()))
-            storage_location = normalize_storage_location(
-                normalized_optional['storage_location'] or default_storage_location
+            inventory = _build_inventory_from_import_row(
+                import_context,
+                row,
             )
-            alias = normalized_optional['alias']
-            english_name = normalized_optional['english_name']
-            category = normalized_optional['category']
-            brand = normalized_optional['brand']
-            notes = normalized_optional['notes']
-            
-            is_hazardous = _parse_boolean(row.get('is_hazardous'), default_is_hazardous)
-            
-            # Parse created_at (custom stock-in date)
-            created_at = None
-            if pd.notna(row.get('created_at')):
-                date_value = row.get('created_at')
-                try:
-                    # Handle multiple date formats:
-                    # - String: "2024-01-15", "2024/01/15", "240115", "240101"
-                    # - Numeric: Excel date serial (5 digits like 45292), YYYYMMDD (8 digits), YYMMDD (6 digits)
-                    date_str = str(date_value).strip()
-                    
-                    # Try parsing as numeric
-                    if date_str.isdigit():
-                        if len(date_str) == 5:  # Excel date serial (e.g., 45292 = 2024-01-15)
-                            excel_epoch = EXCEL_DATE_EPOCH  # Excel epoch
-                            date_str = str(excel_epoch + timedelta(days=int(date_str)))
-                        elif len(date_str) == 8:  # YYYYMMDD
-                            date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
-                        elif len(date_str) == 6:  # YYMMDD
-                            # Assume 2000s for years 00-99
-                            date_str = f"20{date_str[:2]}-{date_str[2:4]}-{date_str[4:6]}"
-                    
-                    # Convert pandas Timestamp to Python datetime
-                    created_at = pd.to_datetime(date_str).to_pydatetime()
-                except (ValueError, TypeError):
-                    # Invalid date format - skip using custom date, use default
-                    pass
-            
-            # Generate internal code (1 item per row for direct import)
-            # Use transaction-level sequence tracking to handle same CAS in batch import
-            internal_code = _generate_internal_code_with_tracking(
-                db, normalized_cas, sequence_tracker, created_at
-            )
-            
-            # 自动计算拼音字段
-            name = str(row['name']).strip()
-            pinyin_fields = compute_pinyin_fields(
-                name=name,
-                category=category,
-                brand=brand,
-                storage_location=storage_location,
-            )
-            
-            # Create inventory item
-            inventory = Inventory(
-                internal_code=internal_code,
-                cas_number=normalized_cas,
-                name=name,
-                english_name=english_name,
-                alias=alias,
-                category=category,
-                brand=brand,
-                storage_location=storage_location,
-                is_common=False,
-                initial_quantity=initial_quantity,
-                remaining_quantity=remaining_qty,
-                remaining_percent=_compute_remaining_percent(remaining_qty, initial_quantity),
-                unit=unit,
-                is_hazardous=is_hazardous,
-                status=InventoryStatus.IN_STOCK,
-                notes=notes,
-                created_at=created_at,
-                created_by_id=user_id,
-                **pinyin_fields,
-            )
-            
             db.add(inventory)
             created_count += 1
-            
-        except Exception as e:
-            errors.append({"row": row_num, "error": str(e)})
+        except Exception as exc:
+            errors.append({"row": row_num, "error": str(exc)})
 
-    # All-or-nothing import:
-    # if any row has validation/import error, rollback the whole batch and do not import valid rows.
+    # 批量导入保持全有或全无，避免同一文件只导入部分行后难以审计和回滚。
     if errors:
         db.rollback()
         return {
@@ -505,16 +436,7 @@ def import_inventory_from_excel(
 
 
 def generate_excel_template() -> bytes:
-    """
-    Generate Excel import template with text format for all columns.
-    This prevents Excel from auto-converting CAS numbers like '64-17-5' to dates.
-    
-    Returns:
-        Excel file content as bytes
-        
-    Raises:
-        HTTPException: If openpyxl library is not installed
-    """
+    # 所有列强制文本格式，避免 Excel 把 CAS 号自动改成日期。
     from io import BytesIO
     
     try:
@@ -581,10 +503,6 @@ def generate_excel_template() -> bytes:
 
 
 def generate_import_template() -> dict:
-    """
-    Generate Excel import template structure.
-    Returns column definitions for frontend.
-    """
     return {
         "columns": [
             {

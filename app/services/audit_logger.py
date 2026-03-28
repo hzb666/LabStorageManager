@@ -1,11 +1,7 @@
-"""
-Audit logger service for security-sensitive operations.
-
-This logger is intentionally separated from the root logger so audit events
-can be retained even when production root level is set to WARNING.
-"""
+# 审计日志单独落盘，避免主日志级别过高时丢失安全事件。
 
 import logging
+from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -18,8 +14,15 @@ AUDIT_LOGGER_NAME = "audit_logger"
 _BOOTSTRAP_LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class AuditEventContext:
+    actor_user_id: int | None = None
+    target_user_id: int | None = None
+    client_ip: str | None = None
+    request_id: str | None = None
+
+
 def get_audit_logger() -> logging.Logger:
-    """Return singleton audit logger configured with dedicated file handler."""
     logger = logging.getLogger(AUDIT_LOGGER_NAME)
     if logger.handlers:
         return logger
@@ -56,21 +59,18 @@ def get_audit_logger() -> logging.Logger:
 def log_audit_event(
     action: str,
     *,
-    actor_user_id: int | None = None,
-    target_user_id: int | None = None,
-    client_ip: str | None = None,
-    request_id: str | None = None,
+    context: AuditEventContext | None = None,
     outcome: str = "success",
     detail: str | None = None,
 ) -> None:
-    """Record normalized audit event line."""
     try:
         logger = get_audit_logger()
+        audit_context = context or AuditEventContext()
         message = (
             f"AUDIT action={action} outcome={outcome} "
-            f"actor_user_id={actor_user_id if actor_user_id is not None else '-'} "
-            f"target_user_id={target_user_id if target_user_id is not None else '-'} "
-            f"client_ip={client_ip or '-'} request_id={request_id or '-'}"
+            f"actor_user_id={audit_context.actor_user_id if audit_context.actor_user_id is not None else '-'} "
+            f"target_user_id={audit_context.target_user_id if audit_context.target_user_id is not None else '-'} "
+            f"client_ip={audit_context.client_ip or '-'} request_id={audit_context.request_id or '-'}"
         )
         if detail:
             message = f"{message} detail={detail}"

@@ -1,15 +1,4 @@
-"""
-API 通用工具函数。
-
-该模块集中承载 API 层可复用的“非业务”逻辑，目标是减少各路由文件中的重复实现：
-1. 列表缓存读写、过期淘汰与前缀清理
-2. 请求载荷字段规范化（如空字符串转 None）
-
-设计原则：
-- 工具函数必须无业务语义，不依赖具体模型
-- 输入输出保持简单，便于在不同 API 文件中直接复用
-- 与时间有关的行为通过 now 回调注入，便于测试
-"""
+# API 层无业务语义的通用小工具。
 
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
@@ -26,7 +15,6 @@ def get_cached_result(
     now: Callable[[], datetime],
     ttl_seconds: int,
 ) -> Optional[Dict[str, Any]]:
-    """读取缓存，若过期则删除后返回 None。"""
     if cache_key not in cache_store:
         return None
 
@@ -44,21 +32,17 @@ def set_cached_result(
     result: Dict[str, Any],
     *,
     now: Callable[[], datetime],
-    max_items: int = CACHE_MAX_ITEMS,
-    prune_count: int = CACHE_PRUNE_COUNT,
 ) -> None:
-    """写入缓存并在容量超过阈值时按最旧时间裁剪。"""
     cache_store[cache_key] = (result, now())
-    if len(cache_store) <= max_items:
+    if len(cache_store) <= CACHE_MAX_ITEMS:
         return
 
-    oldest_keys = sorted(cache_store.keys(), key=lambda key: cache_store[key][1])[:prune_count]
+    oldest_keys = sorted(cache_store.keys(), key=lambda key: cache_store[key][1])[:CACHE_PRUNE_COUNT]
     for key in oldest_keys:
         del cache_store[key]
 
 
 def clear_cache_by_prefix(cache_store: CacheStore, prefix: str = "list:") -> int:
-    """按前缀清理缓存键，返回清理数量。"""
     keys_to_delete = [key for key in cache_store.keys() if key.startswith(prefix)]
     for key in keys_to_delete:
         del cache_store[key]
@@ -66,15 +50,6 @@ def clear_cache_by_prefix(cache_store: CacheStore, prefix: str = "list:") -> int
 
 
 def empty_to_none(obj: Any, fields: Optional[list[str]] = None) -> dict:
-    """将指定字段中的空字符串或纯空格字符串统一转换为 None。
-
-    Args:
-        obj: 输入对象，可以是字典或带属性的对象
-        fields: 需要处理的字段列表；不传时处理对象中的全部字段
-
-    Returns:
-        处理后的字典，空字符串和纯空格都会转为 None
-    """
     if isinstance(obj, dict):
         source = dict(obj)
     elif hasattr(obj, "model_dump"):

@@ -1,13 +1,13 @@
-"""
-拼音工具服务 - 用于中文文本转拼音
-"""
+# 中文与混合文本的拼音归一化工具。
 from typing import Optional
 
 from pypinyin import lazy_pinyin
 
 
+PINYIN_FIELD_MAX_LENGTH = 200
+
+
 def _flush_ascii_buffer(buffer: list[str], full_parts: list[str], initial_parts: list[str]) -> None:
-    """Flush buffered ASCII/数字片段，保留完整 token 便于英文搜索。"""
     if not buffer:
         return
 
@@ -18,14 +18,6 @@ def _flush_ascii_buffer(buffer: list[str], full_parts: list[str], initial_parts:
 
 
 def to_pinyin_parts(text: Optional[str]) -> tuple[str, str]:
-    """
-    将文本转换为 (全拼, 首字母)。
-
-    规则：
-    - 中文按拼音处理，如 "无水乙醇" -> ("wushuiyichun", "wsyc")
-    - 英文/数字 token 原样归一化保留，如 "Sigma" -> ("sigma", "sigma")
-    - 常见分隔符被忽略，便于搜索时跨空格/横杠匹配
-    """
     if not text:
         return "", ""
 
@@ -57,40 +49,19 @@ def to_pinyin_parts(text: Optional[str]) -> tuple[str, str]:
 
 
 def to_pinyin(text: str) -> str:
-    """
-    将文本转换为无音调全拼字符串。
-
-    例如：
-    - "乙醇" -> "yichun"
-    - "Sigma" -> "sigma"
-    """
     full_pinyin, _ = to_pinyin_parts(text)
     return full_pinyin
 
 
-def compute_pinyin_fields(name: str = None, category: str = None,
-                          brand: str = None, alias: str = None,
-                          storage_location: str = None,
-                          full_name: str = None,
-                          max_length: int = 200) -> dict:
-    """
-    计算多个字段的拼音
-
-    Args:
-        name: 名称
-        category: 类别
-        brand: 品牌
-        alias: 别名
-        storage_location: 位置
-        full_name: 姓名（用于用户排序）
-        max_length: 拼音字段的最大长度，超出部分会被截断
-
-    Returns:
-        包含拼音字段的字典
-    """
+def compute_pinyin_fields(
+    name: str = None,
+    category: str = None,
+    brand: str = None,
+    storage_location: str = None,
+    full_name: str = None,
+) -> dict:
     def truncate(text: str) -> str:
-        """截断超长文本"""
-        return text[:max_length] if len(text) > max_length else text
+        return text[:PINYIN_FIELD_MAX_LENGTH] if len(text) > PINYIN_FIELD_MAX_LENGTH else text
 
     name_pinyin, name_initials = to_pinyin_parts(name)
     category_pinyin, category_initials = to_pinyin_parts(category)
@@ -108,7 +79,7 @@ def compute_pinyin_fields(name: str = None, category: str = None,
         'storage_location_pinyin_initials': truncate(storage_location_initials) if storage_location else None,
     }
 
-    # 添加 full_name_pinyin（用于用户排序）
+    # full_name 只用于用户排序和检索，不和物料字段混在一起。
     if full_name:
         full_name_pinyin, full_name_initials = to_pinyin_parts(full_name)
         result['full_name_pinyin'] = truncate(full_name_pinyin)

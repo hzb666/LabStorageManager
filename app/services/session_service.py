@@ -1,12 +1,8 @@
-"""
-Session Service - User session management layer
-
-This module provides session management functions used by the API layer.
-Includes session cleanup, device/IP limits, and session creation.
-"""
+# 用户 session 管理与缓存同步。
 import hashlib
 import secrets
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict
 
@@ -23,6 +19,24 @@ from app.core.time_utils import get_utc_now
 from app.models.user_session import UserSession
 from app.services.sse_manager import sse_manager
 
+
+@dataclass(frozen=True)
+class SessionCacheIdentity:
+    user_id: int
+    username: str
+    is_active: bool
+
+
+@dataclass(frozen=True)
+class SessionCreationRequest:
+    user_id: int
+    username: str
+    device_id: str
+    device_name: str
+    ip_address: str
+    user_agent: str
+    token: str
+
 # ==================== Memory Fallback Rate Limiting ====================
 # 内存后备速率限制（Redis 不可用时使用）
 
@@ -31,7 +45,6 @@ _login_attempts_lock = threading.Lock()  # 线程锁，保护并发访问
 
 
 def _coerce_count(value: object) -> int:
-    """Normalize DB count results across SQLAlchemy/SQLModel return shapes."""
     if value is None:
         return 0
     if isinstance(value, int):
@@ -50,7 +63,6 @@ def _coerce_count(value: object) -> int:
 
 
 def cleanup_expired_sessions(db: Session) -> int:
-    """清理过期的会话，返回删除的数量"""
     now = get_utc_now()
     expired_token_hashes = db.exec(
         select(UserSession.token_hash).where(UserSession.expires_at < now)
@@ -96,9 +108,7 @@ def build_session_cache_payload(
 def sync_session_cache(
     *,
     session: UserSession,
-    user_id: int,
-    username: str,
-    is_active: bool,
+    identity: SessionCacheIdentity,
     now_utc: datetime | None = None,
 ) -> None:
     ttl_seconds = _session_ttl_seconds(session, now_utc=now_utc)
@@ -109,9 +119,9 @@ def sync_session_cache(
     cache_session(
         session.token_hash,
         build_session_cache_payload(
-            user_id=user_id,
-            username=username,
-            is_active=is_active,
+            user_id=identity.user_id,
+            username=identity.username,
+            is_active=identity.is_active,
             session=session,
         ),
         ttl_seconds,
@@ -164,10 +174,7 @@ def stage_revoke_user_sessions(
     *,
     except_token_hash: str | None = None,
 ) -> list[str]:
-    """
-    Stage user-session revocation in current DB transaction.
-    Caller must commit/rollback and then call finalize_revoked_sessions on success.
-    """
+    # 这里只暂存待删 session，真正的缓存删除和 SSE 通知必须等事务提交成功。
     statement = select(UserSession).where(UserSession.user_id == user_id)
     if except_token_hash:
         statement = statement.where(UserSession.token_hash != except_token_hash)
@@ -195,9 +202,7 @@ def finalize_revoked_sessions(token_hashes: list[str], *, reason: str) -> None:
 def refresh_session_expiry(
     db: Session,
     *,
-    user_id: int,
-    username: str,
-    is_active: bool,
+    identity: SessionCacheIdentity,
     session: UserSession,
     new_token: str | None = None,
 ) -> UserSession:
@@ -216,25 +221,16 @@ def refresh_session_expiry(
 
     sync_session_cache(
         session=session,
-        user_id=user_id,
-        username=username,
-        is_active=is_active,
+        identity=identity,
         now_utc=now_utc,
     )
     return session
 
 
-# ==================== Device Session Management ====================
-
 def _check_device_limit(db: Session, user_id: int, device_id: str) -> bool:
-    """
-    检查设备数量限制
-    如果超过限制，返回 False 表示需要踢出旧设备
-    """
     if not device_id:
-        return True  # 没有 device_id 不限制
+        return True
     
-    # 统计当前用户的设备数（排除当前设备）
     count_result = db.exec(
         select(func.count(UserSession.id))
         .where(UserSession.user_id == user_id)
@@ -246,14 +242,9 @@ def _check_device_limit(db: Session, user_id: int, device_id: str) -> bool:
 
 
 def _check_ip_limit(db: Session, user_id: int, ip_address: str) -> bool:
-    """
-    检查 IP 数量限制
-    如果超过限制，返回 False
-    """
     if not ip_address:
         return True
     
-    # 统计当前用户不同 IP 数（排除当前 IP）
     unique_ips_result = db.exec(
         select(func.count(func.distinct(UserSession.ip_address)))
         .where(UserSession.user_id == user_id)
@@ -265,7 +256,6 @@ def _check_ip_limit(db: Session, user_id: int, ip_address: str) -> bool:
 
 
 def _evict_oldest_session(db: Session, user_id: int) -> None:
-    """踢出最旧的会话"""
     oldest = db.exec(
         select(UserSession)
         .where(UserSession.user_id == user_id)
@@ -277,38 +267,24 @@ def _evict_oldest_session(db: Session, user_id: int) -> None:
         revoke_session(db, oldest, reason="device_limit_evict", commit=True)
 
 
-def _create_user_session(
-    db: Session,
-    user_id: int,
-    username: str,
-    device_id: str,
-    device_name: str,
-    ip_address: str,
-    user_agent: str,
-    token: str
-) -> UserSession:
-    """创建用户会话，如果已存在相同设备的会话则更新"""
-    # 计算 token hash
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
+def _create_user_session(db: Session, request: SessionCreationRequest) -> UserSession:
+    # 同设备重复登录直接覆盖旧 token，避免同一设备堆叠无意义 session。
+    token_hash = hashlib.sha256(request.token.encode()).hexdigest()
 
-    # 计算过期时间
     expires_at = get_utc_now() + timedelta(hours=settings.session_expire_hours)
 
-    # 检查是否已存在相同 user_id 和 device_id 的会话
-    # 如果存在则更新，而不是创建新记录
     existing_session = db.exec(
         select(UserSession)
-        .where(UserSession.user_id == user_id)
-        .where(UserSession.device_id == device_id)
+        .where(UserSession.user_id == request.user_id)
+        .where(UserSession.device_id == request.device_id)
     ).first()
 
     if existing_session:
-        # 更新现有会话
         old_token_hash = existing_session.token_hash
         existing_session.token_hash = token_hash
-        existing_session.ip_address = ip_address
-        existing_session.last_ip_address = ip_address
-        existing_session.user_agent = user_agent
+        existing_session.ip_address = request.ip_address
+        existing_session.last_ip_address = request.ip_address
+        existing_session.user_agent = request.user_agent
         existing_session.expires_at = expires_at
         existing_session.last_active_at = get_utc_now()
         db.commit()
@@ -318,16 +294,17 @@ def _create_user_session(
             delete_cached_session(old_token_hash)
             sse_manager.notify_session_revoked(token_hash=old_token_hash, reason="device_relogin")
     else:
-        # 创建新会话
-        # 如果没有 device_id，生成唯一的匿名设备 ID，避免冲突
-        final_device_id = device_id or f"{ANONYMOUS_DEVICE_PREFIX}{secrets.token_hex(ANONYMOUS_DEVICE_TOKEN_HEX_LENGTH)}"
+        final_device_id = (
+            request.device_id
+            or f"{ANONYMOUS_DEVICE_PREFIX}{secrets.token_hex(ANONYMOUS_DEVICE_TOKEN_HEX_LENGTH)}"
+        )
         session = UserSession(
-            user_id=user_id,
+            user_id=request.user_id,
             device_id=final_device_id,
-            device_name=device_name or UNKNOWN_DEVICE,
-            ip_address=ip_address,
-            last_ip_address=ip_address,
-            user_agent=user_agent,
+            device_name=request.device_name or UNKNOWN_DEVICE,
+            ip_address=request.ip_address,
+            last_ip_address=request.ip_address,
+            user_agent=request.user_agent,
             token_hash=token_hash,
             expires_at=expires_at,
         )
@@ -335,12 +312,13 @@ def _create_user_session(
         db.commit()
         db.refresh(session)
 
-    # 缓存到 Redis（使用 session 对象中的实际值，避免 device_id 为 None）
     sync_session_cache(
         session=session,
-        user_id=user_id,
-        username=username,
-        is_active=True,
+        identity=SessionCacheIdentity(
+            user_id=request.user_id,
+            username=request.username,
+            is_active=True,
+        ),
         now_utc=get_utc_now(),
     )
 

@@ -1,9 +1,6 @@
-"""SSE events endpoint.
-
-Integration notes:
-- Include router in main app with prefix /api.
-- Frontend should connect to /api/events?rooms=inventory,common_shelf.
-"""
+# SSE 事件流入口。
+#
+# 前端通过 /api/events?rooms=inventory,common_shelf 建连。
 
 from __future__ import annotations
 
@@ -21,7 +18,7 @@ from app.core.time_utils import get_utc_now
 from app.models.user import User
 from app.models.user_session import UserSession
 from app.api.deps import get_current_session
-from app.services.sse_manager import sse_manager
+from app.services.sse_manager import SSESubscriptionRequest, sse_manager
 
 router = APIRouter(tags=["Events"])
 SSE_SESSION_REVALIDATE_SECONDS = 15
@@ -52,11 +49,7 @@ def _parse_and_validate_rooms(rooms_param: str) -> list[str]:
 
 
 def _filter_rooms_by_user_access(current_user: User, rooms: list[str]) -> list[str]:
-    """Enforce SSE room auth parity with normal read access.
-
-    Current project policy: all authenticated users can subscribe to all defined rooms.
-    Keep this function as an explicit auth hook for future role-based tightening.
-    """
+    # 先保留独立鉴权钩子，后续若房间权限收紧时不需要改建连主流程。
     _ = current_user
     return rooms
 
@@ -66,7 +59,6 @@ async def sse_events(
     request: Request,
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)],
 ) -> StreamingResponse:
-    """Server-Sent Events stream for authenticated users."""
     current_user, current_session = current
     client_ip = get_client_ip(request)
     rooms_param = request.query_params.get("rooms", SSERoom.INVENTORY)
@@ -79,18 +71,19 @@ async def sse_events(
             detail="No SSE rooms are accessible for current user",
         )
 
-    # Replay is intentionally not implemented in this project.
-    # Reconnect strategy is full refresh on stale, so server starts with seq 0.
+    # 当前项目不做服务端 replay，重连后由前端整页刷新兜底。
     last_seq = 0
 
     client_id = sse_manager.new_client_id()
     client = await sse_manager.subscribe(
-        client_id=client_id,
-        rooms=rooms,
-        last_seq=last_seq,
-        user_id=current_user.id,
-        session_id=current_session.id,
-        token_hash=current_session.token_hash,
+        SSESubscriptionRequest(
+            client_id=client_id,
+            rooms=rooms,
+            last_seq=last_seq,
+            user_id=current_user.id,
+            session_id=current_session.id,
+            token_hash=current_session.token_hash,
+        )
     )
     await sse_manager.start_listener()
 
