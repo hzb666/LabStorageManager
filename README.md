@@ -2,9 +2,6 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.14+-blue?style=flat&logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/FastAPI-0.135+-blue?style=flat&logo=fastapi" alt="FastAPI">
-  <img src="https://img.shields.io/badge/React-19.2+-blue?style=flat&logo=react" alt="React">
-  <img src="https://img.shields.io/badge/TypeScript-5.9+-blue?style=flat&logo=typescript" alt="TypeScript">
   <img src="https://img.shields.io/badge/Node.js-24+-blue?style=flat&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/SQLite-WAL-green?style=flat&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/License-Apache%202.0-green?style=flat" alt="License">
