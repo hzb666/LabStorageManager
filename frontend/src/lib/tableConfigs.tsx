@@ -25,6 +25,13 @@ export type { TableRowData }
 
 const columnHelper = createColumnHelper<TableRowData>()
 
+const normalizeCommonShelfHighlight = (value: string) => {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const normalized = trimmed.replace(/^\s*\[std\]\s*/i, '').trim()
+  return normalized
+}
+
 /**
  * 库存表格列配置
  * 包含：CAS号、名称、位置、分类、品牌、剩余/规格、状态
@@ -375,7 +382,42 @@ export function getCommonShelfTableColumns(): ColumnDef<TableRowData, unknown>[]
       header: '名称',
       size: 220,
       minSize: 180,
-      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+      cell: info => {
+        const name = safeString(info.getValue(), '-')
+        const matchedField = safeString(info.row.original.matched_field, '')
+        const matchedName = safeString(info.row.original.matched_name, '')
+        const highlight = normalizeCommonShelfHighlight(safeString(info.table.getState().globalFilter, ''))
+        const fuzzy = info.table.options.meta?.fuzzySearch
+
+        if (matchedField === 'alias' && matchedName) {
+          return (
+            <span className="break-all">
+              {name}
+              {'（'}
+              <HighlightText
+                text={matchedName}
+                highlight={highlight}
+                fuzzy={fuzzy}
+              />
+              {'）'}
+            </span>
+          )
+        }
+
+        if (matchedField === 'name') {
+          return (
+            <span className="break-all">
+              <HighlightText
+                text={name}
+                highlight={highlight}
+                fuzzy={fuzzy}
+              />
+            </span>
+          )
+        }
+
+        return <span className="break-all">{name}</span>
+      },
     }),
     columnHelper.accessor('storage_location', {
       header: '位置',

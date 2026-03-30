@@ -1,4 +1,5 @@
 import { FONT_TIMEOUT_MS } from './lib/constants'
+import { LIB_ASSETS } from '@/lib/staticAssets'
 import {
   clearPreferredFontSource,
   getPreferredFontSource,
@@ -9,10 +10,8 @@ const FONT_READY_CLASS = 'web-fonts-ready'
 const FONT_STATE_ATTRIBUTE = 'data-font-state'
 const FONT_STYLESHEET_ID = 'app-web-fonts'
 const LOCAL_FONT_STYLE_ID = 'app-local-web-fonts'
-const LOCAL_FONT_PREFERENCE_VALUE = 'source-han-sans-cn-vf-v1'
 const GOOGLE_FONT_FAMILY = 'Noto Sans SC'
 const LOCAL_FONT_FAMILY = 'SourceHanSansCN-VF-Local'
-const LOCAL_FONT_URL = '/lib/SourceHanSansCN-VF.woff2'
 
 const FONT_STYLESHEET_URL =
   'https://fonts.googleapis.cn/css2?family=Noto+Sans+SC:wght@400;700&display=swap'
@@ -34,11 +33,11 @@ function delay(ms: number) {
 }
 
 function shouldPreferLocalFont() {
-  return getPreferredFontSource() === LOCAL_FONT_PREFERENCE_VALUE
+  return getPreferredFontSource() === LIB_ASSETS.localFontPreferenceValue
 }
 
 function rememberLocalFontPreference() {
-  setPreferredFontSource(LOCAL_FONT_PREFERENCE_VALUE)
+  setPreferredFontSource(LIB_ASSETS.localFontPreferenceValue)
 }
 
 function clearLocalFontPreference() {
@@ -96,7 +95,7 @@ function ensureLocalFontStylesheet() {
   style.textContent = `
     @font-face {
       font-family: '${LOCAL_FONT_FAMILY}';
-      src: url('${LOCAL_FONT_URL}') format('woff2');
+      src: url('${LIB_ASSETS.localFontUrl}') format('woff2');
       font-weight: 400 700;
       font-style: normal;
       font-display: swap;

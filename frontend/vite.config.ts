@@ -1,7 +1,9 @@
 import path from "path"
-import { defineConfig } from 'vite'
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { promisify } from 'node:util'
+import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib'
 import react from '@vitejs/plugin-react'
-import viteCompression from 'vite-plugin-compression'
+import { defineConfig, type Plugin } from 'vite'
 
 const chunkGroups: Record<string, string[]> = {
   'vendor-react': ['react', 'react-dom', 'react-router-dom'],
@@ -29,23 +31,71 @@ const resolveManualChunk = (moduleId: string): string | undefined => {
   return undefined
 }
 
+const gzipAsync = promisify(gzip)
+const brotliCompressAsync = promisify(brotliCompress)
+const COMPRESSIBLE_ASSET_RE = /\.(?:js|mjs|css|html|json|svg|wasm)$/i
+const MIN_COMPRESS_SIZE = 1024
+
+async function collectFiles(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const files = await Promise.all(entries.map(async (entry) => {
+    const fullPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      return collectFiles(fullPath)
+    }
+    return [fullPath]
+  }))
+  return files.flat()
+}
+
+function createDualCompressionPlugin(): Plugin {
+  let outputDir = ''
+
+  return {
+    name: 'app:dual-compression',
+    apply: 'build',
+    enforce: 'post',
+    configResolved(config) {
+      outputDir = path.isAbsolute(config.build.outDir)
+        ? config.build.outDir
+        : path.resolve(config.root, config.build.outDir)
+    },
+    async closeBundle() {
+      const files = (await collectFiles(outputDir)).filter((filePath) =>
+        COMPRESSIBLE_ASSET_RE.test(filePath)
+      )
+
+      await Promise.all(files.map(async (filePath) => {
+        const fileStat = await stat(filePath)
+        if (fileStat.size < MIN_COMPRESS_SIZE) {
+          return
+        }
+
+        const content = await readFile(filePath)
+        const [gzipContent, brotliContent] = await Promise.all([
+          gzipAsync(content, { level: zlibConstants.Z_BEST_COMPRESSION }),
+          brotliCompressAsync(content, {
+            params: {
+              [zlibConstants.BROTLI_PARAM_MODE]: zlibConstants.BROTLI_MODE_GENERIC,
+              [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
+            },
+          }),
+        ])
+
+        await Promise.all([
+          writeFile(`${filePath}.gz`, gzipContent),
+          writeFile(`${filePath}.br`, brotliContent),
+        ])
+      }))
+    },
+  }
+}
+
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   plugins: [
     react(),
-    // 只在生产环境启用压缩
-    ...(mode === 'production' ? [
-      // gzip 压缩
-      viteCompression({
-        algorithm: 'gzip',
-        ext: '.gz',
-      }),
-      // brotli 压缩
-      viteCompression({
-        algorithm: 'brotliCompress',
-        ext: '.br',
-      }),
-    ] : []),
+    createDualCompressionPlugin(),
   ],
   resolve: {
     alias: {
@@ -56,21 +106,6 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: {
     include: ['react', 'react-dom', 'react-router-dom', 'axios'],
   },
-  // 开发服务器配置
-  server: {
-    headers: {
-      // RDKit 文件缓存 10 年
-      'Cache-Control': 'public, max-age=315360000',
-    },
-  },
-  // 静态资源缓存配置
-  publicAssetsRetry: [
-    {
-      // RDKit 文件缓存 10 年
-      test: /\/lib\/(RDKit|.*\.wasm).*/,
-      maxAge: 60 * 60 * 24 * 365 * 10, // 10年
-    },
-  ],
   build: {
     // 目标浏览器
     target: 'es2020',
@@ -86,12 +121,10 @@ export default defineConfig(({ mode }) => ({
       checks: {
         pluginTimings: false,
       },
-    },
-    rollupOptions: {
       output: {
         // 手动分割代码块
         manualChunks: resolveManualChunk,
       },
     },
   },
-}))
+})

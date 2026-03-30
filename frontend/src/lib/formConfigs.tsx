@@ -66,7 +66,6 @@ export const defaultInventoryValues: InventoryFormInputData = {
   brand: '',
   storage_location: '',
   is_hazardous: false,
-  is_running_short: false,
   notes: '',
   quantity_bottles: 1,
   initial_quantity: undefined,
@@ -85,12 +84,10 @@ export function getInventoryFormFields(
   config?: {
     categoryOptions?: { label: string; value: string }[]
     brandOptions?: { label: string; value: string }[]
-    includeRunningShort?: boolean
   }
 ): FieldSchema<InventoryFormInputData>[] {
   const categoryOptions = config?.categoryOptions ?? REAGENT_CATEGORY_OPTIONS
   const brandOptions = config?.brandOptions ?? REAGENT_BRAND_OPTIONS
-  const includeRunningShort = config?.includeRunningShort ?? false
 
   // 编辑模式下显示：剩余量 + 规格；添加模式下显示：瓶数 + 规格
   const quantityFields = isEdit && initialQuantity !== undefined
@@ -123,21 +120,6 @@ export function getInventoryFormFields(
         </span>
       )
     },
-    ...(includeRunningShort
-      ? [
-          {
-            name: 'is_running_short' as const,
-            label: '是否快用完',
-            type: 'checkbox' as const,
-            checkboxLabel: (
-              <span className="flex items-center gap-1">
-                <AlertTriangle className="w-4 h-4 text-orange-500" />
-                快用完
-              </span>
-            ),
-          },
-        ]
-      : []),
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
   ]
 }

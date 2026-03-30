@@ -374,10 +374,12 @@ export const inventoryAPI = {
   getBorrowHistory: (id: number) => api.get(`/inventory/${id}/borrow-history`),
   getImportTemplate: () => api.get('/inventory/import/template'),
   downloadTemplate: () => api.get('/inventory/import/template', { responseType: 'blob' }),
-  importExcel: (file: FormData) =>
-    api.post('/inventory/import', file, {
+  previewImportExcel: (file: FormData) =>
+    api.post('/inventory/import/preview', file, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+  confirmImportExcel: (previewToken: string) =>
+    api.post('/inventory/import/confirm', { preview_token: previewToken }),
   manualAdd: (data: {
     cas_number: string
     name: string
@@ -422,7 +424,6 @@ export const commonShelfAPI = {
     api.put(`/inventory/common-shelf/group/${sampleInventoryId}`, data),
   deleteGroup: (sampleInventoryId: number) =>
     api.delete(`/inventory/common-shelf/group/${sampleInventoryId}`),
-  exportCommonShelf: () => api.get('/inventory/common-shelf/export', { responseType: 'blob' }),
 }
 
 // Chemical Info APIs

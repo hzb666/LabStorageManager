@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useState } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
-import { Archive, ArrowUpFromLine, Plus, ScanSearch } from 'lucide-react'
+import { Archive, Plus, ScanSearch } from 'lucide-react'
 
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
@@ -20,7 +20,7 @@ import { getCommonShelfTableColumns } from '@/lib/tableConfigs'
 import { COMMON_SHELF_BRAND_OPTIONS, COMMON_SHELF_CATEGORY_OPTIONS } from '@/lib/options'
 import { COMMON_SHELF_SSE_EVENTS } from '@/lib/sseEvents'
 import { useSSEStore } from '@/store/sseStore'
-import { downloadBlobResponse, formatDate } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import {
   InventoryFormSchema,
@@ -54,10 +54,11 @@ interface CommonShelfItem {
   notes?: string | null
   available_bottles: number
   total_bottles: number
-  consumed_bottles: number
   specification?: string | null
   group_names?: string[]
   other_names?: string[]
+  matched_name?: string | null
+  matched_field?: string | null
 }
 
 // 常用货架弹窗只允许 `add / edit` 两种模式。
@@ -114,7 +115,6 @@ function resetCommonShelfForm(
     remaining_quantity: undefined,
     is_hazardous: item.is_hazardous || false,
     notes: item.notes || '',
-    is_running_short: item.status === 'run_short',
   })
 }
 
@@ -129,7 +129,6 @@ function buildCommonShelfEditPayload(formData: InventoryFormData) {
     storage_location: formData.storage_location || '',
     brand: formData.brand || '',
     is_hazardous: formData.is_hazardous,
-    is_running_short: formData.is_running_short ?? false,
     notes: formData.notes || '',
     specification: formData.specification || '',
   }
@@ -210,7 +209,6 @@ function buildCommonShelfFormFields(
   const fields = getInventoryFormFields(false, undefined, {
     categoryOptions: COMMON_SHELF_CATEGORY_OPTIONS,
     brandOptions: COMMON_SHELF_BRAND_OPTIONS,
-    includeRunningShort: dialogState === 'edit',
   })
 
   return fields.map((field) => {
@@ -254,14 +252,13 @@ function renderCommonShelfExpandedRow(itemRaw: Record<string, unknown>) {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 flex-1">
         <div>英文名称：{item.english_name || '-'}</div>
-        <div>别名：{item.alias || '-'}</div>
-        <div>其他名称：{item.other_names && item.other_names.length > 0 ? item.other_names.join(' / ') : '-'}</div>
+        <div>别名：{item.alias ? item.alias.replaceAll('$', '，') : '-'}</div>
+        <div>其他名称：{item.other_names && item.other_names.length > 0 ? item.other_names.join('，') : '-'}</div>
         <div>分类：{item.category || '-'}</div>
         <div>品牌：{item.brand || '-'}</div>
         <div>创建人：{item.created_by_name || '-'}</div>
         <div>入库时间：{formatDate(item.created_at)}</div>
         <div>可用/总计：{item.available_bottles} / {item.total_bottles} 瓶</div>
-        <div>已耗尽：{item.consumed_bottles} 瓶</div>
         <NoteDisplay label="备注" text={item.notes ?? undefined} />
       </div>
     </div>
@@ -446,15 +443,6 @@ export function CommonShelfPage() {
     return [...getCommonShelfTableColumns(), actionColumn] as unknown as ColumnDef<Record<string, unknown>, unknown>[]
   }, [])
 
-  const handleExport = useCallback(async () => {
-    try {
-      const response = await commonShelfAPI.exportCommonShelf()
-      downloadBlobResponse(response, `common_shelf_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
-    } catch {
-      toast.error('导出失败')
-    }
-  }, [])
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -462,9 +450,6 @@ export function CommonShelfPage() {
         <div className="flex flex-wrap gap-2">
           <Button onClick={handleAddClick} size="lg">
             <Plus className="w-4 h-4 mr-1.5" /> 手动添加
-          </Button>
-          <Button variant="modern" size="lg" onClick={handleExport}>
-            <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
           </Button>
         </div>
       </div>
@@ -508,7 +493,7 @@ export function CommonShelfPage() {
         statusOptions={STATUS_OPTIONS}
         searchFieldOptions={SEARCH_FIELD_OPTIONS}
         title={<><Archive className="w-5 h-5" /> 常用/公用试剂</>}
-        searchPlaceholder="搜索名称、别名、CAS号、品牌..."
+        searchPlaceholder="搜索标准名、别名、CAS号、品牌..."
         renderExpandedRow={renderCommonShelfExpandedRow}
         noteField="notes"
       />
