@@ -5,14 +5,13 @@ from typing import Any, Annotated, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlmodel import Session, select, update as sql_update
+from sqlmodel import Session, select, delete as sql_delete, update as sql_update
 
 from app.core.auth import AdminUser, get_current_user
 from app.core.constants import SSEEventType, SSERoom, DEFAULT_PAGE_SIZE
 from app.core.time_utils import get_utc_now
 from app.database import get_db
 from app.models.inventory import (
-    BorrowLog,
     Inventory,
     InventoryStatus,
     InventoryUpdate,
@@ -21,7 +20,11 @@ from app.models.inventory import (
 from app.models.user import User
 from app.services.api_utils import clear_cache_by_prefix
 from app.services.cas_utils import normalize_cas, validate_cas_format
-from app.services.xlsx_export import export_common_shelf_xlsx
+from app.services.common_shelf_search import (
+    match_common_shelf_row,
+    prepare_common_shelf_search_term,
+    split_common_alias_tokens,
+)
 from app.services.inventory_creation import create_manual_inventory_items
 from app.services.inventory_fts import (
     InventoryFTSError,
@@ -33,6 +36,13 @@ from app.services.inventory_queries import (
     common_inventory_clause,
     common_inventory_query,
     get_common_inventory_by_id,
+)
+from app.services.inventory_operation_logger import (
+    SOURCE_MANUAL_ADD,
+    log_common_consume,
+    log_inventory_delete,
+    log_inventory_update,
+    log_stock_in,
 )
 from app.services.common_name_utils import is_std_marked_name, strip_std_name_marker
 from app.services.pinyin_utils import compute_pinyin_fields
@@ -62,7 +72,6 @@ from app.services.sse_manager import sse_manager
 from app.services.user_utils import batch_get_user_names
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
-COMMON_SHELF_CONSUME_NOTE = "common_shelf_consume"
 logger = logging.getLogger(__name__)
 _DECIMAL_1000 = Decimal("1000")
 _DECIMAL_1000000 = Decimal("1000000")
@@ -245,15 +254,40 @@ def _find_common_group_items(
     *,
     available_only: bool = False,
 ) -> list[Inventory]:
+    return _find_common_group_items_by_key(
+        db,
+        cas_number=sample_item.cas_number,
+        group_key=_common_group_sort_key(sample_item),
+        available_only=available_only,
+    )
+
+
+def _find_common_group_items_by_key(
+    db: Session,
+    *,
+    cas_number: Optional[str],
+    group_key: tuple,
+    available_only: bool = False,
+) -> list[Inventory]:
     query = common_inventory_query().where(
-        _same_value_clause(Inventory.cas_number, sample_item.cas_number),
+        _same_value_clause(Inventory.cas_number, cas_number),
     )
     if available_only:
         query = query.where(Inventory.status.in_(COMMON_SHELF_AVAILABLE_STATUSES))
 
     candidates = db.exec(query.order_by(Inventory.created_at.asc(), Inventory.id.asc())).all()
-    sample_key = _common_group_sort_key(sample_item)
-    return [item for item in candidates if _common_group_sort_key(item) == sample_key]
+    return [item for item in candidates if _common_group_sort_key(item) == group_key]
+
+
+def _sort_common_group_consume_candidates(items: list[Inventory]) -> list[Inventory]:
+    return sorted(
+        items,
+        key=lambda item: (
+            is_std_marked_name(item.name),
+            item.created_at or get_utc_now(),
+            item.id or 0,
+        ),
+    )
 
 
 def _normalize_common_group_update_data(update_data: dict[str, Any]) -> dict[str, Any]:
@@ -513,6 +547,7 @@ def _merge_common_shelf_item_into_group(group: dict[str, Any], item: Inventory) 
     group["group_name_candidates"].append(
         {
             "name": clean_name,
+            "alias": item.alias,
             "is_std": is_std_marked_name(item.name),
             "created_at": item.created_at,
             "id": item.id or 0,
@@ -534,8 +569,8 @@ def _merge_common_shelf_item_into_group(group: dict[str, Any], item: Inventory) 
         group["created_by_id"] = item.created_by_id
 
 
-# 根据候选名称规则完成分组收口，保持标准名优先和历史兼容输出。
-def _finalize_common_shelf_group(group: dict[str, Any], cas_alias_map: dict[str, Inventory]) -> None:
+# 根据候选名称规则完成分组收口，保持标准名优先和别名来源稳定。
+def _finalize_common_shelf_group(group: dict[str, Any]) -> None:
     name_candidates = sorted(
         group.pop("group_name_candidates", []),
         key=lambda entry: (
@@ -548,6 +583,7 @@ def _finalize_common_shelf_group(group: dict[str, Any], cas_alias_map: dict[str,
     selected_candidate = std_candidates[0] if std_candidates else (name_candidates[0] if name_candidates else None)
     if selected_candidate:
         group["name"] = selected_candidate["name"]
+        group["alias"] = strip_std_name_marker(selected_candidate["alias"])
 
     dedup_names: list[str] = []
     seen_names: set[str] = set()
@@ -558,18 +594,12 @@ def _finalize_common_shelf_group(group: dict[str, Any], cas_alias_map: dict[str,
         seen_names.add(normalized_name)
         dedup_names.append(normalized_name)
     group["group_names"] = dedup_names
-    group["other_names"] = [name for name in dedup_names if name != group["name"]]
-
-    cas_key = group.get("cas_number")
-    alias_source = cas_alias_map.get(cas_key)
-    if alias_source:
-        group["alias"] = strip_std_name_marker(alias_source.alias)
+    group["other_names"] = split_common_alias_tokens(group.get("alias"))
 
 
 # 把明细库存聚合成 common shelf 组数据，供列表/导出复用同一分组语义。
 def _group_common_shelf_items(items: list[Inventory]) -> dict[tuple, dict[str, Any]]:
     grouped: dict[tuple, dict[str, Any]] = {}
-    cas_alias_map = _build_common_shelf_cas_alias_map(items)
 
     for item in items:
         group_key = _common_group_sort_key(item)
@@ -580,7 +610,7 @@ def _group_common_shelf_items(items: list[Inventory]) -> dict[tuple, dict[str, A
         _merge_common_shelf_item_into_group(group, item)
 
     for group in grouped.values():
-        _finalize_common_shelf_group(group, cas_alias_map)
+        _finalize_common_shelf_group(group)
 
     return grouped
 
@@ -615,7 +645,6 @@ def _build_common_shelf_rows(
                 "status": row_status,
                 "available_bottles": available_bottles,
                 "total_bottles": group["total_bottles"],
-                "consumed_bottles": group["total_bottles"] - available_bottles,
                 "created_at": group["created_at"],
                 "updated_at": group["updated_at"],
                 "notes": group["notes"],
@@ -638,6 +667,35 @@ def _prepare_common_shelf_search_value(search: Optional[str], fuzzy: bool) -> Op
     if not stripped:
         return None
     return normalize_search_term(stripped) if fuzzy else stripped
+
+
+def _filter_common_shelf_rows_by_search(
+    rows: list[dict[str, Any]],
+    *,
+    search_value: str | None,
+    search_field: Optional[str],
+    fuzzy: bool,
+) -> list[dict[str, Any]]:
+    if not search_value:
+        for row in rows:
+            row["matched_field"] = None
+            row["matched_name"] = None
+        return rows
+
+    filtered_rows: list[dict[str, Any]] = []
+    for row in rows:
+        match = match_common_shelf_row(
+            row,
+            search_value=search_value,
+            search_field=search_field,
+            fuzzy=fuzzy,
+        )
+        if not match.matched:
+            continue
+        row["matched_field"] = match.matched_field
+        row["matched_name"] = match.matched_name
+        filtered_rows.append(row)
+    return filtered_rows
 
 
 # 在名称/别名搜索下扩展同 CAS 结果，保持历史召回行为。
@@ -731,7 +789,6 @@ def _apply_common_group_update_to_item(
     update_data: dict[str, Any],
     new_initial_quantity: Optional[float],
     new_unit: Optional[str],
-    is_running_short: Optional[bool],
 ) -> None:
     if item.status == InventoryStatus.BORROWED:
         raise HTTPException(
@@ -758,11 +815,6 @@ def _apply_common_group_update_to_item(
         for pinyin_field, pinyin_value in pinyin_fields.items():
             setattr(item, pinyin_field, pinyin_value)
 
-    if is_running_short is True and item.status != InventoryStatus.CONSUMED:
-        item.status = InventoryStatus.RUN_SHORT
-    if is_running_short is False and item.status == InventoryStatus.RUN_SHORT:
-        item.status = InventoryStatus.IN_STOCK
-
 
 # 注册 common shelf 列表接口，职责仅保留“查询编排 + 响应组装”。
 def _register_common_shelf_list_route(router: APIRouter, max_page_size: int) -> None:
@@ -782,27 +834,31 @@ def _register_common_shelf_list_route(router: APIRouter, max_page_size: int) -> 
         sort_by = query.sort_by
         sort_order = query.sort_order
 
-        base = common_inventory_query()
-        search_value = _prepare_common_shelf_search_value(search, fuzzy)
-        if search_value:
-            base = _apply_common_shelf_filters(
-                base,
-                search_value=search_value,
-                search_field=search_field,
-                fuzzy=fuzzy,
-            )
-
-        items = db.exec(base.order_by(Inventory.created_at.desc(), Inventory.id.desc())).all()
-        items = _expand_common_shelf_search_items(
-            db,
-            items,
-            search_value=search_value,
+        search_prep = prepare_common_shelf_search_term(
+            search,
             search_field=search_field,
             fuzzy=fuzzy,
         )
+        if search_prep.marker_only:
+            return {
+                "data": [],
+                "total": 0,
+                "skip": skip,
+                "limit": limit,
+            }
+
+        items = db.exec(
+            common_inventory_query().order_by(Inventory.created_at.desc(), Inventory.id.desc())
+        ).all()
 
         grouped = _group_common_shelf_items(items)
         grouped_rows = _build_common_shelf_rows(grouped, status_filter=status_filter)
+        grouped_rows = _filter_common_shelf_rows_by_search(
+            grouped_rows,
+            search_value=search_prep.value,
+            search_field=search_field,
+            fuzzy=fuzzy,
+        )
         _sort_common_shelf_rows(grouped_rows, sort_by=sort_by, sort_order=sort_order)
 
         total = len(grouped_rows)
@@ -836,67 +892,87 @@ def _register_common_shelf_consume_route(
         if not is_common_shelf_item(sample_item):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Item is not on common shelf")
 
-        consumed_item: Optional[Inventory] = None
-        consumed_quantity: Optional[float] = None
-        now = get_utc_now()
+        group_cas_number = sample_item.cas_number
+        group_key = _common_group_sort_key(sample_item)
+        consumed_inventory_id: Optional[int] = None
 
         for _ in range(5):
-            group_available_items = _find_common_group_items(db, sample_item, available_only=True)
-            candidate = group_available_items[0] if group_available_items else None
+            group_available_items = _find_common_group_items_by_key(
+                db,
+                cas_number=group_cas_number,
+                group_key=group_key,
+                available_only=True,
+            )
+            sorted_candidates = _sort_common_group_consume_candidates(group_available_items)
+            candidate = sorted_candidates[0] if sorted_candidates else None
             if not candidate:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No available bottle in this group")
 
-            consumed_quantity = candidate.remaining_quantity or candidate.initial_quantity or 1.0
-            update_stmt = (
-                sql_update(Inventory)
-                .where(Inventory.id == candidate.id)
-                .where(common_inventory_clause())
-                .where(Inventory.status.in_(COMMON_SHELF_AVAILABLE_STATUSES))
-                .values(
-                    status=InventoryStatus.CONSUMED,
-                    remaining_quantity=0,
-                    remaining_percent=0,
-                    borrower_id=None,
-                    updated_at=now,
-                )
+            log_common_consume(
+                db,
+                inventory=candidate,
+                operator_id=current_user.id,
             )
-            update_result = db.exec(update_stmt)
+            if len(group_available_items) == 1:
+                consumed_at = get_utc_now()
+                update_result = db.exec(
+                    sql_update(Inventory)
+                    .where(Inventory.id == candidate.id)
+                    .where(common_inventory_clause())
+                    .where(Inventory.status.in_(COMMON_SHELF_AVAILABLE_STATUSES))
+                    .values(
+                        status=InventoryStatus.CONSUMED,
+                        remaining_quantity=0,
+                        remaining_percent=0,
+                        updated_at=consumed_at,
+                    )
+                )
+                if update_result.rowcount == 0:
+                    db.rollback()
+                    continue
+                candidate.status = InventoryStatus.CONSUMED
+                candidate.remaining_quantity = 0
+                candidate.remaining_percent = 0
+                candidate.updated_at = consumed_at
+            else:
+                delete_result = db.exec(
+                    sql_delete(Inventory)
+                    .where(Inventory.id == candidate.id)
+                    .where(common_inventory_clause())
+                    .where(Inventory.status.in_(COMMON_SHELF_AVAILABLE_STATUSES))
+                )
+                if delete_result.rowcount == 0:
+                    db.rollback()
+                    continue
             db.commit()
-            if update_result.rowcount == 0:
-                continue
-            consumed_item = get_common_inventory_by_id(db, candidate.id)
+            consumed_inventory_id = candidate.id
             break
 
-        if not consumed_item:
+        if consumed_inventory_id is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Item changed by another request, please retry",
             )
 
-        consume_log = BorrowLog(
-            inventory_id=consumed_item.id,
-            borrower_id=current_user.id,
-            borrow_time=now,
-            is_consume=True,
-            quantity_borrowed=consumed_quantity or 1.0,
-            quantity_returned=0,
-            notes=COMMON_SHELF_CONSUME_NOTE,
+        remaining_available = len(
+            _find_common_group_items_by_key(
+                db,
+                cas_number=group_cas_number,
+                group_key=group_key,
+                available_only=True,
+            )
         )
-        db.add(consume_log)
-        db.commit()
-
-        remaining_available = len(_find_common_group_items(db, sample_item, available_only=True))
 
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
         await sse_manager.broadcast(
             SSERoom.COMMON_SHELF,
             SSEEventType.COMMON_SHELF_CONSUMED,
-            {"id": payload.sample_inventory_id, "consumed_inventory_id": consumed_item.id},
+            {"id": payload.sample_inventory_id, "consumed_inventory_id": consumed_inventory_id},
         )
 
         return {
             "message": "已拿取一瓶",
-            "consumed_inventory_id": consumed_item.id,
+            "consumed_inventory_id": consumed_inventory_id,
             "available_bottles": remaining_available,
         }
 
@@ -920,6 +996,16 @@ def _register_common_shelf_manual_add_route(
             created_by_id=current_user.id,
             is_common=True,
         )
+        for item in created_items:
+            log_stock_in(
+                db,
+                inventory=item,
+                operator_id=current_user.id,
+                source=SOURCE_MANUAL_ADD,
+            )
+        db.commit()
+        for item in created_items:
+            db.refresh(item)
 
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
         await sse_manager.broadcast(
@@ -946,6 +1032,7 @@ def _register_common_shelf_update_route(
     async def update_common_shelf_group(
         sample_inventory_id: int,
         update: InventoryUpdate,
+        current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
         # 更新 common shelf 分组字段。
@@ -956,7 +1043,6 @@ def _register_common_shelf_update_route(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Item is not on common shelf')
 
         update_data = _normalize_common_group_update_data(update.model_dump(exclude_unset=True))
-        is_running_short = update_data.pop('is_running_short', None)
         new_initial_quantity, new_unit = _parse_common_group_specification(update_data)
 
         group_items = _find_common_group_items(db, sample_item)
@@ -964,13 +1050,20 @@ def _register_common_shelf_update_route(
         if not group_items:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Common shelf group not found')
 
+        before_items = [Inventory.model_validate(item) for item in group_items]
         for item in group_items:
             _apply_common_group_update_to_item(
                 item,
                 update_data=update_data,
                 new_initial_quantity=new_initial_quantity,
                 new_unit=new_unit,
-                is_running_short=is_running_short,
+            )
+        for before_item, after_item in zip(before_items, group_items):
+            log_inventory_update(
+                db,
+                before_inventory=before_item,
+                after_inventory=after_item,
+                operator_id=current_user.id,
             )
 
         db.commit()
@@ -998,6 +1091,7 @@ def _register_common_shelf_delete_route(
     @router.delete('/common-shelf/group/{sample_inventory_id}', response_model=dict, dependencies=[Depends(get_current_user)])
     async def delete_common_shelf_group(
         sample_inventory_id: int,
+        current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
         sample_item = get_common_inventory_by_id(db, sample_inventory_id)
@@ -1012,6 +1106,11 @@ def _register_common_shelf_delete_route(
 
         deleted_count = len(group_items)
         for item in group_items:
+            log_inventory_delete(
+                db,
+                inventory=item,
+                operator_id=current_user.id,
+            )
             db.delete(item)
 
         db.commit()
@@ -1029,20 +1128,6 @@ def _register_common_shelf_delete_route(
         }
 
 
-# 注册 common shelf 导出接口，复用分组逻辑保证导出和列表口径一致。
-def _register_common_shelf_export_route(router: APIRouter) -> None:
-    # 导出 common shelf 数据。
-    @router.get("/common-shelf/export", dependencies=[Depends(get_current_user)])
-    def export_common_shelf(
-        db: Annotated[Session, Depends(get_db)],
-    ):
-        base = common_inventory_query()
-        items = db.exec(base.order_by(Inventory.created_at.desc(), Inventory.id.desc())).all()
-        grouped = _group_common_shelf_items(items)
-        export_rows = _build_common_shelf_rows(grouped, status_filter=None)
-        return export_common_shelf_xlsx(export_rows)
-
-
 # 汇总注册 common shelf 全部路由。
 def register_common_shelf(
     router: APIRouter,
@@ -1055,4 +1140,3 @@ def register_common_shelf(
     _register_common_shelf_manual_add_route(router, search_cache, list_cache_prefix)
     _register_common_shelf_update_route(router, search_cache, list_cache_prefix)
     _register_common_shelf_delete_route(router, search_cache, list_cache_prefix)
-    _register_common_shelf_export_route(router)

@@ -175,7 +175,6 @@ def build_common_shelf_export_rows(items: list[Any]) -> list[dict[str, Any]]:
                 "status": row_status,
                 "available_bottles": available_bottles,
                 "total_bottles": group["total_bottles"],
-                "consumed_bottles": group["total_bottles"] - available_bottles,
                 "created_at": group["created_at"],
                 "updated_at": group["updated_at"],
                 "notes": group["notes"],
@@ -252,7 +251,6 @@ def export_inventory_xlsx(
         "规格",
         "总瓶数",
         "可用瓶数",
-        "已消耗瓶数",
         "是否危险品",
         "状态",
         "入库时间",
@@ -271,7 +269,6 @@ def export_inventory_xlsx(
             _get_field(item, "specification") or "",
             _get_field(item, "total_bottles"),
             _get_field(item, "available_bottles"),
-            _get_field(item, "consumed_bottles"),
             "是" if _get_field(item, "is_hazardous") else "否",
             _get_field(item, "status").value
             if hasattr(_get_field(item, "status"), "value")
@@ -296,61 +293,6 @@ def export_inventory_xlsx(
     return _export_to_xlsx(
         sheets=sheets,
         filename_prefix="inventory_export",
-    )
-
-
-def export_common_shelf_xlsx(
-    items: list[Any],
-) -> StreamingResponse:
-    """Export common shelf items (grouped by sample_inventory_id)."""
-    headers = [
-        "CAS号",
-        "名称",
-        "英文名",
-        "别名",
-        "分类",
-        "品牌",
-        "位置",
-        "规格",
-        "总瓶数",
-        "可用瓶数",
-        "已消耗瓶数",
-        "是否危险品",
-        "状态",
-        "入库时间",
-        "备注",
-    ]
-
-    def row_converter(item: Any) -> list[Any]:
-        return [
-            _get_field(item, "cas_number"),
-            _get_field(item, "name"),
-            _get_field(item, "english_name") or "",
-            _get_field(item, "alias") or "",
-            _get_field(item, "category") or "",
-            _get_field(item, "brand") or "",
-            _get_field(item, "storage_location") or "",
-            _get_field(item, "specification") or "",
-            _get_field(item, "total_bottles"),
-            _get_field(item, "available_bottles"),
-            _get_field(item, "consumed_bottles"),
-            "是" if _get_field(item, "is_hazardous") else "否",
-            _get_field(item, "status").value if hasattr(_get_field(item, "status"), "value") else _get_field(item, "status"),
-            to_china_time(_get_field(item, "created_at")).strftime("%Y-%m-%d %H:%M:%S") if _get_field(item, "created_at") else "",
-            _get_field(item, "notes") or "",
-        ]
-
-    rows = [row_converter(item) for item in items]
-    return _export_to_xlsx(
-        sheets=[
-            ExportSheet(
-                title="常用",
-                headers=headers,
-                rows=rows,
-                text_columns=set(range(1, len(headers) + 1)),
-            )
-        ],
-        filename_prefix="common_shelf_export",
     )
 
 

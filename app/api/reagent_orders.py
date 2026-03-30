@@ -46,7 +46,6 @@ from app.services.search_matchers import (
     classify_cas_search,
     collect_search_fields,
     combine_or_clauses,
-    union_id_subqueries,
 )
 from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import normalize_search_term, order_with_nulls_last
@@ -65,6 +64,10 @@ from app.services.order_fts import (
 )
 from app.services.inventory_queries import regular_inventory_query
 from app.services.sse_manager import sse_manager
+from app.services.order_operation_logger import (
+    log_reagent_order_create,
+    log_reagent_order_update,
+)
 from app.api.reagent_orders_workflow import register_workflow_routes
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
@@ -287,48 +290,40 @@ def _apply_reagent_order_single_field_search(
     return filtered, matched
 
 
-def _build_reagent_order_all_id_subquery(
+def _build_reagent_order_all_search_clause(
     *,
     search_value: str,
     fuzzy: bool,
     applicant_id_subquery,
     fts_rowid_subquery,
 ):
-    # 构建试剂订单 ALL 搜索候选 ID 子查询，统一 applicant/date/fts/like 召回。
+    # 构建试剂订单 ALL 搜索条件，保留 applicant/date/fts/like 召回但避免多路 UNION。
 
-    all_candidates = [
-        select(ReagentOrder.id).where(
-            ReagentOrder.applicant_id.in_(applicant_id_subquery)
-        ),
-        select(ReagentOrder.id).where(
-            build_date_search_clause(ReagentOrder.created_at, search_value)
-        ),
+    all_clauses = [
+        ReagentOrder.applicant_id.in_(applicant_id_subquery),
+        build_date_search_clause(ReagentOrder.created_at, search_value),
     ]
 
     if fts_rowid_subquery is not None:
-        all_candidates.append(
-            select(ReagentOrder.id).where(ReagentOrder.id.in_(fts_rowid_subquery))
+        all_clauses.append(
+            ReagentOrder.id.in_(fts_rowid_subquery)
         )
     else:
-        all_candidates.append(
-            select(ReagentOrder.id).where(
-                build_cas_search_clause(ReagentOrder.cas_number, search_value, fuzzy=fuzzy)
-            )
+        all_clauses.append(
+            build_cas_search_clause(ReagentOrder.cas_number, search_value, fuzzy=fuzzy)
         )
         text_fields = collect_search_fields(
             REAGENT_ORDER_SEARCH_SQL_FIELD_MAP,
             exclude_keys={'cas', 'cas_number', 'created_at'},
         )
         if text_fields:
-            all_candidates.append(
-                select(ReagentOrder.id).where(
-                    combine_or_clauses(
-                        build_text_search_clause(field, search_value, fuzzy=fuzzy)
-                        for field in text_fields
-                    )
+            all_clauses.append(
+                combine_or_clauses(
+                    build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                    for field in text_fields
                 )
             )
-    return union_id_subqueries(all_candidates)
+    return combine_or_clauses(all_clauses)
 
 
 def _apply_reagent_order_filters(
@@ -372,15 +367,15 @@ def _apply_reagent_order_filters(
         if matched:
             return single_field_filtered
 
-    all_id_subquery = _build_reagent_order_all_id_subquery(
+    all_search_clause = _build_reagent_order_all_search_clause(
         search_value=search_value,
         fuzzy=fuzzy,
         applicant_id_subquery=applicant_id_subquery,
         fts_rowid_subquery=fts_state.fts_rowid_subquery,
     )
-    if all_id_subquery is None:
+    if all_search_clause is None:
         return base
-    return base.where(ReagentOrder.id.in_(all_id_subquery))
+    return base.where(all_search_clause)
 
 
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -444,6 +439,12 @@ async def create_reagent_order(
     )
     
     db.add(db_order)
+    db.flush()
+    log_reagent_order_create(
+        db,
+        order=db_order,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(db_order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
@@ -738,11 +739,19 @@ async def update_reagent_order(
         )
 
     _ensure_reagent_order_edit_permission(order, current_user=current_user)
+    before_order = ReagentOrder.model_validate(order)
     update_data = _normalize_reagent_order_update_data(order_update)
     _apply_reagent_order_pinyin_updates(order, update_data=update_data)
 
     for field, value in update_data.items():
         setattr(order, field, value)
+
+    log_reagent_order_update(
+        db,
+        before_order=before_order,
+        after_order=order,
+        actor_user_id=current_user.id,
+    )
     
     db.commit()
     db.refresh(order)

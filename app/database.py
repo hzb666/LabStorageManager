@@ -33,6 +33,8 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("PRAGMA foreign_keys=ON;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
+    cursor.execute("PRAGMA busy_timeout=1000;")
     cursor.close()
 
 
@@ -84,6 +86,36 @@ SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_inventory_borrower_status_updated_at ON inventory (borrower_id, status, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_keeper_location_created_at ON inventory (is_common, temporary_keeper_id, storage_location, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_created_by_created_at_id ON inventory (created_by_id, created_at DESC, id DESC)",
+    # Inventory operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_created_at ON inventory_operation_log (operator_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_action_created_at ON inventory_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_created_at ON inventory_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_action_created_at ON inventory_operation_log (operator_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_inventory_created_at ON inventory_operation_log (inventory_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_common_created_at ON inventory_operation_log (is_common, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_cas_created_at ON inventory_operation_log (cas_number, created_at DESC)",
+    # Reagent order operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_actor_created_at ON reagent_order_operation_log (actor_user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_action_created_at ON reagent_order_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_created_at ON reagent_order_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_actor_action_created_at ON reagent_order_operation_log (actor_user_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_order_created_at ON reagent_order_operation_log (order_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_applicant_created_at ON reagent_order_operation_log (applicant_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_cas_created_at ON reagent_order_operation_log (cas_number, created_at DESC)",
+    # Consumable order operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_actor_created_at ON consumable_order_operation_log (actor_user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_action_created_at ON consumable_order_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_created_at ON consumable_order_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_actor_action_created_at ON consumable_order_operation_log (actor_user_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_order_created_at ON consumable_order_operation_log (order_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_applicant_created_at ON consumable_order_operation_log (applicant_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_name_created_at ON consumable_order_operation_log (order_name, created_at DESC)",
+    # User operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_actor_created_at ON user_operation_log (actor_user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_target_created_at ON user_operation_log (target_user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_action_created_at ON user_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_created_at ON user_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_actor_action_created_at ON user_operation_log (actor_user_id, action, created_at DESC)",
     # Borrow log operational queries.
     "CREATE INDEX IF NOT EXISTS ix_borrowlog_borrower_consume_borrow_time ON borrowlog (borrower_id, is_consume, borrow_time DESC)",
     "CREATE INDEX IF NOT EXISTS ix_borrowlog_inventory_consume_return_borrow ON borrowlog (inventory_id, is_consume, return_time, borrow_time DESC)",
@@ -112,6 +144,15 @@ SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
 SQLITE_PERFORMANCE_INDEX_UPGRADES: tuple[str, ...] = (
     SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES
     + SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES
+)
+
+SQLITE_INVENTORY_OPERATION_LOG_INDEX_UPGRADES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_created_at ON inventory_operation_log (operator_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_action_created_at ON inventory_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_action_created_at ON inventory_operation_log (operator_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_inventory_created_at ON inventory_operation_log (inventory_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_common_created_at ON inventory_operation_log (is_common, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_cas_created_at ON inventory_operation_log (cas_number, created_at DESC)",
 )
 
 SQLITE_INVENTORY_FTS_SETUP: tuple[str, ...] = (
@@ -536,6 +577,7 @@ FROM users
 
 SQLITE_SAFE_COUNT_STATEMENTS: dict[str, str] = {
     "inventory": "SELECT COUNT(*) FROM inventory",
+    "inventory_operation_log": "SELECT COUNT(*) FROM inventory_operation_log",
     "reagent_order": "SELECT COUNT(*) FROM reagent_order",
     "consumable_order": "SELECT COUNT(*) FROM consumable_order",
     "users": "SELECT COUNT(*) FROM users",

@@ -54,10 +54,15 @@ from app.services.search_matchers import (
     union_id_subqueries,
 )
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
+from app.services.inventory_operation_logger import (
+    log_inventory_delete,
+    log_inventory_update,
+)
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
 from app.api.common_shelf import register_common_shelf
 from app.core.request_utils import get_sse_client_id
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -564,6 +569,7 @@ async def update_inventory(
     inventory_id: int,
     update: InventoryUpdate,
     request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     # 更新库存记录，保持权限、字段标准化与状态联动语义不变。
@@ -571,6 +577,7 @@ async def update_inventory(
     item = _get_by_id(db, inventory_id)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+    before_item = Inventory.model_validate(item)
 
     _ensure_inventory_editable(item)
 
@@ -592,6 +599,12 @@ async def update_inventory(
         setattr(item, field, value)
 
     _apply_inventory_pinyin_updates(item, update_data=update_data)
+    log_inventory_update(
+        db,
+        before_inventory=before_item,
+        after_inventory=item,
+        operator_id=current_user.id,
+    )
 
     db.commit()
     db.refresh(item)
@@ -683,11 +696,17 @@ def _apply_inventory_pinyin_updates(item: Inventory, *, update_data: dict) -> No
 async def delete_inventory(
     inventory_id: int,
     request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     item = _get_by_id(db, inventory_id)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+    log_inventory_delete(
+        db,
+        inventory=item,
+        operator_id=current_user.id,
+    )
     db.delete(item)
     db.commit()
     _clear_list_cache()

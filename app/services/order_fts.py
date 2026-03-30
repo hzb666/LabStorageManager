@@ -85,7 +85,8 @@ def build_order_fts_rowid_subquery(
         search_field=search_field,
         field_map=field_map,
     )
-    match_expr = text(f"{fts_table} MATCH :match_query").bindparams(
-        bindparam("match_query", match_query)
+    match_param_name = f"{fts_table}_match_query"
+    match_expr = text(f"{fts_table} MATCH :{match_param_name}").bindparams(
+        bindparam(match_param_name, match_query)
     )
     return select(text("rowid")).select_from(text(fts_table)).where(match_expr)

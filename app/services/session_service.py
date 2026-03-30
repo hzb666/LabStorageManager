@@ -62,20 +62,25 @@ def _coerce_count(value: object) -> int:
     return int(value)
 
 
-def cleanup_expired_sessions(db: Session) -> int:
+def cleanup_expired_sessions(
+    db: Session,
+    *,
+    commit: bool = True,
+) -> list[str]:
     now = get_utc_now()
     expired_token_hashes = db.exec(
         select(UserSession.token_hash).where(UserSession.expires_at < now)
     ).all()
 
     if not expired_token_hashes:
-        return 0
+        return []
 
-    delete_cached_sessions(expired_token_hashes)
     db.exec(delete(UserSession).where(UserSession.expires_at < now))
-    db.commit()
+    if commit:
+        db.commit()
+        delete_cached_sessions(expired_token_hashes)
 
-    return len(expired_token_hashes)
+    return list(expired_token_hashes)
 
 
 def _session_ttl_seconds(session: UserSession, now_utc: datetime | None = None) -> int:
@@ -276,22 +281,37 @@ def _check_ip_limit(db: Session, user_id: int, ip_address: str) -> bool:
     return unique_ips < settings.max_ip_per_user
 
 
-def _evict_oldest_session(db: Session, user_id: int) -> None:
+def _evict_oldest_session(
+    db: Session,
+    user_id: int,
+    *,
+    commit: bool = True,
+) -> list[str]:
     oldest = db.exec(
         select(UserSession)
         .where(UserSession.user_id == user_id)
         .order_by(UserSession.last_active_at.asc())
         .limit(1)
     ).first()
-    
-    if oldest:
-        revoke_session(db, oldest, reason="device_limit_evict", commit=True)
+
+    if not oldest:
+        return []
+
+    token_hash = oldest.token_hash
+    db.delete(oldest)
+    if commit:
+        db.commit()
+        finalize_revoked_sessions([token_hash], reason="device_limit_evict")
+    return [token_hash]
 
 
-def _create_user_session(db: Session, request: SessionCreationRequest) -> UserSession:
-    # 同设备重复登录直接覆盖旧 token，避免同一设备堆叠无意义 session。
+def stage_create_or_refresh_user_session(
+    db: Session,
+    request: SessionCreationRequest,
+) -> tuple[UserSession, list[str]]:
+    """Stage session upsert in current transaction and return side-effect token hashes."""
+
     token_hash = hashlib.sha256(request.token.encode()).hexdigest()
-
     expires_at = get_utc_now() + timedelta(hours=settings.session_expire_hours)
 
     existing_session = db.exec(
@@ -300,6 +320,7 @@ def _create_user_session(db: Session, request: SessionCreationRequest) -> UserSe
         .where(UserSession.device_id == request.device_id)
     ).first()
 
+    revoked_token_hashes: list[str] = []
     if existing_session:
         old_token_hash = existing_session.token_hash
         existing_session.token_hash = token_hash
@@ -308,12 +329,9 @@ def _create_user_session(db: Session, request: SessionCreationRequest) -> UserSe
         existing_session.user_agent = request.user_agent
         existing_session.expires_at = expires_at
         existing_session.last_active_at = get_utc_now()
-        db.commit()
-        db.refresh(existing_session)
         session = existing_session
         if old_token_hash != token_hash:
-            delete_cached_session(old_token_hash)
-            sse_manager.notify_session_revoked(token_hash=old_token_hash, reason="device_relogin")
+            revoked_token_hashes.append(old_token_hash)
     else:
         final_device_id = (
             request.device_id
@@ -330,8 +348,19 @@ def _create_user_session(db: Session, request: SessionCreationRequest) -> UserSe
             expires_at=expires_at,
         )
         db.add(session)
-        db.commit()
-        db.refresh(session)
+
+    db.flush()
+    return session, revoked_token_hashes
+
+
+def _create_user_session(db: Session, request: SessionCreationRequest) -> UserSession:
+    # 同设备重复登录直接覆盖旧 token，避免同一设备堆叠无意义 session。
+    session, revoked_token_hashes = stage_create_or_refresh_user_session(db, request)
+    db.commit()
+    db.refresh(session)
+
+    if revoked_token_hashes:
+        finalize_revoked_sessions(revoked_token_hashes, reason="device_relogin")
 
     sync_session_cache(
         session=session,

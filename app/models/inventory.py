@@ -175,8 +175,6 @@ class InventoryUpdate(SQLModel):
     category: Optional[str] = None
     brand: Optional[str] = None
     is_hazardous: Optional[bool] = None
-    # 仅用于常用货架分组编辑，表示是否标记为快用完
-    is_running_short: Optional[bool] = None
     # 规格字段：前端传入规格字符串（如 "500ml"），后端用 parse_specification 解析
     specification: Optional[str] = None
 

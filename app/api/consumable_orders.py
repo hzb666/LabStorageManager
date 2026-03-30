@@ -35,7 +35,6 @@ from app.services.search_matchers import (
     build_text_search_clause,
     collect_search_fields,
     combine_or_clauses,
-    union_id_subqueries,
 )
 from app.services.sql_utils import normalize_search_term, order_with_nulls_last
 from app.services.api_utils import (
@@ -51,6 +50,14 @@ from app.services.order_fts import (
     should_use_order_fts,
 )
 from app.services.sse_manager import sse_manager
+from app.services.order_operation_logger import (
+    log_consumable_order_approve,
+    log_consumable_order_arrival_complete,
+    log_consumable_order_create,
+    log_consumable_order_delete,
+    log_consumable_order_reject,
+    log_consumable_order_update,
+)
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 logger = logging.getLogger(__name__)
@@ -219,27 +226,23 @@ def _apply_consumable_order_single_field_search(
     return filtered, matched
 
 
-def _build_consumable_order_all_id_subquery(
+def _build_consumable_order_all_search_clause(
     *,
     search_value: str,
     fuzzy: bool,
     applicant_id_subquery,
     fts_rowid_subquery,
 ):
-    # 构建耗材订单 ALL 搜索候选 ID 子查询，统一 applicant/date/fts/like 召回。
+    # 构建耗材订单 ALL 搜索条件，保留 applicant/date/fts/like 召回但避免多路 UNION。
 
-    all_candidates = [
-        select(ConsumableOrder.id).where(
-            ConsumableOrder.applicant_id.in_(applicant_id_subquery)
-        ),
-        select(ConsumableOrder.id).where(
-            build_date_search_clause(ConsumableOrder.created_at, search_value)
-        ),
+    all_clauses = [
+        ConsumableOrder.applicant_id.in_(applicant_id_subquery),
+        build_date_search_clause(ConsumableOrder.created_at, search_value),
     ]
 
     if fts_rowid_subquery is not None:
-        all_candidates.append(
-            select(ConsumableOrder.id).where(ConsumableOrder.id.in_(fts_rowid_subquery))
+        all_clauses.append(
+            ConsumableOrder.id.in_(fts_rowid_subquery)
         )
     else:
         text_fields = collect_search_fields(
@@ -247,15 +250,13 @@ def _build_consumable_order_all_id_subquery(
             exclude_keys={'created_at'},
         )
         if text_fields:
-            all_candidates.append(
-                select(ConsumableOrder.id).where(
-                    combine_or_clauses(
-                        build_text_search_clause(field, search_value, fuzzy=fuzzy)
-                        for field in text_fields
-                    )
+            all_clauses.append(
+                combine_or_clauses(
+                    build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                    for field in text_fields
                 )
             )
-    return union_id_subqueries(all_candidates)
+    return combine_or_clauses(all_clauses)
 
 
 def _apply_consumable_order_filters(
@@ -295,15 +296,15 @@ def _apply_consumable_order_filters(
         if matched:
             return single_field_filtered
 
-    all_id_subquery = _build_consumable_order_all_id_subquery(
+    all_search_clause = _build_consumable_order_all_search_clause(
         search_value=search_value,
         fuzzy=fuzzy,
         applicant_id_subquery=applicant_id_subquery,
         fts_rowid_subquery=fts_state.fts_rowid_subquery,
     )
-    if all_id_subquery is None:
+    if all_search_clause is None:
         return base
-    return base.where(ConsumableOrder.id.in_(all_id_subquery))
+    return base.where(all_search_clause)
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -335,6 +336,12 @@ async def create_consumable_order(
     )
     
     db.add(db_order)
+    db.flush()
+    log_consumable_order_create(
+        db,
+        order=db_order,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(db_order)
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
@@ -529,6 +536,7 @@ async def update_consumable_order(
             detail="Approved or rejected orders can only be deleted by non-admin users"
         )
 
+    before_order = ConsumableOrder.model_validate(order)
     update_data = order_update.model_dump(exclude_unset=True)
     if "status" in update_data:
         raise HTTPException(
@@ -554,6 +562,13 @@ async def update_consumable_order(
     
     for field, value in update_data.items():
         setattr(order, field, value)
+
+    log_consumable_order_update(
+        db,
+        before_order=before_order,
+        after_order=order,
+        actor_user_id=current_user.id,
+    )
     
     db.commit()
     db.refresh(order)
@@ -572,6 +587,7 @@ async def update_consumable_order(
 async def approve_consumable_order(
     order_id: int,
     db: DBSession,
+    current_user: CurrentUser,
 ):
     # Approve a consumable order (Admin only)
     order = get_consumable_order_by_id(db, order_id)
@@ -587,7 +603,14 @@ async def approve_consumable_order(
             detail=f"Cannot approve order with status: {order.status}"
         )
     
+    before_order = ConsumableOrder.model_validate(order)
     order.status = ConsumableOrderStatus.APPROVED
+    log_consumable_order_approve(
+        db,
+        before_order=before_order,
+        after_order=order,
+        actor_user_id=current_user.id,
+    )
     
     db.commit()
     db.refresh(order)
@@ -605,6 +628,7 @@ async def approve_consumable_order(
 async def reject_consumable_order(
     order_id: int,
     db: DBSession,
+    current_user: CurrentUser,
 ):
     # Reject a consumable order (Admin only). Does not modify notes.
     order = get_consumable_order_by_id(db, order_id)
@@ -614,7 +638,14 @@ async def reject_consumable_order(
             detail=ORDER_NOT_FOUND
         )
     
+    before_order = ConsumableOrder.model_validate(order)
     order.status = ConsumableOrderStatus.REJECTED
+    log_consumable_order_reject(
+        db,
+        before_order=before_order,
+        after_order=order,
+        actor_user_id=current_user.id,
+    )
     
     db.commit()
     db.refresh(order)
@@ -656,8 +687,15 @@ async def complete_consumable_order(
             detail=f"Cannot complete order with status: {order.status}. Order must be APPROVED first."
         )
     
+    before_order = ConsumableOrder.model_validate(order)
     # Consumables complete directly (no stock-in)
     order.status = ConsumableOrderStatus.COMPLETED
+    log_consumable_order_arrival_complete(
+        db,
+        before_order=before_order,
+        after_order=order,
+        actor_user_id=current_user.id,
+    )
     
     db.commit()
     db.refresh(order)
@@ -755,6 +793,12 @@ async def delete_consumable_order(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the order applicant or admin can delete this order"
         )
+
+    log_consumable_order_delete(
+        db,
+        order=order,
+        actor_user_id=current_user.id,
+    )
     
     db.delete(order)
     db.commit()

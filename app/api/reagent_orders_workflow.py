@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.database import DBSession
@@ -19,13 +20,27 @@ from app.models.reagent_order import (
 from app.models.inventory import Inventory, InventoryResponse, InventoryStatus
 from app.core.constants import SSEEventType, SSERoom
 from app.services.api_utils import clear_cache_by_prefix
-from app.services.internal_code import generate_internal_code
+from app.services.internal_code import (
+    INTERNAL_CODE_CONFLICT_MAX_RETRIES,
+    generate_internal_code,
+    is_internal_code_unique_violation,
+)
+from app.services.inventory_operation_logger import (
+    SOURCE_ORDER_STOCK_IN,
+    log_inventory_update,
+    log_stock_in,
+)
 from app.services.inventory_queries import regular_inventory_query
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.shelf_utils import normalize_storage_location
 from app.services.spec_utils import format_specification
 from app.services.sse_manager import sse_manager
 from app.services.user_utils import batch_get_user_names
+from app.services.order_operation_logger import (
+    log_reagent_order_approve,
+    log_reagent_order_delete,
+    log_reagent_order_reject,
+)
 
 ORDER_NOT_FOUND = "Order not found"
 LIST_CACHE_PREFIX = "list:"
@@ -113,6 +128,24 @@ def _clear_inventory_projection_cache() -> None:
     clear_cache_by_prefix(INVENTORY_SEARCH_CACHE, prefix=INVENTORY_LIST_CACHE_PREFIX)
 
 
+def _log_stock_in_operations(
+    db: Session,
+    *,
+    items: list[Inventory],
+    operator_id: int,
+) -> None:
+    if not items:
+        return
+    db.flush()
+    for item in items:
+        log_stock_in(
+            db,
+            inventory=item,
+            operator_id=operator_id,
+            source=SOURCE_ORDER_STOCK_IN,
+        )
+
+
 def _create_inventory_items_from_order(
     db: Session,
     order: ReagentOrder,
@@ -128,15 +161,10 @@ def _create_inventory_items_from_order(
             detail="Order missing initial_quantity or unit. Please update the order.",
         )
 
-    try:
-        internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     pinyin_fields = compute_pinyin_fields(
         name=order.name,
         category=order.category,
         brand=order.brand,
-        alias=order.alias,
         storage_location=options.storage_location,
     )
 
@@ -148,34 +176,56 @@ def _create_inventory_items_from_order(
     if effective_remaining is not None and effective_remaining <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity must be greater than 0")
 
-    inventory_items: list[Inventory] = []
-    for internal_code in internal_codes:
-        inv = Inventory(
-            internal_code=internal_code,
-            cas_number=order.cas_number,
-            name=order.name,
-            english_name=order.english_name,
-            alias=order.alias,
-            category=order.category,
-            brand=order.brand,
-            storage_location=options.storage_location,
-            is_common=options.is_common,
-            initial_quantity=order.initial_quantity,
-            remaining_quantity=effective_remaining,
-            remaining_percent=_compute_remaining_percent(effective_remaining, order.initial_quantity),
-            unit=order.unit,
-            is_hazardous=order.is_hazardous,
-            status=options.inventory_status,
-            temporary_keeper_id=options.temporary_keeper_id,
-            source_order_id=order.id,
-            created_by_id=options.created_by_id,
-            notes=notes,
-            **pinyin_fields,
-        )
-        db.add(inv)
-        inventory_items.append(inv)
+    for attempt in range(INTERNAL_CODE_CONFLICT_MAX_RETRIES):
+        try:
+            internal_codes = generate_internal_code(db, order.cas_number, order.quantity)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    return inventory_items
+        inventory_items: list[Inventory] = []
+        try:
+            with db.begin_nested():
+                for internal_code in internal_codes:
+                    inv = Inventory(
+                        internal_code=internal_code,
+                        cas_number=order.cas_number,
+                        name=order.name,
+                        english_name=order.english_name,
+                        alias=order.alias,
+                        category=order.category,
+                        brand=order.brand,
+                        storage_location=options.storage_location,
+                        is_common=options.is_common,
+                        initial_quantity=order.initial_quantity,
+                        remaining_quantity=effective_remaining,
+                        remaining_percent=_compute_remaining_percent(
+                            effective_remaining,
+                            order.initial_quantity,
+                        ),
+                        unit=order.unit,
+                        is_hazardous=order.is_hazardous,
+                        status=options.inventory_status,
+                        temporary_keeper_id=options.temporary_keeper_id,
+                        source_order_id=order.id,
+                        created_by_id=options.created_by_id,
+                        notes=notes,
+                        **pinyin_fields,
+                    )
+                    db.add(inv)
+                    inventory_items.append(inv)
+
+                db.flush()
+            return inventory_items
+        except IntegrityError as exc:
+            if not is_internal_code_unique_violation(exc):
+                raise
+            if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="库存内部编码冲突，请重试订单入库操作",
+                ) from exc
+
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="库存内部编码冲突，请重试订单入库操作")
 
 
 async def _broadcast_inventory_projection_events(
@@ -202,7 +252,7 @@ def _register_approval_routes(
     search_cache: Dict[str, tuple[Any, Any]],
 ) -> None:
     @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
-    async def approve_reagent_order(order_id: int, db: DBSession):
+    async def approve_reagent_order(order_id: int, db: DBSession, current_user: CurrentUser):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -213,7 +263,14 @@ def _register_approval_routes(
                 detail=f"Cannot approve order with status: {order.status}",
             )
 
+        before_order = ReagentOrder.model_validate(order)
         order.status = ReagentOrderStatus.APPROVED
+        log_reagent_order_approve(
+            db,
+            before_order=before_order,
+            after_order=order,
+            actor_user_id=current_user.id,
+        )
 
         db.commit()
         db.refresh(order)
@@ -227,7 +284,7 @@ def _register_approval_routes(
         return order
 
     @router.post("/{order_id}/reject", dependencies=[Depends(require_admin)])
-    async def reject_reagent_order(order_id: int, db: DBSession):
+    async def reject_reagent_order(order_id: int, db: DBSession, current_user: CurrentUser):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -238,7 +295,14 @@ def _register_approval_routes(
                 detail=f"Cannot reject order with status: {order.status}",
             )
 
+        before_order = ReagentOrder.model_validate(order)
         order.status = ReagentOrderStatus.REJECTED
+        log_reagent_order_reject(
+            db,
+            before_order=before_order,
+            after_order=order,
+            actor_user_id=current_user.id,
+        )
 
         db.commit()
         db.refresh(order)
@@ -331,6 +395,11 @@ def _register_arrival_routes(
             order.status = ReagentOrderStatus.ARRIVED
             message = "已到货并进入暂存区，请及时补全入库信息"
 
+        _log_stock_in_operations(
+            db,
+            items=inventory_items,
+            operator_id=current_user.id,
+        )
         db.commit()
         db.refresh(order)
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
@@ -561,7 +630,6 @@ def _apply_arrived_items_stock_in(
             name=item.name,
             category=item.category,
             brand=item.brand,
-            alias=item.alias,
             storage_location=item.storage_location,
         )
         for key, value in pinyin_fields.items():
@@ -609,6 +677,11 @@ def _register_delete_order_route(
                 detail="Only the order applicant or admin can delete this order",
             )
 
+        log_reagent_order_delete(
+            db,
+            order=order,
+            actor_user_id=current_user.id,
+        )
         db.delete(order)
         db.commit()
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
@@ -649,6 +722,11 @@ def _register_stock_in_route(
                 current_user=current_user,
                 stock_context=stock_context,
             )
+            _log_stock_in_operations(
+                db,
+                items=inventory_items,
+                operator_id=current_user.id,
+            )
             await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
             _clear_inventory_projection_cache()
             await _broadcast_inventory_projection_events(db, inventory_items, created=True)
@@ -663,12 +741,20 @@ def _register_stock_in_route(
             }
 
         target_items = _get_arrived_pending_items(db, order)
+        before_items = [Inventory.model_validate(item) for item in target_items]
         _apply_arrived_items_stock_in(
             target_items,
             target_location=target_location,
             effective_remaining=effective_remaining,
             is_common=is_common,
         )
+        for before_item, after_item in zip(before_items, target_items):
+            log_inventory_update(
+                db,
+                before_inventory=before_item,
+                after_inventory=after_item,
+                operator_id=current_user.id,
+            )
         await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
         _clear_inventory_projection_cache()
         await _broadcast_inventory_projection_events(db, target_items, created=False)

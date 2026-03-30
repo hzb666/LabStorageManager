@@ -10,12 +10,11 @@ from pydantic import BaseModel
 from sqlmodel import Session, select, func, update as sql_update
 
 from app.core.auth import CurrentUser, get_current_user
-from app.core.config import settings
 from app.core.constants import (
+    IMPORT_UPLOAD_RATE_LIMIT,
+    IMPORT_UPLOAD_RATE_LIMIT_WINDOW_SECONDS,
     LOW_STOCK_PERCENT,
-    MIN_IMPORT_RATE_LIMIT,
     OVERDUE_BORROW_DAYS,
-    IMPORT_RATE_LIMIT_DIVISOR,
     SSEEventType,
     SSERoom,
     TEMPLATE_DOWNLOAD_RATE_LIMIT,
@@ -40,7 +39,16 @@ from app.services.api_utils import clear_cache_by_prefix
 from app.services.cas_utils import normalize_cas, is_special_cas_value
 from app.services.xlsx_export import export_inventory_xlsx
 from app.services.excel_service import validate_uploaded_file
+from app.services.inventory_import_preview_sessions import (
+    consume_inventory_import_preview_session,
+    create_inventory_import_preview_session,
+)
 from app.services.inventory_creation import create_manual_inventory_items
+from app.services.inventory_operation_logger import (
+    SOURCE_MANUAL_ADD,
+    log_inventory_export_operation,
+    log_stock_in,
+)
 from app.services.inventory_queries import (
     common_inventory_query,
     get_regular_inventory_by_id,
@@ -61,6 +69,10 @@ class InventoryImportQuery(BaseModel):
 
     default_storage_location: Optional[str] = None
     default_is_hazardous: bool = False
+
+
+class InventoryImportConfirmBody(BaseModel):
+    preview_token: str
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -205,11 +217,20 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         return _add_specification(response)
 
     @router.get("/export", dependencies=[Depends(get_current_user)])
-    def export_inventory(db: DBSession):
+    def export_inventory(
+        current_user: Annotated[User, Depends(get_current_user)],
+        db: DBSession,
+    ):
         # 导出库存工作簿，包含常规库存与 common shelf 两个工作表。
         statement = regular_inventory_query().order_by(Inventory.created_at.desc())
         items = db.exec(statement).all()
         common_items = db.exec(common_inventory_query().order_by(Inventory.created_at.desc())).all()
+        log_inventory_export_operation(
+            db,
+            operator_id=current_user.id,
+            exported_count=len(items) + len(common_items),
+        )
+        db.commit()
 
         return export_inventory_xlsx(items, common_items)
 
@@ -233,6 +254,16 @@ def _register_manual_and_dashboard_routes(
             created_by_id=current_user.id,
             is_common=False,
         )
+        for item in created_items:
+            log_stock_in(
+                db,
+                inventory=item,
+                operator_id=current_user.id,
+                source=SOURCE_MANUAL_ADD,
+            )
+        db.commit()
+        for item in created_items:
+            db.refresh(item)
 
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
         serialized_items = _serialize_inventory_items(db, created_items)
@@ -348,6 +379,37 @@ def _register_import_routes(
     search_cache: Dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
+    def _save_import_upload(file: UploadFile) -> str:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename) as tmp_file:
+            tmp_file.write(file.file.read())
+            return tmp_file.name
+
+    def _format_import_response(
+        message: str,
+        result: dict[str, Any],
+        *,
+        preview_token: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return {
+            "message": message,
+            "success": result["success"],
+            "total_rows": result["total_rows"],
+            "valid_rows": result.get("valid_rows", 0),
+            "created": result["created"],
+            "errors_count": len(result["errors"]),
+            "errors": result["errors"] if result["errors"] else None,
+            "preview_items": result.get("preview_items") or None,
+            "preview_token": preview_token,
+        }
+
+    def _enforce_import_upload_rate_limit(request: Request) -> None:
+        client_ip = get_client_ip(request)
+        enforce_rate_limit(
+            scope="import_inventory_upload",
+            identifier=client_ip,
+            limit=IMPORT_UPLOAD_RATE_LIMIT,
+            window_seconds=IMPORT_UPLOAD_RATE_LIMIT_WINDOW_SECONDS,
+        )
 
     @router.get("/import/template")
     def get_import_template(current_user: CurrentUser):
@@ -370,57 +432,84 @@ def _register_import_routes(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
-    @router.post("/import")
-    def import_inventory(
+    @router.post("/import/preview")
+    def preview_inventory_import(
         file: Annotated[UploadFile, File(...)],
         request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
         query: Annotated[InventoryImportQuery, Depends()],
     ):
-        from app.services.excel_service import import_inventory_from_excel
+        from app.services.excel_service import preview_inventory_import_from_excel
 
-        client_ip = get_client_ip(request)
-        enforce_rate_limit(
-            scope="import_inventory",
-            identifier=client_ip,
-            limit=max(MIN_IMPORT_RATE_LIMIT, settings.upload_rate_limit_count // IMPORT_RATE_LIMIT_DIVISOR),
-            window_seconds=settings.upload_rate_limit_window_seconds,
-        )
-
+        _enforce_import_upload_rate_limit(request)
         validate_uploaded_file(file)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename) as tmp_file:
-            tmp_file.write(file.file.read())
-            tmp_file_path = tmp_file.name
+        tmp_file_path = _save_import_upload(file)
 
         try:
-            result = import_inventory_from_excel(
+            result = preview_inventory_import_from_excel(
                 db=db,
                 file_path=tmp_file_path,
                 default_storage_location=query.default_storage_location,
                 default_is_hazardous=query.default_is_hazardous,
                 user_id=current_user.id,
             )
-
-            return {
-                "message": "Import completed",
-                "success": result["success"],
-                "total_rows": result["total_rows"],
-                "created": result["created"],
-                "errors_count": len(result["errors"]),
-                "errors": result["errors"] if result["errors"] else None,
-            }
+            preview_token: Optional[str] = None
+            if result["success"] and result.get("valid_rows", 0) > 0:
+                preview_token = create_inventory_import_preview_session(
+                    file_path=tmp_file_path,
+                    user_id=current_user.id,
+                    default_storage_location=query.default_storage_location,
+                    default_is_hazardous=query.default_is_hazardous,
+                )
+            return _format_import_response("Preview completed", result, preview_token=preview_token)
         except Exception:
-            logger.exception("Import inventory failed")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Import failed, please check file format")
+            logger.exception("Preview inventory import failed")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Import preview failed, please check file format",
+            )
         finally:
             if os.path.exists(tmp_file_path):
                 os.remove(tmp_file_path)
 
-        # 导入成功后清理列表缓存，确保前端获取最新数据
-        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+    @router.post("/import/confirm")
+    def confirm_inventory_import(
+        body: InventoryImportConfirmBody,
+        current_user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[Session, Depends(get_db)],
+    ):
+        from app.services.excel_service import confirm_inventory_import_from_excel
 
+        tmp_file_path: Optional[str] = None
+
+        try:
+            preview_session = consume_inventory_import_preview_session(
+                body.preview_token,
+                user_id=current_user.id,
+            )
+            with tempfile.NamedTemporaryFile(delete=False, suffix=preview_session.file_suffix or ".xlsx") as tmp_file:
+                tmp_file.write(preview_session.file_bytes)
+                tmp_file_path = tmp_file.name
+            result = confirm_inventory_import_from_excel(
+                db=db,
+                file_path=tmp_file_path,
+                default_storage_location=preview_session.default_storage_location,
+                default_is_hazardous=preview_session.default_is_hazardous,
+                user_id=current_user.id,
+            )
+            if result["success"] and result["created"] > 0:
+                clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+
+            return _format_import_response("Import completed", result)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except Exception:
+            logger.exception("Confirm inventory import failed")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Import failed, please check file format")
+        finally:
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                os.remove(tmp_file_path)
 
 # 解析借用人上下文，保证 public 账号借用时的代借人校验语义不变。
 def _resolve_borrower_context(

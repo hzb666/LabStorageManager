@@ -1,5 +1,9 @@
 # 管理员查看用户多来源操作日志。
+import base64
 from dataclasses import dataclass
+import hashlib
+import hmac
+import json
 import secrets
 import time
 from typing import Callable, Optional
@@ -7,10 +11,12 @@ from typing import Callable, Optional
 import redis
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func, or_
 from sqlmodel import select
 
 from app.core.redis import get_redis, redis_key
 from app.core.auth import AdminUser, require_admin
+from app.core.config import settings
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
     LOG_TOKEN_EXPIRE_HOURS,
@@ -22,14 +28,50 @@ from app.core.constants import (
 from app.core.time_utils import utc_iso_str
 from app.database import DBSession
 from app.models.user_session import UserSession
+from app.models.inventory_operation_log import (
+    InventoryOperationAction,
+    InventoryOperationLog,
+)
+from app.models.reagent_order_operation_log import ReagentOrderOperationLog
+from app.models.consumable_order_operation_log import ConsumableOrderOperationLog
+from app.models.user_operation_log import UserOperationLog
+from app.services.inventory_operation_logger import parse_inventory_snapshot
+from app.services.order_operation_logger import (
+    parse_consumable_order_snapshot,
+    parse_reagent_order_snapshot,
+)
+from app.services.user_operation_logger import parse_user_operation_snapshot
 from app.services.inventory_queries import (
-    common_inventory_clause,
     regular_inventory_clause,
-    regular_inventory_query,
 )
 from app.services.user_service import get_user_by_id
+from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/admin/users", tags=["User Logs"])
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(raw: str) -> bytes:
+    padding = "=" * ((4 - len(raw) % 4) % 4)
+    return base64.urlsafe_b64decode(f"{raw}{padding}")
+
+
+def _get_logs_token_signing_key() -> bytes:
+    if settings.secret_key:
+        return settings.secret_key.encode("utf-8")
+    return settings.get_private_key().encode("utf-8")
+
+
+def _sign_logs_token_payload(payload_part: str) -> str:
+    digest = hmac.new(
+        _get_logs_token_signing_key(),
+        payload_part.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return _b64url_encode(digest)
 
 def _check_logs_token_rate_limit(admin_user_id: int) -> None:
     redis_client = get_redis()
@@ -76,19 +118,35 @@ def _record_logs_token_request(admin_user_id: int) -> None:
 
 def create_log_token(user_id: int, expire_hours: int = LOG_TOKEN_EXPIRE_HOURS) -> str:
     expires_at = int(time.time()) + expire_hours * SECONDS_PER_HOUR
-    random_part = secrets.token_hex(8)
-    return f"{user_id}_{expires_at}_{random_part}"
+    payload = {
+        "uid": user_id,
+        "exp": expires_at,
+        "rnd": secrets.token_hex(8),
+    }
+    payload_part = _b64url_encode(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+    signature = _sign_logs_token_payload(payload_part)
+    return f"{payload_part}.{signature}"
 
 
 def parse_log_token(token: str) -> tuple[int, int] | None:
     try:
-        parts = token.split("_")
-        if len(parts) != 3:
+        payload_part, signature = token.split(".", maxsplit=1)
+        expected_signature = _sign_logs_token_payload(payload_part)
+        if not hmac.compare_digest(signature, expected_signature):
             return None
-        user_id = int(parts[0])
-        expires_at = int(parts[1])
+
+        payload = json.loads(_b64url_decode(payload_part).decode("utf-8"))
+        if not isinstance(payload, dict):
+            return None
+
+        user_id = int(payload.get("uid"))
+        expires_at = int(payload.get("exp"))
+        if user_id <= 0 or expires_at <= 0:
+            return None
         return (user_id, expires_at)
-    except (ValueError, IndexError):
+    except (ValueError, IndexError, json.JSONDecodeError, UnicodeDecodeError):
         return None
 
 
@@ -122,6 +180,17 @@ class LogsCollectContext:
     keyword: str | None
     skip: int
     limit: int
+
+
+@dataclass
+class LogsCountContext:
+    db: DBSession
+    user_id: int
+    keyword: str | None
+
+
+LogsCandidateBuilder = Callable[[LogsCollectContext, list[dict[str, object]]], None]
+LogsCounter = Callable[[LogsCountContext], int]
 
 
 def _resolve_logs_query_user(token: str, db: DBSession):
@@ -167,118 +236,301 @@ def _append_candidate(
     )
 
 
+REAGENT_ORDER_ACTION_LABELS: dict[str, str] = {
+    "create": "创建试剂申购",
+    "update": "编辑试剂申购",
+    "delete": "删除试剂申购",
+    "approve": "审批通过试剂申购",
+    "reject": "审批拒绝试剂申购",
+}
+
+CONSUMABLE_ORDER_ACTION_LABELS: dict[str, str] = {
+    "create": "创建耗材申购",
+    "update": "编辑耗材申购",
+    "delete": "删除耗材申购",
+    "approve": "审批通过耗材申购",
+    "reject": "审批拒绝耗材申购",
+    "arrival_complete": "确认耗材到货",
+}
+
+USER_OPERATION_ACTION_LABELS: dict[str, str] = {
+    "login": "用户登录",
+    "logout": "用户退出",
+    "change_password": "修改密码",
+    "update_profile": "修改用户资料",
+    "upload_avatar": "上传头像",
+    "delete_avatar": "删除头像",
+    "create_user": "创建用户",
+    "activate_user": "启用用户",
+    "deactivate_user": "停用用户",
+    "update_user_role": "修改用户角色",
+    "reset_user_password": "重置用户密码",
+    "update_user_sensitive_fields": "修改用户敏感信息",
+}
+
+
+def _build_order_log_keyword_clause(keyword: str):
+    return or_(
+        ReagentOrderOperationLog.order_name.contains(keyword),
+        ReagentOrderOperationLog.cas_number.contains(keyword),
+        ReagentOrderOperationLog.snapshot_json.contains(keyword),
+        ReagentOrderOperationLog.notes.contains(keyword),
+    )
+
+
+def _build_consumable_order_log_keyword_clause(keyword: str):
+    return or_(
+        ConsumableOrderOperationLog.order_name.contains(keyword),
+        ConsumableOrderOperationLog.specification.contains(keyword),
+        ConsumableOrderOperationLog.snapshot_json.contains(keyword),
+        ConsumableOrderOperationLog.notes.contains(keyword),
+    )
+
+
+def _build_user_operation_keyword_clause(keyword: str):
+    return or_(
+        UserOperationLog.detail.contains(keyword),
+        UserOperationLog.client_ip.contains(keyword),
+        UserOperationLog.request_id.contains(keyword),
+        UserOperationLog.snapshot_json.contains(keyword),
+    )
+
+
 def _append_reagent_order_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    from app.models.reagent_order import ReagentOrder
-
-    query = select(ReagentOrder).where(ReagentOrder.applicant_id == context.user_id)
+    query = select(ReagentOrderOperationLog).where(
+        or_(
+            ReagentOrderOperationLog.actor_user_id == context.user_id,
+            ReagentOrderOperationLog.applicant_id == context.user_id,
+        )
+    )
     if context.keyword:
-        query = query.where(ReagentOrder.name.contains(context.keyword))
-    orders = context.db.exec(
-        query.order_by(ReagentOrder.created_at.desc()).offset(context.skip).limit(context.limit)
+        query = query.where(_build_order_log_keyword_clause(context.keyword))
+    logs = context.db.exec(
+        query.order_by(ReagentOrderOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
     ).all()
-    for order in orders:
-        created_at = utc_iso_str(order.created_at)
 
-        def build_reagent_order(order=order, created_at=created_at):
+    actor_ids = {log.actor_user_id for log in logs if log.actor_user_id}
+    user_names = batch_get_user_names(context.db, actor_ids)
+
+    for log in logs:
+        snapshot = parse_reagent_order_snapshot(log.snapshot_json)
+        created_at = utc_iso_str(log.created_at)
+        action_value = log.action.value if hasattr(log.action, "value") else str(log.action)
+        action_label = REAGENT_ORDER_ACTION_LABELS.get(action_value, action_value)
+        actor_name = user_names.get(log.actor_user_id)
+        detail_prefix = action_label
+        if (
+            log.applicant_id == context.user_id
+            and log.actor_user_id
+            and log.actor_user_id != context.user_id
+        ):
+            detail_prefix = f"{actor_name or '管理员'}{action_label}"
+
+        def build_reagent_order(
+            log=log,
+            snapshot=snapshot,
+            created_at=created_at,
+            detail_prefix=detail_prefix,
+            action_value=action_value,
+        ):
+            before_snapshot = snapshot.get("before")
+            after_snapshot = snapshot.get("after")
+            quantity = snapshot.get("quantity")
+            unit = snapshot.get("unit")
             return {
                 "time": created_at,
                 "type": "reagent_order",
-                "detail": f"申购 {order.name} {order.initial_quantity or ''}{order.unit or ''} x{order.quantity}",
+                "detail": f"{detail_prefix} {log.order_name} {snapshot.get('initial_quantity') or ''}{unit or ''} x{quantity or ''}".strip(),
                 "full_data": {
-                    "id": order.id,
-                    "cas_number": order.cas_number,
-                    "name": order.name,
-                    "english_name": order.english_name,
-                    "alias": order.alias,
-                    "category": order.category,
-                    "brand": order.brand,
-                    "initial_quantity": order.initial_quantity,
-                    "unit": order.unit,
-                    "quantity": order.quantity,
-                    "price": order.price,
-                    "order_reason": order.order_reason.value if order.order_reason else None,
-                    "is_hazardous": order.is_hazardous,
-                    "notes": order.notes,
-                    "status": order.status.value if order.status else None,
+                    "id": log.id,
+                    "order_id": log.order_id,
+                    "actor_user_id": log.actor_user_id,
+                    "applicant_id": log.applicant_id,
+                    "action": action_value,
+                    "order_name": log.order_name,
+                    "cas_number": log.cas_number,
+                    "snapshot": snapshot,
+                    "before": before_snapshot,
+                    "after": after_snapshot,
+                    "notes": log.notes,
                     "created_at": created_at,
-                    "updated_at": utc_iso_str(order.updated_at),
-                }
+                },
             }
 
         _append_candidate(candidates, created_at, build_reagent_order)
 
 
 def _append_consumable_order_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    from app.models.consumable_order import ConsumableOrder
-
-    query = select(ConsumableOrder).where(ConsumableOrder.applicant_id == context.user_id)
+    query = select(ConsumableOrderOperationLog).where(
+        or_(
+            ConsumableOrderOperationLog.actor_user_id == context.user_id,
+            ConsumableOrderOperationLog.applicant_id == context.user_id,
+        )
+    )
     if context.keyword:
-        query = query.where(ConsumableOrder.name.contains(context.keyword))
-    orders = context.db.exec(
-        query.order_by(ConsumableOrder.created_at.desc()).offset(context.skip).limit(context.limit)
+        query = query.where(_build_consumable_order_log_keyword_clause(context.keyword))
+    logs = context.db.exec(
+        query.order_by(ConsumableOrderOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
     ).all()
-    for order in orders:
-        created_at = utc_iso_str(order.created_at)
 
-        def build_consumable_order(order=order, created_at=created_at):
+    actor_ids = {log.actor_user_id for log in logs if log.actor_user_id}
+    user_names = batch_get_user_names(context.db, actor_ids)
+
+    for log in logs:
+        snapshot = parse_consumable_order_snapshot(log.snapshot_json)
+        created_at = utc_iso_str(log.created_at)
+        action_value = log.action.value if hasattr(log.action, "value") else str(log.action)
+        action_label = CONSUMABLE_ORDER_ACTION_LABELS.get(action_value, action_value)
+        actor_name = user_names.get(log.actor_user_id)
+        detail_prefix = action_label
+        if (
+            log.applicant_id == context.user_id
+            and log.actor_user_id
+            and log.actor_user_id != context.user_id
+        ):
+            detail_prefix = f"{actor_name or '管理员'}{action_label}"
+
+        def build_consumable_order(
+            log=log,
+            snapshot=snapshot,
+            created_at=created_at,
+            detail_prefix=detail_prefix,
+            action_value=action_value,
+        ):
+            before_snapshot = snapshot.get("before")
+            after_snapshot = snapshot.get("after")
             return {
                 "time": created_at,
                 "type": "consumable_order",
-                "detail": f"申购 {order.name} {order.specification or ''} x{order.quantity}",
+                "detail": f"{detail_prefix} {log.order_name} {log.specification or ''} x{snapshot.get('quantity') or ''}".strip(),
                 "full_data": {
-                    "id": order.id,
-                    "name": order.name,
-                    "english_name": order.english_name,
-                    "specification": order.specification,
-                    "unit": order.unit,
-                    "quantity": order.quantity,
-                    "price": order.price,
-                    "communication": order.communication,
-                    "notes": order.notes,
-                    "status": order.status.value if order.status else None,
+                    "id": log.id,
+                    "order_id": log.order_id,
+                    "actor_user_id": log.actor_user_id,
+                    "applicant_id": log.applicant_id,
+                    "action": action_value,
+                    "order_name": log.order_name,
+                    "specification": log.specification,
+                    "snapshot": snapshot,
+                    "before": before_snapshot,
+                    "after": after_snapshot,
+                    "notes": log.notes,
                     "created_at": created_at,
-                    "updated_at": utc_iso_str(order.updated_at),
-                }
+                },
             }
 
         _append_candidate(candidates, created_at, build_consumable_order)
 
 
-def _append_inventory_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    from app.models.inventory import Inventory
-
-    query = regular_inventory_query().where(Inventory.created_by_id == context.user_id)
+def _append_user_operation_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
+    query = select(UserOperationLog).where(
+        or_(
+            UserOperationLog.actor_user_id == context.user_id,
+            UserOperationLog.target_user_id == context.user_id,
+        )
+    )
     if context.keyword:
-        query = query.where(Inventory.name.contains(context.keyword))
-    items = context.db.exec(
-        query.order_by(Inventory.created_at.desc()).offset(context.skip).limit(context.limit)
+        query = query.where(_build_user_operation_keyword_clause(context.keyword))
+    logs = context.db.exec(
+        query.order_by(UserOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
     ).all()
-    for inventory in items:
-        created_at = utc_iso_str(inventory.created_at)
 
-        def build_inventory(inventory=inventory, created_at=created_at):
+    user_ids = {
+        user_id
+        for log in logs
+        for user_id in (log.actor_user_id, log.target_user_id)
+        if user_id
+    }
+    user_names = batch_get_user_names(context.db, user_ids)
+
+    for log in logs:
+        snapshot = parse_user_operation_snapshot(log.snapshot_json)
+        created_at = utc_iso_str(log.created_at)
+        action_value = log.action.value if hasattr(log.action, "value") else str(log.action)
+        action_label = USER_OPERATION_ACTION_LABELS.get(action_value, action_value)
+        actor_name = user_names.get(log.actor_user_id)
+
+        detail = action_label
+        if (
+            log.target_user_id == context.user_id
+            and log.actor_user_id
+            and log.actor_user_id != context.user_id
+        ):
+            detail = f"{actor_name or '管理员'}对你执行: {action_label}"
+        if log.detail:
+            detail = f"{detail} ({log.detail})"
+
+        def build_user_operation(
+            log=log,
+            snapshot=snapshot,
+            created_at=created_at,
+            detail=detail,
+            action_value=action_value,
+        ):
+            return {
+                "time": created_at,
+                "type": "user",
+                "detail": detail,
+                "full_data": {
+                    "id": log.id,
+                    "action": action_value,
+                    "actor_user_id": log.actor_user_id,
+                    "target_user_id": log.target_user_id,
+                    "outcome": log.outcome,
+                    "client_ip": log.client_ip,
+                    "request_id": log.request_id,
+                    "detail": log.detail,
+                    "snapshot": snapshot,
+                    "created_at": created_at,
+                },
+            }
+
+        _append_candidate(candidates, created_at, build_user_operation)
+
+
+def _append_inventory_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
+    query = select(InventoryOperationLog).where(
+        InventoryOperationLog.operator_id == context.user_id,
+        InventoryOperationLog.action == InventoryOperationAction.STOCK_IN,
+    )
+    if context.keyword:
+        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
+    logs = context.db.exec(
+        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
+    ).all()
+    for log in logs:
+        snapshot = parse_inventory_snapshot(log.snapshot_json)
+        created_at = utc_iso_str(log.created_at)
+
+        def build_inventory(log=log, snapshot=snapshot, created_at=created_at):
+            is_common = bool(log.is_common)
+            detail_prefix = "加入常用货架" if is_common else "入库"
+            source = snapshot.get("source")
             return {
                 "time": created_at,
                 "type": "inventory",
-                "detail": f"入库 {inventory.name} {inventory.initial_quantity or ''}{inventory.unit or ''}",
+                "detail": f"{detail_prefix} {log.item_name} {snapshot.get('initial_quantity') or ''}{snapshot.get('unit') or ''}",
                 "full_data": {
-                    "id": inventory.id,
-                    "cas_number": inventory.cas_number,
-                    "name": inventory.name,
-                    "english_name": inventory.english_name,
-                    "alias": inventory.alias,
-                    "category": inventory.category,
-                    "brand": inventory.brand,
-                    "storage_location": inventory.storage_location,
-                    "initial_quantity": inventory.initial_quantity,
-                    "remaining_quantity": inventory.remaining_quantity,
-                    "unit": inventory.unit,
-                    "is_hazardous": inventory.is_hazardous,
-                    "notes": inventory.notes,
-                    "internal_code": inventory.internal_code,
-                    "status": inventory.status.value if inventory.status else None,
+                    "id": log.id,
+                    "inventory_id": log.inventory_id,
+                    "cas_number": log.cas_number,
+                    "name": log.item_name,
+                    "english_name": snapshot.get("english_name"),
+                    "alias": snapshot.get("alias"),
+                    "category": snapshot.get("category"),
+                    "brand": snapshot.get("brand"),
+                    "storage_location": snapshot.get("storage_location"),
+                    "initial_quantity": snapshot.get("initial_quantity"),
+                    "remaining_quantity": snapshot.get("remaining_quantity"),
+                    "unit": snapshot.get("unit"),
+                    "is_hazardous": snapshot.get("is_hazardous"),
+                    "notes": snapshot.get("notes"),
+                    "internal_code": snapshot.get("internal_code"),
+                    "status": snapshot.get("status"),
+                    "is_common": is_common,
+                    "source": source,
                     "created_at": created_at,
-                    "updated_at": utc_iso_str(inventory.updated_at),
+                    "updated_at": snapshot.get("updated_at"),
                 }
             }
 
@@ -336,47 +588,186 @@ def _append_borrow_candidates(context: LogsCollectContext, candidates: list[dict
 
 
 def _append_consume_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    from app.models.inventory import BorrowLog, Inventory
-
-    query = select(BorrowLog, Inventory).join(
-        Inventory, BorrowLog.inventory_id == Inventory.id
-    ).where(
-        BorrowLog.borrower_id == context.user_id,
-        BorrowLog.is_consume.is_(True),
-        common_inventory_clause(),
+    query = select(InventoryOperationLog).where(
+        InventoryOperationLog.operator_id == context.user_id,
+        InventoryOperationLog.action == InventoryOperationAction.COMMON_CONSUME,
     )
     if context.keyword:
-        query = query.where(Inventory.name.contains(context.keyword))
+        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
     logs = context.db.exec(
-        query.order_by(BorrowLog.borrow_time.desc()).offset(context.skip).limit(context.limit)
+        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
     ).all()
-    for log, inventory in logs:
-        consume_time = utc_iso_str(log.borrow_time)
+    for log in logs:
+        snapshot = parse_inventory_snapshot(log.snapshot_json)
+        consume_time = utc_iso_str(log.created_at)
 
-        def build_consume(log=log, inventory=inventory, consume_time=consume_time):
+        def build_consume(log=log, snapshot=snapshot, consume_time=consume_time):
+            inventory_name = snapshot.get("name") or log.item_name
             return {
                 "time": consume_time,
                 "type": "consume",
-                "detail": f"常用货架拿取 {inventory.name} 1 瓶",
+                "detail": f"常用货架拿取 {log.item_name} 1 瓶",
                 "full_data": {
                     "id": log.id,
                     "inventory_id": log.inventory_id,
-                    "inventory_name": inventory.name,
-                    "cas_number": inventory.cas_number,
+                    "inventory_name": inventory_name,
+                    "cas_number": log.cas_number,
                     "consume_time": consume_time,
-                    "quantity_consumed": log.quantity_borrowed,
-                    "unit": inventory.unit,
-                    "storage_location": inventory.storage_location,
-                    "notes": log.notes,
-                    "created_at": utc_iso_str(log.created_at),
+                    "quantity_consumed": 1,
+                    "unit": snapshot.get("unit"),
+                    "storage_location": snapshot.get("storage_location"),
+                    "notes": snapshot.get("notes"),
+                    "created_at": consume_time,
                 }
             }
 
         _append_candidate(candidates, consume_time, build_consume)
 
 
+def _append_update_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
+    query = select(InventoryOperationLog).where(
+        InventoryOperationLog.operator_id == context.user_id,
+        InventoryOperationLog.action == InventoryOperationAction.INVENTORY_UPDATE,
+    )
+    if context.keyword:
+        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
+    logs = context.db.exec(
+        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
+    ).all()
+    for log in logs:
+        snapshot = parse_inventory_snapshot(log.snapshot_json)
+        updated_at = utc_iso_str(log.created_at)
+        before_snapshot = snapshot.get("before", {})
+        after_snapshot = snapshot.get("after", {})
+
+        def build_update(
+            log=log,
+            updated_at=updated_at,
+            before_snapshot=before_snapshot,
+            after_snapshot=after_snapshot,
+        ):
+            return {
+                "time": updated_at,
+                "type": "update",
+                "detail": f"更新库存 {log.item_name}",
+                "full_data": {
+                    "id": log.id,
+                    "inventory_id": log.inventory_id,
+                    "name": log.item_name,
+                    "cas_number": log.cas_number,
+                    "before": before_snapshot,
+                    "after": after_snapshot,
+                    "created_at": updated_at,
+                },
+            }
+
+        _append_candidate(candidates, updated_at, build_update)
+
+
+def _append_delete_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
+    query = select(InventoryOperationLog).where(
+        InventoryOperationLog.operator_id == context.user_id,
+        InventoryOperationLog.action == InventoryOperationAction.INVENTORY_DELETE,
+    )
+    if context.keyword:
+        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
+    logs = context.db.exec(
+        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
+    ).all()
+    for log in logs:
+        snapshot = parse_inventory_snapshot(log.snapshot_json)
+        deleted_at = utc_iso_str(log.created_at)
+
+        def build_delete(log=log, snapshot=snapshot, deleted_at=deleted_at):
+            return {
+                "time": deleted_at,
+                "type": "delete",
+                "detail": f"删除库存 {log.item_name}",
+                "full_data": {
+                    "id": log.id,
+                    "inventory_id": log.inventory_id,
+                    "cas_number": log.cas_number,
+                    "name": log.item_name,
+                    "english_name": snapshot.get("english_name"),
+                    "alias": snapshot.get("alias"),
+                    "category": snapshot.get("category"),
+                    "brand": snapshot.get("brand"),
+                    "storage_location": snapshot.get("storage_location"),
+                    "initial_quantity": snapshot.get("initial_quantity"),
+                    "remaining_quantity": snapshot.get("remaining_quantity"),
+                    "unit": snapshot.get("unit"),
+                    "is_hazardous": snapshot.get("is_hazardous"),
+                    "notes": snapshot.get("notes"),
+                    "internal_code": snapshot.get("internal_code"),
+                    "status": snapshot.get("status"),
+                    "is_common": bool(log.is_common),
+                    "created_at": deleted_at,
+                    "updated_at": snapshot.get("updated_at"),
+                },
+            }
+
+        _append_candidate(candidates, deleted_at, build_delete)
+
+
+def _apply_export_keyword_filter(query, keyword: str | None):
+    if not keyword:
+        return query
+
+    # export 详情文本固定包含“导出库存 X 条”，这些关键词应命中全部 export 日志。
+    if keyword in "导出库存条":
+        return query
+
+    return query.where(
+        or_(
+            InventoryOperationLog.item_name.contains(keyword),
+            InventoryOperationLog.snapshot_json.contains(keyword),
+            InventoryOperationLog.notes.contains(keyword),
+        )
+    )
+
+
+def _build_session_keyword_clause(keyword: str):
+    return or_(
+        UserSession.device_name.contains(keyword),
+        UserSession.ip_address.contains(keyword),
+        UserSession.last_ip_address.contains(keyword),
+        UserSession.user_agent.contains(keyword),
+    )
+
+
+def _append_export_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
+    query = select(InventoryOperationLog).where(
+        InventoryOperationLog.operator_id == context.user_id,
+        InventoryOperationLog.action == InventoryOperationAction.INVENTORY_EXPORT,
+    )
+    query = _apply_export_keyword_filter(query, context.keyword)
+    logs = context.db.exec(
+        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
+    ).all()
+    for log in logs:
+        snapshot = parse_inventory_snapshot(log.snapshot_json)
+        export_time = utc_iso_str(log.created_at)
+
+        def build_export(log=log, snapshot=snapshot, export_time=export_time):
+            export_count = snapshot.get("count", 0)
+            return {
+                "time": export_time,
+                "type": "export",
+                "detail": f"导出库存 {export_count} 条",
+                "full_data": {
+                    "id": log.id,
+                    "count": export_count,
+                    "created_at": export_time,
+                },
+            }
+
+        _append_candidate(candidates, export_time, build_export)
+
+
 def _append_session_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
     query = select(UserSession).where(UserSession.user_id == context.user_id)
+    if context.keyword:
+        query = query.where(_build_session_keyword_clause(context.keyword))
     sessions = context.db.exec(
         query.order_by(UserSession.last_active_at.desc()).offset(context.skip).limit(context.limit)
     ).all()
@@ -404,13 +795,152 @@ def _append_session_candidates(context: LogsCollectContext, candidates: list[dic
         _append_candidate(candidates, last_active_at, build_session)
 
 
-_LOG_QUERY_BUILDERS = {
+def _exec_count_query(context: LogsCountContext, query) -> int:
+    # COUNT 查询始终返回单行单值；None 兜底是为了兼容极端驱动返回。
+    result = context.db.exec(query).one()
+    return int(result or 0)
+
+
+def _count_reagent_order_candidates(context: LogsCountContext) -> int:
+    query = select(func.count()).select_from(ReagentOrderOperationLog).where(
+        or_(
+            ReagentOrderOperationLog.actor_user_id == context.user_id,
+            ReagentOrderOperationLog.applicant_id == context.user_id,
+        )
+    )
+    if context.keyword:
+        query = query.where(_build_order_log_keyword_clause(context.keyword))
+    return _exec_count_query(context, query)
+
+
+def _count_consumable_order_candidates(context: LogsCountContext) -> int:
+    query = select(func.count()).select_from(ConsumableOrderOperationLog).where(
+        or_(
+            ConsumableOrderOperationLog.actor_user_id == context.user_id,
+            ConsumableOrderOperationLog.applicant_id == context.user_id,
+        )
+    )
+    if context.keyword:
+        query = query.where(_build_consumable_order_log_keyword_clause(context.keyword))
+    return _exec_count_query(context, query)
+
+
+def _count_inventory_operation_candidates(
+    context: LogsCountContext,
+    action: InventoryOperationAction,
+    apply_keyword: bool,
+) -> int:
+    query = select(func.count()).select_from(InventoryOperationLog).where(
+        InventoryOperationLog.operator_id == context.user_id,
+        InventoryOperationLog.action == action,
+    )
+    if apply_keyword and context.keyword:
+        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
+    return _exec_count_query(context, query)
+
+
+def _count_inventory_candidates(context: LogsCountContext) -> int:
+    return _count_inventory_operation_candidates(
+        context,
+        InventoryOperationAction.STOCK_IN,
+        apply_keyword=True,
+    )
+
+
+def _count_borrow_candidates(context: LogsCountContext) -> int:
+    from app.models.inventory import BorrowLog, Inventory
+
+    query = select(func.count()).select_from(BorrowLog).join(
+        Inventory,
+        BorrowLog.inventory_id == Inventory.id,
+    ).where(
+        BorrowLog.borrower_id == context.user_id,
+        BorrowLog.is_consume.is_(False),
+        regular_inventory_clause(),
+    )
+    if context.keyword:
+        query = query.where(Inventory.name.contains(context.keyword))
+    return _exec_count_query(context, query)
+
+
+def _count_consume_candidates(context: LogsCountContext) -> int:
+    return _count_inventory_operation_candidates(
+        context,
+        InventoryOperationAction.COMMON_CONSUME,
+        apply_keyword=True,
+    )
+
+
+def _count_update_candidates(context: LogsCountContext) -> int:
+    return _count_inventory_operation_candidates(
+        context,
+        InventoryOperationAction.INVENTORY_UPDATE,
+        apply_keyword=True,
+    )
+
+
+def _count_delete_candidates(context: LogsCountContext) -> int:
+    return _count_inventory_operation_candidates(
+        context,
+        InventoryOperationAction.INVENTORY_DELETE,
+        apply_keyword=True,
+    )
+
+
+def _count_export_candidates(context: LogsCountContext) -> int:
+    query = select(func.count()).select_from(InventoryOperationLog).where(
+        InventoryOperationLog.operator_id == context.user_id,
+        InventoryOperationLog.action == InventoryOperationAction.INVENTORY_EXPORT,
+    )
+    query = _apply_export_keyword_filter(query, context.keyword)
+    return _exec_count_query(context, query)
+
+
+def _count_session_candidates(context: LogsCountContext) -> int:
+    query = select(func.count()).select_from(UserSession).where(
+        UserSession.user_id == context.user_id
+    )
+    if context.keyword:
+        query = query.where(_build_session_keyword_clause(context.keyword))
+    return _exec_count_query(context, query)
+
+
+def _count_user_operation_candidates(context: LogsCountContext) -> int:
+    query = select(func.count()).select_from(UserOperationLog).where(
+        or_(
+            UserOperationLog.actor_user_id == context.user_id,
+            UserOperationLog.target_user_id == context.user_id,
+        )
+    )
+    if context.keyword:
+        query = query.where(_build_user_operation_keyword_clause(context.keyword))
+    return _exec_count_query(context, query)
+
+
+_LOG_QUERY_BUILDERS: dict[str, LogsCandidateBuilder] = {
     "reagent_order": _append_reagent_order_candidates,
     "consumable_order": _append_consumable_order_candidates,
     "inventory": _append_inventory_candidates,
+    "delete": _append_delete_candidates,
+    "update": _append_update_candidates,
+    "export": _append_export_candidates,
     "borrow": _append_borrow_candidates,
     "consume": _append_consume_candidates,
     "session": _append_session_candidates,
+    "user": _append_user_operation_candidates,
+}
+
+_LOG_QUERY_COUNTERS: dict[str, LogsCounter] = {
+    "reagent_order": _count_reagent_order_candidates,
+    "consumable_order": _count_consumable_order_candidates,
+    "inventory": _count_inventory_candidates,
+    "delete": _count_delete_candidates,
+    "update": _count_update_candidates,
+    "export": _count_export_candidates,
+    "borrow": _count_borrow_candidates,
+    "consume": _count_consume_candidates,
+    "session": _count_session_candidates,
+    "user": _count_user_operation_candidates,
 }
 
 
@@ -421,13 +951,47 @@ def _collect_user_logs(
     candidates: list[dict[str, object]] = []
     builders = _LOG_QUERY_BUILDERS.values() if log_type is None else (_LOG_QUERY_BUILDERS.get(log_type),)
 
+    if log_type is None:
+        # 聚合模式必须先取到每个来源的前(skip + limit)窗口，再做全局合并分页。
+        builder_context = LogsCollectContext(
+            db=context.db,
+            user_id=context.user_id,
+            keyword=context.keyword,
+            skip=0,
+            limit=context.skip + context.limit,
+        )
+    else:
+        builder_context = context
+
     for builder in builders:
         if builder is None:
             continue
-        builder(context, candidates)
+        builder(builder_context, candidates)
 
     candidates.sort(key=lambda item: item["time"], reverse=True)
     return candidates
+
+
+def _collect_user_logs_total(context: LogsCountContext, log_type: str | None) -> int:
+    counters = _LOG_QUERY_COUNTERS.values() if log_type is None else (_LOG_QUERY_COUNTERS.get(log_type),)
+
+    total = 0
+    for counter in counters:
+        if counter is None:
+            continue
+        total += counter(context)
+    return total
+
+
+def _slice_candidates_for_response(
+    candidates: list[dict[str, object]],
+    log_type: str | None,
+    skip: int,
+    limit: int,
+) -> list[dict[str, object]]:
+    if log_type is None:
+        return candidates[skip : skip + limit]
+    return candidates[:limit]
 
 @router.post("/{user_id}/logs-token")
 def generate_logs_token(
@@ -483,12 +1047,25 @@ def get_user_logs(
         ),
         log_type=request.log_type,
     )
-    selected = candidates[:limit]
+    selected = _slice_candidates_for_response(
+        candidates=candidates,
+        log_type=request.log_type,
+        skip=skip,
+        limit=limit,
+    )
     results = [item["builder"]() for item in selected]
+    total = _collect_user_logs_total(
+        context=LogsCountContext(
+            db=db,
+            user_id=user_id,
+            keyword=request.keyword,
+        ),
+        log_type=request.log_type,
+    )
 
     return {
         "user_id": user_id,
         "username": user.username,
         "data": results,
-        "total": len(candidates)
+        "total": total,
     }

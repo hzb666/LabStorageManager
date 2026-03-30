@@ -9,6 +9,26 @@ from .inventory import (
     BorrowLogResponse,
     InventoryResponse,
 )
+from .inventory_operation_log import (
+    InventoryOperationAction,
+    InventoryOperationLog,
+    InventoryOperationLogResponse,
+)
+from .reagent_order_operation_log import (
+    ReagentOrderOperationAction,
+    ReagentOrderOperationLog,
+    ReagentOrderOperationLogResponse,
+)
+from .consumable_order_operation_log import (
+    ConsumableOrderOperationAction,
+    ConsumableOrderOperationLog,
+    ConsumableOrderOperationLogResponse,
+)
+from .user_operation_log import (
+    UserOperationAction,
+    UserOperationLog,
+    UserOperationLogResponse,
+)
 from .reagent_order import (
     ReagentOrder,
     ReagentOrderStatus,
@@ -52,6 +72,18 @@ __all__ = [
     "BorrowLog",
     "BorrowLogResponse",
     "InventoryResponse",
+    "InventoryOperationAction",
+    "InventoryOperationLog",
+    "InventoryOperationLogResponse",
+    "ReagentOrderOperationAction",
+    "ReagentOrderOperationLog",
+    "ReagentOrderOperationLogResponse",
+    "ConsumableOrderOperationAction",
+    "ConsumableOrderOperationLog",
+    "ConsumableOrderOperationLogResponse",
+    "UserOperationAction",
+    "UserOperationLog",
+    "UserOperationLogResponse",
     # Reagent Order
     "ReagentOrder",
     "ReagentOrderStatus",

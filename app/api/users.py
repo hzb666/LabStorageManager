@@ -47,6 +47,7 @@ from app.models.user import (
     UserResponse,
     UserRole,
 )
+from app.models.user_operation_log import UserOperationAction
 from app.models.user_session import UserSession
 from app.services.image_service import save_avatar, delete_file
 from app.services.rate_limit import enforce_rate_limit
@@ -57,17 +58,24 @@ from app.services.sql_utils import normalize_search_term
 from app.services.session_service import (
     cleanup_expired_sessions,
     SessionCreationRequest,
+    SessionCacheIdentity,
     _check_device_limit,
     _check_ip_limit,
     _evict_oldest_session,
-    _create_user_session,
     finalize_revoked_sessions,
-    revoke_session,
+    stage_create_or_refresh_user_session,
     stage_revoke_user_sessions,
+    sync_session_cache,
     LOGIN_ATTEMPTS,
     _login_attempts_lock,
 )
 from app.services.audit_logger import AuditEventContext, log_audit_event
+from app.services.user_operation_logger import (
+    build_user_snapshot,
+    log_user_operation,
+    log_user_profile_update,
+    log_user_sensitive_update,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -361,6 +369,44 @@ class UserSearchItem(BaseModel):
     full_name: str
 
 
+def _finalize_expired_login_cleanup(expired_token_hashes: list[str]) -> None:
+    if not expired_token_hashes:
+        return
+    try:
+        finalize_revoked_sessions(expired_token_hashes, reason="expired_session_cleanup")
+    except Exception:
+        logger.exception("Post-commit session side effects failed for login cleanup")
+
+
+def _apply_login_post_commit_side_effects(
+    *,
+    db: DBSession,
+    session: UserSession,
+    user: User,
+    expired_token_hashes: list[str],
+    evicted_token_hashes: list[str],
+    relogin_token_hashes: list[str],
+) -> None:
+    try:
+        db.refresh(session)
+        _finalize_expired_login_cleanup(expired_token_hashes)
+        if evicted_token_hashes:
+            finalize_revoked_sessions(evicted_token_hashes, reason="device_limit_evict")
+        if relogin_token_hashes:
+            finalize_revoked_sessions(relogin_token_hashes, reason="device_relogin")
+        sync_session_cache(
+            session=session,
+            identity=SessionCacheIdentity(
+                user_id=user.id,
+                username=user.username,
+                is_active=True,
+            ),
+        )
+    except Exception:
+        # 会话缓存/SSE 通知属于提交后副作用，失败不应回滚登录主流程。
+        logger.exception("Post-commit session side effects failed for login user_id=%s", user.id)
+
+
 @router.post("/login")
 def login(
     login_request: LoginRequest,
@@ -368,9 +414,10 @@ def login(
     db: DBSession,
 ):
     try:
+        expired_token_hashes: list[str] = []
         # 维护任务失败不能放大成登录失败，只做回滚和记录。
         try:
-            cleanup_expired_sessions(db)
+            expired_token_hashes = cleanup_expired_sessions(db, commit=False)
         except Exception:
             # 会话清理是维护任务，不应阻断登录主流程
             db.rollback()
@@ -387,12 +434,25 @@ def login(
 
         if not user or not password_valid:
             _record_failed_login(client_ip)
+            log_user_operation(
+                db,
+                action=UserOperationAction.LOGIN,
+                actor_user_id=None,
+                target_user_id=user.id if user else None,
+                outcome="failure",
+                client_ip=client_ip,
+                request_id=get_request_id(http_request),
+                detail=f"username={login_request.username}",
+                snapshot={"un": login_request.username},
+            )
+            db.commit()
             log_audit_event(
                 "login",
                 outcome="failure",
                 context=_build_audit_context(http_request),
                 detail=f"username={login_request.username}",
             )
+            _finalize_expired_login_cleanup(expired_token_hashes)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
@@ -400,6 +460,18 @@ def login(
             )
         
         if not user.is_active:
+            log_user_operation(
+                db,
+                action=UserOperationAction.LOGIN,
+                actor_user_id=user.id,
+                target_user_id=user.id,
+                outcome="failure",
+                client_ip=client_ip,
+                request_id=get_request_id(http_request),
+                detail="account_disabled",
+                snapshot=build_user_snapshot(user),
+            )
+            db.commit()
             log_audit_event(
                 "login",
                 context=_build_audit_context(
@@ -410,6 +482,7 @@ def login(
                 outcome="failure",
                 detail="account_disabled",
             )
+            _finalize_expired_login_cleanup(expired_token_hashes)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is disabled"
@@ -422,8 +495,9 @@ def login(
             )
         
         # 新设备登录前先淘汰最旧会话，保持既有设备上限策略。
+        evicted_token_hashes: list[str] = []
         if not _check_device_limit(db, user.id, login_request.device_id):
-            _evict_oldest_session(db, user.id)
+            evicted_token_hashes = _evict_oldest_session(db, user.id, commit=False)
         
         user_role = user.role.value if isinstance(user.role, UserRole) else str(user.role)
         access_token = create_access_token(
@@ -433,7 +507,7 @@ def login(
             username_version=user.username_version or 1
         )
         
-        _create_user_session(
+        session, relogin_token_hashes = stage_create_or_refresh_user_session(
             db=db,
             request=SessionCreationRequest(
                 user_id=user.id,
@@ -467,7 +541,18 @@ def login(
             max_age=settings.session_expire_hours * SECONDS_PER_HOUR,
             path="/",
         )
-
+        log_user_operation(
+            db,
+            action=UserOperationAction.LOGIN,
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            outcome="success",
+            client_ip=client_ip,
+            request_id=get_request_id(http_request),
+            detail=f"device_id={login_request.device_id or '-'}",
+            snapshot=build_user_snapshot(user),
+        )
+        db.commit()
         log_audit_event(
             "login",
             context=_build_audit_context(
@@ -476,6 +561,14 @@ def login(
                 target_user_id=user.id,
             ),
             detail=f"device_id={login_request.device_id or '-'}",
+        )
+        _apply_login_post_commit_side_effects(
+            db=db,
+            session=session,
+            user=user,
+            expired_token_hashes=expired_token_hashes,
+            evicted_token_hashes=evicted_token_hashes,
+            relogin_token_hashes=relogin_token_hashes,
         )
         
         return json_response
@@ -501,6 +594,7 @@ def logout(
     client_ip = get_client_ip(http_request)
     request_id = get_request_id(http_request)
     actor_user_id: int | None = None
+    revoked_token_hashes: list[str] = []
     if token:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
 
@@ -510,7 +604,8 @@ def logout(
         ).first()
         if session:
             actor_user_id = session.user_id
-            revoke_session(db, session, reason="logout", commit=True)
+            revoked_token_hashes.append(session.token_hash)
+            db.delete(session)
     
     response = JSONResponse(content={"message": "Logged out successfully"})
     
@@ -518,7 +613,16 @@ def logout(
         key="access_token",
         path="/",
     )
-
+    log_user_operation(
+        db,
+        action=UserOperationAction.LOGOUT,
+        actor_user_id=actor_user_id,
+        target_user_id=actor_user_id,
+        outcome="success",
+        client_ip=client_ip,
+        request_id=request_id,
+    )
+    db.commit()
     log_audit_event(
         "logout",
         context=AuditEventContext(
@@ -528,6 +632,12 @@ def logout(
             request_id=request_id,
         ),
     )
+
+    if revoked_token_hashes:
+        try:
+            finalize_revoked_sessions(revoked_token_hashes, reason="logout")
+        except Exception:
+            logger.exception("Post-commit session side effects failed for logout user_id=%s", actor_user_id)
     
     return response
 
@@ -559,12 +669,20 @@ def change_password(
             detail="New password cannot be the same as old password"
         )
     
-    # 先在同一事务中提交“密码变更 + 会话删除”，再做缓存/SSE 通知。
+    # 在同一事务内提交“密码变更 + 日志 + 会话删除”。
     current_user.password_hash = get_password_hash(password_request.new_password)
     revoked_hashes = stage_revoke_user_sessions(db, current_user.id)
+    log_user_operation(
+        db,
+        action=UserOperationAction.CHANGE_PASSWORD,
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        outcome="success",
+        client_ip=client_ip,
+        request_id=get_request_id(http_request),
+        snapshot=build_user_snapshot(current_user),
+    )
     db.commit()
-    finalize_revoked_sessions(revoked_hashes, reason="password_changed")
-
     log_audit_event(
         "change_password",
         context=AuditEventContext(
@@ -574,13 +692,21 @@ def change_password(
             request_id=get_request_id(http_request),
         ),
     )
+
+    if revoked_hashes:
+        try:
+            finalize_revoked_sessions(revoked_hashes, reason="password_changed")
+        except Exception:
+            logger.exception("Post-commit session side effects failed for password change user_id=%s", current_user.id)
     
     return {"message": "密码修改成功"}
 
 
-@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(
     user: UserCreate,
+    request: Request,
+    current_user: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ):
     existing = get_user_by_username(db, user.username)
@@ -601,6 +727,18 @@ def create_user(
     )
 
     db.add(db_user)
+    db.flush()
+    log_user_operation(
+        db,
+        action=UserOperationAction.CREATE_USER,
+        actor_user_id=current_user.id,
+        target_user_id=db_user.id,
+        outcome="success",
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+        detail=f"role={db_user.role.value if hasattr(db_user.role, 'value') else db_user.role}",
+        snapshot=build_user_snapshot(db_user),
+    )
     db.commit()
     db.refresh(db_user)
 
@@ -698,6 +836,7 @@ def update_user(
             detail="User not found"
         )
 
+    before_user = User.model_validate(user)
     update_data = user_update.model_dump(exclude_unset=True)
     update_data.pop("avatar_url", None)
     _validate_update_user_fields(current_user, user_id, update_data)
@@ -717,6 +856,32 @@ def update_user(
     if revoke_reason:
         # 先暂存待撤销会话，等主事务提交成功后再删缓存和发 SSE。
         staged_revoked_hashes = stage_revoke_user_sessions(db, user_id)
+
+    detail_fields = ",".join(sorted(update_data.keys()))
+    client_ip = get_client_ip(request)
+    request_id = get_request_id(request)
+    if any(field in update_data for field in ("role", "is_active", "username")):
+        log_user_sensitive_update(
+            db,
+            actor_user_id=current_user.id,
+            target_user_id=user.id,
+            before_user=before_user,
+            after_user=user,
+            client_ip=client_ip,
+            request_id=request_id,
+            detail=f"fields={detail_fields}",
+        )
+    else:
+        log_user_profile_update(
+            db,
+            actor_user_id=current_user.id,
+            target_user_id=user.id,
+            before_user=before_user,
+            after_user=user,
+            client_ip=client_ip,
+            request_id=request_id,
+            detail=f"fields={detail_fields}",
+        )
 
     db.commit()
     db.refresh(user)
@@ -749,6 +914,16 @@ def activate_user(
         )
     
     user.is_active = True
+    log_user_operation(
+        db,
+        action=UserOperationAction.ACTIVATE_USER,
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        outcome="success",
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+        snapshot=build_user_snapshot(user),
+    )
     db.commit()
     db.refresh(user)
 
@@ -787,6 +962,16 @@ def delete_user(
     user.is_active = False
 
     staged_revoked_hashes = stage_revoke_user_sessions(db, user_id)
+    log_user_operation(
+        db,
+        action=UserOperationAction.DEACTIVATE_USER,
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        outcome="success",
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+        snapshot=build_user_snapshot(user),
+    )
     db.commit()
     finalize_revoked_sessions(staged_revoked_hashes, reason="user_deactivated")
 
@@ -827,6 +1012,18 @@ def update_user_role(
     staged_revoked_hashes: list[str] = []
     if user.role != old_role:
         staged_revoked_hashes = stage_revoke_user_sessions(db, user_id)
+
+    log_user_operation(
+        db,
+        action=UserOperationAction.UPDATE_USER_ROLE,
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        outcome="success",
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+        detail=f"new_role={user.role.value if hasattr(user.role, 'value') else user.role}",
+        snapshot=build_user_snapshot(user),
+    )
 
     db.commit()
     db.refresh(user)
@@ -890,6 +1087,16 @@ def reset_user_password(
     # 在同一事务中提交“密码变更 + 会话删除”，提交成功后再做缓存/SSE 通知。
     user.password_hash = get_password_hash(password_request.new_password)
     staged_revoked_hashes = stage_revoke_user_sessions(db, user.id)
+    log_user_operation(
+        db,
+        action=UserOperationAction.RESET_USER_PASSWORD,
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        outcome="success",
+        client_ip=client_ip,
+        request_id=get_request_id(request),
+        snapshot=build_user_snapshot(user),
+    )
     db.commit()
     finalize_revoked_sessions(staged_revoked_hashes, reason="password_reset")
 
@@ -908,6 +1115,7 @@ def reset_user_password(
 @router.delete("/{user_id}/avatar", response_model=dict)
 def delete_avatar(
     user_id: int,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
@@ -929,6 +1137,16 @@ def delete_avatar(
         delete_file(user.avatar_url, required_subdir="avatars")
     
     user.avatar_url = None
+    log_user_operation(
+        db,
+        action=UserOperationAction.DELETE_AVATAR,
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        outcome="success",
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+        snapshot=build_user_snapshot(user),
+    )
     db.commit()
     db.refresh(user)
     
@@ -971,6 +1189,16 @@ def upload_avatar(
     avatar_url = save_avatar(file, user_id)
 
     user.avatar_url = avatar_url
+    log_user_operation(
+        db,
+        action=UserOperationAction.UPLOAD_AVATAR,
+        actor_user_id=current_user.id,
+        target_user_id=user.id,
+        outcome="success",
+        client_ip=client_ip,
+        request_id=get_request_id(request),
+        snapshot=build_user_snapshot(user),
+    )
     db.commit()
     db.refresh(user)
 

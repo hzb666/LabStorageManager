@@ -3,13 +3,25 @@ from dataclasses import dataclass
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Any, Tuple, Optional
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
 from app.models.inventory import Inventory, InventoryStatus
 from app.services.api_utils import empty_to_none
 from app.services.cas_utils import normalize_cas, validate_cas_format
-from app.services.spec_utils import parse_specification
+from app.services.internal_code import (
+    INTERNAL_CODE_CONFLICT_MAX_RETRIES,
+    build_internal_code_prefix,
+    format_internal_code,
+    get_max_sequence_for_prefix,
+    is_internal_code_unique_violation,
+)
+from app.services.inventory_operation_logger import (
+    SOURCE_BATCH_IMPORT,
+    log_stock_in,
+)
+from app.services.spec_utils import format_specification, parse_specification
 from app.services.shelf_utils import normalize_storage_location
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.core.constants import (
@@ -17,7 +29,6 @@ from app.core.constants import (
     EXCEL_FILE_MAX_BYTES,
     EXCEL_RED_FONT_COLOR,
     INTERNAL_CODE_MAX_SEQUENCE,
-    INTERNAL_CODE_SEQUENCE_PAD_WIDTH,
 )
 from app.core.time_utils import get_utc_now
 
@@ -75,6 +86,18 @@ class ExcelImportContext:
     default_storage_location: Optional[str]
     default_is_hazardous: bool
     user_id: int
+
+
+@dataclass
+class PreparedInventoryImport:
+    total_rows: int
+    created_items: list[Inventory]
+    errors: list[dict[str, Any]]
+    preview_items: list[dict[str, Any]]
+
+    @property
+    def valid_rows(self) -> int:
+        return len(self.created_items)
 
 
 REQUIRED_IMPORT_COLUMNS = {"cas_number", "name", "specification"}
@@ -157,17 +180,11 @@ def _generate_internal_code_with_tracking(
     sequence_tracker: dict[tuple[str, str], int],
     created_at: Optional[datetime] = None
 ) -> str:
-    from sqlmodel import select
-    
     # 同一批次里相同 CAS 也要拿到不同流水号，否则会撞内部编码唯一约束。
-    if created_at:
-        date_str = created_at.strftime("%y%m%d")
-    else:
-        date_str = get_utc_now().strftime("%y%m%d")
-    
-    cas_code = cas_number.replace("-", "")
-    tracker_key = (cas_code, date_str)
-    
+    date_str = (created_at or get_utc_now()).strftime("%y%m%d")
+    prefix = build_internal_code_prefix(cas_number, created_at=created_at)
+    tracker_key = (prefix, date_str)
+
     if tracker_key in sequence_tracker:
         seq = sequence_tracker[tracker_key]
         if seq > INTERNAL_CODE_MAX_SEQUENCE:
@@ -177,24 +194,7 @@ def _generate_internal_code_with_tracking(
             )
         sequence_tracker[tracker_key] = seq + 1
     else:
-        prefix = f"{cas_code}-{date_str}-"
-        
-        statement = select(Inventory).where(
-            Inventory.internal_code.like(f"{prefix}%")
-        )
-        results = db.exec(statement).all()
-        
-        max_seq = 0
-        prefix_len = len(prefix)
-        for item in results:
-            code_part = item.internal_code[prefix_len:]
-            try:
-                seq_num = int(code_part)
-                if seq_num > max_seq:
-                    max_seq = seq_num
-            except ValueError:
-                continue
-        
+        max_seq = get_max_sequence_for_prefix(db, prefix)
         seq = max_seq + 1
         if seq > INTERNAL_CODE_MAX_SEQUENCE:
             raise ValueError(
@@ -202,8 +202,8 @@ def _generate_internal_code_with_tracking(
                 f"max is {INTERNAL_CODE_MAX_SEQUENCE}"
             )
         sequence_tracker[tracker_key] = seq + 1
-    
-    return f"{cas_code}-{date_str}-{str(seq).zfill(INTERNAL_CODE_SEQUENCE_PAD_WIDTH)}"
+
+    return format_internal_code(prefix, seq)
 
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
@@ -373,13 +373,47 @@ def _build_inventory_from_import_row(
     )
 
 
-def import_inventory_from_excel(
+def _serialize_import_preview_item(row_num: int, inventory: Inventory) -> dict[str, Any]:
+    return {
+        "row": row_num,
+        "cas_number": inventory.cas_number,
+        "name": inventory.name,
+        "brand": inventory.brand,
+        "category": inventory.category,
+        "specification": format_specification(inventory.initial_quantity, inventory.unit),
+        "remaining_quantity": inventory.remaining_quantity,
+        "storage_location": inventory.storage_location,
+    }
+
+
+def _build_import_result(
+    prepared: PreparedInventoryImport,
+    *,
+    created: int,
+) -> dict[str, Any]:
+    return {
+        "success": len(prepared.errors) == 0,
+        "total_rows": prepared.total_rows,
+        "valid_rows": prepared.valid_rows,
+        "created": created,
+        "errors": prepared.errors,
+        "preview_items": prepared.preview_items,
+    }
+
+
+def _prepare_inventory_import(
     db: Session,
     file_path: str,
     default_storage_location: Optional[str] = None,
     default_is_hazardous: bool = False,
-    user_id: int = 1
-) -> dict:
+    user_id: int = 1,
+) -> PreparedInventoryImport:
+    df = _parse_import_dataframe(file_path)
+    normalized_df = _normalize_import_columns(df)
+    _validate_required_import_columns(df, normalized_df)
+    errors: list[dict[str, Any]] = []
+    preview_items: list[dict[str, Any]] = []
+    created_items: list[Inventory] = []
     sequence_tracker: dict[tuple[str, str], int] = {}
     import_context = ExcelImportContext(
         db=db,
@@ -388,11 +422,6 @@ def import_inventory_from_excel(
         default_is_hazardous=default_is_hazardous,
         user_id=user_id,
     )
-    df = _parse_import_dataframe(file_path)
-    normalized_df = _normalize_import_columns(df)
-    _validate_required_import_columns(df, normalized_df)
-    created_count = 0
-    errors = []
 
     for idx, row in normalized_df.iterrows():
         row_num = idx + 2
@@ -400,39 +429,106 @@ def import_inventory_from_excel(
         if not is_valid:
             errors.append({"row": row_num, "error": error})
             continue
-
         try:
             inventory = _build_inventory_from_import_row(
                 import_context,
                 row,
             )
-            db.add(inventory)
-            created_count += 1
         except Exception as exc:
             errors.append({"row": row_num, "error": str(exc)})
+            continue
 
-    # 批量导入保持全有或全无，避免同一文件只导入部分行后难以审计和回滚。
-    if errors:
-        db.rollback()
-        return {
-            "success": False,
-            "total_rows": len(normalized_df),
-            "created": 0,
-            "errors": errors,
-        }
-    
-    try:
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise Exception(f"Failed to save imported data: {str(e)}")
-    
-    return {
-        "success": len(errors) == 0,
-        "total_rows": len(normalized_df),
-        "created": created_count,
-        "errors": errors
-    }
+        created_items.append(inventory)
+        preview_items.append(_serialize_import_preview_item(row_num, inventory))
+
+    return PreparedInventoryImport(
+        total_rows=len(normalized_df),
+        created_items=created_items,
+        errors=errors,
+        preview_items=preview_items,
+    )
+
+
+def _persist_imported_inventory(
+    db: Session,
+    *,
+    created_items: list[Inventory],
+    user_id: int,
+) -> None:
+    with db.begin_nested():
+        for inventory in created_items:
+            db.add(inventory)
+
+        db.flush()
+        for inventory in created_items:
+            log_stock_in(
+                db,
+                inventory=inventory,
+                operator_id=user_id,
+                source=SOURCE_BATCH_IMPORT,
+            )
+        db.flush()
+
+    db.commit()
+
+
+def preview_inventory_import_from_excel(
+    db: Session,
+    file_path: str,
+    default_storage_location: Optional[str] = None,
+    default_is_hazardous: bool = False,
+    user_id: int = 1,
+) -> dict[str, Any]:
+    prepared = _prepare_inventory_import(
+        db=db,
+        file_path=file_path,
+        default_storage_location=default_storage_location,
+        default_is_hazardous=default_is_hazardous,
+        user_id=user_id,
+    )
+    db.rollback()
+    return _build_import_result(prepared, created=0)
+
+
+def confirm_inventory_import_from_excel(
+    db: Session,
+    file_path: str,
+    default_storage_location: Optional[str] = None,
+    default_is_hazardous: bool = False,
+    user_id: int = 1,
+) -> dict[str, Any]:
+    # 批量导入保持全有或全无；确认阶段会重新完整校验，避免预览后文件变化导致脏写入。
+    for attempt in range(INTERNAL_CODE_CONFLICT_MAX_RETRIES):
+        prepared = _prepare_inventory_import(
+            db=db,
+            file_path=file_path,
+            default_storage_location=default_storage_location,
+            default_is_hazardous=default_is_hazardous,
+            user_id=user_id,
+        )
+        if prepared.errors:
+            db.rollback()
+            return _build_import_result(prepared, created=0)
+
+        try:
+            _persist_imported_inventory(
+                db,
+                created_items=prepared.created_items,
+                user_id=user_id,
+            )
+            return _build_import_result(prepared, created=prepared.valid_rows)
+        except IntegrityError as exc:
+            if not is_internal_code_unique_violation(exc):
+                db.rollback()
+                raise Exception(f"Failed to save imported data: {str(exc)}") from exc
+            db.rollback()
+            if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
+                raise Exception("Failed to allocate unique internal codes during import, please retry") from exc
+        except Exception as exc:
+            db.rollback()
+            raise Exception(f"Failed to save imported data: {str(exc)}") from exc
+
+    raise Exception("Failed to import inventory after retries")
 
 
 def generate_excel_template() -> bytes:
