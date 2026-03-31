@@ -49,9 +49,10 @@ class CommonShelfOperationLog(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     common_shelf_id: int = Field(default=0, index=False)
-    operator_id: int = Field(
+    operator_id: Optional[int] = Field(
+        default=None,
         foreign_key="users.id",
-        ondelete="CASCADE",
+        ondelete="SET NULL",
     )
     action: CommonShelfOperationAction = Field(
         sa_column=Column(
@@ -77,7 +78,7 @@ class CommonShelfOperationLogResponse(BaseResponse):
 
     id: int
     common_shelf_id: int
-    operator_id: int
+    operator_id: Optional[int]
     action: CommonShelfOperationAction
     created_at: datetime
     item_name: str
