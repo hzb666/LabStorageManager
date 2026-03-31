@@ -12,6 +12,7 @@ export interface ReagentOrderExpandedRowProps {
   cas_number: string;
   english_name?: string | null;
   alias?: string | null;
+  purity?: string | null;
   notes?: string | null;
 }
 
@@ -184,6 +185,7 @@ export const ReagentOrderExpandedRow = React.memo(
         <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
           <div>英文名称：{item.english_name || "-"}</div>
           <div>别名：{item.alias || "-"}</div>
+          <div>纯度：{item.purity || "-"}</div>
           <div>备注：{item.notes || "-"}</div>
           <CasOverviewDetails
             casOverview={casOverview}

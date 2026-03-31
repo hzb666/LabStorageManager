@@ -12,6 +12,13 @@ import type {
   ReagentOrderFormInputData,
   ConsumableOrderFormInputData,
   InventoryFormInputData,
+  CommonShelfItemEditRowInputData,
+  CommonShelfManualAddInputData,
+  CommonShelfGroupEditInputData,
+  CommonShelfAddBottlesInputData,
+  CommonShelfRemoveOneInputData,
+  ChemicalNameMapFormInputData,
+  CommonPublicArrivalFormInputData,
   UserUpdateFormData,
   StockInFormInputData,
   ReturnFormInputData,
@@ -21,6 +28,7 @@ import {
   REAGENT_CATEGORY_OPTIONS,
   REAGENT_BRAND_OPTIONS,
 } from './options'
+import { CHEMICAL_CATEGORY_LABELS } from './constants'
 
 // 为 `cas_number` 字段统一挂载识别按钮与可选 blur 检查，避免页面重复 map 字段。
 export function enhanceCasLookupField<T extends FieldValues>(
@@ -64,6 +72,7 @@ export const defaultInventoryValues: InventoryFormInputData = {
   specification: '',
   category: '',
   brand: '',
+  purity: '',
   storage_location: '',
   is_hazardous: false,
   notes: '',
@@ -108,6 +117,7 @@ export function getInventoryFormFields(
     { name: 'storage_location' as const, label: '存放位置', type: 'input' as const, placeholder: '如: A-1-1 柜' },
     ...quantityFields,
     { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: brandOptions, placeholder: '输入品牌名称' },
+    { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如: 95%、AR、HPLC' },
     { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: categoryOptions, placeholder: '输入分类名称' },
     {
       name: 'is_hazardous' as const,
@@ -137,6 +147,7 @@ export const defaultReagentOrderValues = {
   alias: '',
   category: '',
   brand: '',
+  purity: '',
   specification: '',
   quantity: 1,
   price: undefined as unknown as number,
@@ -166,6 +177,7 @@ export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormInputDa
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
     { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称' },
+    { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如: 95%、AR、HPLC' },
     { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' },
     {
       name: 'quantity' as const,
@@ -308,7 +320,10 @@ export const defaultStockInValues: StockInFormInputData = {
 }
 
 // 获取入库表单字段配置
-export function getStockInFormFields(unit?: string): FieldSchema<StockInFormInputData>[] {
+export function getStockInFormFields(
+  unit?: string,
+  locationOptions?: { label: string; value: string }[],
+): FieldSchema<StockInFormInputData>[] {
   return [
     {
       name: 'remaining_quantity' as const,
@@ -321,10 +336,132 @@ export function getStockInFormFields(unit?: string): FieldSchema<StockInFormInpu
     {
       name: 'storage_location' as const,
       label: '库存位置',
-      type: 'input' as const,
+      type: locationOptions ? 'autocomplete' as const : 'input' as const,
+      options: locationOptions,
       required: true,
       placeholder: '如: A-1-1 柜',
     },
+  ]
+}
+
+// ============================================================================
+// CommonShelf 表单配置
+// ============================================================================
+
+const CHEMICAL_CATEGORY_FORM_OPTIONS = Object.entries(CHEMICAL_CATEGORY_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}))
+
+export function getCommonShelfManualAddFormFields(): FieldSchema<CommonShelfManualAddInputData>[] {
+  return [
+    { name: 'cas_number' as const, label: 'CAS', type: 'input' as const },
+    { name: 'name_snapshot' as const, label: '名称', type: 'input' as const },
+    { name: 'brand' as const, label: '品牌', type: 'input' as const },
+    { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如 95%、AR、HPLC' },
+    { name: 'specification' as const, label: '规格', type: 'input' as const, placeholder: '如 500mL' },
+    { name: 'count' as const, label: '瓶数', type: 'number' as const },
+    { name: 'storage_location' as const, label: '位置', type: 'input' as const },
+    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 2 },
+  ]
+}
+
+export function getCommonShelfEditFormFields(): FieldSchema<CommonShelfGroupEditInputData>[] {
+  return [
+    { name: 'brand' as const, label: '品牌', type: 'input' as const },
+    { name: 'specification' as const, label: '规格', type: 'input' as const },
+  ]
+}
+
+export function getCommonShelfItemEditFormFields(
+  hideLabel = false,
+): FieldSchema<CommonShelfItemEditRowInputData>[] {
+  return [
+    {
+      name: 'purity' as const,
+      label: '纯度',
+      type: 'input' as const,
+      hideLabel,
+      placeholder: '如 95%、AR、HPLC',
+    },
+    {
+      name: 'storage_location' as const,
+      label: '位置',
+      type: 'input' as const,
+      hideLabel,
+      placeholder: '如 A-1-1 柜',
+    },
+    {
+      name: 'notes' as const,
+      label: '备注',
+      type: 'input' as const,
+      hideLabel,
+      placeholder: '选填',
+    },
+  ]
+}
+
+export function getCommonPublicArrivalFormFields(
+  locationSuggestions: string[],
+): FieldSchema<CommonPublicArrivalFormInputData>[] {
+  return [
+    {
+      name: 'storage_location' as const,
+      label: '常用货架位置',
+      type: 'autocomplete' as const,
+      options: locationSuggestions.map((item) => ({ label: item, value: item })),
+      required: true,
+      placeholder: '输入或选择当前位置',
+    },
+  ]
+}
+
+export function getCommonShelfAddBottlesFormFields(
+  locationSuggestions: string[],
+): FieldSchema<CommonShelfAddBottlesInputData>[] {
+  return [
+    { name: 'count' as const, label: '新增瓶数', type: 'number' as const },
+    {
+      name: 'storage_location' as const,
+      label: '位置',
+      type: 'autocomplete' as const,
+      options: locationSuggestions.map((item) => ({ label: item, value: item })),
+      placeholder: '输入或选择当前位置',
+    },
+  ]
+}
+
+export function getCommonShelfRemoveOneFormFields(
+  locationOptions: Array<{ value: string; label: string }>,
+): FieldSchema<CommonShelfRemoveOneInputData>[] {
+  return [
+    {
+      name: 'storage_location' as const,
+      label: '位置',
+      type: 'select' as const,
+      options: locationOptions,
+      placeholder: '请选择位置',
+    },
+  ]
+}
+
+export function getChemicalNameMapFormFields(
+  isEdit: boolean,
+): FieldSchema<ChemicalNameMapFormInputData>[] {
+  return [
+    { name: 'cas_number' as const, label: 'CAS', type: 'input' as const, disabled: isEdit },
+    {
+      name: 'category' as const,
+      label: '分类',
+      type: 'autocomplete' as const,
+      options: CHEMICAL_CATEGORY_FORM_OPTIONS,
+      placeholder: '可留空或选择分类',
+    },
+    { name: 'name' as const, label: '中文名称', type: 'input' as const, colSpan: 2 },
+    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2 },
+    { name: 'alias_1' as const, label: '别名1', type: 'input' as const },
+    { name: 'alias_2' as const, label: '别名2', type: 'input' as const },
+    { name: 'alias_3' as const, label: '别名3', type: 'input' as const },
   ]
 }
 

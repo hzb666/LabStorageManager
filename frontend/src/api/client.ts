@@ -86,6 +86,7 @@ api.interceptors.response.use(
 // Paginated response type
 export interface PaginatedResponse<T> {
   data: T[]
+  current?: number
   total: number
   skip: number
   limit: number
@@ -267,6 +268,7 @@ export const reagentOrderAPI = {
     alias?: string
     category?: string
     brand?: string
+    purity?: string
     specification: string
     quantity: number
     price: number
@@ -389,6 +391,7 @@ export const inventoryAPI = {
     quantity_bottles: number
     brand?: string
     category?: string
+    purity?: string
     storage_location?: string
     is_hazardous: boolean
     notes?: string
@@ -396,34 +399,158 @@ export const inventoryAPI = {
   exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
 }
 
+export type ChemicalCategory =
+  | 'acid'
+  | 'base'
+  | 'salt'
+  | 'solvent'
+  | 'catalyst'
+  | 'indicator'
+  | 'other'
+
+export interface CommonShelfGroupIdentity {
+  group_key: string
+  cas_number: string
+  brand: string | null
+  brand_normalized: string
+  specification_text: string
+  specification_normalized: string
+}
+
+export interface CommonShelfGroupDisplay {
+  name: string
+  english_name: string | null
+  category: ChemicalCategory | null
+  purity: string | null
+  notes: string | null
+}
+
+export interface CommonShelfGroup {
+  id: string
+  group: CommonShelfGroupIdentity
+  display: CommonShelfGroupDisplay
+  bottle_count: number
+  location_count: number
+  latest_name_snapshot: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CommonShelfLocationSummary {
+  storage_location: string | null
+  bottle_count: number
+  oldest_created_at: string
+}
+
+export interface CommonShelfGroupItem {
+  id: number
+  internal_code: string
+  purity: string | null
+  storage_location: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ChemicalNameMapItem {
+  id: number
+  cas_number: string
+  name: string
+  english_name: string | null
+  alias_1: string | null
+  alias_2: string | null
+  alias_3: string | null
+  category: ChemicalCategory | null
+  created_at: string
+  updated_at: string
+}
+
 export const commonShelfAPI = {
-  list: (params?: PaginationParams & {
-    status_filter?: string
+  list: async (params?: PaginationParams & {
     search?: string
     search_field?: string
     fuzzy?: boolean
     sort_by?: string
     sort_order?: string
-  }) => api.get('/inventory/common-shelf', { params }),
-  consumeOne: (sampleInventoryId: number) =>
-    api.post('/inventory/common-shelf/consume-one', { sample_inventory_id: sampleInventoryId }),
+  }) => {
+    const response = await api.get<PaginatedResponse<Omit<CommonShelfGroup, 'id'>>>('/common-shelf/groups', { params })
+    return {
+      ...response,
+      data: {
+        ...response.data,
+        data: response.data.data.map((item) => ({
+          ...item,
+          id: item.group.group_key,
+        })),
+      },
+    }
+  },
   manualAdd: (data: {
+    cas_number: string
+    name_snapshot: string
+    brand?: string
+    purity?: string
+    specification: string
+    count: number
+    storage_location?: string
+    notes?: string
+  }) => api.post('/common-shelf/manual-add', data),
+  getLocations: (groupKey: string) =>
+    api.get<CommonShelfLocationSummary[]>(`/common-shelf/groups/${groupKey}/locations`),
+  getLocationSuggestions: (groupKey: string) =>
+    api.get<string[]>(`/common-shelf/groups/${groupKey}/location-suggestions`),
+  getLocationSuggestionsByFields: (params: {
+    cas_number: string
+    brand?: string
+    specification: string
+  }) => api.get<string[]>('/common-shelf/location-suggestions', { params }),
+  getGroupItems: (groupKey: string) =>
+    api.get<CommonShelfGroupItem[]>(`/common-shelf/groups/${groupKey}/items`),
+  updateGroup: (groupKey: string, data: {
+    brand?: string
+    specification: string
+    confirm_merge?: boolean
+  }) => api.put(`/common-shelf/groups/${groupKey}`, data),
+  updateItem: (groupKey: string, itemId: number, data: {
+    purity?: string
+    storage_location?: string
+    notes?: string
+  }) => api.put(`/common-shelf/groups/${groupKey}/items/${itemId}`, data),
+  deleteItem: (groupKey: string, itemId: number) =>
+    api.delete(`/common-shelf/groups/${groupKey}/items/${itemId}`),
+  addBottles: (groupKey: string, data: { count: number; storage_location?: string }) =>
+    api.post(`/common-shelf/groups/${groupKey}/add-bottles`, data),
+  removeOne: (groupKey: string, data: { storage_location?: string }) =>
+    api.post(`/common-shelf/groups/${groupKey}/remove-one`, data),
+  deleteGroup: (groupKey: string) =>
+    api.delete(`/common-shelf/groups/${groupKey}`),
+  exportCommonShelf: () => api.get('/common-shelf/export', { responseType: 'blob' as const }),
+}
+
+export const chemicalNameMapAPI = {
+  list: (params?: PaginationParams & {
+    search?: string
+    search_field?: string
+    fuzzy?: boolean
+  }) => api.get<PaginatedResponse<ChemicalNameMapItem>>('/chemical-name-map', { params }),
+  create: (data: {
     cas_number: string
     name: string
     english_name?: string
-    alias?: string
-    specification: string
-    quantity_bottles: number
-    brand?: string
-    category?: string
-    storage_location?: string
-    is_hazardous: boolean
-    notes?: string
-  }) => api.post('/inventory/common-shelf/manual-add', data),
-  updateGroup: (sampleInventoryId: number, data: Record<string, unknown>) =>
-    api.put(`/inventory/common-shelf/group/${sampleInventoryId}`, data),
-  deleteGroup: (sampleInventoryId: number) =>
-    api.delete(`/inventory/common-shelf/group/${sampleInventoryId}`),
+    alias_1?: string
+    alias_2?: string
+    alias_3?: string
+    category?: ChemicalCategory | null
+  }) => api.post('/chemical-name-map', data),
+  update: (id: number, data: {
+    name?: string
+    english_name?: string
+    alias_1?: string
+    alias_2?: string
+    alias_3?: string
+    category?: ChemicalCategory | null
+  }) => api.put(`/chemical-name-map/${id}`, data),
+  delete: (id: number) => api.delete(`/chemical-name-map/${id}`),
 }
 
 // Chemical Info APIs

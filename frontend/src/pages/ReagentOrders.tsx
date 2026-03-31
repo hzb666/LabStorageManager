@@ -74,6 +74,7 @@ interface ReagentOrder {
   alias: string | null
   category: string | null
   brand: string | null
+  purity: string | null
   specification: string
   initial_quantity: number | null
   unit: string | null
@@ -136,6 +137,7 @@ function createReagentOrderFormValues(item: ReagentOrder): ReagentOrderFormInput
     alias: item.alias || '',
     category: item.category || '',
     brand: item.brand || '',
+    purity: item.purity || '',
     specification: item.specification || '',
     quantity: item.quantity || 1,
     price: item.price ?? '',
@@ -154,6 +156,7 @@ function createReagentOrderCreatePayload(formData: ReagentOrderFormData) {
     alias: formData.alias || undefined,
     category: formData.category || undefined,
     brand: formData.brand || undefined,
+    purity: formData.purity || undefined,
     specification: formData.specification,
     quantity: formData.quantity,
     price: formData.price,
@@ -171,6 +174,7 @@ function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
     alias: formData.alias || '',
     category: formData.category || '',
     brand: formData.brand || '',
+    purity: formData.purity || '',
     specification: formData.specification || '',
     quantity: formData.quantity,
     price: formData.price,

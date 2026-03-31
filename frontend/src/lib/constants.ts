@@ -56,6 +56,7 @@ export const STATUS_COLORS = {
   high_usage: 'amber',
   degraded: 'red',
   others: 'gray',
+  common_shelf: 'blue',
 } as const satisfies Record<string, BadgeColor>
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -85,6 +86,7 @@ export const STATUS_LABELS: Record<string, string> = {
   high_usage: '大量',
   degraded: '变质',
   others: '其他',
+  common_shelf: '常用货架',
 }
 
 export const ORDER_REASON_LABELS: Record<string, string> = {
@@ -160,6 +162,16 @@ export const INVENTORY_STATUS_STYLE: Record<string, string> = {
   run_short: 'bg-orange-100 text-orange-800',
   borrowed: 'bg-blue-100 text-blue-800',
   consumed: 'bg-gray-100 text-gray-800',
+}
+
+export const CHEMICAL_CATEGORY_LABELS: Record<string, string> = {
+  acid: '酸类',
+  base: '碱类',
+  salt: '盐类',
+  solvent: '溶剂',
+  catalyst: '催化',
+  indicator: '指示剂',
+  other: '其他',
 }
 
 // === Order Reason ===

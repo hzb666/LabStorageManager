@@ -1,481 +1,1165 @@
-import React, { useMemo, useCallback, useState } from 'react'
-import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useForm, type FieldValues, type UseFormReturn } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
-import { Archive, Plus, ScanSearch } from 'lucide-react'
+import type { ColumnDef } from '@tanstack/react-table'
+import { Archive, ArrowUpFromLine, Plus } from 'lucide-react'
 
+import {
+  chemicalNameMapAPI,
+  commonShelfAPI,
+  type ChemicalCategory,
+  type ChemicalNameMapItem,
+  type CommonShelfGroup,
+  type CommonShelfGroupItem,
+} from '@/api/client'
+import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { Button } from '@/components/ui/Button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { BaseForm } from '@/components/BaseForm'
-import { EditDialogActions } from '@/components/EditDialogActions'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
-import { NoteDisplay } from '@/components/ui/NoteDisplay'
-import { TableActionButtonsMemo } from '@/components/TableActionButtons'
-import { chemicalAPI, commonShelfAPI } from '@/api/client'
 import type { FilterAPI } from '@/hooks/useTableState'
-import useDialogState from '@/hooks/useDialogState'
-import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfigs'
-import { getCommonShelfTableColumns } from '@/lib/tableConfigs'
-import { COMMON_SHELF_BRAND_OPTIONS, COMMON_SHELF_CATEGORY_OPTIONS } from '@/lib/options'
+import { UserRoles } from '@/lib/constants'
 import { COMMON_SHELF_SSE_EVENTS } from '@/lib/sseEvents'
-import { useSSEStore } from '@/store/sseStore'
-import { formatDate } from '@/lib/utils'
+import {
+  COMMON_SHELF_EMPTY_LOCATION_VALUE,
+  COMMON_SHELF_GROUP_SEARCH_FIELD_OPTIONS,
+  COMMON_SHELF_GROUP_STATUS_OPTIONS,
+  getChemicalNameMapTableColumns,
+  getCommonShelfGroupTableColumns,
+  renderCommonShelfCategory,
+} from '@/lib/tableConfigs'
 import { toast } from '@/lib/toast'
 import {
-  InventoryFormSchema,
+  applyValidationErrors,
+  ChemicalNameMapSchema,
+  CommonShelfAddBottlesSchema,
+  CommonShelfGroupEditSchema,
+  CommonShelfManualAddSchema,
+  CommonShelfRemoveOneSchema,
+  type ChemicalNameMapFormData,
+  type ChemicalNameMapFormInputData,
+  type CommonShelfAddBottlesData,
+  type CommonShelfAddBottlesInputData,
+  type CommonShelfGroupEditData,
+  type CommonShelfGroupEditInputData,
+  type CommonShelfItemEditRowData,
+  type CommonShelfManualAddData,
+  type CommonShelfManualAddInputData,
+  type CommonShelfRemoveOneData,
+  type CommonShelfRemoveOneInputData,
   createValibotResolver,
   extractApiErrorDetail,
   getApiErrorMessage,
-  isSpecialCasValue,
   normalizeApiErrorMessage,
   toValidationErrors,
-  validateAndNormalizeCASInput,
 } from '@/lib/validationSchemas'
-import type { InventoryFormData, InventoryFormInputData, ValidationError } from '@/lib/validationSchemas'
+import { downloadBlobResponse, formatDate } from '@/lib/utils'
+import {
+  ChemicalNameMapEditorDialog,
+  ChemicalNameMapManagementDialog,
+  CommonShelfDialogs,
+  type ChemicalNameMapEditorController,
+  type CommonShelfDialogController,
+  type CommonShelfDialogMode,
+} from '@/components/CommonShelfDialogs'
+import { useSSEStore } from '@/store/sseStore'
+import { useAuthStore } from '@/store/useStore'
 
-// 表格展示、编辑弹窗和操作列都依赖这一组常用货架字段。
-interface CommonShelfItem {
-  id: number
-  sample_inventory_id: number
+const DEFAULT_MANUAL_ADD_FORM: CommonShelfManualAddInputData = {
+  cas_number: '',
+  name_snapshot: '',
+  brand: '',
+  purity: '',
+  specification: '',
+  count: '1',
+  storage_location: '',
+  notes: '',
+}
+
+const DEFAULT_EDIT_FORM: CommonShelfGroupEditInputData = {
+  brand: '',
+  specification: '',
+  confirm_merge: undefined,
+}
+
+const DEFAULT_ADD_BOTTLES_FORM: CommonShelfAddBottlesInputData = {
+  count: '1',
+  storage_location: '',
+}
+
+const DEFAULT_REMOVE_ONE_FORM: CommonShelfRemoveOneInputData = {
+  storage_location: '',
+}
+
+const DEFAULT_CHEMICAL_NAME_MAP_FORM: ChemicalNameMapFormInputData = {
+  cas_number: '',
+  name: '',
+  english_name: '',
+  alias_1: '',
+  alias_2: '',
+  alias_3: '',
+  category: '',
+}
+
+type ManualAddPayload = {
   cas_number: string
-  name: string
-  english_name: string | null
-  alias: string | null
-  category: string | null
-  brand: string | null
-  storage_location: string | null
-  initial_quantity: number | null
-  unit: string | null
-  is_hazardous: boolean
-  status: string
-  created_at: string
-  created_by_name?: string | null
-  notes?: string | null
-  available_bottles: number
-  total_bottles: number
-  specification?: string | null
-  group_names?: string[]
-  other_names?: string[]
-  matched_name?: string | null
-  matched_field?: string | null
+  name_snapshot: string
+  brand?: string
+  purity?: string
+  specification: string
+  count: number
+  storage_location?: string
+  notes?: string
 }
 
-// 常用货架弹窗只允许 `add / edit` 两种模式。
-type CommonShelfDialogMode = 'edit' | 'add'
+type CommonShelfDialogForms = CommonShelfDialogController['forms']
 
-// 状态筛选的 value 和文案映射必须与后端状态语义保持一致。
-const STATUS_OPTIONS = [
-  { value: 'all', label: '全部状态' },
-  { value: 'in_stock', label: '有库存' },
-  { value: 'run_short', label: '快用完' },
-  { value: 'consumed', label: '已耗尽' },
-]
-
-// 搜索字段范围和后端可搜索字段保持一致，避免前后端搜索语义漂移。
-const SEARCH_FIELD_OPTIONS = [
-  { value: 'all', label: '全部' },
-  { value: 'name', label: '名称' },
-  { value: 'alias', label: '别名' },
-  { value: 'cas_number', label: 'CAS号' },
-  { value: 'brand', label: '品牌' },
-  { value: 'category', label: '分类' },
-  { value: 'storage_location', label: '位置' },
-]
-
-// 为常用货架列定义保留字段级类型推导。
-const columnHelper = createColumnHelper<CommonShelfItem>()
-
-// 把表格行数据统一收口成 `CommonShelfItem`，避免各处理器重复断言。
-function toCommonShelfItem(itemRaw: Record<string, unknown>) {
-  return itemRaw as unknown as CommonShelfItem
-}
-
-// 统一处理新增默认值与编辑回填；关闭弹窗时走无 `item` 分支回到默认值。
-function resetCommonShelfForm(
-  form: ReturnType<typeof useForm<InventoryFormInputData, unknown, InventoryFormData>>,
-  item?: CommonShelfItem
-) {
-  if (!item) {
-    form.reset(defaultInventoryValues)
-    return
-  }
-
-  form.reset({
-    name: item.name || '',
-    cas_number: item.cas_number || '',
-    english_name: item.english_name || '',
-    alias: item.alias || '',
-    specification: item.specification || '',
-    category: item.category || '',
-    brand: item.brand || '',
-    storage_location: item.storage_location || '',
-    quantity_bottles: 1,
-    initial_quantity: item.initial_quantity ?? undefined,
-    remaining_quantity: undefined,
-    is_hazardous: item.is_hazardous || false,
-    notes: item.notes || '',
-  })
-}
-
-// 编辑请求只组装接口需要的字段，避免把表格展示字段带入提交。
-function buildCommonShelfEditPayload(formData: InventoryFormData) {
-  return {
-    name: formData.name || '',
-    cas_number: formData.cas_number || '',
-    english_name: formData.english_name || '',
-    alias: formData.alias || '',
-    category: formData.category || '',
-    storage_location: formData.storage_location || '',
-    brand: formData.brand || '',
-    is_hazardous: formData.is_hazardous,
-    notes: formData.notes || '',
-    specification: formData.specification || '',
-  }
-}
-
-// 新增请求体复用共同字段映射，并保留新增路径自己的库存初始化字段。
-function buildCommonShelfAddPayload(formData: InventoryFormData) {
-  return {
-    cas_number: formData.cas_number,
-    name: formData.name,
-    english_name: formData.english_name || undefined,
-    alias: formData.alias || undefined,
-    specification: formData.specification || '',
-    quantity_bottles: formData.quantity_bottles as number,
-    brand: formData.brand || undefined,
-    category: formData.category || undefined,
-    storage_location: formData.storage_location || undefined,
-    is_hazardous: formData.is_hazardous,
-    notes: formData.notes || undefined,
-  }
-}
-
-// 后端字段级校验错误继续回填到表单，而不是转成 toast。
-function applyCommonShelfValidationErrors(
-  form: ReturnType<typeof useForm<InventoryFormInputData, unknown, InventoryFormData>>,
-  validationErrors: ValidationError[]
-) {
-  validationErrors.forEach((error) => {
-    if (error.loc?.[1]) {
-      form.setError(error.loc[1] as keyof InventoryFormData, { message: error.msg || '输入不合法' })
-    }
-  })
-}
-
-// 提交入口同时覆盖新增、编辑和错误回填，成功后统一刷新列表和关闭弹窗。
-async function submitCommonShelfForm(params: {
-  dialogState: CommonShelfDialogMode | null
-  editingItem: CommonShelfItem | null
-  form: ReturnType<typeof useForm<InventoryFormInputData, unknown, InventoryFormData>>
-  formData: InventoryFormData
+type CommonShelfDialogControllerParams = {
   refreshCommonShelf: () => Promise<void>
-  setDialogState: (value: CommonShelfDialogMode | null) => void
-}) {
-  const { dialogState, editingItem, form, formData, refreshCommonShelf, setDialogState } = params
+  canDeleteGroup: boolean
+  onRequireChemicalNameMap: (payload: ManualAddPayload) => void
+}
 
-  try {
-    if (dialogState === 'edit' && editingItem) {
-      await commonShelfAPI.updateGroup(
-        editingItem.sample_inventory_id,
-        buildCommonShelfEditPayload(formData)
-      )
-      toast.success('常用货架分组已更新')
-    } else if (dialogState === 'add') {
-      await commonShelfAPI.manualAdd(buildCommonShelfAddPayload(formData))
-      toast.success('已加入常用货架')
-    }
+type CommonShelfPageController = {
+  canDeleteGroup: boolean
+  dialogController: CommonShelfDialogController
+  chemicalNameMapController: ReturnType<typeof useChemicalNameMapController>
+  columns: ColumnDef<Record<string, unknown>, unknown>[]
+  renderExpandedRow: (itemRaw: Record<string, unknown>) => ReactElement
+  refreshCommonShelf: () => Promise<void>
+  handleExport: () => Promise<void>
+}
 
-    await refreshCommonShelf()
-    setDialogState(null)
-  } catch (error) {
-    const detail = extractApiErrorDetail(error)
-    const validationErrors = toValidationErrors(detail)
-    if (validationErrors.length > 0) {
-      applyCommonShelfValidationErrors(form, validationErrors)
-      return
-    }
+function normalizeOptionalText(value: string | null | undefined) {
+  const trimmed = (value || '').trim()
+  return trimmed ? trimmed : undefined
+}
 
-    toast.error(normalizeApiErrorMessage(detail, '操作失败'))
+function normalizeCategoryValue(value: string | null | undefined): ChemicalCategory | null {
+  return (normalizeOptionalText(value) as ChemicalCategory | undefined) ?? null
+}
+
+function normalizeLocationValue(value: string) {
+  if (value === COMMON_SHELF_EMPTY_LOCATION_VALUE) {
+    return undefined
+  }
+  return normalizeOptionalText(value)
+}
+
+function buildCommonShelfEditForm(item: CommonShelfGroup): CommonShelfGroupEditInputData {
+  return {
+    brand: item.group.brand || '',
+    specification: item.group.specification_text || '',
+    confirm_merge: undefined,
   }
 }
 
-// 新增和编辑共用同一套字段配置，只在必要处保留模式差异。
-function buildCommonShelfFormFields(
-  dialogState: CommonShelfDialogMode | null,
-  isCasLookupLoading: boolean,
-  handleCasLookup: () => Promise<void>
-) {
-  const fields = getInventoryFormFields(false, undefined, {
-    categoryOptions: COMMON_SHELF_CATEGORY_OPTIONS,
-    brandOptions: COMMON_SHELF_BRAND_OPTIONS,
-  })
+function buildChemicalNameMapForm(item: ChemicalNameMapItem | null): ChemicalNameMapFormInputData {
+  if (!item) {
+    return DEFAULT_CHEMICAL_NAME_MAP_FORM
+  }
 
-  return fields.map((field) => {
-    if (dialogState === 'edit' && field.name === 'quantity_bottles') {
-      return { ...field, hidden: true }
-    }
-
-    if ((dialogState === 'add' || dialogState === 'edit') && field.name === 'name') {
-      return {
-        ...field,
-        enableTagToggle: true,
-        tag: '[std]',
-        placeholder: '输入名称或点击左侧图标标记为标准名',
-      }
-    }
-
-    if (dialogState === 'add' && field.name === 'cas_number') {
-      return {
-        ...field,
-        prefixButton: {
-          onClick: handleCasLookup,
-          loading: isCasLookupLoading,
-          title: '识别 CAS 号',
-          icon: ScanSearch,
-        },
-      }
-    }
-
-    return field
-  })
+  return {
+    cas_number: item.cas_number,
+    name: item.name,
+    english_name: item.english_name || '',
+    alias_1: item.alias_1 || '',
+    alias_2: item.alias_2 || '',
+    alias_3: item.alias_3 || '',
+    category: item.category || '',
+  }
 }
 
-// 展开行补充英文名、别名、分类、品牌、创建信息、库存统计和备注等明细字段。
-function renderCommonShelfExpandedRow(itemRaw: Record<string, unknown>) {
-  const item = toCommonShelfItem(itemRaw)
+function buildManualAddPayload(data: CommonShelfManualAddData): ManualAddPayload {
+  return {
+    cas_number: data.cas_number,
+    name_snapshot: data.name_snapshot,
+    brand: normalizeOptionalText(data.brand),
+    purity: normalizeOptionalText(data.purity),
+    specification: data.specification,
+    count: data.count,
+    storage_location: normalizeOptionalText(data.storage_location),
+    notes: normalizeOptionalText(data.notes),
+  }
+}
 
+function buildChemicalNameMapPayload(data: ChemicalNameMapFormData) {
+  return {
+    cas_number: data.cas_number,
+    name: data.name,
+    english_name: normalizeOptionalText(data.english_name),
+    alias_1: normalizeOptionalText(data.alias_1),
+    alias_2: normalizeOptionalText(data.alias_2),
+    alias_3: normalizeOptionalText(data.alias_3),
+    category: normalizeCategoryValue(data.category),
+  }
+}
+
+function toCommonShelfGroup(row: Record<string, unknown>) {
+  return row as unknown as CommonShelfGroup
+}
+
+function renderChemicalAliases(row: Record<string, unknown>) {
+  const aliases = [row.alias_1, row.alias_2, row.alias_3]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+  return aliases.length > 0 ? aliases.join(' / ') : '-'
+}
+
+function useCommonShelfDialogForms(): CommonShelfDialogForms {
+  return {
+    manualAddForm: useForm<CommonShelfManualAddInputData, unknown, CommonShelfManualAddData>({
+      resolver: createValibotResolver(CommonShelfManualAddSchema),
+      defaultValues: DEFAULT_MANUAL_ADD_FORM,
+    }),
+    editForm: useForm<CommonShelfGroupEditInputData, unknown, CommonShelfGroupEditData>({
+      resolver: createValibotResolver(CommonShelfGroupEditSchema),
+      defaultValues: DEFAULT_EDIT_FORM,
+    }),
+    addBottlesForm: useForm<CommonShelfAddBottlesInputData, unknown, CommonShelfAddBottlesData>({
+      resolver: createValibotResolver(CommonShelfAddBottlesSchema),
+      defaultValues: DEFAULT_ADD_BOTTLES_FORM,
+    }),
+    removeOneForm: useForm<CommonShelfRemoveOneInputData, unknown, CommonShelfRemoveOneData>({
+      resolver: createValibotResolver(CommonShelfRemoveOneSchema),
+      defaultValues: DEFAULT_REMOVE_ONE_FORM,
+    }),
+  }
+}
+
+function resetCommonShelfDialogForms(forms: CommonShelfDialogForms) {
+  forms.manualAddForm.reset(DEFAULT_MANUAL_ADD_FORM)
+  forms.editForm.reset(DEFAULT_EDIT_FORM)
+  forms.addBottlesForm.reset(DEFAULT_ADD_BOTTLES_FORM)
+  forms.removeOneForm.reset(DEFAULT_REMOVE_ONE_FORM)
+}
+
+function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
+  const [mode, setMode] = useState<CommonShelfDialogMode>(null)
+  const [selectedGroup, setSelectedGroup] = useState<CommonShelfGroup | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [editNeedsMergeConfirm, setEditNeedsMergeConfirm] = useState(false)
+
+  const resetDialogState = useCallback(() => {
+    setMode(null)
+    setSelectedGroup(null)
+    setDeleteConfirm(false)
+    setEditNeedsMergeConfirm(false)
+    resetCommonShelfDialogForms(forms)
+  }, [forms])
+
+  const openManualAddDialog = useCallback(() => {
+    resetDialogState()
+    setMode('manual-add')
+  }, [resetDialogState])
+
+  const openEditDialog = useCallback((item: CommonShelfGroup) => {
+    resetDialogState()
+    setSelectedGroup(item)
+    forms.editForm.reset(buildCommonShelfEditForm(item))
+    setMode('edit')
+  }, [forms.editForm, resetDialogState])
+
+  const openAddBottlesDialog = useCallback((item: CommonShelfGroup) => {
+    resetDialogState()
+    setSelectedGroup(item)
+    setMode('add-bottles')
+  }, [resetDialogState])
+
+  const openRemoveOneDialog = useCallback((item: CommonShelfGroup) => {
+    resetDialogState()
+    setSelectedGroup(item)
+    setMode('remove-one')
+  }, [resetDialogState])
+
+  const handleOpenChange = useCallback((open: boolean) => {
+    if (!open) resetDialogState()
+  }, [resetDialogState])
+
+  return {
+    mode,
+    selectedGroup,
+    deleteConfirm,
+    editNeedsMergeConfirm,
+    setDeleteConfirm,
+    setEditNeedsMergeConfirm,
+    resetDialogState,
+    openManualAddDialog,
+    openEditDialog,
+    openAddBottlesDialog,
+    openRemoveOneDialog,
+    handleOpenChange,
+  }
+}
+
+function CommonShelfExpandedRow({ item }: { item: CommonShelfGroup }) {
   return (
-    <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
-      <div className="hidden md:block shrink-0">
-        <MoleculeStructure casNumber={item.cas_number} width={150} height={100} />
+    <div className="flex flex-col gap-4 border-b border-border p-3 md:flex-row">
+      <div className="hidden shrink-0 md:block">
+        <MoleculeStructure casNumber={item.group.cas_number} width={150} height={100} />
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 flex-1">
-        <div>英文名称：{item.english_name || '-'}</div>
-        <div>别名：{item.alias ? item.alias.replaceAll('$', '，') : '-'}</div>
-        <div>其他名称：{item.other_names && item.other_names.length > 0 ? item.other_names.join('，') : '-'}</div>
-        <div>分类：{item.category || '-'}</div>
-        <div>品牌：{item.brand || '-'}</div>
-        <div>创建人：{item.created_by_name || '-'}</div>
-        <div>入库时间：{formatDate(item.created_at)}</div>
-        <div>可用/总计：{item.available_bottles} / {item.total_bottles} 瓶</div>
-        <NoteDisplay label="备注" text={item.notes ?? undefined} />
+      <div className="grid flex-1 grid-cols-2 gap-x-6 gap-y-2 md:grid-cols-3">
+        <div>中文名称：{item.display.name || '-'}</div>
+        <div>英文名称：{item.display.english_name || '-'}</div>
+        <div>分类：{renderCommonShelfCategory(item.display.category)}</div>
+        <div>纯度：{item.display.purity || '-'}</div>
+        <div>CAS号：{item.group.cas_number}</div>
+        <div>品牌：{item.group.brand || '-'}</div>
+        <div>规格：{item.group.specification_text || '-'}</div>
+        <div>现有瓶数：{item.bottle_count} 瓶</div>
+        <div>位置数：{item.location_count} 处</div>
+        <div>最新入库名称：{item.latest_name_snapshot || '-'}</div>
+        <div className="col-span-2 md:col-span-3">备注：{item.display.notes || '-'}</div>
+        <div>创建时间：{formatDate(item.created_at)}</div>
+        <div>更新时间：{formatDate(item.updated_at)}</div>
       </div>
     </div>
   )
 }
 
-// 操作列继续保留编辑和“拿一瓶”入口，并复用原有禁用/确认语义。
-function createCommonShelfActionColumn(): ColumnDef<CommonShelfItem, unknown> {
-  return columnHelper.display({
-    id: 'actions',
-    header: '操作',
-    size: 100,
-    minSize: 100,
-    maxSize: 140,
-    cell: (info) => {
-      const meta = info.table.options.meta
+function createCommonShelfColumns(params: {
+  onEdit: (item: CommonShelfGroup) => void
+  onAddBottles: (item: CommonShelfGroup) => void
+  onRemoveOne: (item: CommonShelfGroup) => void
+}) {
+  return getCommonShelfGroupTableColumns({
+    renderActions: (row) => {
+      const item = row as unknown as CommonShelfGroup
       return (
         <CommonShelfActionButtons
-          item={info.row.original}
-          onEdit={meta?.onEdit as (item: CommonShelfItem) => void}
-          onConsumeSuccess={meta?.onBorrowSuccess as () => void}
+          item={item}
+          onEdit={params.onEdit}
+          onAddBottles={params.onAddBottles}
+          onRemoveOne={params.onRemoveOne}
         />
       )
     },
-  })
+  }) as unknown as ColumnDef<Record<string, unknown>, unknown>[]
 }
 
-// 集中管理弹窗状态、表单实例、提交动作和字段配置。
-function useCommonShelfDialogState(
-  form: ReturnType<typeof useForm<InventoryFormInputData, unknown, InventoryFormData>>,
-  refreshCommonShelf: () => Promise<void>
+function createChemicalNameMapColumns(params: {
+  onEdit: (item: ChemicalNameMapItem) => void
+  onDelete: (item: ChemicalNameMapItem) => Promise<void>
+}) {
+  return getChemicalNameMapTableColumns({
+    renderAliases: renderChemicalAliases,
+    renderActions: (row) => {
+      const item = row as unknown as ChemicalNameMapItem
+      return (
+        <ChemicalNameMapActionButtons
+          item={item}
+          onEdit={params.onEdit}
+          onDelete={params.onDelete}
+        />
+      )
+    },
+  }) as unknown as ColumnDef<Record<string, unknown>, unknown>[]
+}
+
+function applyFormValidationDetail(
+  detail: unknown,
+  setFieldError: (fieldName: string, message: string) => void,
 ) {
-  const [dialogState, internalSetDialogState] = useDialogState<CommonShelfDialogMode>()
-  const [editingItem, setEditingItem] = useState<CommonShelfItem | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
+  return applyValidationErrors(toValidationErrors(detail), setFieldError)
+}
 
-  const handleAddClick = useCallback(() => {
-    setEditingItem(null)
-    setDeleteConfirm(false)
-    resetCommonShelfForm(form)
-    internalSetDialogState('add')
-  }, [form, internalSetDialogState])
+// 把字符串字段名统一映射到 react-hook-form 的 setError，避免每个提交处理器都写一遍类型转换。
+function createFormFieldErrorSetter<TInput extends FieldValues, TOutput>(
+  form: Pick<UseFormReturn<TInput, unknown, TOutput>, 'setError'>,
+) {
+  return (fieldName: string, message: string) => {
+    type FormFieldName = Parameters<typeof form.setError>[0]
+    form.setError(fieldName as FormFieldName, { message })
+  }
+}
 
-  const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
-    const item = toCommonShelfItem(itemRaw)
-    setEditingItem(item)
-    setDeleteConfirm(false)
-    resetCommonShelfForm(form, item)
-    internalSetDialogState('edit')
-  }, [form, internalSetDialogState])
+// 多个提交流程都需要同样的 loading 包装；这里只抽公共壳子，不隐藏具体业务逻辑。
+async function runWithSubmitting(
+  setIsSubmitting: (value: boolean) => void,
+  task: () => Promise<void>,
+) {
+  setIsSubmitting(true)
+  try {
+    await task()
+  } finally {
+    setIsSubmitting(false)
+  }
+}
 
-  const handleCasLookup = useCallback(async () => {
-    const casValue = form.getValues('cas_number')
-    const casValidation = validateAndNormalizeCASInput(casValue || '')
-    if ('error' in casValidation) {
-      form.setError('cas_number', { message: casValidation.error })
+async function executeCommonShelfManualAdd(params: {
+  payload: ManualAddPayload
+  setFieldError: (fieldName: string, message: string) => void
+  refreshCommonShelf: () => Promise<void>
+  resetDialogState: () => void
+  onRequireChemicalNameMap: (payload: ManualAddPayload) => void
+}) {
+  const { payload, setFieldError, refreshCommonShelf, resetDialogState, onRequireChemicalNameMap } = params
+
+  try {
+    await commonShelfAPI.manualAdd(payload)
+    toast.success('已加入常用货架')
+    resetDialogState()
+    await refreshCommonShelf()
+  } catch (error) {
+    const errorDetail = extractApiErrorDetail(error)
+    if (typeof errorDetail === 'string' && /CAS master data not found/i.test(errorDetail)) {
+      // 先补 chemical_name_map，再续写这次手动加瓶，避免货架页出现无法展示名称的脏数据。
+      onRequireChemicalNameMap(payload)
+      return
+    }
+    if (applyFormValidationDetail(errorDetail, setFieldError)) {
+      return
+    }
+    toast.error(normalizeApiErrorMessage(errorDetail, '添加失败'))
+  }
+}
+
+async function executeCommonShelfGroupEdit(params: {
+  groupKey: string
+  data: CommonShelfGroupEditData
+  editNeedsMergeConfirm: boolean
+  setEditNeedsMergeConfirm: (value: boolean) => void
+  setFieldError: (fieldName: string, message: string) => void
+  refreshCommonShelf: () => Promise<void>
+  resetDialogState: () => void
+}) {
+  const {
+    groupKey,
+    data,
+    editNeedsMergeConfirm,
+    setEditNeedsMergeConfirm,
+    setFieldError,
+    refreshCommonShelf,
+    resetDialogState,
+  } = params
+
+  try {
+    const response = await commonShelfAPI.updateGroup(groupKey, {
+      brand: normalizeOptionalText(data.brand),
+      specification: data.specification,
+      // merge 是两阶段确认：第一次只探测撞组，第二次才真的写库。
+      confirm_merge: editNeedsMergeConfirm || undefined,
+    })
+
+    if (response.data?.requires_confirmation) {
+      setEditNeedsMergeConfirm(true)
+      toast.error(String(response.data.message || '修改后将与其他分组合并，请再次确认'))
       return
     }
 
-    if (isSpecialCasValue(casValidation.normalized)) {
-      form.setError('cas_number', { message: '生物试剂不支持 CAS 识别查询' })
+    toast.success('常用货架分组已更新')
+    resetDialogState()
+    await refreshCommonShelf()
+  } catch (error) {
+    const errorDetail = extractApiErrorDetail(error)
+    if (applyFormValidationDetail(errorDetail, setFieldError)) {
       return
     }
+    toast.error(normalizeApiErrorMessage(errorDetail, '保存失败'))
+  }
+}
 
-    setIsCasLookupLoading(true)
-    try {
-      const response = await chemicalAPI.getInfo(casValidation.normalized)
-      const info = response.data
-      if (info.name) {
-        form.setValue('name', info.name, { shouldValidate: true })
-      }
-      if (info.english_name) {
-        form.setValue('english_name', info.english_name, { shouldValidate: true })
-      }
-      toast.success('CAS 号识别成功')
-    } catch (error) {
-      const detail = extractApiErrorDetail(error)
-      if (typeof detail === 'string') {
-        form.setError('cas_number', { message: normalizeApiErrorMessage(detail, 'CAS 号识别失败') })
-      } else {
-        toast.error('CAS 号识别失败')
-      }
-    } finally {
-      setIsCasLookupLoading(false)
+async function executeCommonShelfItemEdit(params: {
+  groupKey: string
+  itemId: number
+  data: CommonShelfItemEditRowData
+  setFieldError: (fieldName: string, message: string) => void
+  refreshCommonShelf: () => Promise<void>
+}) {
+  const { groupKey, itemId, data, setFieldError, refreshCommonShelf } = params
+
+  try {
+    await commonShelfAPI.updateItem(groupKey, itemId, {
+      purity: normalizeOptionalText(data.purity),
+      storage_location: normalizeOptionalText(data.storage_location),
+      notes: normalizeOptionalText(data.notes),
+    })
+    toast.success('常用货架条目已更新')
+    await refreshCommonShelf()
+  } catch (error) {
+    const errorDetail = extractApiErrorDetail(error)
+    if (applyFormValidationDetail(errorDetail, setFieldError)) {
+      return
     }
-  }, [form])
+    toast.error(normalizeApiErrorMessage(errorDetail, '保存失败'))
+  }
+}
 
-  const formFields = useMemo(
-    () => buildCommonShelfFormFields(dialogState, isCasLookupLoading, handleCasLookup),
-    [dialogState, handleCasLookup, isCasLookupLoading]
-  )
+async function executeCommonShelfItemDelete(params: {
+  groupKey: string
+  itemId: number
+  refreshCommonShelf: () => Promise<void>
+  resetDialogState: () => void
+}) {
+  const { groupKey, itemId, refreshCommonShelf, resetDialogState } = params
 
-  const handleSubmit = form.handleSubmit(async (formData) => {
-    setIsSubmitting(true)
+  try {
+    const response = await commonShelfAPI.deleteItem(groupKey, itemId)
+    toast.success('常用货架条目已删除')
+    if (response.data?.group_exists === false) {
+      resetDialogState()
+    }
+    await refreshCommonShelf()
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, '删除失败'))
+  }
+}
+
+async function executeCommonShelfAddBottles(params: {
+  groupKey: string
+  data: CommonShelfAddBottlesData
+  setFieldError: (fieldName: string, message: string) => void
+  refreshCommonShelf: () => Promise<void>
+  resetDialogState: () => void
+}) {
+  const { groupKey, data, setFieldError, refreshCommonShelf, resetDialogState } = params
+
+  try {
+    await commonShelfAPI.addBottles(groupKey, {
+      count: data.count,
+      storage_location: normalizeOptionalText(data.storage_location),
+    })
+    toast.success('常用货架已加瓶')
+    resetDialogState()
+    await refreshCommonShelf()
+  } catch (error) {
+    const errorDetail = extractApiErrorDetail(error)
+    if (applyFormValidationDetail(errorDetail, setFieldError)) {
+      return
+    }
+    toast.error(normalizeApiErrorMessage(errorDetail, '加瓶失败'))
+  }
+}
+
+async function executeCommonShelfRemoveOne(params: {
+  groupKey: string
+  data: CommonShelfRemoveOneData
+  setFieldError: (fieldName: string, message: string) => void
+  refreshCommonShelf: () => Promise<void>
+  resetDialogState: () => void
+}) {
+  const { groupKey, data, setFieldError, refreshCommonShelf, resetDialogState } = params
+
+  try {
+    await commonShelfAPI.removeOne(groupKey, {
+      storage_location: normalizeLocationValue(data.storage_location),
+    })
+    toast.success('已扣减 1 瓶')
+    resetDialogState()
+    await refreshCommonShelf()
+  } catch (error) {
+    const errorDetail = extractApiErrorDetail(error)
+    if (applyFormValidationDetail(errorDetail, setFieldError)) {
+      return
+    }
+    toast.error(normalizeApiErrorMessage(errorDetail, '扣减失败'))
+  }
+}
+
+async function executeCommonShelfDeleteGroup(params: {
+  groupKey: string
+  refreshCommonShelf: () => Promise<void>
+  resetDialogState: () => void
+}) {
+  const { groupKey, refreshCommonShelf, resetDialogState } = params
+
+  try {
+    await commonShelfAPI.deleteGroup(groupKey)
+    toast.success('常用货架分组已删除')
+    resetDialogState()
+    await refreshCommonShelf()
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, '删除失败'))
+  }
+}
+
+function useCommonShelfItemEditActions(params: {
+  mode: CommonShelfDialogMode
+  selectedGroup: CommonShelfGroup | null
+  refreshCommonShelf: () => Promise<void>
+  resetDialogState: () => void
+}) {
+  const { mode, selectedGroup, refreshCommonShelf, resetDialogState } = params
+  const [submittingItemId, setSubmittingItemId] = useState<number | null>(null)
+  const [deleteItemConfirmId, setDeleteItemConfirmId] = useState<number | null>(null)
+
+  const handleSubmitEditItem = useCallback(async (
+    item: CommonShelfGroupItem,
+    data: CommonShelfItemEditRowData,
+    setFieldError: (fieldName: string, message: string) => void,
+  ) => {
+    if (!selectedGroup) return
+    setSubmittingItemId(item.id)
     try {
-      await submitCommonShelfForm({
-        dialogState,
-        editingItem,
-        form,
-        formData,
+      await executeCommonShelfItemEdit({
+        groupKey: selectedGroup.group.group_key,
+        itemId: item.id,
+        data,
+        setFieldError,
         refreshCommonShelf,
-        setDialogState: internalSetDialogState,
       })
     } finally {
-      setIsSubmitting(false)
+      setSubmittingItemId(null)
     }
-  })
+  }, [refreshCommonShelf, selectedGroup])
 
-  const handleDeleteClick = useCallback(async () => {
-    if (!editingItem) {
+  const handleDeleteEditItem = useCallback(async (item: CommonShelfGroupItem) => {
+    if (!selectedGroup) return
+    if (deleteItemConfirmId !== item.id) {
+      setDeleteItemConfirmId(item.id)
       return
     }
 
+    setSubmittingItemId(item.id)
+    try {
+      await executeCommonShelfItemDelete({
+        groupKey: selectedGroup.group.group_key,
+        itemId: item.id,
+        refreshCommonShelf,
+        resetDialogState,
+      })
+      setDeleteItemConfirmId(null)
+    } finally {
+      setSubmittingItemId(null)
+    }
+  }, [deleteItemConfirmId, refreshCommonShelf, resetDialogState, selectedGroup])
+
+  useEffect(() => {
+    if (mode === 'edit') {
+      return
+    }
+    setSubmittingItemId(null)
+    setDeleteItemConfirmId(null)
+  }, [mode])
+
+  return {
+    submittingItemId,
+    deleteItemConfirmId,
+    handleSubmitEditItem,
+    handleDeleteEditItem,
+  }
+}
+
+function useCommonShelfGroupEditActions(params: {
+  canDeleteGroup: boolean
+  deleteConfirm: boolean
+  editNeedsMergeConfirm: boolean
+  editForm: CommonShelfDialogForms['editForm']
+  refreshCommonShelf: () => Promise<void>
+  resetDialogState: () => void
+  selectedGroup: CommonShelfGroup | null
+  setDeleteConfirm: (value: boolean) => void
+  setEditNeedsMergeConfirm: (value: boolean) => void
+  setIsSubmitting: (value: boolean) => void
+}) {
+  const {
+    canDeleteGroup,
+    deleteConfirm,
+    editNeedsMergeConfirm,
+    editForm,
+    refreshCommonShelf,
+    resetDialogState,
+    selectedGroup,
+    setDeleteConfirm,
+    setEditNeedsMergeConfirm,
+    setIsSubmitting,
+  } = params
+
+  const handleSubmitEdit = useCallback(async () => {
+    await editForm.handleSubmit(async (data) => {
+      if (!selectedGroup) return
+      await runWithSubmitting(setIsSubmitting, async () => {
+        await executeCommonShelfGroupEdit({
+          groupKey: selectedGroup.group.group_key,
+          data,
+          editNeedsMergeConfirm,
+          setEditNeedsMergeConfirm,
+          setFieldError: createFormFieldErrorSetter(editForm),
+          refreshCommonShelf,
+          resetDialogState,
+        })
+      })
+    })()
+  }, [editForm, editNeedsMergeConfirm, refreshCommonShelf, resetDialogState, selectedGroup, setEditNeedsMergeConfirm, setIsSubmitting])
+
+  const handleDelete = useCallback(async () => {
+    if (!selectedGroup || !canDeleteGroup) return
     if (!deleteConfirm) {
       setDeleteConfirm(true)
       return
     }
+    await runWithSubmitting(setIsSubmitting, async () => {
+      await executeCommonShelfDeleteGroup({
+        groupKey: selectedGroup.group.group_key,
+        refreshCommonShelf,
+        resetDialogState,
+      })
+    })
+  }, [canDeleteGroup, deleteConfirm, refreshCommonShelf, resetDialogState, selectedGroup, setDeleteConfirm, setIsSubmitting])
+
+  useEffect(() => {
+    const subscription = editForm.watch((_value, info) => {
+      if (!editNeedsMergeConfirm) {
+        return
+      }
+      if (info.name === 'brand' || info.name === 'specification') {
+        setEditNeedsMergeConfirm(false)
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [editForm, editNeedsMergeConfirm, setEditNeedsMergeConfirm])
+
+  return {
+    handleSubmitEdit,
+    handleDelete,
+  }
+}
+
+// 这里集中管理常用货架弹窗，主页面只负责“何时打开、刷新什么”，避免再分散成多层只转发参数的 hook。
+function useCommonShelfDialogController({
+  refreshCommonShelf,
+  canDeleteGroup,
+  onRequireChemicalNameMap,
+}: CommonShelfDialogControllerParams): CommonShelfDialogController {
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const forms = useCommonShelfDialogForms()
+  const {
+    manualAddForm,
+    editForm,
+    addBottlesForm,
+    removeOneForm,
+  } = forms
+  const {
+    mode,
+    selectedGroup,
+    deleteConfirm,
+    editNeedsMergeConfirm,
+    setDeleteConfirm,
+    setEditNeedsMergeConfirm,
+    resetDialogState,
+    openManualAddDialog,
+    openEditDialog,
+    openAddBottlesDialog,
+    openRemoveOneDialog,
+    handleOpenChange,
+  } = useCommonShelfDialogState(forms)
+
+  const handleSubmitManualAdd = useCallback(async () => {
+    await manualAddForm.handleSubmit(async (data) => {
+      await runWithSubmitting(setIsSubmitting, async () => {
+        await executeCommonShelfManualAdd({
+          payload: buildManualAddPayload(data),
+          setFieldError: createFormFieldErrorSetter(manualAddForm),
+          refreshCommonShelf,
+          resetDialogState,
+          onRequireChemicalNameMap,
+        })
+      })
+    })()
+  }, [manualAddForm, onRequireChemicalNameMap, refreshCommonShelf, resetDialogState])
+
+  const handleSubmitAddBottles = useCallback(async () => {
+    await addBottlesForm.handleSubmit(async (data) => {
+      if (!selectedGroup) return
+      await runWithSubmitting(setIsSubmitting, async () => {
+        await executeCommonShelfAddBottles({
+          groupKey: selectedGroup.group.group_key,
+          data,
+          setFieldError: createFormFieldErrorSetter(addBottlesForm),
+          refreshCommonShelf,
+          resetDialogState,
+        })
+      })
+    })()
+  }, [addBottlesForm, refreshCommonShelf, resetDialogState, selectedGroup])
+
+  const handleSubmitRemoveOne = useCallback(async () => {
+    await removeOneForm.handleSubmit(async (data) => {
+      if (!selectedGroup) return
+      if (!data.storage_location) {
+        removeOneForm.setError('storage_location', { message: '请选择位置' })
+        return
+      }
+      await runWithSubmitting(setIsSubmitting, async () => {
+        await executeCommonShelfRemoveOne({
+          groupKey: selectedGroup.group.group_key,
+          data,
+          setFieldError: createFormFieldErrorSetter(removeOneForm),
+          refreshCommonShelf,
+          resetDialogState,
+        })
+      })
+    })()
+  }, [refreshCommonShelf, removeOneForm, resetDialogState, selectedGroup])
+
+  const {
+    submittingItemId,
+    deleteItemConfirmId,
+    handleSubmitEditItem,
+    handleDeleteEditItem,
+  } = useCommonShelfItemEditActions({
+    mode,
+    selectedGroup,
+    refreshCommonShelf,
+    resetDialogState,
+  })
+  const {
+    handleSubmitEdit,
+    handleDelete,
+  } = useCommonShelfGroupEditActions({
+    canDeleteGroup,
+    deleteConfirm,
+    editNeedsMergeConfirm,
+    editForm,
+    refreshCommonShelf,
+    resetDialogState,
+    selectedGroup,
+    setDeleteConfirm,
+    setEditNeedsMergeConfirm,
+    setIsSubmitting,
+  })
+
+  return {
+    state: {
+      mode,
+      selectedGroup,
+      isSubmitting,
+      deleteConfirm,
+      editNeedsMergeConfirm,
+    },
+    forms,
+    itemEdit: {
+      submittingItemId,
+      deleteItemConfirmId,
+      handleSubmitEditItem,
+      handleDeleteEditItem,
+    },
+    actions: {
+      handleOpenChange,
+      handleSubmitManualAdd,
+      handleSubmitEdit,
+      handleSubmitAddBottles,
+      handleSubmitRemoveOne,
+      handleDelete,
+      openManualAddDialog,
+      openEditDialog,
+      openAddBottlesDialog,
+      openRemoveOneDialog,
+      resetDialogState,
+    },
+  }
+}
+
+function useChemicalNameMapController({
+  refreshChemicalNameMap,
+  refreshCommonShelf,
+  resetCommonShelfDialog,
+}: {
+  refreshChemicalNameMap: () => Promise<void>
+  refreshCommonShelf: () => Promise<void>
+  resetCommonShelfDialog: () => void
+}) {
+  const [managementOpen, setManagementOpen] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState<ChemicalNameMapItem | null>(null)
+  const [pendingManualAddPayload, setPendingManualAddPayload] = useState<ManualAddPayload | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const form = useForm<ChemicalNameMapFormInputData, unknown, ChemicalNameMapFormData>({
+    resolver: createValibotResolver(ChemicalNameMapSchema),
+    defaultValues: DEFAULT_CHEMICAL_NAME_MAP_FORM,
+  })
+
+  const resetChemicalNameMapEditor = useCallback((clearPendingManualAdd = true) => {
+    setEditorOpen(false)
+    setEditingItem(null)
+    form.reset(DEFAULT_CHEMICAL_NAME_MAP_FORM)
+    if (clearPendingManualAdd) {
+      setPendingManualAddPayload(null)
+    }
+  }, [form, setPendingManualAddPayload])
+
+  const openChemicalNameMapCreateDialog = useCallback((params?: {
+    prefill?: Partial<ChemicalNameMapFormInputData>
+    keepPendingManualAdd?: boolean
+  }) => {
+    setEditingItem(null)
+    form.reset({
+      ...DEFAULT_CHEMICAL_NAME_MAP_FORM,
+      ...params?.prefill,
+    })
+    if (!params?.keepPendingManualAdd) {
+      setPendingManualAddPayload(null)
+    }
+    setEditorOpen(true)
+  }, [form, setPendingManualAddPayload])
+
+  const openChemicalNameMapEditDialog = useCallback((item: ChemicalNameMapItem) => {
+    setEditingItem(item)
+    form.reset(buildChemicalNameMapForm(item))
+    setEditorOpen(true)
+  }, [form])
+
+  const promptCreateForMissingCas = useCallback((payload: ManualAddPayload) => {
+    setPendingManualAddPayload(payload)
+    openChemicalNameMapCreateDialog({
+      keepPendingManualAdd: true,
+      prefill: {
+        cas_number: payload.cas_number,
+        name: payload.name_snapshot,
+      },
+    })
+    toast.warning('该 CAS 还未录入主数据，请先补录')
+  }, [openChemicalNameMapCreateDialog])
+
+  const handleDeleteChemicalNameMap = useCallback(async (item: ChemicalNameMapItem) => {
+    const confirmed = window.confirm(`确认删除 CAS 主数据 ${item.cas_number} 吗？`)
+    if (!confirmed) {
+      return
+    }
 
     try {
-      await commonShelfAPI.deleteGroup(editingItem.sample_inventory_id)
-      toast.success('常用货架分组已删除')
-      internalSetDialogState(null)
+      await chemicalNameMapAPI.delete(item.id)
+      toast.success('CAS 主数据已删除')
+      await refreshChemicalNameMap()
       await refreshCommonShelf()
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
-  }, [deleteConfirm, editingItem, internalSetDialogState, refreshCommonShelf])
+  }, [refreshChemicalNameMap, refreshCommonShelf])
 
-  const handleDialogChange = useCallback((open: boolean) => {
-    if (!open) {
-      internalSetDialogState(null)
-      setDeleteConfirm(false)
-      resetCommonShelfForm(form)
-    }
-  }, [form, internalSetDialogState])
+  const handleSubmit = useCallback(async () => {
+    await form.handleSubmit(async (data) => {
+      const payload = buildChemicalNameMapPayload(data)
+
+      await runWithSubmitting(setIsSubmitting, async () => {
+        try {
+          if (editingItem) {
+            await chemicalNameMapAPI.update(editingItem.id, payload)
+            toast.success('CAS 主数据已更新')
+          } else {
+            await chemicalNameMapAPI.create(payload)
+            toast.success('CAS 主数据已新增')
+          }
+
+          await refreshChemicalNameMap()
+          resetChemicalNameMapEditor(false)
+
+          if (!pendingManualAddPayload) {
+            await refreshCommonShelf()
+            return
+          }
+
+          try {
+            // 缺失主数据时，用户补录成功后要把被中断的“加入常用货架”继续执行完。
+            await commonShelfAPI.manualAdd(pendingManualAddPayload)
+            toast.success('CAS 主数据已录入，并已加入常用货架')
+            setPendingManualAddPayload(null)
+            resetCommonShelfDialog()
+            await refreshCommonShelf()
+          } catch (error) {
+            setPendingManualAddPayload(null)
+            toast.error(getApiErrorMessage(error, 'CAS 主数据已录入，但加入常用货架失败'))
+          }
+        } catch (error) {
+          const errorDetail = extractApiErrorDetail(error)
+          if (applyFormValidationDetail(errorDetail, createFormFieldErrorSetter(form))) {
+            return
+          }
+          toast.error(normalizeApiErrorMessage(errorDetail, '保存失败'))
+        }
+      })
+    })()
+  }, [
+    editingItem,
+    form,
+    pendingManualAddPayload,
+    refreshChemicalNameMap,
+    refreshCommonShelf,
+    resetChemicalNameMapEditor,
+    resetCommonShelfDialog,
+    setPendingManualAddPayload,
+  ])
+
+  const columns = useMemo(() => createChemicalNameMapColumns({
+    onEdit: openChemicalNameMapEditDialog,
+    onDelete: handleDeleteChemicalNameMap,
+  }), [handleDeleteChemicalNameMap, openChemicalNameMapEditDialog])
+
+  const editorDialog: ChemicalNameMapEditorController = {
+    open: editorOpen,
+    editingItem,
+    form,
+    isSubmitting,
+    onOpenChange: (open: boolean) => {
+      if (!open) {
+        resetChemicalNameMapEditor()
+      }
+    },
+    onSubmit: handleSubmit,
+  }
 
   return {
-    dialogState,
-    deleteConfirm,
-    isSubmitting,
-    formFields,
-    handleAddClick,
-    handleEditClick,
-    handleDeleteClick,
-    handleSubmit,
-    handleDialogChange,
+    managementOpen,
+    setManagementOpen,
+    openCreateDialog: () => openChemicalNameMapCreateDialog(),
+    promptCreateForMissingCas,
+    columns,
+    editorDialog,
   }
 }
 
-// 页面主组件负责编排弹窗、SSE 刷新和表格查询。
-export function CommonShelfPage() {
+// 页面装配层负责把刷新、弹窗、表格列和导出动作收敛起来。
+// 主页面只消费这个 controller，避免在 JSX 上方继续堆叠一长串 useCallback/useMemo。
+function useCommonShelfPageController(): CommonShelfPageController {
   const queryClient = useQueryClient()
   const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
-
-  const form = useForm<InventoryFormInputData, unknown, InventoryFormData>({
-    resolver: createValibotResolver(InventoryFormSchema),
-    defaultValues: defaultInventoryValues,
-    shouldFocusError: false,
-  })
+  const currentUser = useAuthStore((state) => state.user)
+  const canDeleteGroup = currentUser?.role === UserRoles.ADMIN
+  const requireChemicalNameMapRef = useRef<(payload: ManualAddPayload) => void>(() => undefined)
 
   const refreshCommonShelf = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ['common-shelf'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['common-shelf'] }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf-group-items'] }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf-location-suggestions'] }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf-remove-locations'] }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf-order-location-suggestions'] }),
+    ])
     clearRoomStale('common_shelf')
   }, [clearRoomStale, queryClient])
 
-  const {
-    dialogState,
-    deleteConfirm,
-    isSubmitting,
-    formFields,
-    handleAddClick,
-    handleEditClick,
-    handleDeleteClick,
-    handleSubmit,
-    handleDialogChange,
-  } = useCommonShelfDialogState(form, refreshCommonShelf)
+  const refreshChemicalNameMap = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['chemical-name-map'] })
+  }, [queryClient])
 
-  const columns = useMemo(() => {
-    const actionColumn = createCommonShelfActionColumn()
-    return [...getCommonShelfTableColumns(), actionColumn] as unknown as ColumnDef<Record<string, unknown>, unknown>[]
+  const dialogController = useCommonShelfDialogController({
+    refreshCommonShelf,
+    canDeleteGroup,
+    onRequireChemicalNameMap: (payload) => {
+      requireChemicalNameMapRef.current(payload)
+    },
+  })
+  const dialogActions = dialogController.actions
+
+  const chemicalNameMapController = useChemicalNameMapController({
+    refreshChemicalNameMap,
+    refreshCommonShelf,
+    resetCommonShelfDialog: dialogActions.resetDialogState,
+  })
+  useEffect(() => {
+    requireChemicalNameMapRef.current = chemicalNameMapController.promptCreateForMissingCas
+  }, [chemicalNameMapController.promptCreateForMissingCas])
+
+  const handleExport = useCallback(async () => {
+    try {
+      const response = await commonShelfAPI.exportCommonShelf()
+      downloadBlobResponse(response, `common_shelf_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '导出失败'))
+    }
   }, [])
+
+  const columns = useMemo(() => createCommonShelfColumns({
+    onEdit: dialogActions.openEditDialog,
+    onAddBottles: dialogActions.openAddBottlesDialog,
+    onRemoveOne: dialogActions.openRemoveOneDialog,
+  }), [
+    dialogActions.openAddBottlesDialog,
+    dialogActions.openEditDialog,
+    dialogActions.openRemoveOneDialog,
+  ])
+
+  const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
+    return <CommonShelfExpandedRow item={toCommonShelfGroup(itemRaw)} />
+  }, [])
+
+  return {
+    canDeleteGroup,
+    dialogController,
+    chemicalNameMapController,
+    columns,
+    renderExpandedRow,
+    refreshCommonShelf,
+    handleExport,
+  }
+}
+
+function CommonShelfPageHeader({
+  onOpenManualAdd,
+  onOpenChemicalNameMapManagement,
+  onExport,
+}: {
+  onOpenManualAdd: () => void
+  onOpenChemicalNameMapManagement: () => void
+  onExport: () => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <h1 className="card-title-placeholder text-3xl font-bold text-primary">常用货架</h1>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={onOpenManualAdd} size="lg">
+          <Plus className="mr-1.5 h-4 w-4" />
+          手动添加
+        </Button>
+        <Button variant="secondary" size="lg" onClick={onOpenChemicalNameMapManagement}>
+          CAS 主数据管理
+        </Button>
+        <Button variant="secondary" size="lg" onClick={onExport}>
+          <ArrowUpFromLine className="mr-1.5 h-4 w-4" />
+          导出
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function CommonShelfPageDialogs({
+  dialogController,
+  chemicalNameMapController,
+  canDeleteGroup,
+}: Pick<CommonShelfPageController, 'dialogController' | 'chemicalNameMapController' | 'canDeleteGroup'>) {
+  return (
+    <>
+      <CommonShelfDialogs dialog={dialogController} showDelete={canDeleteGroup} />
+
+      <ChemicalNameMapManagementDialog
+        open={chemicalNameMapController.managementOpen}
+        onOpenChange={chemicalNameMapController.setManagementOpen}
+        onCreate={chemicalNameMapController.openCreateDialog}
+        columns={chemicalNameMapController.columns}
+      />
+
+      <ChemicalNameMapEditorDialog dialog={chemicalNameMapController.editorDialog} />
+    </>
+  )
+}
+
+export function CommonShelfPage() {
+  const {
+    canDeleteGroup,
+    dialogController,
+    chemicalNameMapController,
+    columns,
+    renderExpandedRow,
+    refreshCommonShelf,
+    handleExport,
+  } = useCommonShelfPageController()
+  const dialogActions = dialogController.actions
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary card-title-placeholder">常用货架</h1>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={handleAddClick} size="lg">
-            <Plus className="w-4 h-4 mr-1.5" /> 手动添加
-          </Button>
-        </div>
-      </div>
+      <CommonShelfPageHeader
+        onOpenManualAdd={dialogActions.openManualAddDialog}
+        onOpenChemicalNameMapManagement={() => chemicalNameMapController.setManagementOpen(true)}
+        onExport={() => {
+          void handleExport()
+        }}
+      />
 
-      <Dialog open={dialogState !== null} onOpenChange={handleDialogChange}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{dialogState === 'edit' ? '编辑常用货架分组' : '手动加入常用货架'}</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit}>
-            <BaseForm
-              form={form}
-              fields={formFields}
-            />
-            <EditDialogActions
-              mode={dialogState ?? 'add'}
-              onCancel={() => handleDialogChange(false)}
-              onDelete={dialogState === 'edit' ? handleDeleteClick : undefined}
-              deleteConfirm={deleteConfirm}
-              submitLabelEdit="保存分组"
-              submitLabelAdd="确认添加"
-              isSubmitting={isSubmitting}
-            />
-          </form>
-        </DialogContent>
-      </Dialog>
+      <CommonShelfPageDialogs
+        dialogController={dialogController}
+        chemicalNameMapController={chemicalNameMapController}
+        canDeleteGroup={canDeleteGroup}
+      />
 
       <FilterTable
         api={commonShelfAPI as FilterAPI}
@@ -488,48 +1172,41 @@ export function CommonShelfPage() {
           onRefresh: refreshCommonShelf,
         }}
         customColumns={columns}
-        onEdit={handleEditClick}
-        onBorrowSuccess={refreshCommonShelf}
-        statusOptions={STATUS_OPTIONS}
-        searchFieldOptions={SEARCH_FIELD_OPTIONS}
-        title={<><Archive className="w-5 h-5" /> 常用/公用试剂</>}
-        searchPlaceholder="搜索标准名、别名、CAS号、品牌..."
-        renderExpandedRow={renderCommonShelfExpandedRow}
-        noteField="notes"
+        statusOptions={COMMON_SHELF_GROUP_STATUS_OPTIONS}
+        searchFieldOptions={COMMON_SHELF_GROUP_SEARCH_FIELD_OPTIONS}
+        title={<><Archive className="h-5 w-5" /> 常用货架</>}
+        searchPlaceholder="搜索名称、别名、CAS号、品牌..."
+        renderExpandedRow={renderExpandedRow}
+        emptyText="暂无常用货架记录"
       />
     </div>
   )
 }
 
-// 行操作按钮继续保留“拿一瓶”和编辑，两者都沿用原有表格交互语义。
-const CommonShelfActionButtons = React.memo(function CommonShelfActionButtons({
+const CommonShelfActionButtons = function CommonShelfActionButtons({
   item,
   onEdit,
-  onConsumeSuccess,
+  onAddBottles,
+  onRemoveOne,
 }: {
-  item: CommonShelfItem
-  onEdit: (item: CommonShelfItem) => void
-  onConsumeSuccess: () => void | Promise<void>
+  item: CommonShelfGroup
+  onEdit: (item: CommonShelfGroup) => void
+  onAddBottles: (item: CommonShelfGroup) => void
+  onRemoveOne: (item: CommonShelfGroup) => void
 }) {
   const actions = useMemo(() => [
     {
-      id: 'consume',
-      label: '拿一瓶',
-      confirm: true,
-      confirmLabel: '确认',
-      showWhen: (currentItem: CommonShelfItem) => currentItem.available_bottles > 0,
-      onClick: async (currentItem: CommonShelfItem) => {
-        try {
-          await commonShelfAPI.consumeOne(currentItem.sample_inventory_id)
-          await onConsumeSuccess()
-          toast.success('已记录拿取 1 瓶')
-        } catch (error) {
-          toast.error(getApiErrorMessage(error, '拿取失败'))
-          throw error
-        }
-      },
+      id: 'add-bottles',
+      label: '加瓶',
+      onClick: onAddBottles,
     },
-  ], [onConsumeSuccess])
+    {
+      id: 'remove-one',
+      label: '扣减1瓶',
+      onClick: onRemoveOne,
+      showWhen: (currentItem: CommonShelfGroup) => currentItem.bottle_count > 0,
+    },
+  ], [onAddBottles, onRemoveOne])
 
   return (
     <TableActionButtonsMemo
@@ -537,20 +1214,27 @@ const CommonShelfActionButtons = React.memo(function CommonShelfActionButtons({
       actions={actions}
       showEdit={true}
       onEdit={onEdit}
-      statusField="status"
     />
   )
-}, (prevProps, nextProps) => {
-  if (prevProps.onEdit !== nextProps.onEdit) return false
-  if (prevProps.onConsumeSuccess !== nextProps.onConsumeSuccess) return false
+}
 
-  const prevItem = prevProps.item as unknown as Record<string, unknown>
-  const nextItem = nextProps.item as unknown as Record<string, unknown>
-  if (prevItem === nextItem) return true
-
-  const prevKeys = Object.keys(prevItem)
-  const nextKeys = Object.keys(nextItem)
-  if (prevKeys.length !== nextKeys.length) return false
-
-  return prevKeys.every((key) => prevItem[key] === nextItem[key])
-})
+function ChemicalNameMapActionButtons({
+  item,
+  onEdit,
+  onDelete,
+}: {
+  item: ChemicalNameMapItem
+  onEdit: (item: ChemicalNameMapItem) => void
+  onDelete: (item: ChemicalNameMapItem) => Promise<void>
+}) {
+  return (
+    <div className="flex gap-2">
+      <Button variant="secondary" size="sm" onClick={() => onEdit(item)}>
+        编辑
+      </Button>
+      <Button variant="destructive" size="sm" onClick={() => void onDelete(item)}>
+        删除
+      </Button>
+    </div>
+  )
+}

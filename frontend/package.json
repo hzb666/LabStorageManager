@@ -8,8 +8,7 @@
     "dev": "npm run generate:static-assets && vite",
     "build": "npm run generate:static-assets && tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "test:lib-assets": "node scripts/lib-assets.test.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",
@@ -68,7 +67,6 @@
     "tailwindcss": "^4.2.2",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.1",
-    "vite": "^8.0.1",
-    "vite-plugin-compression": "^0.5.1"
+    "vite": "^8.0.1"
   }
 }

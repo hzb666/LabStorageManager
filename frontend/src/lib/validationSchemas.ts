@@ -322,6 +322,7 @@ export const InventoryFormSchema = v.object({
   alias: createMaxLengthSchema('别名', 200),
   category: createMaxLengthSchema('分类', 100),
   brand: createMaxLengthSchema('品牌', 100),
+  purity: createMaxLengthSchema('纯度', 20),
   specification: v.optional(SpecificationSchema),
   storage_location: createMaxLengthSchema('存储位置', 200),
   notes: createMaxLengthSchema('备注', 500),
@@ -340,6 +341,65 @@ export const InventoryFormSchema = v.object({
 export type InventoryFormData = v.InferOutput<typeof InventoryFormSchema>
 export type InventoryFormInputData = v.InferInput<typeof InventoryFormSchema>
 
+export const CommonShelfManualAddSchema = v.object({
+  cas_number: CasNumberSchema,
+  name_snapshot: createStringLengthSchema('名称', 1, 200),
+  brand: createMaxLengthSchema('品牌', 100),
+  purity: createMaxLengthSchema('纯度', 20),
+  specification: SpecificationSchema,
+  count: v.pipe(createPositiveNumberSchema('瓶数'), v.maxValue(99, '瓶数不能超过99')),
+  storage_location: createMaxLengthSchema('存放位置', 200),
+  notes: createMaxLengthSchema('备注', 100),
+})
+
+export const CommonShelfItemEditRowSchema = v.object({
+  id: v.number(),
+  purity: createMaxLengthSchema('纯度', 20),
+  storage_location: createMaxLengthSchema('存放位置', 200),
+  notes: createMaxLengthSchema('备注', 100),
+})
+
+export const CommonShelfGroupEditSchema = v.object({
+  brand: createMaxLengthSchema('品牌', 100),
+  specification: SpecificationSchema,
+  confirm_merge: v.optional(v.boolean()),
+})
+
+export const CommonShelfAddBottlesSchema = v.object({
+  count: v.pipe(createPositiveNumberSchema('新增瓶数'), v.maxValue(99, '新增瓶数不能超过99')),
+  storage_location: createMaxLengthSchema('存放位置', 200),
+})
+
+export const CommonShelfRemoveOneSchema = v.object({
+  storage_location: createMaxLengthSchema('存放位置', 200),
+})
+
+export const ChemicalNameMapSchema = v.object({
+  cas_number: CasNumberSchema,
+  name: createStringLengthSchema('中文名称', 1, 200),
+  english_name: createMaxLengthSchema('英文名称', 200),
+  alias_1: createMaxLengthSchema('别名1', 200),
+  alias_2: createMaxLengthSchema('别名2', 200),
+  alias_3: createMaxLengthSchema('别名3', 200),
+  category: v.optional(v.union([
+    v.literal(''),
+    v.picklist(['acid', 'base', 'salt', 'solvent', 'catalyst', 'indicator', 'other']),
+  ])),
+})
+
+export type CommonShelfManualAddData = v.InferOutput<typeof CommonShelfManualAddSchema>
+export type CommonShelfManualAddInputData = v.InferInput<typeof CommonShelfManualAddSchema>
+export type CommonShelfItemEditRowData = v.InferOutput<typeof CommonShelfItemEditRowSchema>
+export type CommonShelfItemEditRowInputData = v.InferInput<typeof CommonShelfItemEditRowSchema>
+export type CommonShelfGroupEditData = v.InferOutput<typeof CommonShelfGroupEditSchema>
+export type CommonShelfGroupEditInputData = v.InferInput<typeof CommonShelfGroupEditSchema>
+export type CommonShelfAddBottlesData = v.InferOutput<typeof CommonShelfAddBottlesSchema>
+export type CommonShelfAddBottlesInputData = v.InferInput<typeof CommonShelfAddBottlesSchema>
+export type CommonShelfRemoveOneData = v.InferOutput<typeof CommonShelfRemoveOneSchema>
+export type CommonShelfRemoveOneInputData = v.InferInput<typeof CommonShelfRemoveOneSchema>
+export type ChemicalNameMapFormData = v.InferOutput<typeof ChemicalNameMapSchema>
+export type ChemicalNameMapFormInputData = v.InferInput<typeof ChemicalNameMapSchema>
+
 // ==========================================
 // 5. 订单模块 Schema
 // ==========================================
@@ -356,6 +416,7 @@ export const ReagentOrderSchema = v.object({
   alias: createMaxLengthSchema('别名', 200),
   category: createMaxLengthSchema('分类', 100),
   brand: createMaxLengthSchema('品牌', 100),
+  purity: createMaxLengthSchema('纯度', 20),
   specification: SpecificationSchema, // 后端必填
   quantity: v.pipe(createPositiveNumberSchema('数量'), v.maxValue(99, '数量不能超过99')),
   price: createPriceSchema(0.01),  // 必填
@@ -497,6 +558,13 @@ export const StockInFormSchema = v.object({
 export type StockInFormInputData = v.InferInput<typeof StockInFormSchema>
 export type StockInFormData = v.InferOutput<typeof StockInFormSchema>
 
+export const CommonPublicArrivalFormSchema = v.object({
+  storage_location: createRequiredStringSchema('常用货架位置'),
+})
+
+export type CommonPublicArrivalFormInputData = v.InferInput<typeof CommonPublicArrivalFormSchema>
+export type CommonPublicArrivalFormData = v.InferOutput<typeof CommonPublicArrivalFormSchema>
+
 // ==========================================
 // 9. 设备管理模块 Schema
 // ==========================================
@@ -620,9 +688,11 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Cannot edit item while borrowed/i, message: '借用中的试剂无法编辑，请等待归还后再操作' },
   { pattern: /Item is borrowed by another user/i, message: '该物品已被他人借用，请刷新后重试' },
   { pattern: /Cannot borrow, current status/i, message: '无法借用，当前状态' },
-  { pattern: /Common shelf items do not support borrow workflow/i, message: '常用货架物品不支持借用流程' },
-  { pattern: /Item is not on common shelf/i, message: '该物品不在常用货架' },
-  { pattern: /Common shelf group not found/i, message: '常用货架分组不存在' },
+  { pattern: /CommonShelf group not found|Common shelf group not found/i, message: '常用货架分组不存在' },
+  { pattern: /No bottle found at selected location/i, message: '所选位置没有可扣减的瓶子' },
+  { pattern: /CAS master data already exists/i, message: '该 CAS 主数据已存在' },
+  { pattern: /CAS master data not found/i, message: '缺少该 CAS 的主数据，请先录入后再加入常用货架' },
+  { pattern: /cannot be deleted/i, message: '该 CAS 主数据已被常用货架引用，不能删除' },
   { pattern: /Item changed by another request, please retry/i, message: '该物品状态已变更，请刷新后重试' },
   { pattern: /No available bottle in this group/i, message: '该分组已无可用瓶数' },
   { pattern: /Item is not borrowed, current status/i, message: '该物品未被借用' },
@@ -652,6 +722,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Invalid order quantity/i, message: '订单数量无效' },
   { pattern: /No enough pending stock items/i, message: '没有足够的待入库物品' },
   { pattern: /Order must be in APPROVED or ARRIVED status to stock in/i, message: '订单必须处于已批准或已到货状态才能入库' },
+  { pattern: /Common-public orders are stocked at confirm-arrival time/i, message: '常用订单在确认到货时会直接入常用货架' },
   { pattern: /storage_location is required/i, message: '存储位置不能为空' },
   { pattern: /remaining_quantity is required for ARRIVED orders/i, message: '已到货订单需要填写剩余数量' },
 

@@ -3,7 +3,7 @@ import { useMemo, useState, useCallback } from "react";
 import * as v from "valibot";
 import { createColumnHelper } from "@tanstack/react-table";
 import type { ColumnDef } from "@tanstack/react-table";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { FlaskConical, PackageCheck, Warehouse } from "lucide-react";
 
@@ -26,14 +26,17 @@ import { UserRoles } from "@/lib/constants";
 import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from "@/store/useStore";
 
-import { reagentOrderAPI } from "@/api/client";
+import { commonShelfAPI, reagentOrderAPI } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
 import { getReagentOrderTableColumns } from "@/lib/tableConfigs";
 import { REAGENT_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
 import {
   ReagentOrderSchema,
   StockInFormSchema,
+  CommonPublicArrivalFormSchema,
   type StockInFormInputData,
+  type CommonPublicArrivalFormData,
+  type CommonPublicArrivalFormInputData,
   type ReagentOrderFormData,
   type ReagentOrderFormInputData,
   createValibotResolver,
@@ -47,6 +50,7 @@ import {
   getReagentOrderFormFields,
   defaultReagentOrderValues,
   defaultStockInValues,
+  getCommonPublicArrivalFormFields,
   getStockInFormFields,
 } from "@/lib/formConfigs";
 
@@ -63,7 +67,7 @@ import {
 
 const reagentColumnHelper = createColumnHelper<DashboardReagentOrder>();
 
-type StockinMode = "quick" | "arrived";
+type StockinMode = "quick" | "arrived" | "common-public-arrival";
 
 // Dashboard 接口返回按状态分组的订单，这里先拍平成 `FilterTable` 需要的本地列表。
 function createReagentDashboardAPI(currentUserId?: number): FilterAPI {
@@ -117,6 +121,7 @@ function buildReagentFormValues(
     alias: String(item.alias ?? ""),
     category: String(item.category ?? ""),
     brand: String(item.brand ?? ""),
+    purity: String(item.purity ?? ""),
     specification: String(item.specification ?? ""),
     quantity: Number(item.quantity ?? 1),
     price: item.price ?? "",
@@ -139,7 +144,17 @@ function buildStockinFormValues(
   };
 }
 
-// `approved` 状态显示“到货 / 一键入库”，`arrived` 状态显示“入库”。
+function getStockinDialogTitle(mode: StockinMode): string {
+  if (mode === "quick") {
+    return "一键入库";
+  }
+  if (mode === "common-public-arrival") {
+    return "到货并加入常用货架";
+  }
+  return "入库";
+}
+
+// `approved` 状态显示“到货 / 一键入库”（common_public 不显示一键入库），`arrived` 状态显示“入库”。
 function createReagentActions(
   refreshTables: () => Promise<void>,
   openStockinDialog: (item: DashboardReagentOrder, mode: StockinMode) => void,
@@ -157,6 +172,10 @@ function createReagentActions(
       showWhen: (currItem: DashboardReagentOrder) =>
         currItem.status === "approved",
       onClick: async (currItem: DashboardReagentOrder) => {
+        if (currItem.order_reason === "common_public") {
+          openStockinDialog(currItem, "common-public-arrival");
+          return;
+        }
         await reagentOrderAPI.confirmArrival(currItem.id, {});
         await refreshTables();
         toast.success("确认到货成功");
@@ -170,7 +189,8 @@ function createReagentActions(
       className:
         "text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950",
       showWhen: (currItem: DashboardReagentOrder) =>
-        currItem.status === "approved",
+        currItem.status === "approved" &&
+        currItem.order_reason !== "common_public",
       onClick: (currItem: DashboardReagentOrder) => {
         openStockinDialog(currItem, "quick");
       },
@@ -308,10 +328,46 @@ function DashboardReagentStockinDialog({
     stockinTarget,
     stockinMode,
     stockinForm,
+    commonPublicArrivalForm,
     isSubmittingStockin,
     closeStockinDialog,
     submitStockin,
   } = dialog;
+  const commonShelfLocationSuggestionsQuery = useQuery({
+    queryKey: [
+      "common-shelf-order-location-suggestions",
+      stockinTarget?.cas_number,
+      stockinTarget?.brand,
+      stockinTarget?.specification,
+    ],
+    enabled: stockinMode === "common-public-arrival" && Boolean(stockinTarget),
+    queryFn: async () => {
+      const response = await commonShelfAPI.getLocationSuggestionsByFields({
+        cas_number: stockinTarget!.cas_number,
+        brand: stockinTarget!.brand || undefined,
+        specification: stockinTarget!.specification || "",
+      });
+      return response.data;
+    },
+  });
+  const commonPublicArrivalFields = getCommonPublicArrivalFormFields(
+    commonShelfLocationSuggestionsQuery.data ?? [],
+  );
+  const dialogTitle = getStockinDialogTitle(stockinMode);
+  const isCommonPublicArrival = stockinMode === "common-public-arrival";
+  const stockinFormContent = isCommonPublicArrival ? (
+    <BaseForm
+      form={commonPublicArrivalForm}
+      fields={commonPublicArrivalFields}
+      layout="stack"
+    />
+  ) : (
+    <BaseForm
+      form={stockinForm}
+      fields={getStockInFormFields(stockinTarget?.unit ?? undefined)}
+      layout="stack"
+    />
+  );
 
   return (
     <Dialog
@@ -322,9 +378,7 @@ function DashboardReagentStockinDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {stockinMode === "quick" ? "一键入库" : "入库"}
-          </DialogTitle>
+          <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
 
         <form className="space-y-4" onSubmit={submitStockin}>
@@ -336,11 +390,7 @@ function DashboardReagentStockinDialog({
             </p>
           </div>
 
-          <BaseForm
-            form={stockinForm}
-            fields={getStockInFormFields(stockinTarget?.unit ?? undefined)}
-            layout="stack"
-          />
+          {stockinFormContent}
 
           <div className="flex gap-3 mt-8">
             <Button
@@ -360,7 +410,7 @@ function DashboardReagentStockinDialog({
               className="flex-1"
               size="lg"
             >
-              确认入库
+              {isCommonPublicArrival ? "确认到货" : "确认入库"}
             </LoadingButton>
           </div>
         </form>
@@ -429,6 +479,7 @@ function useReagentEditDialog({
         alias: formData.alias || "",
         category: formData.category || "",
         brand: formData.brand || "",
+        purity: formData.purity || "",
         specification: formData.specification || "",
         quantity: formData.quantity,
         price: formData.price,
@@ -511,21 +562,36 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
     defaultValues: defaultStockInValues,
     shouldFocusError: false,
   });
+  const commonPublicArrivalForm = useForm<
+    CommonPublicArrivalFormInputData,
+    unknown,
+    CommonPublicArrivalFormData
+  >({
+    resolver: createValibotResolver(CommonPublicArrivalFormSchema),
+    defaultValues: { storage_location: "" },
+    shouldFocusError: false,
+  });
 
   // 提交成功和手动关闭共用同一套入库重置逻辑。
   const resetStockinDialog = useCallback(() => {
     setStockinTarget(null);
+    setStockinMode("quick");
     stockinForm.reset(defaultStockInValues);
-  }, [stockinForm]);
+    commonPublicArrivalForm.reset({ storage_location: "" });
+  }, [commonPublicArrivalForm, stockinForm]);
 
   // 打开入库弹窗时按 `mode` 设置默认剩余量。
   const openStockinDialog = useCallback(
     (item: DashboardReagentOrder, mode: StockinMode) => {
       setStockinTarget(item);
       setStockinMode(mode);
+      if (mode === "common-public-arrival") {
+        commonPublicArrivalForm.reset({ storage_location: "" });
+        return;
+      }
       stockinForm.reset(buildStockinFormValues(item, mode));
     },
-    [stockinForm],
+    [commonPublicArrivalForm, stockinForm],
   );
 
   // 提交中禁止关闭；关闭时重置记录和表单，避免上次输入残留到下一次入库。
@@ -579,14 +645,53 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
     }
   });
 
+  const submitCommonPublicArrival = commonPublicArrivalForm.handleSubmit(
+    async (formData) => {
+      if (!stockinTarget) return;
+
+      setIsSubmittingStockin(true);
+      try {
+        await reagentOrderAPI.confirmArrival(stockinTarget.id, {
+          storage_location: formData.storage_location,
+        });
+        resetStockinDialog();
+        await refreshTables();
+        toast.success("确认到货成功");
+      } catch (err) {
+        const detail = extractApiErrorDetail(err);
+        const validationErrors = toValidationErrors(detail);
+        if (validationErrors.length > 0) {
+          validationErrors.forEach((e) => {
+            if (e.loc?.[1]) {
+              commonPublicArrivalForm.setError(
+                e.loc[1] as keyof CommonPublicArrivalFormData,
+                {
+                  message: e.msg || "输入不合法",
+                },
+              );
+            }
+          });
+          return;
+        }
+        toast.error(normalizeApiErrorMessage(detail, "确认到货失败"));
+      } finally {
+        setIsSubmittingStockin(false);
+      }
+    },
+  );
+
   return {
     stockinTarget,
     stockinMode,
     stockinForm,
+    commonPublicArrivalForm,
     isSubmittingStockin,
     openStockinDialog,
     closeStockinDialog,
-    submitStockin,
+    submitStockin:
+      stockinMode === "common-public-arrival"
+        ? submitCommonPublicArrival
+        : submitStockin,
   };
 }
 

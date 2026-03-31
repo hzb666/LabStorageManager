@@ -68,6 +68,7 @@ export interface InventoryItem {
   alias: string | null
   category: string | null
   brand: string | null
+  purity: string | null
   storage_location: string | null
   initial_quantity: number
   remaining_quantity: number
@@ -107,6 +108,7 @@ function createInventoryFormValues(item: InventoryItem): InventoryFormInputData 
     specification: item.specification || '',
     category: item.category || '',
     brand: item.brand || '',
+    purity: item.purity || '',
     storage_location: item.storage_location || '',
     quantity_bottles: 1,
     initial_quantity: item.initial_quantity ?? undefined,
@@ -172,6 +174,7 @@ function createInventoryUpdatePayload(formData: InventoryFormData) {
     storage_location: formData.storage_location || '',
     remaining_quantity: formData.remaining_quantity,
     brand: formData.brand || '',
+    purity: formData.purity || '',
     is_hazardous: formData.is_hazardous,
     notes: processNotes(formData.notes),
     specification: formData.specification || '',
@@ -189,6 +192,7 @@ function createInventoryCreatePayload(formData: InventoryFormData) {
     quantity_bottles: formData.quantity_bottles as number,
     brand: formData.brand || undefined,
     category: formData.category || undefined,
+    purity: formData.purity || undefined,
     storage_location: formData.storage_location || undefined,
     is_hazardous: formData.is_hazardous,
     notes: processNotes(formData.notes),
@@ -426,6 +430,7 @@ function InventoryExpandedRow({ item }: { item: InventoryItem }) {
       <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
         <div>英文名称：{item.english_name || '-'}</div>
         <div>别名：{item.alias || '-'}</div>
+        <div>纯度：{item.purity || '-'}</div>
         <div>入库时间：{formatDate(item.created_at)}</div>
         <div>入库用户：{item.created_by_name || '-'}</div>
         <div>上次借用：{formatInventoryBorrowerDisplay(item)}</div>

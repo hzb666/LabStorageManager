@@ -465,7 +465,7 @@ function BaseFormFieldRenderer<
             label={field.label}
             error={errorMessage}
             required={field.required}
-            hideLabel={field.type === "checkbox"}
+            hideLabel={field.hideLabel || field.type === "checkbox"}
           >
             <BaseFormFieldControl
               field={field}

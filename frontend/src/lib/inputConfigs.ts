@@ -4,7 +4,6 @@ import {
   AlertCircle,
   Lock,
   CheckCircle2,
-  SquareLibrary,
 } from "lucide-react";
 
 // ==========================================
@@ -43,12 +42,6 @@ export const inputConfigs: Record<string, InputTagConfig> = {
     text: "text-emerald-600 dark:text-emerald-500",
     border: "border-emerald-500/40 dark:border-emerald-500/30",
     focus: "focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20",
-  },
-  "[std]": {
-    icon: SquareLibrary,
-    text: "text-sky-700 dark:text-sky-400",
-    border: "border-sky-500/40 dark:border-sky-400/30",
-    focus: "focus-visible:border-sky-500 focus-visible:ring-sky-500/20",
   },
 };
 

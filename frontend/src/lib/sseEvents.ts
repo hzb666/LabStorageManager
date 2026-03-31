@@ -10,7 +10,6 @@ export const COMMON_SHELF_SSE_EVENTS = [
   'common_shelf.created',
   'common_shelf.updated',
   'common_shelf.deleted',
-  'common_shelf.consumed',
 ] as const
 
 export const REAGENT_ORDER_SSE_EVENTS = [

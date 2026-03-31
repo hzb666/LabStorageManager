@@ -33,11 +33,11 @@ const LOG_TYPE_OPTIONS = [
   { value: 'reagent_order', label: '试剂订单' },
   { value: 'consumable_order', label: '耗材订单' },
   { value: 'inventory', label: '入库记录' },
+  { value: 'common_shelf', label: '常用货架' },
   { value: 'delete', label: '删除记录' },
   { value: 'update', label: '更新记录' },
   { value: 'export', label: '导出记录' },
   { value: 'borrow', label: '借用记录' },
-  { value: 'consume', label: '拿取记录' },
   { value: 'session', label: '登录记录' }
 ]
 
@@ -138,6 +138,7 @@ const renderReagentOrderExpandedTable = (fullData: Record<string, unknown>) => (
     <div><span className="text-muted-foreground">规格：</span>{safeString(fullData.specification)}</div>
     <div><span className="text-muted-foreground">数量：</span>{safeString(fullData.quantity)}</div>
     <div><span className="text-muted-foreground">品牌：</span>{safeString(fullData.brand)}</div>
+    <div><span className="text-muted-foreground">纯度：</span>{safeString(fullData.purity)}</div>
     <div><span className="text-muted-foreground">价格：</span>{fullData.price ? `¥${safeString(fullData.price)}` : '-'}</div>
     <div><span className="text-muted-foreground">申购原因：</span>{safeString(fullData.order_reason)}</div>
     <div><span className="text-muted-foreground">状态：</span>{safeString(fullData.status)}</div>
@@ -169,6 +170,7 @@ const renderInventoryExpandedTable = (fullData: Record<string, unknown>) => (
     <div><span className="text-muted-foreground">入库数量：</span><span className="text-green-600">{safeString(fullData.initial_quantity)} {safeString(fullData.unit)}</span></div>
     <div><span className="text-muted-foreground">剩余数量：</span>{safeString(fullData.remaining_quantity)} {safeString(fullData.unit)}</div>
     <div><span className="text-muted-foreground">品牌：</span>{safeString(fullData.brand)}</div>
+    <div><span className="text-muted-foreground">纯度：</span>{safeString(fullData.purity)}</div>
     <div><span className="text-muted-foreground">存放位置：</span>{safeString(fullData.storage_location)}</div>
     <div><span className="text-muted-foreground">状态：</span>{safeString(fullData.status)}</div>
     <div><span className="text-muted-foreground">内部编号：</span><span className="font-base">{safeString(fullData.internal_code)}</span></div>
@@ -179,6 +181,43 @@ const renderInventoryExpandedTable = (fullData: Record<string, unknown>) => (
   </div>
 )
 
+const renderCommonShelfExpandedTable = (fullData: Record<string, unknown>) => {
+  const before = (fullData.before as Record<string, unknown> | undefined) ?? {}
+  const after = (fullData.after as Record<string, unknown> | undefined) ?? {}
+  const hasDiff = Object.keys(before).length > 0 || Object.keys(after).length > 0
+
+  if (hasDiff) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
+        <div><span className="text-muted-foreground">名称：</span>{safeString(fullData.name)}</div>
+        <div><span className="text-muted-foreground">CAS号：</span>{safeString(fullData.cas_number)}</div>
+        <div><span className="text-muted-foreground">品牌：</span>{safeString(before.brand)} → {safeString(after.brand)}</div>
+        <div><span className="text-muted-foreground">纯度：</span>{safeString(before.purity)} → {safeString(after.purity)}</div>
+        <div><span className="text-muted-foreground">规格：</span>{safeString(before.specification_text)} → {safeString(after.specification_text)}</div>
+        <div><span className="text-muted-foreground">位置：</span>{safeString(before.storage_location)} → {safeString(after.storage_location)}</div>
+        <div><span className="text-muted-foreground">动作：</span>{safeString(fullData.action)}</div>
+        <div><span className="text-muted-foreground">操作时间：</span>{formatDateTime(fullData.created_at as string)}</div>
+        <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(before.notes)} → {safeString(after.notes)}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
+      <div><span className="text-muted-foreground">名称：</span>{safeString(fullData.name)}</div>
+      <div><span className="text-muted-foreground">CAS号：</span>{safeString(fullData.cas_number)}</div>
+      <div><span className="text-muted-foreground">品牌：</span>{safeString(fullData.brand)}</div>
+      <div><span className="text-muted-foreground">纯度：</span>{safeString(fullData.purity)}</div>
+      <div><span className="text-muted-foreground">规格：</span>{safeString(fullData.specification_text)}</div>
+      <div><span className="text-muted-foreground">位置：</span>{safeString(fullData.location ?? fullData.storage_location)}</div>
+      <div><span className="text-muted-foreground">数量：</span>{safeString(fullData.count)}</div>
+      <div><span className="text-muted-foreground">动作：</span>{safeString(fullData.action)}</div>
+      <div><span className="text-muted-foreground">操作时间：</span>{formatDateTime(fullData.created_at as string)}</div>
+      <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(fullData.notes)}</div>
+    </div>
+  )
+}
+
 const renderDeleteExpandedTable = (fullData: Record<string, unknown>) => (
   <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
     <div><span className="text-muted-foreground">物品名称：</span>{safeString(fullData.name)}</div>
@@ -186,6 +225,7 @@ const renderDeleteExpandedTable = (fullData: Record<string, unknown>) => (
     <div><span className="text-muted-foreground">删除前数量：</span><span className="text-red-600">{safeString(fullData.remaining_quantity)} {safeString(fullData.unit)}</span></div>
     <div><span className="text-muted-foreground">存放位置：</span>{safeString(fullData.storage_location)}</div>
     <div><span className="text-muted-foreground">品牌：</span>{safeString(fullData.brand)}</div>
+    <div><span className="text-muted-foreground">纯度：</span>{safeString(fullData.purity)}</div>
     <div><span className="text-muted-foreground">内部编号：</span><span className="font-base">{safeString(fullData.internal_code)}</span></div>
     <div><span className="text-muted-foreground">状态：</span>{safeString(fullData.status)}</div>
     <div><span className="text-muted-foreground">操作时间：</span>{formatDateTime(fullData.created_at as string)}</div>
@@ -208,6 +248,7 @@ const renderUpdateExpandedTable = (fullData: Record<string, unknown>) => {
       <div><span className="text-muted-foreground">状态：</span>{safeString(before.status)} → {safeString(after.status)}</div>
       <div><span className="text-muted-foreground">规格：</span>{safeString(before.initial_quantity)} {beforeUnit} → {safeString(after.initial_quantity)} {afterUnit}</div>
       <div><span className="text-muted-foreground">品牌：</span>{safeString(before.brand)} → {safeString(after.brand)}</div>
+      <div><span className="text-muted-foreground">纯度：</span>{safeString(before.purity)} → {safeString(after.purity)}</div>
       <div><span className="text-muted-foreground">操作时间：</span>{formatDateTime(fullData.created_at as string)}</div>
       <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(before.notes)} → {safeString(after.notes)}</div>
     </div>
@@ -216,6 +257,7 @@ const renderUpdateExpandedTable = (fullData: Record<string, unknown>) => {
 
 const renderExportExpandedTable = (fullData: Record<string, unknown>) => (
   <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
+    <div><span className="text-muted-foreground">导出对象：</span>{safeString(fullData.export_scope) === 'common_shelf' ? '常用货架' : '库存'}</div>
     <div><span className="text-muted-foreground">导出条数：</span>{safeString(fullData.count)}</div>
     <div><span className="text-muted-foreground">导出时间：</span>{formatDateTime(fullData.created_at as string)}</div>
   </div>
@@ -231,17 +273,6 @@ const renderSessionExpandedTable = (fullData: Record<string, unknown>) => (
     <div><span className="text-muted-foreground">首次登录：</span>{formatDateTime(fullData.created_at as string)}</div>
     <div><span className="text-muted-foreground">最后活跃：</span>{formatDateTime(fullData.last_active_at as string)}</div>
     <div><span className="text-muted-foreground">过期时间：</span>{formatDateTime(fullData.expires_at as string)}</div>
-  </div>
-)
-
-const renderConsumeExpandedTable = (fullData: Record<string, unknown>) => (
-  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 flex-1">
-    <div><span className="text-muted-foreground">物品名称：</span>{safeString(fullData.inventory_name)}</div>
-    <div><span className="text-muted-foreground">CAS号：</span>{safeString(fullData.cas_number)}</div>
-    <div><span className="text-muted-foreground">拿取数量：</span><span className="text-green-600">{safeString(fullData.quantity_consumed)} {safeString(fullData.unit)}</span></div>
-    <div><span className="text-muted-foreground">位置：</span>{safeString(fullData.storage_location)}</div>
-    <div><span className="text-muted-foreground">拿取时间：</span>{formatDateTime(fullData.consume_time as string)}</div>
-    <div className="col-span-2"><span className="text-muted-foreground">备注：</span>{safeString(fullData.notes)}</div>
   </div>
 )
 
@@ -263,6 +294,9 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
     case 'inventory':
       return renderInventoryExpandedTable(fullData)
 
+    case 'common_shelf':
+      return renderCommonShelfExpandedTable(fullData)
+
     case 'delete':
       return renderDeleteExpandedTable(fullData)
 
@@ -274,9 +308,6 @@ const renderExpandedTable = (fullData: Record<string, unknown>, type: string) =>
 
     case 'session':
       return renderSessionExpandedTable(fullData)
-
-    case 'consume':
-      return renderConsumeExpandedTable(fullData)
 
     default:
       // 默认显示 JSON
