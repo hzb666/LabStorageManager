@@ -70,8 +70,10 @@ def build_chemical_name_map_fts_rowid_subquery(
         field_map=field_map,
     )
 
-    match_expr = text("chemical_name_map_fts MATCH :match_query").bindparams(
-        bindparam("match_query", match_query)
+    match_expr = text(
+        "chemical_name_map_fts MATCH :chemical_name_map_fts_match_query"
+    ).bindparams(
+        bindparam("chemical_name_map_fts_match_query", match_query)
     )
     return (
         select(text("rowid"))

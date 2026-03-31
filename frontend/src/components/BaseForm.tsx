@@ -306,8 +306,15 @@ function renderInputField<T extends FieldValues>({
       {...controllerField}
       id={fieldId}
       type={field.type === "number" ? "number" : field.inputType || "text"}
-      value={(controllerField.value as string) ?? ""}
-      onChange={(event) => controllerField.onChange(event.target.value)}
+      value={controllerField.value ?? ""}
+      onChange={(event) => {
+        if (field.type === "number") {
+          const num = event.target.valueAsNumber
+          controllerField.onChange(Number.isNaN(num) ? undefined : num)
+        } else {
+          controllerField.onChange(event.target.value)
+        }
+      }}
       placeholder={field.placeholder}
       disabled={isDisabled}
       readOnly={isReadOnly}

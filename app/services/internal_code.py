@@ -5,6 +5,7 @@ Sequence: Auto-increment per CAS number group, zero-padded to ensure proper sort
 """
 from datetime import datetime
 import re
+import sqlite3
 
 from sqlalchemy import Integer, cast, func, text
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +15,11 @@ from app.models.common_shelf import CommonShelf
 from app.core.constants import INTERNAL_CODE_MAX_SEQUENCE, INTERNAL_CODE_SEQUENCE_PAD_WIDTH
 from app.core.time_utils import get_utc_now
 from app.models.inventory import Inventory
+
+# UPDATE ... RETURNING requires SQLite >= 3.35.0
+_SQLITE_SUPPORTS_RETURNING = (
+    tuple(int(x) for x in sqlite3.sqlite_version.split(".")) >= (3, 35, 0)
+)
 
 INTERNAL_CODE_CONFLICT_MAX_RETRIES = 3
 
@@ -118,29 +124,59 @@ def _reserve_sequence_range(
     prefix: str,
     quantity: int,
 ) -> int:
-    # Reserve the whole range in one UPDATE ... RETURNING to avoid check-then-insert races.
+    # Reserve the whole range in one atomic operation to avoid check-then-insert races.
     _ensure_internal_code_sequence_table(session)
     _seed_sequence_prefix(session, prefix=prefix)
-    reserved_row = session.exec(
-        text(
-            """
-            UPDATE internal_code_sequences
-            SET current_seq = current_seq + :quantity,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE prefix = :prefix
-              AND current_seq + :quantity <= :max_sequence
-            RETURNING current_seq
-            """
-        ),
-        {
-            "prefix": prefix,
-            "quantity": quantity,
-            "max_sequence": INTERNAL_CODE_MAX_SEQUENCE,
-        },
-    ).first()
-    if reserved_row is None:
-        raise ValueError("internal code sequence limit reached")
-    return _extract_scalar(reserved_row)
+    if _SQLITE_SUPPORTS_RETURNING:
+        reserved_row = session.exec(
+            text(
+                """
+                UPDATE internal_code_sequences
+                SET current_seq = current_seq + :quantity,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE prefix = :prefix
+                  AND current_seq + :quantity <= :max_sequence
+                RETURNING current_seq
+                """
+            ),
+            {
+                "prefix": prefix,
+                "quantity": quantity,
+                "max_sequence": INTERNAL_CODE_MAX_SEQUENCE,
+            },
+        ).first()
+        if reserved_row is None:
+            raise ValueError("internal code sequence limit reached")
+        return _extract_scalar(reserved_row)
+    else:
+        # Fallback for SQLite < 3.35: UPDATE then SELECT within the same transaction.
+        result = session.exec(
+            text(
+                """
+                UPDATE internal_code_sequences
+                SET current_seq = current_seq + :quantity,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE prefix = :prefix
+                  AND current_seq + :quantity <= :max_sequence
+                """
+            ),
+            {
+                "prefix": prefix,
+                "quantity": quantity,
+                "max_sequence": INTERNAL_CODE_MAX_SEQUENCE,
+            },
+        )
+        if result.rowcount == 0:
+            raise ValueError("internal code sequence limit reached")
+        reserved_row = session.exec(
+            text(
+                "SELECT current_seq FROM internal_code_sequences WHERE prefix = :prefix"
+            ),
+            {"prefix": prefix},
+        ).first()
+        if reserved_row is None:
+            raise ValueError("internal code sequence limit reached")
+        return _extract_scalar(reserved_row)
 
 
 def generate_internal_code(

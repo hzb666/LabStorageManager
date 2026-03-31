@@ -71,7 +71,11 @@ api.interceptors.response.use(
     const isLogoutRequest = requestUrl.includes('/users/logout')
     const skipAuthInvalidation = hasSkipAuthInvalidationHeader(error.config?.headers)
     const status = error.response?.status
-    const authErrorCode = String(error.response?.headers?.['x-auth-error-code'] ?? '')
+    const authErrorCode = String(
+      readHeaderValue(error.response?.headers, 'x-auth-error-code')
+      ?? readHeaderValue(error.response?.headers, 'X-Auth-Error-Code')
+      ?? ''
+    )
     const isDisabled403 = status === 403 && authErrorCode === 'AUTH_USER_DISABLED'
 
     if ((status === 401 || isDisabled403) && !isLoginRequest && !isLogoutRequest && !skipAuthInvalidation) {
