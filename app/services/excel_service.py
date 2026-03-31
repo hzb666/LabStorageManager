@@ -359,7 +359,6 @@ def _build_inventory_from_import_row(
         category=optional_fields['category'],
         brand=optional_fields['brand'],
         storage_location=optional_fields['storage_location'],
-        is_common=False,
         initial_quantity=initial_quantity,
         remaining_quantity=remaining_qty,
         remaining_percent=_compute_remaining_percent(remaining_qty, initial_quantity),

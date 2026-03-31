@@ -32,6 +32,7 @@ class InventoryBase(SQLModel):
     alias: Optional[str] = Field(None, max_length=200)
     category: Optional[str] = Field(max_length=100)  # 排序/搜索常用
     brand: Optional[str] = Field(max_length=100)  # 排序/搜索常用
+    purity: Optional[str] = Field(default=None, max_length=20)
     storage_location: Optional[str] = Field(max_length=200)  # 排序/搜索常用
     # 数据库模型：允许 NULL 以兼容旧数据
     initial_quantity: Optional[float] = Field(default=None)
@@ -47,29 +48,32 @@ class Inventory(InventoryBase, table=True):
     """Inventory database model - Individual item tracking"""
     __table_args__ = (
         # Search/sort acceleration: keep indexes that can actually hit B-Tree paths.
-        Index("ix_inventory_is_common_cas_number_created_at_id", "is_common", "cas_number", "created_at", "id"),
-        Index("ix_inventory_is_common_name_pinyin", "is_common", "name_pinyin", "created_at", "id"),
-        Index("ix_inventory_is_common_name_pinyin_initials", "is_common", "name_pinyin_initials", "created_at", "id"),
-        Index("ix_inventory_is_common_category_pinyin", "is_common", "category_pinyin", "created_at", "id"),
-        Index("ix_inventory_is_common_category_pinyin_initials", "is_common", "category_pinyin_initials", "created_at", "id"),
-        Index("ix_inventory_is_common_brand_pinyin", "is_common", "brand_pinyin", "created_at", "id"),
-        Index("ix_inventory_is_common_brand_pinyin_initials", "is_common", "brand_pinyin_initials", "created_at", "id"),
-        Index("ix_inventory_is_common_storage_location_created_at_id", "is_common", "storage_location", "created_at", "id"),
-        Index("ix_inventory_is_common_storage_location_pinyin", "is_common", "storage_location_pinyin", "created_at", "id"),
-        Index("ix_inventory_is_common_storage_location_pinyin_initials", "is_common", "storage_location_pinyin_initials", "created_at", "id"),
+        Index("ix_inventory_cas_number_created_at_id", "cas_number", "created_at", "id"),
+        Index("ix_inventory_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
+        Index("ix_inventory_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),
+        Index("ix_inventory_category_pinyin_created_at_id", "category_pinyin", "created_at", "id"),
+        Index("ix_inventory_category_pinyin_initials_created_at_id", "category_pinyin_initials", "created_at", "id"),
+        Index("ix_inventory_brand_pinyin_created_at_id", "brand_pinyin", "created_at", "id"),
+        Index("ix_inventory_brand_pinyin_initials_created_at_id", "brand_pinyin_initials", "created_at", "id"),
+        Index("ix_inventory_storage_location_created_at_id", "storage_location", "created_at", "id"),
+        Index("ix_inventory_storage_location_pinyin_created_at_id", "storage_location_pinyin", "created_at", "id"),
         Index(
-            "ix_inventory_is_common_remaining_percent_created_at_id",
-            "is_common",
+            "ix_inventory_storage_location_pinyin_initials_created_at_id",
+            "storage_location_pinyin_initials",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_inventory_remaining_percent_created_at_id",
             "remaining_percent",
             "created_at",
             "id",
         ),
-        Index("ix_inventory_is_common_created_at_id", "is_common", "created_at", "id"),
-        Index("ix_inventory_is_common_status_created_at_id", "is_common", "status", "created_at", "id"),
+        Index("ix_inventory_created_at_id", "created_at", "id"),
+        Index("ix_inventory_status_created_at_id", "status", "created_at", "id"),
         Index("ix_inventory_borrower_status_updated_at", "borrower_id", "status", "updated_at"),
         Index(
-            "ix_inventory_is_common_keeper_location_created_at",
-            "is_common",
+            "ix_inventory_keeper_location_created_at",
             "temporary_keeper_id",
             "storage_location",
             "created_at",
@@ -80,7 +84,6 @@ class Inventory(InventoryBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     # Unique internal code: e.g., "64175-250113-001" (CAS-Date-Sequence)
     internal_code: str = Field(unique=True, index=True, max_length=50)
-    is_common: bool = Field(default=False)
     status: InventoryStatus = Field(
         default=InventoryStatus.IN_STOCK,
         sa_column=Column(
@@ -147,6 +150,7 @@ class InventoryCreate(SQLModel):
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
+    purity: Optional[str] = Field(default=None, max_length=20)
     storage_location: Optional[str] = None
     # 数据库模型：允许 NULL 以兼容旧数据
     initial_quantity: Optional[float] = None
@@ -162,7 +166,7 @@ class InventoryCreate(SQLModel):
 
 class InventoryUpdate(SQLModel):
     """DTO for updating inventory"""
-    # 安全边界：拒绝未声明字段（如 is_common），避免静默忽略带来的越权探测面
+    # 安全边界：拒绝未声明字段，避免静默忽略带来的越权探测面
     model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = None
@@ -174,6 +178,7 @@ class InventoryUpdate(SQLModel):
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
+    purity: Optional[str] = None
     is_hazardous: Optional[bool] = None
     # 规格字段：前端传入规格字符串（如 "500ml"），后端用 parse_specification 解析
     specification: Optional[str] = None
@@ -199,13 +204,13 @@ class InventoryResponse(BaseResponse):
     alias: Optional[str]
     category: Optional[str]
     brand: Optional[str]
+    purity: Optional[str]
     storage_location: Optional[str]
     # 允许 NULL 以兼容旧数据
     initial_quantity: Optional[float]
     remaining_quantity: Optional[float]
     remaining_percent: Optional[float]
     unit: Optional[str]
-    is_common: bool
     status: InventoryStatus
     borrower_id: Optional[int]
     last_borrower_id: Optional[int]
@@ -277,4 +282,5 @@ class ManualInventoryCreate(SQLModel):
     is_hazardous: bool = False
     category: Optional[str] = None
     brand: Optional[str] = None
+    purity: Optional[str] = Field(default=None, max_length=20)
     notes: Optional[str] = None

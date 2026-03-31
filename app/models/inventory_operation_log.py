@@ -16,7 +16,6 @@ class InventoryOperationAction(str, Enum):
     """Supported inventory snapshot log actions."""
 
     STOCK_IN = "stock_in"
-    COMMON_CONSUME = "common_consume"
     INVENTORY_DELETE = "inventory_delete"
     INVENTORY_UPDATE = "inventory_update"
     INVENTORY_EXPORT = "inventory_export"
@@ -27,9 +26,9 @@ class InventoryOperationLog(SQLModel, table=True):
 
     # snapshot_json short-key contract:
     # id=inventory row id, ic=internal_code, ca=cas_number, na=name, en=english_name,
-    # al=alias, cg=category, br=brand, sl=storage_location, iq=initial_quantity,
+    # al=alias, cg=category, br=brand, pu=purity, sl=storage_location, iq=initial_quantity,
     # rq=remaining_quantity, rp=remaining_percent, un=unit, hz=is_hazardous,
-    # nt=notes, cm=is_common, bi=borrower_id, lb=last_borrower_id,
+    # nt=notes, bi=borrower_id, lb=last_borrower_id,
     # tk=temporary_keeper_id, oi=source_order_id, cb=created_by_id, cr=created_at,
     # up=updated_at, sc=source, ct=count(export only), cq=consumed_quantity,
     # bf=before(update only), af=after(update only)
@@ -62,11 +61,6 @@ class InventoryOperationLog(SQLModel, table=True):
             "created_at",
         ),
         Index(
-            "ix_inventory_operation_log_common_created_at",
-            "is_common",
-            "created_at",
-        ),
-        Index(
             "ix_inventory_operation_log_cas_created_at",
             "cas_number",
             "created_at",
@@ -92,7 +86,6 @@ class InventoryOperationLog(SQLModel, table=True):
         ),
     )
     created_at: datetime = Field(default_factory=get_utc_now)
-    is_common: bool = Field(default=False)
     item_name: str = Field(max_length=200)
     cas_number: str = Field(max_length=50)
     snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
@@ -107,7 +100,6 @@ class InventoryOperationLogResponse(BaseResponse):
     operator_id: int
     action: InventoryOperationAction
     created_at: datetime
-    is_common: bool
     item_name: str
     cas_number: str
     snapshot_json: str
