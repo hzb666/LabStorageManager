@@ -7,6 +7,8 @@
 - `announcements.router` -> `/api`
 - `cart_sync.router` -> `/api`
 - `chemical_info.router` -> `/api`
+- `chemical_name_map.router` -> `/api`
+- `common_shelf.router` -> `/api`
 - `consumable_orders.router` -> `/api`
 - `error_logs.router` -> `/api`
 - `events.router` -> `/api`
@@ -15,7 +17,7 @@
 - `user_logs.router` -> `/api`
 - `user_sessions.router` -> `/api/users/me`
 - `users.router` -> `/api`
-- `inventory_extended_routes` 与 `common_shelf` 通过 `register_*` 动态挂到 `inventory.router`，最终前缀为 `/api/inventory`。
+- `inventory_extended_routes` 通过 `register_*` 动态挂到 `inventory.router`，最终前缀为 `/api/inventory`。
 - `reagent_orders_workflow` 通过 `register_*` 动态挂到 `reagent_orders.router`，最终前缀为 `/api/reagent-orders`。
 
 ## 权限判定
@@ -102,12 +104,28 @@
 
 | 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/inventory/common-shelf` | `list_common_shelf` | 已登录用户 | query: `search` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L591" /> |
-| `POST` | `/api/inventory/common-shelf/consume-one` | `consume_one_common_shelf_item` | 管理员 | body: `CommonShelfConsumeRequest` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L679" /> |
-| `GET` | `/api/inventory/common-shelf/export` | `export_common_shelf` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L895" /> |
-| `DELETE` | `/api/inventory/common-shelf/group/{sample_inventory_id}` | `delete_common_shelf_group` | 已登录用户 | path: `sample_inventory_id` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L862" /> |
-| `PUT` | `/api/inventory/common-shelf/group/{sample_inventory_id}` | `update_common_shelf_group` | 已登录用户 | path: `sample_inventory_id`；body: `InventoryUpdate` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L783" /> |
-| `POST` | `/api/inventory/common-shelf/manual-add` | `manual_add_common_shelf_inventory` | 已登录用户 | body: `ManualInventoryCreate` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L757" /> |
+| `GET` | `/api/common-shelf/groups` | `list_common_shelf_groups` | 已登录用户 | query: `search`、`search_field`、`fuzzy`、`sort_by`、`sort_order` | `CommonShelfGroupListResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L131" /> |
+| `POST` | `/api/common-shelf/manual-add` | `manual_add_common_shelf` | 已登录用户 | body: `CommonShelfManualCreate` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L206" /> |
+| `GET` | `/api/common-shelf/groups/{group_key}/locations` | `get_common_shelf_group_locations` | 已登录用户 | path: `group_key` | `list[CommonShelfLocationSummaryResponse]` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L155" /> |
+| `GET` | `/api/common-shelf/groups/{group_key}/location-suggestions` | `get_common_shelf_group_location_suggestions` | 已登录用户 | path: `group_key` | `list[str]` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L164" /> |
+| `GET` | `/api/common-shelf/location-suggestions` | `get_common_shelf_location_suggestions_by_fields` | 已登录用户 | query: `cas_number`、`brand`、`specification` | `list[str]` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L169" /> |
+| `GET` | `/api/common-shelf/groups/{group_key}/items` | `get_common_shelf_group_items` | 已登录用户 | path: `group_key` | `list[CommonShelfGroupItemResponse]` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L187" /> |
+| `PUT` | `/api/common-shelf/groups/{group_key}` | `update_common_shelf_group` | 已登录用户 | path: `group_key`；body: `CommonShelfGroupEditRequest` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L229" /> |
+| `PUT` | `/api/common-shelf/groups/{group_key}/items/{item_id}` | `update_common_shelf_item` | 已登录用户 | path: `group_key`、`item_id`；body: `CommonShelfGroupItemUpdateRequest` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L312" /> |
+| `POST` | `/api/common-shelf/groups/{group_key}/add-bottles` | `add_common_shelf_bottles` | 已登录用户 | path: `group_key`；body: `CommonShelfAddBottlesRequest` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L357" /> |
+| `POST` | `/api/common-shelf/groups/{group_key}/remove-one` | `remove_one_common_shelf` | 已登录用户 | path: `group_key`；body: `CommonShelfRemoveOneRequest` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L399" /> |
+| `DELETE` | `/api/common-shelf/groups/{group_key}/items/{item_id}` | `delete_common_shelf_item` | 已登录用户 | path: `group_key`、`item_id` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L439" /> |
+| `DELETE` | `/api/common-shelf/groups/{group_key}` | `delete_common_shelf_group` | 管理员 | path: `group_key` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L473" /> |
+| `GET` | `/api/common-shelf/export` | `export_common_shelf` | 已登录用户 | — | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py#L506" /> |
+
+### CAS 主数据接口 (`chemical_name_map`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/chemical-name-map` | `list_chemical_name_map` | 已登录用户 | query: `search`、`search_field`、`fuzzy`、`skip`、`limit` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chemical_name_map.py#L85" /> |
+| `POST` | `/api/chemical-name-map` | `create_chemical_name_map` | 已登录用户 | body: `ChemicalNameMapCreate` | `ChemicalNameMapResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chemical_name_map.py#L123" /> |
+| `PUT` | `/api/chemical-name-map/{item_id}` | `update_chemical_name_map` | 已登录用户 | path: `item_id`；body: `ChemicalNameMapUpdate` | `ChemicalNameMapResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chemical_name_map.py#L149" /> |
+| `DELETE` | `/api/chemical-name-map/{item_id}` | `delete_chemical_name_map` | 已登录用户 | path: `item_id` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chemical_name_map.py#L173" /> |
 
 ### 试剂订单基础接口 (`reagent_orders`)
 
@@ -210,5 +228,4 @@
 - [app/api/users.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py)（行211，365，410，447，480，579，607，613，628，732，768，812，858，922，958）
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)（行370，382，396）
 - [app/services/chemical_info.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/chemical_info.py)（行442）
-
 
