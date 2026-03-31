@@ -11,14 +11,14 @@ from sqlmodel import Session, select, func, delete
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, get_current_user, require_admin
-from app.core.constants import (
-    DEFAULT_PAGE_SIZE,
+from app.core.constants import (    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
     SSEEventType,
     SSERoom,
 )
 from app.core.time_utils import get_utc_now, utc_iso_str
+from app.core.db_compat import exec_delete_returning_first
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
@@ -146,9 +146,9 @@ def _delete_consumable_order_with_permission(
     delete_stmt = delete(ConsumableOrder).where(ConsumableOrder.id == order_id)
     if current_user.role != UserRole.ADMIN:
         delete_stmt = delete_stmt.where(ConsumableOrder.applicant_id == current_user.id)
-    deleted_row = db.exec(delete_stmt.returning(*ConsumableOrder.__table__.columns)).first()
-    if deleted_row is not None:
-        return ConsumableOrder.model_validate(dict(deleted_row._mapping))
+    deleted_item = exec_delete_returning_first(db, delete_stmt, ConsumableOrder)
+    if deleted_item is not None:
+        return deleted_item
 
     order_exists = db.exec(select(ConsumableOrder.id).where(ConsumableOrder.id == order_id)).first()
     if order_exists is None:

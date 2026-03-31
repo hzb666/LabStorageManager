@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, delete, func, or_
 from sqlmodel import Session, select
 
+from app.core.db_compat import exec_delete_returning_first, exec_delete_returning_all
 from app.core.time_utils import get_utc_now
 from app.models.chemical_name_map import ChemicalNameMap
 from app.models.common_shelf import (
@@ -370,12 +371,11 @@ def remove_earliest_item_in_location(
     delete_stmt = (
         delete(CommonShelf)
         .where(CommonShelf.id == candidate_id_subquery)
-        .returning(*CommonShelf.__table__.columns)
     )
-    deleted_row = db.exec(delete_stmt).first()
-    if deleted_row is None:
+    deleted_item = exec_delete_returning_first(db, delete_stmt, CommonShelf)
+    if deleted_item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No bottle found at selected location")
-    return CommonShelf.model_validate(dict(deleted_row._mapping))
+    return deleted_item
 
 
 def delete_group_items_returning(
@@ -388,10 +388,8 @@ def delete_group_items_returning(
         .where(CommonShelf.cas_number == group_fields.cas_number)
         .where(CommonShelf.brand_normalized == group_fields.brand_normalized)
         .where(CommonShelf.specification_normalized == group_fields.specification_normalized)
-        .returning(*CommonShelf.__table__.columns)
     )
-    deleted_rows = db.exec(delete_stmt).all()
-    return [CommonShelf.model_validate(dict(row._mapping)) for row in deleted_rows]
+    return exec_delete_returning_all(db, delete_stmt, CommonShelf)
 
 
 def _apply_chemical_name_like_filter(base, *, search_value: str, search_field: Optional[str], fuzzy: bool):

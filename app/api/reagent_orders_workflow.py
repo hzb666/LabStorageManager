@@ -9,6 +9,7 @@ from sqlmodel import Session, select, delete
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, get_current_user, require_admin
+from app.core.db_compat import exec_delete_returning_first
 from app.core.time_utils import utc_iso_str
 from app.models.user import UserRole
 from app.models.reagent_order import (
@@ -741,9 +742,9 @@ def _delete_reagent_order_with_permission(
     delete_stmt = delete(ReagentOrder).where(ReagentOrder.id == order_id)
     if current_user.role != UserRole.ADMIN:
         delete_stmt = delete_stmt.where(ReagentOrder.applicant_id == current_user.id)
-    deleted_row = db.exec(delete_stmt.returning(*ReagentOrder.__table__.columns)).first()
-    if deleted_row is not None:
-        return ReagentOrder.model_validate(dict(deleted_row._mapping))
+    deleted_item = exec_delete_returning_first(db, delete_stmt, ReagentOrder)
+    if deleted_item is not None:
+        return deleted_item
 
     order_exists = db.exec(select(ReagentOrder.id).where(ReagentOrder.id == order_id)).first()
     if order_exists is None:

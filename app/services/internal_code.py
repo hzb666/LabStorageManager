@@ -5,7 +5,6 @@ Sequence: Auto-increment per CAS number group, zero-padded to ensure proper sort
 """
 from datetime import datetime
 import re
-import sqlite3
 
 from sqlalchemy import Integer, cast, func, text
 from sqlalchemy.exc import IntegrityError
@@ -13,13 +12,12 @@ from sqlmodel import Session, select
 
 from app.models.common_shelf import CommonShelf
 from app.core.constants import INTERNAL_CODE_MAX_SEQUENCE, INTERNAL_CODE_SEQUENCE_PAD_WIDTH
+from app.core.db_compat import SQLITE_SUPPORTS_RETURNING
 from app.core.time_utils import get_utc_now
 from app.models.inventory import Inventory
 
 # UPDATE ... RETURNING requires SQLite >= 3.35.0
-_SQLITE_SUPPORTS_RETURNING = (
-    tuple(int(x) for x in sqlite3.sqlite_version.split(".")) >= (3, 35, 0)
-)
+_SQLITE_SUPPORTS_RETURNING = SQLITE_SUPPORTS_RETURNING
 
 INTERNAL_CODE_CONFLICT_MAX_RETRIES = 3
 

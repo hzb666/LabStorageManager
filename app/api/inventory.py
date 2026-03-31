@@ -15,8 +15,7 @@ from sqlmodel import Session, select, func, delete
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
 from app.core.auth import get_current_user
-from app.core.constants import (
-    DEFAULT_PAGE_SIZE,
+from app.core.constants import (    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
     SSEEventType,
@@ -61,6 +60,7 @@ from app.services.inventory_operation_logger import (
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
 from app.core.request_utils import get_sse_client_id
+from app.core.db_compat import exec_delete_returning_first
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -697,12 +697,11 @@ async def delete_inventory(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    deleted_row = db.exec(
-        delete(Inventory)
-        .where(Inventory.id == inventory_id)
-        .returning(*Inventory.__table__.columns)
-    ).first()
-    item = Inventory.model_validate(dict(deleted_row._mapping)) if deleted_row else None
+    item = exec_delete_returning_first(
+        db,
+        delete(Inventory).where(Inventory.id == inventory_id),
+        Inventory,
+    )
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
     log_inventory_delete(
