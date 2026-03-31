@@ -141,7 +141,6 @@ class SSEEventType:
     COMMON_SHELF_CREATED = "common_shelf.created"
     COMMON_SHELF_UPDATED = "common_shelf.updated"
     COMMON_SHELF_DELETED = "common_shelf.deleted"
-    COMMON_SHELF_CONSUMED = "common_shelf.consumed"
 
     REAGENT_ORDER_CREATED = "reagent_order.created"
     REAGENT_ORDER_UPDATED = "reagent_order.updated"

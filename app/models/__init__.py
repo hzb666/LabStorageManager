@@ -9,10 +9,23 @@ from .inventory import (
     BorrowLogResponse,
     InventoryResponse,
 )
+from .common_shelf import CommonShelf, CommonShelfResponse
+from .chemical_name_map import (
+    ChemicalCategory,
+    ChemicalNameMap,
+    ChemicalNameMapCreate,
+    ChemicalNameMapResponse,
+    ChemicalNameMapUpdate,
+)
 from .inventory_operation_log import (
     InventoryOperationAction,
     InventoryOperationLog,
     InventoryOperationLogResponse,
+)
+from .common_shelf_operation_log import (
+    CommonShelfOperationAction,
+    CommonShelfOperationLog,
+    CommonShelfOperationLogResponse,
 )
 from .reagent_order_operation_log import (
     ReagentOrderOperationAction,
@@ -72,9 +85,19 @@ __all__ = [
     "BorrowLog",
     "BorrowLogResponse",
     "InventoryResponse",
+    "CommonShelf",
+    "CommonShelfResponse",
+    "ChemicalCategory",
+    "ChemicalNameMap",
+    "ChemicalNameMapCreate",
+    "ChemicalNameMapUpdate",
+    "ChemicalNameMapResponse",
     "InventoryOperationAction",
     "InventoryOperationLog",
     "InventoryOperationLogResponse",
+    "CommonShelfOperationAction",
+    "CommonShelfOperationLog",
+    "CommonShelfOperationLogResponse",
     "ReagentOrderOperationAction",
     "ReagentOrderOperationLog",
     "ReagentOrderOperationLogResponse",
