@@ -23,7 +23,7 @@ function PasswordInput({
 
   const showCapsLockHint = isFocused && isCapsLockOn
 
-  const syncCapsLockState = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const updateCapsLockState = (event: React.KeyboardEvent<HTMLInputElement>) => {
     setIsCapsLockOn(event.getModifierState('CapsLock'))
   }
 
@@ -46,15 +46,14 @@ function PasswordInput({
           }}
           onBlur={(event) => {
             setIsFocused(false)
-            setIsCapsLockOn(false)
             onBlur?.(event)
           }}
           onKeyDown={(event) => {
-            syncCapsLockState(event)
+            updateCapsLockState(event)
             onKeyDown?.(event)
           }}
           onKeyUp={(event) => {
-            syncCapsLockState(event)
+            updateCapsLockState(event)
             onKeyUp?.(event)
           }}
           {...props}
@@ -71,7 +70,12 @@ function PasswordInput({
 
       {showCapsLockHint && typeof document !== 'undefined'
         ? createPortal(
-            <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div
+              className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4 animate-in fade-in slide-in-from-top-2 duration-200"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
               <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-card/96 px-3 py-2 shadow-lg backdrop-blur dark:border-2 dark:border-input">
                 <Keyboard className="size-4 text-amber-500" />
                 <span className="truncate text-sm text-foreground">大写锁定已开启</span>
