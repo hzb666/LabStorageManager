@@ -13,6 +13,7 @@
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py) 负责审批、到货、入库和删除。
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py) 同时承担耗材订单 CRUD 与状态流转。
 - [app/api/announcements.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py)、[app/api/error_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/error_logs.py)、[app/api/user_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py)、[app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)、[app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py) 则处理外围能力。
+- [app/api/common_shelf.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py)、[app/api/chemical_name_map.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chemical_name_map.py) 负责常用货架分组与 CAS 主数据维护。
 
 ## 试剂工作流
 
@@ -45,14 +46,15 @@
 - `borrow` 和 `return` 会修改状态、写借还历史，并通过 SSE 通知前端。
 - `dashboard/my-borrows` 和 `dashboard/pending-stockin` 为首页和仪表盘聚合数据。
 - `import/template` 与 `import` 组成 Excel 导入链路。
-- 常用货架不单独建表，而是同 `inventory` 共表，通过 `is_common` 语义和专用路由完成分组维护。
+- 常用货架不单独建表，而是通过 `CommonShelf` 模型维护，按 `CAS + 品牌 + 规格` 形成分组键 `group_key`，并由 `/api/common-shelf/*` 提供分组级与瓶级操作。
+- 手动加瓶前会校验 CAS 主数据；若缺失主数据，需要先走 `/api/chemical-name-map` 完成补录，避免常用货架出现无法稳定展示名称的脏数据。
 
 ## 事件驱动补充层
 
 路由不是唯一的更新出口。很多接口在数据库提交后还会广播 SSE：
 
 - 库存创建、编辑、删除、借用、归还
-- 常用货架创建、编辑、删除、消耗
+- 常用货架创建、编辑、删除、加瓶、扣减 1 瓶
 - 试剂订单与耗材订单的创建、更新、删除
 - 仪表盘聚合数据更新
 
