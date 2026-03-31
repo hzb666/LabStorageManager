@@ -50,9 +50,7 @@ from app.services.inventory_operation_logger import (
     log_stock_in,
 )
 from app.services.inventory_queries import (
-    common_inventory_query,
     get_regular_inventory_by_id,
-    regular_inventory_clause,
     regular_inventory_query,
 )
 from app.services.rate_limit import enforce_rate_limit
@@ -198,7 +196,6 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         statement = select(func.sum(Inventory.remaining_quantity)).where(
             Inventory.cas_number == normalized_cas,
             Inventory.status != InventoryStatus.CONSUMED,
-            regular_inventory_clause(),
         )
 
         total = db.exec(statement).first()
@@ -221,18 +218,17 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         current_user: Annotated[User, Depends(get_current_user)],
         db: DBSession,
     ):
-        # 导出库存工作簿，包含常规库存与 common shelf 两个工作表。
+        # 导出库存工作簿，仅包含常规库存。
         statement = regular_inventory_query().order_by(Inventory.created_at.desc())
         items = db.exec(statement).all()
-        common_items = db.exec(common_inventory_query().order_by(Inventory.created_at.desc())).all()
         log_inventory_export_operation(
             db,
             operator_id=current_user.id,
-            exported_count=len(items) + len(common_items),
+            exported_count=len(items),
         )
         db.commit()
 
-        return export_inventory_xlsx(items, common_items)
+        return export_inventory_xlsx(items)
 
 
 def _register_manual_and_dashboard_routes(
@@ -252,7 +248,6 @@ def _register_manual_and_dashboard_routes(
             db,
             item_data,
             created_by_id=current_user.id,
-            is_common=False,
         )
         for item in created_items:
             log_stock_in(
@@ -634,7 +629,6 @@ def _register_borrow_route(
             sql_update(Inventory)
             .where(Inventory.id == inventory_id)
             .where(Inventory.status == InventoryStatus.IN_STOCK)
-            .where(regular_inventory_clause())
             .values(
                 status=InventoryStatus.BORROWED,
                 borrower_id=borrower_id,

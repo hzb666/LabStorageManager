@@ -11,7 +11,6 @@ from app.models.inventory_operation_log import (
     InventoryOperationAction,
     InventoryOperationLog,
 )
-from app.services.common_name_utils import strip_std_name_marker
 
 SNAPSHOT_KEY_MAP = {
     "id": "id",
@@ -22,6 +21,7 @@ SNAPSHOT_KEY_MAP = {
     "al": "alias",
     "cg": "category",
     "br": "brand",
+    "pu": "purity",
     "sl": "storage_location",
     "iq": "initial_quantity",
     "rq": "remaining_quantity",
@@ -29,8 +29,6 @@ SNAPSHOT_KEY_MAP = {
     "un": "unit",
     "hz": "is_hazardous",
     "nt": "notes",
-    "cm": "is_common",
-    # Keep for backward compatibility when parsing historical logs.
     "st": "status",
     "bi": "borrower_id",
     "lb": "last_borrower_id",
@@ -41,7 +39,6 @@ SNAPSHOT_KEY_MAP = {
     "up": "updated_at",
     "sc": "source",
     "ct": "count",
-    "cq": "consumed_quantity",
     "bf": "before",
     "af": "after",
 }
@@ -67,6 +64,7 @@ def build_inventory_snapshot(
         "al": inventory.alias,
         "cg": inventory.category,
         "br": inventory.brand,
+        "pu": inventory.purity,
         "sl": inventory.storage_location,
         "iq": inventory.initial_quantity,
         "rq": inventory.remaining_quantity,
@@ -74,7 +72,6 @@ def build_inventory_snapshot(
         "un": inventory.unit,
         "hz": inventory.is_hazardous,
         "nt": inventory.notes,
-        "cm": inventory.is_common,
         "bi": inventory.borrower_id,
         "lb": inventory.last_borrower_id,
         "tk": inventory.temporary_keeper_id,
@@ -116,7 +113,6 @@ def _create_inventory_operation_log(
     inventory_id: int,
     operator_id: int,
     action: InventoryOperationAction,
-    is_common: bool,
     item_name: str,
     cas_number: str,
     snapshot: dict[str, Any],
@@ -126,7 +122,6 @@ def _create_inventory_operation_log(
         inventory_id=inventory_id,
         operator_id=operator_id,
         action=action,
-        is_common=is_common,
         item_name=item_name,
         cas_number=cas_number,
         snapshot_json=json.dumps(snapshot, ensure_ascii=False, sort_keys=True),
@@ -149,28 +144,7 @@ def log_stock_in(
         inventory_id=inventory.id or 0,
         operator_id=operator_id,
         action=InventoryOperationAction.STOCK_IN,
-        is_common=bool(inventory.is_common),
-        item_name=strip_std_name_marker(inventory.name) if inventory.is_common else inventory.name.strip(),
-        cas_number=inventory.cas_number,
-        snapshot=snapshot,
-        notes=inventory.notes,
-    )
-
-
-def log_common_consume(
-    db: Session,
-    *,
-    inventory: Inventory,
-    operator_id: int,
-) -> InventoryOperationLog:
-    snapshot = build_inventory_snapshot(inventory)
-    return _create_inventory_operation_log(
-        db,
-        inventory_id=inventory.id or 0,
-        operator_id=operator_id,
-        action=InventoryOperationAction.COMMON_CONSUME,
-        is_common=True,
-        item_name=strip_std_name_marker(inventory.name),
+        item_name=inventory.name.strip(),
         cas_number=inventory.cas_number,
         snapshot=snapshot,
         notes=inventory.notes,
@@ -189,8 +163,7 @@ def log_inventory_delete(
         inventory_id=inventory.id or 0,
         operator_id=operator_id,
         action=InventoryOperationAction.INVENTORY_DELETE,
-        is_common=bool(inventory.is_common),
-        item_name=strip_std_name_marker(inventory.name) if inventory.is_common else inventory.name.strip(),
+        item_name=inventory.name.strip(),
         cas_number=inventory.cas_number,
         snapshot=snapshot,
         notes=inventory.notes,
@@ -213,12 +186,7 @@ def log_inventory_update(
         inventory_id=after_inventory.id or before_inventory.id or 0,
         operator_id=operator_id,
         action=InventoryOperationAction.INVENTORY_UPDATE,
-        is_common=bool(after_inventory.is_common),
-        item_name=(
-            strip_std_name_marker(after_inventory.name)
-            if after_inventory.is_common
-            else after_inventory.name.strip()
-        ),
+        item_name=after_inventory.name.strip(),
         cas_number=after_inventory.cas_number,
         snapshot=snapshot,
         notes=after_inventory.notes,
@@ -237,7 +205,6 @@ def log_inventory_export_operation(
         inventory_id=0,
         operator_id=operator_id,
         action=InventoryOperationAction.INVENTORY_EXPORT,
-        is_common=False,
         item_name="库存导出",
         cas_number="",
         snapshot_json=json.dumps({"ct": exported_count}, ensure_ascii=False, sort_keys=True),

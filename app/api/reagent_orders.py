@@ -410,7 +410,7 @@ async def create_reagent_order(
     # order_reason 已在模型层验证（枚举类型），直接使用
 
     # 处理可选字段：空字符串和纯空格转为 None
-    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'notes']
+    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'purity', 'notes']
     normalized = empty_to_none(order.model_dump(), optional_string_fields)
 
     # 计算拼音字段
@@ -428,6 +428,7 @@ async def create_reagent_order(
         alias=normalized.get('alias'),
         category=normalized.get('category'),
         brand=normalized.get('brand'),
+        purity=normalized.get('purity'),
         initial_quantity=initial_quantity,
         unit=unit,
         quantity=order.quantity,
@@ -435,6 +436,7 @@ async def create_reagent_order(
         order_reason=order.order_reason,
         is_hazardous=order.is_hazardous,
         applicant_id=current_user.id,
+        notes=normalized.get('notes'),
         **pinyin_fields,
     )
     
@@ -800,7 +802,7 @@ def _normalize_reagent_order_update_data(order_update: ReagentOrderUpdate) -> di
             detail="Status must be changed via workflow endpoints",
         )
 
-    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'unit', 'notes']
+    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'purity', 'unit', 'notes']
     normalized_strings = empty_to_none(update_data, optional_string_fields)
     for field in optional_string_fields:
         if field in update_data:

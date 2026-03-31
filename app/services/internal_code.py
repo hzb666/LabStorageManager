@@ -6,16 +6,26 @@ Sequence: Auto-increment per CAS number group, zero-padded to ensure proper sort
 from datetime import datetime
 import re
 
-from sqlalchemy import Integer, cast, func
+from sqlalchemy import Integer, cast, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.models.common_shelf import CommonShelf
 from app.core.constants import INTERNAL_CODE_MAX_SEQUENCE, INTERNAL_CODE_SEQUENCE_PAD_WIDTH
 from app.core.time_utils import get_utc_now
 from app.models.inventory import Inventory
 
 INTERNAL_CODE_CONFLICT_MAX_RETRIES = 3
-_INTERNAL_CODE_UNIQUE_CONSTRAINT_MESSAGE = "UNIQUE constraint failed: inventory.internal_code"
+
+_SQLITE_CONSTRAINT_UNIQUE = 2067
+_SQLITE_CONSTRAINT_PRIMARYKEY = 1555
+_INTERNAL_CODE_SEQUENCE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS internal_code_sequences (
+    prefix TEXT PRIMARY KEY,
+    current_seq INTEGER NOT NULL CHECK(current_seq >= 0),
+    updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+)
+"""
 
 
 def _cas_code_fragment(cas_number: str) -> str:
@@ -34,14 +44,23 @@ def build_internal_code_prefix(cas_number: str, *, created_at: datetime | None =
 
 
 def get_max_sequence_for_prefix(session: Session, prefix: str) -> int:
-    """Query the current max sequence for an internal_code prefix in SQL."""
+    """Query the current max sequence for an internal_code prefix across both inventory domains."""
     prefix_len = len(prefix)
-    suffix_expr = func.substr(Inventory.internal_code, prefix_len + 1)
-    statement = select(
-        func.coalesce(func.max(cast(suffix_expr, Integer)), 0)
+    max_values: list[int] = []
+
+    inventory_suffix_expr = func.substr(Inventory.internal_code, prefix_len + 1)
+    inventory_statement = select(
+        func.coalesce(func.max(cast(inventory_suffix_expr, Integer)), 0)
     ).where(Inventory.internal_code.like(f"{prefix}%"))
-    max_seq = session.exec(statement).one()
-    return int(max_seq or 0)
+    max_values.append(int(session.exec(inventory_statement).one() or 0))
+
+    common_suffix_expr = func.substr(CommonShelf.internal_code, prefix_len + 1)
+    common_statement = select(
+        func.coalesce(func.max(cast(common_suffix_expr, Integer)), 0)
+    ).where(CommonShelf.internal_code.like(f"{prefix}%"))
+    max_values.append(int(session.exec(common_statement).one() or 0))
+
+    return max(max_values, default=0)
 
 
 def format_internal_code(prefix: str, sequence: int) -> str:
@@ -50,9 +69,78 @@ def format_internal_code(prefix: str, sequence: int) -> str:
 
 
 def is_internal_code_unique_violation(exc: IntegrityError) -> bool:
-    """Whether an IntegrityError came from inventory.internal_code uniqueness."""
-    raw_message = str(getattr(exc, "orig", exc))
-    return _INTERNAL_CODE_UNIQUE_CONSTRAINT_MESSAGE in raw_message
+    """Whether an IntegrityError came from an internal_code unique/primary-key constraint."""
+    raw_message = str(getattr(exc, "orig", exc)).lower()
+    if "internal_code" in raw_message and "unique constraint failed" in raw_message:
+        return True
+
+    orig = getattr(exc, "orig", None)
+    sqlite_error_name = str(getattr(orig, "sqlite_errorname", "")).upper()
+    sqlite_error_code = getattr(orig, "sqlite_errorcode", None)
+    if sqlite_error_name in {"SQLITE_CONSTRAINT_UNIQUE", "SQLITE_CONSTRAINT_PRIMARYKEY"}:
+        return "internal_code" in raw_message
+    if sqlite_error_code in {_SQLITE_CONSTRAINT_UNIQUE, _SQLITE_CONSTRAINT_PRIMARYKEY}:
+        return "internal_code" in raw_message
+    return False
+
+
+def _extract_scalar(result_row: object) -> int:
+    mapping = getattr(result_row, "_mapping", None)
+    if mapping:
+        return int(next(iter(mapping.values())))
+    if isinstance(result_row, (tuple, list)):
+        return int(result_row[0])
+    return int(result_row)
+
+
+def _ensure_internal_code_sequence_table(session: Session) -> None:
+    # Use lazy bootstrap so runtime can upgrade old DBs without a separate migration release.
+    session.exec(text(_INTERNAL_CODE_SEQUENCE_TABLE_SQL))
+
+
+def _seed_sequence_prefix(session: Session, *, prefix: str) -> None:
+    max_seq = get_max_sequence_for_prefix(session, prefix)
+    session.exec(
+        text(
+            """
+            INSERT INTO internal_code_sequences (prefix, current_seq, updated_at)
+            VALUES (:prefix, :current_seq, CURRENT_TIMESTAMP)
+            ON CONFLICT(prefix) DO NOTHING
+            """
+        ),
+        {"prefix": prefix, "current_seq": max_seq},
+    )
+
+
+def _reserve_sequence_range(
+    session: Session,
+    *,
+    prefix: str,
+    quantity: int,
+) -> int:
+    # Reserve the whole range in one UPDATE ... RETURNING to avoid check-then-insert races.
+    _ensure_internal_code_sequence_table(session)
+    _seed_sequence_prefix(session, prefix=prefix)
+    reserved_row = session.exec(
+        text(
+            """
+            UPDATE internal_code_sequences
+            SET current_seq = current_seq + :quantity,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE prefix = :prefix
+              AND current_seq + :quantity <= :max_sequence
+            RETURNING current_seq
+            """
+        ),
+        {
+            "prefix": prefix,
+            "quantity": quantity,
+            "max_sequence": INTERNAL_CODE_MAX_SEQUENCE,
+        },
+    ).first()
+    if reserved_row is None:
+        raise ValueError("internal code sequence limit reached")
+    return _extract_scalar(reserved_row)
 
 
 def generate_internal_code(
@@ -79,55 +167,18 @@ def generate_internal_code(
         raise ValueError(f"Invalid CAS number format: {cas_number}")
     if quantity <= 0:
         raise ValueError("quantity must be greater than 0")
+    if quantity > INTERNAL_CODE_MAX_SEQUENCE:
+        raise ValueError(f"quantity exceeds max sequence capacity: {INTERNAL_CODE_MAX_SEQUENCE}")
     
     date_str = _date_fragment(created_at)
     prefix = build_internal_code_prefix(cas_number, created_at=created_at)
-    max_seq = get_max_sequence_for_prefix(session, prefix)
-    target_max_seq = max_seq + quantity
-    if target_max_seq > INTERNAL_CODE_MAX_SEQUENCE:
+    try:
+        end_seq = _reserve_sequence_range(session, prefix=prefix, quantity=quantity)
+    except ValueError as exc:
         raise ValueError(
             f"Internal code sequence limit reached for {cas_number} on {date_str}: "
             f"max is {INTERNAL_CODE_MAX_SEQUENCE}"
-        )
-    
-    start_seq = max_seq + 1
+        ) from exc
+
+    start_seq = end_seq - quantity + 1
     return [format_internal_code(prefix, seq) for seq in range(start_seq, start_seq + quantity)]
-
-
-def get_next_sequence(
-    session: Session,
-    cas_number: str
-) -> int:
-    """
-    Get the next sequence number for a CAS number
-    
-    Args:
-        session: Database session
-        cas_number: Normalized CAS number
-    
-    Returns:
-        Next sequence number (1-indexed)
-    """
-    # Validate CAS number to prevent SQL injection
-    if not re.match(r"^[0-9-]+$", cas_number):
-        raise ValueError(f"Invalid CAS number format: {cas_number}")
-
-    statement = select(Inventory.internal_code).where(Inventory.cas_number == cas_number)
-    existing_codes = session.exec(statement).all()
-
-    if not existing_codes:
-        return 1
-
-    max_seq = 0
-    for internal_code in existing_codes:
-        parts = internal_code.split("-")
-        if not parts:
-            continue
-        try:
-            seq = int(parts[-1])
-        except ValueError:
-            continue
-        if seq > max_seq:
-            max_seq = seq
-
-    return max_seq + 1

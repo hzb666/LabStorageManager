@@ -36,7 +36,20 @@ from app.core.request_utils import (
     set_current_sse_client_id,
 )
 from app.database import engine, init_db
-from app.api import users, user_logs, inventory, reagent_orders, consumable_orders, user_sessions, cart_sync, announcements, error_logs, events
+from app.api import (
+    announcements,
+    cart_sync,
+    chemical_name_map,
+    common_shelf,
+    consumable_orders,
+    error_logs,
+    events,
+    inventory,
+    reagent_orders,
+    user_logs,
+    user_sessions,
+    users,
+)
 from app.services import chemical_info
 from app.services.cache_reset_service import apply_startup_cache_reset_if_needed
 from app.services.sse_manager import sse_manager
@@ -442,6 +455,8 @@ app.include_router(chemical_info.router, prefix="/api")
 app.include_router(announcements.router, prefix="/api")
 app.include_router(error_logs.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
+app.include_router(common_shelf.router, prefix="/api")
+app.include_router(chemical_name_map.router, prefix="/api")
 
 
 @app.get("/")
@@ -481,7 +496,18 @@ def get_runtime_cache_version(response: Response) -> dict[str, str]:
 
 # Import models to ensure tables are created
 # This is needed for SQLModel to register all models
-from app.models import User, Inventory, BorrowLog, ReagentOrder, ConsumableOrder, Announcement, RuntimeState  # noqa: E402, F401
+from app.models import (  # noqa: E402, F401
+    Announcement,
+    BorrowLog,
+    ChemicalNameMap,
+    CommonShelf,
+    CommonShelfOperationLog,
+    ConsumableOrder,
+    Inventory,
+    ReagentOrder,
+    RuntimeState,
+    User,
+)
 
 
 @app.get("/cart-import")

@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, select, delete
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, get_current_user, require_admin
@@ -17,9 +17,12 @@ from app.models.reagent_order import (
     ReagentOrderResponse,
     ReagentOrderStatus,
 )
+from app.models.common_shelf import CommonShelf, CommonShelfResponse
 from app.models.inventory import Inventory, InventoryResponse, InventoryStatus
 from app.core.constants import SSEEventType, SSERoom
 from app.services.api_utils import clear_cache_by_prefix
+from app.services.common_shelf_creation import create_common_shelf_items_from_order
+from app.services.common_shelf_operation_logger import log_common_shelf_stock_in
 from app.services.internal_code import (
     INTERNAL_CODE_CONFLICT_MAX_RETRIES,
     generate_internal_code,
@@ -44,6 +47,8 @@ from app.services.order_operation_logger import (
 
 ORDER_NOT_FOUND = "Order not found"
 LIST_CACHE_PREFIX = "list:"
+DELETE_ORDER_FORBIDDEN_DETAIL = "Only the order applicant or admin can delete this order"
+DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL = "Public account cannot delete orders"
 
 
 class ConfirmArrivalRequest(BaseModel):
@@ -68,7 +73,6 @@ class InventoryCreateOptions:
     temporary_keeper_id: Optional[int]
     storage_location: Optional[str]
     inventory_status: InventoryStatus
-    is_common: bool
     remaining_quantity: Optional[float] = None
     note_suffix: Optional[str] = None
 
@@ -119,6 +123,19 @@ def _serialize_inventory_items(db: Session, items: list[Inventory]) -> list[dict
     return serialized_items
 
 
+def _serialize_common_shelf_items(db: Session, items: list[CommonShelf]) -> list[dict[str, Any]]:
+    users_map = batch_get_user_names(
+        db,
+        {item.created_by_id for item in items if item.created_by_id},
+    )
+    serialized_items: list[dict[str, Any]] = []
+    for item in items:
+        item_dict = CommonShelfResponse.model_validate(item).model_dump(mode="json")
+        item_dict["created_by_name"] = users_map.get(item.created_by_id)
+        serialized_items.append(item_dict)
+    return serialized_items
+
+
 def _clear_inventory_projection_cache() -> None:
     from app.api.inventory import (
         LIST_CACHE_PREFIX as INVENTORY_LIST_CACHE_PREFIX,
@@ -143,6 +160,23 @@ def _log_stock_in_operations(
             inventory=item,
             operator_id=operator_id,
             source=SOURCE_ORDER_STOCK_IN,
+        )
+
+
+def _log_common_stock_in_operations(
+    db: Session,
+    *,
+    items: list[CommonShelf],
+    operator_id: int,
+) -> None:
+    if not items:
+        return
+    db.flush()
+    for item in items:
+        log_common_shelf_stock_in(
+            db,
+            item=item,
+            operator_id=operator_id,
         )
 
 
@@ -194,8 +228,8 @@ def _create_inventory_items_from_order(
                         alias=order.alias,
                         category=order.category,
                         brand=order.brand,
+                        purity=order.purity,
                         storage_location=options.storage_location,
-                        is_common=options.is_common,
                         initial_quantity=order.initial_quantity,
                         remaining_quantity=effective_remaining,
                         remaining_percent=_compute_remaining_percent(
@@ -239,12 +273,31 @@ async def _broadcast_inventory_projection_events(
 
     serialized_items = _serialize_inventory_items(db, items)
     for item, serialized_item in zip(items, serialized_items):
-        room = SSERoom.COMMON_SHELF if item.is_common else SSERoom.INVENTORY
-        if item.is_common:
-            event_type = SSEEventType.COMMON_SHELF_CREATED if created else SSEEventType.COMMON_SHELF_UPDATED
-        else:
-            event_type = SSEEventType.INVENTORY_CREATED if created else SSEEventType.INVENTORY_UPDATED
-        await sse_manager.broadcast(room, event_type, {"id": item.id, "item": serialized_item})
+        event_type = SSEEventType.INVENTORY_CREATED if created else SSEEventType.INVENTORY_UPDATED
+        await sse_manager.broadcast(SSERoom.INVENTORY, event_type, {"id": item.id, "item": serialized_item})
+
+
+async def _broadcast_common_shelf_events(
+    db: Session,
+    items: list[CommonShelf],
+    *,
+    created: bool,
+) -> None:
+    if not items:
+        return
+
+    serialized_items = _serialize_common_shelf_items(db, items)
+    event_type = (
+        SSEEventType.COMMON_SHELF_CREATED
+        if created
+        else SSEEventType.COMMON_SHELF_UPDATED
+    )
+    for item, serialized_item in zip(items, serialized_items):
+        await sse_manager.broadcast(
+            SSERoom.COMMON_SHELF,
+            event_type,
+            {"id": item.id, "item": serialized_item},
+        )
 
 
 def _register_approval_routes(
@@ -349,20 +402,36 @@ def _register_arrival_routes(
         direct_storage_location = body.storage_location.strip() if body.storage_location else None
 
         if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
-            target_location = normalize_storage_location(direct_storage_location)
-            inventory_items = _create_inventory_items_from_order(
+            common_shelf_items = create_common_shelf_items_from_order(
                 db,
                 order,
-                options=InventoryCreateOptions(
-                    created_by_id=current_user.id,
-                    temporary_keeper_id=None,
-                    storage_location=target_location,
-                    inventory_status=InventoryStatus.IN_STOCK,
-                    is_common=True,
-                ),
+                created_by_id=current_user.id,
+                storage_location=direct_storage_location,
             )
             order.status = ReagentOrderStatus.STOCKED
             message = "已到货并加入常用货架"
+            _log_common_stock_in_operations(
+                db,
+                items=common_shelf_items,
+                operator_id=current_user.id,
+            )
+            db.commit()
+            db.refresh(order)
+            clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+            await sse_manager.broadcast(
+                SSERoom.REAGENT_ORDERS,
+                SSEEventType.REAGENT_ORDER_UPDATED,
+                {"id": order_id, "item": _serialize_reagent_order(order, db)},
+            )
+            await _broadcast_common_shelf_events(db, common_shelf_items, created=True)
+
+            return {
+                "message": message,
+                "order_id": order.id,
+                "status": order.status,
+                "notes": order.notes,
+                "items_created": len(common_shelf_items),
+            }
         elif direct_storage_location:
             target_location = normalize_storage_location(direct_storage_location)
             inventory_items = _create_inventory_items_from_order(
@@ -373,7 +442,6 @@ def _register_arrival_routes(
                     temporary_keeper_id=None,
                     storage_location=target_location,
                     inventory_status=InventoryStatus.IN_STOCK,
-                    is_common=False,
                 ),
             )
             order.status = ReagentOrderStatus.STOCKED
@@ -388,7 +456,6 @@ def _register_arrival_routes(
                     temporary_keeper_id=current_user.id,
                     storage_location=None,
                     inventory_status=InventoryStatus.IN_STOCK,
-                    is_common=False,
                     note_suffix=f"{keeper_name}暂存",
                 ),
             )
@@ -441,6 +508,7 @@ def _register_dashboard_routes(router: APIRouter) -> None:
                     "price": order.price,
                     "is_hazardous": order.is_hazardous,
                     "notes": order.notes,
+                    "purity": order.purity,
                     "arrived_at": order.updated_at,
                 }
                 for order in orders
@@ -487,6 +555,7 @@ def _register_dashboard_routes(router: APIRouter) -> None:
                 "price": order.price,
                 "is_hazardous": order.is_hazardous,
                 "notes": order.notes,
+                "purity": order.purity,
                 "order_reason": order.order_reason,
                 "created_at": utc_iso_str(order.created_at),
                 "updated_at": utc_iso_str(order.updated_at),
@@ -540,8 +609,12 @@ def _validate_stock_in_order(
             detail="Order missing initial_quantity or unit. Please update the order.",
         )
 
-    is_common_shelf_order = order.order_reason == ReagentOrderReason.COMMON_PUBLIC
-    if not is_common_shelf_order and not payload.storage_location.strip():
+    if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Common-public orders are stocked at confirm-arrival time",
+        )
+    if not payload.storage_location.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="storage_location is required")
     if payload.remaining_quantity is not None and payload.remaining_quantity <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity must be greater than 0")
@@ -561,11 +634,10 @@ def _validate_stock_in_order(
 
 
 # 计算 stock-in 的目标库存属性，复用 APPROVED/ARRIVED 两条路径。
-def _build_stock_in_context(order: ReagentOrder, payload: StockInRequest) -> tuple[Optional[str], bool, float]:
+def _build_stock_in_context(order: ReagentOrder, payload: StockInRequest) -> tuple[Optional[str], float]:
     target_location = normalize_storage_location(payload.storage_location)
-    is_common = order.order_reason == ReagentOrderReason.COMMON_PUBLIC
     effective_remaining = order.initial_quantity if payload.remaining_quantity is None else payload.remaining_quantity
-    return target_location, is_common, effective_remaining
+    return target_location, effective_remaining
 
 
 # 处理 APPROVED 订单直接入库，保持原有创建库存和返回字段语义。
@@ -574,9 +646,9 @@ def _stock_in_approved_order(
     *,
     order: ReagentOrder,
     current_user: CurrentUser,
-    stock_context: tuple[Optional[str], bool, float],
+    stock_context: tuple[Optional[str], float],
 ) -> list[Inventory]:
-    target_location, is_common, effective_remaining = stock_context
+    target_location, effective_remaining = stock_context
     return _create_inventory_items_from_order(
         db,
         order,
@@ -585,7 +657,6 @@ def _stock_in_approved_order(
             temporary_keeper_id=None,
             storage_location=target_location,
             inventory_status=InventoryStatus.IN_STOCK,
-            is_common=is_common,
             remaining_quantity=effective_remaining,
         ),
     )
@@ -614,17 +685,17 @@ def _get_arrived_pending_items(db: Session, order: ReagentOrder) -> list[Invento
 def _apply_arrived_items_stock_in(
     target_items: list[Inventory],
     *,
+    order: ReagentOrder,
     target_location: Optional[str],
     effective_remaining: float,
-    is_common: bool,
 ) -> None:
     for item in target_items:
+        item.purity = order.purity
         item.storage_location = target_location
         item.remaining_quantity = effective_remaining
         item.remaining_percent = _compute_remaining_percent(effective_remaining, item.initial_quantity)
         item.temporary_keeper_id = None
         item.status = InventoryStatus.IN_STOCK
-        item.is_common = is_common
 
         pinyin_fields = compute_pinyin_fields(
             name=item.name,
@@ -654,6 +725,35 @@ async def _finalize_stock_in_order(
     )
 
 
+def _delete_reagent_order_with_permission(
+    db: Session,
+    *,
+    order_id: int,
+    current_user: CurrentUser,
+) -> ReagentOrder:
+    # Keep delete atomic while preserving legacy API semantics: missing -> 404, unauthorized existing row -> 403.
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL,
+        )
+
+    delete_stmt = delete(ReagentOrder).where(ReagentOrder.id == order_id)
+    if current_user.role != UserRole.ADMIN:
+        delete_stmt = delete_stmt.where(ReagentOrder.applicant_id == current_user.id)
+    deleted_row = db.exec(delete_stmt.returning(*ReagentOrder.__table__.columns)).first()
+    if deleted_row is not None:
+        return ReagentOrder.model_validate(dict(deleted_row._mapping))
+
+    order_exists = db.exec(select(ReagentOrder.id).where(ReagentOrder.id == order_id)).first()
+    if order_exists is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=DELETE_ORDER_FORBIDDEN_DETAIL,
+    )
+
+
 # 注册删除订单接口，保持原权限和 204 语义。
 def _register_delete_order_route(
     router: APIRouter,
@@ -662,27 +762,18 @@ def _register_delete_order_route(
     # 删除试剂订单。
     @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_reagent_order(order_id: int, db: DBSession, current_user: CurrentUser):
-        # 删除试剂订单。
-        order = _get_reagent_order_by_id(db, order_id)
-        if not order:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
-        if current_user.role == UserRole.PUBLIC:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Public account cannot delete orders",
-            )
-        if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the order applicant or admin can delete this order",
-            )
+        # 删除试剂订单（单语句原子删除 + 保持原鉴权语义）。
+        order = _delete_reagent_order_with_permission(
+            db,
+            order_id=order_id,
+            current_user=current_user,
+        )
 
         log_reagent_order_delete(
             db,
             order=order,
             actor_user_id=current_user.id,
         )
-        db.delete(order)
         db.commit()
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
         await sse_manager.broadcast(
@@ -713,7 +804,7 @@ def _register_stock_in_route(
 
         _validate_stock_in_order(order, current_user=current_user, payload=payload)
         stock_context = _build_stock_in_context(order, payload)
-        target_location, is_common, effective_remaining = stock_context
+        target_location, effective_remaining = stock_context
 
         if order.status == ReagentOrderStatus.APPROVED:
             inventory_items = _stock_in_approved_order(
@@ -744,9 +835,9 @@ def _register_stock_in_route(
         before_items = [Inventory.model_validate(item) for item in target_items]
         _apply_arrived_items_stock_in(
             target_items,
+            order=order,
             target_location=target_location,
             effective_remaining=effective_remaining,
-            is_common=is_common,
         )
         for before_item, after_item in zip(before_items, target_items):
             log_inventory_update(

@@ -32,18 +32,20 @@ from app.models.inventory_operation_log import (
     InventoryOperationAction,
     InventoryOperationLog,
 )
+from app.models.common_shelf_operation_log import (
+    CommonShelfOperationAction,
+    CommonShelfOperationLog,
+)
 from app.models.reagent_order_operation_log import ReagentOrderOperationLog
 from app.models.consumable_order_operation_log import ConsumableOrderOperationLog
 from app.models.user_operation_log import UserOperationLog
+from app.services.common_shelf_operation_logger import parse_common_shelf_snapshot
 from app.services.inventory_operation_logger import parse_inventory_snapshot
 from app.services.order_operation_logger import (
     parse_consumable_order_snapshot,
     parse_reagent_order_snapshot,
 )
 from app.services.user_operation_logger import parse_user_operation_snapshot
-from app.services.inventory_queries import (
-    regular_inventory_clause,
-)
 from app.services.user_service import get_user_by_id
 from app.services.user_utils import batch_get_user_names
 
@@ -268,6 +270,17 @@ USER_OPERATION_ACTION_LABELS: dict[str, str] = {
     "update_user_sensitive_fields": "修改用户敏感信息",
 }
 
+COMMON_SHELF_ACTION_LABELS: dict[str, str] = {
+    "stock_in": "常用货架入库",
+    "add_bottles": "常用货架加瓶",
+    "remove_one": "常用货架扣减",
+    "update_group": "修改常用货架分组",
+    "update_item": "修改常用货架条目",
+    "merge_group": "合并常用货架分组",
+    "delete_group": "删除常用货架分组",
+    "export": "导出常用货架",
+}
+
 
 def _build_order_log_keyword_clause(keyword: str):
     return or_(
@@ -293,6 +306,15 @@ def _build_user_operation_keyword_clause(keyword: str):
         UserOperationLog.client_ip.contains(keyword),
         UserOperationLog.request_id.contains(keyword),
         UserOperationLog.snapshot_json.contains(keyword),
+    )
+
+
+def _build_common_shelf_keyword_clause(keyword: str):
+    return or_(
+        CommonShelfOperationLog.item_name.contains(keyword),
+        CommonShelfOperationLog.cas_number.contains(keyword),
+        CommonShelfOperationLog.snapshot_json.contains(keyword),
+        CommonShelfOperationLog.notes.contains(keyword),
     )
 
 
@@ -335,12 +357,13 @@ def _append_reagent_order_candidates(context: LogsCollectContext, candidates: li
         ):
             before_snapshot = snapshot.get("before")
             after_snapshot = snapshot.get("after")
-            quantity = snapshot.get("quantity")
-            unit = snapshot.get("unit")
+            display_snapshot = after_snapshot or before_snapshot or snapshot
+            quantity = display_snapshot.get("quantity")
+            unit = display_snapshot.get("unit")
             return {
                 "time": created_at,
                 "type": "reagent_order",
-                "detail": f"{detail_prefix} {log.order_name} {snapshot.get('initial_quantity') or ''}{unit or ''} x{quantity or ''}".strip(),
+                "detail": f"{detail_prefix} {log.order_name} {display_snapshot.get('initial_quantity') or ''}{unit or ''} x{quantity or ''}".strip(),
                 "full_data": {
                     "id": log.id,
                     "order_id": log.order_id,
@@ -352,6 +375,15 @@ def _append_reagent_order_candidates(context: LogsCollectContext, candidates: li
                     "snapshot": snapshot,
                     "before": before_snapshot,
                     "after": after_snapshot,
+                    "name": display_snapshot.get("name") or log.order_name,
+                    "specification": f"{display_snapshot.get('initial_quantity') or ''} {display_snapshot.get('unit') or ''}".strip(),
+                    "quantity": quantity,
+                    "brand": display_snapshot.get("brand"),
+                    "purity": display_snapshot.get("purity"),
+                    "price": display_snapshot.get("price"),
+                    "order_reason": display_snapshot.get("order_reason"),
+                    "status": display_snapshot.get("status"),
+                    "category": display_snapshot.get("category"),
                     "notes": log.notes,
                     "created_at": created_at,
                 },
@@ -503,13 +535,11 @@ def _append_inventory_candidates(context: LogsCollectContext, candidates: list[d
         created_at = utc_iso_str(log.created_at)
 
         def build_inventory(log=log, snapshot=snapshot, created_at=created_at):
-            is_common = bool(log.is_common)
-            detail_prefix = "加入常用货架" if is_common else "入库"
             source = snapshot.get("source")
             return {
                 "time": created_at,
                 "type": "inventory",
-                "detail": f"{detail_prefix} {log.item_name} {snapshot.get('initial_quantity') or ''}{snapshot.get('unit') or ''}",
+                "detail": f"入库 {log.item_name} {snapshot.get('initial_quantity') or ''}{snapshot.get('unit') or ''}",
                 "full_data": {
                     "id": log.id,
                     "inventory_id": log.inventory_id,
@@ -519,6 +549,7 @@ def _append_inventory_candidates(context: LogsCollectContext, candidates: list[d
                     "alias": snapshot.get("alias"),
                     "category": snapshot.get("category"),
                     "brand": snapshot.get("brand"),
+                    "purity": snapshot.get("purity"),
                     "storage_location": snapshot.get("storage_location"),
                     "initial_quantity": snapshot.get("initial_quantity"),
                     "remaining_quantity": snapshot.get("remaining_quantity"),
@@ -527,7 +558,6 @@ def _append_inventory_candidates(context: LogsCollectContext, candidates: list[d
                     "notes": snapshot.get("notes"),
                     "internal_code": snapshot.get("internal_code"),
                     "status": snapshot.get("status"),
-                    "is_common": is_common,
                     "source": source,
                     "created_at": created_at,
                     "updated_at": snapshot.get("updated_at"),
@@ -535,6 +565,59 @@ def _append_inventory_candidates(context: LogsCollectContext, candidates: list[d
             }
 
         _append_candidate(candidates, created_at, build_inventory)
+
+
+def _append_common_shelf_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
+    query = select(CommonShelfOperationLog).where(
+        CommonShelfOperationLog.operator_id == context.user_id,
+        CommonShelfOperationLog.action != CommonShelfOperationAction.EXPORT,
+    )
+    if context.keyword:
+        query = query.where(_build_common_shelf_keyword_clause(context.keyword))
+    logs = context.db.exec(
+        query.order_by(CommonShelfOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
+    ).all()
+    for log in logs:
+        snapshot = parse_common_shelf_snapshot(log.snapshot_json)
+        created_at = utc_iso_str(log.created_at)
+        action_value = log.action.value if hasattr(log.action, "value") else str(log.action)
+        action_label = COMMON_SHELF_ACTION_LABELS.get(action_value, action_value)
+
+        def build_common_shelf(
+            log=log,
+            snapshot=snapshot,
+            created_at=created_at,
+            action_value=action_value,
+            action_label=action_label,
+        ):
+            before_snapshot = snapshot.get("before")
+            after_snapshot = snapshot.get("after")
+            display_snapshot = after_snapshot or before_snapshot or snapshot
+            return {
+                "time": created_at,
+                "type": "common_shelf",
+                "detail": f"{action_label} {log.item_name}",
+                "full_data": {
+                    "id": log.id,
+                    "common_shelf_id": log.common_shelf_id,
+                    "action": action_value,
+                    "cas_number": log.cas_number,
+                    "name": log.item_name,
+                    "brand": display_snapshot.get("brand"),
+                    "purity": display_snapshot.get("purity"),
+                    "specification_text": display_snapshot.get("specification_text"),
+                    "storage_location": display_snapshot.get("storage_location"),
+                    "count": snapshot.get("count"),
+                    "location": snapshot.get("location"),
+                    "notes": display_snapshot.get("notes"),
+                    "before": before_snapshot,
+                    "after": after_snapshot,
+                    "snapshot": snapshot,
+                    "created_at": created_at,
+                },
+            }
+
+        _append_candidate(candidates, created_at, build_common_shelf)
 
 
 def _append_borrow_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
@@ -545,7 +628,6 @@ def _append_borrow_candidates(context: LogsCollectContext, candidates: list[dict
     ).where(
         BorrowLog.borrower_id == context.user_id,
         BorrowLog.is_consume.is_(False),
-        regular_inventory_clause(),
     )
     if context.keyword:
         query = query.where(Inventory.name.contains(context.keyword))
@@ -587,43 +669,6 @@ def _append_borrow_candidates(context: LogsCollectContext, candidates: list[dict
         _append_candidate(candidates, borrow_time, build_borrow)
 
 
-def _append_consume_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(InventoryOperationLog).where(
-        InventoryOperationLog.operator_id == context.user_id,
-        InventoryOperationLog.action == InventoryOperationAction.COMMON_CONSUME,
-    )
-    if context.keyword:
-        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
-    logs = context.db.exec(
-        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-    for log in logs:
-        snapshot = parse_inventory_snapshot(log.snapshot_json)
-        consume_time = utc_iso_str(log.created_at)
-
-        def build_consume(log=log, snapshot=snapshot, consume_time=consume_time):
-            inventory_name = snapshot.get("name") or log.item_name
-            return {
-                "time": consume_time,
-                "type": "consume",
-                "detail": f"常用货架拿取 {log.item_name} 1 瓶",
-                "full_data": {
-                    "id": log.id,
-                    "inventory_id": log.inventory_id,
-                    "inventory_name": inventory_name,
-                    "cas_number": log.cas_number,
-                    "consume_time": consume_time,
-                    "quantity_consumed": 1,
-                    "unit": snapshot.get("unit"),
-                    "storage_location": snapshot.get("storage_location"),
-                    "notes": snapshot.get("notes"),
-                    "created_at": consume_time,
-                }
-            }
-
-        _append_candidate(candidates, consume_time, build_consume)
-
-
 def _append_update_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
     query = select(InventoryOperationLog).where(
         InventoryOperationLog.operator_id == context.user_id,
@@ -657,6 +702,7 @@ def _append_update_candidates(context: LogsCollectContext, candidates: list[dict
                     "cas_number": log.cas_number,
                     "before": before_snapshot,
                     "after": after_snapshot,
+                    "purity": after_snapshot.get("purity"),
                     "created_at": updated_at,
                 },
             }
@@ -692,6 +738,7 @@ def _append_delete_candidates(context: LogsCollectContext, candidates: list[dict
                     "alias": snapshot.get("alias"),
                     "category": snapshot.get("category"),
                     "brand": snapshot.get("brand"),
+                    "purity": snapshot.get("purity"),
                     "storage_location": snapshot.get("storage_location"),
                     "initial_quantity": snapshot.get("initial_quantity"),
                     "remaining_quantity": snapshot.get("remaining_quantity"),
@@ -700,7 +747,6 @@ def _append_delete_candidates(context: LogsCollectContext, candidates: list[dict
                     "notes": snapshot.get("notes"),
                     "internal_code": snapshot.get("internal_code"),
                     "status": snapshot.get("status"),
-                    "is_common": bool(log.is_common),
                     "created_at": deleted_at,
                     "updated_at": snapshot.get("updated_at"),
                 },
@@ -756,12 +802,47 @@ def _append_export_candidates(context: LogsCollectContext, candidates: list[dict
                 "detail": f"导出库存 {export_count} 条",
                 "full_data": {
                     "id": log.id,
+                    "export_scope": "inventory",
                     "count": export_count,
                     "created_at": export_time,
                 },
             }
 
         _append_candidate(candidates, export_time, build_export)
+
+    common_shelf_query = select(CommonShelfOperationLog).where(
+        CommonShelfOperationLog.operator_id == context.user_id,
+        CommonShelfOperationLog.action == CommonShelfOperationAction.EXPORT,
+    )
+    if context.keyword:
+        if context.keyword not in "导出常用货架条":
+            common_shelf_query = common_shelf_query.where(
+                CommonShelfOperationLog.snapshot_json.contains(context.keyword)
+            )
+    common_shelf_logs = context.db.exec(
+        common_shelf_query.order_by(CommonShelfOperationLog.created_at.desc())
+        .offset(context.skip)
+        .limit(context.limit)
+    ).all()
+    for log in common_shelf_logs:
+        snapshot = parse_common_shelf_snapshot(log.snapshot_json)
+        export_time = utc_iso_str(log.created_at)
+
+        def build_common_shelf_export(log=log, snapshot=snapshot, export_time=export_time):
+            export_count = snapshot.get("count", 0)
+            return {
+                "time": export_time,
+                "type": "export",
+                "detail": f"导出常用货架 {export_count} 条",
+                "full_data": {
+                    "id": log.id,
+                    "export_scope": "common_shelf",
+                    "count": export_count,
+                    "created_at": export_time,
+                },
+            }
+
+        _append_candidate(candidates, export_time, build_common_shelf_export)
 
 
 def _append_session_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
@@ -847,6 +928,16 @@ def _count_inventory_candidates(context: LogsCountContext) -> int:
     )
 
 
+def _count_common_shelf_candidates(context: LogsCountContext) -> int:
+    query = select(func.count()).select_from(CommonShelfOperationLog).where(
+        CommonShelfOperationLog.operator_id == context.user_id,
+        CommonShelfOperationLog.action != CommonShelfOperationAction.EXPORT,
+    )
+    if context.keyword:
+        query = query.where(_build_common_shelf_keyword_clause(context.keyword))
+    return _exec_count_query(context, query)
+
+
 def _count_borrow_candidates(context: LogsCountContext) -> int:
     from app.models.inventory import BorrowLog, Inventory
 
@@ -856,19 +947,10 @@ def _count_borrow_candidates(context: LogsCountContext) -> int:
     ).where(
         BorrowLog.borrower_id == context.user_id,
         BorrowLog.is_consume.is_(False),
-        regular_inventory_clause(),
     )
     if context.keyword:
         query = query.where(Inventory.name.contains(context.keyword))
     return _exec_count_query(context, query)
-
-
-def _count_consume_candidates(context: LogsCountContext) -> int:
-    return _count_inventory_operation_candidates(
-        context,
-        InventoryOperationAction.COMMON_CONSUME,
-        apply_keyword=True,
-    )
 
 
 def _count_update_candidates(context: LogsCountContext) -> int:
@@ -888,12 +970,23 @@ def _count_delete_candidates(context: LogsCountContext) -> int:
 
 
 def _count_export_candidates(context: LogsCountContext) -> int:
-    query = select(func.count()).select_from(InventoryOperationLog).where(
+    inventory_query = select(func.count()).select_from(InventoryOperationLog).where(
         InventoryOperationLog.operator_id == context.user_id,
         InventoryOperationLog.action == InventoryOperationAction.INVENTORY_EXPORT,
     )
-    query = _apply_export_keyword_filter(query, context.keyword)
-    return _exec_count_query(context, query)
+    inventory_query = _apply_export_keyword_filter(inventory_query, context.keyword)
+    inventory_count = _exec_count_query(context, inventory_query)
+
+    common_shelf_query = select(func.count()).select_from(CommonShelfOperationLog).where(
+        CommonShelfOperationLog.operator_id == context.user_id,
+        CommonShelfOperationLog.action == CommonShelfOperationAction.EXPORT,
+    )
+    if context.keyword and context.keyword not in "导出常用货架条":
+        common_shelf_query = common_shelf_query.where(
+            CommonShelfOperationLog.snapshot_json.contains(context.keyword)
+        )
+    common_shelf_count = _exec_count_query(context, common_shelf_query)
+    return inventory_count + common_shelf_count
 
 
 def _count_session_candidates(context: LogsCountContext) -> int:
@@ -921,11 +1014,11 @@ _LOG_QUERY_BUILDERS: dict[str, LogsCandidateBuilder] = {
     "reagent_order": _append_reagent_order_candidates,
     "consumable_order": _append_consumable_order_candidates,
     "inventory": _append_inventory_candidates,
+    "common_shelf": _append_common_shelf_candidates,
     "delete": _append_delete_candidates,
     "update": _append_update_candidates,
     "export": _append_export_candidates,
     "borrow": _append_borrow_candidates,
-    "consume": _append_consume_candidates,
     "session": _append_session_candidates,
     "user": _append_user_operation_candidates,
 }
@@ -934,11 +1027,11 @@ _LOG_QUERY_COUNTERS: dict[str, LogsCounter] = {
     "reagent_order": _count_reagent_order_candidates,
     "consumable_order": _count_consumable_order_candidates,
     "inventory": _count_inventory_candidates,
+    "common_shelf": _count_common_shelf_candidates,
     "delete": _count_delete_candidates,
     "update": _count_update_candidates,
     "export": _count_export_candidates,
     "borrow": _count_borrow_candidates,
-    "consume": _count_consume_candidates,
     "session": _count_session_candidates,
     "user": _count_user_operation_candidates,
 }
@@ -951,8 +1044,8 @@ def _collect_user_logs(
     candidates: list[dict[str, object]] = []
     builders = _LOG_QUERY_BUILDERS.values() if log_type is None else (_LOG_QUERY_BUILDERS.get(log_type),)
 
-    if log_type is None:
-        # 聚合模式必须先取到每个来源的前(skip + limit)窗口，再做全局合并分页。
+    if log_type is None or log_type == "export":
+        # 多来源聚合日志必须先取到每个来源的前(skip + limit)窗口，再做全局合并分页。
         builder_context = LogsCollectContext(
             db=context.db,
             user_id=context.user_id,
@@ -989,7 +1082,7 @@ def _slice_candidates_for_response(
     skip: int,
     limit: int,
 ) -> list[dict[str, object]]:
-    if log_type is None:
+    if log_type is None or log_type == "export":
         return candidates[skip : skip + limit]
     return candidates[:limit]
 

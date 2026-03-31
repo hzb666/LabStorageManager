@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, delete
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
@@ -60,7 +60,6 @@ from app.services.inventory_operation_logger import (
 )
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
-from app.api.common_shelf import register_common_shelf
 from app.core.request_utils import get_sse_client_id
 from app.models.user import User
 
@@ -448,7 +447,7 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
     # 规范化库存更新载荷并处理规格字段，返回是否更新了规格。
 
     specification_updated = False
-    optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'notes']
+    optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'purity', 'notes']
     for field in optional_string_fields:
         if field in update_data and update_data[field] == '':
             update_data[field] = None
@@ -476,7 +475,6 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
 
 # Register named/extended routes first to keep path precedence semantics.
 register_inventory_extended_routes(router, SEARCH_CACHE, LIST_CACHE_PREFIX)
-register_common_shelf(router, MAX_PAGE_SIZE, SEARCH_CACHE, LIST_CACHE_PREFIX)
 
 
 @router.get("/", dependencies=[Depends(get_current_user)])
@@ -699,7 +697,12 @@ async def delete_inventory(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    item = _get_by_id(db, inventory_id)
+    deleted_row = db.exec(
+        delete(Inventory)
+        .where(Inventory.id == inventory_id)
+        .returning(*Inventory.__table__.columns)
+    ).first()
+    item = Inventory.model_validate(dict(deleted_row._mapping)) if deleted_row else None
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
     log_inventory_delete(
@@ -707,7 +710,6 @@ async def delete_inventory(
         inventory=item,
         operator_id=current_user.id,
     )
-    db.delete(item)
     db.commit()
     _clear_list_cache()
     await sse_manager.broadcast(

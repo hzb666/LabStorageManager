@@ -9,7 +9,6 @@ from fastapi import HTTPException, status
 from app.models.inventory import Inventory, InventoryStatus, ManualInventoryCreate
 from app.services.api_utils import empty_to_none
 from app.services.cas_utils import normalize_cas, validate_cas_format
-from app.services.common_name_utils import strip_std_name_marker
 from app.services.internal_code import (
     INTERNAL_CODE_CONFLICT_MAX_RETRIES,
     generate_internal_code,
@@ -25,7 +24,6 @@ def create_manual_inventory_items(
     item_data: ManualInventoryCreate,
     *,
     created_by_id: int,
-    is_common: bool,
 ) -> list[Inventory]:
     """Create one or more inventory rows from manual stock-in input."""
     normalized_cas = normalize_cas(item_data.cas_number)
@@ -41,14 +39,13 @@ def create_manual_inventory_items(
     except SpecificationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    optional_string_fields = ["storage_location", "category", "brand", "english_name", "alias", "notes"]
+    optional_string_fields = ["storage_location", "category", "brand", "english_name", "alias", "purity", "notes"]
     string_fields = empty_to_none(item_data, optional_string_fields)
     normalized_storage_location = normalize_storage_location(string_fields["storage_location"])
     string_fields["storage_location"] = normalized_storage_location
 
-    normalized_name_for_pinyin = strip_std_name_marker(item_data.name) if is_common else item_data.name
     pinyin_fields = compute_pinyin_fields(
-        name=normalized_name_for_pinyin,
+        name=item_data.name,
         category=item_data.category,
         brand=item_data.brand,
         storage_location=normalized_storage_location,
@@ -71,8 +68,8 @@ def create_manual_inventory_items(
                     alias=string_fields["alias"],
                     category=string_fields["category"],
                     brand=string_fields["brand"],
+                    purity=string_fields["purity"],
                     storage_location=string_fields["storage_location"],
-                    is_common=is_common,
                     initial_quantity=per_bottle_value,
                     remaining_quantity=per_bottle_value,
                     remaining_percent=1,
@@ -89,7 +86,7 @@ def create_manual_inventory_items(
             db.flush()
             return created_items
         except IntegrityError as exc:
-            # 冲突后回滚事务，下一轮重试才能看到其他并发请求已提交的新序号。
+            # Full rollback is required here because this path does not use nested savepoints.
             db.rollback()
             if not is_internal_code_unique_violation(exc):
                 raise

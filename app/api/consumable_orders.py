@@ -7,7 +7,7 @@ from typing import Annotated, Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, delete
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, get_current_user, require_admin
@@ -67,6 +67,8 @@ logger = logging.getLogger(__name__)
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
+DELETE_ORDER_FORBIDDEN_DETAIL = "Only the order applicant or admin can delete this order"
+DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL = "Public account cannot delete orders"
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
 VALID_CONSUMABLE_SORT_FIELDS = {
@@ -126,6 +128,35 @@ class ConsumableOrderListQuery(BaseModel):
     fuzzy: bool = False
     sort_by: Optional[str] = None
     sort_order: Optional[str] = "desc"
+
+
+def _delete_consumable_order_with_permission(
+    db: Session,
+    *,
+    order_id: int,
+    current_user: CurrentUser,
+) -> ConsumableOrder:
+    # Atomic delete avoids check-then-delete races; explicit existence check preserves 404/403 semantics.
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL,
+        )
+
+    delete_stmt = delete(ConsumableOrder).where(ConsumableOrder.id == order_id)
+    if current_user.role != UserRole.ADMIN:
+        delete_stmt = delete_stmt.where(ConsumableOrder.applicant_id == current_user.id)
+    deleted_row = db.exec(delete_stmt.returning(*ConsumableOrder.__table__.columns)).first()
+    if deleted_row is not None:
+        return ConsumableOrder.model_validate(dict(deleted_row._mapping))
+
+    order_exists = db.exec(select(ConsumableOrder.id).where(ConsumableOrder.id == order_id)).first()
+    if order_exists is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=DELETE_ORDER_FORBIDDEN_DETAIL,
+    )
 
 
 def _add_specification(item_dict: dict) -> dict:
@@ -774,33 +805,19 @@ async def delete_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Delete a consumable order (only applicant or admin can delete)
-    order = get_consumable_order_by_id(db, order_id)
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ORDER_NOT_FOUND
-        )
-    
-    # Check if user is the applicant or admin
-    if current_user.role == UserRole.PUBLIC:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Public account cannot delete orders"
-        )
-    if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the order applicant or admin can delete this order"
-        )
+    # Delete a consumable order (only applicant or admin can delete).
+    order = _delete_consumable_order_with_permission(
+        db,
+        order_id=order_id,
+        current_user=current_user,
+    )
 
     log_consumable_order_delete(
         db,
         order=order,
         actor_user_id=current_user.id,
     )
-    
-    db.delete(order)
+
     db.commit()
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     await sse_manager.broadcast(
