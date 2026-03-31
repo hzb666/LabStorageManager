@@ -46,7 +46,7 @@
 - `borrow` 和 `return` 会修改状态、写借还历史，并通过 SSE 通知前端。
 - `dashboard/my-borrows` 和 `dashboard/pending-stockin` 为首页和仪表盘聚合数据。
 - `import/template` 与 `import` 组成 Excel 导入链路。
-- 常用货架不单独建表，而是通过 `CommonShelf` 模型维护，按 `CAS + 品牌 + 规格` 形成分组键 `group_key`，并由 `/api/common-shelf/*` 提供分组级与瓶级操作。
+- 常用货架由独立的 `common_shelf` 表（`CommonShelf` 模型）维护，按 `CAS + 品牌 + 规格` 形成分组键 `group_key`，并由 `/api/common-shelf/*` 提供分组级与瓶级操作。
 - 手动加瓶前会校验 CAS 主数据；若缺失主数据，需要先走 `/api/chemical-name-map` 完成补录，避免常用货架出现无法稳定展示名称的脏数据。
 
 ## 事件驱动补充层
