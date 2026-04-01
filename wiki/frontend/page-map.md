@@ -1,67 +1,144 @@
 # 页面地图
 
+本页从“路由如何分层”“页面挂在什么壳层下”“它通常依赖哪些 API / SSE 房间”三个角度说明当前前端页面结构。
+
 ## 路由概览
 
-- `/`：应用主入口，由 `Layout` 提供边栏、面包屑和通知区域
-- `/reagents`、`/consumables`：订单核心视图，共享 `FilterTable` 与表格状态体系
-- `/inventory`、`/common-shelf`：库存浏览与操作页面，结合 SSE 与虚拟滚动展示数据
-- `/import`、`/cart-import`：导入相关页面，分别覆盖 Excel 导入与设备或采购桥接
-- `/devices`：设备管理页面，承载 Session 列表与操作按钮
-- `/test-error`：用于手动验证错误边界
-- `/login`：独立登录页，不依赖应用骨架
-- `*`：未匹配路径统一进入 `NotFoundPage`
+- `/login`：独立登录页，不使用主布局壳层。
+- `/cart-import`：独立受保护页，用于承接扩展桥接批次，不走主业务布局。
+- `/test-error`：人工验证错误边界。
+- `*`：未匹配路径进入 `NotFoundPage`。
+- `/`：仪表盘。
+- `/reagents`：试剂订单。
+- `/consumables`：耗材订单。
+- `/inventory`：库存列表。
+- `/common-shelf`：常用货架。
+- `/import`：Excel 或手工批量导入相关页面。
+- `/devices`：个人设备和会话管理。
+- `/admin/users`：用户管理。
+- `/admin/announcements`：公告管理。
+- `/admin/logs`：操作日志查看。
 
 ## 守卫与加载方式
 
-- `ProtectedRoute` 负责普通登录态校验，并在跳转时保留来源路径
-- `AdminRoute` 在此基础上继续校验管理员权限
-- 页面组件统一使用 `React.lazy` 和 `<Suspense>`，按访问路径加载对应 chunk
-- `/admin/*` 等管理入口只在路由命中时挂载，减少无关页面成本
+当前路由不是一个统一守卫包住所有页面，而是按页面性质分层：
+
+- `LoginRoute`：控制登录页的反向跳转。
+- `ProtectedRoute`：保护独立页面，当前主要用于 `/cart-import`。
+- `ProtectedLayoutRoute`：保护主布局页面，并在硬刷新恢复登录态时允许 `Layout deferOutlet` 先渲染壳层。
+- `AdminRoute`：进一步限制后台管理页面只能由管理员访问。
+
+所有业务页都通过 `React.lazy` + `<Suspense>` 懒加载；不同页面会使用 `AuthDeferredShell` 或 `CartImportLoadingScreen` 作为占位。
+
+## 主布局页与独立页的边界
+
+### 独立页
+
+- `Login`：不需要侧边栏、公告条或用户菜单。
+- `CartImport`：虽然需要登录，但它是一次性导入工作区，因此不复用常规布局。
+- `TestError` 和 `NotFound`：保持独立，便于单独验证和兜底。
+
+### 主布局页
+
+主布局页都挂在 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Layout.tsx" /> 下，因此天然共享：
+
+- 桌面/移动侧边栏
+- 公告横幅和公告按钮
+- 主题切换
+- 用户入口
+- 退出登录确认
+
+这意味着如果某个页面应该出现在主导航里，就通常应该挂在主布局路由树下，而不是另起一个独立路由。
 
 ## 页面职责分布
 
 ### 仪表盘
 
-负责首屏汇总和概览展示，通常结合 TanStack Query 与 `useQueryClient` 更新简报数据。
+`Dashboard` 负责展示各条主业务链的汇总状态，例如我的试剂订单、我的耗材订单、待补位置库存等。它偏读聚合接口，不承担复杂编辑流程。
 
-### 订单与库存页
+### 订单页
 
-负责列表浏览、筛选、分页和展开详情，核心依赖 `FilterTable`、`DataTable`、`useTableState`。
+`ReagentOrders` 和 `ConsumableOrders` 都是典型列表页：
+
+- 共享 `FilterTable`
+- 共享 `useTableState`
+- 接入各自的 SSE 房间
+- 表格行展开后再展示更细粒度的详情和操作按钮
+
+二者最大的不同不是前端表格，而是后端工作流分叉：试剂有到货/入库链，耗材只有审批/完成链。
+
+### 库存与常用货架页
+
+`Inventory` 和 `CommonShelf` 都属于“现货侧页面”，但语义不同：
+
+- `Inventory` 面向单瓶库存和借还
+- `CommonShelf` 面向分组展示、公用沉淀和补瓶减瓶
+
+因此它们虽然都接实时刷新，但列表主键和局部 patch 语义并不相同。
 
 ### 管理页
 
-负责表格与表单的组合交互，例如用户管理和公告管理，通常同时依赖 API 模块与表单 schema。
+`AdminUsers`、`AnnouncementManagement`、`OperationLogs` 都属于后台管理页：
+
+- 只对管理员开放
+- 通常同时依赖列表和表单
+- 更强调权限、审计和导出，而不是日常高频操作
+
+### 设备页
+
+`DeviceManagement` 放在主布局里，但不是管理员页。它承载个人会话查看、设备名修改和会话下线，是认证系统在前端的直接落点。
 
 ## 页面与 API / 状态同步对照
 
 | 页面 | 主 API 模块 | 常用 SSE rooms |
 | --- | --- | --- |
-| `Dashboard` | `dashboardAPI`、`inventoryAPI.dashboard*` | `dashboard`、`inventory` |
+| `Dashboard` | `reagentOrderAPI.getMyReagentOrders`、`consumableOrderAPI.getMyConsumableOrders`、`inventoryAPI.getPendingStockin` | `dashboard`、`inventory` |
 | `ReagentOrders` | `reagentOrderAPI` | `reagent_orders` |
 | `ConsumableOrders` | `consumableOrderAPI` | `consumable_orders` |
 | `Inventory` | `inventoryAPI` | `inventory` |
-| `CommonShelf` | `commonShelfAPI`、`chemicalNameMapAPI` | `common_shelf` |
-| `CartImport` | `cartSyncAPI` | 以 HTTP 为主，提交后触发相关房间刷新 |
+| `CommonShelf` | `commonShelfAPI` | `common_shelf` |
+| `CartImport` | `authAPI`、`reagentOrderAPI`、`consumableOrderAPI` | 以本地草稿和标准 API 为主，不直接依赖 SSE 房间 |
+| `DeviceManagement` | `sessionAPI` | 通常不依赖业务 SSE 房间 |
 
-## 改动入口
+## 导航与页面分组
 
-- 新页面先判断它属于公开页、受保护页还是管理员页
-- 列表页优先接入 `FilterTable` 和 `useTableState`
-- 表单页优先接入 `BaseForm` 和 `validationSchemas`
-- 需要实时数据时，优先补齐 `useSSE` 或 `useListSSE`
-- 页面级导航变化时，同步更新本页和 [应用骨架](/frontend/app-shell)
-- 涉及常用货架补录时，同步考虑 CAS 主数据管理入口和 `chemicalNameMapAPI` 的联动
+主布局里的导航项由 `Layout.tsx` 中的 `navItems` 定义，分成两组：
+
+- `功能`：仪表盘、试剂订单、耗材订单、库存列表、常用货架、导入数据
+- `管理`：用户管理、公告管理
+
+这里有几个细节值得记住：
+
+- `adminOnly` 导航项只在当前用户是管理员时出现。
+- `/devices` 不在主导航列表里，而是挂在侧边栏底部的用户信息区。
+- `/admin/logs` 当前可以访问，但不在左侧主导航项数组里。
+
+## 页面改动时的判断顺序
+
+- 新页面是否需要共享侧边栏和公告条？
+- 它是否要求登录，但又不适合放进主壳层？
+- 它是否需要管理员权限？
+- 它是列表页、表单页，还是一次性流程页？
+- 它是否需要接入某个 SSE 房间，还是只需要普通 HTTP 快照？
+
+按这个顺序判断，通常就能知道它该挂在哪层、该复用哪些基础设施。
 
 ## 验证建议
 
-- 新页面是否挂在正确的路由分层下
-- 是否按需加载且不会提前请求无关 chunk
-- 页面切换后，相关缓存和实时同步状态是否仍然一致
-- 新页面是否能在本页对应的 API 和 SSE 入口中被准确定位
+- 未登录访问受保护页时，是否全部被正确拦截。
+- 管理员和普通用户看到的导航项是否不同。
+- `/cart-import` 是否保持独立工作区体验，而不是混入主布局。
+- 切换不同业务页后，相关列表是否仍能收到正确的 SSE 更新或 stale 提示。
+- 新页面挂载后，是否选用了正确的懒加载 fallback 和路由守卫。
 
 ## 参考代码
 - [frontend/src/App.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx)
-- [frontend/src/pages/Inventory.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Inventory.tsx)
 - [frontend/src/pages/Layout.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Layout.tsx)
+- [frontend/src/pages/CartImport.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx)
+- [frontend/src/pages/Dashboard.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Dashboard.tsx)
+- [frontend/src/pages/Inventory.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Inventory.tsx)
 - [frontend/src/pages/ReagentOrders.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/ReagentOrders.tsx)
-
+- [frontend/src/pages/ConsumableOrders.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/ConsumableOrders.tsx)
+- [frontend/src/pages/DeviceManagement.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/DeviceManagement.tsx)
+- [frontend/src/pages/AnnouncementManagement.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/AnnouncementManagement.tsx)
+- [frontend/src/pages/OperationLogs.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/OperationLogs.tsx)

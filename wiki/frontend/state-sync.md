@@ -1,65 +1,121 @@
 # 状态同步
 
-本页说明前端在本地状态、路由状态、查询缓存和 SSE 之间的职责分层，以及当前系统在实时性与一致性之间的取舍。
+本页说明前端在本地状态、URL 状态、查询缓存和 SSE 之间的职责分层，以及当前系统在实时性与一致性之间的取舍。
 
 ## Zustand 状态职责
 
-- `useAuthStore` 负责登录态，配合 `persist` 与 `createExpireStorage` 控制本地缓存过期时间；登录、注销和 `401` 处理都会同步 `user` 与 `isAuthenticated`
-- `useUIStore` 负责侧栏折叠状态，避免界面偏好在刷新后丢失
-- `sseStore` 负责 SSE 链接状态，包括 `isConnected`、`clientId`、`reconnectCount`、`lastSeqByRoom` 和 `staleRooms`
+当前全局状态不是一个大 store，而是几类职责明确的状态源：
+
+- `useAuthStore`：负责登录态、`authStatus` 状态机、服务端会话探测和退出流程。
+- `useUIStore`：负责侧边栏折叠状态。
+- `useSSEStore`：负责 SSE 连接状态、`clientId`、重连次数、每个房间的最新序号和 stale 标记。
+
+`useAuthStore` 有几个关键点：
+
+- 本地持久化键是 `auth-storage`。
+- 持久化内容只有 `user` 和 `isAuthenticated`，不是完整认证状态机。
+- TTL 为 3 天，过期后会自动清理。
+- 应用启动时必须走一次 `bootstrapAuth()`，不能直接信任本地快照。
 
 ## 表格状态与 URL 同步
 
-- `useTableState` 统一承接搜索、筛选、排序、列宽、展开和分页等状态，并通过 `useInfiniteQuery` 拉取列表数据
-- 该 Hook 同时提供 `applySearchImmediate`、`resetFilters`、`invalidate` 等方法，供 `FilterTable`、`TableFilters` 等上层复用
-- `useTableUrlState` 将 `globalFilter`、`columnFilters` 与 `pagination` 同步到 `location.search`，用于书签恢复和路由复用
+列表页状态分成三层：
+
+- `useTableState`：管理搜索输入、防抖后的全局搜索词、状态筛选、搜索字段、模糊搜索、排序、分页、列宽和展开状态。
+- `useTableUrlState`：负责把筛选状态同步到地址栏，并在 URL 变化时把状态回流到页面。
+- TanStack Query：负责真正的分页数据缓存。
+
+这套设计里有两个重要约束：
+
+- 搜索输入和实际查询词不是一回事。输入框先写 `searchInput`，防抖后才同步到 `globalFilter`。
+- URL 同步采用 merge patch，而不是整体覆盖 `location.search`，避免把页面其他 URL 状态一并抹掉。
 
 ## SSE 与实时状态
 
-- `useSSE` 负责建立 `/api/events` 连接、批量订阅 rooms，并在重连时递增重连计数、标记房间为 stale
-- `useListSSE` 负责判断事件是否可以安全 patch 列表缓存；如果语义可能失真，则优先进入 stale 流程
-- 这套机制的目标不是追求最少刷新，而是在正确性的前提下尽量减少全量请求
+`useSSE` 和 `useListSSE` 共同组成了当前前端的实时同步层：
 
-## 主题与其他全局状态
+- `useSSE` 建立 `/api/events?rooms=...` 连接，监听 `connected`、`auth.invalid` 和业务事件。
+- `useSSEStore.processSeq()` 会逐房间记录 `lastSeqByRoom`，用于检测重复事件和断档。
+- 重连后，如果已经不是第一次打开流，前端会把当前房间标为 stale。
+- 如果发现序号断档，也会直接 stale，而不是尝试猜测丢失的数据。
 
-- `useTheme` 负责初始化主题、同步 `app-ui.theme`，并更新 `document.documentElement` 的 `dark` 类
-- `ToastContainer`、`TooltipProvider` 等全局容器在 `App.tsx` 统一挂载
-- SSE 相关 store 不依赖页面卸载，保证跨路由持续运行
+`useListSSE` 的策略可以概括成一句话：只有在“局部 patch 不会破坏当前列表语义”时才 patch，否则就 stale。
+
+## patch 与 stale 的边界
+
+当前列表 SSE 处理遵循下面的规则：
+
+- `created` 事件只有在列表正处于第一页起点、没有搜索词、没有排序冲突，并且新项能安全 prepend 时才会直接插入。
+- `updated` 事件只有在目标行已经加载进列表、更新字段不影响当前搜索字段、不影响当前排序字段、并且合并后仍满足当前筛选时才会 patch。
+- `deleted` 事件默认直接 stale。
+- 任何“字段变更可能影响搜索命中”“排序字段被改”“目标行当前没加载出来”的场景，都直接 stale。
+
+这套取舍故意偏保守，因为它优先保证“页面不会静默展示错误顺序或错误过滤结果”。
+
+## 认证状态与 SSE 的衔接
+
+认证和 SSE 是联动的：
+
+- `api/client.ts` 会把当前 `clientId` 写入普通 API 请求头 `X-SSE-Client-Id`。
+- 后端广播时会回写 `actor_client_id`，前端收到后会跳过自己触发的回声事件。
+- 如果 SSE 收到 `auth.invalid`，前端会调用 `triggerSessionInvalidation()`，统一收敛到重新登录流程。
+- `bootstrapAuth()` 对启动探测请求会带 `X-Skip-Auth-Invalidation: 1`，避免一次启动探测失败就弹全局失效提示。
 
 ## 本地存储分层
 
-- `app-ui`：主题、字体来源、Dashboard 页签、公告已读/关闭、Bug 按钮隐藏
-- `app-table`：表格 `expandAll`、`fuzzySearch`、列宽
-- `app-auth-meta`：设备 `id/name`、remembered user
-- 独立保留：`auth-storage`、`sidebar-storage`、`chemical_properties_cache`、`cart_import_batch_latest`
+当前本地存储大致分成四类：
 
-## 状态模型
+- `app-ui`：主题、字体来源、仪表盘激活页签、公告已读/关闭、Bug 按钮隐藏状态。
+- `app-table`：各表格的 `expandAll`、`fuzzySearch`、列宽。
+- `app-auth-meta`：设备 `id/name` 和 remembered user。
+- 独立键：`auth-storage`、`sidebar-storage`、`chemical_properties_cache`、`cart_import_batch_latest`。
 
-前端采用“快照 + 增量通知”的同步模型：
+这几层的设计重点是“让同类偏好写到同一个规范化对象里”，而不是每个功能各自散落在多个 localStorage key 里。
 
-1. 页面先通过 HTTP 获取权威快照
-2. SSE 只在语义安全时做局部 patch
-3. 一旦排序、筛选或序列号可能失真，就将房间标记为 stale
-4. 页面通过刷新重新获取完整快照
+## 主题与壳层状态
+
+- `useTheme` 会优先读取 `app-ui.theme`；没有保存值时才回退到系统主题偏好。
+- 主题切换时会短暂禁用全局 CSS transition，避免亮暗模式切换时整页动画闪烁。
+- 侧边栏折叠状态存储在 `sidebar-storage`，由 `useUIStore` 持久化。
+- Layout 打开移动端侧边栏时会锁住 `document.body.style.overflow`，避免抽屉和页面双滚动。
+
+## 当前同步模型
+
+前端整体采用“快照 + 增量通知 + 明确失效”的同步模型：
+
+1. 页面先通过 HTTP 获取权威快照。
+2. SSE 尽量对当前缓存做安全 patch。
+3. 只要 patch 的正确性不再可证，就把列表标为 stale。
+4. 页面根据 stale 标记重新拉完整快照。
+
+这意味着 stale 不是失败，而是当前实现里一种主动的正确性保护机制。
 
 ## 改动入口
 
-- 登录态相关行为优先改 `useAuthStore`
-- 侧栏和界面偏好优先改 `useUIStore`
-- 表格筛选、分页和列宽优先改 `useTableState` 与 `useTableUrlState`
-- SSE 连接、重连和 patch 规则优先改 `useSSE` 与 `useListSSE`
-- 主题初始化优先改 `useTheme`
+- 登录态相关问题：优先改 `useStore.ts` 和 `api/client.ts`
+- SSE 建连、重连、断档：优先改 `useSSE.ts` 和 `sseStore.ts`
+- 列表级 patch 策略：优先改 `useListSSE.ts`
+- 搜索、防抖、分页、列宽：优先改 `useTableState.tsx`
+- URL 查询参数联动：优先改 `useTableUrlState.ts`
+- 主题持久化和公告已读：优先改 `appUiStorage.ts`
 
 ## 验证建议
 
-- `auth-storage` / `sidebar-storage` 的 TTL 是否按预期刷新
-- 断网后重连是否会进入 stale 流程
-- 同一条列表数据在局部更新和全量刷新下是否保持一致
-- 多筛选、多排序场景是否避免错误 patch
+- 刷新已登录页面时，`authStatus` 是否从 `checking` 正常过渡到 `authenticated`。
+- 强制断网或重连时，列表是否进入 stale 流程，而不是默默停在旧数据。
+- 同一条数据被当前客户端修改后，是否能正确跳过自己的 SSE 回声事件。
+- 搜索命中、排序字段更新、删除事件这些场景下，是否都按预期选择 patch 或 stale。
+- 更改列宽、展开状态、模糊搜索后，是否能在刷新后恢复。
 
 ## 参考代码
+- [frontend/src/api/client.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts)
 - [frontend/src/hooks/useListSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useListSSE.ts)
 - [frontend/src/hooks/useSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts)
+- [frontend/src/hooks/useTableState.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableState.tsx)
+- [frontend/src/hooks/useTableUrlState.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableUrlState.ts)
+- [frontend/src/hooks/useTheme.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTheme.ts)
+- [frontend/src/store/sseStore.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/sseStore.ts)
 - [frontend/src/store/useStore.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/useStore.ts)
-
-
+- [frontend/src/lib/storage/appAuthMetaStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appAuthMetaStorage.ts)
+- [frontend/src/lib/storage/appTableStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appTableStorage.ts)
+- [frontend/src/lib/storage/appUiStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appUiStorage.ts)

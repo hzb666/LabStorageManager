@@ -1,72 +1,110 @@
 # 关键文件索引
 
+本页不是简单列文件名，而是说明“遇到某类问题时，优先看哪几个文件，为什么先看它们”。
+
 ## 启动与运行边界
 
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />：FastAPI 实例、生命周期、中间件、安全头、SSE 初始化和 `/cart-import` 入口都在这里。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />：SQLite 引擎、WAL、外键、索引、FTS 和默认管理员初始化都在这里收口。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py" />：分别负责认证依赖和 Redis 降级能力，是理解登录、会话和限流的起点。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />：FastAPI 实例、生命周期、中间件、安全头、SSE 上下文、`/cart-import` 重定向和所有路由挂载都在这里收口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />：SQLite 引擎、WAL、外键、性能索引、FTS、schema consistency check 和默认管理员初始化都从这里进入。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/main.tsx" />：前端启动时机、`QueryClient`、cache version bootstrap 和真正挂载 `App` 的入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" />：前端路由树、认证守卫、懒加载页面和全局 Provider 的装配点。
+
+## 认证、会话与访问边界
+
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py" />：`CurrentUser`、管理员检查、token 会话校验和 Cookie/Bearer 兼容逻辑的核心。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py" />：设备会话管理的 API 入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/useStore.ts" />：`bootstrapAuth()`、`logout()`、`authStatus` 状态机和本地持久化策略。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" />：Axios 拦截器、401/403 收敛、`X-SSE-Client-Id` 注入和设备标识传递。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Layout.tsx" />：前端导航项的权限过滤、账户入口、主题切换和退出确认。
 
 ## 核心业务链
 
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py" />：用户 CRUD、登录、注销、头像上传和日志 Token API。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" />：试剂订单列表、筛选、导入、审批、到货和入库。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py" />：耗材订单接口，`complete` 仅接受审批后状态，`export` 生成 XLSX。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py" /> + <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py" />：库存列表、借用、归还和常用货架。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" />：购物车同步和导入 API，通过 `normalize_cas` 和 `parse_specification` 清洗并创建订单。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py" />：SSE 流的核心实现，决定实时同步是否稳定。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/image_service.py" />：处理上传图片并写入 `static/uploads` 和 `static/thumbnails`。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py" />：试剂订单列表、查询和基础 CRUD。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" />：试剂审批、到货、入库、仪表盘卡片和删除权限的核心工作流。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py" />：耗材列表、搜索、审批、完成、导出和删除权限。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" />：库存列表、借用、归还、Excel 导入、手工入库、导出等主入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py" />：常用货架分组、位置建议、补瓶、减瓶和删除。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py" />：库存瓶级唯一编码生成器，排查入库冲突时优先看这里。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py" />：名称、分类、品牌、位置的拼音与首字母预计算逻辑。
 
-## 数据模型与查询工具
+## 数据模型与检索基线
 
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/models" />：`User`、`UserSession`、`ReagentOrder`、`ConsumableOrder`、`Inventory`、`Announcement` 等模型。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py" />：生成 `internal_code`，用于唯一识别瓶级库存。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/api_utils.py" />：列表页短 TTL 缓存，是排查“数据改了但列表还旧”问题时必须检查的地方。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/models" />：`User`、`UserSession`、`ReagentOrder`、`ConsumableOrder`、`Inventory`、`CommonShelf`、`Announcement` 等数据对象定义。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory.py" />：库存事实源、借用日志和手工入库 DTO。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py" />：试剂状态枚举、订购原因和规格拆分后的字段。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order.py" />：耗材状态枚举和搜索相关字段。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/api_utils.py" />：列表页短 TTL 缓存，是排查“数据改了但第一页还是旧的”时必须看的文件。
 
-## 前端关键入口
+## 实时同步与缓存一致性
 
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/main.tsx" />：`QueryClientProvider` + `App`。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" />：路由树、`ProtectedRoute`、`AdminRoute` 和懒加载页面。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" />：Axios 实例、统一 API 和各业务接口。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts" /> + `store/sseStore.ts`：SSE 连接和状态管理。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ui/FilterTable.tsx" /> + `hooks/useTableState.tsx`：TanStack Table + 状态管理。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/validationSchemas.ts" />：Valibot 验证和中文错误提示。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx" />：处理扩展数据、划分试剂/耗材并调用 `cartSyncAPI.importItems`。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py" />：SSE 建连入口、房间白名单、会话周期复检。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py" />：本地 fan-out、Redis 跨进程广播、慢客户端断开、`auth.invalid` 消息构造。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_redis.py" />：Redis 发布订阅封装。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts" />：EventSource 连接、重连、序号断档处理和 auth invalid 事件收敛。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useListSSE.ts" />：列表级 patch / stale 策略。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/sseStore.ts" />：客户端 SSE 运行时状态、`lastSeqByRoom` 和 `staleRooms`。
 
-## 浏览器扩展与部署入口
+## 前端页面基础设施
 
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json" />：扩展权限、入口和内容脚本声明。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js" />：从外部平台抓购物车并写入 `chrome.storage.local.import_batch_latest`。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" />：在 `/cart-import` 页面注入桥接逻辑。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml" />：组合 `redis`、`backend`、`frontend`。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" />：反向代理 `/api`、`/static` 与前端路由。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ui/FilterTable.tsx" />：列表页工具栏、搜索、筛选和表格容器总入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableState.tsx" />：分页、搜索、防抖、模糊搜索、列宽和展开状态。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableUrlState.ts" />：URL 查询参数与表格状态同步。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BaseForm.tsx" />：统一表单渲染外壳。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/validationSchemas.ts" />：前端表单校验和 API 错误归一化。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTheme.ts" />：主题初始化与切换逻辑。
+
+## 购物车导入与扩展桥接
+
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json" />：扩展权限、content script 注入范围和 popup 入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/background/service-worker.js" />：目标购物车标签页解析、后台消息路由、详情页抓取辅助。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/popup/popup.js" />：抓取、详情补齐、类型判断、批次保存和跳转系统页面。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" />：把扩展批次复制到页面 `localStorage` 并发出 `IMPORT_BATCH_READY` 消息。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx" />：购物车导入 UI 布局。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/cartimport/cartImportControllers.ts" />：批次加载、草稿持久化、CAS 预警和逐条提交逻辑。
+
+## 部署与运行环境
+
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml" />：`redis`、`backend`、`frontend` 三服务编排。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/backend/Dockerfile" />：后端镜像构建方式。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/frontend/Dockerfile" />：前端静态资源镜像构建方式。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" />：统一代理 `/api`、`/static` 和前端路由回退。
+
+## 按问题反查文件
+
+- 登录态异常：先看 `auth.py`、`useStore.ts`、`api/client.ts`
+- 到货或入库异常：先看 `reagent_orders_workflow.py`、`inventory.py`、`internal_code.py`
+- 耗材列表搜索异常：先看 `consumable_orders.py`、`database.py`
+- 页面数据旧但刷新正常：先看 `api_utils.py`、`events.py`、`useListSSE.ts`
+- 扩展导入失败：先看 `popup.js`、`import-bridge.js`、`cartImportControllers.ts`
+- 线上容器访问异常：先看 `docker-compose.yml`、`default.conf`、`main.py`
 
 ## 参考代码
-- [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)
 - [app/api/common_shelf.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py)
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py)
 - [app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py)
-- [app/api/inventory_extended_routes.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py)
 - [app/api/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py)
-- [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)
 - [app/api/reagent_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py)
-- [app/api/users.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py)
+- [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)
+- [app/api/user_sessions.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py)
 - [app/core/auth.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py)
-- [app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
 - [app/services/api_utils.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/api_utils.py)
-- [app/services/image_service.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/image_service.py)
 - [app/services/internal_code.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py)
+- [app/services/pinyin_utils.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py)
 - [app/services/sse_manager.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py)
+- [browser-extension/background/service-worker.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/background/service-worker.js)
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)
-- [browser-extension/content/script.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js)
 - [browser-extension/manifest.json](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json)
+- [browser-extension/popup/popup.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/popup/popup.js)
 - [docker-compose.yml](https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml)
 - [docker/nginx/default.conf](https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf)
 - [frontend/src/api/client.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts)
 - [frontend/src/App.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx)
+- [frontend/src/components/BaseForm.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BaseForm.tsx)
 - [frontend/src/components/ui/FilterTable.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ui/FilterTable.tsx)
-- [frontend/src/hooks/useSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts)
-- [frontend/src/lib/validationSchemas.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/validationSchemas.ts)
-- [frontend/src/main.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/main.tsx)
-- [frontend/src/pages/CartImport.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx)
+- [frontend/src/hooks/useListSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useListSSE.ts)
+- [frontend/src/hooks/useTableState.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableState.tsx)
+- [frontend/src/hooks/useTableUrlState.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableUrlState.ts)
+- [frontend/src/pages/cartimport/cartImportControllers.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/cartimport/cartImportControllers.ts)
+- [frontend/src/store/sseStore.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/sseStore.ts)
