@@ -3,56 +3,53 @@
  *
  * Keep it independent so each page can opt in with minimal wiring.
  */
-import { useCallback, useState } from 'react'
-import { RefreshCw, Info } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { useSSEStore } from '@/store/sseStore'
+import { useCallback, useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { useSSEStore } from "@/store/sseStore";
 
 interface StaleBannerProps {
-  room: string
-  onRefresh: () => void | Promise<void>
-  message?: string
+  staleKey: string;
+  onRefresh: () => void | Promise<void>;
 }
 
-export function StaleBanner({ room, onRefresh, message }: StaleBannerProps) {
-  const isStale = useSSEStore((state) => state.staleRooms.has(room))
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
-  const [isRefreshing, setIsRefreshing] = useState(false)
+export function StaleBanner({ staleKey, onRefresh }: StaleBannerProps) {
+  const isStale = useSSEStore((state) => state.hasStaleKey(staleKey));
+  const clearStaleKey = useSSEStore((state) => state.clearStaleKey);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = useCallback(async () => {
-    setIsRefreshing(true)
+    setIsRefreshing(true);
     try {
-      await onRefresh()
-      clearRoomStale(room)
+      await onRefresh();
+      clearStaleKey(staleKey);
     } finally {
-      setIsRefreshing(false)
+      setIsRefreshing(false);
     }
-  }, [clearRoomStale, onRefresh, room])
+  }, [clearStaleKey, onRefresh, staleKey]);
 
   if (!isStale) {
-    return null
+    return null;
   }
 
   return (
-    <div className="mb-4 flex items-center justify-between overflow-hidden rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 shadow-sm transition-all animate-in fade-in slide-in-from-top-4 duration-300 ease-out">
-      <div className="flex items-center gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Info className="h-4 w-4" />
-        </div>
-        <span className="text-sm  text-foreground">
-          {message ?? '已接收到数据更新，点击刷新获取最新内容'}
+    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className="pointer-events-auto inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-card/96 px-2 py-1.5 shadow-lg backdrop-blur dark:border-2 dark:border-input">
+        <span className="truncate px-2 text-sm text-foreground">
+          检测到更新
         </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="size-8 rounded-full px-3 shadow-none"
+        >
+          <RefreshCw
+            className={`size-4 ${isRefreshing ? "animate-spin" : ""}`}
+          />
+        </Button>
       </div>
-      <Button
-        variant="default"
-        size="sm"
-        onClick={handleRefresh}
-        disabled={isRefreshing}
-        className="h-8 shrink-0 shadow-none transition-colors"
-      >
-        <RefreshCw className={`mr-2 h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-        {isRefreshing ? '刷新中...' : '立即刷新'}
-      </Button>
     </div>
-  )
+  );
 }

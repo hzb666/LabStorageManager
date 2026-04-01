@@ -14,6 +14,7 @@ import {
 } from '@floating-ui/react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
 import { querySmiles } from '@/lib/chemicalProperties'
+import { LIB_ASSETS } from '@/lib/staticAssets'
 import { isSpecialCasValue } from '@/lib/validationSchemas'
 
 type RDKitModule = {
@@ -23,7 +24,9 @@ type RDKitModule = {
 
 declare global {
   var RDKit: RDKitModule | undefined
-  var initRDKitModule: (() => Promise<RDKitModule>) | undefined
+  var initRDKitModule:
+    | ((moduleConfig?: { locateFile?: (path: string) => string }) => Promise<RDKitModule>)
+    | undefined
 }
 
 interface Mol {
@@ -131,7 +134,7 @@ async function loadRDKitScript(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const script = document.createElement('script')
     script.id = 'rdkit-script'
-    script.src = '/lib/RDKit_minimal.js'
+    script.src = LIB_ASSETS.rdkitScriptUrl
     script.async = true
     script.onload = () => resolve()
     script.onerror = () => reject(new Error('RDKit 脚本加载失败'))
@@ -152,7 +155,14 @@ async function initRDKit(): Promise<RDKitModule> {
     throw new Error('RDKit 模块未初始化')
   }
 
-  const rdkit = await globalThis.initRDKitModule()
+  const rdkit = await globalThis.initRDKitModule({
+    locateFile: (path) => {
+      if (path.endsWith('.wasm')) {
+        return LIB_ASSETS.rdkitWasmUrl
+      }
+      return `/lib/${path}`
+    },
+  })
   globalThis.RDKit = rdkit
   return rdkit
 }
@@ -435,7 +445,7 @@ function MoleculePreview(props: {
   filterClass: string
   canZoom: boolean
   casNumber: string
-  setReference: (node: Element | null) => void
+  setReference: (node: HTMLElement | null) => void
   referenceProps: HTMLAttributes<HTMLDivElement>
 }) {
   const { width, height, svg, filterClass, canZoom, casNumber, setReference, referenceProps } = props
@@ -477,7 +487,7 @@ function MoleculePreview(props: {
 // 渲染悬浮放大层，复用浮层定位样式并保持原过渡效果。
 function MoleculeZoomPortal(props: {
   shouldRender: boolean
-  setFloating: (node: Element | null) => void
+  setFloating: (node: HTMLElement | null) => void
   floatingProps: HTMLAttributes<HTMLDivElement>
   floatingStyles: CSSProperties
   transitionStyles: CSSProperties

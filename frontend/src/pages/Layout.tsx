@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, type ComponentProps, type ReactElement } from 'react'
 import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '@/store/useStore'
 import { cn, getFullImageUrl } from '@/lib/utils'
@@ -23,16 +23,19 @@ import {
   Archive,
 } from 'lucide-react'
 import { BugReportButton } from '@/components/BugReportButton'
-import { getBugButtonHidden, clearBugButtonHidden } from '@/lib/bugReportButtonStorage'
 import { clearDashboardTab } from '@/lib/dashboardUtils'
+import { clearBugButtonHiddenUntil, getBugButtonHiddenUntil } from '@/lib/storage/appUiStorage'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
 import { UserRoles, USER_ROLE_MAP } from '@/lib/constants'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { SidebarLogo } from '@/components/SidebarLogo'
+import { AuthDeferredShell } from '@/components/AuthDeferredShell'
 
 type NavGroup = '功能' | '管理'
+type TooltipSide = ComponentProps<typeof TooltipContent>['side']
+const SIDEBAR_TRANSITION_MS = 300
 
 interface NavItem {
   title: string
@@ -42,7 +45,7 @@ interface NavItem {
   adminOnly?: boolean
 }
 
-type LayoutUser = ReturnType<typeof useAuthStore>['user']
+type LayoutUser = ReturnType<typeof useAuthStore.getState>['user']
 
 // 全站侧边栏的顺序、路由和 `adminOnly` 权限标记都集中在这里维护。
 const navItems: NavItem[] = [
@@ -85,41 +88,63 @@ function getNavLinkClassName(
   )
 }
 
+function DesktopCollapsedTooltip({
+  enabled,
+  label,
+  side = 'right',
+  children,
+}: {
+  enabled: boolean
+  label: string
+  side?: TooltipSide
+  children: ReactElement
+}) {
+  if (!enabled) {
+    return children
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent side={side}>
+        <p>{label}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function DesktopSidebarNavItem({
   item,
   pathname,
   sidebarCollapsed,
+  sidebarTooltipsEnabled,
 }: {
   item: NavItem
   pathname: string
   sidebarCollapsed: boolean
+  sidebarTooltipsEnabled: boolean
 }) {
   const isActive = pathname === item.href
   const Icon = item.icon
 
   return (
-    <Tooltip key={item.href}>
-      <TooltipTrigger asChild>
-        <Link
-          to={item.href}
-          className={getNavLinkClassName(
-            isActive,
-            'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
-            'desktop'
-          )}
-        >
-          <Icon className={cn('h-5 w-5 shrink-0', isActive ? '' : 'text-sidebar-foreground')} />
-          <span className={getSidebarLabelClassName(sidebarCollapsed, 'opacity-100 max-w-50 ml-3')}>
-            {item.title}
-          </span>
-        </Link>
-      </TooltipTrigger>
-      {sidebarCollapsed && (
-        <TooltipContent side="right">
-          <p>{item.title}</p>
-        </TooltipContent>
-      )}
-    </Tooltip>
+    <DesktopCollapsedTooltip enabled={sidebarTooltipsEnabled} label={item.title}>
+      <Link
+        to={item.href}
+        className={getNavLinkClassName(
+          isActive,
+          'flex items-center rounded-lg pl-3 py-2.5 overflow-hidden relative isolate',
+          'desktop'
+        )}
+      >
+        <Icon className={cn('h-5 w-5 shrink-0', isActive ? '' : 'text-sidebar-foreground')} />
+        <span className={getSidebarLabelClassName(sidebarCollapsed, 'opacity-100 max-w-50 ml-3')}>
+          {item.title}
+        </span>
+      </Link>
+    </DesktopCollapsedTooltip>
   )
 }
 
@@ -157,11 +182,13 @@ function DesktopSidebarGroup({
   items,
   pathname,
   sidebarCollapsed,
+  sidebarTooltipsEnabled,
 }: {
   title: NavGroup
   items: NavItem[]
   pathname: string
   sidebarCollapsed: boolean
+  sidebarTooltipsEnabled: boolean
 }) {
   if (items.length === 0) {
     return null
@@ -179,6 +206,7 @@ function DesktopSidebarGroup({
             item={item}
             pathname={pathname}
             sidebarCollapsed={sidebarCollapsed}
+            sidebarTooltipsEnabled={sidebarTooltipsEnabled}
           />
         ))}
       </div>
@@ -236,6 +264,7 @@ function DesktopSidebar({
   onLogout,
   onLogoutBlur,
   filteredNavItems,
+  sidebarTooltipsEnabled,
 }: {
   pathname: string
   user: LayoutUser
@@ -246,6 +275,7 @@ function DesktopSidebar({
   onLogout: () => void
   onLogoutBlur: () => void
   filteredNavItems: NavItem[]
+  sidebarTooltipsEnabled: boolean
 }) {
   const functionalItems = filteredNavItems.filter((item) => item.group === '功能')
   const managementItems = filteredNavItems.filter((item) => item.group === '管理')
@@ -257,6 +287,7 @@ function DesktopSidebar({
 
   return (
     <aside
+      data-desktop-sidebar="true"
       className={cn(
         'fixed inset-y-0 left-0 z-30 bg-sidebar flex flex-col transition-[width] duration-300 ease-in-out',
         sidebarCollapsed ? 'w-16' : 'w-64'
@@ -285,12 +316,14 @@ function DesktopSidebar({
                 items={functionalItems}
                 pathname={pathname}
                 sidebarCollapsed={sidebarCollapsed}
+                sidebarTooltipsEnabled={sidebarTooltipsEnabled}
               />
               <DesktopSidebarGroup
                 title="管理"
                 items={managementItems}
                 pathname={pathname}
                 sidebarCollapsed={sidebarCollapsed}
+                sidebarTooltipsEnabled={sidebarTooltipsEnabled}
               />
             </div>
           </nav>
@@ -305,49 +338,35 @@ function DesktopSidebar({
         />
 
         <div className="flex flex-col gap-1 overflow-hidden pt-4">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                onClick={toggleTheme}
-                className="justify-start text-base p-2 h-11 w-full hover:bg-muted text-sidebar-foreground transition-colors"
-              >
-                {theme === 'dark' ? <Sun className="size-5 shrink-0" /> : <Moon className="size-5 shrink-0" />}
-                <span className={getSidebarLabelClassName(sidebarCollapsed, 'opacity-100 max-w-50 ml-3')}>
-                  {themeLabel}
-                </span>
-              </Button>
-            </TooltipTrigger>
-            {sidebarCollapsed && (
-              <TooltipContent side="right">
-                <p>{tooltipThemeLabel}</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
+          <DesktopCollapsedTooltip enabled={sidebarTooltipsEnabled} label={tooltipThemeLabel}>
+            <Button
+              variant="ghost"
+              onClick={toggleTheme}
+              className="justify-start text-base p-2 h-11 w-full hover:bg-muted text-sidebar-foreground transition-colors"
+            >
+              {theme === 'dark' ? <Sun className="size-5 shrink-0" /> : <Moon className="size-5 shrink-0" />}
+              <span className={getSidebarLabelClassName(sidebarCollapsed, 'opacity-100 max-w-50 ml-3')}>
+                {themeLabel}
+              </span>
+            </Button>
+          </DesktopCollapsedTooltip>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={logoutConfirming ? 'destructive' : 'ghost'}
-                onClick={onLogout}
-                onBlur={onLogoutBlur}
-                className={cn(
-                  'justify-start p-2 h-11 w-full text-base',
-                  logoutConfirming ? 'transition-none' : 'hover:bg-muted text-sidebar-foreground transition-colors'
-                )}
-              >
-                <LogOut className="size-5 shrink-0" />
-                <span className={getSidebarLabelClassName(sidebarCollapsed, 'opacity-100 max-w-50 ml-3')}>
-                  {logoutLabel}
-                </span>
-              </Button>
-            </TooltipTrigger>
-            {sidebarCollapsed && (
-              <TooltipContent side="right">
-                <p>{logoutTooltipLabel}</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
+          <DesktopCollapsedTooltip enabled={sidebarTooltipsEnabled} label={logoutTooltipLabel}>
+            <Button
+              variant={logoutConfirming ? 'destructive' : 'ghost'}
+              onClick={onLogout}
+              onBlur={onLogoutBlur}
+              className={cn(
+                'justify-start p-2 h-11 w-full text-base',
+                logoutConfirming ? 'transition-none' : 'hover:bg-muted text-sidebar-foreground transition-colors'
+              )}
+            >
+              <LogOut className="size-5 shrink-0" />
+              <span className={getSidebarLabelClassName(sidebarCollapsed, 'opacity-100 max-w-50 ml-3')}>
+                {logoutLabel}
+              </span>
+            </Button>
+          </DesktopCollapsedTooltip>
         </div>
       </div>
     </aside>
@@ -382,44 +401,6 @@ function MobileSidebarSection({
           />
         ))}
       </div>
-    </div>
-  )
-}
-
-// 移动端把账户入口与主题/退出动作固定在底部，和滚动导航区分离。
-function MobileSidebarFooter({
-  pathname,
-  user,
-  closeMobileMenu,
-  theme,
-  toggleTheme,
-  logoutConfirming,
-  onLogout,
-  onLogoutBlur,
-}: {
-  pathname: string
-  user: LayoutUser
-  closeMobileMenu: () => void
-  theme: string
-  toggleTheme: () => void
-  logoutConfirming: boolean
-  onLogout: () => void
-  onLogoutBlur: () => void
-}) {
-  return (
-    <div className="mt-auto p-4 border-t border-border/50 shrink-0">
-      <MobileUserLink
-        pathname={pathname}
-        user={user}
-        closeMobileMenu={closeMobileMenu}
-      />
-      <MobileSidebarActions
-        theme={theme}
-        toggleTheme={toggleTheme}
-        logoutConfirming={logoutConfirming}
-        onLogout={onLogout}
-        onLogoutBlur={onLogoutBlur}
-      />
     </div>
   )
 }
@@ -572,16 +553,20 @@ function MobileSidebar({
           </div>
         </div>
 
-        <MobileSidebarFooter
-          pathname={pathname}
-          user={user}
-          closeMobileMenu={closeMobileMenu}
-          theme={theme}
-          toggleTheme={toggleTheme}
-          logoutConfirming={logoutConfirming}
-          onLogout={onLogout}
-          onLogoutBlur={onLogoutBlur}
-        />
+        <div className="mt-auto p-4 border-t border-border/50 shrink-0">
+          <MobileUserLink
+            pathname={pathname}
+            user={user}
+            closeMobileMenu={closeMobileMenu}
+          />
+          <MobileSidebarActions
+            theme={theme}
+            toggleTheme={toggleTheme}
+            logoutConfirming={logoutConfirming}
+            onLogout={onLogout}
+            onLogoutBlur={onLogoutBlur}
+          />
+        </div>
       </aside>
     </div>
   )
@@ -594,6 +579,71 @@ function getMainContentShiftClass(showDesktopSidebar: boolean, sidebarCollapsed:
   }
 
   return sidebarCollapsed ? 'md:ml-16' : 'md:ml-64'
+}
+
+function useDesktopSidebarTooltipGuard({
+  sidebarCollapsed,
+  toggleSidebar,
+}: {
+  sidebarCollapsed: boolean
+  toggleSidebar: () => void
+}) {
+  const [sidebarTooltipSuspended, setSidebarTooltipSuspended] = useState(false)
+  const sidebarTooltipTimerRef = useRef<number | null>(null)
+
+  const blurActiveElement = useCallback(() => {
+    const activeElement = document.activeElement
+    if (
+      activeElement instanceof HTMLElement &&
+      activeElement.closest('[data-desktop-sidebar="true"]')
+    ) {
+      activeElement.blur()
+    }
+  }, [])
+
+  const suspendSidebarTooltips = useCallback(() => {
+    setSidebarTooltipSuspended(true)
+
+    if (sidebarTooltipTimerRef.current !== null) {
+      globalThis.clearTimeout(sidebarTooltipTimerRef.current)
+    }
+
+    sidebarTooltipTimerRef.current = globalThis.setTimeout(() => {
+      setSidebarTooltipSuspended(false)
+      sidebarTooltipTimerRef.current = null
+    }, SIDEBAR_TRANSITION_MS)
+  }, [])
+
+  const handleToggleSidebar = useCallback(() => {
+    blurActiveElement()
+    suspendSidebarTooltips()
+    toggleSidebar()
+  }, [blurActiveElement, suspendSidebarTooltips, toggleSidebar])
+
+  const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'b') {
+      event.preventDefault()
+      handleToggleSidebar()
+    }
+  }, [handleToggleSidebar])
+
+  useEffect(() => {
+    globalThis.addEventListener('keydown', handleKeyDown)
+    return () => globalThis.removeEventListener('keydown', handleKeyDown)
+  }, [handleKeyDown])
+
+  useEffect(() => {
+    return () => {
+      if (sidebarTooltipTimerRef.current !== null) {
+        globalThis.clearTimeout(sidebarTooltipTimerRef.current)
+      }
+    }
+  }, [])
+
+  return {
+    handleToggleSidebar,
+    sidebarTooltipsEnabled: sidebarCollapsed && !sidebarTooltipSuspended,
+  }
 }
 
 // 页头统一放桌面侧栏开关、公告横幅/公告按钮，以及移动端菜单和主题入口。
@@ -686,8 +736,13 @@ function LayoutHeader({
   )
 }
 
+function LayoutDeferredOutlet({ pathname }: Readonly<{ pathname: string }>) {
+  // 骨架按页面类型区分到“仪表盘/列表页”两档，避免为每个页面单独维护一份占位布局。
+  return <AuthDeferredShell pathname={pathname} />
+}
+
 // 布局页负责拉取公告、维护桌面/移动侧栏状态、处理退出确认和移动端滚动锁定。
-export function Layout() {
+export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean }>) {
   const location = useLocation()
   const { user, logout } = useAuthStore()
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
@@ -696,7 +751,9 @@ export function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [logoutConfirming, setLogoutConfirming] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
-  const [showBugButton, setShowBugButton] = useState(() => !getBugButtonHidden())
+  const [showBugButton, setShowBugButton] = useState(
+    () => Date.now() >= getBugButtonHiddenUntil()
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -729,7 +786,7 @@ export function Layout() {
   const handleLogout = useCallback(() => {
     // 二次确认期间不立即登出，避免误触；确认后再清理隐藏状态和仪表盘持久化页签。
     if (logoutConfirming) {
-      clearBugButtonHidden()
+      clearBugButtonHiddenUntil()
       clearDashboardTab()
       logout()
       return
@@ -746,17 +803,10 @@ export function Layout() {
 
   const filteredNavItems = getFilteredNavItems(user?.role)
 
-  const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'b') {
-      event.preventDefault()
-      toggleSidebar()
-    }
-  }, [toggleSidebar])
-
-  useEffect(() => {
-    globalThis.addEventListener('keydown', handleKeyDown)
-    return () => globalThis.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
+  const { handleToggleSidebar, sidebarTooltipsEnabled } = useDesktopSidebarTooltipGuard({
+    sidebarCollapsed,
+    toggleSidebar,
+  })
 
   useEffect(() => {
     // 移动端侧栏打开时锁 body 滚动，防止背景内容跟随滚动造成“抽屉 + 页面”双滚动。
@@ -781,6 +831,7 @@ export function Layout() {
           onLogout={handleLogout}
           onLogoutBlur={handleLogoutBlur}
           filteredNavItems={filteredNavItems}
+          sidebarTooltipsEnabled={sidebarTooltipsEnabled}
         />
       )}
 
@@ -808,7 +859,7 @@ export function Layout() {
             <LayoutHeader
               showDesktopSidebar={showDesktopSidebar}
               sidebarCollapsed={sidebarCollapsed}
-              toggleSidebar={toggleSidebar}
+              toggleSidebar={handleToggleSidebar}
               showBugButton={showBugButton}
               onBugButtonRightClick={handleBugButtonRightClick}
               mobileMenuOpen={mobileMenuOpen}
@@ -819,7 +870,7 @@ export function Layout() {
             />
 
             <div className="px-4 py-6 md:px-6">
-              <Outlet />
+              {deferOutlet ? <LayoutDeferredOutlet pathname={location.pathname} /> : <Outlet />}
             </div>
           </div>
         </main>

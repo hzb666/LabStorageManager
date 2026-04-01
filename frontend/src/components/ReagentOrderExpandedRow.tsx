@@ -12,6 +12,7 @@ export interface ReagentOrderExpandedRowProps {
   cas_number: string;
   english_name?: string | null;
   alias?: string | null;
+  purity?: string | null;
   notes?: string | null;
 }
 
@@ -145,16 +146,16 @@ function CasOverviewDetails({
     <>
       <div className={CAS_OVERVIEW_GRID_CLASS_NAME}>
         <span>订单：{getOrderCountLabel(loadingOverview, casOverview)}</span>
-        <span>，最近订单：{getLatestOrderText(latestOrder)}</span>
+        <span>，最近订单：{getLatestOrderText(latestOrder ?? null)}</span>
       </div>
       <div className={CAS_OVERVIEW_GRID_CLASS_NAME}>
         <span>
           库存：{getInventoryCountLabel(loadingOverview, casOverview)}
         </span>
         <span>
-          ，最近库存剩余量：{getInventoryQuantityText(inventoryLatest)}
+          ，最近库存剩余量：{getInventoryQuantityText(inventoryLatest ?? null)}
         </span>
-        <span>，库存位置：{getInventoryLocationText(inventoryLatest)}</span>
+        <span>，库存位置：{getInventoryLocationText(inventoryLatest ?? null)}</span>
       </div>
     </>
   );
@@ -184,6 +185,7 @@ export const ReagentOrderExpandedRow = React.memo(
         <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
           <div>英文名称：{item.english_name || "-"}</div>
           <div>别名：{item.alias || "-"}</div>
+          <div>纯度：{item.purity || "-"}</div>
           <div>备注：{item.notes || "-"}</div>
           <CasOverviewDetails
             casOverview={casOverview}

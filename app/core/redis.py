@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import Iterable, Optional
 
 import redis
@@ -19,6 +20,12 @@ _redis_client: Optional[redis.Redis] = None
 _last_error_time: float = 0.0
 _raw_prefix = (settings.redis_key_prefix or "lsm").strip(":").strip()
 REDIS_KEY_PREFIX = _raw_prefix or "lsm"
+
+
+@dataclass(frozen=True)
+class RedisDeleteByPrefixResult:
+    success: bool
+    deleted_count: int
 
 def get_redis() -> Optional[redis.Redis]:
     """获取 Redis 客户端（带简易熔断机制）"""
@@ -124,3 +131,34 @@ def delete_cached_sessions(token_hashes: Iterable[str]) -> None:
         redis_client.delete(*keys)
     except redis.RedisError as e:
         _handle_redis_error(e, "批量删除 Session 缓存", ",".join(keys))
+
+
+def delete_keys_by_prefix(prefix: str) -> RedisDeleteByPrefixResult:
+    redis_client = get_redis()
+    if redis_client is None:
+        return RedisDeleteByPrefixResult(success=False, deleted_count=0)
+
+    normalized_prefix = prefix.strip()
+    if not normalized_prefix:
+        return RedisDeleteByPrefixResult(success=True, deleted_count=0)
+
+    deleted_count = 0
+    batch: list[str] = []
+    pattern = f"{normalized_prefix}:*"
+
+    try:
+        for key in redis_client.scan_iter(match=pattern, count=200):
+            batch.append(key)
+            if len(batch) < 200:
+                continue
+
+            deleted_count += int(redis_client.delete(*batch) or 0)
+            batch.clear()
+
+        if batch:
+            deleted_count += int(redis_client.delete(*batch) or 0)
+    except redis.RedisError as e:
+        _handle_redis_error(e, "按前缀删除缓存", pattern)
+        return RedisDeleteByPrefixResult(success=False, deleted_count=deleted_count)
+
+    return RedisDeleteByPrefixResult(success=True, deleted_count=deleted_count)

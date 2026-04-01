@@ -1,14 +1,17 @@
 import { FONT_TIMEOUT_MS } from './lib/constants'
+import { LIB_ASSETS } from '@/lib/staticAssets'
+import {
+  clearPreferredFontSource,
+  getPreferredFontSource,
+  setPreferredFontSource,
+} from '@/lib/storage/appUiStorage'
 
 const FONT_READY_CLASS = 'web-fonts-ready'
 const FONT_STATE_ATTRIBUTE = 'data-font-state'
 const FONT_STYLESHEET_ID = 'app-web-fonts'
 const LOCAL_FONT_STYLE_ID = 'app-local-web-fonts'
-const LOCAL_FONT_PREFERENCE_KEY = 'preferred-font-source'
-const LOCAL_FONT_PREFERENCE_VALUE = 'source-han-sans-cn-vf-v1'
 const GOOGLE_FONT_FAMILY = 'Noto Sans SC'
 const LOCAL_FONT_FAMILY = 'SourceHanSansCN-VF-Local'
-const LOCAL_FONT_URL = '/lib/SourceHanSansCN-VF.woff2'
 
 const FONT_STYLESHEET_URL =
   'https://fonts.googleapis.cn/css2?family=Noto+Sans+SC:wght@400;700&display=swap'
@@ -30,27 +33,15 @@ function delay(ms: number) {
 }
 
 function shouldPreferLocalFont() {
-  try {
-    return localStorage.getItem(LOCAL_FONT_PREFERENCE_KEY) === LOCAL_FONT_PREFERENCE_VALUE
-  } catch {
-    return false
-  }
+  return getPreferredFontSource() === LIB_ASSETS.localFontPreferenceValue
 }
 
 function rememberLocalFontPreference() {
-  try {
-    localStorage.setItem(LOCAL_FONT_PREFERENCE_KEY, LOCAL_FONT_PREFERENCE_VALUE)
-  } catch {
-    // ignore localStorage errors
-  }
+  setPreferredFontSource(LIB_ASSETS.localFontPreferenceValue)
 }
 
 function clearLocalFontPreference() {
-  try {
-    localStorage.removeItem(LOCAL_FONT_PREFERENCE_KEY)
-  } catch {
-    // ignore localStorage errors
-  }
+  clearPreferredFontSource()
 }
 
 function ensureFontStylesheet() {
@@ -104,7 +95,7 @@ function ensureLocalFontStylesheet() {
   style.textContent = `
     @font-face {
       font-family: '${LOCAL_FONT_FAMILY}';
-      src: url('${LOCAL_FONT_URL}') format('woff2');
+      src: url('${LIB_ASSETS.localFontUrl}') format('woff2');
       font-weight: 400 700;
       font-style: normal;
       font-display: swap;

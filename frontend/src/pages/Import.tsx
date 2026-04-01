@@ -34,12 +34,28 @@ const MAX_FILE_SIZE = 2 * 1024 * 1024
 const IMPORT_FILE_EXTENSIONS = ['.csv', '.xlsx', '.xls']
 
 // 结果面板和成功提示都依赖这组字段，错误明细按 `row + error` 展示。
+type ImportStage = 'preview' | 'confirm'
+
+interface ImportPreviewItem {
+  row: number
+  cas_number: string
+  name: string
+  brand: string | null
+  category: string | null
+  specification: string
+  remaining_quantity: number | null
+  storage_location: string | null
+}
+
 interface ImportResult {
   success: boolean
   total_rows: number
+  valid_rows: number
   created: number
   errors_count: number
   errors: { row: number; error: string }[] | null
+  preview_items?: ImportPreviewItem[] | null
+  preview_token?: string | null
 }
 
 // 模板下载失败时接口可能返回 Blob；若文本可解析为 JSON，则优先读取其中的 `detail`。
@@ -116,6 +132,37 @@ function getResultTone(success: boolean): { container: string; title: string } {
     container: 'bg-destructive/10 border-destructive/20',
     title: 'text-destructive',
   }
+}
+
+function getResultHeadline(stage: ImportStage, success: boolean): string {
+  if (stage === 'preview') {
+    return success ? '预览通过' : '预览发现错误'
+  }
+  return success ? '导入成功' : '导入失败'
+}
+
+function getResultPrimaryLabel(stage: ImportStage): string {
+  return stage === 'preview' ? '可导入' : '成功创建'
+}
+
+function getResultPrimaryValue(stage: ImportStage, result: ImportResult): number {
+  return stage === 'preview' ? result.valid_rows : result.created
+}
+
+function getEmptyResultHint(stage: ImportStage | null): string {
+  if (stage === 'preview') {
+    return '文件已完成预览校验，可在这里查看结果'
+  }
+  if (stage === 'confirm') {
+    return '文件已完成导入，可在这里查看结果'
+  }
+  return '上传文件并先执行预览校验'
+}
+
+function buildImportFormData(file: File): FormData {
+  const formData = new FormData()
+  formData.append('file', file)
+  return formData
 }
 
 // 拖入时显示高亮态；已有文件时保留弱高亮，提示当前已有待导入文件。
@@ -256,21 +303,138 @@ function ImportFileDropzone({
   )
 }
 
+function ImportPreviewTable({
+  previewItems,
+}: Readonly<{
+  previewItems: ImportPreviewItem[]
+}>) {
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      <div className="bg-muted/50 px-4 py-2 border-b">
+        <h4>待入库预览</h4>
+      </div>
+      <div className="max-h-75 overflow-y-auto">
+        <table className="w-full">
+          <thead className="bg-muted/50 sticky top-0">
+            <tr>
+              <th className="px-4 py-2 text-left text-muted-foreground w-16">行号</th>
+              <th className="px-4 py-2 text-left text-muted-foreground">CAS</th>
+              <th className="px-4 py-2 text-left text-muted-foreground">名称</th>
+              <th className="px-4 py-2 text-left text-muted-foreground">品牌</th>
+              <th className="px-4 py-2 text-left text-muted-foreground">分类</th>
+              <th className="px-4 py-2 text-left text-muted-foreground">剩余量</th>
+              <th className="px-4 py-2 text-left text-muted-foreground">规格</th>
+              <th className="px-4 py-2 text-left text-muted-foreground">位置</th>
+            </tr>
+          </thead>
+          <tbody>
+            {previewItems.slice(0, 50).map((item) => (
+              <tr key={`${item.row}-${item.cas_number}-${item.name}`} className="border-t border-border">
+                <td className="px-4 py-2 text-sm">{item.row}</td>
+                <td className="px-4 py-2 text-sm">{item.cas_number}</td>
+                <td className="px-4 py-2 text-sm">{item.name}</td>
+                <td className="px-4 py-2 text-sm">{item.brand ?? '-'}</td>
+                <td className="px-4 py-2 text-sm">{item.category ?? '-'}</td>
+                <td className="px-4 py-2 text-sm">{item.remaining_quantity ?? '-'}</td>
+                <td className="px-4 py-2 text-sm">{item.specification}</td>
+                <td className="px-4 py-2 text-sm">{item.storage_location ?? '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {previewItems.length > 50 && (
+          <div className="px-4 py-2 text-center text-sm text-muted-foreground bg-muted/30">
+            ... 还有 {previewItems.length - 50} 条待入库记录
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ImportErrorPanel({
+  errors,
+}: Readonly<{
+  errors: { row: number; error: string }[]
+}>) {
+  return (
+    <div className="border border-destructive rounded-lg overflow-hidden">
+      <div className="bg-destructive/10 px-4 py-2 border-b border-destructive/20">
+        <h4 className="text-destructive">错误详情</h4>
+      </div>
+      <div className="max-h-75 overflow-y-auto">
+        <table className="w-full">
+          <thead className="bg-muted/50 sticky top-0">
+            <tr>
+              <th className="px-4 py-2 text-left text-muted-foreground w-16">行号</th>
+              <th className="px-4 py-2 text-left text-muted-foreground">错误信息</th>
+            </tr>
+          </thead>
+          <tbody>
+            {errors.slice(0, 50).map((errorItem, index) => (
+              <tr key={index} className="border-t border-border">
+                <td className="px-4 py-2 text-sm">{errorItem.row}</td>
+                <td className="px-4 py-2 text-destructive text-sm">{errorItem.error}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {errors.length > 50 && (
+          <div className="px-4 py-2 text-center text-sm text-muted-foreground bg-muted/30">
+            ... 还有 {errors.length - 50} 条错误
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ImportResultMessage({
+  stage,
+  success,
+  errorsCount,
+}: Readonly<{
+  stage: ImportStage
+  success: boolean
+  errorsCount: number
+}>) {
+  if (!success || errorsCount !== 0) {
+    return null
+  }
+
+  if (stage === 'preview') {
+    return (
+      <div className="text-center py-4 text-sm text-muted-foreground">
+        预览校验通过，请点击“确认导入”后再真正写入库存
+      </div>
+    )
+  }
+
+  return (
+    <div className="text-center py-4 text-sm text-muted-foreground">
+      所有数据已成功导入到库存系统
+    </div>
+  )
+}
+
 // 结果摘要固定展示 `total_rows / created / errors_count`；错误明细最多展示前 50 条。
 function ImportResultPanel({
   result,
+  stage,
 }: Readonly<{
   result: ImportResult | null
+  stage: ImportStage | null
 }>) {
   if (!result) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
         <FileSpreadsheet className="w-12 h-12 mb-3 opacity-50" />
-        <p className="text-sm">上传文件并导入后查看结果</p>
+        <p className="text-sm">{getEmptyResultHint(stage)}</p>
       </div>
     )
   }
 
+  const resolvedStage = stage ?? 'preview'
   const tone = getResultTone(result.success)
 
   return (
@@ -279,7 +443,7 @@ function ImportResultPanel({
         <div className="flex items-center gap-2 mb-3">
           {getResultStatusIcon(result.success)}
           <span className={cn('font-bold', tone.title)}>
-            {result.success ? '导入成功' : '导入失败'}
+            {getResultHeadline(resolvedStage, result.success)}
           </span>
         </div>
         <div className="grid grid-cols-3 gap-4 text-center">
@@ -289,9 +453,9 @@ function ImportResultPanel({
           </div>
           <div>
             <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-              {result.created}
+              {getResultPrimaryValue(resolvedStage, result)}
             </div>
-            <div className="text-sm text-muted-foreground">成功创建</div>
+            <div className="text-sm text-muted-foreground">{getResultPrimaryLabel(resolvedStage)}</div>
           </div>
           <div>
             <div
@@ -307,55 +471,159 @@ function ImportResultPanel({
         </div>
       </div>
 
-      {result.errors && result.errors.length > 0 && (
-        <div className="border border-destructive rounded-lg overflow-hidden">
-          <div className="bg-destructive/10 px-4 py-2 border-b border-destructive/20">
-            <h4 className="text-destructive">错误详情</h4>
-          </div>
-          <div className="max-h-75 overflow-y-auto">
-            <table className="w-full">
-              <thead className="bg-muted/50 sticky top-0">
-                <tr>
-                  <th className="px-4 py-2 text-left text-muted-foreground w-16">行号</th>
-                  <th className="px-4 py-2 text-left text-muted-foreground">错误信息</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.errors.slice(0, 50).map((errorItem, index) => (
-                  <tr key={index} className="border-t border-border">
-                    <td className="px-4 py-2 text-sm">{errorItem.row}</td>
-                    <td className="px-4 py-2 text-destructive text-sm">{errorItem.error}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {result.errors.length > 50 && (
-              <div className="px-4 py-2 text-center text-sm text-muted-foreground bg-muted/30">
-                ... 还有 {result.errors.length - 50} 条错误
-              </div>
-            )}
-          </div>
-        </div>
+      {resolvedStage === 'preview' && result.preview_items && result.preview_items.length > 0 && (
+        <ImportPreviewTable previewItems={result.preview_items} />
       )}
 
-      {result.success && result.errors_count === 0 && (
-        <div className="text-center py-4 text-sm text-muted-foreground">
-          所有数据已成功导入到库存系统
-        </div>
+      {result.errors && result.errors.length > 0 && (
+        <ImportErrorPanel errors={result.errors} />
       )}
+
+      <ImportResultMessage
+        stage={resolvedStage}
+        success={result.success}
+        errorsCount={result.errors_count}
+      />
     </div>
+  )
+}
+
+function ImportActionButtons({
+  file,
+  submittingStage,
+  resultStage,
+  resultSuccess,
+  onPreview,
+  onConfirm,
+}: Readonly<{
+  file: File | null
+  submittingStage: ImportStage | null
+  resultStage: ImportStage | null
+  resultSuccess: boolean
+  onPreview: () => void
+  onConfirm: () => void
+}>) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Button
+        onClick={onPreview}
+        disabled={!file || submittingStage !== null}
+        className="w-full"
+        size="lg"
+      >
+        {submittingStage === 'preview' ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            预览校验中...
+          </>
+        ) : (
+          <>先预览校验</>
+        )}
+      </Button>
+      <Button
+        onClick={onConfirm}
+        disabled={!file || submittingStage !== null || resultStage !== 'preview' || !resultSuccess}
+        className="w-full"
+        size="lg"
+      >
+        {submittingStage === 'confirm' ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            导入中...
+          </>
+        ) : (
+          <>确认导入</>
+        )}
+      </Button>
+    </div>
+  )
+}
+
+function ImportFormCard({
+  upload,
+  onDownloadTemplate,
+  file,
+  submittingStage,
+  resultStage,
+  resultSuccess,
+  onPreview,
+  onConfirm,
+}: Readonly<{
+  upload: {
+    file: File | null
+    isDragging: boolean
+    fileInputRef: React.RefObject<HTMLInputElement | null>
+    onFileChange: (event: ChangeEvent<HTMLInputElement>) => void
+    onDragOver: (event: DragEvent<HTMLDivElement>) => void
+    onDragLeave: (event: DragEvent<HTMLDivElement>) => void
+    onDrop: (event: DragEvent<HTMLDivElement>) => void
+    onOpenFileDialog: () => void
+    onClearFile: () => void
+  }
+  onDownloadTemplate: () => void
+  file: File | null
+  submittingStage: ImportStage | null
+  resultStage: ImportStage | null
+  resultSuccess: boolean
+  onPreview: () => void
+  onConfirm: () => void
+}>) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileSpreadsheet className="w-5 h-5" />
+          导入数据
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <ImportTemplateSection onDownloadTemplate={onDownloadTemplate} />
+        <ImportFileDropzone upload={upload} />
+        <ImportActionButtons
+          file={file}
+          submittingStage={submittingStage}
+          resultStage={resultStage}
+          resultSuccess={resultSuccess}
+          onPreview={onPreview}
+          onConfirm={onConfirm}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+function ImportResultCard({
+  result,
+  resultStage,
+}: Readonly<{
+  result: ImportResult | null
+  resultStage: ImportStage | null
+}>) {
+  return (
+    <Card className="lg:row-span-1">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          {getResultTitleIcon(result)}
+          {resultStage === 'preview' ? '预览结果' : '导入结果'}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="mt-4">
+        <ImportResultPanel result={result} stage={resultStage} />
+      </CardContent>
+    </Card>
   )
 }
 
 // 导入页主组件只负责模板下载、文件上传和结果展示的状态编排。
 export function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
-  const [importing, setImporting] = useState(false)
+  const [submittingStage, setSubmittingStage] = useState<ImportStage | null>(null)
+  const [resultStage, setResultStage] = useState<ImportStage | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
+  const [previewToken, setPreviewToken] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // 拖拽与点击选择共用同一套大小和扩展名校验规则。
   const validateFile = useCallback((selectedFile: File): boolean => {
     if (!isSupportedImportFile(selectedFile.name)) {
       toast.warning('请选择 CSV 或 Excel 文件 (.csv, .xlsx, .xls)')
@@ -372,7 +640,6 @@ export function ImportPage() {
     return true
   }, [])
 
-  // 文件来自点击或拖拽都走同一条状态写入链路，并在选中新文件时清空旧导入结果。
   const applySelectedFile = useCallback((selectedFile: File | null) => {
     if (!selectedFile || !validateFile(selectedFile)) {
       return
@@ -380,67 +647,88 @@ export function ImportPage() {
 
     setFile(selectedFile)
     setResult(null)
+    setResultStage(null)
+    setPreviewToken(null)
   }, [validateFile])
 
   const handleFileChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     applySelectedFile(event.target.files?.[0] ?? null)
   }, [applySelectedFile])
 
-  // `preventDefault()` 允许 drop，并在拖入时切换上传区高亮态。
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(true)
   }, [])
 
-  // 拖拽离开时取消高亮，避免上传区残留拖拽态样式。
   const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(false)
   }, [])
 
-  // 放下文件后取消高亮，并沿用与点击上传相同的文件选择和校验流程。
   const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(false)
     applySelectedFile(event.dataTransfer.files?.[0] ?? null)
   }, [applySelectedFile])
 
-  // 清空当前文件、导入结果和原生 file input 值，允许用户重新选择同名文件。
   const handleClearFile = useCallback(() => {
     setFile(null)
     setResult(null)
+    setResultStage(null)
+    setPreviewToken(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
   }, [])
 
-  // 导入开始前先清空旧结果；无论成功还是失败都在 `finally` 里复位 loading。
-  const handleImport = useCallback(async () => {
+  const handlePreview = useCallback(async () => {
     if (!file) {
       return
     }
 
-    setImporting(true)
+    setSubmittingStage('preview')
     setResult(null)
+    setResultStage(null)
+    setPreviewToken(null)
 
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const response = await inventoryAPI.importExcel(formData)
+      const response = await inventoryAPI.previewImportExcel(buildImportFormData(file))
       setResult(response.data)
-      // 只在后端明确 success 时弹成功提示，避免“部分失败”被误认为完全导入成功。
+      setResultStage('preview')
+      setPreviewToken(response.data.preview_token ?? null)
+      if (response.data.success) {
+        toast.success(`预览通过，可导入 ${response.data.valid_rows} 条记录`)
+      }
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '预览校验失败'))
+    } finally {
+      setSubmittingStage(null)
+    }
+  }, [file])
+
+  const handleConfirmImport = useCallback(async () => {
+    if (!previewToken) {
+      return
+    }
+
+    setSubmittingStage('confirm')
+
+    try {
+      const response = await inventoryAPI.confirmImportExcel(previewToken)
+      setResult(response.data)
+      setResultStage('confirm')
+      setPreviewToken(null)
       if (response.data.success) {
         toast.success(`导入成功！共 ${response.data.created} 条记录`)
       }
     } catch (error) {
+      setPreviewToken(null)
       toast.error(getApiErrorMessage(error, '导入失败'))
     } finally {
-      setImporting(false)
+      setSubmittingStage(null)
     }
-  }, [file])
+  }, [previewToken])
 
-  // 模板下载接口返回 `429` 时固定提示“2 秒后重试”，其余失败走 Blob / JSON 兼容解析。
   const handleDownloadTemplate = useCallback(async () => {
     try {
       const response = await inventoryAPI.downloadTemplate()
@@ -456,7 +744,7 @@ export function ImportPage() {
       toast.error(normalizeApiErrorMessage(errorDetail, '下载模板失败'))
     }
   }, [])
-  // 上传区参数打包后统一透传，减少 JSX 中重复的事件线缆。
+
   const upload = {
     file,
     isDragging,
@@ -476,47 +764,17 @@ export function ImportPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileSpreadsheet className="w-5 h-5" />
-              导入数据
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <ImportTemplateSection onDownloadTemplate={handleDownloadTemplate} />
-            <ImportFileDropzone
-              upload={upload}
-            />
-            <Button
-              onClick={handleImport}
-              disabled={!file || importing}
-              className="w-full"
-              size="lg"
-            >
-              {importing ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  导入中...
-                </>
-              ) : (
-                <>开始导入</>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="lg:row-span-1">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              {getResultTitleIcon(result)}
-              导入结果
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="mt-4">
-            <ImportResultPanel result={result} />
-          </CardContent>
-        </Card>
+        <ImportFormCard
+          upload={upload}
+          onDownloadTemplate={handleDownloadTemplate}
+          file={file}
+          submittingStage={submittingStage}
+          resultStage={resultStage}
+          resultSuccess={Boolean(result?.success) && Boolean(previewToken)}
+          onPreview={handlePreview}
+          onConfirm={handleConfirmImport}
+        />
+        <ImportResultCard result={result} resultStage={resultStage} />
       </div>
     </div>
   )

@@ -1,9 +1,8 @@
-"""
-Database module - SQLModel Engine Configuration
-Critical Rule #1: SQLite must enable WAL Mode for concurrency
-"""
+# SQLModel 引擎与 SQLite 初始化。
 import logging
 import os
+import re
+from dataclasses import dataclass
 from typing import Annotated, Generator
 
 from sqlalchemy import Connection, event, inspect, text
@@ -15,13 +14,13 @@ from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
 
-# Ensure data directory exists
+# 确保数据库文件目录存在。
 data_dir = os.path.dirname(os.path.dirname(__file__))
 db_path = os.path.join(data_dir, "lab_inventory.db")
 
 sqlite_url = f"sqlite:///{db_path}"
 
-# Create engine
+# SQLite 仍使用单文件库，但必须开启 WAL 才能承受并发读写。
 engine = create_engine(
     sqlite_url,
     echo=False,
@@ -31,36 +30,36 @@ engine = create_engine(
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record):
-    """Critical Rule #1: Enable WAL mode on every new connection."""
+    # 每个新连接都显式打开 WAL 和外键校验，避免驱动默认值漂移。
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("PRAGMA foreign_keys=ON;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
+    cursor.execute("PRAGMA busy_timeout=1000;")
     cursor.close()
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Database session dependency for FastAPI"""
     with Session(engine) as session:
         yield session
 
 
-# Annotated type alias for database session dependency
-# Usage: def endpoint(db: DBSession): ...
+# 路由层统一用这个别名拿 DB session。
 DBSession = Annotated[Session, Depends(get_db)]
 
 
 SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
-    # Inventory searchable fields (regular/common split by is_common).
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_cas_number_created_at_id ON inventory (is_common, cas_number, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_name_pinyin ON inventory (is_common, name_pinyin DESC, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_name_pinyin_initials ON inventory (is_common, name_pinyin_initials DESC, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_category_pinyin ON inventory (is_common, category_pinyin DESC, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_category_pinyin_initials ON inventory (is_common, category_pinyin_initials DESC, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_brand_pinyin ON inventory (is_common, brand_pinyin DESC, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_brand_pinyin_initials ON inventory (is_common, brand_pinyin_initials DESC, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_storage_location_created_at_id ON inventory (is_common, storage_location, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_storage_location_pinyin ON inventory (is_common, storage_location_pinyin DESC, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_storage_location_pinyin_initials ON inventory (is_common, storage_location_pinyin_initials DESC, created_at DESC, id DESC)",
+    # Inventory searchable fields.
+    "CREATE INDEX IF NOT EXISTS ix_inventory_cas_number_created_at_id ON inventory (cas_number, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_name_pinyin_created_at_id ON inventory (name_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_name_pinyin_initials_created_at_id ON inventory (name_pinyin_initials, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_category_pinyin_created_at_id ON inventory (category_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_category_pinyin_initials_created_at_id ON inventory (category_pinyin_initials, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_brand_pinyin_created_at_id ON inventory (brand_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_brand_pinyin_initials_created_at_id ON inventory (brand_pinyin_initials, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_created_at_id ON inventory (storage_location, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_pinyin_created_at_id ON inventory (storage_location_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_pinyin_initials_created_at_id ON inventory (storage_location_pinyin_initials, created_at DESC, id DESC)",
     # Reagent order searchable raw-text and pinyin fields.
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_cas_number_created_at_id ON reagent_order (cas_number, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_created_at_id ON reagent_order (name, created_at DESC, id DESC)",
@@ -77,17 +76,55 @@ SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_created_at_id ON consumable_order (name, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_created_at_id ON consumable_order (name_pinyin, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_initials_created_at_id ON consumable_order (name_pinyin_initials, created_at DESC, id DESC)",
+    # Chemical name map searchable pinyin fields.
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_name_pinyin ON chemical_name_map (name_pinyin)",
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_name_initials ON chemical_name_map (name_initials)",
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_1_pinyin ON chemical_name_map (alias_1_pinyin)",
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_1_initials ON chemical_name_map (alias_1_initials)",
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_2_pinyin ON chemical_name_map (alias_2_pinyin)",
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_2_initials ON chemical_name_map (alias_2_initials)",
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_3_pinyin ON chemical_name_map (alias_3_pinyin)",
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_3_initials ON chemical_name_map (alias_3_initials)",
 )
 
 
 SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
     # Inventory filter/sort and operational paths.
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_created_at_id ON inventory (is_common, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_status_created_at_id ON inventory (is_common, status, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_remaining_percent_created_at_id ON inventory (is_common, remaining_percent DESC, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_created_at_id ON inventory (created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_status_created_at_id ON inventory (status, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_remaining_percent_created_at_id ON inventory (remaining_percent DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_borrower_status_updated_at ON inventory (borrower_id, status, updated_at DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_is_common_keeper_location_created_at ON inventory (is_common, temporary_keeper_id, storage_location, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_keeper_location_created_at ON inventory (temporary_keeper_id, storage_location, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_created_by_created_at_id ON inventory (created_by_id, created_at DESC, id DESC)",
+    # Inventory operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_created_at ON inventory_operation_log (operator_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_action_created_at ON inventory_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_created_at ON inventory_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_action_created_at ON inventory_operation_log (operator_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_inventory_created_at ON inventory_operation_log (inventory_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_cas_created_at ON inventory_operation_log (cas_number, created_at DESC)",
+    # Reagent order operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_actor_created_at ON reagent_order_operation_log (actor_user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_action_created_at ON reagent_order_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_created_at ON reagent_order_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_actor_action_created_at ON reagent_order_operation_log (actor_user_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_order_created_at ON reagent_order_operation_log (order_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_applicant_created_at ON reagent_order_operation_log (applicant_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_cas_created_at ON reagent_order_operation_log (cas_number, created_at DESC)",
+    # Consumable order operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_actor_created_at ON consumable_order_operation_log (actor_user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_action_created_at ON consumable_order_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_created_at ON consumable_order_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_actor_action_created_at ON consumable_order_operation_log (actor_user_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_order_created_at ON consumable_order_operation_log (order_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_applicant_created_at ON consumable_order_operation_log (applicant_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_name_created_at ON consumable_order_operation_log (order_name, created_at DESC)",
+    # User operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_actor_created_at ON user_operation_log (actor_user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_target_created_at ON user_operation_log (target_user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_action_created_at ON user_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_created_at ON user_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_user_operation_log_actor_action_created_at ON user_operation_log (actor_user_id, action, created_at DESC)",
     # Borrow log operational queries.
     "CREATE INDEX IF NOT EXISTS ix_borrowlog_borrower_consume_borrow_time ON borrowlog (borrower_id, is_consume, borrow_time DESC)",
     "CREATE INDEX IF NOT EXISTS ix_borrowlog_inventory_consume_return_borrow ON borrowlog (inventory_id, is_consume, return_time, borrow_time DESC)",
@@ -105,6 +142,21 @@ SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_users_active_role_created ON users (is_active DESC, role DESC, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_users_role_created_at ON users (role, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_users_full_name_pinyin_id ON users (full_name_pinyin, id)",
+    # Common shelf filters and grouping.
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_cas_created_at ON common_shelf (cas_number, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_group_created_at ON common_shelf (cas_number, brand_normalized, specification_normalized, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_group_location_created_at ON common_shelf (cas_number, brand_normalized, specification_normalized, storage_location_normalized, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_source_order_created_at ON common_shelf (source_order_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_creator_created_at ON common_shelf (created_by_id, created_at DESC)",
+    # Chemical name map filtering.
+    "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_category ON chemical_name_map (category)",
+    # Common shelf operation log audit queries.
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_operator_created_at ON common_shelf_operation_log (operator_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_action_created_at ON common_shelf_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_created_at ON common_shelf_operation_log (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_operator_action_created_at ON common_shelf_operation_log (operator_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_shelf_created_at ON common_shelf_operation_log (common_shelf_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_cas_created_at ON common_shelf_operation_log (cas_number, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_last_active ON user_sessions (user_id, last_active_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_device ON user_sessions (user_id, device_id)",
     "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_expires ON user_sessions (user_id, expires_at)",
@@ -116,6 +168,14 @@ SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
 SQLITE_PERFORMANCE_INDEX_UPGRADES: tuple[str, ...] = (
     SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES
     + SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES
+)
+
+SQLITE_INVENTORY_OPERATION_LOG_INDEX_UPGRADES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_created_at ON inventory_operation_log (operator_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_action_created_at ON inventory_operation_log (action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_action_created_at ON inventory_operation_log (operator_id, action, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_inventory_created_at ON inventory_operation_log (inventory_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_cas_created_at ON inventory_operation_log (cas_number, created_at DESC)",
 )
 
 SQLITE_INVENTORY_FTS_SETUP: tuple[str, ...] = (
@@ -538,15 +598,165 @@ SELECT
 FROM users
 """
 
+SQLITE_CHEMICAL_NAME_MAP_FTS_SETUP: tuple[str, ...] = (
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS chemical_name_map_fts USING fts5(
+        cas_number,
+        name,
+        english_name,
+        alias_1,
+        alias_2,
+        alias_3,
+        name_pinyin,
+        name_initials,
+        alias_1_pinyin,
+        alias_1_initials,
+        alias_2_pinyin,
+        alias_2_initials,
+        alias_3_pinyin,
+        alias_3_initials,
+        tokenize='trigram'
+    )
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_chemical_name_map_fts_ai
+    AFTER INSERT ON chemical_name_map
+    BEGIN
+        INSERT INTO chemical_name_map_fts(
+            rowid,
+            cas_number,
+            name,
+            english_name,
+            alias_1,
+            alias_2,
+            alias_3,
+            name_pinyin,
+            name_initials,
+            alias_1_pinyin,
+            alias_1_initials,
+            alias_2_pinyin,
+            alias_2_initials,
+            alias_3_pinyin,
+            alias_3_initials
+        )
+        VALUES (
+            NEW.id,
+            NEW.cas_number,
+            NEW.name,
+            NEW.english_name,
+            NEW.alias_1,
+            NEW.alias_2,
+            NEW.alias_3,
+            NEW.name_pinyin,
+            NEW.name_initials,
+            NEW.alias_1_pinyin,
+            NEW.alias_1_initials,
+            NEW.alias_2_pinyin,
+            NEW.alias_2_initials,
+            NEW.alias_3_pinyin,
+            NEW.alias_3_initials
+        );
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_chemical_name_map_fts_ad
+    AFTER DELETE ON chemical_name_map
+    BEGIN
+        DELETE FROM chemical_name_map_fts WHERE rowid = OLD.id;
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_chemical_name_map_fts_au
+    AFTER UPDATE ON chemical_name_map
+    BEGIN
+        DELETE FROM chemical_name_map_fts WHERE rowid = OLD.id;
+        INSERT INTO chemical_name_map_fts(
+            rowid,
+            cas_number,
+            name,
+            english_name,
+            alias_1,
+            alias_2,
+            alias_3,
+            name_pinyin,
+            name_initials,
+            alias_1_pinyin,
+            alias_1_initials,
+            alias_2_pinyin,
+            alias_2_initials,
+            alias_3_pinyin,
+            alias_3_initials
+        )
+        VALUES (
+            NEW.id,
+            NEW.cas_number,
+            NEW.name,
+            NEW.english_name,
+            NEW.alias_1,
+            NEW.alias_2,
+            NEW.alias_3,
+            NEW.name_pinyin,
+            NEW.name_initials,
+            NEW.alias_1_pinyin,
+            NEW.alias_1_initials,
+            NEW.alias_2_pinyin,
+            NEW.alias_2_initials,
+            NEW.alias_3_pinyin,
+            NEW.alias_3_initials
+        );
+    END
+    """,
+)
+
+SQLITE_CHEMICAL_NAME_MAP_FTS_REBUILD_SQL = """
+INSERT INTO chemical_name_map_fts(
+    rowid,
+    cas_number,
+    name,
+    english_name,
+    alias_1,
+    alias_2,
+    alias_3,
+    name_pinyin,
+    name_initials,
+    alias_1_pinyin,
+    alias_1_initials,
+    alias_2_pinyin,
+    alias_2_initials,
+    alias_3_pinyin,
+    alias_3_initials
+)
+SELECT
+    id,
+    cas_number,
+    name,
+    english_name,
+    alias_1,
+    alias_2,
+    alias_3,
+    name_pinyin,
+    name_initials,
+    alias_1_pinyin,
+    alias_1_initials,
+    alias_2_pinyin,
+    alias_2_initials,
+    alias_3_pinyin,
+    alias_3_initials
+FROM chemical_name_map
+"""
+
 SQLITE_SAFE_COUNT_STATEMENTS: dict[str, str] = {
     "inventory": "SELECT COUNT(*) FROM inventory",
+    "inventory_operation_log": "SELECT COUNT(*) FROM inventory_operation_log",
     "reagent_order": "SELECT COUNT(*) FROM reagent_order",
     "consumable_order": "SELECT COUNT(*) FROM consumable_order",
     "users": "SELECT COUNT(*) FROM users",
+    "chemical_name_map": "SELECT COUNT(*) FROM chemical_name_map",
     "inventory_fts": "SELECT COUNT(*) FROM inventory_fts",
     "reagent_order_fts": "SELECT COUNT(*) FROM reagent_order_fts",
     "consumable_order_fts": "SELECT COUNT(*) FROM consumable_order_fts",
     "users_fts": "SELECT COUNT(*) FROM users_fts",
+    "chemical_name_map_fts": "SELECT COUNT(*) FROM chemical_name_map_fts",
 }
 
 SQLITE_SAFE_DELETE_STATEMENTS: dict[str, str] = {
@@ -554,6 +764,7 @@ SQLITE_SAFE_DELETE_STATEMENTS: dict[str, str] = {
     "reagent_order_fts": "DELETE FROM reagent_order_fts",
     "consumable_order_fts": "DELETE FROM consumable_order_fts",
     "users_fts": "DELETE FROM users_fts",
+    "chemical_name_map_fts": "DELETE FROM chemical_name_map_fts",
 }
 
 SQLITE_SAFE_DROP_TRIGGER_STATEMENTS: dict[str, str] = {
@@ -569,7 +780,18 @@ SQLITE_SAFE_DROP_TRIGGER_STATEMENTS: dict[str, str] = {
     "trg_users_fts_ai": "DROP TRIGGER IF EXISTS trg_users_fts_ai",
     "trg_users_fts_ad": "DROP TRIGGER IF EXISTS trg_users_fts_ad",
     "trg_users_fts_au": "DROP TRIGGER IF EXISTS trg_users_fts_au",
+    "trg_chemical_name_map_fts_ai": "DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_ai",
+    "trg_chemical_name_map_fts_ad": "DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_ad",
+    "trg_chemical_name_map_fts_au": "DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_au",
 }
+
+@dataclass(frozen=True)
+class SQLiteFTSTableConfig:
+    source_table: str
+    fts_table: str
+    setup_statements: tuple[str, ...]
+    rebuild_sql: str
+    trigger_names: tuple[str, str, str]
 
 
 def _get_safe_count_statement(table_name: str) -> str:
@@ -593,8 +815,47 @@ def _get_safe_drop_trigger_statement(trigger_name: str) -> str:
     return statement
 
 
+def _extract_index_name_from_create_statement(statement: str) -> str | None:
+    match = re.search(
+        r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)",
+        statement,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
+def _normalize_index_ddl(statement: str) -> str:
+    normalized = re.sub(r"\s+", " ", statement.strip())
+    normalized = re.sub(r"\s+IF\s+NOT\s+EXISTS\s+", " ", normalized, flags=re.IGNORECASE)
+    return normalized.lower()
+
+
+def _ensure_sqlite_index_statement(connection: Connection, create_statement: str) -> bool:
+    index_name = _extract_index_name_from_create_statement(create_statement)
+    if not index_name:
+        connection.execute(text(create_statement))
+        return False
+
+    existing_sql_row = connection.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='index' AND name=:index_name"
+        ),
+        {"index_name": index_name},
+    ).first()
+    if existing_sql_row and existing_sql_row[0]:
+        existing_sql = str(existing_sql_row[0])
+        if _normalize_index_ddl(existing_sql) != _normalize_index_ddl(create_statement):
+            safe_name = index_name.replace('"', '""')
+            connection.execute(text(f'DROP INDEX IF EXISTS "{safe_name}"'))
+            connection.execute(text(create_statement))
+            return True
+
+    connection.execute(text(create_statement))
+    return False
+
+
 def check_sqlite_schema_consistency(connection: Connection) -> None:
-    """Check whether SQLite schema matches current SQLModel definitions."""
     inspector = inspect(connection)
     metadata = SQLModel.metadata
 
@@ -667,11 +928,18 @@ def check_sqlite_schema_consistency(connection: Connection) -> None:
 
 
 def ensure_sqlite_performance_indexes(connection: Connection) -> None:
-    """Ensure current SQLite performance indexes exist."""
+    rebuilt_indexes = 0
     for statement in SQLITE_PERFORMANCE_INDEX_UPGRADES:
-        connection.execute(text(statement))
+        if _ensure_sqlite_index_statement(connection, statement):
+            rebuilt_indexes += 1
 
-    # Refresh planner stats so SQLite can pick the intended composite indexes.
+    if rebuilt_indexes > 0:
+        logger.warning(
+            "Rebuilt %d SQLite indexes to match expected DDL definitions.",
+            rebuilt_indexes,
+        )
+
+    # 建索引后立刻刷新统计信息，避免查询计划继续沿用旧分布。
     connection.execute(text("ANALYZE"))
     connection.execute(text("PRAGMA optimize"))
 
@@ -679,43 +947,39 @@ def ensure_sqlite_performance_indexes(connection: Connection) -> None:
 def _ensure_sqlite_fts_table(
     connection: Connection,
     *,
-    source_table: str,
-    fts_table: str,
-    setup_statements: tuple[str, ...],
-    rebuild_sql: str,
-    trigger_names: tuple[str, str, str],
+    config: SQLiteFTSTableConfig,
 ) -> None:
     table_exists = connection.execute(
         text(
             "SELECT 1 FROM sqlite_master "
             "WHERE type='table' AND name=:table_name"
         ),
-        {"table_name": fts_table},
+        {"table_name": config.fts_table},
     ).first() is not None
 
-    for trigger_name in trigger_names:
+    for trigger_name in config.trigger_names:
         drop_statement = _get_safe_drop_trigger_statement(trigger_name)
         connection.execute(text(drop_statement))
 
-    for statement in setup_statements:
+    for statement in config.setup_statements:
         connection.execute(text(statement))
 
-    source_count_statement = _get_safe_count_statement(source_table)
-    fts_count_statement = _get_safe_count_statement(fts_table)
+    source_count_statement = _get_safe_count_statement(config.source_table)
+    fts_count_statement = _get_safe_count_statement(config.fts_table)
     source_count = connection.execute(text(source_count_statement)).scalar_one()
     fts_count = connection.execute(text(fts_count_statement)).scalar_one()
     needs_rebuild = (not table_exists) or (source_count != fts_count)
     if not needs_rebuild:
         return
 
-    delete_statement = _get_safe_delete_statement(fts_table)
+    delete_statement = _get_safe_delete_statement(config.fts_table)
     connection.execute(text(delete_statement))
-    connection.execute(text(rebuild_sql))
+    connection.execute(text(config.rebuild_sql))
     fts_count_after = connection.execute(text(fts_count_statement)).scalar_one()
     logger.info(
         "Rebuilt %s data (%s rows=%s, fts rows before=%s, after=%s)",
-        fts_table,
-        source_table,
+        config.fts_table,
+        config.source_table,
         source_count,
         fts_count,
         fts_count_after,
@@ -723,54 +987,75 @@ def _ensure_sqlite_fts_table(
 
 
 def ensure_sqlite_inventory_fts(connection: Connection) -> None:
-    """Create inventory/order/user FTS tables and triggers for fast substring search."""
     try:
         _ensure_sqlite_fts_table(
             connection,
-            source_table="inventory",
-            fts_table="inventory_fts",
-            setup_statements=SQLITE_INVENTORY_FTS_SETUP,
-            rebuild_sql=SQLITE_INVENTORY_FTS_REBUILD_SQL,
-            trigger_names=(
-                "trg_inventory_fts_ai",
-                "trg_inventory_fts_ad",
-                "trg_inventory_fts_au",
+            config=SQLiteFTSTableConfig(
+                source_table="inventory",
+                fts_table="inventory_fts",
+                setup_statements=SQLITE_INVENTORY_FTS_SETUP,
+                rebuild_sql=SQLITE_INVENTORY_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_inventory_fts_ai",
+                    "trg_inventory_fts_ad",
+                    "trg_inventory_fts_au",
+                ),
             ),
         )
         _ensure_sqlite_fts_table(
             connection,
-            source_table="reagent_order",
-            fts_table="reagent_order_fts",
-            setup_statements=SQLITE_REAGENT_ORDER_FTS_SETUP,
-            rebuild_sql=SQLITE_REAGENT_ORDER_FTS_REBUILD_SQL,
-            trigger_names=(
-                "trg_reagent_order_fts_ai",
-                "trg_reagent_order_fts_ad",
-                "trg_reagent_order_fts_au",
+            config=SQLiteFTSTableConfig(
+                source_table="reagent_order",
+                fts_table="reagent_order_fts",
+                setup_statements=SQLITE_REAGENT_ORDER_FTS_SETUP,
+                rebuild_sql=SQLITE_REAGENT_ORDER_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_reagent_order_fts_ai",
+                    "trg_reagent_order_fts_ad",
+                    "trg_reagent_order_fts_au",
+                ),
             ),
         )
         _ensure_sqlite_fts_table(
             connection,
-            source_table="consumable_order",
-            fts_table="consumable_order_fts",
-            setup_statements=SQLITE_CONSUMABLE_ORDER_FTS_SETUP,
-            rebuild_sql=SQLITE_CONSUMABLE_ORDER_FTS_REBUILD_SQL,
-            trigger_names=(
-                "trg_consumable_order_fts_ai",
-                "trg_consumable_order_fts_ad",
-                "trg_consumable_order_fts_au",
+            config=SQLiteFTSTableConfig(
+                source_table="consumable_order",
+                fts_table="consumable_order_fts",
+                setup_statements=SQLITE_CONSUMABLE_ORDER_FTS_SETUP,
+                rebuild_sql=SQLITE_CONSUMABLE_ORDER_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_consumable_order_fts_ai",
+                    "trg_consumable_order_fts_ad",
+                    "trg_consumable_order_fts_au",
+                ),
             ),
         )
         _ensure_sqlite_fts_table(
             connection,
-            source_table="users",
-            fts_table="users_fts",
-            setup_statements=SQLITE_USERS_FTS_SETUP,
-            rebuild_sql=SQLITE_USERS_FTS_REBUILD_SQL,
-            trigger_names=(
-                "trg_users_fts_ai",
-                "trg_users_fts_ad",
-                "trg_users_fts_au",
+            config=SQLiteFTSTableConfig(
+                source_table="users",
+                fts_table="users_fts",
+                setup_statements=SQLITE_USERS_FTS_SETUP,
+                rebuild_sql=SQLITE_USERS_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_users_fts_ai",
+                    "trg_users_fts_ad",
+                    "trg_users_fts_au",
+                ),
+            ),
+        )
+        _ensure_sqlite_fts_table(
+            connection,
+            config=SQLiteFTSTableConfig(
+                source_table="chemical_name_map",
+                fts_table="chemical_name_map_fts",
+                setup_statements=SQLITE_CHEMICAL_NAME_MAP_FTS_SETUP,
+                rebuild_sql=SQLITE_CHEMICAL_NAME_MAP_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_chemical_name_map_fts_ai",
+                    "trg_chemical_name_map_fts_ad",
+                    "trg_chemical_name_map_fts_au",
+                ),
             ),
         )
     except Exception as exc:  # noqa: BLE001
@@ -783,10 +1068,7 @@ def ensure_sqlite_inventory_fts(connection: Connection) -> None:
 
 
 def init_db() -> None:
-    """Initialize database and create all tables"""
-    # Ensure all SQLModel tables are registered before create_all.
-    # This guarantees fresh database initialization includes the latest columns
-    # such as inventory.remaining_percent.
+    # create_all 前先导入模型，避免新字段漏进初始化库。
     import app.models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
@@ -797,24 +1079,19 @@ def init_db() -> None:
         ensure_sqlite_inventory_fts(connection)
         check_sqlite_schema_consistency(connection)
 
-    # Create default admin user if no users exist
     _create_default_admin()
 
 
 def _create_default_admin() -> None:
-    """确保始终至少有一个管理员账户"""
-    # Import here to avoid circular import
     from app.core.auth import get_password_hash
     from app.core.config import get_settings
     
     settings = get_settings()
     
-    # Get config or use defaults
     default_username = settings.default_admin_username
     default_password = settings.default_admin_password
     default_full_name = settings.default_admin_full_name
     
-    # Always require password from environment variable
     if not default_password:
         raise ValueError(
             "DEFAULT_ADMIN_PASSWORD must be set. "
@@ -822,13 +1099,11 @@ def _create_default_admin() -> None:
         )
     
     with Session(engine) as session:
-        # Check if any admin users exist (only check for admins, not all users)
         statement = select(User).where(User.role == UserRole.ADMIN)
         admin_exists = session.exec(statement).first()
         
         if admin_exists is None:
             pinyin_fields = pinyin_utils.compute_pinyin_fields(full_name=default_full_name)
-            # Create default admin user
             admin = User(
                 username=default_username,
                 password_hash=get_password_hash(default_password),
@@ -845,7 +1120,6 @@ def _create_default_admin() -> None:
 
 
 def reset_db() -> None:
-    """Drop all tables and recreate (use with caution!)"""
     with engine.begin() as connection:
         connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_ai"))
         connection.execute(text("DROP TRIGGER IF EXISTS trg_inventory_fts_ad"))
@@ -859,10 +1133,14 @@ def reset_db() -> None:
         connection.execute(text("DROP TRIGGER IF EXISTS trg_users_fts_ai"))
         connection.execute(text("DROP TRIGGER IF EXISTS trg_users_fts_ad"))
         connection.execute(text("DROP TRIGGER IF EXISTS trg_users_fts_au"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_ai"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_ad"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_au"))
         connection.execute(text("DROP TABLE IF EXISTS inventory_fts"))
         connection.execute(text("DROP TABLE IF EXISTS reagent_order_fts"))
         connection.execute(text("DROP TABLE IF EXISTS consumable_order_fts"))
         connection.execute(text("DROP TABLE IF EXISTS users_fts"))
+        connection.execute(text("DROP TABLE IF EXISTS chemical_name_map_fts"))
 
     SQLModel.metadata.drop_all(engine)
     init_db()

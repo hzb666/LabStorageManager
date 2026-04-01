@@ -47,7 +47,7 @@
 
 1. 扩展在外部平台采集购物车与商品详情。
 2. popup 把最近一次导入批次写入 `chrome.storage.local`。
-3. 导入页桥接脚本把批次复制到页面 `localStorage`。
+3. 导入页桥接脚本把批次复制到页面 `localStorage.cart_import_batch_latest`。
 4. 前端再调用 `/api/cart-sync` 和 `/api/cart-sync/import`。
 
 这样做的边界是明确的：扩展负责采集，后端负责最终订单写入。

@@ -178,14 +178,34 @@ function getColSpanClass(colSpan?: number) {
 }
 
 // 根据布局模式生成表单容器 class，统一 grid、flex、stack 三种布局。
-function getContainerClassName(layout: BaseFormLayout, className?: string) {
+function getContainerClassName(
+  layout: BaseFormLayout,
+  className?: string,
+  columns?: number,
+) {
+  const gridColumnsClass = getGridColumnsClass(columns);
   const baseClasses: Record<BaseFormLayout, string> = {
-    grid: "grid grid-cols-1 sm:grid-cols-3 gap-4",
+    grid: `grid grid-cols-1 ${gridColumnsClass} gap-4`,
     flex: "flex flex-wrap gap-4",
     stack: "space-y-4",
   };
 
   return `${baseClasses[layout]} ${className || ""}`.trim();
+}
+
+// 将外部 columns 约束到 1-4 列，使用静态 class 兼容 Tailwind 编译。
+function getGridColumnsClass(columns?: number) {
+  switch (columns) {
+    case 1:
+      return "sm:grid-cols-1";
+    case 2:
+      return "sm:grid-cols-2";
+    case 4:
+      return "sm:grid-cols-4";
+    case 3:
+    default:
+      return "sm:grid-cols-3";
+  }
 }
 
 // 为字段生成稳定的 DOM id，方便 label 与输入控件建立关联。
@@ -285,9 +305,16 @@ function renderInputField<T extends FieldValues>({
     <Input
       {...controllerField}
       id={fieldId}
-      type={field.inputType || "text"}
-      value={(controllerField.value as string) ?? ""}
-      onChange={(event) => controllerField.onChange(event.target.value)}
+      type={field.type === "number" ? "number" : field.inputType || "text"}
+      value={controllerField.value ?? ""}
+      onChange={(event) => {
+        if (field.type === "number") {
+          const num = event.target.valueAsNumber
+          controllerField.onChange(Number.isNaN(num) ? undefined : num)
+        } else {
+          controllerField.onChange(event.target.value)
+        }
+      }}
       placeholder={field.placeholder}
       disabled={isDisabled}
       readOnly={isReadOnly}
@@ -389,6 +416,7 @@ function BaseFormFieldControl<T extends FieldValues>({
     case "password":
       return renderPasswordField(renderContext);
     case "input":
+    case "number":
       return renderInputField(renderContext);
     case "autocomplete":
       return renderAutocompleteField(renderContext);
@@ -399,8 +427,11 @@ function BaseFormFieldControl<T extends FieldValues>({
   }
 }
 
-interface BaseFormFieldRendererProps<T extends FieldValues> {
-  control: Control<T>;
+interface BaseFormFieldRendererProps<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined,
+> {
+  control: Control<T, unknown, TTransformedValues>;
   field: FieldSchema<T>;
   errors: unknown;
   disabled: boolean;
@@ -408,13 +439,16 @@ interface BaseFormFieldRendererProps<T extends FieldValues> {
 }
 
 // 组合字段级错误、布局、禁用和只读状态后渲染单个字段。
-function BaseFormFieldRenderer<T extends FieldValues>({
+function BaseFormFieldRenderer<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined,
+>({
   control,
   field,
   errors,
   disabled,
   readOnly,
-}: Readonly<BaseFormFieldRendererProps<T>>) {
+}: Readonly<BaseFormFieldRendererProps<T, TTransformedValues>>) {
   if (field.hidden) {
     return null;
   }
@@ -438,7 +472,7 @@ function BaseFormFieldRenderer<T extends FieldValues>({
             label={field.label}
             error={errorMessage}
             required={field.required}
-            hideLabel={field.type === "checkbox"}
+            hideLabel={field.hideLabel || field.type === "checkbox"}
           >
             <BaseFormFieldControl
               field={field}
@@ -469,10 +503,12 @@ function BaseForm<
   T extends FieldValues,
   TTransformedValues extends FieldValues | undefined = undefined,
 >(props: BaseFormProps<T, TTransformedValues>) {
-  const layout = "layout" in props ? props.layout : "grid";
-  const className = "className" in props ? props.className : "";
+  const layout: BaseFormLayout =
+    ("layout" in props ? props.layout : "grid") ?? "grid";
+  const className = ("className" in props ? props.className : "") ?? "";
   const { form, disabled = false, readOnly = false } = props;
   const fields = isSchemaMode(props) ? props.schema.fields : props.fields;
+  const columns = isSchemaMode(props) ? props.schema.columns : props.columns;
   const {
     control,
     formState: { errors },
@@ -482,10 +518,10 @@ function BaseForm<
   return (
     <div
       id="base-form-container"
-      className={getContainerClassName(layout, className)}
+      className={getContainerClassName(layout, className, columns)}
     >
       {fields.map((field) => (
-        <BaseFormFieldRenderer
+        <BaseFormFieldRenderer<T, TTransformedValues>
           key={field.name as string}
           control={control}
           field={field}

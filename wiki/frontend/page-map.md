@@ -40,7 +40,7 @@
 | `ReagentOrders` | `reagentOrderAPI` | `reagent_orders` |
 | `ConsumableOrders` | `consumableOrderAPI` | `consumable_orders` |
 | `Inventory` | `inventoryAPI` | `inventory` |
-| `CommonShelf` | `commonShelfAPI` | `common_shelf` |
+| `CommonShelf` | `commonShelfAPI`、`chemicalNameMapAPI` | `common_shelf` |
 | `CartImport` | `cartSyncAPI` | 以 HTTP 为主，提交后触发相关房间刷新 |
 
 ## 改动入口
@@ -50,6 +50,7 @@
 - 表单页优先接入 `BaseForm` 和 `validationSchemas`
 - 需要实时数据时，优先补齐 `useSSE` 或 `useListSSE`
 - 页面级导航变化时，同步更新本页和 [应用骨架](/frontend/app-shell)
+- 涉及常用货架补录时，同步考虑 CAS 主数据管理入口和 `chemicalNameMapAPI` 的联动
 
 ## 验证建议
 
@@ -63,5 +64,4 @@
 - [frontend/src/pages/Inventory.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Inventory.tsx)
 - [frontend/src/pages/Layout.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Layout.tsx)
 - [frontend/src/pages/ReagentOrders.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/ReagentOrders.tsx)
-
 

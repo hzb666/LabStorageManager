@@ -2,6 +2,7 @@
 import { Link } from 'react-router-dom'
 import { CircleQuestionMark } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { getTheme } from '@/lib/storage/appUiStorage'
 import {
   Card,
   CardContent,
@@ -14,7 +15,7 @@ import {
 function ThemeInitializer() {
   useEffect(() => {
     // 读取保存的主题设置
-    const savedTheme = localStorage.getItem('theme') || 'light'
+    const savedTheme = getTheme()
     const root = document.documentElement
     if (savedTheme === 'dark') {
       root.classList.add('dark')
@@ -32,7 +33,7 @@ export function NotFoundPage() {
     <>
       <ThemeInitializer />
       <div className="flex min-h-svh w-full items-center justify-center px-4">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] dark:[mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
+        <div className="absolute inset-0 -z-10 [background-image:radial-gradient(circle_at_center,#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(closest-side_at_50%_50%,#000_70%,transparent_100%)] dark:[background-image:radial-gradient(circle_at_center,#1f2937_1px,transparent_1px)] dark:[mask-image:radial-gradient(closest-side_at_50%_50%,#000_70%,transparent_100%)]" />
         
         <Card className="w-full max-w-sm">
           <CardHeader className="space-y-4 mb-4">

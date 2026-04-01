@@ -1,9 +1,21 @@
 // 购物车同步 - Service Worker
 // 处理跨标签页通信和后端API调用
 
-const TARGET_URL_PATTERN = 'https://reagent.bjmu.edu.cn/*';
-const TARGET_BASE_URL = 'https://reagent.bjmu.edu.cn';
+importScripts('cart-tab-selection.js');
+importScripts('../shared/site-config.js');
+
 const REQUEST_TIMEOUT_MS = 15000;
+const cartTabActivityById = Object.create(null);
+
+const { isCartPageUrl, selectPreferredCartTab } = globalThis.CartTabSelection;
+const {
+  DEFAULT_SYSTEM_CONFIG,
+  SYSTEM_CONFIG_STORAGE_KEY,
+  buildProductDetailUrl,
+  buildSiteUrlPattern,
+  normalizeExtensionConfig,
+} = globalThis.ExtensionSiteConfig;
+let trackedCartUrlPattern = null;
 
 console.log('[Background] Service Worker 加载中...');
 
@@ -31,8 +43,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'RESOLVE_CART_TAB') {
+    resolveCartTab()
+      .then((tab) => sendResponse({ success: true, tab: tab || null }))
+      .catch((error) => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
   sendResponse({ success: false, error: '未知消息类型' });
   return false;
+});
+
+function trackCartTabActivity(details) {
+  if (!Number.isInteger(details.tabId) || details.tabId < 0) {
+    return;
+  }
+
+  chrome.tabs.get(details.tabId, (tab) => {
+    if (chrome.runtime.lastError || !isCartPageUrl(tab?.url)) {
+      return;
+    }
+
+    cartTabActivityById[details.tabId] = Date.now();
+  });
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  delete cartTabActivityById[tabId];
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url) {
+    return;
+  }
+
+  if (isCartPageUrl(changeInfo.url)) {
+    cartTabActivityById[tabId] = Date.now();
+    return;
+  }
+
+  delete cartTabActivityById[tabId];
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes[SYSTEM_CONFIG_STORAGE_KEY]) {
+    return;
+  }
+
+  void syncCartRequestTracking();
 });
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -45,14 +103,47 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
   }
 }
 
+async function getSystemConfig() {
+  const data = await chrome.storage.local.get([SYSTEM_CONFIG_STORAGE_KEY]);
+  return normalizeExtensionConfig(
+    data?.[SYSTEM_CONFIG_STORAGE_KEY],
+    DEFAULT_SYSTEM_CONFIG
+  );
+}
+
+async function syncCartRequestTracking() {
+  const config = await getSystemConfig();
+  const nextPattern = buildSiteUrlPattern(config.reagentSiteUrl);
+
+  if (
+    trackedCartUrlPattern === nextPattern &&
+    chrome.webRequest.onBeforeRequest.hasListener(trackCartTabActivity)
+  ) {
+    return;
+  }
+
+  if (chrome.webRequest.onBeforeRequest.hasListener(trackCartTabActivity)) {
+    chrome.webRequest.onBeforeRequest.removeListener(trackCartTabActivity);
+  }
+
+  chrome.webRequest.onBeforeRequest.addListener(
+    trackCartTabActivity,
+    { urls: [nextPattern] }
+  );
+  trackedCartUrlPattern = nextPattern;
+}
+
+async function resolveCartTab() {
+  const config = await getSystemConfig();
+  const tabs = await chrome.tabs.query({ url: buildSiteUrlPattern(config.reagentSiteUrl) });
+  return selectPreferredCartTab(tabs, cartTabActivityById);
+}
+
 // 从目标网站获取购物车数据
 async function getCartDataFromTargetSite() {
   console.log('[Background] 开始获取购物车数据...');
 
-  const tabs = await chrome.tabs.query({ url: TARGET_URL_PATTERN });
-  console.log('[Background] 找到标签页:', tabs.length);
-
-  const targetTab = tabs.find(tab => tab.url?.includes('page=gwc'));
+  const targetTab = await resolveCartTab();
   console.log('[Background] 目标标签页:', targetTab);
 
   if (!targetTab) {
@@ -96,7 +187,8 @@ async function getCartDataFromTargetSite() {
 
 // 获取产品详情
 async function fetchProductDetail(productId) {
-  const url = `${TARGET_BASE_URL}/Front.aspx?page=cpxq&param=${productId}`;
+  const config = await getSystemConfig();
+  const url = buildProductDetailUrl(config.reagentSiteUrl, productId);
   console.log('[Background] 请求详情页:', url);
 
   try {
@@ -106,23 +198,23 @@ async function fetchProductDetail(productId) {
 
     if (!response.ok) {
       console.log('[Background] HTTP错误，返回基本信息');
-      return createBasicItem(productId);
+      return createBasicItem(productId, config.reagentSiteUrl);
     }
 
     const html = await response.text();
     console.log('[Background] 详情页HTML长度:', html.length);
 
-    const detail = parseProductDetail(html, productId);
+    const detail = parseProductDetail(html, productId, config.reagentSiteUrl);
     console.log('[Background] 解析结果:', detail);
     return detail;
   } catch (error) {
     console.error('[Background] 请求失败:', error);
-    return createBasicItem(productId);
+    return createBasicItem(productId, config.reagentSiteUrl);
   }
 }
 
 // 创建基本信息
-function createBasicItem(productId) {
+function createBasicItem(productId, reagentSiteUrl) {
   return {
     name: `查看产品详情`,
     english_name: '',
@@ -133,7 +225,7 @@ function createBasicItem(productId) {
     cas_number: '',
     alias: '',
     product_id: productId,
-    detail_url: `${TARGET_BASE_URL}/Front.aspx?page=cpxq&param=${productId}`
+    detail_url: buildProductDetailUrl(reagentSiteUrl, productId)
   };
 }
 
@@ -142,7 +234,7 @@ function matchFirstGroup(html, pattern) {
 }
 
 // 解析产品详情页面
-function parseProductDetail(html, productId) {
+function parseProductDetail(html, productId, reagentSiteUrl) {
   let name = '';
   const liMatches = html.match(/<li[^>]*>[^<]*中文名称[^<]*<[^>]*>([^<]+)<\/li>/gi);
   if (liMatches?.length) {
@@ -178,14 +270,15 @@ function parseProductDetail(html, productId) {
     cas_number: casNumber || '',
     alias: '',
     product_id: productId,
-    detail_url: `${TARGET_BASE_URL}/Front.aspx?page=cpxq&param=${productId}`
+    detail_url: buildProductDetailUrl(reagentSiteUrl, productId)
   };
 }
 
 // 检查目标标签页
 async function checkTargetTab() {
-  const tabs = await chrome.tabs.query({ url: TARGET_URL_PATTERN });
-  return tabs.find(tab => tab.url?.includes('page=gwc'));
+  return resolveCartTab();
 }
+
+void syncCartRequestTracking();
 
 console.log('[Background] Service Worker 加载完成');

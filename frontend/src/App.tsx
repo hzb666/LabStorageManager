@@ -1,14 +1,15 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { lazy, Suspense, useEffect, useRef } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { lazy, Suspense, useEffect } from 'react'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
+import { CartImportLoadingScreen } from '@/components/CartImportLoadingScreen'
+import { AuthDeferredShell } from '@/components/AuthDeferredShell'
 import { useAuthStore } from '@/store/useStore'
 import { ToastContainer } from '@/components/ui/Toast'
 import { TooltipProvider } from '@/components/ui/Tooltip'
 import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { UserRoles } from '@/lib/constants'
-import { authAPI } from '@/api/client'
 
 // 懒加载页面组件 - 使用默认导出
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
@@ -25,19 +26,44 @@ const DeviceManagement = lazy(() => import('@/pages/DeviceManagement').then(m =>
 const AnnouncementManagement = lazy(() => import('@/pages/AnnouncementManagement').then(m => ({ default: m.AnnouncementManagement })))
 const OperationLogsPage = lazy(() => import('@/pages/OperationLogs').then(m => ({ default: m.default })))
 
-function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
+function AuthCheckingScreen() {
+  return <div className="min-h-svh flex items-center justify-center text-muted-foreground">正在验证登录状态...</div>
+}
+
+function ProtectedRoute({
+  children,
+  checkingFallback,
+}: Readonly<{
+  children: React.ReactNode
+  checkingFallback?: React.ReactNode
+}>) {
+  const authStatus = useAuthStore((state) => state.authStatus)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  const location = useLocation()
+  if (authStatus === 'checking') {
+    return <>{checkingFallback ?? <AuthCheckingScreen />}</>
+  }
   if (!isAuthenticated) {
-    return (
-      <Navigate
-        to="/login"
-        replace
-        state={{ authNotice: '登录状态已失效，请重新登录', from: location.pathname }}
-      />
-    )
+    return <Navigate to="/login" replace />
   }
   return <>{children}</>
+}
+
+function ProtectedLayoutRoute() {
+  const authStatus = useAuthStore((state) => state.authStatus)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+
+  if (authStatus === 'checking' && isAuthenticated) {
+    // 保留 Layout 外壳，避免硬刷新时整页白屏；只延后真正的业务内容区。
+    return <Layout deferOutlet />
+  }
+  if (authStatus === 'checking') {
+    return <AuthCheckingScreen />
+  }
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+
+  return <Layout />
 }
 
 function AdminRoute({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -48,34 +74,37 @@ function AdminRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   return <>{children}</>
 }
 
+function LoginRoute() {
+  const authStatus = useAuthStore((state) => state.authStatus)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  if (authStatus === 'checking' && isAuthenticated) {
+    return <AuthCheckingScreen />
+  }
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />
+  }
+  return <Login />
+}
+
 function AppContent() {
   // 初始化主题
   useTheme()
 
-  const setAuth = useAuthStore((state) => state.setAuth)
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  const hasFetchedUser = useRef(false)
-
-  // 刷新页面时获取最新用户信息（包括头像）
+  const bootstrapAuth = useAuthStore((state) => state.bootstrapAuth)
   useEffect(() => {
-    if (isAuthenticated && !hasFetchedUser.current) {
-      hasFetchedUser.current = true
-      authAPI.getProfile().then((res) => {
-        setAuth(res.data)
-      }).catch(console.error)
-    }
-  }, [isAuthenticated, setAuth])
+    void bootstrapAuth()
+  }, [bootstrapAuth])
 
   return (
     <TooltipProvider>
       <BrowserRouter>
         <ToastContainer />
         <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={<LoginRoute />} />
           <Route
             path="/cart-import"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute checkingFallback={<CartImportLoadingScreen />}>
                 <Suspense>
                   <CartImportPage />
                 </Suspense>
@@ -86,39 +115,35 @@ function AppContent() {
           <Route path="*" element={<NotFoundPage />} />
           <Route
             path="/"
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
+            element={<ProtectedLayoutRoute />}
           >
             <Route index element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/" />}>
                 <Dashboard />
               </Suspense>
             } />
             <Route path="reagents" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/reagents" />}>
                 <ReagentOrdersPage />
               </Suspense>
             } />
             <Route path="consumables" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/consumables" />}>
                 <ConsumableOrdersPage />
               </Suspense>
             } />
             <Route path="inventory" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/inventory" />}>
                 <InventoryPage />
               </Suspense>
             } />
             <Route path="common-shelf" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/common-shelf" />}>
                 <CommonShelfPage />
               </Suspense>
             } />
             <Route path="import" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/import" />}>
                 <ImportPage />
               </Suspense>
             } />
@@ -126,7 +151,7 @@ function AppContent() {
               path="admin/users"
               element={
                 <AdminRoute>
-                  <Suspense>
+                  <Suspense fallback={<AuthDeferredShell pathname="/admin/users" />}>
                     <AdminUsersPage />
                   </Suspense>
                 </AdminRoute>
@@ -136,14 +161,14 @@ function AppContent() {
               path="admin/announcements"
               element={
                 <AdminRoute>
-                  <Suspense>
+                  <Suspense fallback={<AuthDeferredShell pathname="/admin/announcements" />}>
                     <AnnouncementManagement />
                   </Suspense>
                 </AdminRoute>
               }
             />
             <Route path="devices" element={
-              <Suspense>
+              <Suspense fallback={<AuthDeferredShell pathname="/devices" />}>
                 <DeviceManagement />
               </Suspense>
             } />
@@ -151,7 +176,7 @@ function AppContent() {
               path="admin/logs"
               element={
                 <AdminRoute>
-                  <Suspense>
+                  <Suspense fallback={<AuthDeferredShell pathname="/admin/logs" />}>
                     <OperationLogsPage />
                   </Suspense>
                 </AdminRoute>

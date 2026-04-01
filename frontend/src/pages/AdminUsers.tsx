@@ -153,7 +153,10 @@ function buildUserListParams(
 }
 
 // 当前登录管理员固定显示在列表顶部，其余用户保持原有顺序。
-function moveCurrentUserToTop(userData: User[], currentUser: User | null | undefined) {
+function moveCurrentUserToTop(
+  userData: User[],
+  currentUser: { id: number } | null | undefined
+) {
   if (!currentUser) {
     return userData
   }

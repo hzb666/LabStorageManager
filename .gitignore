@@ -72,8 +72,10 @@ BUGS.md
 # Tests
 tests/
 scripts/
+!frontend/scripts/
 
 # Others
 plans/
 static/
 report/
+video/

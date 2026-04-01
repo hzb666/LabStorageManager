@@ -1,10 +1,10 @@
 ﻿import axios from 'axios'
-import { useAuthStore } from '@/store/useStore'
-import { getDeviceId, getDeviceName } from '@/lib/deviceId'
+import { getDeviceId, getDeviceName } from '@/lib/storage/appAuthMetaStorage'
+import { AxiosHeaders } from 'axios'
 import { getApiBaseUrl } from '@/lib/apiConfig'
-import { AUTH_NOTICE_KEY } from '@/lib/constants'
-import { toast } from '@/lib/toast'
 import { getApiErrorMessage } from '@/lib/validationSchemas'
+import { resolveAuthNoticeByCode, triggerSessionInvalidation } from '@/lib/authSession'
+import { useSSEStore } from '@/store/sseStore'
 
 const API_BASE_URL = getApiBaseUrl()
 
@@ -17,9 +17,43 @@ export const api = axios.create({
   withCredentials: true,
 })
 
+const readHeaderValue = (headers: unknown, headerName: string): unknown => {
+  if (!headers || typeof headers !== 'object') {
+    return undefined
+  }
+
+  const record = headers as Record<string, unknown>
+  if (headerName in record) {
+    return record[headerName]
+  }
+
+  const maybeGet = (record as { get?: unknown }).get
+  if (typeof maybeGet === 'function') {
+    return (maybeGet as (name: string) => unknown)(headerName)
+  }
+  return undefined
+}
+
+const hasSkipAuthInvalidationHeader = (headers: unknown): boolean => {
+  // 允许少量请求（如应用启动探测）在 401 时静默回落，不弹全局失效提示。
+  const raw = String(
+    readHeaderValue(headers, 'x-skip-auth-invalidation')
+    ?? readHeaderValue(headers, 'X-Skip-Auth-Invalidation')
+    ?? ''
+  )
+  return raw === '1'
+}
+
 // Request interceptor — 不再从 localStorage 读取 token，改为使用 Cookie
 api.interceptors.request.use(
   (config) => {
+    const sseClientId = useSSEStore.getState().clientId
+    if (sseClientId) {
+      const headers = AxiosHeaders.from(config.headers)
+      headers.set('X-SSE-Client-Id', sseClientId)
+      config.headers = headers
+    }
+
     // Token 现在通过 httpOnly Cookie 自动发送，不需要手动设置
     return config
   },
@@ -32,18 +66,22 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // 排除登录接口的 401 错误，避免页面刷新导致登录页错误信息丢失
-    const isLoginRequest = error.config?.url?.includes('/users/login')
-    if (error.response?.status === 401 && !isLoginRequest) {
-      // 获取错误详情并转换为中文
-      const message = getApiErrorMessage(error, '会话已失效，请重新登录')
-      try {
-        sessionStorage.setItem(AUTH_NOTICE_KEY, message)
-      } catch {
-        toast.error(message)
-      }
-      useAuthStore.getState().logout()
-      globalThis.location.href = '/login'
+    const requestUrl = String(error.config?.url ?? '')
+    const isLoginRequest = requestUrl.includes('/users/login')
+    const isLogoutRequest = requestUrl.includes('/users/logout')
+    const skipAuthInvalidation = hasSkipAuthInvalidationHeader(error.config?.headers)
+    const status = error.response?.status
+    const authErrorCode = String(
+      readHeaderValue(error.response?.headers, 'x-auth-error-code')
+      ?? readHeaderValue(error.response?.headers, 'X-Auth-Error-Code')
+      ?? ''
+    )
+    const isDisabled403 = status === 403 && authErrorCode === 'AUTH_USER_DISABLED'
+
+    if ((status === 401 || isDisabled403) && !isLoginRequest && !isLogoutRequest && !skipAuthInvalidation) {
+      const fallbackNotice = getApiErrorMessage(error, '会话已失效，请重新登录')
+      const notice = resolveAuthNoticeByCode(authErrorCode || undefined, fallbackNotice)
+      void triggerSessionInvalidation({ notice, skipApi: true })
     }
     return Promise.reject(error)
   }
@@ -52,6 +90,7 @@ api.interceptors.response.use(
 // Paginated response type
 export interface PaginatedResponse<T> {
   data: T[]
+  current?: number
   total: number
   skip: number
   limit: number
@@ -233,6 +272,7 @@ export const reagentOrderAPI = {
     alias?: string
     category?: string
     brand?: string
+    purity?: string
     specification: string
     quantity: number
     price: number
@@ -340,10 +380,12 @@ export const inventoryAPI = {
   getBorrowHistory: (id: number) => api.get(`/inventory/${id}/borrow-history`),
   getImportTemplate: () => api.get('/inventory/import/template'),
   downloadTemplate: () => api.get('/inventory/import/template', { responseType: 'blob' }),
-  importExcel: (file: FormData) =>
-    api.post('/inventory/import', file, {
+  previewImportExcel: (file: FormData) =>
+    api.post('/inventory/import/preview', file, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+  confirmImportExcel: (previewToken: string) =>
+    api.post('/inventory/import/confirm', { preview_token: previewToken }),
   manualAdd: (data: {
     cas_number: string
     name: string
@@ -353,6 +395,7 @@ export const inventoryAPI = {
     quantity_bottles: number
     brand?: string
     category?: string
+    purity?: string
     storage_location?: string
     is_hazardous: boolean
     notes?: string
@@ -360,35 +403,158 @@ export const inventoryAPI = {
   exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
 }
 
+export type ChemicalCategory =
+  | 'acid'
+  | 'base'
+  | 'salt'
+  | 'solvent'
+  | 'catalyst'
+  | 'indicator'
+  | 'other'
+
+export interface CommonShelfGroupIdentity {
+  group_key: string
+  cas_number: string
+  brand: string | null
+  brand_normalized: string
+  specification_text: string
+  specification_normalized: string
+}
+
+export interface CommonShelfGroupDisplay {
+  name: string
+  english_name: string | null
+  category: ChemicalCategory | null
+  purity: string | null
+  notes: string | null
+}
+
+export interface CommonShelfGroup {
+  id: string
+  group: CommonShelfGroupIdentity
+  display: CommonShelfGroupDisplay
+  bottle_count: number
+  location_count: number
+  latest_name_snapshot: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CommonShelfLocationSummary {
+  storage_location: string | null
+  bottle_count: number
+  oldest_created_at: string
+}
+
+export interface CommonShelfGroupItem {
+  id: number
+  internal_code: string
+  purity: string | null
+  storage_location: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ChemicalNameMapItem {
+  id: number
+  cas_number: string
+  name: string
+  english_name: string | null
+  alias_1: string | null
+  alias_2: string | null
+  alias_3: string | null
+  category: ChemicalCategory | null
+  created_at: string
+  updated_at: string
+}
+
 export const commonShelfAPI = {
-  list: (params?: PaginationParams & {
-    status_filter?: string
+  list: async (params?: PaginationParams & {
     search?: string
     search_field?: string
     fuzzy?: boolean
     sort_by?: string
     sort_order?: string
-  }) => api.get('/inventory/common-shelf', { params }),
-  consumeOne: (sampleInventoryId: number) =>
-    api.post('/inventory/common-shelf/consume-one', { sample_inventory_id: sampleInventoryId }),
+  }) => {
+    const response = await api.get<PaginatedResponse<Omit<CommonShelfGroup, 'id'>>>('/common-shelf/groups', { params })
+    return {
+      ...response,
+      data: {
+        ...response.data,
+        data: response.data.data.map((item) => ({
+          ...item,
+          id: item.group.group_key,
+        })),
+      },
+    }
+  },
   manualAdd: (data: {
+    cas_number: string
+    name_snapshot: string
+    brand?: string
+    purity?: string
+    specification: string
+    count: number
+    storage_location?: string
+    notes?: string
+  }) => api.post('/common-shelf/manual-add', data),
+  getLocations: (groupKey: string) =>
+    api.get<CommonShelfLocationSummary[]>(`/common-shelf/groups/${groupKey}/locations`),
+  getLocationSuggestions: (groupKey: string) =>
+    api.get<string[]>(`/common-shelf/groups/${groupKey}/location-suggestions`),
+  getLocationSuggestionsByFields: (params: {
+    cas_number: string
+    brand?: string
+    specification: string
+  }) => api.get<string[]>('/common-shelf/location-suggestions', { params }),
+  getGroupItems: (groupKey: string) =>
+    api.get<CommonShelfGroupItem[]>(`/common-shelf/groups/${groupKey}/items`),
+  updateGroup: (groupKey: string, data: {
+    brand?: string
+    specification: string
+    confirm_merge?: boolean
+  }) => api.put(`/common-shelf/groups/${groupKey}`, data),
+  updateItem: (groupKey: string, itemId: number, data: {
+    purity?: string
+    storage_location?: string
+    notes?: string
+  }) => api.put(`/common-shelf/groups/${groupKey}/items/${itemId}`, data),
+  deleteItem: (groupKey: string, itemId: number) =>
+    api.delete(`/common-shelf/groups/${groupKey}/items/${itemId}`),
+  addBottles: (groupKey: string, data: { count: number; storage_location?: string }) =>
+    api.post(`/common-shelf/groups/${groupKey}/add-bottles`, data),
+  removeOne: (groupKey: string, data: { storage_location?: string }) =>
+    api.post(`/common-shelf/groups/${groupKey}/remove-one`, data),
+  deleteGroup: (groupKey: string) =>
+    api.delete(`/common-shelf/groups/${groupKey}`),
+  exportCommonShelf: () => api.get('/common-shelf/export', { responseType: 'blob' as const }),
+}
+
+export const chemicalNameMapAPI = {
+  list: (params?: PaginationParams & {
+    search?: string
+    search_field?: string
+    fuzzy?: boolean
+  }) => api.get<PaginatedResponse<ChemicalNameMapItem>>('/chemical-name-map', { params }),
+  create: (data: {
     cas_number: string
     name: string
     english_name?: string
-    alias?: string
-    specification: string
-    quantity_bottles: number
-    brand?: string
-    category?: string
-    storage_location?: string
-    is_hazardous: boolean
-    notes?: string
-  }) => api.post('/inventory/common-shelf/manual-add', data),
-  updateGroup: (sampleInventoryId: number, data: Record<string, unknown>) =>
-    api.put(`/inventory/common-shelf/group/${sampleInventoryId}`, data),
-  deleteGroup: (sampleInventoryId: number) =>
-    api.delete(`/inventory/common-shelf/group/${sampleInventoryId}`),
-  exportCommonShelf: () => api.get('/inventory/common-shelf/export', { responseType: 'blob' }),
+    alias_1?: string
+    alias_2?: string
+    alias_3?: string
+    category?: ChemicalCategory | null
+  }) => api.post('/chemical-name-map', data),
+  update: (id: number, data: {
+    name?: string
+    english_name?: string
+    alias_1?: string
+    alias_2?: string
+    alias_3?: string
+    category?: ChemicalCategory | null
+  }) => api.put(`/chemical-name-map/${id}`, data),
+  delete: (id: number) => api.delete(`/chemical-name-map/${id}`),
 }
 
 // Chemical Info APIs

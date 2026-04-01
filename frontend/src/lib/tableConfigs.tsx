@@ -9,11 +9,13 @@
 import { createColumnHelper } from '@tanstack/react-table'
 import { safeString } from '@/lib/validationSchemas'
 import type { ColumnDef } from '@tanstack/react-table'
+import type { ReactNode } from 'react'
 import { HighlightText } from '@/components/ui/HighlightText'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
 import { formatDate, formatDateTime, getFullImageUrl } from '@/lib/utils'
+import { CHEMICAL_CATEGORY_LABELS } from '@/lib/constants'
 import { Laptop } from 'lucide-react'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 
@@ -112,6 +114,14 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
         </span>
       ),
     }),
+    columnHelper.accessor('purity', {
+      header: '纯度',
+      size: 90,
+      minSize: 80,
+      maxSize: 120,
+      enableSorting: false,
+      cell: info => <span>{safeString(info.getValue(), '-')}</span>,
+    }),
     columnHelper.accessor('remaining_percent', {
       id: 'remaining_percent',
       header: '剩余/规格',
@@ -184,6 +194,14 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
         const value = info.getValue()
         return <span>{safeString(value, '-')}</span>
       },
+    }),
+    columnHelper.accessor('purity', {
+      header: '纯度',
+      size: 90,
+      minSize: 70,
+      maxSize: 120,
+      enableSorting: false,
+      cell: info => <span>{safeString(info.getValue(), '-')}</span>,
     }),
     columnHelper.accessor('specification', {
       header: '规格',
@@ -362,56 +380,200 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
   ]
 }
 
-// 常用货架表格列配置（不含操作列）
+export const COMMON_SHELF_STATUS_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'in_stock', label: '有库存' },
+  { value: 'run_short', label: '快用完' },
+  { value: 'consumed', label: '已耗尽' },
+]
+
+export const COMMON_SHELF_SEARCH_FIELD_OPTIONS = [
+  { value: 'all', label: '全部' },
+  { value: 'name', label: '名称' },
+  { value: 'alias', label: '别名' },
+  { value: 'cas_number', label: 'CAS号' },
+  { value: 'brand', label: '品牌' },
+  { value: 'category', label: '分类' },
+  { value: 'storage_location', label: '位置' },
+]
+
 export function getCommonShelfTableColumns(): ColumnDef<TableRowData, unknown>[] {
   return [
     columnHelper.accessor('cas_number', {
       header: 'CAS号',
-      size: 130,
-      minSize: 110,
-      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+      size: 120,
+      minSize: 100,
+      maxSize: 180,
+      cell: info => (
+        <span className="break-all">
+          <HighlightText
+            text={safeString(info.getValue(), '')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('name', {
       header: '名称',
-      size: 220,
-      minSize: 180,
-      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+      size: 240,
+      minSize: 160,
+      maxSize: 320,
+      cell: info => (
+        <span className="break-all">
+          <HighlightText
+            text={safeString(info.getValue(), '')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('storage_location', {
       header: '位置',
-      size: 140,
-      minSize: 110,
-      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+      size: 120,
+      minSize: 90,
+      maxSize: 180,
+      cell: info => (
+        <span className="break-all">
+          <HighlightText
+            text={safeString(info.getValue(), '-')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('brand', {
       header: '品牌',
-      size: 100,
-      minSize: 80,
-      cell: info => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
-    }),
-    columnHelper.accessor('specification', {
-      header: '规格',
-      size: 110,
+      size: 120,
       minSize: 90,
-      cell: info => <span>{safeString(info.getValue(), '-')}</span>,
-    }),
-    columnHelper.accessor('available_bottles', {
-      header: '可用瓶数',
-      size: 90,
-      minSize: 80,
-      cell: info => <span className=" text-green-700">{safeString(info.getValue(), '0')} 瓶</span>,
-    }),
-    columnHelper.accessor('total_bottles', {
-      header: '总瓶数',
-      size: 90,
-      minSize: 80,
-      cell: info => <span>{safeString(info.getValue(), '0')} 瓶</span>,
+      maxSize: 180,
+      cell: info => (
+        <span className="break-all">
+          <HighlightText
+            text={safeString(info.getValue(), '-')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('status', {
       header: '状态',
-      size: 80,
-      minSize: 70,
+      size: 90,
+      minSize: 80,
+      maxSize: 130,
       cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
+    }),
+  ]
+}
+
+export const COMMON_SHELF_GROUP_STATUS_OPTIONS = [{ value: 'all', label: '全部' }]
+export const COMMON_SHELF_GROUP_SEARCH_FIELD_OPTIONS = [
+  { value: 'all', label: '全部' },
+  { value: 'cas_number', label: 'CAS' },
+  { value: 'name', label: '名称' },
+  { value: 'alias', label: '别名' },
+  { value: 'brand', label: '品牌' },
+]
+export const CHEMICAL_NAME_MAP_SEARCH_FIELD_OPTIONS = [
+  { value: 'all', label: '全部' },
+  { value: 'cas_number', label: 'CAS' },
+  { value: 'name', label: '名称' },
+  { value: 'alias', label: '别名' },
+]
+export const COMMON_SHELF_EMPTY_LOCATION_VALUE = '__EMPTY_LOCATION__'
+
+export function renderCommonShelfCategory(category: string | null) {
+  if (!category) return '-'
+  return CHEMICAL_CATEGORY_LABELS[category] || category
+}
+
+export function getCommonShelfGroupTableColumns(args: {
+  renderActions: (row: TableRowData) => ReactNode
+}): ColumnDef<TableRowData, unknown>[] {
+  return [
+    columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.cas_number, ''), {
+      id: 'cas_number',
+      header: 'CAS',
+      cell: (info) => <span className="break-all">{safeString(info.getValue(), '')}</span>,
+    }),
+    columnHelper.accessor((row) => safeString((row.display as Record<string, unknown>)?.name, ''), {
+      id: 'name',
+      header: '名称',
+      cell: (info) => <span className="break-all">{safeString(info.getValue(), '')}</span>,
+    }),
+    columnHelper.accessor((row) => (row.display as Record<string, unknown>)?.category as string | null, {
+      id: 'category',
+      header: '分类',
+      cell: (info) => <span>{renderCommonShelfCategory(info.getValue())}</span>,
+    }),
+    columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.brand, ''), {
+      id: 'brand',
+      header: '品牌',
+      cell: (info) => <span>{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor((row) => safeString((row.display as Record<string, unknown>)?.purity, ''), {
+      id: 'purity',
+      header: '纯度',
+      enableSorting: false,
+      cell: (info) => <span>{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.specification_text, ''), {
+      id: 'specification',
+      header: '规格',
+      cell: (info) => <span>{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor((row) => safeString((row.display as Record<string, unknown>)?.notes, ''), {
+      id: 'notes',
+      header: '备注',
+      enableSorting: false,
+      cell: (info) => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.accessor((row) => Number(row.bottle_count ?? 0), {
+      id: 'bottle_count',
+      header: '剩余瓶数',
+      cell: (info) => <span className="font-medium text-green-700">{info.getValue()} 瓶</span>,
+    }),
+    columnHelper.display({
+      id: 'actions',
+      header: '操作',
+      cell: (info) => <>{args.renderActions(info.row.original)}</>,
+    }),
+  ]
+}
+
+export function getChemicalNameMapTableColumns(args: {
+  renderActions: (row: TableRowData) => ReactNode
+  renderAliases: (row: TableRowData) => string
+}): ColumnDef<TableRowData, unknown>[] {
+  return [
+    columnHelper.accessor('cas_number', {
+      header: 'CAS',
+      cell: (info) => <span className="break-all">{safeString(info.getValue(), '')}</span>,
+    }),
+    columnHelper.accessor('name', {
+      header: '中文名称',
+      cell: (info) => <span className="break-all">{safeString(info.getValue(), '')}</span>,
+    }),
+    columnHelper.accessor('english_name', {
+      header: '英文名称',
+      cell: (info) => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+    }),
+    columnHelper.display({
+      id: 'aliases',
+      header: '别名',
+      cell: (info) => <span className="break-all">{args.renderAliases(info.row.original)}</span>,
+    }),
+    columnHelper.accessor('category', {
+      header: '分类',
+      cell: (info) => <span>{renderCommonShelfCategory(info.getValue() as string | null)}</span>,
+    }),
+    columnHelper.display({
+      id: 'actions',
+      header: '操作',
+      cell: (info) => <>{args.renderActions(info.row.original)}</>,
     }),
   ]
 }

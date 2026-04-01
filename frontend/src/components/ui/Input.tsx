@@ -151,7 +151,7 @@ const renderLeftArea = ({
           <DefaultIcon
             className={cn(
               styles.tagButton.iconBase,
-              isActive ? "fill-current" : "fill-transparent"
+              isActive && activeConfig.filledWhenActive === true ? "fill-current" : "fill-transparent"
             )}
           />
         </button>

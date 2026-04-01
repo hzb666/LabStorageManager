@@ -240,8 +240,8 @@ def build_applicant_id_subquery(search_value: str, *, fuzzy: bool):
             f"full_name_pinyin:{phrase}",
             f"full_name_pinyin_initials:{phrase}",
         ])
-        match_expr = text("users_fts MATCH :match_query").bindparams(
-            bindparam("match_query", match_query)
+        match_expr = text("users_fts MATCH :users_match_query").bindparams(
+            bindparam("users_match_query", match_query)
         )
         fts_subquery = select(text("rowid")).select_from(text("users_fts")).where(match_expr)
         return exact_subquery.union(fts_subquery)

@@ -30,6 +30,7 @@ import {
 import { useRememberedUser } from "@/hooks/useRememberedUser";
 import { UserRoles } from "@/lib/constants";
 import { getUserEditFormFields, USER_ROLE_OPTIONS } from "@/lib/formConfigs";
+import { clearRememberedUser as clearRememberedUserStorage } from "@/lib/storage/appAuthMetaStorage";
 import { toast } from "@/lib/toast";
 import { cn, getFullImageUrl } from "@/lib/utils";
 import {
@@ -46,6 +47,9 @@ import type {
 import { useAuthStore } from "@/store/useStore";
 
 type UserRole = "admin" | "user" | "public";
+type AuthStoreState = ReturnType<typeof useAuthStore.getState>;
+type AuthStoreUser = AuthStoreState["user"];
+type AuthStoreSetAuth = AuthStoreState["setAuth"];
 
 export interface User {
   id: number;
@@ -72,6 +76,7 @@ const ALLOWED_TYPES = [
   "image/webp",
   "image/gif",
 ];
+const AUTH_LOCAL_STORAGE_KEYS = ["auth-storage"];
 const MAX_SIZE_MB = 5;
 const AVATAR_INPUT_ID = "avatar-upload";
 const USER_EDIT_FIELDS = getUserEditFormFields();
@@ -235,11 +240,23 @@ function redirectToLogin() {
   }, 1500);
 }
 
+// 定向清理认证相关本地状态，避免把主题、侧栏等偏好一起抹掉。
+function clearAuthLocalStorage() {
+  try {
+    for (const key of AUTH_LOCAL_STORAGE_KEYS) {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // 忽略本地清理异常，后续仍会走服务端注销与登录页跳转。
+  }
+  clearRememberedUserStorage();
+}
+
 // 处理用户名修改后的退出登录链路，确保本地和服务端会话一起失效。
 async function handleUsernameChanged(onClose: () => void) {
   toast.success("用户名已更新，请重新登录");
   onClose();
-  localStorage.clear();
+  clearAuthLocalStorage();
 
   try {
     await authAPI.logout();
@@ -454,12 +471,12 @@ interface UseSaveHandlerOptions {
   user: User | null;
   mode: "admin" | "profile";
   editForm: UseFormReturn<UserUpdateFormData>;
-  currentUser: ReturnType<typeof useAuthStore>["user"];
+  currentUser: AuthStoreUser;
   rememberedUser: ReturnType<typeof useRememberedUser>["rememberedUser"];
   updateRememberedUser: ReturnType<
     typeof useRememberedUser
   >["updateRememberedUser"];
-  setAuth: ReturnType<typeof useAuthStore>["setAuth"];
+  setAuth: AuthStoreSetAuth;
   onSuccess?: () => void;
   onClose: () => void;
   handleAvatarUpdate: (targetUser: User) => Promise<boolean>;
@@ -500,7 +517,9 @@ function useSaveUserHandler({
       );
       const updatedUser = response.data;
 
-      if (user.username !== formData.username) {
+      const usernameChanged = user.username !== formData.username;
+      const currentUserEditedSelf = user.id === currentUser?.id;
+      if (usernameChanged && currentUserEditedSelf) {
         await handleUsernameChanged(onClose);
         return;
       }
@@ -538,7 +557,7 @@ function useSaveUserHandler({
 
 interface UsePasswordHandlerOptions {
   user: User | null;
-  currentUser: ReturnType<typeof useAuthStore>["user"];
+  currentUser: AuthStoreUser;
   passwordForm: UseFormReturn<ChangePasswordFormData>;
   onClose: () => void;
   setIsEditingPasswordSession: Dispatch<SetStateAction<symbol | null>>;
@@ -814,7 +833,7 @@ function ProfileSection({
 
         {mode === "admin" && (
           <RoleSelector
-            role={editForm.watch("role")}
+            role={(editForm.watch("role") ?? "user") as UserRole}
             onRoleChange={(value) => editForm.setValue("role", value)}
           />
         )}

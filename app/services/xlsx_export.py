@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.core.time_utils import get_utc_now, to_china_time
-from app.models.inventory import InventoryStatus
-from app.services.shelf_utils import is_common_shelf_available_status
 from app.services.spec_utils import format_specification
 
 _DANGEROUS_SPREADSHEET_PREFIXES = ("=", "+", "-", "@")
@@ -48,6 +47,12 @@ def _escape_spreadsheet_formula(value: Any) -> Any:
     if stripped and stripped[0] in _DANGEROUS_SPREADSHEET_PREFIXES:
         return f"'{value}"
 
+    return value
+
+
+def _unwrap_enum_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
     return value
 
 
@@ -97,100 +102,10 @@ def _export_to_xlsx(
     )
 
 
-def _common_group_sort_key(item: Any) -> tuple[Any, ...]:
-    return (
-        _get_field(item, "cas_number") or "",
-        _get_field(item, "name") or "",
-        _get_field(item, "brand") or "",
-        _get_field(item, "initial_quantity") if _get_field(item, "initial_quantity") is not None else -1,
-        _get_field(item, "unit") or "",
-        _get_field(item, "storage_location") or "",
-    )
-
-
-def _derive_common_group_status(available_bottles: int, has_running_short: bool) -> InventoryStatus:
-    if available_bottles <= 0:
-        return InventoryStatus.CONSUMED
-    if has_running_short:
-        return InventoryStatus.RUN_SHORT
-    return InventoryStatus.IN_STOCK
-
-
-def build_common_shelf_export_rows(items: list[Any]) -> list[dict[str, Any]]:
-    """Build grouped common-shelf export rows from raw common inventory items."""
-    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
-    for item in items:
-        group_key = _common_group_sort_key(item)
-        group = grouped.get(group_key)
-        if group is None:
-            group = {
-                "sample_inventory_id": _get_field(item, "id"),
-                "cas_number": _get_field(item, "cas_number"),
-                "name": _get_field(item, "name"),
-                "english_name": _get_field(item, "english_name"),
-                "alias": _get_field(item, "alias"),
-                "category": _get_field(item, "category"),
-                "brand": _get_field(item, "brand"),
-                "storage_location": _get_field(item, "storage_location"),
-                "initial_quantity": _get_field(item, "initial_quantity"),
-                "unit": _get_field(item, "unit"),
-                "is_hazardous": _get_field(item, "is_hazardous"),
-                "notes": _get_field(item, "notes"),
-                "created_at": _get_field(item, "created_at"),
-                "updated_at": _get_field(item, "updated_at"),
-                "total_bottles": 0,
-                "available_bottles": 0,
-                "has_running_short": False,
-            }
-            grouped[group_key] = group
-
-        group["total_bottles"] += 1
-        if is_common_shelf_available_status(_get_field(item, "status")):
-            group["available_bottles"] += 1
-        if _get_field(item, "status") == InventoryStatus.RUN_SHORT:
-            group["has_running_short"] = True
-
-        created_at = _get_field(item, "created_at")
-        if created_at and (group["created_at"] is None or created_at > group["created_at"]):
-            group["created_at"] = created_at
-            group["sample_inventory_id"] = _get_field(item, "id")
-
-    rows: list[dict[str, Any]] = []
-    for group in grouped.values():
-        available_bottles = group["available_bottles"]
-        row_status = _derive_common_group_status(available_bottles, group["has_running_short"])
-        rows.append(
-            {
-                "sample_inventory_id": group["sample_inventory_id"],
-                "cas_number": group["cas_number"],
-                "name": group["name"],
-                "english_name": group["english_name"],
-                "alias": group["alias"],
-                "category": group["category"],
-                "brand": group["brand"],
-                "storage_location": group["storage_location"],
-                "initial_quantity": group["initial_quantity"],
-                "unit": group["unit"],
-                "is_hazardous": group["is_hazardous"],
-                "status": row_status,
-                "available_bottles": available_bottles,
-                "total_bottles": group["total_bottles"],
-                "consumed_bottles": group["total_bottles"] - available_bottles,
-                "created_at": group["created_at"],
-                "updated_at": group["updated_at"],
-                "notes": group["notes"],
-                "specification": format_specification(group["initial_quantity"], group["unit"]),
-            }
-        )
-
-    return rows
-
-
 def export_inventory_xlsx(
     items: list[Any],
-    common_items: Optional[list[Any]] = None,
 ) -> StreamingResponse:
-    """Export inventory workbook with regular and common-shelf worksheets."""
+    """Export inventory workbook with regular inventory only."""
     regular_headers = [
         "CAS号",
         "名称",
@@ -198,6 +113,7 @@ def export_inventory_xlsx(
         "别名",
         "分类",
         "品牌",
+        "纯度",
         "位置",
         "初始数量",
         "剩余数量",
@@ -216,6 +132,7 @@ def export_inventory_xlsx(
             _get_field(item, "alias") or "",
             _get_field(item, "category") or "",
             _get_field(item, "brand") or "",
+            _get_field(item, "purity") or "",
             _get_field(item, "storage_location") or "",
             _get_field(item, "initial_quantity"),
             _get_field(item, "remaining_quantity"),
@@ -240,59 +157,6 @@ def export_inventory_xlsx(
         )
     ]
 
-    common_rows_data = build_common_shelf_export_rows(common_items or [])
-    common_headers = [
-        "CAS号",
-        "名称",
-        "英文名",
-        "别名",
-        "分类",
-        "品牌",
-        "位置",
-        "规格",
-        "总瓶数",
-        "可用瓶数",
-        "已消耗瓶数",
-        "是否危险品",
-        "状态",
-        "入库时间",
-        "备注",
-    ]
-
-    common_rows = [
-        [
-            _get_field(item, "cas_number"),
-            _get_field(item, "name"),
-            _get_field(item, "english_name") or "",
-            _get_field(item, "alias") or "",
-            _get_field(item, "category") or "",
-            _get_field(item, "brand") or "",
-            _get_field(item, "storage_location") or "",
-            _get_field(item, "specification") or "",
-            _get_field(item, "total_bottles"),
-            _get_field(item, "available_bottles"),
-            _get_field(item, "consumed_bottles"),
-            "是" if _get_field(item, "is_hazardous") else "否",
-            _get_field(item, "status").value
-            if hasattr(_get_field(item, "status"), "value")
-            else _get_field(item, "status"),
-            to_china_time(_get_field(item, "created_at")).strftime("%Y-%m-%d %H:%M:%S")
-            if _get_field(item, "created_at")
-            else "",
-            _get_field(item, "notes") or "",
-        ]
-        for item in common_rows_data
-    ]
-
-    sheets.append(
-        ExportSheet(
-            title="常用",
-            headers=common_headers,
-            rows=common_rows,
-            text_columns=set(range(1, len(common_headers) + 1)),
-        )
-    )
-
     return _export_to_xlsx(
         sheets=sheets,
         filename_prefix="inventory_export",
@@ -300,54 +164,55 @@ def export_inventory_xlsx(
 
 
 def export_common_shelf_xlsx(
-    items: list[Any],
+    groups: list[Any],
 ) -> StreamingResponse:
-    """Export common shelf items (grouped by sample_inventory_id)."""
+    """Export grouped common shelf data."""
     headers = [
         "CAS号",
         "名称",
         "英文名",
-        "别名",
         "分类",
         "品牌",
-        "位置",
+        "纯度",
         "规格",
-        "总瓶数",
-        "可用瓶数",
-        "已消耗瓶数",
-        "是否危险品",
-        "状态",
-        "入库时间",
+        "剩余瓶数",
+        "位置数",
+        "最新入库名称",
         "备注",
+        "创建时间",
+        "更新时间",
     ]
 
-    def row_converter(item: Any) -> list[Any]:
+    def row_converter(group: Any) -> list[Any]:
+        group_data = _get_field(group, "group", {}) or {}
+        display_data = _get_field(group, "display", {}) or {}
+        created_at = _get_field(group, "created_at")
+        updated_at = _get_field(group, "updated_at")
         return [
-            _get_field(item, "cas_number"),
-            _get_field(item, "name"),
-            _get_field(item, "english_name") or "",
-            _get_field(item, "alias") or "",
-            _get_field(item, "category") or "",
-            _get_field(item, "brand") or "",
-            _get_field(item, "storage_location") or "",
-            _get_field(item, "specification") or "",
-            _get_field(item, "total_bottles"),
-            _get_field(item, "available_bottles"),
-            _get_field(item, "consumed_bottles"),
-            "是" if _get_field(item, "is_hazardous") else "否",
-            _get_field(item, "status").value if hasattr(_get_field(item, "status"), "value") else _get_field(item, "status"),
-            to_china_time(_get_field(item, "created_at")).strftime("%Y-%m-%d %H:%M:%S") if _get_field(item, "created_at") else "",
-            _get_field(item, "notes") or "",
+            _get_field(group_data, "cas_number"),
+            _get_field(display_data, "name"),
+            _get_field(display_data, "english_name") or "",
+            _unwrap_enum_value(_get_field(display_data, "category")) or "",
+            _get_field(group_data, "brand") or "",
+            _get_field(display_data, "purity") or "",
+            _get_field(group_data, "specification_text") or "",
+            _get_field(group, "bottle_count") or 0,
+            _get_field(group, "location_count") or 0,
+            _get_field(group, "latest_name_snapshot") or "",
+            _get_field(display_data, "notes") or "",
+            to_china_time(created_at).strftime("%Y-%m-%d %H:%M:%S") if created_at else "",
+            to_china_time(updated_at).strftime("%Y-%m-%d %H:%M:%S") if updated_at else "",
         ]
 
-    rows = [row_converter(item) for item in items]
+    rows = [row_converter(group) for group in groups]
+    text_columns = {1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13}
     return _export_to_xlsx(
         sheets=[
             ExportSheet(
-                title="常用",
+                title="常用货架",
                 headers=headers,
                 rows=rows,
-                text_columns=set(range(1, len(headers) + 1)),
+                text_columns=text_columns,
             )
         ],
         filename_prefix="common_shelf_export",
@@ -366,6 +231,7 @@ def export_reagent_orders_xlsx(
         "别名",
         "分类",
         "品牌",
+        "纯度",
         "规格",
         "数量",
         "单价",
@@ -393,6 +259,7 @@ def export_reagent_orders_xlsx(
             _get_field(item, "alias") or "",
             _get_field(item, "category") or "",
             _get_field(item, "brand") or "",
+            _get_field(item, "purity") or "",
             specification or "",
             _get_field(item, "quantity"),
             _get_field(item, "price") or "",
@@ -407,7 +274,7 @@ def export_reagent_orders_xlsx(
     resolved_users_map = users_map or {}
     rows = [row_converter(item, resolved_users_map) for item in items]
     # 单价列保持数值格式，其余列全部强制文本格式
-    text_columns = {idx for idx in range(1, len(headers) + 1) if idx != 9}
+    text_columns = {idx for idx in range(1, len(headers) + 1) if idx != 10}
     return _export_to_xlsx(
         sheets=[
             ExportSheet(

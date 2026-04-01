@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "generate:static-assets": "node scripts/lib-assets.mjs",
+    "dev": "npm run generate:static-assets && vite",
+    "build": "npm run generate:static-assets && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -66,7 +67,6 @@
     "tailwindcss": "^4.2.2",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.1",
-    "vite": "^8.0.1",
-    "vite-plugin-compression": "^0.5.1"
+    "vite": "^8.0.1"
   }
 }

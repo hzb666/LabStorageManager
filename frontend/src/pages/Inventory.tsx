@@ -28,6 +28,7 @@ import { inventoryAPI, chemicalAPI } from '@/api/client'
 import { downloadBlobResponse, formatDate, processNotes } from '@/lib/utils'
 import {
   InventoryFormSchema,
+  applyValidationErrors,
   parseSpecification,
   createValibotResolver,
   validateAndNormalizeCASInput,
@@ -37,13 +38,15 @@ import {
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
-import type { InventoryFormData, InventoryFormInputData, ValidationError } from '@/lib/validationSchemas'
+import type { InventoryFormData, InventoryFormInputData } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 import { UserRoles } from '@/lib/constants'
+import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from '@/store/useStore'
+import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 
 // 表单配置
-import { defaultInventoryValues, getInventoryFormFields } from '@/lib/formConfigs'
+import { defaultInventoryValues, enhanceCasLookupField, getInventoryFormFields } from '@/lib/formConfigs'
 
 // 图标
 import {
@@ -65,6 +68,7 @@ export interface InventoryItem {
   alias: string | null
   category: string | null
   brand: string | null
+  purity: string | null
   storage_location: string | null
   initial_quantity: number
   remaining_quantity: number
@@ -104,6 +108,7 @@ function createInventoryFormValues(item: InventoryItem): InventoryFormInputData 
     specification: item.specification || '',
     category: item.category || '',
     brand: item.brand || '',
+    purity: item.purity || '',
     storage_location: item.storage_location || '',
     quantity_bottles: 1,
     initial_quantity: item.initial_quantity ?? undefined,
@@ -169,6 +174,7 @@ function createInventoryUpdatePayload(formData: InventoryFormData) {
     storage_location: formData.storage_location || '',
     remaining_quantity: formData.remaining_quantity,
     brand: formData.brand || '',
+    purity: formData.purity || '',
     is_hazardous: formData.is_hazardous,
     notes: processNotes(formData.notes),
     specification: formData.specification || '',
@@ -186,29 +192,11 @@ function createInventoryCreatePayload(formData: InventoryFormData) {
     quantity_bottles: formData.quantity_bottles as number,
     brand: formData.brand || undefined,
     category: formData.category || undefined,
+    purity: formData.purity || undefined,
     storage_location: formData.storage_location || undefined,
     is_hazardous: formData.is_hazardous,
     notes: processNotes(formData.notes),
   }
-}
-
-// 将后端字段校验错误写回库存表单。 让提交异常处理只保留一次判断，而不重复遍历错误数组。
-function applyInventoryValidationErrors(
-  form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>,
-  validationErrors: ValidationError[],
-): boolean {
-  if (validationErrors.length === 0) {
-    return false
-  }
-
-  validationErrors.forEach((errorItem) => {
-    if (errorItem.loc?.[1]) {
-      form.setError(errorItem.loc[1] as keyof InventoryFormData, {
-        message: errorItem.msg || '输入不合法',
-      })
-    }
-  })
-  return true
 }
 
 // 按当前弹窗模式执行库存新增或编辑请求。 把接口调用分支从提交流程中抽离，让主提交处理器只保留业务编排。
@@ -241,19 +229,14 @@ function createInventoryFormFields(params: {
     return fields
   }
 
-  return fields.map((field) =>
-    field.name === 'cas_number'
-      ? {
-        ...field,
-        prefixButton: {
-          onClick: handleCasLookup,
-          loading: isCasLookupLoading,
-          title: '识别 CAS 号',
-          icon: ScanSearch,
-        },
-      }
-      : field,
-  )
+  return enhanceCasLookupField(fields, {
+    prefixButton: {
+      onClick: handleCasLookup,
+      loading: isCasLookupLoading,
+      title: '识别 CAS 号',
+      icon: ScanSearch,
+    },
+  })
 }
 
 // 格式化库存展开行里的“上次借用”展示文本。 消除 JSX 中的嵌套三元表达式，同时保持原有文案与状态语义不变。
@@ -349,7 +332,9 @@ function useInventoryDialogController(refreshInventory: () => void | Promise<voi
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(errorDetail)
-      if (applyInventoryValidationErrors(form, validationErrors)) {
+      if (applyValidationErrors(validationErrors, (fieldName, message) => {
+        form.setError(fieldName as keyof InventoryFormData, { message })
+      })) {
         return
       }
       toast.error(normalizeApiErrorMessage(errorDetail, '操作失败'))
@@ -445,6 +430,7 @@ function InventoryExpandedRow({ item }: { item: InventoryItem }) {
       <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
         <div>英文名称：{item.english_name || '-'}</div>
         <div>别名：{item.alias || '-'}</div>
+        <div>纯度：{item.purity || '-'}</div>
         <div>入库时间：{formatDate(item.created_at)}</div>
         <div>入库用户：{item.created_by_name || '-'}</div>
         <div>上次借用：{formatInventoryBorrowerDisplay(item)}</div>
@@ -461,9 +447,11 @@ function InventoryExpandedRow({ item }: { item: InventoryItem }) {
 // 直接组合列表、页头和叶子组件，避免继续保留只转发参数的壳层。
 export function InventoryPage() {
   const queryClient = useQueryClient()
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const loadInventory = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['inventory'] })
-  }, [queryClient])
+    clearRoomStale('inventory')
+  }, [clearRoomStale, queryClient])
   const dialogController = useInventoryDialogController(loadInventory)
 
   const handleExport = useCallback(async () => {
@@ -521,6 +509,11 @@ export function InventoryPage() {
         api={inventoryAPI as FilterAPI}
         queryKey={['inventory']}
         tableId="inventory-table"
+        realtime={{
+          room: 'inventory',
+          eventTypes: INVENTORY_SSE_EVENTS,
+          onRefresh: loadInventory,
+        }}
         customColumns={columns}
         onEdit={dialogController.handleEditClick}
         onBorrowSuccess={loadInventory}

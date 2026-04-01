@@ -3,6 +3,7 @@
  * 纯工具文件，不包含 React 组件（避免 react-refresh/only-export-components 规则冲突）
  */
 import type { ColumnDef } from '@tanstack/react-table'
+import { clearDashboardActiveTab } from '@/lib/storage/appUiStorage'
 
 // ============================================================================
 // 类型定义
@@ -86,7 +87,6 @@ export type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
 // 常量
 // ============================================================================
 
-export const DASHBOARD_TAB_STORAGE_KEY = 'dashboard-active-tab'
 const DASHBOARD_COUNTS_REFRESH_EVENT = 'dashboard-counts-refresh'
 
 /**
@@ -95,7 +95,7 @@ const DASHBOARD_COUNTS_REFRESH_EVENT = 'dashboard-counts-refresh'
  */
 export function clearDashboardTab(): void {
   try {
-    localStorage.removeItem(DASHBOARD_TAB_STORAGE_KEY)
+    clearDashboardActiveTab()
   } catch {
     // ignore localStorage errors
   }

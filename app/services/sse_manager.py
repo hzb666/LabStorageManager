@@ -1,10 +1,4 @@
-"""SSE connection manager.
-
-Design goals:
-1) Keep in-process client queues for low-latency push.
-2) Use Redis PubSub for cross-process fan-out.
-3) Mark event identity and sequence so frontend can do reliability checks.
-"""
+# SSE 本地 fan-out 与 Redis 跨进程桥接。
 
 from __future__ import annotations
 
@@ -28,6 +22,7 @@ from app.core.constants import (
     SSE_REDIS_SUBSCRIBE_RETRY_SECONDS,
     SSE_SLOW_CLIENT_QUEUE_FULL_STREAK_LIMIT,
 )
+from app.core.request_utils import get_current_sse_client_id
 from app.core.redis import redis_key, REDIS_KEY_PREFIX
 from app.services.sse_redis import redis_pubsub
 
@@ -36,29 +31,38 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SSEClient:
-    """One logical browser subscriber."""
-
     client_id: str
     rooms: set[str] = field(default_factory=set)
     queue: asyncio.Queue[str] = field(default_factory=lambda: asyncio.Queue(maxsize=SSE_CLIENT_QUEUE_MAXSIZE))
     last_seq_by_room: dict[str, int] = field(default_factory=dict)
     queue_full_streak: int = 0
     dropped_events: int = 0
+    user_id: int | None = None
+    session_id: int | None = None
+    token_hash: str | None = None
+    revoked: bool = False
+    revoke_reason: str | None = None
 
 
 @dataclass
 class SSERoom:
-    """Local in-memory room state."""
-
     name: str
     clients: set[str] = field(default_factory=set)
     fallback_seq: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
-class SSEManager:
-    """SSE manager singleton for local fan-out + Redis bridge."""
+@dataclass(frozen=True)
+class SSESubscriptionRequest:
+    client_id: str
+    rooms: list[str]
+    last_seq: int = 0
+    user_id: int | None = None
+    session_id: int | None = None
+    token_hash: str | None = None
 
+
+class SSEManager:
     _instance: Optional["SSEManager"] = None
 
     def __new__(cls) -> "SSEManager":
@@ -75,13 +79,13 @@ class SSEManager:
         self._rooms: dict[str, SSERoom] = {}
         self._manager_lock = asyncio.Lock()
         self._listener_task: Optional[asyncio.Task[None]] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._origin = secrets.token_hex(SSE_ORIGIN_TOKEN_HEX_LENGTH)
         self._slow_client_disconnects = 0
         self._initialized = True
 
     @staticmethod
     def new_client_id() -> str:
-        """Generate a high-entropy client id for one SSE connection."""
         return secrets.token_hex(SSE_CLIENT_ID_TOKEN_HEX_LENGTH)
 
     async def get_room(self, room: str) -> SSERoom:
@@ -90,32 +94,33 @@ class SSEManager:
                 self._rooms[room] = SSERoom(name=room)
             return self._rooms[room]
 
-    async def subscribe(self, client_id: str, rooms: list[str], last_seq: int = 0) -> SSEClient:
-        """Subscribe client to multiple rooms.
-
-        last_seq is accepted for integration compatibility. Current implementation
-        stores it per room and leaves replay to future extension.
-        """
-        normalized_rooms = sorted({room.strip() for room in rooms if room.strip()})
+    async def subscribe(self, request: SSESubscriptionRequest) -> SSEClient:
+        # 保留 last_seq 参数位，后续要补 replay 时不需要改建连协议。
+        normalized_rooms = sorted({room.strip() for room in request.rooms if room.strip()})
         if not normalized_rooms:
             normalized_rooms = ["inventory"]
 
-        client = SSEClient(client_id=client_id, rooms=set(normalized_rooms))
+        client = SSEClient(
+            client_id=request.client_id,
+            rooms=set(normalized_rooms),
+            user_id=request.user_id,
+            session_id=request.session_id,
+            token_hash=request.token_hash,
+        )
         for room in normalized_rooms:
-            client.last_seq_by_room[room] = last_seq
+            client.last_seq_by_room[room] = request.last_seq
 
         async with self._manager_lock:
-            self._clients[client_id] = client
+            self._clients[request.client_id] = client
 
         for room in normalized_rooms:
             local_room = await self.get_room(room)
             async with local_room.lock:
-                local_room.clients.add(client_id)
+                local_room.clients.add(request.client_id)
 
         return client
 
     async def unsubscribe(self, client: SSEClient) -> None:
-        """Detach client from all rooms and remove queue holder."""
         for room in list(client.rooms):
             local_room = await self.get_room(room)
             async with local_room.lock:
@@ -134,7 +139,7 @@ class SSEManager:
             self._clients.pop(client.client_id, None)
 
     async def _next_seq(self, room: str) -> int:
-        """Prefer Redis INCR for global room sequence; fallback to local counter."""
+        # Redis 不可用时退回本地序号，至少保证单进程内有序。
         redis_seq = await asyncio.to_thread(redis_pubsub.next_sequence, room)
         if redis_seq is not None:
             return redis_seq
@@ -144,11 +149,17 @@ class SSEManager:
             local_room.fallback_seq += 1
             return local_room.fallback_seq
 
-    async def broadcast(self, room: str, event_type: str, data: dict[str, Any]) -> int:
-        """Broadcast one event.
+    async def broadcast(
+        self,
+        room: str,
+        event_type: str,
+        data: dict[str, Any],
+        *,
+        actor_client_id: str | None = None,
+    ) -> int:
+        if actor_client_id is None:
+            actor_client_id = get_current_sse_client_id()
 
-        Returns local delivered count. Redis publish count is logged only.
-        """
         seq = await self._next_seq(room)
         event = {
             "room": room,
@@ -157,6 +168,7 @@ class SSEManager:
             "data": data,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "origin": self._origin,
+            "actor_client_id": actor_client_id,
         }
 
         local_delivered = await self._push_local(room, event_type, event)
@@ -172,7 +184,6 @@ class SSEManager:
         return local_delivered
 
     async def _push_local(self, room: str, event_type: str, full_event: dict[str, Any]) -> int:
-        """Push pre-encoded message to all local subscribers of one room."""
         local_room = await self.get_room(room)
         payload = json.dumps(full_event, ensure_ascii=False)
         sse_message = f"event: {event_type}\ndata: {payload}\n\n"
@@ -184,6 +195,9 @@ class SSEManager:
         for client_id in client_ids:
             client = self._clients.get(client_id)
             if client is None:
+                continue
+            if client.revoked:
+                # 会话已撤销的连接不再接收业务事件，防止“被踢后仍收流”。
                 continue
 
             try:
@@ -209,7 +223,6 @@ class SSEManager:
         return delivered
 
     async def _disconnect_slow_client(self, client: SSEClient) -> None:
-        """Disconnect clients that stay persistently back-pressured."""
         # Client may already be disconnected by another coroutine.
         if self._clients.get(client.client_id) is not client:
             return
@@ -224,8 +237,73 @@ class SSEManager:
         )
         await self.unsubscribe(client)
 
+    @staticmethod
+    def _map_auth_code(reason: str) -> str:
+        if reason in {"user_deactivated"}:
+            return "AUTH_USER_DISABLED"
+        if reason in {"session_revalidation_failed", "session_expired_cleanup"}:
+            return "AUTH_SESSION_EXPIRED"
+        return "AUTH_SESSION_REVOKED"
+
+    @classmethod
+    def build_auth_invalid_message(cls, reason: str) -> str:
+        payload = json.dumps(
+            {"reason": reason, "code": cls._map_auth_code(reason)},
+            ensure_ascii=False,
+        )
+        return f"event: auth.invalid\ndata: {payload}\n\n"
+
+    def _mark_client_revoked(self, client: SSEClient, reason: str) -> None:
+        if client.revoked:
+            return
+        client.revoked = True
+        client.revoke_reason = reason
+
+        # Drop already-buffered business events so revocation is the next thing the
+        # client sees. Otherwise a kicked session can still consume stale messages.
+        with suppress(asyncio.QueueEmpty):
+            while True:
+                client.queue.get_nowait()
+
+        try:
+            client.queue.put_nowait(self.build_auth_invalid_message(reason))
+        except asyncio.QueueFull:
+            with suppress(asyncio.QueueFull):
+                client.queue.put_nowait(self.build_auth_invalid_message(reason))
+
+    async def _disconnect_clients_by_token_hash(self, token_hash: str, reason: str) -> None:
+        if not token_hash:
+            return
+
+        async with self._manager_lock:
+            candidates = [client for client in self._clients.values() if client.token_hash == token_hash]
+
+        for client in candidates:
+            self._mark_client_revoked(client, reason)
+
+    def notify_session_revoked(self, *, token_hash: str, reason: str = "session_revoked") -> None:
+        # 普通 API 已拒绝后，长连接也要尽快表现为失效。
+        event = {
+            "kind": "session_revoked",
+            "token_hash": token_hash,
+            "reason": reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "origin": self._origin,
+        }
+        channel = redis_key("sse:control")
+        try:
+            redis_pubsub.publish(channel, event)
+        except Exception:  # noqa: BLE001
+            logger.exception("SSE revoke publish failed token_hash=%s", token_hash)
+
+        if self._loop and self._loop.is_running():
+            def _schedule_revoke() -> None:
+                asyncio.create_task(self._disconnect_clients_by_token_hash(token_hash, reason))
+
+            self._loop.call_soon_threadsafe(_schedule_revoke)
+
     async def start_listener(self) -> None:
-        """Start a single background Redis listener task."""
+        self._loop = asyncio.get_running_loop()
         async with self._manager_lock:
             if self._listener_task and not self._listener_task.done():
                 return
@@ -235,10 +313,10 @@ class SSEManager:
             )
 
     async def stop_listener(self) -> None:
-        """Stop Redis listener task on application shutdown."""
         async with self._manager_lock:
             task = self._listener_task
             self._listener_task = None
+            self._loop = None
 
         if task is None:
             return
@@ -287,8 +365,41 @@ class SSEManager:
             room = str(event.get("room") or "")
         if not room:
             return None
+        if room == "control":
+            return None
 
         return room, event_type, event
+
+    def _parse_control_message(self, message: dict[str, Any]) -> Optional[dict[str, Any]]:
+        raw_channel = message.get("channel")
+        channel = self._decode_pubsub_value(raw_channel)
+        if ":sse:control" not in channel and channel != "sse:control":
+            return None
+
+        raw_data = message.get("data")
+        text_data = self._decode_pubsub_value(raw_data)
+        try:
+            event = json.loads(text_data)
+        except json.JSONDecodeError:
+            logger.warning("Invalid SSE control payload on %s", channel)
+            return None
+
+        token_hash = event.get("token_hash") if isinstance(event, dict) else None
+        if (
+            not isinstance(event, dict)
+            or event.get("origin") == self._origin
+            or event.get("kind") != "session_revoked"
+            or not isinstance(token_hash, str)
+            or not token_hash
+        ):
+            return None
+
+        return event
+
+    async def _handle_control_message(self, event: dict[str, Any]) -> None:
+        token_hash = str(event.get("token_hash") or "")
+        reason = str(event.get("reason") or "session_revoked")
+        await self._disconnect_clients_by_token_hash(token_hash, reason)
 
     @staticmethod
     def _pubsub_reader_worker(
@@ -297,7 +408,7 @@ class SSEManager:
         message_queue: asyncio.Queue[dict[str, Any]],
         stop_event: threading.Event,
     ) -> None:
-        """Read PubSub messages in one dedicated thread and forward to asyncio queue."""
+        # Redis 客户端是阻塞接口，用单独线程读消息再转发给事件循环。
         while not stop_event.is_set():
             try:
                 message = pubsub.get_message(
@@ -338,6 +449,10 @@ class SSEManager:
 
                 if queue_get_task in done:
                     message = queue_get_task.result()
+                    control_event = self._parse_control_message(message)
+                    if control_event is not None:
+                        await self._handle_control_message(control_event)
+                        continue
                     parsed = self._parse_pubsub_event(message)
                     if parsed is not None:
                         room, event_type, event = parsed
@@ -361,7 +476,6 @@ class SSEManager:
                 await reader_task
 
     async def _listener_loop(self) -> None:
-        """Bridge Redis pubsub events into local client queues."""
         while True:
             pubsub = None
             try:
@@ -383,18 +497,23 @@ class SSEManager:
         client: SSEClient,
         heartbeat_seconds: int = SSE_HEARTBEAT_SECONDS,
     ) -> AsyncGenerator[str, None]:
-        """Yield SSE chunks for a client until disconnect/cancel."""
         try:
             while True:
                 # Stop stream quickly when client is removed (e.g., slow client governance).
                 if self._clients.get(client.client_id) is not client:
                     break
+                if client.revoked and client.queue.empty():
+                    break
 
                 try:
                     message = await asyncio.wait_for(client.queue.get(), timeout=heartbeat_seconds)
                     yield message
+                    if client.revoked and client.queue.empty():
+                        break
                 except asyncio.TimeoutError:
                     if self._clients.get(client.client_id) is not client:
+                        break
+                    if client.revoked:
                         break
                     yield ": heartbeat\n\n"
         except (GeneratorExit, asyncio.CancelledError):

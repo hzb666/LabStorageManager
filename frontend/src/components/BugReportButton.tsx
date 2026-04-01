@@ -12,7 +12,7 @@ import { Bug, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useErrorLogger, fetchBackendErrorLogs } from '@/hooks/useErrorLogger'
 import { useAuthStore } from '@/store/useStore'
-import { setBugButtonHidden } from '@/lib/bugReportButtonStorage'
+import { setBugButtonHiddenUntil } from '@/lib/storage/appUiStorage'
 import {
   Tooltip,
   TooltipContent,
@@ -91,7 +91,7 @@ export function BugReportButton({
   // 处理右键点击 - 隐藏按钮1天
   const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
-    setBugButtonHidden(1) // 隐藏1天
+    setBugButtonHiddenUntil(Date.now() + 24 * 60 * 60 * 1000) // 隐藏1天
     if (onRightClick) {
       onRightClick()
     }

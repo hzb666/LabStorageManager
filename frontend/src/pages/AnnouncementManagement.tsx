@@ -389,7 +389,10 @@ function AnnouncementFiltersBar({
   return (
     <div className="flex items-center gap-3">
       <AnnouncementStorageBar storageInfo={listController.storageInfo} />
-      <Select value={listController.visibilityFilter} onValueChange={listController.setVisibilityFilter}>
+      <Select
+        value={listController.visibilityFilter}
+        onValueChange={(value) => listController.setVisibilityFilter(value as VisibilityFilter)}
+      >
         <SelectTrigger className="w-30 min-h-10">
           <SelectValue placeholder="显示状态" />
         </SelectTrigger>
@@ -400,7 +403,10 @@ function AnnouncementFiltersBar({
         </SelectContent>
       </Select>
 
-      <Select value={listController.pinnedFilter} onValueChange={listController.setPinnedFilter}>
+      <Select
+        value={listController.pinnedFilter}
+        onValueChange={(value) => listController.setPinnedFilter(value as PinnedFilter)}
+      >
         <SelectTrigger className="w-30 min-h-10">
           <SelectValue placeholder="置顶状态" />
         </SelectTrigger>
@@ -994,11 +1000,8 @@ function useAnnouncementDialogActions({
         images: prev.images.filter((imageUrl) => imageUrl !== url),
       }))
       toast.success('图片已移除')
-    } catch {
-      setFormData((prev) => ({
-        ...prev,
-        images: prev.images.filter((imageUrl) => imageUrl !== url),
-      }))
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '图片移除失败'))
     }
   }, [setFormData])
 

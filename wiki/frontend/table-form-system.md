@@ -12,7 +12,7 @@
 
 - `useTableState` 是列表页状态的总控，负责 `globalFilter`、`statusFilter`、`searchField`、`sorting`、`fuzzySearch`、`columnSizing`、`isAllExpanded` 和分页数据
 - `useTableState` 与 `useInfiniteQuery`、列表 API 和 `getNextPageParam` 协作，形成无限滚动的数据获取方式
-- 列宽、展开状态和模糊开关分别通过 `localStorage` 与 `tableId` 相关键持久化
+- 列宽、展开状态和模糊开关统一持久化到 `app-table`，按 `tableId` 进行分组
 - `useTableUrlState` 将筛选和分页写回 URL，便于刷新、分享和路由复用
 
 ## 列表性能处理

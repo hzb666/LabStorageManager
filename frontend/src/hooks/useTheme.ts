@@ -1,13 +1,20 @@
-﻿import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import {
+  getThemePreference,
+  setTheme as persistTheme,
+  type AppTheme,
+} from '@/lib/storage/appUiStorage'
 
-type Theme = 'light' | 'dark'
+type Theme = AppTheme
 
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(() => {
-    // 优先从 localStorage 读取
+    // 优先从 app-ui 持久化读取
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('theme') as Theme
-      if (saved) return saved
+      const saved = getThemePreference()
+      if (saved === 'dark' || saved === 'light') {
+        return saved
+      }
       // 如果没有保存，检查系统偏好
       if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
         return 'dark'
@@ -25,7 +32,7 @@ export function useTheme() {
       root.classList.remove('dark')
       root.style.colorScheme = 'light'
     }
-    localStorage.setItem('theme', theme)
+    persistTheme(theme)
   }, [theme])
 
   const toggleTheme = useCallback(() => {
@@ -33,9 +40,9 @@ export function useTheme() {
     const style = document.createElement('style')
     style.textContent = '*,*::before,*::after{transition:none !important}'
     document.head.appendChild(style)
-    
-    setTheme(prev => prev === 'light' ? 'dark' : 'light')
-    
+
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))
+
     // 强制重绘后移除禁用样式
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {

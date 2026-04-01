@@ -50,6 +50,8 @@ class ReagentOrderBase(SQLModel):
     category: Optional[str] = Field(max_length=100)
     # Brand (with index for query and pinyin for sorting)
     brand: Optional[str] = Field(max_length=100)
+    # Purity / grade (e.g. 95%, AR, HPLC)
+    purity: Optional[str] = Field(None, max_length=20)
     # 数据库模型：允许 NULL 以兼容旧数据
     initial_quantity: Optional[float] = Field(default=None)
     # Unit (e.g., "ml", "g", "L")
@@ -144,6 +146,7 @@ class ReagentOrderCreate(SQLModel):
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
+    purity: Optional[str] = Field(default=None, max_length=20)
     specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500ml"
     quantity: int = Field(gt=0, le=MAX_ORDER_QUANTITY)  # 数量限制：1-99
     price: float = Field(gt=0)  # 价格必填，必须大于0
@@ -162,6 +165,7 @@ class ReagentOrderUpdate(SQLModel):
     alias: Optional[str] = None
     category: Optional[str] = None
     brand: Optional[str] = None
+    purity: Optional[str] = None
     initial_quantity: Optional[float] = None
     unit: Optional[str] = None
     quantity: Optional[int] = None
@@ -180,6 +184,7 @@ class ReagentOrderResponse(BaseResponse):
     alias: Optional[str]
     category: Optional[str]
     brand: Optional[str]
+    purity: Optional[str]
     initial_quantity: Optional[float]
     unit: Optional[str]
     quantity: int

@@ -25,11 +25,16 @@ import { formatDate, formatDateTime, toText } from '@/lib/utils'
 
 import { inventoryAPI } from '@/api/client'
 import type { FilterAPI } from '@/hooks/useTableState'
+import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
+import { useSSEStore } from '@/store/sseStore'
+import { useAuthStore } from '@/store/useStore'
 import {
   ReturnFormSchema,
   createValibotResolver,
   getApiErrorMessage,
   createReturnQuantitySchema,
+  type ReturnFormData,
+  type ReturnFormInputData,
 } from '@/lib/validationSchemas'
 import { getReturnFormFields, defaultReturnValues } from '@/lib/formConfigs'
 
@@ -282,16 +287,18 @@ function DashboardBorrowReturnDialog({
   )
 }
 
-type ReturnForm = UseFormReturn<typeof defaultReturnValues>
+type ReturnForm = UseFormReturn<ReturnFormInputData, unknown, ReturnFormData>
 
 export function DashboardBorrowTab() {
+  const currentUser = useAuthStore((state) => state.user)
+  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const queryClient = useQueryClient()
 
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
   const [returnMode, setReturnMode] = useState<BorrowReturnMode>('used')
   const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
 
-  const returnForm = useForm({
+  const returnForm = useForm<ReturnFormInputData, unknown, ReturnFormData>({
     resolver: createValibotResolver(ReturnFormSchema),
     defaultValues: defaultReturnValues,
     shouldFocusError: false,
@@ -302,8 +309,9 @@ export function DashboardBorrowTab() {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'borrows'] }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
     ])
+    clearRoomStale('inventory')
     requestDashboardCountsRefresh()
-  }, [queryClient])
+  }, [clearRoomStale, queryClient])
 
   const borrowDashboardAPI = useMemo(() => createBorrowDashboardAPI(), [])
 
@@ -381,7 +389,9 @@ export function DashboardBorrowTab() {
     returnForm,
     isSubmittingReturn,
     onReturnModeChange: handleReturnModeChange,
-    onSubmit: handleReturn,
+    onSubmit: () => {
+      void handleReturn()
+    },
     onOpenChange: handleReturnDialogOpenChange,
   }
 
@@ -391,6 +401,32 @@ export function DashboardBorrowTab() {
         api={borrowDashboardAPI}
         queryKey={['dashboard', 'borrows']}
         tableId="dashboard-borrows"
+        realtime={{
+          room: 'inventory',
+          eventTypes: INVENTORY_SSE_EVENTS,
+          staleOnly: true,
+          onRefresh: refreshTables,
+          shouldHandleEvent: (event, context) => {
+            const payload = event.data as Record<string, unknown>
+            const item = payload.item as Record<string, unknown> | undefined
+            let itemId: number | null = null
+            if (typeof payload.id === 'number') {
+              itemId = payload.id
+            } else if (typeof item?.id === 'number') {
+              itemId = item.id
+            }
+
+            if (itemId !== null && context.loadedIds.has(itemId)) {
+              return true
+            }
+
+            if (!item || typeof currentUser?.id !== 'number') {
+              return false
+            }
+
+            return item.borrower_id === currentUser.id || item.last_borrower_id === currentUser.id
+          },
+        }}
         customColumns={borrowColumns}
         statusOptions={[{ value: 'all', label: '全部' }]}
         searchFieldOptions={BORROW_SEARCH_FIELDS}
