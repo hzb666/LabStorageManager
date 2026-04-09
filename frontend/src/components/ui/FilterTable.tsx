@@ -132,6 +132,19 @@ function getScrollHeight(
   return "calc(100vh - 112px - 16px)";
 }
 
+// 首屏无数据时仍给 loading 容器保留稳定高度，避免鉴权骨架切换后表格区域塌陷。
+function getLoadingSurfaceStyle(scrollHeight: number | string): React.CSSProperties {
+  if (typeof scrollHeight === "number") {
+    return { height: `${scrollHeight}px` };
+  }
+
+  if (scrollHeight !== "auto") {
+    return { height: scrollHeight };
+  }
+
+  return { minHeight: "25.5rem" };
+}
+
 function resolveTableColumns(
   customColumns?: ColumnDef<Record<string, unknown>, unknown>[],
 ): ColumnDef<Record<string, unknown>, unknown>[] {
@@ -474,8 +487,14 @@ function FilterTableContent({
 }: Readonly<FilterTableContentProps>) {
   if (filter.isLoading && filter.data.length === 0) {
     return (
-      <div className="flex items-center justify-center py-8 text-muted-foreground">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+      <div className="px-6 pb-6">
+        <div
+          className="flex items-center justify-center rounded-md border border-border bg-card text-muted-foreground"
+          style={getLoadingSurfaceStyle(scrollHeight)}
+        >
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+          <span>加载中...</span>
+        </div>
       </div>
     );
   }

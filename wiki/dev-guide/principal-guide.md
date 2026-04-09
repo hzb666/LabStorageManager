@@ -17,7 +17,7 @@
 - Redis 是加速层，不是事实源。当前项目把会话失效通知、登录限流和跨进程 SSE 放在 Redis 上，但就算 Redis 退化，SQLite 仍是业务主数据源。
 - 公共账号不是“弱权限用户”，而是专门受限身份。它在导入、建单等路径上会被显式拒绝。
 
-## 先看什么，才能最快进入状态
+## 快速进入状态的阅读顺序
 
 - 运行边界：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/main.tsx" />
 - 数据基线：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py" />
@@ -54,7 +54,7 @@
 
 - 列表里数据旧，但刷新后正确：优先查短 TTL 缓存和 SSE stale 处理。
 - 到货后找不到库存：优先查 `reagent_orders_workflow.py` 的确认到货/入库分支。
-- 被踢下线但页面还挂着：优先查 `auth.invalid` 事件、`triggerSessionInvalidation` 和当前会话 token hash。
+- 会话被强制下线但页面仍停留在当前状态：优先查 `auth.invalid` 事件、`triggerSessionInvalidation` 和当前会话 token hash。
 - 扩展导入打开了页面但没有批次：优先查 bridge、批次 TTL 和 `batch_id`。
 
 ## 接手时容易漏掉的点

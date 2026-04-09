@@ -52,7 +52,7 @@
 - `POST /api/reagent-orders`：当前 `CartImport` 页面提交试剂条目时实际调用的接口。
 - `POST /api/consumable-orders`：当前 `CartImport` 页面提交耗材条目时实际调用的接口。
 
-如果你在排查“扩展导入成功，但页面没有落单”，要先确认是桥接阶段失败，还是页面逐条调用标准订单 API 失败，而不是默认怀疑 `/api/cart-sync/import`。
+排查“扩展导入成功，但页面没有落单”时，应先确认是桥接阶段失败，还是页面逐条调用标准订单 API 失败，而不是默认怀疑 `/api/cart-sync/import`。
 
 ## 安全与边界
 

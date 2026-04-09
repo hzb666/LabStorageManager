@@ -137,13 +137,13 @@ flowchart LR
 | 后端启动 | `python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` |
 | 前端启动 | `cd frontend && npm run dev` |
 
-## 继续看哪一页
+## 相关主题
 
-- 想看代码目录怎么分：去 [目录结构](/overview/directory-structure)
-- 想看接口怎么组织：去 [API 边界与导航](/overview/api-boundary)
-- 想看后端职责：去 [后端服务地图](/backend/service-map)
-- 想看前端基础设施：去 [前端 Hooks](/frontend/hooks) 和 [前端 Lib 工具箱](/frontend/lib-overview)
-- 想看数据库实体：去 [数据模型](/database/data-model) 和 [字段参考](/database/field-reference)
+- 代码目录划分：参见 [目录结构](/overview/directory-structure)
+- 接口组织方式：参见 [API 边界与导航](/overview/api-boundary)
+- 后端职责分层：参见 [后端服务地图](/backend/service-map)
+- 前端基础设施：参见 [前端 Hooks](/frontend/hooks) 和 [前端 Lib 工具箱](/frontend/lib-overview)
+- 数据库实体与字段：参见 [数据模型](/database/data-model) 和 [字段参考](/database/field-reference)
 
 ## 参考代码
 - [app/core/auth.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py)
