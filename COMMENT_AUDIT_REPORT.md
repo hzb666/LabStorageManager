@@ -3,11 +3,13 @@
 > 审查范围：仓库内所有已跟踪代码文件（扩展名：.py/.js/.ts/.tsx/.mjs/.vue/.css/.html/.sh/.yml/.yaml/.toml/.conf）。\
 > 审查项：1) 纯英文注释；2) 多行注释（排除分类/分隔用途注释）。\
 > 说明：本次仅生成报告，不修改代码。
+> 注：问题片段为便于阅读会截取显示，`...` 表示原注释后续内容。
 
 - 目标代码文件数：**223**
 - 缺失文件数：**0**
-- 存在问题的文件数：**85**
-- 问题总数：**360**
+- 存在问题的文件数：**82**
+- 问题总数：**337**
+- 统计校验：已通过（已复核汇总数与逐文件明细一致）
 
 ## 逐文件审查结果
 
@@ -53,24 +55,21 @@
 
 ### app/api/consumable_orders.py
 
-- 结果：❌ 发现 17 处问题
-  - 1. 类型：多行注释；行号：1；片段：`耗材订单 API 路由：耗材申购流程管理。`
-  - 2. 类型：纯英文注释；行号：139；片段：`Atomic delete avoids check-then-delete races; explicit existence check preserves 404/403 semantics.`
-  - 3. 类型：多行注释；行号：163；片段：`补充 specification 展示字段。`
-  - 4. 类型：纯英文注释；行号：178；片段：`Get consumable order by ID`
-  - 5. 类型：纯英文注释；行号：347；片段：`Create a new consumable order`
-  - 6. 类型：纯英文注释；行号：476；片段：`Enrich with applicant names`
-  - 7. 类型：纯英文注释；行号：500；片段：`--- Export ---`
-  - 8. 类型：纯英文注释；行号：506；片段：`Export consumable orders as a downloadable XLSX file.`
-  - 9. 类型：纯英文注释；行号：524；片段：`Get consumable order by ID`
-  - 10. 类型：纯英文注释；行号：541；片段：`Update consumable order information`
-  - 11. 类型：纯英文注释；行号：623；片段：`Approve a consumable order (Admin only)`
-  - 12. 类型：纯英文注释；行号：664；片段：`Reject a consumable order (Admin only). Does not modify notes.`
-  - 13. 类型：多行注释；行号：699；片段：`完成耗材订单（耗材不需要入库）。`
-  - 14. 类型：纯英文注释；行号：708；片段：`Check if user is the applicant or admin`
-  - 15. 类型：纯英文注释；行号：722；片段：`Consumables complete directly (no stock-in)`
-  - 16. 类型：纯英文注释；行号：752；片段：`Get current user's consumable order progress`
-  - 17. 类型：纯英文注释；行号：808；片段：`Delete a consumable order (only applicant or admin can delete).`
+- 结果：❌ 发现 14 处问题
+  - 1. 类型：纯英文注释；行号：139；片段：`Atomic delete avoids check-then-delete races; explicit existence check preserves 404/403 semantics.`
+  - 2. 类型：纯英文注释；行号：178；片段：`Get consumable order by ID`
+  - 3. 类型：纯英文注释；行号：347；片段：`Create a new consumable order`
+  - 4. 类型：纯英文注释；行号：476；片段：`Enrich with applicant names`
+  - 5. 类型：纯英文注释；行号：506；片段：`Export consumable orders as a downloadable XLSX file.`
+  - 6. 类型：纯英文注释；行号：524；片段：`Get consumable order by ID`
+  - 7. 类型：纯英文注释；行号：541；片段：`Update consumable order information`
+  - 8. 类型：纯英文注释；行号：623；片段：`Approve a consumable order (Admin only)`
+  - 9. 类型：纯英文注释；行号：664；片段：`Reject a consumable order (Admin only). Does not modify notes.`
+  - 10. 类型：多行注释；行号：699；片段：`完成耗材订单（耗材不需要入库）。`
+  - 11. 类型：纯英文注释；行号：708；片段：`Check if user is the applicant or admin`
+  - 12. 类型：纯英文注释；行号：722；片段：`Consumables complete directly (no stock-in)`
+  - 13. 类型：纯英文注释；行号：752；片段：`Get current user's consumable order progress`
+  - 14. 类型：纯英文注释；行号：808；片段：`Delete a consumable order (only applicant or admin can delete).`
 
 ### app/api/deps.py
 
@@ -82,13 +81,11 @@
 
 ### app/api/events.py
 
-- 结果：❌ 发现 1 处问题
-  - 1. 类型：多行注释；行号：1；片段：`SSE 事件流入口。`
+- 结果：✅ 无问题
 
 ### app/api/inventory.py
 
-- 结果：❌ 发现 1 处问题
-  - 1. 类型：多行注释；行号：1；片段：`Inventory API 路由：库存管理。`
+- 结果：✅ 无问题
 
 ### app/api/inventory_extended_routes.py
 
@@ -96,19 +93,17 @@
 
 ### app/api/reagent_orders.py
 
-- 结果：❌ 发现 12 处问题
-  - 1. 类型：多行注释；行号：1；片段：`试剂订单 API 路由：试剂申购流程管理。`
-  - 2. 类型：纯英文注释；行号：186；片段：`Add computed specification field to order response dict`
-  - 3. 类型：纯英文注释；行号：201；片段：`Get reagent order by ID`
-  - 4. 类型：纯英文注释；行号：391；片段：`Normalize CAS Number`
-  - 5. 类型：纯英文注释；行号：401；片段：`Parse specification to get initial_quantity and unit`
-  - 6. 类型：纯英文注释；行号：423；片段：`Create order`
-  - 7. 类型：纯英文注释；行号：558；片段：`Enrich with applicant names`
-  - 8. 类型：纯英文注释；行号：583；片段：`--- Export ---`
-  - 9. 类型：纯英文注释；行号：589；片段：`Export reagent orders as a downloadable XLSX file.`
-  - 10. 类型：纯英文注释；行号：608；片段：`Get CAS overview for duplicate-check hints in forms and expanded rows.`
-  - 11. 类型：多行注释；行号：624；片段：`订单：匹配同 CAS 的所有订单。`
-  - 12. 类型：纯英文注释；行号：717；片段：`Get reagent order by ID`
+- 结果：❌ 发现 10 处问题
+  - 1. 类型：纯英文注释；行号：186；片段：`Add computed specification field to order response dict`
+  - 2. 类型：纯英文注释；行号：201；片段：`Get reagent order by ID`
+  - 3. 类型：纯英文注释；行号：391；片段：`Normalize CAS Number`
+  - 4. 类型：纯英文注释；行号：401；片段：`Parse specification to get initial_quantity and unit`
+  - 5. 类型：纯英文注释；行号：423；片段：`Create order`
+  - 6. 类型：纯英文注释；行号：558；片段：`Enrich with applicant names`
+  - 7. 类型：纯英文注释；行号：589；片段：`Export reagent orders as a downloadable XLSX file.`
+  - 8. 类型：纯英文注释；行号：608；片段：`Get CAS overview for duplicate-check hints in forms and expanded rows.`
+  - 9. 类型：多行注释；行号：624；片段：`订单：匹配同 CAS 的所有订单。`
+  - 10. 类型：纯英文注释；行号：717；片段：`Get reagent order by ID`
 
 ### app/api/reagent_orders_workflow.py
 
@@ -177,9 +172,8 @@
 
 ### app/core/constants.py
 
-- 结果：❌ 发现 2 处问题
+- 结果：❌ 发现 1 处问题
   - 1. 类型：多行注释；行号：166；片段：`SSE runtime tuning`
-  - 2. 类型：纯英文注释；行号：166；片段：`SSE runtime tuning`
 
 ### app/core/db_compat.py
 
@@ -283,20 +277,19 @@
 
 ### app/models/inventory_operation_log.py
 
-- 结果：❌ 发现 9 处问题
+- 结果：❌ 发现 8 处问题
   - 1. 类型：多行注释；行号：27；片段：`snapshot_json short-key contract:`
-  - 2. 类型：纯英文注释；行号：27；片段：`snapshot_json short-key contract:`
-  - 3. 类型：纯英文注释；行号：28；片段：`id=inventory row id, ic=internal_code, ca=cas_number, na=name, en=english_name,`
-  - 4. 类型：纯英文注释；行号：29；片段：`al=alias, cg=category, br=brand, pu=purity, sl=storage_location, iq=initial_quantity,`
-  - 5. 类型：纯英文注释；行号：30；片段：`rq=remaining_quantity, rp=remaining_percent, un=unit, hz=is_hazardous,`
-  - 6. 类型：纯英文注释；行号：31；片段：`nt=notes, bi=borrower_id, lb=last_borrower_id,`
-  - 7. 类型：纯英文注释；行号：32；片段：`tk=temporary_keeper_id, oi=source_order_id, cb=created_by_id, cr=created_at,`
-  - 8. 类型：纯英文注释；行号：33；片段：`up=updated_at, sc=source, ct=count(export only), cq=consumed_quantity,`
-  - 9. 类型：纯英文注释；行号：34；片段：`bf=before(update only), af=after(update only)`
+  - 2. 类型：纯英文注释；行号：28；片段：`id=inventory row id, ic=internal_code, ca=cas_number, na=name, en=english_name,`
+  - 3. 类型：纯英文注释；行号：29；片段：`al=alias, cg=category, br=brand, pu=purity, sl=storage_location, iq=initial_quantity,`
+  - 4. 类型：纯英文注释；行号：30；片段：`rq=remaining_quantity, rp=remaining_percent, un=unit, hz=is_hazardous,`
+  - 5. 类型：纯英文注释；行号：31；片段：`nt=notes, bi=borrower_id, lb=last_borrower_id,`
+  - 6. 类型：纯英文注释；行号：32；片段：`tk=temporary_keeper_id, oi=source_order_id, cb=created_by_id, cr=created_at,`
+  - 7. 类型：纯英文注释；行号：33；片段：`up=updated_at, sc=source, ct=count(export only), cq=consumed_quantity,`
+  - 8. 类型：纯英文注释；行号：34；片段：`bf=before(update only), af=after(update only)`
 
 ### app/models/reagent_order.py
 
-- 结果：❌ 发现 14 处问题
+- 结果：❌ 发现 13 处问题
   - 1. 类型：纯英文注释；行号：41；片段：`CAS Number - Critical field for reagents`
   - 2. 类型：纯英文注释；行号：43；片段：`Chinese name (with index for query and pinyin for sorting)`
   - 3. 类型：纯英文注释；行号：45；片段：`English name`
@@ -307,10 +300,9 @@
   - 8. 类型：纯英文注释；行号：59；片段：`Quantity ordered (number of bottles)`
   - 9. 类型：纯英文注释；行号：61；片段：`Price`
   - 10. 类型：多行注释；行号：63；片段：`Order reason`
-  - 11. 类型：纯英文注释；行号：63；片段：`Order reason`
-  - 12. 类型：纯英文注释；行号：64；片段：`Order reason (optional, frontend must provide when creating)`
-  - 13. 类型：纯英文注释；行号：78；片段：`Hazardous flag`
-  - 14. 类型：纯英文注释；行号：80；片段：`Notes`
+  - 11. 类型：纯英文注释；行号：64；片段：`Order reason (optional, frontend must provide when creating)`
+  - 12. 类型：纯英文注释；行号：78；片段：`Hazardous flag`
+  - 13. 类型：纯英文注释；行号：80；片段：`Notes`
 
 ### app/models/reagent_order_operation_log.py
 
@@ -350,17 +342,16 @@
 
 ### app/services/cas_utils.py
 
-- 结果：❌ 发现 10 处问题
+- 结果：❌ 发现 9 处问题
   - 1. 类型：纯英文注释；行号：38；片段：`Remove all whitespace`
   - 2. 类型：多行注释；行号：83；片段：``validate_and_normalize_cas` passes normalized input, so compare directly`
-  - 3. 类型：纯英文注释；行号：83；片段：``validate_and_normalize_cas` passes normalized input, so compare directly`
-  - 4. 类型：纯英文注释；行号：84；片段：`here to avoid a second normalize pass via `is_special_cas_value`.`
-  - 5. 类型：纯英文注释；行号：88；片段：`Check basic pattern`
-  - 6. 类型：纯英文注释；行号：92；片段：`Split and validate structure`
-  - 7. 类型：纯英文注释；行号：97；片段：`Extract parts`
-  - 8. 类型：纯英文注释；行号：102；片段：`Combine first two parts as sequence number`
-  - 9. 类型：纯英文注释；行号：105；片段：`Calculate expected check digit`
-  - 10. 类型：纯英文注释；行号：109；片段：`Validate check digit`
+  - 3. 类型：纯英文注释；行号：84；片段：`here to avoid a second normalize pass via `is_special_cas_value`.`
+  - 4. 类型：纯英文注释；行号：88；片段：`Check basic pattern`
+  - 5. 类型：纯英文注释；行号：92；片段：`Split and validate structure`
+  - 6. 类型：纯英文注释；行号：97；片段：`Extract parts`
+  - 7. 类型：纯英文注释；行号：102；片段：`Combine first two parts as sequence number`
+  - 8. 类型：纯英文注释；行号：105；片段：`Calculate expected check digit`
+  - 9. 类型：纯英文注释；行号：109；片段：`Validate check digit`
 
 ### app/services/chemical_info.py
 
@@ -399,14 +390,13 @@
 
 ### app/services/internal_code.py
 
-- 结果：❌ 发现 7 处问题
+- 结果：❌ 发现 6 处问题
   - 1. 类型：纯英文注释；行号：19；片段：`UPDATE ... RETURNING requires SQLite >= 3.35.0`
   - 2. 类型：纯英文注释；行号：101；片段：`Use lazy bootstrap so runtime can upgrade old DBs without a separate migration release.`
   - 3. 类型：纯英文注释；行号：125；片段：`Reserve the whole range in one atomic operation to avoid check-then-insert races.`
   - 4. 类型：纯英文注释；行号：150；片段：`Fallback for SQLite < 3.35: UPDATE then SELECT within the same transaction.`
   - 5. 类型：多行注释；行号：198；片段：`Validate CAS number to prevent SQL injection`
-  - 6. 类型：纯英文注释；行号：198；片段：`Validate CAS number to prevent SQL injection`
-  - 7. 类型：纯英文注释；行号：199；片段：`CAS should only contain digits and hyphens`
+  - 6. 类型：纯英文注释；行号：199；片段：`CAS should only contain digits and hyphens`
 
 ### app/services/inventory_creation.py
 
@@ -461,13 +451,12 @@
 
 ### app/services/spec_utils.py
 
-- 结果：❌ 发现 6 处问题
+- 结果：❌ 发现 5 处问题
   - 1. 类型：纯英文注释；行号：10；片段：`Canonical unit form mapping (lowercase -> display form)`
   - 2. 类型：纯英文注释；行号：53；片段：`Normalize unit to canonical form (e.g., "ml" -> "mL")`
   - 3. 类型：纯英文注释；行号：56；片段：`Format number: integer without decimals, float with decimals`
   - 4. 类型：多行注释；行号：82；片段：`Pattern: number + optional space + unit`
-  - 5. 类型：纯英文注释；行号：82；片段：`Pattern: number + optional space + unit`
-  - 6. 类型：纯英文注释；行号：83；片段：`Use (\d+(?:\.\d+)?) to avoid matching invalid formats like "1.5.5"`
+  - 5. 类型：纯英文注释；行号：83；片段：`Use (\d+(?:\.\d+)?) to avoid matching invalid formats like "1.5.5"`
 
 ### app/services/sql_utils.py
 
@@ -476,16 +465,15 @@
 
 ### app/services/sse_manager.py
 
-- 结果：❌ 发现 9 处问题
+- 结果：❌ 发现 8 处问题
   - 1. 类型：纯英文注释；行号：129；片段：`Reclaim empty rooms to avoid unbounded in-memory room growth.`
   - 2. 类型：纯英文注释；行号：209；片段：`Queue full means client is too slow; drop and eventually disconnect.`
   - 3. 类型：纯英文注释；行号：226；片段：`Client may already be disconnected by another coroutine.`
   - 4. 类型：多行注释；行号：262；片段：`Drop already-buffered business events so revocation is the next thing the`
-  - 5. 类型：纯英文注释；行号：262；片段：`Drop already-buffered business events so revocation is the next thing the`
-  - 6. 类型：纯英文注释；行号：263；片段：`client sees. Otherwise a kicked session can still consume stale messages.`
-  - 7. 类型：纯英文注释；行号：338；片段：`Extract room from channel with prefix: "lsm:sse:room-123" -> "room-123"`
-  - 8. 类型：纯英文注释；行号：360；片段：`Already pushed locally by this process.`
-  - 9. 类型：纯英文注释；行号：502；片段：`Stop stream quickly when client is removed (e.g., slow client governance).`
+  - 5. 类型：纯英文注释；行号：263；片段：`client sees. Otherwise a kicked session can still consume stale messages.`
+  - 6. 类型：纯英文注释；行号：338；片段：`Extract room from channel with prefix: "lsm:sse:room-123" -> "room-123"`
+  - 7. 类型：纯英文注释；行号：360；片段：`Already pushed locally by this process.`
+  - 8. 类型：纯英文注释；行号：502；片段：`Stop stream quickly when client is removed (e.g., slow client governance).`
 
 ### app/services/sse_redis.py
 
@@ -514,8 +502,7 @@
 
 ### browser-extension/background/service-worker.js
 
-- 结果：❌ 发现 1 处问题
-  - 1. 类型：多行注释；行号：1；片段：`// 购物车同步 - Service Worker // 处理跨标签页通信和后端API调用`
+- 结果：✅ 无问题
 
 ### browser-extension/content/import-bridge.js
 
@@ -556,7 +543,6 @@
 
 - 结果：✅ 无问题
 
-
 ### docker/nginx/default.conf
 
 - 结果：✅ 无问题
@@ -569,7 +555,6 @@
 
 - 结果：✅ 无问题
 
-
 ### frontend/index.html
 
 - 结果：✅ 无问题
@@ -580,9 +565,8 @@
 
 ### frontend/public/lib/RDKit_minimal.js
 
-- 结果：❌ 发现 2 处问题
-  - 1. 类型：多行注释；行号：16；片段：`// This default export looks redundant, but it allows TS to import this // commonjs style module.`
-  - 2. 类型：纯英文注释；行号：16；片段：`This default export looks redundant, but it allows TS to import this`
+- 结果：❌ 发现 1 处问题
+  - 1. 类型：纯英文注释；行号：16；片段：`This default export looks redundant, but it allows TS to import this`
 
 ### frontend/scripts/lib-assets.mjs
 
@@ -642,7 +626,7 @@
 ### frontend/src/components/BugReportButton.tsx
 
 - 结果：❌ 发现 1 处问题
-  - 1. 类型：多行注释；行号：1；片段：`/** * BugReportButton - Bug反馈按钮组件 * * 点击后： * 1. 获取前端错误日志 * 2. 获取后端错误日志（需要管理员权限） * 3. 生成日志文件并下载 * 4. 打开mailto链...`
+  - 1. 类型：多行注释；行号：1；片段：`/** * BugReportButton - Bug反馈按钮组件 * * 点击后： * 1. 获取前端错误日志 * 2. 获取后端错误日志（需要管理员权限） * 3. 生成日志文件并下载 * 4. 打开mailto链接 */`
 
 ### frontend/src/components/CartImportLoadingScreen.tsx
 
@@ -733,15 +717,8 @@
 
 ### frontend/src/components/ui/FormField.tsx
 
-- 结果：❌ 发现 8 处问题
+- 结果：❌ 发现 1 处问题
   - 1. 类型：多行注释；行号：13；片段：`/** * FormField - 表单字段组合组件 * 封装 Label + Input/Select + ErrorMessage 的组合 * 支持语义化颜色和 dark mode * * 使用示例: * ```ts...`
-  - 2. 类型：纯英文注释；行号：19；片段：````tsx`
-  - 3. 类型：纯英文注释；行号：21；片段：`<Input`
-  - 4. 类型：纯英文注释；行号：22；片段：`id="add_spec"`
-  - 5. 类型：纯英文注释；行号：23；片段：`value={formData.specification}`
-  - 6. 类型：纯英文注释；行号：24；片段：`onChange={(e) => handleChange('specification', e.target.value)}`
-  - 7. 类型：纯英文注释；行号：25；片段：`className={cn(INPUT_STYLES.lg, error && 'border-destructive')}`
-  - 8. 类型：纯英文注释；行号：27；片段：`</FormField>`
 
 ### frontend/src/components/ui/HazardousIcon.tsx
 
@@ -1001,7 +978,6 @@
 ### frontend/src/lib/options.ts
 
 - 结果：✅ 无问题
-
 
 ### frontend/src/lib/orderSubmitHelpers.ts
 
