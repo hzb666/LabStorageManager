@@ -153,7 +153,7 @@
   - [纯英文注释] 行 211：`Add cache headers for static files (images, fonts, etc.)`
   - [纯英文注释] 行 392：`CORS middleware - must be added AFTER exception handlers`
   - [纯英文注释] 行 418：`Global exception handler for logging 500 errors - must be added BEFORE routes`
-  - [多行注释] 行 497：`Import models to ensure tables are created This is needed for SQLModel to register all models`
+  - [纯英文注释] 行 497：`Import models to ensure tables are created This is needed for SQLModel to register all models`
 
 ## `app/models/__init__.py`
 - 结论：无问题
@@ -189,7 +189,7 @@
 
 ## `app/models/inventory_operation_log.py`
 - 结论：有问题
-  - [多行注释] 行 27：`snapshot_json short-key contract: id=inventory row id, ic=internal_code, ca=cas_number, na=name, en=english_name, al=alias, cg=category, br=brand, pu=purity, sl=storage_location, iq=initial_quantity,`
+  - [纯英文注释] 行 27：`snapshot_json short-key contract: id=inventory row id, ic=internal_code, ca=cas_number, na=name, en=english_name, al=alias, cg=category, br=brand, pu=purity, sl=storage_location, iq=initial_quantity,`
 
 ## `app/models/reagent_order.py`
 - 结论：有问题
@@ -198,7 +198,7 @@
   - [纯英文注释] 行 51：`Brand (with index for query and pinyin for sorting)`
   - [纯英文注释] 行 53：`Purity / grade (e.g. 95%, AR, HPLC)`
   - [纯英文注释] 行 57：`Unit (e.g., "ml", "g", "L")`
-  - [多行注释] 行 63：`Order reason Order reason (optional, frontend must provide when creating)`
+  - [纯英文注释] 行 63：`Order reason Order reason (optional, frontend must provide when creating)`
 
 ## `app/models/reagent_order_operation_log.py`
 - 结论：无问题
@@ -229,7 +229,7 @@
 
 ## `app/services/cas_utils.py`
 - 结论：有问题
-  - [多行注释] 行 83：`\`validate_and_normalize_cas\` passes normalized input, so compare directly here to avoid a second normalize pass via \`is_special_cas_value\`.`
+  - [纯英文注释] 行 83：`\`validate_and_normalize_cas\` passes normalized input, so compare directly here to avoid a second normalize pass via \`is_special_cas_value\`.`
 
 ## `app/services/chemical_info.py`
 - 结论：无问题
@@ -264,7 +264,7 @@
   - [纯英文注释] 行 101：`Use lazy bootstrap so runtime can upgrade old DBs without a separate migration release.`
   - [纯英文注释] 行 125：`Reserve the whole range in one atomic operation to avoid check-then-insert races.`
   - [纯英文注释] 行 150：`Fallback for SQLite < 3.35: UPDATE then SELECT within the same transaction.`
-  - [多行注释] 行 198：`Validate CAS number to prevent SQL injection CAS should only contain digits and hyphens`
+  - [纯英文注释] 行 198：`Validate CAS number to prevent SQL injection CAS should only contain digits and hyphens`
 
 ## `app/services/inventory_creation.py`
 - 结论：有问题
@@ -310,7 +310,7 @@
   - [纯英文注释] 行 10：`Canonical unit form mapping (lowercase -> display form)`
   - [纯英文注释] 行 53：`Normalize unit to canonical form (e.g., "ml" -> "mL")`
   - [纯英文注释] 行 56：`Format number: integer without decimals, float with decimals`
-  - [多行注释] 行 82：`Pattern: number + optional space + unit Use (\d+(?:\.\d+)?) to avoid matching invalid formats like "1.5.5"`
+  - [纯英文注释] 行 82：`Pattern: number + optional space + unit Use (\d+(?:\.\d+)?) to avoid matching invalid formats like "1.5.5"`
 
 ## `app/services/sql_utils.py`
 - 结论：有问题
@@ -321,7 +321,7 @@
   - [纯英文注释] 行 129：`Reclaim empty rooms to avoid unbounded in-memory room growth.`
   - [纯英文注释] 行 209：`Queue full means client is too slow; drop and eventually disconnect.`
   - [纯英文注释] 行 226：`Client may already be disconnected by another coroutine.`
-  - [多行注释] 行 262：`Drop already-buffered business events so revocation is the next thing the client sees. Otherwise a kicked session can still consume stale messages.`
+  - [纯英文注释] 行 262：`Drop already-buffered business events so revocation is the next thing the client sees. Otherwise a kicked session can still consume stale messages.`
   - [纯英文注释] 行 338：`Extract room from channel with prefix: "lsm:sse:room-123" -> "room-123"`
   - [纯英文注释] 行 360：`Already pushed locally by this process.`
   - [纯英文注释] 行 502：`Stop stream quickly when client is removed (e.g., slow client governance).`
@@ -408,7 +408,7 @@
 
 ## `frontend/public/lib/RDKit_minimal.js`
 - 结论：有问题
-  - [多行注释] 行 16：`This default export looks redundant, but it allows TS to import this commonjs style module.`
+  - [纯英文注释] 行 16：`This default export looks redundant, but it allows TS to import this commonjs style module.`
 
 ## `frontend/scripts/lib-assets.mjs`
 - 结论：无问题
@@ -441,7 +441,7 @@
 
 ## `frontend/src/components/BugReportButton.tsx`
 - 结论：有问题
-  - [多行注释] 行 1：`BugReportButton - Bug反馈按钮组件 点击后： 1. 获取前端错误日志 2. 获取后端错误日志（需要管理员权限） 3. 生成日志文件并下载 4. 打开mailto链接`
+  - [多行注释] 行 1：`BugReportButton - Bug反馈按钮组件  点击后： 1. 获取前端错误日志 2. 获取后端错误日志（需要管理员权限） 3. 生成日志文件并下载 4. 打开mailto链接`
 
 ## `frontend/src/components/CartImportLoadingScreen.tsx`
 - 结论：无问题
@@ -510,7 +510,7 @@
 
 ## `frontend/src/components/ui/FormField.tsx`
 - 结论：有问题
-  - [多行注释] 行 13：`FormField - 表单字段组合组件 封装 Label + Input/Select + ErrorMessage 的组合 支持语义化颜色和 dark mode 使用示例: \`\`\`tsx <FormField label="规格" required error={formErrors.specification}> <Input id="add_spec" value={formData.sp`
+  - [多行注释] 行 13：`FormField - 表单字段组合组件 封装 Label + Input/Select + ErrorMessage 的组合 支持语义化颜色和 dark mode  使用示例: \`\`\`tsx <FormField label="规格" required error={formErrors.specification}> <Input id="add_spec" value={formData.s`
 
 ## `frontend/src/components/ui/HazardousIcon.tsx`
 - 结论：无问题
@@ -553,7 +553,7 @@
 
 ## `frontend/src/components/ui/StaleBanner.tsx`
 - 结论：有问题
-  - [多行注释] 行 1：`Banner shown when list snapshot is considered structurally stale. Keep it independent so each page can opt in with minimal wiring.`
+  - [纯英文注释] 行 1：`Banner shown when list snapshot is considered structurally stale.  Keep it independent so each page can opt in with minimal wiring.`
 
 ## `frontend/src/components/ui/StatusBadge.tsx`
 - 结论：无问题
@@ -588,19 +588,19 @@
 
 ## `frontend/src/hooks/useDialogState.tsx`
 - 结论：有问题
-  - [多行注释] 行 3：`Custom hook for confirm dialog @param initialState string | null @returns A stateful value, and a function to update it. @example const [open, setOpen] = useDialogState<"approve" | "reject">()`
+  - [纯英文注释] 行 3：`Custom hook for confirm dialog @param initialState string | null @returns A stateful value, and a function to update it. @example const [open, setOpen] = useDialogState<"approve" | "reject">()`
 
 ## `frontend/src/hooks/useErrorLogger.tsx`
 - 结论：有问题
-  - [多行注释] 行 1：`useErrorLogger - 前端错误日志收集Hook 自动捕获前端控制台错误和网络请求错误 日志仅保存在内存中，页面刷新后清除（保护隐私）`
+  - [多行注释] 行 1：`useErrorLogger - 前端错误日志收集Hook  自动捕获前端控制台错误和网络请求错误 日志仅保存在内存中，页面刷新后清除（保护隐私）`
 
 ## `frontend/src/hooks/useFormModal.tsx`
 - 结论：有问题
-  - [多行注释] 行 44：`通用表单Modal Hook 封装表单状态管理、验证和提交流逻辑 @example \`\`\`tsx const { formData, formErrors, submitting, handleChange, validateForm, resetForm, handleSubmit } = useFormModal({ initialData: { name: '', quantity: 0 }`
+  - [多行注释] 行 44：`通用表单Modal Hook 封装表单状态管理、验证和提交流逻辑  @example \`\`\`tsx const { formData, formErrors, submitting, handleChange, validateForm, resetForm, handleSubmit } = useFormModal({ initialData: { name: '', quantity: 0`
 
 ## `frontend/src/hooks/useListSSE.ts`
 - 结论：有问题
-  - [多行注释] 行 1：`List-focused SSE integration hook. Policy: - Stable row-field updates are patched locally. - Structural changes only patch when they are obviously safe. - Ambiguous cases fall back to stale banner ref`
+  - [纯英文注释] 行 1：`List-focused SSE integration hook.  Policy: - Stable row-field updates are patched locally. - Structural changes only patch when they are obviously safe. - Ambiguous cases fall back to stale banner re`
 
 ## `frontend/src/hooks/useMobile.tsx`
 - 结论：无问题
@@ -614,7 +614,7 @@
 
 ## `frontend/src/hooks/useSSE.ts`
 - 结论：有问题
-  - [多行注释] 行 1：`Generic SSE hook for room-based event streams. Integration: 1) Build event handlers in page/domain hook. 2) Call useSSE({ rooms, handlers }). 3) Use store stale flag to show refresh banner.`
+  - [纯英文注释] 行 1：`Generic SSE hook for room-based event streams.  Integration: 1) Build event handlers in page/domain hook. 2) Call useSSE({ rooms, handlers }). 3) Use store stale flag to show refresh banner.`
 
 ## `frontend/src/hooks/useTableState.tsx`
 - 结论：无问题
@@ -689,7 +689,7 @@
 
 ## `frontend/src/lib/tableConfigs.tsx`
 - 结论：有问题
-  - [多行注释] 行 1：`表格列配置抽离 仿照 formConfigs.tsx 模式，集中管理表格列配置 使用方式： import { getInventoryTableColumns } from '@/lib/tableConfigs' const columns = getInventoryTableColumns()`
+  - [多行注释] 行 1：`表格列配置抽离 仿照 formConfigs.tsx 模式，集中管理表格列配置  使用方式： import { getInventoryTableColumns } from '@/lib/tableConfigs' const columns = getInventoryTableColumns()`
   - [多行注释] 行 30：`库存表格列配置 包含：CAS号、名称、位置、分类、品牌、剩余/规格、状态`
   - [多行注释] 行 149：`试剂订单表格列配置 包含：CAS号、名称、品牌、规格、价格、原因、订购人、时间、状态`
   - [多行注释] 行 284：`耗材订单表格列配置 包含：名称、分类、品牌、规格、数量、价格、订购人、状态`
@@ -706,7 +706,7 @@
 
 ## `frontend/src/lib/validationSchemas.ts`
 - 结论：有问题
-  - [多行注释] 行 1：`Valibot 验证 Schemas 使用方法: \`\`\`tsx import { useForm } from 'react-hook-form' import { valibotResolver } from '@hookform/resolvers/valibot' import { InventorySchema } from '@/lib/validationSchemas' const`
+  - [多行注释] 行 1：`Valibot 验证 Schemas 使用方法: \`\`\`tsx import { useForm } from 'react-hook-form' import { valibotResolver } from '@hookform/resolvers/valibot' import { InventorySchema } from '@/lib/validationSchemas'  const`
   - [多行注释] 行 20：`类型化 resolver - 解决类型推断问题 使用方法: resolver: createValibotResolver(InventoryFormSchema)`
   - [多行注释] 行 50：`必填字符串验证 - 替代 validateRequired @param fieldName 字段中文名称`
   - [多行注释] 行 61：`字符串长度验证 - 替代 validateStringLength @param fieldName 字段中文名称 @param min 最小长度 @param max 最大长度`
@@ -803,7 +803,7 @@
 
 ## `frontend/src/store/sseStore.ts`
 - 结论：有问题
-  - [多行注释] 行 1：`SSE runtime state store. This file is intentionally standalone so it can be integrated page-by-page without touching existing global stores.`
+  - [纯英文注释] 行 1：`SSE runtime state store.  This file is intentionally standalone so it can be integrated page-by-page without touching existing global stores.`
   - [纯英文注释] 行 21：`Track sequence per room for reliability checks.`
   - [纯英文注释] 行 107：`Ignore duplicate/old events.`
 
