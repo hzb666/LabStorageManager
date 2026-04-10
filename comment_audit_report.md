@@ -154,7 +154,6 @@
   - [纯英文注释] 行 392：`CORS middleware - must be added AFTER exception handlers`
   - [纯英文注释] 行 418：`Global exception handler for logging 500 errors - must be added BEFORE routes`
   - [多行注释] 行 497：`Import models to ensure tables are created This is needed for SQLModel to register all models`
-  - [纯英文注释] 行 497：`Import models to ensure tables are created This is needed for SQLModel to register all models`
 
 ## `app/models/__init__.py`
 - 结论：无问题
@@ -191,7 +190,6 @@
 ## `app/models/inventory_operation_log.py`
 - 结论：有问题
   - [多行注释] 行 27：`snapshot_json short-key contract: id=inventory row id, ic=internal_code, ca=cas_number, na=name, en=english_name, al=alias, cg=category, br=brand, pu=purity, sl=storage_location, iq=initial_quantity,`
-  - [纯英文注释] 行 27：`snapshot_json short-key contract: id=inventory row id, ic=internal_code, ca=cas_number, na=name, en=english_name, al=alias, cg=category, br=brand, pu=purity, sl=storage_location, iq=initial_quantity,`
 
 ## `app/models/reagent_order.py`
 - 结论：有问题
@@ -201,7 +199,6 @@
   - [纯英文注释] 行 53：`Purity / grade (e.g. 95%, AR, HPLC)`
   - [纯英文注释] 行 57：`Unit (e.g., "ml", "g", "L")`
   - [多行注释] 行 63：`Order reason Order reason (optional, frontend must provide when creating)`
-  - [纯英文注释] 行 63：`Order reason Order reason (optional, frontend must provide when creating)`
 
 ## `app/models/reagent_order_operation_log.py`
 - 结论：无问题
@@ -233,7 +230,6 @@
 ## `app/services/cas_utils.py`
 - 结论：有问题
   - [多行注释] 行 83：`\`validate_and_normalize_cas\` passes normalized input, so compare directly here to avoid a second normalize pass via \`is_special_cas_value\`.`
-  - [纯英文注释] 行 83：`\`validate_and_normalize_cas\` passes normalized input, so compare directly here to avoid a second normalize pass via \`is_special_cas_value\`.`
 
 ## `app/services/chemical_info.py`
 - 结论：无问题
@@ -269,7 +265,6 @@
   - [纯英文注释] 行 125：`Reserve the whole range in one atomic operation to avoid check-then-insert races.`
   - [纯英文注释] 行 150：`Fallback for SQLite < 3.35: UPDATE then SELECT within the same transaction.`
   - [多行注释] 行 198：`Validate CAS number to prevent SQL injection CAS should only contain digits and hyphens`
-  - [纯英文注释] 行 198：`Validate CAS number to prevent SQL injection CAS should only contain digits and hyphens`
 
 ## `app/services/inventory_creation.py`
 - 结论：有问题
@@ -316,7 +311,6 @@
   - [纯英文注释] 行 53：`Normalize unit to canonical form (e.g., "ml" -> "mL")`
   - [纯英文注释] 行 56：`Format number: integer without decimals, float with decimals`
   - [多行注释] 行 82：`Pattern: number + optional space + unit Use (\d+(?:\.\d+)?) to avoid matching invalid formats like "1.5.5"`
-  - [纯英文注释] 行 82：`Pattern: number + optional space + unit Use (\d+(?:\.\d+)?) to avoid matching invalid formats like "1.5.5"`
 
 ## `app/services/sql_utils.py`
 - 结论：有问题
@@ -328,7 +322,6 @@
   - [纯英文注释] 行 209：`Queue full means client is too slow; drop and eventually disconnect.`
   - [纯英文注释] 行 226：`Client may already be disconnected by another coroutine.`
   - [多行注释] 行 262：`Drop already-buffered business events so revocation is the next thing the client sees. Otherwise a kicked session can still consume stale messages.`
-  - [纯英文注释] 行 262：`Drop already-buffered business events so revocation is the next thing the client sees. Otherwise a kicked session can still consume stale messages.`
   - [纯英文注释] 行 338：`Extract room from channel with prefix: "lsm:sse:room-123" -> "room-123"`
   - [纯英文注释] 行 360：`Already pushed locally by this process.`
   - [纯英文注释] 行 502：`Stop stream quickly when client is removed (e.g., slow client governance).`
@@ -387,8 +380,7 @@
 - 结论：无问题
 
 ## `docker/backend/entrypoint.sh`
-- 结论：有问题
-  - [纯英文注释] 行 1：`!/bin/sh`
+- 结论：无问题
 
 ## `docker/frontend/Dockerfile`
 - 结论：无问题
@@ -400,9 +392,7 @@
 - 结论：无问题
 
 ## `frontend/eslint.config.js`
-- 结论：有问题
-  - [多行注释] 行 10：`.css"]), { files: ["*`
-  - [纯英文注释] 行 10：`.css"]), { files: ["*`
+- 结论：无问题
 
 ## `frontend/index.html`
 - 结论：无问题
@@ -419,7 +409,6 @@
 ## `frontend/public/lib/RDKit_minimal.js`
 - 结论：有问题
   - [多行注释] 行 16：`This default export looks redundant, but it allows TS to import this commonjs style module.`
-  - [纯英文注释] 行 16：`This default export looks redundant, but it allows TS to import this commonjs style module.`
 
 ## `frontend/scripts/lib-assets.mjs`
 - 结论：无问题
@@ -503,8 +492,7 @@
 - 结论：无问题
 
 ## `frontend/src/components/ui/DataTable.tsx`
-- 结论：有问题
-  - [纯英文注释] 行 158：`eslint-disable-next-line react-hooks/incompatible-library`
+- 结论：无问题
 
 ## `frontend/src/components/ui/DataTableBody.tsx`
 - 结论：有问题
@@ -518,8 +506,7 @@
 - 结论：无问题
 
 ## `frontend/src/components/ui/FilterTable.tsx`
-- 结论：有问题
-  - [纯英文注释] 行 632：`eslint-disable-next-line react-hooks/incompatible-library`
+- 结论：无问题
 
 ## `frontend/src/components/ui/FormField.tsx`
 - 结论：有问题
@@ -567,7 +554,6 @@
 ## `frontend/src/components/ui/StaleBanner.tsx`
 - 结论：有问题
   - [多行注释] 行 1：`Banner shown when list snapshot is considered structurally stale. Keep it independent so each page can opt in with minimal wiring.`
-  - [纯英文注释] 行 1：`Banner shown when list snapshot is considered structurally stale. Keep it independent so each page can opt in with minimal wiring.`
 
 ## `frontend/src/components/ui/StatusBadge.tsx`
 - 结论：无问题
@@ -603,7 +589,6 @@
 ## `frontend/src/hooks/useDialogState.tsx`
 - 结论：有问题
   - [多行注释] 行 3：`Custom hook for confirm dialog @param initialState string | null @returns A stateful value, and a function to update it. @example const [open, setOpen] = useDialogState<"approve" | "reject">()`
-  - [纯英文注释] 行 3：`Custom hook for confirm dialog @param initialState string | null @returns A stateful value, and a function to update it. @example const [open, setOpen] = useDialogState<"approve" | "reject">()`
 
 ## `frontend/src/hooks/useErrorLogger.tsx`
 - 结论：有问题
@@ -616,7 +601,6 @@
 ## `frontend/src/hooks/useListSSE.ts`
 - 结论：有问题
   - [多行注释] 行 1：`List-focused SSE integration hook. Policy: - Stable row-field updates are patched locally. - Structural changes only patch when they are obviously safe. - Ambiguous cases fall back to stale banner ref`
-  - [纯英文注释] 行 1：`List-focused SSE integration hook. Policy: - Stable row-field updates are patched locally. - Structural changes only patch when they are obviously safe. - Ambiguous cases fall back to stale banner ref`
 
 ## `frontend/src/hooks/useMobile.tsx`
 - 结论：无问题
@@ -631,7 +615,6 @@
 ## `frontend/src/hooks/useSSE.ts`
 - 结论：有问题
   - [多行注释] 行 1：`Generic SSE hook for room-based event streams. Integration: 1) Build event handlers in page/domain hook. 2) Call useSSE({ rooms, handlers }). 3) Use store stale flag to show refresh banner.`
-  - [纯英文注释] 行 1：`Generic SSE hook for room-based event streams. Integration: 1) Build event handlers in page/domain hook. 2) Call useSSE({ rooms, handlers }). 3) Use store stale flag to show refresh banner.`
 
 ## `frontend/src/hooks/useTableState.tsx`
 - 结论：无问题
@@ -649,9 +632,7 @@
 - 结论：无问题
 
 ## `frontend/src/lib/authSession.ts`
-- 结论：有问题
-  - [纯英文注释] 行 30：`eslint-disable-next-line sonarjs/no-hardcoded-passwords`
-  - [纯英文注释] 行 32：`eslint-disable-next-line sonarjs/no-hardcoded-passwords`
+- 结论：无问题
 
 ## `frontend/src/lib/cacheVersionBootstrap.ts`
 - 结论：有问题
@@ -661,9 +642,7 @@
 - 结论：无问题
 
 ## `frontend/src/lib/constants.ts`
-- 结论：有问题
-  - [多行注释] 行 1：`Centralized mapping tables for status/reason/role display Backend stores English values; frontend maps to Chinese.`
-  - [纯英文注释] 行 1：`Centralized mapping tables for status/reason/role display Backend stores English values; frontend maps to Chinese.`
+- 结论：无问题
 
 ## `frontend/src/lib/dashboardUtils.tsx`
 - 结论：有问题
@@ -825,7 +804,6 @@
 ## `frontend/src/store/sseStore.ts`
 - 结论：有问题
   - [多行注释] 行 1：`SSE runtime state store. This file is intentionally standalone so it can be integrated page-by-page without touching existing global stores.`
-  - [纯英文注释] 行 1：`SSE runtime state store. This file is intentionally standalone so it can be integrated page-by-page without touching existing global stores.`
   - [纯英文注释] 行 21：`Track sequence per room for reliability checks.`
   - [纯英文注释] 行 107：`Ignore duplicate/old events.`
 
@@ -833,8 +811,7 @@
 - 结论：无问题
 
 ## `frontend/tailwind.config.js`
-- 结论：有问题
-  - [纯英文注释] 行 1：`@type {import('tailwindcss').Config}`
+- 结论：无问题
 
 ## `frontend/tsconfig.app.json`
 - 结论：无问题
