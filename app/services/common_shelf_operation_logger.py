@@ -11,6 +11,7 @@ from app.models.common_shelf_operation_log import (
     CommonShelfOperationAction,
     CommonShelfOperationLog,
 )
+from app.services.log_timeline_projection import project_common_shelf_operation_log
 
 SNAPSHOT_KEY_MAP = {
     "id": "id",
@@ -93,6 +94,7 @@ def _create_common_shelf_operation_log(
     cas_number: str,
     snapshot: dict[str, Any],
     notes: str | None = None,
+    is_cli: bool,
 ) -> CommonShelfOperationLog:
     log = CommonShelfOperationLog(
         common_shelf_id=common_shelf_id,
@@ -104,6 +106,8 @@ def _create_common_shelf_operation_log(
         notes=notes,
     )
     db.add(log)
+    db.flush([log])
+    project_common_shelf_operation_log(db, log=log, is_cli=is_cli)
     return log
 
 
@@ -112,6 +116,7 @@ def log_common_shelf_stock_in(
     *,
     item: CommonShelf,
     operator_id: int,
+    is_cli: bool,
 ) -> CommonShelfOperationLog:
     return _create_common_shelf_operation_log(
         db,
@@ -122,6 +127,7 @@ def log_common_shelf_stock_in(
         cas_number=item.cas_number,
         snapshot=build_common_shelf_snapshot(item),
         notes=item.notes,
+        is_cli=is_cli,
     )
 
 
@@ -132,6 +138,7 @@ def log_common_shelf_add_bottles(
     operator_id: int,
     count: int,
     location: str | None,
+    is_cli: bool,
 ) -> CommonShelfOperationLog:
     snapshot = {
         **build_common_shelf_snapshot(sample_item),
@@ -147,6 +154,7 @@ def log_common_shelf_add_bottles(
         cas_number=sample_item.cas_number,
         snapshot=snapshot,
         notes=sample_item.notes,
+        is_cli=is_cli,
     )
 
 
@@ -155,6 +163,7 @@ def log_common_shelf_remove_one(
     *,
     item: CommonShelf,
     operator_id: int,
+    is_cli: bool,
 ) -> CommonShelfOperationLog:
     return _create_common_shelf_operation_log(
         db,
@@ -165,6 +174,7 @@ def log_common_shelf_remove_one(
         cas_number=item.cas_number,
         snapshot=build_common_shelf_snapshot(item),
         notes=item.notes,
+        is_cli=is_cli,
     )
 
 
@@ -175,6 +185,7 @@ def log_common_shelf_group_update(
     after_item: CommonShelf,
     operator_id: int,
     merged: bool,
+    is_cli: bool,
 ) -> CommonShelfOperationLog:
     snapshot = {
         "bf": build_common_shelf_snapshot(before_item),
@@ -194,6 +205,7 @@ def log_common_shelf_group_update(
         cas_number=after_item.cas_number,
         snapshot=snapshot,
         notes=after_item.notes,
+        is_cli=is_cli,
     )
 
 
@@ -203,6 +215,7 @@ def log_common_shelf_item_update(
     before_item: CommonShelf,
     after_item: CommonShelf,
     operator_id: int,
+    is_cli: bool,
 ) -> CommonShelfOperationLog:
     """Log one bottle-level field edit from item mode."""
     snapshot = {
@@ -218,6 +231,7 @@ def log_common_shelf_item_update(
         cas_number=after_item.cas_number,
         snapshot=snapshot,
         notes=after_item.notes,
+        is_cli=is_cli,
     )
 
 
@@ -226,6 +240,7 @@ def log_common_shelf_group_delete(
     *,
     item: CommonShelf,
     operator_id: int,
+    is_cli: bool,
 ) -> CommonShelfOperationLog:
     return _create_common_shelf_operation_log(
         db,
@@ -236,6 +251,7 @@ def log_common_shelf_group_delete(
         cas_number=item.cas_number,
         snapshot=build_common_shelf_snapshot(item),
         notes=item.notes,
+        is_cli=is_cli,
     )
 
 
@@ -244,6 +260,7 @@ def log_common_shelf_export_operation(
     *,
     operator_id: int,
     exported_count: int,
+    is_cli: bool,
 ) -> CommonShelfOperationLog:
     log = CommonShelfOperationLog(
         common_shelf_id=0,
@@ -255,4 +272,6 @@ def log_common_shelf_export_operation(
         notes=None,
     )
     db.add(log)
+    db.flush([log])
+    project_common_shelf_operation_log(db, log=log, is_cli=is_cli)
     return log

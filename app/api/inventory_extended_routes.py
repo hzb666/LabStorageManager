@@ -22,7 +22,7 @@ from app.core.constants import (
     TEMPLATE_DOWNLOAD_WINDOW_SECONDS,
 )
 from app.services.sse_manager import sse_manager
-from app.core.request_utils import get_client_ip, get_sse_client_id
+from app.core.request_utils import get_client_ip, get_request_is_cli, get_sse_client_id
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.database import DBSession, get_db
 from app.models.inventory import (
@@ -40,8 +40,10 @@ from app.services.cas_utils import normalize_cas, is_special_cas_value
 from app.services.xlsx_export import export_inventory_xlsx
 from app.services.excel_service import validate_uploaded_file
 from app.services.inventory_import_preview_sessions import (
+    cleanup_expired_inventory_import_preview_artifacts,
     consume_inventory_import_preview_session,
     create_inventory_import_preview_session,
+    discard_inventory_import_preview_session,
 )
 from app.services.inventory_creation import create_manual_inventory_items
 from app.services.inventory_operation_logger import (
@@ -53,6 +55,7 @@ from app.services.inventory_queries import (
     get_regular_inventory_by_id,
     regular_inventory_query,
 )
+from app.services.log_timeline_projection import project_borrow_log
 from app.services.rate_limit import enforce_rate_limit
 from app.services.spec_utils import format_specification
 from app.services.user_utils import batch_get_user_names
@@ -158,6 +161,12 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         ).order_by(Inventory.created_at.desc())
 
         items = db.exec(statement).all()
+        borrowed_user_ids = {
+            item.borrower_id
+            for item in items
+            if item.status == InventoryStatus.BORROWED and item.borrower_id is not None
+        }
+        users_map = batch_get_user_names(db, borrowed_user_ids)
 
         total_remaining = sum((item.remaining_quantity or 0) for item in items)
         borrowed_count = sum(1 for item in items if item.status == InventoryStatus.BORROWED)
@@ -173,11 +182,14 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
                 {
                     "id": item.id,
                     "name": item.name,
+                    "brand": item.brand,
                     "storage_location": item.storage_location,
                     "remaining_quantity": item.remaining_quantity,
+                    "specification": format_specification(item.initial_quantity, item.unit or ""),
                     "unit": item.unit,
                     "status": item.status,
                     "borrower_id": item.borrower_id,
+                    "borrower_name": users_map.get(item.borrower_id),
                 }
                 for item in items
             ],
@@ -210,11 +222,11 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         item = _find_by_code(db, internal_code)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
-        response = InventoryResponse.model_validate(item).model_dump()
-        return _add_specification(response)
+        return _serialize_inventory_item(db, item)
 
     @router.get("/export", dependencies=[Depends(get_current_user)])
     def export_inventory(
+        request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: DBSession,
     ):
@@ -225,6 +237,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
             db,
             operator_id=current_user.id,
             exported_count=len(items),
+            is_cli=get_request_is_cli(request),
         )
         db.commit()
 
@@ -255,6 +268,7 @@ def _register_manual_and_dashboard_routes(
                 inventory=item,
                 operator_id=current_user.id,
                 source=SOURCE_MANUAL_ADD,
+                is_cli=get_request_is_cli(request),
             )
         db.commit()
         for item in created_items:
@@ -299,7 +313,6 @@ def _register_manual_and_dashboard_routes(
                 select(BorrowLog)
                 .where(
                     BorrowLog.inventory_id.in_(inventory_ids),
-                    BorrowLog.is_consume.is_(False),
                     BorrowLog.return_time.is_(None),
                 )
                 .order_by(BorrowLog.borrow_time.desc())
@@ -440,6 +453,7 @@ def _register_import_routes(
         _enforce_import_upload_rate_limit(request)
         validate_uploaded_file(file)
         tmp_file_path = _save_import_upload(file)
+        preview_session_owns_file = False
 
         try:
             result = preview_inventory_import_from_excel(
@@ -457,6 +471,7 @@ def _register_import_routes(
                     default_storage_location=query.default_storage_location,
                     default_is_hazardous=query.default_is_hazardous,
                 )
+                preview_session_owns_file = True
             return _format_import_response("Preview completed", result, preview_token=preview_token)
         except Exception:
             logger.exception("Preview inventory import failed")
@@ -465,33 +480,33 @@ def _register_import_routes(
                 detail="Import preview failed, please check file format",
             )
         finally:
-            if os.path.exists(tmp_file_path):
+            if not preview_session_owns_file and os.path.exists(tmp_file_path):
                 os.remove(tmp_file_path)
 
     @router.post("/import/confirm")
     def confirm_inventory_import(
         body: InventoryImportConfirmBody,
+        request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
         from app.services.excel_service import confirm_inventory_import_from_excel
 
-        tmp_file_path: Optional[str] = None
+        preview_session = None
+        cleanup_expired_inventory_import_preview_artifacts()
 
         try:
             preview_session = consume_inventory_import_preview_session(
                 body.preview_token,
                 user_id=current_user.id,
             )
-            with tempfile.NamedTemporaryFile(delete=False, suffix=preview_session.file_suffix or ".xlsx") as tmp_file:
-                tmp_file.write(preview_session.file_bytes)
-                tmp_file_path = tmp_file.name
             result = confirm_inventory_import_from_excel(
                 db=db,
-                file_path=tmp_file_path,
+                file_path=preview_session.file_path,
                 default_storage_location=preview_session.default_storage_location,
                 default_is_hazardous=preview_session.default_is_hazardous,
                 user_id=current_user.id,
+                is_cli=get_request_is_cli(request),
             )
             if result["success"] and result["created"] > 0:
                 clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
@@ -503,8 +518,11 @@ def _register_import_routes(
             logger.exception("Confirm inventory import failed")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Import failed, please check file format")
         finally:
-            if tmp_file_path and os.path.exists(tmp_file_path):
-                os.remove(tmp_file_path)
+            if preview_session is not None:
+                discard_inventory_import_preview_session(
+                    body.preview_token,
+                    file_path=preview_session.file_path,
+                )
 
 # 解析借用人上下文，保证 public 账号借用时的代借人校验语义不变。
 def _resolve_borrower_context(
@@ -571,7 +589,6 @@ def _get_latest_active_borrow_log(db: Session, inventory_id: int) -> Optional[Bo
         select(BorrowLog)
         .where(
             BorrowLog.inventory_id == inventory_id,
-            BorrowLog.is_consume.is_(False),
             BorrowLog.return_time.is_(None),
         )
         .order_by(BorrowLog.borrow_time.desc())
@@ -637,7 +654,6 @@ def _register_borrow_route(
         )
 
         result = db.exec(update_statement)
-        db.commit()
         if result.rowcount == 0:
             latest_item = _get_by_id(db, inventory_id)
             if latest_item and latest_item.status == InventoryStatus.BORROWED:
@@ -655,11 +671,17 @@ def _register_borrow_route(
             inventory_id=inventory_id,
             borrower_id=borrower_id,
             borrow_time=get_utc_now(),
-            is_consume=False,
             quantity_borrowed=borrow_quantity,
             notes=_encode_actual_borrower_notes(actual_borrower_id),
         )
         db.add(borrow_log)
+        db.flush([borrow_log])
+        project_borrow_log(
+            db,
+            log=borrow_log,
+            inventory=item,
+            is_cli=get_request_is_cli(request),
+        )
         db.commit()
 
         db.refresh(item)
@@ -747,7 +769,6 @@ def _register_borrow_history_route(router: APIRouter) -> None:
             select(BorrowLog)
             .where(
                 BorrowLog.inventory_id == inventory_id,
-                BorrowLog.is_consume.is_(False),
             )
             .order_by(BorrowLog.borrow_time.desc())
             .limit(10)

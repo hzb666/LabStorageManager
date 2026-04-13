@@ -1,6 +1,4 @@
-"""
-Configuration settings for Lab Storage Manager
-"""
+"""Lab Storage Manager 配置。"""
 import logging
 import secrets
 from functools import lru_cache
@@ -16,24 +14,24 @@ logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables"""
+    """从环境变量加载应用配置。"""
     
-    # Application
+    # 应用
     app_name: str = "Lab Storage Manager"
     app_version: str = "0.1.0"
     cache_version: str = ""
     debug: bool = False
-    env: str = "development"  # development or production
+    env: str = "development"  # development 或 production
     
-    # Database
+    # 数据库
     database_url: str = "sqlite:///./lab_inventory.db"
     
-    # JWT Authentication
+    # JWT 认证
     secret_key: str = Field(default="", description="JWT secret key (for HS256 in development)")
-    algorithm: str = "RS256"  # Changed from HS256 to RS256 for better security
-    access_token_expire_minutes: int = 7 * 24 * 60  # 7 days
+    algorithm: str = "RS256"  # 从 HS256 切到 RS256 以提升安全性
+    access_token_expire_minutes: int = 7 * 24 * 60  # 7 天
     
-    # RSA Keys for RS256
+    # RS256 密钥
     private_key_path: str = Field(default=".keys/private.pem", description="JWT private key path")
     public_key_path: str = Field(default=".keys/public.pem", description="JWT public key path")
     
@@ -44,42 +42,46 @@ class Settings(BaseSettings):
         description="Whether to trust reverse-proxy forwarding headers such as X-Forwarded-For",
     )
     
-    # File Upload
+    # 文件上传
     max_file_size_mb: int = 10
     max_upload_request_size_mb: int = 5
     allowed_image_types: tuple = ("image/jpeg", "image/png", "image/webp")
     max_image_width: int = 800
     max_image_height: int = 800
-    max_image_size_kb: int = 100  # Critical Rule #3: <100KB
+    max_image_size_kb: int = 100  # 关键规则 #3：小于 100KB
     upload_rate_limit_count: int = 10
     upload_rate_limit_window_seconds: int = 300
+    cli_rate_limit_count: int = Field(default=60, description="Max CLI API requests per window")
+    cli_rate_limit_window_seconds: int = Field(default=60, description="CLI API rate-limit window in seconds")
+    cli_login_rate_limit_count: int = Field(default=3, description="Max CLI login attempts per window")
+    cli_login_rate_limit_window_seconds: int = Field(default=300, description="CLI login rate-limit window in seconds")
     
-    # Default Admin
+    # 默认管理员
     default_admin_username: str = Field(default="admin", description="Default admin username")
     default_admin_password: str = Field(default="", description="Default admin password (set in production)")
     default_admin_full_name: str = Field(default="系统管理员", description="Default admin full name")
     
-    # Session & Device Settings (IP Limit Feature)
+    # 会话与设备设置（含 IP 限制）
     max_ip_per_user: int = Field(default=5, description="Max distinct IPs per user")
     max_device_per_user: int = Field(default=10, description="Max devices per user")
     session_expire_hours: int = Field(default=72, description="Session expiration hours (3 days)")
     session_strict_ip: bool = Field(default=False, description="Whether to enforce IP consistency")
 
-    # Announcement Settings
+    # 公告设置
     max_total_announcements: int = Field(default=10, description="Max announcements per admin")
     max_visible_announcements: int = Field(default=5, description="Max visible announcements per admin")
     
-    # Redis Configuration (for session caching)
+    # Redis 设置（用于会话缓存）
     redis_host: str = Field(default="localhost", description="Redis host")
     redis_port: int = Field(default=6379, description="Redis port")
     redis_db: int = Field(default=0, description="Redis database number")
     redis_password: Optional[str] = Field(default=None, description="Redis password")
     redis_key_prefix: str = Field(default="lsm", description="Redis key prefix for app namespace")
     
-    # CAS Configuration
+    # CAS 设置
     cas_pattern: str = CAS_PATTERN
     
-    # Niutrans Translation API
+    # 小牛翻译 API
     niutrans_appid: str = Field(default="", description="Niutrans API appId")
     niutrans_apikey: str = Field(default="", description="Niutrans API key")
     
@@ -101,7 +103,7 @@ class Settings(BaseSettings):
         if key_path.exists():
             return key_path.read_text(encoding="utf-8")
         
-        # Only generate temporary key in explicit development mode
+        # 仅在显式开发环境生成临时密钥
         if self._is_explicit_development():
             logger.warning("No RSA private key found, generating temporary key for development")
             return self._generate_rsa_key_pair()
@@ -125,7 +127,7 @@ class Settings(BaseSettings):
         if key_path.exists():
             return key_path.read_text(encoding="utf-8")
         
-        # Derive from private key only in explicit development mode
+        # 仅在显式开发环境里由私钥派生公钥
         if self._is_explicit_development():
             private_key = self.get_private_key()
             return self._derive_public_key(private_key)
@@ -145,25 +147,25 @@ class Settings(BaseSettings):
             key_size=RSA_KEY_SIZE_BITS
         )
         
-        # Save private key
+        # 保存私钥
         private_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption()
         )
         
-        # Save public key
+        # 保存公钥
         public_key = private_key.public_key()
         public_pem = public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
         
-        # Ensure directory exists
+        # 确保目录存在
         key_dir = Path(self.private_key_path).parent
         key_dir.mkdir(parents=True, exist_ok=True)
         
-        # Write keys
+        # 写入密钥
         Path(self.private_key_path).write_bytes(private_pem)
         Path(self.public_key_path).write_bytes(public_pem)
         
@@ -207,16 +209,16 @@ def get_settings() -> Settings:
     return settings
 
 
-# Global settings instance
+# 全局配置实例
 settings = get_settings()
 
 
-# Paths
+# 路径
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 STATIC_DIR = BASE_DIR / "static"
 UPLOADS_DIR = STATIC_DIR / "uploads"
 THUMBNAILS_DIR = STATIC_DIR / "thumbnails"
 
-# Ensure directories exist
+# 确保目录存在
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)

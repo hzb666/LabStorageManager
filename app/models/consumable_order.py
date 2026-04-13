@@ -1,7 +1,4 @@
-"""
-Consumable Order Model - Consumables Purchase Order Management
-Separated from Reagent for independent workflow (no stock-in needed)
-"""
+"""耗材订单模型。"""
 from datetime import datetime
 
 from app.core.time_utils import get_utc_now
@@ -24,23 +21,23 @@ class ConsumableOrderStatus(str, Enum):
 
 class ConsumableOrderBase(SQLModel):
     """Base consumable order model"""
-    # Chinese name (with index for query)
+    # 中文名称，带查询索引
     name: str = Field(max_length=200)
-    # English name
+    # 英文名称
     english_name: Optional[str] = Field(None, max_length=200)
-    # Product number (货号)
+    # 货号
     product_number: Optional[str] = Field(None, max_length=200)
-    # Specification (规格型号，如 "500ml"、M码)
+    # 规格型号，如 "500ml"、M 码
     specification: str = Field(max_length=100)
-    # Unit (单位，如 "箱"、"个") - 选填
+    # 单位，如 "箱"、"个"，选填
     unit: Optional[str] = Field(None, max_length=20)
-    # Quantity ordered (必填，大于0)
+    # 订购数量，必填且大于 0
     quantity: int = Field(gt=0)
-    # Price
+    # 单价
     price: Optional[float] = Field(None, ge=0)
-    # Communication (沟通信息，可选)
+    # 沟通信息，选填
     communication: Optional[str] = Field(None, max_length=100)
-    # Notes
+    # 备注
     notes: Optional[str] = Field(None, max_length=500)
 
 
@@ -91,6 +88,8 @@ class ConsumableOrderCreate(SQLModel):
 
     前端传入 quantity (数量) 和 specification (规格)
     """
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(max_length=200)
     english_name: Optional[str] = None
     product_number: Optional[str] = None  # 货号，选填

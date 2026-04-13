@@ -1,13 +1,15 @@
 """CommonShelf APIs."""
 from __future__ import annotations
 
+import time
 from typing import Optional, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from app.core.auth import CurrentUser, get_current_user, require_admin
+from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
 from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SSEEventType, SSERoom
+from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.database import DBSession
 from app.models.common_shelf import (
     CommonShelf,
@@ -56,6 +58,11 @@ from app.services.common_shelf_queries import (
 from app.services.spec_utils import SpecificationError, parse_specification
 from app.services.shelf_utils import normalize_storage_location
 from app.services.sse_manager import sse_manager
+from app.services.search_query_log_service import (
+    buffer_search_log,
+    build_search_log_filters,
+    build_search_log_sort,
+)
 from app.services.xlsx_export import export_common_shelf_xlsx
 
 router = APIRouter(prefix="/common-shelf", tags=["CommonShelf"])
@@ -127,13 +134,18 @@ class CommonShelfLocationSuggestionQuery(BaseModel):
     specification: str = Query(..., max_length=50)
 
 
-@router.get("/groups", response_model=CommonShelfGroupListResponse, dependencies=[Depends(get_current_user)])
+@router.get("/groups", response_model=CommonShelfGroupListResponse)
 def list_common_shelf_groups(
+    request: Request,
     db: DBSession,
     query: Annotated[CommonShelfGroupListQuery, Depends()],
+    current_session: CurrentSession,
 ):
+    _current_user, session = current_session
+    started = time.perf_counter()
+    include_search_options = bool(query.search and len(query.search.strip()) >= 2)
     skip, limit = _resolve_pagination(query.skip, query.limit)
-    return list_grouped_common_shelf(
+    result = list_grouped_common_shelf(
         db,
         options=CommonShelfGroupListOptions(
             search=query.search,
@@ -145,6 +157,23 @@ def list_common_shelf_groups(
             sort_order=query.sort_order,
         ),
     )
+    buffer_search_log(
+        user_id=session.user_id,
+        session_id=session.id or 0,
+        source="cli" if get_request_is_cli(request) else "web",
+        endpoint="/common-shelf/groups",
+        client_slot="cli" if get_request_is_cli(request) else (get_sse_client_id(request) or "web"),
+        raw_query=query.search,
+        filters=build_search_log_filters(
+            search_field=query.search_field if include_search_options else None,
+            fuzzy=query.fuzzy if include_search_options else False,
+        ),
+        has_effective_filter=False,
+        sort=build_search_log_sort(sort_by=query.sort_by, sort_order=query.sort_order),
+        result_count=result.total,
+        latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
+    )
+    return result
 
 
 @router.get(
@@ -205,12 +234,18 @@ def get_common_shelf_group_items(group_key: str, db: DBSession):
 @router.post("/manual-add", response_model=dict, dependencies=[Depends(get_current_user)])
 async def manual_add_common_shelf(
     payload: CommonShelfManualCreate,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
     created_items = create_manual_common_shelf_items(db, payload, created_by_id=current_user.id)
     for item in created_items:
-        log_common_shelf_stock_in(db, item=item, operator_id=current_user.id)
+        log_common_shelf_stock_in(
+            db,
+            item=item,
+            operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
+        )
     _commit_and_refresh_items(db, created_items)
 
     await _broadcast_common_shelf_change(
@@ -229,6 +264,7 @@ async def manual_add_common_shelf(
 async def update_common_shelf_group(
     group_key: str,
     payload: CommonShelfGroupEditRequest,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -276,6 +312,7 @@ async def update_common_shelf_group(
             after_item=after_item,
             operator_id=current_user.id,
             merged=merge_target is not None,
+            is_cli=get_request_is_cli(request),
         )
 
     _commit_and_refresh_items(db, items)
@@ -313,6 +350,7 @@ async def update_common_shelf_item(
     group_key: str,
     item_id: int,
     payload: CommonShelfGroupItemUpdateRequest,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -334,6 +372,7 @@ async def update_common_shelf_item(
         before_item=before_item,
         after_item=item,
         operator_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
     _commit_and_refresh_items(db, [item])
 
@@ -357,6 +396,7 @@ async def update_common_shelf_item(
 async def add_common_shelf_bottles(
     group_key: str,
     payload: CommonShelfAddBottlesRequest,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -375,6 +415,7 @@ async def add_common_shelf_bottles(
         operator_id=current_user.id,
         count=payload.count,
         location=normalized_location,
+        is_cli=get_request_is_cli(request),
     )
     _commit_and_refresh_items(db, created_items)
 
@@ -399,6 +440,7 @@ async def add_common_shelf_bottles(
 async def remove_one_common_shelf(
     group_key: str,
     payload: CommonShelfRemoveOneRequest,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -408,7 +450,12 @@ async def remove_one_common_shelf(
         group_fields=group_fields,
         storage_location=payload.storage_location,
     )
-    log_common_shelf_remove_one(db, item=removed_item, operator_id=current_user.id)
+    log_common_shelf_remove_one(
+        db,
+        item=removed_item,
+        operator_id=current_user.id,
+        is_cli=get_request_is_cli(request),
+    )
     removed_item_id = removed_item.id
     fallback_name = removed_item.name_snapshot
     db.commit()
@@ -439,6 +486,7 @@ async def remove_one_common_shelf(
 async def delete_common_shelf_item(
     group_key: str,
     item_id: int,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -448,7 +496,12 @@ async def delete_common_shelf_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CommonShelf item not found")
 
     removed_snapshot = CommonShelf.model_validate(item)
-    log_common_shelf_remove_one(db, item=removed_snapshot, operator_id=current_user.id)
+    log_common_shelf_remove_one(
+        db,
+        item=removed_snapshot,
+        operator_id=current_user.id,
+        is_cli=get_request_is_cli(request),
+    )
     removed_item_id = item.id
     db.delete(item)
     db.commit()
@@ -472,6 +525,7 @@ async def delete_common_shelf_item(
 @router.delete("/groups/{group_key}", response_model=dict, dependencies=[Depends(require_admin)])
 async def delete_common_shelf_group(
     group_key: str,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -486,6 +540,7 @@ async def delete_common_shelf_group(
         db,
         item=sample_item,
         operator_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
 
@@ -503,7 +558,7 @@ async def delete_common_shelf_group(
 
 
 @router.get("/export", dependencies=[Depends(get_current_user)])
-def export_common_shelf(db: DBSession, current_user: CurrentUser):
+def export_common_shelf(request: Request, db: DBSession, current_user: CurrentUser):
     # 导出复用分组查询，保证页面看到的聚合口径和 Excel 导出口径一致。
     response = list_grouped_common_shelf(
         db,
@@ -521,6 +576,7 @@ def export_common_shelf(db: DBSession, current_user: CurrentUser):
         db,
         operator_id=current_user.id,
         exported_count=len(response.data),
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     return export_common_shelf_xlsx(response.data)

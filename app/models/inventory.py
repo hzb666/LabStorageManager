@@ -1,7 +1,4 @@
-"""
-Inventory Model - Laboratory Reagents and Consumables Tracking
-Critical Rule #2: CAS Number must be normalized (uppercase, no spaces)
-"""
+"""库存模型。"""
 from datetime import datetime
 from enum import Enum
 from typing import Optional
@@ -25,10 +22,10 @@ class InventoryStatus(str, Enum):
 
 class InventoryBase(SQLModel):
     """Base inventory model with common fields"""
-    # Critical: CAS Number copied from Order (already normalized)
+    # CAS 号从订单复制，进入库存前已标准化
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)  # 排序/搜索常用
-    english_name: Optional[str] = Field(None, max_length=200)  # English name
+    english_name: Optional[str] = Field(None, max_length=200)  # 英文名称
     alias: Optional[str] = Field(None, max_length=200)
     category: Optional[str] = Field(max_length=100)  # 排序/搜索常用
     brand: Optional[str] = Field(max_length=100)  # 排序/搜索常用
@@ -39,15 +36,15 @@ class InventoryBase(SQLModel):
     remaining_quantity: Optional[float] = Field(default=None)
     # 剩余百分比：remaining_quantity / initial_quantity，存储到数据库用于排序
     remaining_percent: Optional[float] = Field(default=None)
-    unit: Optional[str] = Field(default=None, max_length=20)  # Case-insensitive storage
+    unit: Optional[str] = Field(default=None, max_length=20)  # 不区分大小写存储
     is_hazardous: bool = False
-    notes: Optional[str] = Field(None, max_length=500)  # User custom notes
+    notes: Optional[str] = Field(None, max_length=500)  # 用户自定义备注
 
 
 class Inventory(InventoryBase, table=True):
     """Inventory database model - Individual item tracking"""
     __table_args__ = (
-        # Search/sort acceleration: keep indexes that can actually hit B-Tree paths.
+        # 搜索和排序加速：只保留能真正命中 B-Tree 的索引。
         Index("ix_inventory_cas_number_created_at_id", "cas_number", "created_at", "id"),
         Index("ix_inventory_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
         Index("ix_inventory_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),
@@ -82,7 +79,7 @@ class Inventory(InventoryBase, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    # Unique internal code: e.g., "64175-250113-001" (CAS-Date-Sequence)
+    # 唯一内部编码，如 "64175-250113-001"（CAS-日期-序号）
     internal_code: str = Field(unique=True, index=True, max_length=50)
     status: InventoryStatus = Field(
         default=InventoryStatus.IN_STOCK,
@@ -186,12 +183,16 @@ class InventoryUpdate(SQLModel):
 
 class InventoryBorrowReturn(SQLModel):
     """DTO for borrow/return operations"""
+    model_config = ConfigDict(extra="forbid")
+
     remaining_quantity: float = Field(ge=0)
     unit: Optional[str] = Field(default=None, max_length=20)
 
 
 class InventoryBorrowRequest(SQLModel):
     """DTO for borrow operation."""
+    model_config = ConfigDict(extra="forbid")
+
     actual_borrower_id: Optional[int] = Field(default=None)
 
 
@@ -221,9 +222,9 @@ class InventoryResponse(BaseResponse):
     notes: Optional[str]
     created_at: datetime
     updated_at: datetime
-    # Computed field: specification (e.g., "500ml")
+    # 计算字段：规格，如 "500ml"
     specification: Optional[str] = None
-    # Computed fields: user names
+    # 计算字段：用户名称
     borrower_name: Optional[str] = None
     last_borrower_name: Optional[str] = None
     created_by_name: Optional[str] = None
@@ -233,8 +234,8 @@ class InventoryResponse(BaseResponse):
 class BorrowLog(SQLModel, table=True):
     """Borrow Log - Track borrow/return history"""
     __table_args__ = (
-        Index("ix_borrowlog_borrower_consume_borrow_time", "borrower_id", "is_consume", "borrow_time"),
-        Index("ix_borrowlog_inventory_consume_return_borrow", "inventory_id", "is_consume", "return_time", "borrow_time"),
+        Index("ix_borrowlog_borrower_borrow_time", "borrower_id", "borrow_time"),
+        Index("ix_borrowlog_inventory_borrow_time", "inventory_id", "borrow_time"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -247,7 +248,6 @@ class BorrowLog(SQLModel, table=True):
         ondelete="CASCADE"
     )
     borrow_time: datetime = Field(default_factory=get_utc_now)
-    is_consume: bool = Field(default=False)
     return_time: Optional[datetime] = None
     quantity_borrowed: float = Field(gt=0)
     quantity_returned: Optional[float] = None
@@ -261,7 +261,6 @@ class BorrowLogResponse(BaseResponse):
     inventory_id: int
     borrower_id: int
     borrow_time: datetime
-    is_consume: bool
     return_time: Optional[datetime]
     quantity_borrowed: float
     quantity_returned: Optional[float]
@@ -271,6 +270,8 @@ class BorrowLogResponse(BaseResponse):
 
 class ManualInventoryCreate(SQLModel):
     """DTO for manually adding inventory (not from Order)"""
+    model_config = ConfigDict(extra="forbid")
+
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
     english_name: Optional[str] = None

@@ -38,13 +38,16 @@ from app.models.common_shelf_operation_log import (
 )
 from app.models.reagent_order_operation_log import ReagentOrderOperationLog
 from app.models.consumable_order_operation_log import ConsumableOrderOperationLog
+from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
 from app.models.user_operation_log import UserOperationLog
+from app.services.order_fts import build_order_fts_rowid_subquery, should_use_order_fts
 from app.services.common_shelf_operation_logger import parse_common_shelf_snapshot
 from app.services.inventory_operation_logger import parse_inventory_snapshot
 from app.services.order_operation_logger import (
     parse_consumable_order_snapshot,
     parse_reagent_order_snapshot,
 )
+from app.services.sql_utils import normalize_search_term
 from app.services.user_operation_logger import parse_user_operation_snapshot
 from app.services.user_service import get_user_by_id
 from app.services.user_utils import batch_get_user_names
@@ -162,7 +165,7 @@ def is_token_valid(token: str) -> bool:
 
 class LogsQueryParams(BaseModel):
     keyword: Optional[str] = Field(default=None, max_length=100)  # 搜索关键词
-    log_type: Optional[str] = None  # 日志类型：reagent_order, consumable_order, inventory, borrow, consume, session
+    log_type: Optional[str] = None  # 日志类型：reagent_order, consumable_order, inventory, borrow, session
     skip: int = 0
     limit: int = DEFAULT_PAGE_SIZE
 
@@ -627,7 +630,6 @@ def _append_borrow_candidates(context: LogsCollectContext, candidates: list[dict
         Inventory, BorrowLog.inventory_id == Inventory.id
     ).where(
         BorrowLog.borrower_id == context.user_id,
-        BorrowLog.is_consume.is_(False),
     )
     if context.keyword:
         query = query.where(Inventory.name.contains(context.keyword))
@@ -946,7 +948,6 @@ def _count_borrow_candidates(context: LogsCountContext) -> int:
         BorrowLog.inventory_id == Inventory.id,
     ).where(
         BorrowLog.borrower_id == context.user_id,
-        BorrowLog.is_consume.is_(False),
     )
     if context.keyword:
         query = query.where(Inventory.name.contains(context.keyword))
@@ -1010,70 +1011,669 @@ def _count_user_operation_candidates(context: LogsCountContext) -> int:
     return _exec_count_query(context, query)
 
 
-_LOG_QUERY_BUILDERS: dict[str, LogsCandidateBuilder] = {
-    "reagent_order": _append_reagent_order_candidates,
-    "consumable_order": _append_consumable_order_candidates,
-    "inventory": _append_inventory_candidates,
-    "common_shelf": _append_common_shelf_candidates,
-    "delete": _append_delete_candidates,
-    "update": _append_update_candidates,
-    "export": _append_export_candidates,
-    "borrow": _append_borrow_candidates,
-    "session": _append_session_candidates,
-    "user": _append_user_operation_candidates,
+LOG_TIMELINE_FTS_FIELD_MAP: dict[str, list[str]] = {
+    "all": ["search_text", "search_text_pinyin"],
 }
 
-_LOG_QUERY_COUNTERS: dict[str, LogsCounter] = {
-    "reagent_order": _count_reagent_order_candidates,
-    "consumable_order": _count_consumable_order_candidates,
-    "inventory": _count_inventory_candidates,
-    "common_shelf": _count_common_shelf_candidates,
-    "delete": _count_delete_candidates,
-    "update": _count_update_candidates,
-    "export": _count_export_candidates,
-    "borrow": _count_borrow_candidates,
-    "session": _count_session_candidates,
-    "user": _count_user_operation_candidates,
-}
+
+@dataclass
+class TimelineSourceBundle:
+    reagent_logs: dict[int, ReagentOrderOperationLog]
+    consumable_logs: dict[int, ConsumableOrderOperationLog]
+    inventory_logs: dict[int, InventoryOperationLog]
+    common_shelf_logs: dict[int, CommonShelfOperationLog]
+    user_logs: dict[int, UserOperationLog]
+    borrow_logs: dict[int, tuple[object, object]]
+    user_names: dict[int, str]
+
+
+@dataclass
+class TimelineSourceIds:
+    reagent_ids: list[int]
+    consumable_ids: list[int]
+    inventory_ids: list[int]
+    common_shelf_ids: list[int]
+    user_log_ids: list[int]
+    borrow_ids: list[int]
+
+
+def _build_log_timeline_base_query(user_id: int, log_type: str | None):
+    base = select(LogTimeline).where(
+        or_(
+            LogTimeline.subject_user_id == user_id,
+            LogTimeline.actor_user_id == user_id,
+        )
+    )
+    if log_type:
+        base = base.where(LogTimeline.log_type == log_type)
+    return base
+
+
+def _apply_log_timeline_keyword_filter(base, keyword: str | None):
+    if not keyword:
+        return base
+
+    raw_keyword = keyword.strip()
+    if not raw_keyword:
+        return base
+
+    if should_use_order_fts(raw_keyword):
+        rowid_subquery = build_order_fts_rowid_subquery(
+            fts_table="log_timeline_fts",
+            search_value=raw_keyword,
+            search_field="all",
+            field_map=LOG_TIMELINE_FTS_FIELD_MAP,
+        )
+        return base.where(LogTimeline.id.in_(rowid_subquery))
+
+    pinyin_keyword = normalize_search_term(raw_keyword)
+    return base.where(
+        or_(
+            LogTimeline.search_text.contains(raw_keyword),
+            LogTimeline.search_text_pinyin.contains(pinyin_keyword or raw_keyword),
+        )
+    )
+
+
+def _count_log_timeline_candidates(context: LogsCountContext, log_type: str | None) -> int:
+    base = _build_log_timeline_base_query(context.user_id, log_type)
+    base = _apply_log_timeline_keyword_filter(base, context.keyword)
+    count_query = select(func.count()).select_from(base.subquery())
+    return _exec_count_query(context, count_query)
+
+
+def _load_log_timeline_rows(
+    context: LogsCollectContext,
+    *,
+    log_type: str | None,
+    offset: int,
+    limit: int,
+) -> list[LogTimeline]:
+    base = _build_log_timeline_base_query(context.user_id, log_type)
+    base = _apply_log_timeline_keyword_filter(base, context.keyword)
+    ordered = base.order_by(LogTimeline.occurred_at.desc(), LogTimeline.id.desc())
+    if limit > 0:
+        ordered = ordered.offset(offset).limit(limit)
+    return context.db.exec(ordered).all()
+
+
+def _collect_timeline_source_ids(rows: list[LogTimeline]) -> TimelineSourceIds:
+    reagent_ids: list[int] = []
+    consumable_ids: list[int] = []
+    inventory_ids: list[int] = []
+    common_shelf_ids: list[int] = []
+    user_log_ids: list[int] = []
+    borrow_ids: list[int] = []
+
+    for row in rows:
+        source_table = row.source_table.value if hasattr(row.source_table, "value") else str(row.source_table)
+        if source_table == LogTimelineSourceTable.REAGENT_ORDER_OPERATION_LOG.value:
+            reagent_ids.append(row.source_log_id)
+        elif source_table == LogTimelineSourceTable.CONSUMABLE_ORDER_OPERATION_LOG.value:
+            consumable_ids.append(row.source_log_id)
+        elif source_table == LogTimelineSourceTable.INVENTORY_OPERATION_LOG.value:
+            inventory_ids.append(row.source_log_id)
+        elif source_table == LogTimelineSourceTable.COMMON_SHELF_OPERATION_LOG.value:
+            common_shelf_ids.append(row.source_log_id)
+        elif source_table == LogTimelineSourceTable.USER_OPERATION_LOG.value:
+            user_log_ids.append(row.source_log_id)
+        elif source_table == LogTimelineSourceTable.BORROWLOG.value:
+            borrow_ids.append(row.source_log_id)
+
+    return TimelineSourceIds(
+        reagent_ids=reagent_ids,
+        consumable_ids=consumable_ids,
+        inventory_ids=inventory_ids,
+        common_shelf_ids=common_shelf_ids,
+        user_log_ids=user_log_ids,
+        borrow_ids=borrow_ids,
+    )
+
+
+def _load_logs_by_ids(db: DBSession, model_cls, ids: list[int]) -> dict[int, object]:
+    if not ids:
+        return {}
+    return {
+        log.id: log
+        for log in db.exec(select(model_cls).where(model_cls.id.in_(ids))).all()
+        if log.id is not None
+    }
+
+
+def _load_borrow_logs_by_ids(db: DBSession, ids: list[int]) -> dict[int, tuple[object, object]]:
+    if not ids:
+        return {}
+    from app.models.inventory import BorrowLog, Inventory
+
+    borrow_rows = db.exec(
+        select(BorrowLog, Inventory)
+        .join(Inventory, BorrowLog.inventory_id == Inventory.id)
+        .where(BorrowLog.id.in_(ids))
+    ).all()
+    return {
+        borrow_log.id: (borrow_log, inventory)
+        for borrow_log, inventory in borrow_rows
+        if borrow_log.id is not None
+    }
+
+
+def _load_timeline_source_bundle(db: DBSession, rows: list[LogTimeline]) -> TimelineSourceBundle:
+    source_ids = _collect_timeline_source_ids(rows)
+
+    reagent_logs = {}
+    if source_ids.reagent_ids:
+        reagent_logs = _load_logs_by_ids(db, ReagentOrderOperationLog, source_ids.reagent_ids)
+
+    consumable_logs = {}
+    if source_ids.consumable_ids:
+        consumable_logs = _load_logs_by_ids(db, ConsumableOrderOperationLog, source_ids.consumable_ids)
+
+    inventory_logs = {}
+    if source_ids.inventory_ids:
+        inventory_logs = _load_logs_by_ids(db, InventoryOperationLog, source_ids.inventory_ids)
+
+    common_shelf_logs = {}
+    if source_ids.common_shelf_ids:
+        common_shelf_logs = _load_logs_by_ids(db, CommonShelfOperationLog, source_ids.common_shelf_ids)
+
+    user_logs = {}
+    if source_ids.user_log_ids:
+        user_logs = _load_logs_by_ids(db, UserOperationLog, source_ids.user_log_ids)
+
+    borrow_logs = _load_borrow_logs_by_ids(db, source_ids.borrow_ids)
+
+    user_ids: set[int] = set()
+    for log in reagent_logs.values():
+        if log.actor_user_id:
+            user_ids.add(log.actor_user_id)
+        if log.applicant_id:
+            user_ids.add(log.applicant_id)
+    for log in consumable_logs.values():
+        if log.actor_user_id:
+            user_ids.add(log.actor_user_id)
+        if log.applicant_id:
+            user_ids.add(log.applicant_id)
+    for log in user_logs.values():
+        if log.actor_user_id:
+            user_ids.add(log.actor_user_id)
+        if log.target_user_id:
+            user_ids.add(log.target_user_id)
+
+    return TimelineSourceBundle(
+        reagent_logs=reagent_logs,
+        consumable_logs=consumable_logs,
+        inventory_logs=inventory_logs,
+        common_shelf_logs=common_shelf_logs,
+        user_logs=user_logs,
+        borrow_logs=borrow_logs,
+        user_names=batch_get_user_names(db, user_ids) if user_ids else {},
+    )
+
+
+def _wrap_rendered_candidate(rendered: dict[str, object]) -> dict[str, object]:
+    return {
+        "time": rendered["time"],
+        "builder": lambda rendered=rendered: rendered,
+    }
+
+
+def _render_reagent_timeline_row(
+    timeline_row: LogTimeline,
+    log: ReagentOrderOperationLog,
+    *,
+    user_id: int,
+    user_names: dict[int, str],
+) -> dict[str, object]:
+    snapshot = parse_reagent_order_snapshot(log.snapshot_json)
+    created_at = utc_iso_str(log.created_at)
+    action_value = log.action.value if hasattr(log.action, "value") else str(log.action)
+    action_label = REAGENT_ORDER_ACTION_LABELS.get(action_value, action_value)
+    actor_name = user_names.get(log.actor_user_id)
+    detail_prefix = action_label
+    if (
+        log.applicant_id == user_id
+        and log.actor_user_id
+        and log.actor_user_id != user_id
+    ):
+        detail_prefix = f"{actor_name or '管理员'}{action_label}"
+
+    before_snapshot = snapshot.get("before")
+    after_snapshot = snapshot.get("after")
+    display_snapshot = after_snapshot or before_snapshot or snapshot
+    quantity = display_snapshot.get("quantity")
+    unit = display_snapshot.get("unit")
+    return {
+        "time": created_at,
+        "type": "reagent_order",
+        "detail": f"{detail_prefix} {log.order_name} {display_snapshot.get('initial_quantity') or ''}{unit or ''} x{quantity or ''}".strip(),
+        "full_data": {
+            "id": log.id,
+            "order_id": log.order_id,
+            "actor_user_id": log.actor_user_id,
+            "applicant_id": log.applicant_id,
+            "action": action_value,
+            "order_name": log.order_name,
+            "cas_number": log.cas_number,
+            "snapshot": snapshot,
+            "before": before_snapshot,
+            "after": after_snapshot,
+            "name": display_snapshot.get("name") or log.order_name,
+            "specification": f"{display_snapshot.get('initial_quantity') or ''} {display_snapshot.get('unit') or ''}".strip(),
+            "quantity": quantity,
+            "brand": display_snapshot.get("brand"),
+            "purity": display_snapshot.get("purity"),
+            "price": display_snapshot.get("price"),
+            "order_reason": display_snapshot.get("order_reason"),
+            "status": display_snapshot.get("status"),
+            "category": display_snapshot.get("category"),
+            "notes": log.notes,
+            "created_at": created_at,
+            "is_cli": timeline_row.is_cli,
+        },
+    }
+
+
+def _render_consumable_timeline_row(
+    timeline_row: LogTimeline,
+    log: ConsumableOrderOperationLog,
+    *,
+    user_id: int,
+    user_names: dict[int, str],
+) -> dict[str, object]:
+    snapshot = parse_consumable_order_snapshot(log.snapshot_json)
+    created_at = utc_iso_str(log.created_at)
+    action_value = log.action.value if hasattr(log.action, "value") else str(log.action)
+    action_label = CONSUMABLE_ORDER_ACTION_LABELS.get(action_value, action_value)
+    actor_name = user_names.get(log.actor_user_id)
+    detail_prefix = action_label
+    if (
+        log.applicant_id == user_id
+        and log.actor_user_id
+        and log.actor_user_id != user_id
+    ):
+        detail_prefix = f"{actor_name or '管理员'}{action_label}"
+
+    before_snapshot = snapshot.get("before")
+    after_snapshot = snapshot.get("after")
+    return {
+        "time": created_at,
+        "type": "consumable_order",
+        "detail": f"{detail_prefix} {log.order_name} {log.specification or ''} x{snapshot.get('quantity') or ''}".strip(),
+        "full_data": {
+            "id": log.id,
+            "order_id": log.order_id,
+            "actor_user_id": log.actor_user_id,
+            "applicant_id": log.applicant_id,
+            "action": action_value,
+            "order_name": log.order_name,
+            "specification": log.specification,
+            "snapshot": snapshot,
+            "before": before_snapshot,
+            "after": after_snapshot,
+            "notes": log.notes,
+            "created_at": created_at,
+            "is_cli": timeline_row.is_cli,
+        },
+    }
+
+
+def _render_user_timeline_row(
+    timeline_row: LogTimeline,
+    log: UserOperationLog,
+    *,
+    user_id: int,
+    user_names: dict[int, str],
+) -> dict[str, object]:
+    snapshot = parse_user_operation_snapshot(log.snapshot_json)
+    created_at = utc_iso_str(log.created_at)
+    action_value = log.action.value if hasattr(log.action, "value") else str(log.action)
+    action_label = USER_OPERATION_ACTION_LABELS.get(action_value, action_value)
+    actor_name = user_names.get(log.actor_user_id)
+
+    detail = action_label
+    if (
+        log.target_user_id == user_id
+        and log.actor_user_id
+        and log.actor_user_id != user_id
+    ):
+        detail = f"{actor_name or '管理员'}对你执行: {action_label}"
+    if log.detail:
+        detail = f"{detail} ({log.detail})"
+
+    return {
+        "time": created_at,
+        "type": "user",
+        "detail": detail,
+        "full_data": {
+            "id": log.id,
+            "action": action_value,
+            "actor_user_id": log.actor_user_id,
+            "target_user_id": log.target_user_id,
+            "outcome": log.outcome,
+            "client_ip": log.client_ip,
+            "request_id": log.request_id,
+            "detail": log.detail,
+            "snapshot": snapshot,
+            "created_at": created_at,
+            "is_cli": timeline_row.is_cli,
+        },
+    }
+
+
+def _render_inventory_timeline_row(
+    timeline_row: LogTimeline,
+    log: InventoryOperationLog,
+) -> dict[str, object]:
+    snapshot = parse_inventory_snapshot(log.snapshot_json)
+    created_at = utc_iso_str(log.created_at)
+
+    if timeline_row.log_type == "update":
+        before_snapshot = snapshot.get("before", {})
+        after_snapshot = snapshot.get("after", {})
+        return {
+            "time": created_at,
+            "type": "update",
+            "detail": f"更新库存 {log.item_name}",
+            "full_data": {
+                "id": log.id,
+                "inventory_id": log.inventory_id,
+                "name": log.item_name,
+                "cas_number": log.cas_number,
+                "before": before_snapshot,
+                "after": after_snapshot,
+                "purity": after_snapshot.get("purity"),
+                "created_at": created_at,
+                "is_cli": timeline_row.is_cli,
+            },
+        }
+
+    if timeline_row.log_type == "delete":
+        return {
+            "time": created_at,
+            "type": "delete",
+            "detail": f"删除库存 {log.item_name}",
+            "full_data": {
+                "id": log.id,
+                "inventory_id": log.inventory_id,
+                "cas_number": log.cas_number,
+                "name": log.item_name,
+                "english_name": snapshot.get("english_name"),
+                "alias": snapshot.get("alias"),
+                "category": snapshot.get("category"),
+                "brand": snapshot.get("brand"),
+                "purity": snapshot.get("purity"),
+                "storage_location": snapshot.get("storage_location"),
+                "initial_quantity": snapshot.get("initial_quantity"),
+                "remaining_quantity": snapshot.get("remaining_quantity"),
+                "unit": snapshot.get("unit"),
+                "is_hazardous": snapshot.get("is_hazardous"),
+                "notes": snapshot.get("notes"),
+                "internal_code": snapshot.get("internal_code"),
+                "status": snapshot.get("status"),
+                "created_at": created_at,
+                "updated_at": snapshot.get("updated_at"),
+                "is_cli": timeline_row.is_cli,
+            },
+        }
+
+    if timeline_row.log_type == "export":
+        export_count = snapshot.get("count", 0)
+        return {
+            "time": created_at,
+            "type": "export",
+            "detail": f"导出库存 {export_count} 条",
+            "full_data": {
+                "id": log.id,
+                "export_scope": "inventory",
+                "count": export_count,
+                "created_at": created_at,
+                "is_cli": timeline_row.is_cli,
+            },
+        }
+
+    source = snapshot.get("source")
+    return {
+        "time": created_at,
+        "type": "inventory",
+        "detail": f"入库 {log.item_name} {snapshot.get('initial_quantity') or ''}{snapshot.get('unit') or ''}",
+        "full_data": {
+            "id": log.id,
+            "inventory_id": log.inventory_id,
+            "cas_number": log.cas_number,
+            "name": log.item_name,
+            "english_name": snapshot.get("english_name"),
+            "alias": snapshot.get("alias"),
+            "category": snapshot.get("category"),
+            "brand": snapshot.get("brand"),
+            "purity": snapshot.get("purity"),
+            "storage_location": snapshot.get("storage_location"),
+            "initial_quantity": snapshot.get("initial_quantity"),
+            "remaining_quantity": snapshot.get("remaining_quantity"),
+            "unit": snapshot.get("unit"),
+            "is_hazardous": snapshot.get("is_hazardous"),
+            "notes": snapshot.get("notes"),
+            "internal_code": snapshot.get("internal_code"),
+            "status": snapshot.get("status"),
+            "source": source,
+            "created_at": created_at,
+            "updated_at": snapshot.get("updated_at"),
+            "is_cli": timeline_row.is_cli,
+        },
+    }
+
+
+def _render_common_shelf_timeline_row(
+    timeline_row: LogTimeline,
+    log: CommonShelfOperationLog,
+) -> dict[str, object]:
+    snapshot = parse_common_shelf_snapshot(log.snapshot_json)
+    created_at = utc_iso_str(log.created_at)
+    action_value = log.action.value if hasattr(log.action, "value") else str(log.action)
+
+    if timeline_row.log_type == "export":
+        export_count = snapshot.get("count", 0)
+        return {
+            "time": created_at,
+            "type": "export",
+            "detail": f"导出常用货架 {export_count} 条",
+            "full_data": {
+                "id": log.id,
+                "export_scope": "common_shelf",
+                "count": export_count,
+                "created_at": created_at,
+                "is_cli": timeline_row.is_cli,
+            },
+        }
+
+    action_label = COMMON_SHELF_ACTION_LABELS.get(action_value, action_value)
+    before_snapshot = snapshot.get("before")
+    after_snapshot = snapshot.get("after")
+    display_snapshot = after_snapshot or before_snapshot or snapshot
+    return {
+        "time": created_at,
+        "type": "common_shelf",
+        "detail": f"{action_label} {log.item_name}",
+        "full_data": {
+            "id": log.id,
+            "common_shelf_id": log.common_shelf_id,
+            "action": action_value,
+            "cas_number": log.cas_number,
+            "name": log.item_name,
+            "brand": display_snapshot.get("brand"),
+            "purity": display_snapshot.get("purity"),
+            "specification_text": display_snapshot.get("specification_text"),
+            "storage_location": display_snapshot.get("storage_location"),
+            "count": snapshot.get("count"),
+            "location": snapshot.get("location"),
+            "notes": display_snapshot.get("notes"),
+            "before": before_snapshot,
+            "after": after_snapshot,
+            "snapshot": snapshot,
+            "created_at": created_at,
+            "is_cli": timeline_row.is_cli,
+        },
+    }
+
+
+def _render_borrow_timeline_row(
+    timeline_row: LogTimeline,
+    borrow_log,
+    inventory,
+) -> dict[str, object]:
+    is_returned = borrow_log.return_time is not None
+    return_info = f", 已归还 {borrow_log.quantity_returned} {inventory.unit or ''}" if is_returned else ", 未归还"
+    borrow_time = utc_iso_str(borrow_log.borrow_time)
+    return {
+        "time": borrow_time,
+        "type": "borrow",
+        "detail": f"借用 {inventory.name} {borrow_log.quantity_borrowed} {inventory.unit or ''}{return_info}",
+        "full_data": {
+            "id": borrow_log.id,
+            "inventory_id": borrow_log.inventory_id,
+            "inventory_name": inventory.name,
+            "cas_number": inventory.cas_number,
+            "borrow_time": borrow_time,
+            "return_time": utc_iso_str(borrow_log.return_time),
+            "quantity_borrowed": borrow_log.quantity_borrowed,
+            "quantity_returned": borrow_log.quantity_returned,
+            "unit": inventory.unit,
+            "notes": borrow_log.notes,
+            "is_returned": is_returned,
+            "created_at": utc_iso_str(borrow_log.created_at),
+            "is_cli": timeline_row.is_cli,
+        },
+    }
+
+
+def _render_timeline_candidate(
+    timeline_row: LogTimeline,
+    *,
+    bundle: TimelineSourceBundle,
+    user_id: int,
+) -> dict[str, object] | None:
+    source_table = timeline_row.source_table.value if hasattr(timeline_row.source_table, "value") else str(timeline_row.source_table)
+    if source_table == LogTimelineSourceTable.REAGENT_ORDER_OPERATION_LOG.value:
+        log = bundle.reagent_logs.get(timeline_row.source_log_id)
+        if log is None:
+            return None
+        return _render_reagent_timeline_row(
+            timeline_row,
+            log,
+            user_id=user_id,
+            user_names=bundle.user_names,
+        )
+    if source_table == LogTimelineSourceTable.CONSUMABLE_ORDER_OPERATION_LOG.value:
+        log = bundle.consumable_logs.get(timeline_row.source_log_id)
+        if log is None:
+            return None
+        return _render_consumable_timeline_row(
+            timeline_row,
+            log,
+            user_id=user_id,
+            user_names=bundle.user_names,
+        )
+    if source_table == LogTimelineSourceTable.INVENTORY_OPERATION_LOG.value:
+        log = bundle.inventory_logs.get(timeline_row.source_log_id)
+        if log is None:
+            return None
+        return _render_inventory_timeline_row(timeline_row, log)
+    if source_table == LogTimelineSourceTable.COMMON_SHELF_OPERATION_LOG.value:
+        log = bundle.common_shelf_logs.get(timeline_row.source_log_id)
+        if log is None:
+            return None
+        return _render_common_shelf_timeline_row(timeline_row, log)
+    if source_table == LogTimelineSourceTable.USER_OPERATION_LOG.value:
+        log = bundle.user_logs.get(timeline_row.source_log_id)
+        if log is None:
+            return None
+        return _render_user_timeline_row(
+            timeline_row,
+            log,
+            user_id=user_id,
+            user_names=bundle.user_names,
+        )
+    if source_table == LogTimelineSourceTable.BORROWLOG.value:
+        borrow_row = bundle.borrow_logs.get(timeline_row.source_log_id)
+        if borrow_row is None:
+            return None
+        borrow_log, inventory = borrow_row
+        return _render_borrow_timeline_row(timeline_row, borrow_log, inventory)
+    return None
+
+
+def _collect_timeline_candidates(
+    context: LogsCollectContext,
+    *,
+    log_type: str | None,
+    offset: int,
+    limit: int,
+) -> list[dict[str, object]]:
+    rows = _load_log_timeline_rows(
+        context,
+        log_type=log_type,
+        offset=offset,
+        limit=limit,
+    )
+    if not rows:
+        return []
+
+    bundle = _load_timeline_source_bundle(context.db, rows)
+    candidates: list[dict[str, object]] = []
+    for row in rows:
+        rendered = _render_timeline_candidate(row, bundle=bundle, user_id=context.user_id)
+        if rendered is None:
+            continue
+        candidates.append(_wrap_rendered_candidate(rendered))
+    return candidates
 
 
 def _collect_user_logs(
     context: LogsCollectContext,
     log_type: str | None,
 ) -> list[dict[str, object]]:
-    candidates: list[dict[str, object]] = []
-    builders = _LOG_QUERY_BUILDERS.values() if log_type is None else (_LOG_QUERY_BUILDERS.get(log_type),)
+    if log_type == "session":
+        candidates: list[dict[str, object]] = []
+        _append_session_candidates(context, candidates)
+        return candidates
 
-    if log_type is None or log_type == "export":
-        # 多来源聚合日志必须先取到每个来源的前(skip + limit)窗口，再做全局合并分页。
-        builder_context = LogsCollectContext(
-            db=context.db,
-            user_id=context.user_id,
-            keyword=context.keyword,
-            skip=0,
-            limit=context.skip + context.limit,
+    if log_type is None:
+        # timeline + session 混排时，先分别取到前 skip+limit 窗口再做全局排序。
+        merged_limit = context.skip + context.limit
+        timeline_candidates = _collect_timeline_candidates(
+            context,
+            log_type=None,
+            offset=0,
+            limit=merged_limit,
         )
-    else:
-        builder_context = context
+        session_candidates: list[dict[str, object]] = []
+        _append_session_candidates(
+            LogsCollectContext(
+                db=context.db,
+                user_id=context.user_id,
+                keyword=context.keyword,
+                skip=0,
+                limit=merged_limit,
+            ),
+            session_candidates,
+        )
+        candidates = [*timeline_candidates, *session_candidates]
+        candidates.sort(key=lambda item: item["time"], reverse=True)
+        return candidates
 
-    for builder in builders:
-        if builder is None:
-            continue
-        builder(builder_context, candidates)
-
-    candidates.sort(key=lambda item: item["time"], reverse=True)
-    return candidates
+    return _collect_timeline_candidates(
+        context,
+        log_type=log_type,
+        offset=context.skip,
+        limit=context.limit,
+    )
 
 
 def _collect_user_logs_total(context: LogsCountContext, log_type: str | None) -> int:
-    counters = _LOG_QUERY_COUNTERS.values() if log_type is None else (_LOG_QUERY_COUNTERS.get(log_type),)
-
-    total = 0
-    for counter in counters:
-        if counter is None:
-            continue
-        total += counter(context)
-    return total
+    if log_type == "session":
+        return _count_session_candidates(context)
+    if log_type is None:
+        return _count_log_timeline_candidates(context, None) + _count_session_candidates(context)
+    return _count_log_timeline_candidates(context, log_type)
 
 
 def _slice_candidates_for_response(
@@ -1082,7 +1682,7 @@ def _slice_candidates_for_response(
     skip: int,
     limit: int,
 ) -> list[dict[str, object]]:
-    if log_type is None or log_type == "export":
+    if log_type is None:
         return candidates[skip : skip + limit]
     return candidates[:limit]
 

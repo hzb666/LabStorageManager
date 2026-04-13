@@ -2,10 +2,15 @@
 
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
-from app.core.constants import CACHE_MAX_ITEMS, CACHE_PRUNE_COUNT
+from app.core.constants import CACHE_MAX_ITEMS, CACHE_PRUNE_COUNT, MAX_PAGE_SIZE
 
 
 CacheStore = Dict[str, tuple[Any, datetime]]
+
+
+def normalize_pagination(skip: int, limit: int) -> tuple[int, int]:
+    # 统一分页参数边界：负数回退到 0，limit 最高不超过全局上限。
+    return max(skip, 0), max(0, min(limit, MAX_PAGE_SIZE))
 
 
 def get_cached_result(

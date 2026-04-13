@@ -22,7 +22,7 @@ from app.services.session_service import SessionCacheIdentity, sync_session_cach
 
 logger = logging.getLogger(__name__)
 
-# HTTP Bearer token scheme
+# HTTP Bearer 鉴权方案
 security = HTTPBearer()
 
 
@@ -391,7 +391,14 @@ def get_password_hash(password: str) -> str:
     ).decode('utf-8')
 
 
-def create_access_token(user_id: int, username: str, role: str, username_version: int = 1) -> str:
+def create_access_token(
+    user_id: int,
+    username: str,
+    role: str,
+    username_version: int = 1,
+    *,
+    client: str | None = None,
+) -> str:
     expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
     
     payload = {
@@ -403,8 +410,11 @@ def create_access_token(user_id: int, username: str, role: str, username_version
         "exp": get_utc_now() + expires_delta,
         "iat": get_utc_now(),
     }
+    # `client` 只是服务端签发的来源标记，用于 CLI/Web 分流，不单独授予权限。
+    if client:
+        payload["client"] = client
     
-    # Production must use RS256; HS256 branch is for development fallback only.
+    # 生产环境必须使用 RS256；HS256 仅保留给开发环境兜底。
     if settings.algorithm == "RS256":
         token = jwt.encode(
             payload,
@@ -412,7 +422,7 @@ def create_access_token(user_id: int, username: str, role: str, username_version
             algorithm=settings.algorithm
         )
     else:
-        # HS256 development fallback
+        # 开发环境下的 HS256 兜底
         token = jwt.encode(
             payload,
             settings.secret_key,
@@ -424,7 +434,7 @@ def create_access_token(user_id: int, username: str, role: str, username_version
 
 def decode_token(token: str) -> dict:
     try:
-        # Production must use RS256; HS256 branch is for development fallback only.
+        # 生产环境必须使用 RS256；HS256 仅保留给开发环境兜底。
         if settings.algorithm == "RS256":
             payload = jwt.decode(
                 token,
@@ -432,7 +442,7 @@ def decode_token(token: str) -> dict:
                 algorithms=[settings.algorithm]
             )
         else:
-            # HS256 development fallback
+            # 开发环境下的 HS256 兜底
             payload = jwt.decode(
                 token,
                 settings.secret_key,
@@ -455,6 +465,7 @@ def resolve_current_session(
 ) -> tuple[User, UserSession]:
     # 所有受保护接口统一走这里，保证 token、user、session 的错误语义一致。
     token, payload, user_id = _resolve_access_identity(request)
+    request.state.is_cli = payload.get("client") == "cli"
 
     token_hash = _compute_token_hash(token)
     now_utc = get_utc_now()
@@ -468,8 +479,7 @@ def resolve_current_session(
     )
 
     if cached_session is not None:
-        # 命中 session 缓存时仍查询一次 User，确保禁用账号/用户名版本变更能立即生效，
-        # 同时避免每次都回源联表查询 session。
+        # 命中 session 缓存后仍补查一次 User，避免用户状态和用户名版本滞后。
         user = _get_cached_session_user_or_raise(db, user_id, token_hash)
         _ensure_active_user(user)
         _validate_token_username_version(payload, user)
@@ -565,6 +575,16 @@ def is_token_session_active(token_hash: str, *, client_ip: str | None = None) ->
             db.commit()
             delete_cached_session(token_hash)
             return False
+
+        sync_session_cache(
+            session=session,
+            identity=SessionCacheIdentity(
+                user_id=user.id,
+                username=user.username,
+                is_active=user.is_active,
+            ),
+            now_utc=now_utc,
+        )
 
     return True
 

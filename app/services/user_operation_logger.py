@@ -8,6 +8,7 @@ from sqlmodel import Session
 
 from app.models.user import User
 from app.models.user_operation_log import UserOperationAction, UserOperationLog
+from app.services.log_timeline_projection import project_user_operation_log
 
 USER_SNAPSHOT_KEY_MAP = {
     "id": "id",
@@ -79,6 +80,7 @@ def log_user_operation(
     request_id: str | None = None,
     detail: str | None = None,
     snapshot: dict[str, Any] | None = None,
+    is_cli: bool,
 ) -> UserOperationLog:
     """Persist a user operation log entry."""
 
@@ -94,6 +96,8 @@ def log_user_operation(
         snapshot_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
     )
     db.add(log)
+    db.flush([log])
+    project_user_operation_log(db, log=log, is_cli=is_cli)
     return log
 
 
@@ -107,6 +111,7 @@ def log_user_profile_update(
     client_ip: str | None,
     request_id: str | None,
     detail: str | None = None,
+    is_cli: bool,
 ) -> UserOperationLog:
     """Persist a user profile update log entry with before/after snapshots."""
 
@@ -124,6 +129,7 @@ def log_user_profile_update(
         request_id=request_id,
         detail=detail,
         snapshot=snapshot,
+        is_cli=is_cli,
     )
 
 
@@ -137,6 +143,7 @@ def log_user_sensitive_update(
     client_ip: str | None,
     request_id: str | None,
     detail: str | None,
+    is_cli: bool,
 ) -> UserOperationLog:
     """Persist a sensitive user update log entry with before/after snapshots."""
 
@@ -154,4 +161,5 @@ def log_user_sensitive_update(
         request_id=request_id,
         detail=detail,
         snapshot=snapshot,
+        is_cli=is_cli,
     )

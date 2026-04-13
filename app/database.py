@@ -14,6 +14,11 @@ from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
 
+SQLITE_BORROWLOG_INDEX_UPGRADES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS ix_borrowlog_borrower_borrow_time ON borrowlog (borrower_id, borrow_time DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_borrowlog_inventory_borrow_time ON borrowlog (inventory_id, borrow_time DESC)",
+)
+
 # 确保数据库文件目录存在。
 data_dir = os.path.dirname(os.path.dirname(__file__))
 db_path = os.path.join(data_dir, "lab_inventory.db")
@@ -49,7 +54,7 @@ DBSession = Annotated[Session, Depends(get_db)]
 
 
 SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
-    # Inventory searchable fields.
+    # 库存可搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_inventory_cas_number_created_at_id ON inventory (cas_number, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_name_pinyin_created_at_id ON inventory (name_pinyin, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_name_pinyin_initials_created_at_id ON inventory (name_pinyin_initials, created_at DESC, id DESC)",
@@ -60,23 +65,23 @@ SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_created_at_id ON inventory (storage_location, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_pinyin_created_at_id ON inventory (storage_location_pinyin, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_pinyin_initials_created_at_id ON inventory (storage_location_pinyin_initials, created_at DESC, id DESC)",
-    # Reagent order searchable raw-text and pinyin fields.
+    # 试剂订单原文与拼音搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_cas_number_created_at_id ON reagent_order (cas_number, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_created_at_id ON reagent_order (name, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_category_created_at_id ON reagent_order (category, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_created_at_id ON reagent_order (brand, created_at DESC, id DESC)",
-    # Reagent order searchable pinyin fields.
+    # 试剂订单拼音搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_pinyin_created_at_id ON reagent_order (name_pinyin, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_pinyin_initials_created_at_id ON reagent_order (name_pinyin_initials, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_category_pinyin_created_at_id ON reagent_order (category_pinyin, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_category_pinyin_initials_created_at_id ON reagent_order (category_pinyin_initials, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_pinyin_created_at_id ON reagent_order (brand_pinyin, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_pinyin_initials_created_at_id ON reagent_order (brand_pinyin_initials, created_at DESC, id DESC)",
-    # Consumable order searchable raw-text and pinyin fields.
+    # 耗材订单原文与拼音搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_created_at_id ON consumable_order (name, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_created_at_id ON consumable_order (name_pinyin, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_initials_created_at_id ON consumable_order (name_pinyin_initials, created_at DESC, id DESC)",
-    # Chemical name map searchable pinyin fields.
+    # 化学名称映射拼音搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_name_pinyin ON chemical_name_map (name_pinyin)",
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_name_initials ON chemical_name_map (name_initials)",
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_1_pinyin ON chemical_name_map (alias_1_pinyin)",
@@ -89,21 +94,21 @@ SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
 
 
 SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
-    # Inventory filter/sort and operational paths.
+    # 库存筛选、排序与操作链路。
     "CREATE INDEX IF NOT EXISTS ix_inventory_created_at_id ON inventory (created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_status_created_at_id ON inventory (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_remaining_percent_created_at_id ON inventory (remaining_percent DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_borrower_status_updated_at ON inventory (borrower_id, status, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_keeper_location_created_at ON inventory (temporary_keeper_id, storage_location, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_created_by_created_at_id ON inventory (created_by_id, created_at DESC, id DESC)",
-    # Inventory operation log audit queries.
+    # 库存操作日志审计查询。
     "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_created_at ON inventory_operation_log (operator_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_action_created_at ON inventory_operation_log (action, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_created_at ON inventory_operation_log (created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_action_created_at ON inventory_operation_log (operator_id, action, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_inventory_created_at ON inventory_operation_log (inventory_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_cas_created_at ON inventory_operation_log (cas_number, created_at DESC)",
-    # Reagent order operation log audit queries.
+    # 试剂订单操作日志审计查询。
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_actor_created_at ON reagent_order_operation_log (actor_user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_action_created_at ON reagent_order_operation_log (action, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_created_at ON reagent_order_operation_log (created_at DESC)",
@@ -111,7 +116,7 @@ SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_order_created_at ON reagent_order_operation_log (order_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_applicant_created_at ON reagent_order_operation_log (applicant_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_operation_log_cas_created_at ON reagent_order_operation_log (cas_number, created_at DESC)",
-    # Consumable order operation log audit queries.
+    # 耗材订单操作日志审计查询。
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_actor_created_at ON consumable_order_operation_log (actor_user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_action_created_at ON consumable_order_operation_log (action, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_created_at ON consumable_order_operation_log (created_at DESC)",
@@ -119,38 +124,43 @@ SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_order_created_at ON consumable_order_operation_log (order_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_applicant_created_at ON consumable_order_operation_log (applicant_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_operation_log_name_created_at ON consumable_order_operation_log (order_name, created_at DESC)",
-    # User operation log audit queries.
+    # 用户操作日志审计查询。
     "CREATE INDEX IF NOT EXISTS ix_user_operation_log_actor_created_at ON user_operation_log (actor_user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_user_operation_log_target_created_at ON user_operation_log (target_user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_user_operation_log_action_created_at ON user_operation_log (action, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_user_operation_log_created_at ON user_operation_log (created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_user_operation_log_actor_action_created_at ON user_operation_log (actor_user_id, action, created_at DESC)",
-    # Borrow log operational queries.
-    "CREATE INDEX IF NOT EXISTS ix_borrowlog_borrower_consume_borrow_time ON borrowlog (borrower_id, is_consume, borrow_time DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_borrowlog_inventory_consume_return_borrow ON borrowlog (inventory_id, is_consume, return_time, borrow_time DESC)",
-    # Reagent/consumable list status + applicant filters.
+    # 时间线读模型查询。
+    "CREATE INDEX IF NOT EXISTS ix_log_timeline_occurred_at_id ON log_timeline (occurred_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_log_timeline_log_type_occurred_at_id ON log_timeline (log_type, occurred_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_log_timeline_actor_occurred_at_id ON log_timeline (actor_user_id, occurred_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_log_timeline_subject_occurred_at_id ON log_timeline (subject_user_id, occurred_at DESC, id DESC)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_log_timeline_source_table_source_log_id ON log_timeline (source_table, source_log_id)",
+    # 借用日志操作查询。
+    *SQLITE_BORROWLOG_INDEX_UPGRADES,
+    # 试剂/耗材列表的状态与申请人筛选。
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_created_at_id ON reagent_order (created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_status_created_at_id ON reagent_order (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_applicant_created_at_id ON reagent_order (applicant_id, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_created_at_id ON consumable_order (created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_status_created_at_id ON consumable_order (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_applicant_created_at_id ON consumable_order (applicant_id, created_at DESC, id DESC)",
-    # Other modules.
+    # 其他模块。
     "CREATE INDEX IF NOT EXISTS ix_announcements_pinned_created ON announcements (is_pinned DESC, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_announcements_visible_pinned_created ON announcements (is_visible, is_pinned DESC, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_announcements_creator_visible ON announcements (created_by, is_visible)",
     "CREATE INDEX IF NOT EXISTS ix_users_active_role_created ON users (is_active DESC, role DESC, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_users_role_created_at ON users (role, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_users_full_name_pinyin_id ON users (full_name_pinyin, id)",
-    # Common shelf filters and grouping.
+    # 常用货架筛选与分组。
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_cas_created_at ON common_shelf (cas_number, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_group_created_at ON common_shelf (cas_number, brand_normalized, specification_normalized, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_group_location_created_at ON common_shelf (cas_number, brand_normalized, specification_normalized, storage_location_normalized, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_source_order_created_at ON common_shelf (source_order_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_creator_created_at ON common_shelf (created_by_id, created_at DESC)",
-    # Chemical name map filtering.
+    # 化学名称映射筛选。
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_category ON chemical_name_map (category)",
-    # Common shelf operation log audit queries.
+    # 常用货架操作日志审计查询。
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_operator_created_at ON common_shelf_operation_log (operator_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_action_created_at ON common_shelf_operation_log (action, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_created_at ON common_shelf_operation_log (created_at DESC)",
@@ -745,6 +755,69 @@ SELECT
 FROM chemical_name_map
 """
 
+SQLITE_LOG_TIMELINE_FTS_SETUP: tuple[str, ...] = (
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS log_timeline_fts USING fts5(
+        search_text,
+        search_text_pinyin,
+        tokenize='trigram'
+    )
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_log_timeline_fts_ai
+    AFTER INSERT ON log_timeline
+    BEGIN
+        INSERT INTO log_timeline_fts(
+            rowid,
+            search_text,
+            search_text_pinyin
+        )
+        VALUES (
+            NEW.id,
+            NEW.search_text,
+            NEW.search_text_pinyin
+        );
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_log_timeline_fts_ad
+    AFTER DELETE ON log_timeline
+    BEGIN
+        DELETE FROM log_timeline_fts WHERE rowid = OLD.id;
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_log_timeline_fts_au
+    AFTER UPDATE ON log_timeline
+    BEGIN
+        DELETE FROM log_timeline_fts WHERE rowid = OLD.id;
+        INSERT INTO log_timeline_fts(
+            rowid,
+            search_text,
+            search_text_pinyin
+        )
+        VALUES (
+            NEW.id,
+            NEW.search_text,
+            NEW.search_text_pinyin
+        );
+    END
+    """,
+)
+
+SQLITE_LOG_TIMELINE_FTS_REBUILD_SQL = """
+INSERT INTO log_timeline_fts(
+    rowid,
+    search_text,
+    search_text_pinyin
+)
+SELECT
+    id,
+    search_text,
+    search_text_pinyin
+FROM log_timeline
+"""
+
 SQLITE_SAFE_COUNT_STATEMENTS: dict[str, str] = {
     "inventory": "SELECT COUNT(*) FROM inventory",
     "inventory_operation_log": "SELECT COUNT(*) FROM inventory_operation_log",
@@ -752,11 +825,13 @@ SQLITE_SAFE_COUNT_STATEMENTS: dict[str, str] = {
     "consumable_order": "SELECT COUNT(*) FROM consumable_order",
     "users": "SELECT COUNT(*) FROM users",
     "chemical_name_map": "SELECT COUNT(*) FROM chemical_name_map",
+    "log_timeline": "SELECT COUNT(*) FROM log_timeline",
     "inventory_fts": "SELECT COUNT(*) FROM inventory_fts",
     "reagent_order_fts": "SELECT COUNT(*) FROM reagent_order_fts",
     "consumable_order_fts": "SELECT COUNT(*) FROM consumable_order_fts",
     "users_fts": "SELECT COUNT(*) FROM users_fts",
     "chemical_name_map_fts": "SELECT COUNT(*) FROM chemical_name_map_fts",
+    "log_timeline_fts": "SELECT COUNT(*) FROM log_timeline_fts",
 }
 
 SQLITE_SAFE_DELETE_STATEMENTS: dict[str, str] = {
@@ -765,6 +840,7 @@ SQLITE_SAFE_DELETE_STATEMENTS: dict[str, str] = {
     "consumable_order_fts": "DELETE FROM consumable_order_fts",
     "users_fts": "DELETE FROM users_fts",
     "chemical_name_map_fts": "DELETE FROM chemical_name_map_fts",
+    "log_timeline_fts": "DELETE FROM log_timeline_fts",
 }
 
 SQLITE_SAFE_DROP_TRIGGER_STATEMENTS: dict[str, str] = {
@@ -783,6 +859,9 @@ SQLITE_SAFE_DROP_TRIGGER_STATEMENTS: dict[str, str] = {
     "trg_chemical_name_map_fts_ai": "DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_ai",
     "trg_chemical_name_map_fts_ad": "DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_ad",
     "trg_chemical_name_map_fts_au": "DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_au",
+    "trg_log_timeline_fts_ai": "DROP TRIGGER IF EXISTS trg_log_timeline_fts_ai",
+    "trg_log_timeline_fts_ad": "DROP TRIGGER IF EXISTS trg_log_timeline_fts_ad",
+    "trg_log_timeline_fts_au": "DROP TRIGGER IF EXISTS trg_log_timeline_fts_au",
 }
 
 @dataclass(frozen=True)
@@ -792,6 +871,7 @@ class SQLiteFTSTableConfig:
     setup_statements: tuple[str, ...]
     rebuild_sql: str
     trigger_names: tuple[str, str, str]
+    auto_rebuild: bool = True
 
 
 def _get_safe_count_statement(table_name: str) -> str:
@@ -830,6 +910,11 @@ def _normalize_index_ddl(statement: str) -> str:
     return normalized.lower()
 
 
+def _drop_sqlite_index_if_exists(connection: Connection, index_name: str) -> None:
+    safe_name = index_name.replace('"', '""')
+    connection.execute(text(f'DROP INDEX IF EXISTS "{safe_name}"'))
+
+
 def _ensure_sqlite_index_statement(connection: Connection, create_statement: str) -> bool:
     index_name = _extract_index_name_from_create_statement(create_statement)
     if not index_name:
@@ -846,8 +931,7 @@ def _ensure_sqlite_index_statement(connection: Connection, create_statement: str
     if existing_sql_row and existing_sql_row[0]:
         existing_sql = str(existing_sql_row[0])
         if _normalize_index_ddl(existing_sql) != _normalize_index_ddl(create_statement):
-            safe_name = index_name.replace('"', '""')
-            connection.execute(text(f'DROP INDEX IF EXISTS "{safe_name}"'))
+            _drop_sqlite_index_if_exists(connection, index_name)
             connection.execute(text(create_statement))
             return True
 
@@ -964,6 +1048,9 @@ def _ensure_sqlite_fts_table(
     for statement in config.setup_statements:
         connection.execute(text(statement))
 
+    if not config.auto_rebuild:
+        return
+
     source_count_statement = _get_safe_count_statement(config.source_table)
     fts_count_statement = _get_safe_count_statement(config.fts_table)
     source_count = connection.execute(text(source_count_statement)).scalar_one()
@@ -1058,6 +1145,21 @@ def ensure_sqlite_inventory_fts(connection: Connection) -> None:
                 ),
             ),
         )
+        _ensure_sqlite_fts_table(
+            connection,
+            config=SQLiteFTSTableConfig(
+                source_table="log_timeline",
+                fts_table="log_timeline_fts",
+                setup_statements=SQLITE_LOG_TIMELINE_FTS_SETUP,
+                rebuild_sql=SQLITE_LOG_TIMELINE_FTS_REBUILD_SQL,
+                trigger_names=(
+                    "trg_log_timeline_fts_ai",
+                    "trg_log_timeline_fts_ad",
+                    "trg_log_timeline_fts_au",
+                ),
+                auto_rebuild=False,
+            ),
+        )
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "CRITICAL: SQLite FTS initialization failed: %s. "
@@ -1136,11 +1238,15 @@ def reset_db() -> None:
         connection.execute(text("DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_ai"))
         connection.execute(text("DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_ad"))
         connection.execute(text("DROP TRIGGER IF EXISTS trg_chemical_name_map_fts_au"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_log_timeline_fts_ai"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_log_timeline_fts_ad"))
+        connection.execute(text("DROP TRIGGER IF EXISTS trg_log_timeline_fts_au"))
         connection.execute(text("DROP TABLE IF EXISTS inventory_fts"))
         connection.execute(text("DROP TABLE IF EXISTS reagent_order_fts"))
         connection.execute(text("DROP TABLE IF EXISTS consumable_order_fts"))
         connection.execute(text("DROP TABLE IF EXISTS users_fts"))
         connection.execute(text("DROP TABLE IF EXISTS chemical_name_map_fts"))
+        connection.execute(text("DROP TABLE IF EXISTS log_timeline_fts"))
 
     SQLModel.metadata.drop_all(engine)
     init_db()

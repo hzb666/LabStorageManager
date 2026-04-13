@@ -1,7 +1,4 @@
-"""
-Reagent Order Model - Reagent Purchase Order Management
-Separated from Consumable for independent workflow
-"""
+"""试剂订单模型。"""
 from datetime import datetime
 
 from app.core.constants import MAX_ORDER_QUANTITY
@@ -38,30 +35,29 @@ class ReagentOrderReason(str, Enum):
 
 class ReagentOrderBase(SQLModel):
     """Base reagent order model with common fields"""
-    # CAS Number - Critical field for reagents
+    # CAS 号，试剂的关键字段
     cas_number: str = Field(max_length=50)
-    # Chinese name (with index for query and pinyin for sorting)
+    # 中文名称，带查询索引和拼音排序字段
     name: str = Field(max_length=200)
-    # English name
+    # 英文名称
     english_name: Optional[str] = Field(None, max_length=200)
-    # Alias (e.g., "酒精, Ethanol")
+    # 别名，如 "酒精, Ethanol"
     alias: Optional[str] = Field(None, max_length=200)
-    # Category (with index for query and pinyin for sorting)
+    # 分类，带查询索引和拼音排序字段
     category: Optional[str] = Field(max_length=100)
-    # Brand (with index for query and pinyin for sorting)
+    # 品牌，带查询索引和拼音排序字段
     brand: Optional[str] = Field(max_length=100)
-    # Purity / grade (e.g. 95%, AR, HPLC)
+    # 纯度或等级，如 95%、AR、HPLC
     purity: Optional[str] = Field(None, max_length=20)
     # 数据库模型：允许 NULL 以兼容旧数据
     initial_quantity: Optional[float] = Field(default=None)
-    # Unit (e.g., "ml", "g", "L")
+    # 单位，如 "ml"、"g"、"L"
     unit: Optional[str] = Field(None, max_length=20)
-    # Quantity ordered (number of bottles)
+    # 订购数量（瓶数）
     quantity: int = Field(gt=0)
-    # Price
+    # 单价
     price: float = Field(ge=0)
-    # Order reason
-    # Order reason (optional, frontend must provide when creating)
+    # 订购原因；数据库允许为空，但前端创建时必须传入
     order_reason: Optional[ReagentOrderReason] = Field(
         default=None,
         sa_column=Column(
@@ -75,9 +71,9 @@ class ReagentOrderBase(SQLModel):
             nullable=True,
         ),
     )
-    # Hazardous flag
+    # 危险品标记
     is_hazardous: bool = False
-    # Notes
+    # 备注
     notes: Optional[str] = Field(None, max_length=500)
 
 
@@ -140,6 +136,8 @@ class ReagentOrderCreate(SQLModel):
     
     前端传入 specification (规格字符串)，后端解析为 initial_quantity + unit
     """
+    model_config = ConfigDict(extra="forbid")
+
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
     english_name: Optional[str] = None

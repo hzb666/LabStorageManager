@@ -11,6 +11,7 @@ from app.models.inventory_operation_log import (
     InventoryOperationAction,
     InventoryOperationLog,
 )
+from app.services.log_timeline_projection import project_inventory_operation_log
 
 SNAPSHOT_KEY_MAP = {
     "id": "id",
@@ -117,6 +118,7 @@ def _create_inventory_operation_log(
     cas_number: str,
     snapshot: dict[str, Any],
     notes: str | None = None,
+    is_cli: bool,
 ) -> InventoryOperationLog:
     log = InventoryOperationLog(
         inventory_id=inventory_id,
@@ -128,6 +130,8 @@ def _create_inventory_operation_log(
         notes=notes,
     )
     db.add(log)
+    db.flush([log])
+    project_inventory_operation_log(db, log=log, is_cli=is_cli)
     return log
 
 
@@ -137,6 +141,7 @@ def log_stock_in(
     inventory: Inventory,
     operator_id: int,
     source: str | None = None,
+    is_cli: bool,
 ) -> InventoryOperationLog:
     snapshot = build_inventory_snapshot(inventory, source=source)
     return _create_inventory_operation_log(
@@ -148,6 +153,7 @@ def log_stock_in(
         cas_number=inventory.cas_number,
         snapshot=snapshot,
         notes=inventory.notes,
+        is_cli=is_cli,
     )
 
 
@@ -156,6 +162,7 @@ def log_inventory_delete(
     *,
     inventory: Inventory,
     operator_id: int,
+    is_cli: bool,
 ) -> InventoryOperationLog:
     snapshot = build_inventory_snapshot(inventory)
     return _create_inventory_operation_log(
@@ -167,6 +174,7 @@ def log_inventory_delete(
         cas_number=inventory.cas_number,
         snapshot=snapshot,
         notes=inventory.notes,
+        is_cli=is_cli,
     )
 
 
@@ -176,6 +184,7 @@ def log_inventory_update(
     before_inventory: Inventory,
     after_inventory: Inventory,
     operator_id: int,
+    is_cli: bool,
 ) -> InventoryOperationLog:
     snapshot = {
         "bf": build_inventory_snapshot(before_inventory),
@@ -190,6 +199,7 @@ def log_inventory_update(
         cas_number=after_inventory.cas_number,
         snapshot=snapshot,
         notes=after_inventory.notes,
+        is_cli=is_cli,
     )
 
 
@@ -198,6 +208,7 @@ def log_inventory_export_operation(
     *,
     operator_id: int,
     exported_count: int,
+    is_cli: bool,
 ) -> InventoryOperationLog:
     """Persist a lightweight export audit log."""
 
@@ -211,4 +222,6 @@ def log_inventory_export_operation(
         notes=None,
     )
     db.add(log)
+    db.flush([log])
+    project_inventory_operation_log(db, log=log, is_cli=is_cli)
     return log

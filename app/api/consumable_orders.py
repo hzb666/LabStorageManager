@@ -1,16 +1,17 @@
 # 耗材订单 API 路由：耗材申购流程管理。
 # 与试剂订单分离（耗材无需入库流程）。
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlmodel import Session, select, func, delete
 
 from app.database import DBSession
-from app.core.auth import CurrentUser, get_current_user, require_admin
+from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
 from app.core.constants import (    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
@@ -19,6 +20,7 @@ from app.core.constants import (    DEFAULT_PAGE_SIZE,
 )
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.core.db_compat import exec_delete_returning_first
+from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
@@ -41,6 +43,7 @@ from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
     get_cached_result,
+    normalize_pagination,
     set_cached_result,
 )
 from app.services.order_fts import (
@@ -57,6 +60,11 @@ from app.services.order_operation_logger import (
     log_consumable_order_delete,
     log_consumable_order_reject,
     log_consumable_order_update,
+)
+from app.services.search_query_log_service import (
+    buffer_search_log,
+    build_search_log_filters,
+    build_search_log_sort,
 )
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
@@ -341,6 +349,7 @@ def _apply_consumable_order_filters(
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_consumable_order(
     order: ConsumableOrderCreate,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -372,6 +381,7 @@ async def create_consumable_order(
         db,
         order=db_order,
         actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     db.refresh(db_order)
@@ -385,15 +395,18 @@ async def create_consumable_order(
     return db_order
 
 
-@router.get("/", dependencies=[Depends(get_current_user)])
+@router.get("/")
 def list_consumable_orders(
+    request: Request,
     db: DBSession,
     query: Annotated[ConsumableOrderListQuery, Depends()],
+    current_session: CurrentSession,
 ):
     # 按查询参数返回耗材订单列表，保持分页/搜索/排序行为兼容。
 
-    skip = query.skip
-    limit = query.limit
+    _current_user, session = current_session
+    started = time.perf_counter()
+    skip, limit = normalize_pagination(query.skip, query.limit)
     status_filter = query.status_filter
     search = query.search
     search_field = query.search_field
@@ -471,7 +484,7 @@ def list_consumable_orders(
     if limit > 0:
         orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
     else:
-        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order)).all()
+        orders = []
 
     # Enrich with applicant names
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
@@ -486,6 +499,7 @@ def list_consumable_orders(
         "skip": skip,
         "limit": limit,
     }
+    include_search_options = bool(search and len(search.strip()) >= 2)
 
     # 缓存查询结果（仅当是第一页且无搜索条件时）
     if should_use_cache:
@@ -494,6 +508,24 @@ def list_consumable_orders(
             "total": result["total"],
         }
         set_cached_result(SEARCH_CACHE, cache_key, cache_data, now=get_utc_now)
+
+    buffer_search_log(
+        user_id=session.user_id,
+        session_id=session.id or 0,
+        source="cli" if get_request_is_cli(request) else "web",
+        endpoint="/consumable-orders/",
+        client_slot="cli" if get_request_is_cli(request) else (get_sse_client_id(request) or "web"),
+        raw_query=search,
+        filters=build_search_log_filters(
+            search_field=search_field if include_search_options else None,
+            fuzzy=fuzzy if include_search_options else False,
+            extra_filters={"status_filter": status_filter},
+        ),
+        has_effective_filter=bool(status_filter),
+        sort=build_search_log_sort(sort_by=sort_by, sort_order=sort_order),
+        result_count=total,
+        latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
+    )
     return result
 
 
@@ -535,6 +567,7 @@ def get_consumable_order(
 async def update_consumable_order(
     order_id: int,
     order_update: ConsumableOrderUpdate,
+    request: Request,
     db: DBSession,
     current_user: CurrentUser,
 ):
@@ -599,6 +632,7 @@ async def update_consumable_order(
         before_order=before_order,
         after_order=order,
         actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
     
     db.commit()
@@ -617,6 +651,7 @@ async def update_consumable_order(
 @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
 async def approve_consumable_order(
     order_id: int,
+    request: Request,
     db: DBSession,
     current_user: CurrentUser,
 ):
@@ -641,6 +676,7 @@ async def approve_consumable_order(
         before_order=before_order,
         after_order=order,
         actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
     
     db.commit()
@@ -658,6 +694,7 @@ async def approve_consumable_order(
 @router.post("/{order_id}/reject", dependencies=[Depends(require_admin)])
 async def reject_consumable_order(
     order_id: int,
+    request: Request,
     db: DBSession,
     current_user: CurrentUser,
 ):
@@ -676,6 +713,7 @@ async def reject_consumable_order(
         before_order=before_order,
         after_order=order,
         actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
     
     db.commit()
@@ -693,6 +731,7 @@ async def reject_consumable_order(
 @router.post("/{order_id}/complete")
 async def complete_consumable_order(
     order_id: int,
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -726,6 +765,7 @@ async def complete_consumable_order(
         before_order=before_order,
         after_order=order,
         actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
     
     db.commit()
@@ -802,6 +842,7 @@ def get_my_consumable_orders(
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_consumable_order(
     order_id: int,
+    request: Request,
     db: DBSession,
     current_user: CurrentUser,
 ):
@@ -816,6 +857,7 @@ async def delete_consumable_order(
         db,
         order=order,
         actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
 
     db.commit()

@@ -2,6 +2,7 @@
 Lab Storage Manager - Main FastAPI Application
 """
 import logging
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -9,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
@@ -26,7 +27,7 @@ from app.core.constants import (
     STATIC_CACHE_MAX_AGE_SECONDS,
     UPLOAD_PATHS,
 )
-from app.core.auth import resolve_current_session
+from app.core.auth import decode_token, extract_access_token, resolve_current_session
 from app.core.banner import print_banner
 from app.core.request_utils import (
     get_client_ip,
@@ -52,7 +53,13 @@ from app.api import (
 )
 from app.services import chemical_info
 from app.services.cache_reset_service import apply_startup_cache_reset_if_needed
+from app.services.error_logger import log_error
+from app.services.inventory_import_preview_sessions import cleanup_expired_inventory_import_preview_artifacts
+from app.services.log_queue import get_request_logger, initialize_async_file_logging, shutdown_async_file_logging
+from app.services.rate_limit import enforce_rate_limit
+from app.services.search_query_log_service import stop_search_query_log_worker, start_search_query_log_worker
 from app.services.sse_manager import sse_manager
+from app.search_query_log_db import init_query_log_db
 from sqlmodel import Session
 
 
@@ -60,6 +67,83 @@ LOGIN_PATH = "/login"
 ROBOTS_PATH = "/robots.txt"
 HEALTH_PATH = "/health"
 UNAUTH_REDIRECT_EXEMPT_PATHS = {LOGIN_PATH, ROBOTS_PATH, HEALTH_PATH}
+CLI_CLIENT_NAME = "cli"
+CLI_ALLOWED_USER_PATHS = {
+    "/api/users/login/token",
+    "/api/users/logout",
+    "/api/users/me",
+}
+CLI_ALLOWED_ROUTE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("POST", r"^/api/users/login/token$"),
+    ("POST", r"^/api/users/logout$"),
+    ("GET", r"^/api/users/me$"),
+    ("GET", r"^/api/inventory/$"),
+    ("GET", r"^/api/inventory/\d+$"),
+    ("PUT", r"^/api/inventory/\d+$"),
+    ("GET", r"^/api/inventory/cas/[^/]+$"),
+    ("GET", r"^/api/inventory/code/[^/]+$"),
+    ("GET", r"^/api/inventory/dashboard/my-borrows$"),
+    ("GET", r"^/api/inventory/dashboard/pending-stockin$"),
+    ("POST", r"^/api/inventory/\d+/borrow$"),
+    ("POST", r"^/api/inventory/\d+/return$"),
+    ("GET", r"^/api/inventory/\d+/borrow-history$"),
+    ("POST", r"^/api/inventory/manual-add$"),
+    ("GET", r"^/api/reagent-orders/$"),
+    ("POST", r"^/api/reagent-orders/$"),
+    ("GET", r"^/api/reagent-orders/\d+$"),
+    ("PUT", r"^/api/reagent-orders/\d+$"),
+    ("GET", r"^/api/reagent-orders/cas-overview/[^/]+$"),
+    ("GET", r"^/api/reagent-orders/dashboard/my-reagent-orders$"),
+    ("POST", r"^/api/reagent-orders/\d+/confirm-arrival$"),
+    ("POST", r"^/api/reagent-orders/\d+/stock-in$"),
+    ("GET", r"^/api/consumable-orders/$"),
+    ("POST", r"^/api/consumable-orders/$"),
+    ("GET", r"^/api/consumable-orders/\d+$"),
+    ("PUT", r"^/api/consumable-orders/\d+$"),
+    ("GET", r"^/api/consumable-orders/dashboard/my-consumable-orders$"),
+    ("POST", r"^/api/consumable-orders/\d+/complete$"),
+)
+
+
+def _resolve_cli_user_id(request: Request) -> int | None:
+    # CLI token 可能通过 header 或 cookie 传入；这里必须和真正鉴权读取的 token 来源保持一致。
+    token = extract_access_token(request)
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+    except HTTPException:
+        return None
+    if payload.get("client") != CLI_CLIENT_NAME:
+        return None
+    try:
+        return int(payload.get("sub"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _matches_cli_allowed_route(request: Request) -> bool:
+    method = request.method.upper()
+    path = request.url.path
+    for allowed_method, pattern in CLI_ALLOWED_ROUTE_PATTERNS:
+        if method != allowed_method:
+            continue
+        if re.match(pattern, path):
+            return True
+    return False
+
+
+def _is_cli_blocked_request(request: Request) -> bool:
+    # CLI 只开放命令层真正需要的 API；新路由默认关闭，避免能力范围悄悄漂移。
+    if request.url.path.startswith("/api/users") and request.url.path not in CLI_ALLOWED_USER_PATHS:
+        return True
+    if not _matches_cli_allowed_route(request):
+        return True
+    # 文件上传会把 agent 输入扩大成文件系统读写，先统一禁用，后续按场景单独放开。
+    content_type = request.headers.get("content-type", "").lower()
+    if "multipart/form-data" in content_type:
+        return True
+    return False
 
 
 def _get_log_level() -> int:
@@ -71,7 +155,7 @@ def _get_log_level() -> int:
     return logging.INFO
 
 
-# Configure logging
+# 配置日志
 logging.basicConfig(
     level=_get_log_level(),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -92,7 +176,7 @@ def _sanitize_path_for_log(path: str) -> str:
             masked_segments.append(segment)
             continue
 
-        # Mask numeric ids and long opaque tokens/UUID-like segments.
+        # 脱敏数字 ID 和较长的 token/UUID 段。
         if segment.isdigit() or (len(segment) >= 16 and any(char.isdigit() for char in segment)):
             masked_segments.append("{id}")
             continue
@@ -208,7 +292,7 @@ class CachedStaticFiles(StaticFiles):
         """Override to add cache headers for static files"""
         response = await super().get_response(path, scope)
 
-        # Add cache headers for static files (images, fonts, etc.)
+        # 为静态文件添加缓存头。
         response.headers["Cache-Control"] = f"public, max-age={STATIC_CACHE_MAX_AGE_SECONDS}, immutable"
         _apply_security_headers(response, scope.get("path"))
 
@@ -219,7 +303,11 @@ class CachedStaticFiles(StaticFiles):
 async def lifespan(app: FastAPI):
     """Application lifespan handler - startup and shutdown events"""
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
+    initialize_async_file_logging()
+    cleanup_expired_inventory_import_preview_artifacts()
     init_db()
+    init_query_log_db()
+    start_search_query_log_worker()
     logger.info("Database initialized (WAL mode enabled)")
     try:
         cache_reset_result = apply_startup_cache_reset_if_needed()
@@ -232,11 +320,13 @@ async def lifespan(app: FastAPI):
         logger.exception("Startup cache reset failed; continue without version-based reset")
     print_banner()
     yield
+    stop_search_query_log_worker()
+    shutdown_async_file_logging()
     await sse_manager.stop_listener()
     logger.info("Shutting down...")
 
 
-# Create FastAPI application
+# 创建 FastAPI 应用
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
@@ -267,12 +357,13 @@ async def request_logging_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.request_id = request_id
     started = time.perf_counter()
+    request_logger = get_request_logger()
 
     try:
         response = await call_next(request)
     except Exception:
         duration_ms = (time.perf_counter() - started) * 1000
-        logger.exception(
+        request_logger.exception(
             "request_error request_id=%s method=%s path=%s client_ip=%s duration_ms=%.2f",
             request_id,
             request.method,
@@ -290,7 +381,7 @@ async def request_logging_middleware(request: Request, call_next):
     elif status >= 400:
         log_level = logging.WARNING
 
-    logger.log(
+    request_logger.log(
         log_level,
         "request request_id=%s method=%s path=%s status=%s client_ip=%s duration_ms=%.2f",
         request_id,
@@ -389,7 +480,33 @@ async def csrf_origin_check_middleware(
 
     return await call_next(request)
 
-# CORS middleware - must be added AFTER exception handlers
+
+@app.middleware("http")
+async def cli_guard_middleware(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Apply CLI-specific rate limits and block sensitive operations for CLI tokens."""
+    cli_user_id = _resolve_cli_user_id(request)
+    if cli_user_id is None:
+        return await call_next(request)
+
+    if _is_cli_blocked_request(request):
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "CLI token cannot access this endpoint"},
+        )
+
+    # CLI 统一按 user_id 限流，避免同一台机器上的多个普通用户互相抢额度。
+    enforce_rate_limit(
+        scope="cli_api",
+        identifier=str(cli_user_id),
+        limit=settings.cli_rate_limit_count,
+        window_seconds=settings.cli_rate_limit_window_seconds,
+    )
+    return await call_next(request)
+
+# CORS 中间件必须放在异常处理器之后。
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -422,8 +539,15 @@ async def global_exception_handler(request, exc):
     request_id = get_request_id(request)
     log_path = _resolve_request_log_path(request)
     if settings.debug:
+        log_error(
+            f"Unhandled exception request_id={request_id} path={log_path}",
+            exc_info=exc,
+        )
         logger.exception("Unhandled exception request_id=%s path=%s", request_id, log_path)
     else:
+        log_error(
+            f"Unhandled exception request_id={request_id} path={log_path} error={type(exc).__name__}"
+        )
         logger.error(
             "Unhandled exception request_id=%s path=%s error=%s",
             request_id,

@@ -16,6 +16,10 @@ from app.models.reagent_order_operation_log import (
     ReagentOrderOperationAction,
     ReagentOrderOperationLog,
 )
+from app.services.log_timeline_projection import (
+    project_consumable_order_operation_log,
+    project_reagent_order_operation_log,
+)
 
 REAGENT_SNAPSHOT_KEY_MAP = {
     "id": "id",
@@ -155,6 +159,7 @@ def _create_reagent_order_operation_log(
     cas_number: str,
     snapshot: dict[str, Any],
     notes: str | None = None,
+    is_cli: bool,
 ) -> ReagentOrderOperationLog:
     log = ReagentOrderOperationLog(
         order_id=order_id,
@@ -167,6 +172,8 @@ def _create_reagent_order_operation_log(
         notes=notes,
     )
     db.add(log)
+    db.flush([log])
+    project_reagent_order_operation_log(db, log=log, is_cli=is_cli)
     return log
 
 
@@ -181,6 +188,7 @@ def _create_consumable_order_operation_log(
     specification: str,
     snapshot: dict[str, Any],
     notes: str | None = None,
+    is_cli: bool,
 ) -> ConsumableOrderOperationLog:
     log = ConsumableOrderOperationLog(
         order_id=order_id,
@@ -193,6 +201,8 @@ def _create_consumable_order_operation_log(
         notes=notes,
     )
     db.add(log)
+    db.flush([log])
+    project_consumable_order_operation_log(db, log=log, is_cli=is_cli)
     return log
 
 
@@ -201,6 +211,7 @@ def log_reagent_order_create(
     *,
     order: ReagentOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ReagentOrderOperationLog:
     snapshot = build_reagent_order_snapshot(order)
     return _create_reagent_order_operation_log(
@@ -213,6 +224,7 @@ def log_reagent_order_create(
         cas_number=order.cas_number,
         snapshot=snapshot,
         notes=order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -222,6 +234,7 @@ def log_reagent_order_update(
     before_order: ReagentOrder,
     after_order: ReagentOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ReagentOrderOperationLog:
     snapshot = {
         "bf": build_reagent_order_snapshot(before_order),
@@ -237,6 +250,7 @@ def log_reagent_order_update(
         cas_number=after_order.cas_number,
         snapshot=snapshot,
         notes=after_order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -245,6 +259,7 @@ def log_reagent_order_delete(
     *,
     order: ReagentOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ReagentOrderOperationLog:
     snapshot = build_reagent_order_snapshot(order)
     return _create_reagent_order_operation_log(
@@ -257,6 +272,7 @@ def log_reagent_order_delete(
         cas_number=order.cas_number,
         snapshot=snapshot,
         notes=order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -266,6 +282,7 @@ def log_reagent_order_approve(
     before_order: ReagentOrder,
     after_order: ReagentOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ReagentOrderOperationLog:
     snapshot = {
         "bf": build_reagent_order_snapshot(before_order),
@@ -281,6 +298,7 @@ def log_reagent_order_approve(
         cas_number=after_order.cas_number,
         snapshot=snapshot,
         notes=after_order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -290,6 +308,7 @@ def log_reagent_order_reject(
     before_order: ReagentOrder,
     after_order: ReagentOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ReagentOrderOperationLog:
     snapshot = {
         "bf": build_reagent_order_snapshot(before_order),
@@ -305,6 +324,7 @@ def log_reagent_order_reject(
         cas_number=after_order.cas_number,
         snapshot=snapshot,
         notes=after_order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -313,6 +333,7 @@ def log_consumable_order_create(
     *,
     order: ConsumableOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ConsumableOrderOperationLog:
     snapshot = build_consumable_order_snapshot(order)
     return _create_consumable_order_operation_log(
@@ -325,6 +346,7 @@ def log_consumable_order_create(
         specification=order.specification,
         snapshot=snapshot,
         notes=order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -334,6 +356,7 @@ def log_consumable_order_update(
     before_order: ConsumableOrder,
     after_order: ConsumableOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ConsumableOrderOperationLog:
     snapshot = {
         "bf": build_consumable_order_snapshot(before_order),
@@ -349,6 +372,7 @@ def log_consumable_order_update(
         specification=after_order.specification,
         snapshot=snapshot,
         notes=after_order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -357,6 +381,7 @@ def log_consumable_order_delete(
     *,
     order: ConsumableOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ConsumableOrderOperationLog:
     snapshot = build_consumable_order_snapshot(order)
     return _create_consumable_order_operation_log(
@@ -369,6 +394,7 @@ def log_consumable_order_delete(
         specification=order.specification,
         snapshot=snapshot,
         notes=order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -378,6 +404,7 @@ def log_consumable_order_approve(
     before_order: ConsumableOrder,
     after_order: ConsumableOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ConsumableOrderOperationLog:
     snapshot = {
         "bf": build_consumable_order_snapshot(before_order),
@@ -393,6 +420,7 @@ def log_consumable_order_approve(
         specification=after_order.specification,
         snapshot=snapshot,
         notes=after_order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -402,6 +430,7 @@ def log_consumable_order_reject(
     before_order: ConsumableOrder,
     after_order: ConsumableOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ConsumableOrderOperationLog:
     snapshot = {
         "bf": build_consumable_order_snapshot(before_order),
@@ -417,6 +446,7 @@ def log_consumable_order_reject(
         specification=after_order.specification,
         snapshot=snapshot,
         notes=after_order.notes,
+        is_cli=is_cli,
     )
 
 
@@ -426,6 +456,7 @@ def log_consumable_order_arrival_complete(
     before_order: ConsumableOrder,
     after_order: ConsumableOrder,
     actor_user_id: int | None,
+    is_cli: bool,
 ) -> ConsumableOrderOperationLog:
     snapshot = {
         "bf": build_consumable_order_snapshot(before_order),
@@ -441,4 +472,5 @@ def log_consumable_order_arrival_complete(
         specification=after_order.specification,
         snapshot=snapshot,
         notes=after_order.notes,
+        is_cli=is_cli,
     )

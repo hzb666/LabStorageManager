@@ -82,6 +82,11 @@ def get_request_id(request: Request) -> str:
     return str(uuid.uuid4())
 
 
+def get_request_is_cli(request: Request) -> bool:
+    """Read authenticated request CLI flag from request state."""
+    return bool(getattr(request.state, "is_cli", False))
+
+
 def get_sse_client_id(request: Request) -> str | None:
     """Read current tab SSE client id from request headers when provided."""
     client_id = request.headers.get("X-SSE-Client-Id", "").strip()

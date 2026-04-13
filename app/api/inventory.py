@@ -4,6 +4,7 @@
 # 路由顺序要求：具名路由必须在 /{inventory_id} 之前，
 # 避免路径参数误捕获 "export"、"dashboard" 等字符串。
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Dict, Any, Annotated
@@ -14,7 +15,7 @@ from sqlmodel import Session, select, func, delete
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
-from app.core.auth import get_current_user
+from app.core.auth import CurrentSession, get_current_user
 from app.core.constants import (    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
@@ -32,7 +33,12 @@ from app.services.sql_utils import (
     order_with_nulls_last,
     order_with_special_last,
 )
-from app.services.api_utils import clear_cache_by_prefix, get_cached_result, set_cached_result
+from app.services.api_utils import (
+    clear_cache_by_prefix,
+    get_cached_result,
+    normalize_pagination,
+    set_cached_result,
+)
 from app.services.inventory_fts import (
     InventoryFTSError,
     apply_inventory_fts_filter,
@@ -59,9 +65,14 @@ from app.services.inventory_operation_logger import (
 )
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
-from app.core.request_utils import get_sse_client_id
+from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.core.db_compat import exec_delete_returning_first
 from app.models.user import User
+from app.services.search_query_log_service import (
+    buffer_search_log,
+    build_search_log_filters,
+    build_search_log_sort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -477,15 +488,18 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
 register_inventory_extended_routes(router, SEARCH_CACHE, LIST_CACHE_PREFIX)
 
 
-@router.get("/", dependencies=[Depends(get_current_user)])
+@router.get("/")
 def list_inventory(
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     query: Annotated[InventoryListQuery, Depends()],
+    current_session: CurrentSession,
 ):
     # 按查询参数返回库存列表，并保持缓存与排序行为一致。
 
-    skip = query.skip
-    limit = query.limit
+    _current_user, session = current_session
+    started = time.perf_counter()
+    skip, limit = normalize_pagination(query.skip, query.limit)
     status_filter = query.status_filter
     cas_filter = query.cas_filter
     hazardous_only = query.hazardous_only
@@ -533,7 +547,7 @@ def list_inventory(
     if limit > 0:
         items = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
     else:
-        items = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order)).all()
+        items = []
 
     result_data = _attach_user_names(db, items)
 
@@ -543,6 +557,7 @@ def list_inventory(
         "skip": skip,
         "limit": limit,
     }
+    include_search_options = bool(search and len(search.strip()) >= 2)
 
     if should_use_cache:
         cache_data = {
@@ -551,6 +566,28 @@ def list_inventory(
         }
         set_cached_result(SEARCH_CACHE, cache_key, cache_data, now=get_utc_now)
 
+    buffer_search_log(
+        user_id=session.user_id,
+        session_id=session.id or 0,
+        source="cli" if get_request_is_cli(request) else "web",
+        endpoint="/inventory/",
+        client_slot="cli" if get_request_is_cli(request) else (get_sse_client_id(request) or "web"),
+        raw_query=search,
+        filters=build_search_log_filters(
+            search_field=search_field if include_search_options else None,
+            fuzzy=fuzzy if include_search_options else False,
+            extra_filters={
+                "status_filter": status_filter,
+                "cas_filter": cas_filter,
+                "hazardous_only": hazardous_only,
+            },
+        ),
+        has_effective_filter=bool(status_filter or cas_filter or hazardous_only),
+        sort=build_search_log_sort(sort_by=sort_by, sort_order=sort_order),
+        result_count=total,
+        latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
+    )
+
     return result
 
 @router.get("/{inventory_id}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
@@ -558,8 +595,7 @@ def get_inventory(inventory_id: int, db: DBSession):
     item = _get_by_id(db, inventory_id)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
-    response = InventoryResponse.model_validate(item).model_dump()
-    return _add_specification(response)
+    return _attach_user_names(db, [item])[0]
 
 
 @router.put("/{inventory_id}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
@@ -602,6 +638,7 @@ async def update_inventory(
         before_inventory=before_item,
         after_inventory=item,
         operator_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
 
     db.commit()
@@ -708,6 +745,7 @@ async def delete_inventory(
         db,
         inventory=item,
         operator_id=current_user.id,
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     _clear_list_cache()

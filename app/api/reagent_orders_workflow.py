@@ -2,14 +2,15 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select, delete
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.db_compat import exec_delete_returning_first
+from app.core.request_utils import get_request_is_cli
 from app.core.time_utils import utc_iso_str
 from app.models.user import UserRole
 from app.models.reagent_order import (
@@ -54,6 +55,7 @@ DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL = "Public account cannot delete orders"
 
 class ConfirmArrivalRequest(BaseModel):
     # confirm-arrival 操作请求体。
+    model_config = ConfigDict(extra="forbid")
 
     arrival_notes: Optional[str] = None
     storage_location: Optional[str] = None
@@ -61,6 +63,7 @@ class ConfirmArrivalRequest(BaseModel):
 
 class StockInRequest(BaseModel):
     # stock-in 操作请求体。
+    model_config = ConfigDict(extra="forbid")
 
     storage_location: str
     remaining_quantity: Optional[float] = None
@@ -151,6 +154,7 @@ def _log_stock_in_operations(
     *,
     items: list[Inventory],
     operator_id: int,
+    is_cli: bool,
 ) -> None:
     if not items:
         return
@@ -161,6 +165,7 @@ def _log_stock_in_operations(
             inventory=item,
             operator_id=operator_id,
             source=SOURCE_ORDER_STOCK_IN,
+            is_cli=is_cli,
         )
 
 
@@ -169,6 +174,7 @@ def _log_common_stock_in_operations(
     *,
     items: list[CommonShelf],
     operator_id: int,
+    is_cli: bool,
 ) -> None:
     if not items:
         return
@@ -178,6 +184,7 @@ def _log_common_stock_in_operations(
             db,
             item=item,
             operator_id=operator_id,
+            is_cli=is_cli,
         )
 
 
@@ -306,7 +313,12 @@ def _register_approval_routes(
     search_cache: Dict[str, tuple[Any, Any]],
 ) -> None:
     @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
-    async def approve_reagent_order(order_id: int, db: DBSession, current_user: CurrentUser):
+    async def approve_reagent_order(
+        order_id: int,
+        request: Request,
+        db: DBSession,
+        current_user: CurrentUser,
+    ):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -324,6 +336,7 @@ def _register_approval_routes(
             before_order=before_order,
             after_order=order,
             actor_user_id=current_user.id,
+            is_cli=get_request_is_cli(request),
         )
 
         db.commit()
@@ -338,7 +351,12 @@ def _register_approval_routes(
         return order
 
     @router.post("/{order_id}/reject", dependencies=[Depends(require_admin)])
-    async def reject_reagent_order(order_id: int, db: DBSession, current_user: CurrentUser):
+    async def reject_reagent_order(
+        order_id: int,
+        request: Request,
+        db: DBSession,
+        current_user: CurrentUser,
+    ):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
@@ -356,6 +374,7 @@ def _register_approval_routes(
             before_order=before_order,
             after_order=order,
             actor_user_id=current_user.id,
+            is_cli=get_request_is_cli(request),
         )
 
         db.commit()
@@ -376,6 +395,7 @@ def _register_arrival_routes(
 ) -> None:
     @router.post("/{order_id}/confirm-arrival")
     async def confirm_reagent_arrival(
+        request: Request,
         current_user: CurrentUser,
         db: DBSession,
         order_id: int,
@@ -415,6 +435,7 @@ def _register_arrival_routes(
                 db,
                 items=common_shelf_items,
                 operator_id=current_user.id,
+                is_cli=get_request_is_cli(request),
             )
             db.commit()
             db.refresh(order)
@@ -467,6 +488,7 @@ def _register_arrival_routes(
             db,
             items=inventory_items,
             operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
         )
         db.commit()
         db.refresh(order)
@@ -762,7 +784,12 @@ def _register_delete_order_route(
 ) -> None:
     # 删除试剂订单。
     @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
-    async def delete_reagent_order(order_id: int, db: DBSession, current_user: CurrentUser):
+    async def delete_reagent_order(
+        order_id: int,
+        request: Request,
+        db: DBSession,
+        current_user: CurrentUser,
+    ):
         # 删除试剂订单（单语句原子删除 + 保持原鉴权语义）。
         order = _delete_reagent_order_with_permission(
             db,
@@ -774,6 +801,7 @@ def _register_delete_order_route(
             db,
             order=order,
             actor_user_id=current_user.id,
+            is_cli=get_request_is_cli(request),
         )
         db.commit()
         clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
@@ -794,6 +822,7 @@ def _register_stock_in_route(
     async def stock_in_reagent_order(
         order_id: int,
         payload: StockInRequest,
+        request: Request,
         current_user: CurrentUser,
         db: DBSession,
     ):
@@ -818,6 +847,7 @@ def _register_stock_in_route(
                 db,
                 items=inventory_items,
                 operator_id=current_user.id,
+                is_cli=get_request_is_cli(request),
             )
             await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
             _clear_inventory_projection_cache()
@@ -846,6 +876,7 @@ def _register_stock_in_route(
                 before_inventory=before_item,
                 after_inventory=after_item,
                 operator_id=current_user.id,
+                is_cli=get_request_is_cli(request),
             )
         await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
         _clear_inventory_projection_cache()

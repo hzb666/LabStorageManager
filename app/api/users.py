@@ -12,6 +12,7 @@ from sqlmodel import Session, select, func, or_
 import redis
 
 from app.core.auth import (
+    decode_token,
     extract_access_token,
     get_current_user,
     require_admin,
@@ -36,7 +37,7 @@ from app.core.constants import (
     USERNAME_MIN_LENGTH,
 )
 from app.core.time_utils import utc_iso_str
-from app.core.request_utils import get_client_ip, get_request_id
+from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
 from app.core.redis import get_redis, redis_key
 from app.database import get_db, DBSession
 from app.models.user import (
@@ -81,6 +82,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 DUMMY_PASSWORD_HASH = get_password_hash("constant-timing-placeholder")
+CLI_CLIENT_NAME = "cli"
+CLI_DEVICE_NAME = "LabStorageManager CLI"
 
 
 @dataclass
@@ -91,6 +94,17 @@ class UserListQuery:
     full_name: Annotated[Optional[str], Query(max_length=100)] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+def _resolve_request_token_is_cli(request: Request) -> bool:
+    token = extract_access_token(request)
+    if not token:
+        return False
+    try:
+        payload = decode_token(token)
+    except HTTPException:
+        return False
+    return payload.get("client") == CLI_CLIENT_NAME
 
 
 def _password_change_rate_limit_key(user_id: int, client_ip: str) -> str:
@@ -271,6 +285,28 @@ def _rate_limit_key(client_ip: str) -> str:
     return redis_key(f"rate_limit:login:{client_ip}")
 
 
+def _clear_failed_login_memory(client_ip: str) -> None:
+    with _login_attempts_lock:
+        LOGIN_ATTEMPTS.pop(client_ip, None)
+
+
+def _clear_failed_login(client_ip: str) -> None:
+    redis_client = get_redis()
+
+    if redis_client is None:
+        if settings.use_secure_runtime():
+            # 生产环境限流依赖 Redis；Redis 不可用时由前置检查 fail-closed。
+            return
+        _clear_failed_login_memory(client_ip)
+        return
+
+    try:
+        redis_client.delete(_rate_limit_key(client_ip))
+    except redis.RedisError:
+        if not settings.use_secure_runtime():
+            _clear_failed_login_memory(client_ip)
+
+
 def _check_rate_limit(client_ip: str) -> None:
     redis_client = get_redis()
     
@@ -313,11 +349,24 @@ def _check_rate_limit(client_ip: str) -> None:
 
 def _record_failed_login(client_ip: str) -> None:
     redis_client = get_redis()
-    
     if redis_client is None:
         # 生产环境 fail-closed，开发环境使用内存后备
         if settings.use_secure_runtime():
             return
+        _record_failed_login_memory(client_ip)
+        return
+
+    key = _rate_limit_key(client_ip)
+    try:
+        current = redis_client.incr(key)
+        if current == 1:
+            redis_client.expire(key, LOGIN_WINDOW_SECONDS)
+    except redis.RedisError:
+        if settings.use_secure_runtime():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Login service temporarily unavailable",
+            )
         _record_failed_login_memory(client_ip)
 
 def _check_rate_limit_memory(client_ip: str) -> None:
@@ -369,6 +418,25 @@ class UserSearchItem(BaseModel):
     full_name: str
 
 
+@dataclass
+class LoginSuccessResult:
+    user: User
+    access_token: str
+    session: UserSession
+    expired_token_hashes: list[str]
+    evicted_token_hashes: list[str]
+    relogin_token_hashes: list[str]
+    redis_warning: str | None
+
+
+class CLILoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    expires_in: int
+    user: UserResponse
+    redis_warning: Optional[str] = None
+
+
 def _finalize_expired_login_cleanup(expired_token_hashes: list[str]) -> None:
     if not expired_token_hashes:
         return
@@ -407,150 +475,124 @@ def _apply_login_post_commit_side_effects(
         logger.exception("Post-commit session side effects failed for login user_id=%s", user.id)
 
 
-@router.post("/login")
-def login(
+def _check_cli_login_rate_limit(client_ip: str, username: str) -> None:
+    normalized_username = username.strip().lower()
+    enforce_rate_limit(
+        scope="cli_login",
+        identifier=f"{client_ip}:{normalized_username}",
+        limit=settings.cli_login_rate_limit_count,
+        window_seconds=settings.cli_login_rate_limit_window_seconds,
+    )
+
+
+def _build_cli_login_forbidden_response(
+    *,
+    db: DBSession,
+    http_request: Request,
+    user: User,
+    expired_token_hashes: list[str],
+) -> None:
+    log_user_operation(
+        db,
+        action=UserOperationAction.LOGIN,
+        actor_user_id=user.id,
+        target_user_id=user.id,
+        outcome="failure",
+        client_ip=get_client_ip(http_request),
+        request_id=get_request_id(http_request),
+        detail="cli_role_forbidden",
+        snapshot=build_user_snapshot(user),
+        is_cli=True,
+    )
+    db.commit()
+    log_audit_event(
+        "login",
+        context=_build_audit_context(
+            http_request,
+            actor_user_id=user.id,
+            target_user_id=user.id,
+        ),
+        outcome="failure",
+        detail="cli_role_forbidden",
+    )
+    _finalize_expired_login_cleanup(expired_token_hashes)
+    # 对外仍返回统一认证失败，避免把“密码正确但角色不允许”暴露成在线探测信号。
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _login_user(
+    *,
     login_request: LoginRequest,
     http_request: Request,
     db: DBSession,
-):
+    token_client: str | None = None,
+    cli_user_only: bool = False,
+) -> LoginSuccessResult:
+    # Web 和 CLI 复用同一条登录事务，避免会话、审计和缓存副作用在两条入口上漂移。
+    expired_token_hashes: list[str] = []
     try:
-        expired_token_hashes: list[str] = []
-        # 维护任务失败不能放大成登录失败，只做回滚和记录。
-        try:
-            expired_token_hashes = cleanup_expired_sessions(db, commit=False)
-        except Exception:
-            # 会话清理是维护任务，不应阻断登录主流程
-            db.rollback()
-            logger.exception("Session cleanup failed before login, continue with auth flow")
+        expired_token_hashes = cleanup_expired_sessions(db, commit=False)
+    except Exception:
+        # 会话清理是维护任务，不应阻断登录主流程
+        db.rollback()
+        logger.exception("Session cleanup failed before login, continue with auth flow")
 
-        client_ip = get_client_ip(http_request)
-        user_agent = http_request.headers.get("User-Agent", "Unknown")
-        
+    client_ip = get_client_ip(http_request)
+    user_agent = http_request.headers.get("User-Agent", "Unknown")
+    if token_client == CLI_CLIENT_NAME:
+        _check_cli_login_rate_limit(client_ip, login_request.username)
+    else:
         _check_rate_limit(client_ip)
-        
-        user = get_user_by_username(db, login_request.username)
-        password_hash = user.password_hash if user else DUMMY_PASSWORD_HASH
-        password_valid = verify_password(login_request.password, password_hash)
 
-        if not user or not password_valid:
+    user = get_user_by_username(db, login_request.username)
+    password_hash = user.password_hash if user else DUMMY_PASSWORD_HASH
+    password_valid = verify_password(login_request.password, password_hash)
+
+    if not user or not password_valid:
+        if token_client != CLI_CLIENT_NAME:
             _record_failed_login(client_ip)
-            log_user_operation(
-                db,
-                action=UserOperationAction.LOGIN,
-                actor_user_id=None,
-                target_user_id=user.id if user else None,
-                outcome="failure",
-                client_ip=client_ip,
-                request_id=get_request_id(http_request),
-                detail=f"username={login_request.username}",
-                snapshot={"un": login_request.username},
-            )
-            db.commit()
-            log_audit_event(
-                "login",
-                outcome="failure",
-                context=_build_audit_context(http_request),
-                detail=f"username={login_request.username}",
-            )
-            _finalize_expired_login_cleanup(expired_token_hashes)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        if not user.is_active:
-            log_user_operation(
-                db,
-                action=UserOperationAction.LOGIN,
-                actor_user_id=user.id,
-                target_user_id=user.id,
-                outcome="failure",
-                client_ip=client_ip,
-                request_id=get_request_id(http_request),
-                detail="account_disabled",
-                snapshot=build_user_snapshot(user),
-            )
-            db.commit()
-            log_audit_event(
-                "login",
-                context=_build_audit_context(
-                    http_request,
-                    actor_user_id=user.id,
-                    target_user_id=user.id,
-                ),
-                outcome="failure",
-                detail="account_disabled",
-            )
-            _finalize_expired_login_cleanup(expired_token_hashes)
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is disabled"
-            )
-        
-        if not _check_ip_limit(db, user.id, client_ip):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"IP limit reached ({settings.max_ip_per_user} IPs), please remove other devices first"
-            )
-        
-        # 新设备登录前先淘汰最旧会话，保持既有设备上限策略。
-        evicted_token_hashes: list[str] = []
-        if not _check_device_limit(db, user.id, login_request.device_id):
-            evicted_token_hashes = _evict_oldest_session(db, user.id, commit=False)
-        
-        user_role = user.role.value if isinstance(user.role, UserRole) else str(user.role)
-        access_token = create_access_token(
-            user_id=user.id,
-            username=user.username,
-            role=user_role,
-            username_version=user.username_version or 1
+        log_user_operation(
+            db,
+            action=UserOperationAction.LOGIN,
+            actor_user_id=None,
+            target_user_id=user.id if user else None,
+            outcome="failure",
+            client_ip=client_ip,
+            request_id=get_request_id(http_request),
+            detail=f"username={login_request.username}",
+            snapshot={"un": login_request.username},
+            is_cli=token_client == CLI_CLIENT_NAME,
         )
-        
-        session, relogin_token_hashes = stage_create_or_refresh_user_session(
-            db=db,
-            request=SessionCreationRequest(
-                user_id=user.id,
-                username=user.username,
-                device_id=login_request.device_id,
-                device_name=login_request.device_name or UNKNOWN_DEVICE,
-                ip_address=client_ip,
-                user_agent=user_agent,
-                token=access_token,
-            ),
+        db.commit()
+        log_audit_event(
+            "login",
+            outcome="failure",
+            context=_build_audit_context(http_request),
+            detail=f"username={login_request.username}",
         )
-        
-        response = {
-            "token_type": "bearer",
-            "user": UserResponse.model_validate(user).model_dump(mode='json'),
-            "redis_warning": None
-        }
-        
-        json_response = JSONResponse(content=response)
-        
-        redis_client = get_redis()
-        if redis_client is None:
-            json_response.headers["X-Redis-Status"] = "unavailable"
-        
-        json_response.set_cookie(
-            key="access_token",
-            value=access_token,
-            httponly=True,
-            secure=settings.use_secure_runtime(),  # 非开发环境启用 HTTPS cookie
-            samesite="lax",
-            max_age=settings.session_expire_hours * SECONDS_PER_HOUR,
-            path="/",
+        _finalize_expired_login_cleanup(expired_token_hashes)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if not user.is_active:
         log_user_operation(
             db,
             action=UserOperationAction.LOGIN,
             actor_user_id=user.id,
             target_user_id=user.id,
-            outcome="success",
+            outcome="failure",
             client_ip=client_ip,
             request_id=get_request_id(http_request),
-            detail=f"device_id={login_request.device_id or '-'}",
+            detail="account_disabled",
             snapshot=build_user_snapshot(user),
+            is_cli=token_client == CLI_CLIENT_NAME,
         )
         db.commit()
         log_audit_event(
@@ -560,17 +602,133 @@ def login(
                 actor_user_id=user.id,
                 target_user_id=user.id,
             ),
-            detail=f"device_id={login_request.device_id or '-'}",
+            outcome="failure",
+            detail="account_disabled",
         )
-        _apply_login_post_commit_side_effects(
+        _finalize_expired_login_cleanup(expired_token_hashes)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled",
+        )
+
+    if cli_user_only and user.role != UserRole.USER:
+        # CLI 不承担管理员入口，避免机器调用天然带上更宽的账号自助能力。
+        _build_cli_login_forbidden_response(
             db=db,
-            session=session,
+            http_request=http_request,
             user=user,
             expired_token_hashes=expired_token_hashes,
-            evicted_token_hashes=evicted_token_hashes,
-            relogin_token_hashes=relogin_token_hashes,
         )
-        
+
+    if not _check_ip_limit(db, user.id, client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"IP limit reached ({settings.max_ip_per_user} IPs), please remove other devices first",
+        )
+
+    evicted_token_hashes: list[str] = []
+    if not _check_device_limit(db, user.id, login_request.device_id):
+        evicted_token_hashes = _evict_oldest_session(db, user.id, commit=False)
+
+    user_role = user.role.value if isinstance(user.role, UserRole) else str(user.role)
+    access_token = create_access_token(
+        user_id=user.id,
+        username=user.username,
+        role=user_role,
+        username_version=user.username_version or 1,
+        client=token_client,
+    )
+
+    session, relogin_token_hashes = stage_create_or_refresh_user_session(
+        db=db,
+        request=SessionCreationRequest(
+            user_id=user.id,
+            username=user.username,
+            device_id=login_request.device_id,
+            device_name=login_request.device_name or UNKNOWN_DEVICE,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            token=access_token,
+        ),
+    )
+
+    log_user_operation(
+        db,
+        action=UserOperationAction.LOGIN,
+        actor_user_id=user.id,
+        target_user_id=user.id,
+        outcome="success",
+        client_ip=client_ip,
+        request_id=get_request_id(http_request),
+        detail=f"device_id={login_request.device_id or '-'}",
+        snapshot=build_user_snapshot(user),
+        is_cli=token_client == CLI_CLIENT_NAME,
+    )
+    db.commit()
+    log_audit_event(
+        "login",
+        context=_build_audit_context(
+            http_request,
+            actor_user_id=user.id,
+            target_user_id=user.id,
+        ),
+        detail=f"device_id={login_request.device_id or '-'}",
+    )
+    _apply_login_post_commit_side_effects(
+        db=db,
+        session=session,
+        user=user,
+        expired_token_hashes=expired_token_hashes,
+        evicted_token_hashes=evicted_token_hashes,
+        relogin_token_hashes=relogin_token_hashes,
+    )
+    _clear_failed_login(client_ip)
+
+    redis_warning: str | None = None
+    redis_client = get_redis()
+    if redis_client is None:
+        redis_warning = "unavailable"
+
+    return LoginSuccessResult(
+        user=user,
+        access_token=access_token,
+        session=session,
+        expired_token_hashes=expired_token_hashes,
+        evicted_token_hashes=evicted_token_hashes,
+        relogin_token_hashes=relogin_token_hashes,
+        redis_warning=redis_warning,
+    )
+
+
+@router.post("/login")
+def login(
+    login_request: LoginRequest,
+    http_request: Request,
+    db: DBSession,
+):
+    try:
+        result = _login_user(
+            login_request=login_request,
+            http_request=http_request,
+            db=db,
+        )
+        response = {
+            "token_type": "bearer",
+            "user": UserResponse.model_validate(result.user).model_dump(mode='json'),
+            "redis_warning": None,
+        }
+        json_response = JSONResponse(content=response)
+        if result.redis_warning is not None:
+            json_response.headers["X-Redis-Status"] = "unavailable"
+        json_response.set_cookie(
+            key="access_token",
+            value=result.access_token,
+            httponly=True,
+            secure=settings.use_secure_runtime(),  # 非开发环境启用 HTTPS cookie
+            samesite="lax",
+            max_age=settings.session_expire_hours * SECONDS_PER_HOUR,
+            path="/",
+        )
         return json_response
     except HTTPException:
         raise
@@ -585,6 +743,49 @@ def login(
         )
 
 
+@router.post("/login/token", response_model=CLILoginResponse)
+def login_cli_token(
+    login_request: LoginRequest,
+    http_request: Request,
+    db: DBSession,
+):
+    cli_request = login_request.model_copy(
+        update={
+            "device_name": login_request.device_name or CLI_DEVICE_NAME,
+            "device_id": login_request.device_id or "cli",
+        }
+    )
+    try:
+        result = _login_user(
+            login_request=cli_request,
+            http_request=http_request,
+            db=db,
+            token_client=CLI_CLIENT_NAME,
+            cli_user_only=True,
+        )
+        response = CLILoginResponse(
+            access_token=result.access_token,
+            token_type="bearer",
+            expires_in=settings.access_token_expire_minutes * 60,
+            user=UserResponse.model_validate(result.user),
+            redis_warning=result.redis_warning,
+        )
+        json_response = JSONResponse(content=response.model_dump(mode="json"))
+        if result.redis_warning is not None:
+            json_response.headers["X-Redis-Status"] = "unavailable"
+        return json_response
+    except HTTPException:
+        raise
+    except Exception:
+        request_id = get_request_id(http_request)
+        logger.exception("CLI login error request_id=%s", request_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="CLI login failed",
+            headers={"X-Request-ID": request_id},
+        )
+
+
 @router.post("/logout")
 def logout(
     http_request: Request,
@@ -595,6 +796,7 @@ def logout(
     request_id = get_request_id(http_request)
     actor_user_id: int | None = None
     revoked_token_hashes: list[str] = []
+    is_cli = _resolve_request_token_is_cli(http_request)
     if token:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
 
@@ -621,6 +823,7 @@ def logout(
         outcome="success",
         client_ip=client_ip,
         request_id=request_id,
+        is_cli=is_cli,
     )
     db.commit()
     log_audit_event(
@@ -681,6 +884,7 @@ def change_password(
         client_ip=client_ip,
         request_id=get_request_id(http_request),
         snapshot=build_user_snapshot(current_user),
+        is_cli=get_request_is_cli(http_request),
     )
     db.commit()
     log_audit_event(
@@ -738,6 +942,7 @@ def create_user(
         request_id=get_request_id(request),
         detail=f"role={db_user.role.value if hasattr(db_user.role, 'value') else db_user.role}",
         snapshot=build_user_snapshot(db_user),
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     db.refresh(db_user)
@@ -870,6 +1075,7 @@ def update_user(
             client_ip=client_ip,
             request_id=request_id,
             detail=f"fields={detail_fields}",
+            is_cli=get_request_is_cli(request),
         )
     else:
         log_user_profile_update(
@@ -881,6 +1087,7 @@ def update_user(
             client_ip=client_ip,
             request_id=request_id,
             detail=f"fields={detail_fields}",
+            is_cli=get_request_is_cli(request),
         )
 
     db.commit()
@@ -923,6 +1130,7 @@ def activate_user(
         client_ip=get_client_ip(request),
         request_id=get_request_id(request),
         snapshot=build_user_snapshot(user),
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     db.refresh(user)
@@ -971,6 +1179,7 @@ def delete_user(
         client_ip=get_client_ip(request),
         request_id=get_request_id(request),
         snapshot=build_user_snapshot(user),
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     finalize_revoked_sessions(staged_revoked_hashes, reason="user_deactivated")
@@ -1023,6 +1232,7 @@ def update_user_role(
         request_id=get_request_id(request),
         detail=f"new_role={user.role.value if hasattr(user.role, 'value') else user.role}",
         snapshot=build_user_snapshot(user),
+        is_cli=get_request_is_cli(request),
     )
 
     db.commit()
@@ -1096,6 +1306,7 @@ def reset_user_password(
         client_ip=client_ip,
         request_id=get_request_id(request),
         snapshot=build_user_snapshot(user),
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     finalize_revoked_sessions(staged_revoked_hashes, reason="password_reset")
@@ -1146,6 +1357,7 @@ def delete_avatar(
         client_ip=get_client_ip(request),
         request_id=get_request_id(request),
         snapshot=build_user_snapshot(user),
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     db.refresh(user)
@@ -1198,6 +1410,7 @@ def upload_avatar(
         client_ip=client_ip,
         request_id=get_request_id(request),
         snapshot=build_user_snapshot(user),
+        is_cli=get_request_is_cli(request),
     )
     db.commit()
     db.refresh(user)

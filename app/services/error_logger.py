@@ -1,14 +1,10 @@
-"""
-Error Logger Service - 后端错误日志收集服务
-
-用于收集后端Python运行时的错误日志，并提供安全过滤功能
-"""
+"""后端错误日志收集服务。"""
 import logging
 import re
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timedelta
-from app.core.constants import DEFAULT_LOG_HOURS, DEFAULT_LOG_LINES, LOG_FILE_MAX_BYTES
+from app.core.constants import DEFAULT_LOG_HOURS, DEFAULT_LOG_LINES
 
 # 敏感关键词列表（用于日志脱敏）
 SENSITIVE_KEYWORDS = [
@@ -32,35 +28,24 @@ def get_error_logger() -> logging.Logger:
     logger = logging.getLogger("error_logger")
     
     # 避免重复添加handler
-    if logger.handlers:
+    if logger.handlers and not all(isinstance(handler, logging.NullHandler) for handler in logger.handlers):
         return logger
+    logger.handlers = [handler for handler in logger.handlers if not isinstance(handler, logging.NullHandler)]
     
-    logger.setLevel(logging.ERROR)
-    
-    # 文件处理器 - 使用RotatingFileHandler限制文件大小
     try:
-        from logging.handlers import RotatingFileHandler
-        
-        file_handler = RotatingFileHandler(
-            LOG_FILE,
-            maxBytes=LOG_FILE_MAX_BYTES,
-            encoding="utf-8"
+        from app.services.log_queue import get_async_file_logger
+
+        return get_async_file_logger(
+            logger_name="error_logger",
+            file_path=LOG_FILE,
+            level=logging.ERROR,
+            datefmt="%Y-%m-%d %H:%M:%S",
+            backup_count=5,
         )
-    except Exception:
-        # 如果RotatingFileHandler不可用，使用普通FileHandler
-        file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
-    
-    file_handler.setLevel(logging.ERROR)
-    
-    # 设置日志格式
-    formatter = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    file_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
-    
+    except OSError:
+        logger.handlers = [handler for handler in logger.handlers if handler.__class__.__name__ != "QueueHandler"]
+        logger.addHandler(logging.NullHandler())
+        logger.propagate = False
     return logger
 
 
@@ -74,8 +59,7 @@ def sanitize_log_content(content: str) -> str:
     
     # 替换敏感键值对 - 使用更精确的正则避免误伤
     for keyword in SENSITIVE_KEYWORDS:
-        # 匹配 key=value 或 key: value 格式，要求前面有空格或开头
-        # 排除常见单词中的关键词（如 password123 中的 pass 不会被替换）
+        # 匹配 key=value 或 key: value，并尽量避免误伤普通单词。
         pattern = rf"(?:^|\s|[\"'])({keyword})(?:[=:]\s*)[^\s,}}]+"
         sanitized = re.sub(
             pattern,

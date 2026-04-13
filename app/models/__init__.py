@@ -42,6 +42,7 @@ from .user_operation_log import (
     UserOperationLog,
     UserOperationLogResponse,
 )
+from .log_timeline import LogTimeline, LogTimelineSourceTable
 from .reagent_order import (
     ReagentOrder,
     ReagentOrderStatus,
@@ -107,6 +108,8 @@ __all__ = [
     "UserOperationAction",
     "UserOperationLog",
     "UserOperationLogResponse",
+    "LogTimeline",
+    "LogTimelineSourceTable",
     # Reagent Order
     "ReagentOrder",
     "ReagentOrderStatus",

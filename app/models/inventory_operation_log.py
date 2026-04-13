@@ -1,4 +1,4 @@
-"""Inventory operation snapshot log models."""
+"""库存操作快照日志模型。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -13,7 +13,7 @@ from app.models.base import BaseResponse
 
 
 class InventoryOperationAction(str, Enum):
-    """Supported inventory snapshot log actions."""
+    """库存快照日志支持的动作。"""
 
     STOCK_IN = "stock_in"
     INVENTORY_DELETE = "inventory_delete"
@@ -22,16 +22,16 @@ class InventoryOperationAction(str, Enum):
 
 
 class InventoryOperationLog(SQLModel, table=True):
-    """Stable inventory operation snapshots for audit and user logs."""
+    """供审计和用户日志复用的稳定库存操作快照。"""
 
-    # snapshot_json short-key contract:
-    # id=inventory row id, ic=internal_code, ca=cas_number, na=name, en=english_name,
-    # al=alias, cg=category, br=brand, pu=purity, sl=storage_location, iq=initial_quantity,
-    # rq=remaining_quantity, rp=remaining_percent, un=unit, hz=is_hazardous,
-    # nt=notes, bi=borrower_id, lb=last_borrower_id,
-    # tk=temporary_keeper_id, oi=source_order_id, cb=created_by_id, cr=created_at,
-    # up=updated_at, sc=source, ct=count(export only), cq=consumed_quantity,
-    # bf=before(update only), af=after(update only)
+    # snapshot_json 短键约定：
+    # id=库存记录 ID, ic=内部编码, ca=CAS 号, na=名称, en=英文名,
+    # al=别名, cg=分类, br=品牌, pu=纯度, sl=存放位置, iq=初始量,
+    # rq=剩余量, rp=剩余百分比, un=单位, hz=危险品标记,
+    # nt=备注, bi=借用人 ID, lb=上次借用人 ID,
+    # tk=临时保管人 ID, oi=来源订单 ID, cb=创建人 ID, cr=创建时间,
+    # up=更新时间, sc=来源, ct=数量（仅导出）,
+    # bf=变更前（仅更新）, af=变更后（仅更新）
 
     __tablename__ = "inventory_operation_log"
     __table_args__ = (

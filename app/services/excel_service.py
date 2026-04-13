@@ -453,6 +453,7 @@ def _persist_imported_inventory(
     *,
     created_items: list[Inventory],
     user_id: int,
+    is_cli: bool,
 ) -> None:
     with db.begin_nested():
         for inventory in created_items:
@@ -465,6 +466,7 @@ def _persist_imported_inventory(
                 inventory=inventory,
                 operator_id=user_id,
                 source=SOURCE_BATCH_IMPORT,
+                is_cli=is_cli,
             )
         db.flush()
 
@@ -495,6 +497,7 @@ def confirm_inventory_import_from_excel(
     default_storage_location: Optional[str] = None,
     default_is_hazardous: bool = False,
     user_id: int = 1,
+    is_cli: bool = False,
 ) -> dict[str, Any]:
     # 批量导入保持全有或全无；确认阶段会重新完整校验，避免预览后文件变化导致脏写入。
     for attempt in range(INTERNAL_CODE_CONFLICT_MAX_RETRIES):
@@ -514,6 +517,7 @@ def confirm_inventory_import_from_excel(
                 db,
                 created_items=prepared.created_items,
                 user_id=user_id,
+                is_cli=is_cli,
             )
             return _build_import_result(prepared, created=prepared.valid_rows)
         except IntegrityError as exc:

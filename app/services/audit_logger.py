@@ -2,10 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
-
-from app.core.constants import LOG_FILE_MAX_BYTES
 
 
 AUDIT_LOG_DIR = Path(__file__).parent.parent.parent / "logs"
@@ -24,31 +21,23 @@ class AuditEventContext:
 
 def get_audit_logger() -> logging.Logger:
     logger = logging.getLogger(AUDIT_LOGGER_NAME)
-    if logger.handlers:
+    if logger.handlers and not all(isinstance(handler, logging.NullHandler) for handler in logger.handlers):
         return logger
+    logger.handlers = [handler for handler in logger.handlers if not isinstance(handler, logging.NullHandler)]
 
     try:
-        AUDIT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        from app.services.log_queue import get_async_file_logger
 
-        handler = RotatingFileHandler(
-            AUDIT_LOG_FILE,
-            maxBytes=LOG_FILE_MAX_BYTES,
-            backupCount=5,
-            encoding="utf-8",
+        return get_async_file_logger(
+            logger_name=AUDIT_LOGGER_NAME,
+            file_path=AUDIT_LOG_FILE,
+            level=logging.INFO,
+            datefmt="%Y-%m-%d %H:%M:%S",
+            backup_count=5,
         )
-        handler.setLevel(logging.INFO)
-        handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
-        )
-
-        logger.setLevel(logging.INFO)
-        logger.addHandler(handler)
-        logger.propagate = False
     except OSError:
         # 审计日志初始化失败时不阻断业务请求（例如只读文件系统/权限不足）
+        logger.handlers = [handler for handler in logger.handlers if handler.__class__.__name__ != "QueueHandler"]
         logger.addHandler(logging.NullHandler())
         logger.propagate = False
         _BOOTSTRAP_LOGGER.exception("Failed to initialize audit logger at %s", AUDIT_LOG_FILE)
