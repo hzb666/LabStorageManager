@@ -1,4 +1,10 @@
-# LabStorageManager - 实验室库存管理系统 (LIMS)
+<h1 align="center">LabStorageManager</h1>
+
+
+
+<img src="D:\Code\LabStorageManager\wiki\logo.gif" alt="logo" style="zoom:40%;" />
+
+
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.14+-blue?style=flat&logo=python" alt="Python">
@@ -8,6 +14,7 @@
   <a href="https://zread.ai/hzb666/LabStorageManager" target="_blank"><img src="https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=565656&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff" alt="zread"/></a>
 <img src="https://img.shields.io/badge/Ask_Deepwiki-_.svg?style=flat&color=00b0aa&labelColor=565656&logo=data:image/svg+xml;charset=utf-8;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0NjAiIGhlaWdodD0iNTAwIiBjbGFzcz0ic2l6ZS00IHRyYW5zZm9ybSB0cmFuc2l0aW9uLXRyYW5zZm9ybSBkdXJhdGlvbi03MDAgZ3JvdXAtaG92ZXI6cm90YXRlLTE4MCBbJmFtcDtfcGF0aF06c3Ryb2tlLTAiIHZpZXdCb3g9IjExMCAxMTAgNDYwIDUwMCI+PHBhdGggZD0iTTQxOSAzMzJxMTYtNyAzMiAwbDI1IDE1IDMgMSAzIDEgMy0xIDMtMSA1MS0yOXE2LTMgNi0xMXYtNThxMC04LTYtMTFsLTUxLTI5cS02LTMtMTIgMGwtNTEgMjl2MWwtMiAxLTIgMnYxbC0xIDJ2MWwtMSAzdjI5YTMyIDMyIDAgMCAxLTQ4IDI4bC0yNS0xNS0zLTEtMy0xLTMgMS0zIDEtNTEgMjlxLTUgMy02IDExdjU4cTEgOCA2IDExbDUxIDI5IDMgMSAzIDEgMy0xIDMtMSAyNS0xNWEzMiAzMiAwIDAgMSA0OCAyOHYyOWwxIDN2MWwxIDJ2MWwyIDIgMiAyIDUxIDI5IDYgMiA2LTIgNTEtMjlxNi0zIDYtMTF2LTU4cTAtOC02LTExbC01MS0yOS0zLTEtMy0xLTMgMS0zIDEtMjUgMTVhMzIgMzIgMCAwIDEtNDgtMjhxMS0xOCAxNi0yOCIgc3R5bGU9ImZpbGw6IzIxYzE5YSIvPjxwYXRoIGQ9Im0xNDEgMzE4IDUxIDI5IDYgMiA2LTIgNTEtMjl2LTFsMi0xIDItMnYtMWwxLTJ2LTFsMS0zdi0yOWEzMiAzMiAwIDAgMSA0OC0yOGwyNSAxNSAzIDEgMyAxIDMtMSAzLTEgNTEtMjlxNi0zIDYtMTF2LTU4cTAtOC02LTExbC01MS0yOXEtNi0zLTEyIDBsLTUxIDI5LTIgMmgtMWwtMSAydjFsLTEgMnYxbC0xIDN2MjlhMzIgMzIgMCAwIDEtNDggMjhsLTI1LTE1LTMtMS0zLTEtMyAxLTMgMS01MSAyOXEtNiAzLTYgMTF2NThxMCA4IDYgMTEiIHN0eWxlPSJmaWxsOiMzOTY5Y2EiLz48cGF0aCBkPSJtMzk3IDQ4NC01MS0yOS0zLTEtMy0xLTMgMS0zIDEtMjUgMTVhMzIgMzIgMCAwIDEtNDgtMjh2LTI5bC0xLTN2LTFsLTEtMnYtMWwtMi0yLTItMXYtMWwtNTEtMjlxLTYtMy0xMiAwbC01MSAyOXEtNiAzLTYgMTF2NThxMCA4IDYgMTFsNTEgMjkgMyAxIDMgMSAzLTEgMy0xIDI1LTE1YTMyIDMyIDAgMCAxIDQ4IDI4djI5bDEgM3YxbDEgMnYxbDIgMiAyIDIgNTEgMjkgNiAyIDYtMiA1MS0yOXE2LTMgNi0xMXYtNThxMC04LTYtMTEiIHN0eWxlPSJmaWxsOiMwMjk0ZGUiLz48L3N2Zz4=" alt="deepwiki"/>
 </p>
+
 
 面向实验室场景的试剂与耗材管理系统，覆盖申购、审批、到货、入库、借用、归还、公告、设备会话管理等完整流程。项目采用 FastAPI + React 前后端分离架构，后端以 SQLite WAL 模式为核心存储，前端基于 React 19 和 Vite 8 构建，适合单实验室或中小团队快速部署。
 
@@ -19,6 +26,7 @@
 - [快速开始](#快速开始)
 - [环境变量](#环境变量)
 - [常用命令](#常用命令)
+- [CLI 支持](#cli-支持)
 - [系统架构](#系统架构)
 - [前端本地存储](#前端本地存储)
 - [关键业务规则](#关键业务规则)
@@ -26,7 +34,7 @@
 - [部署说明](#部署说明)
 - [附属模块](#附属模块)
 - [故障排查](#故障排查)
-- [开发约定](#开发约定)
+- [AGENTS Skill](#agents-skill)
 - [许可证](#许可证)
 
 ## 项目简介
@@ -60,6 +68,8 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
   支持 HttpOnly Cookie 登录、设备列表、批量注销、IP/设备数量限制。
 - 公告与图片上传
   公告支持图片，图片文件落地到 `static/`，并受尺寸、类型、上传频率控制。
+- CLI 与自动化入口
+  提供 `python -m lsm_cli` 命令行入口，适合脚本、agent 和无 UI 场景操作。
 - 部署简单
   内置 Docker Compose，可快速拉起 `frontend + backend + redis`。
 
@@ -270,6 +280,56 @@ docker compose logs -f backend
 docker compose logs -f frontend
 docker compose logs -f redis
 ```
+
+## CLI 支持
+
+仓库提供本地命令行入口 [`lsm_cli/README.md`](lsm_cli/README.md)，适合 agent、脚本任务和不想打开前端的开发者。CLI 只通过后端 API 工作，不直接访问数据库，也不导入服务层。
+
+### 支持范围
+
+- `auth`
+  支持 `login`、`logout`、`whoami`
+- `inventory`
+  支持列表、详情、CAS 查询、借还、手工入库、更新等日常库存操作
+- `reagent-orders`
+  支持列表、创建、更新、到货确认、一键入库等试剂订单流程
+- `consumable-orders`
+  支持列表、创建、更新、完成等耗材订单流程
+
+限制说明：
+
+- 不开放 `delete`
+- 不开放 `export`
+- 不开放文件上传
+- 不开放 CLI 未显式暴露的 API
+
+### 快速示例
+
+```bash
+# 查看顶层帮助
+python -m lsm_cli --help
+
+# 交互式登录
+python -m lsm_cli auth login --username alice
+
+# 查询库存
+python -m lsm_cli inventory list --page 1 --page-size 20 --param search=乙醇
+
+# 创建试剂订单
+python -m lsm_cli reagent-orders create --data-file payload.json
+
+# 查看当前登录用户
+python -m lsm_cli auth whoami
+```
+
+### 使用约定
+
+- 默认 API 地址为 `http://127.0.0.1:8000/api`
+- `auth login` 支持 `--base-url` 与 `--timeout`
+- 自动化脚本推荐使用 `--password-stdin` 传递密码，避免明文出现在 shell history
+- 所有命令向 `stdout` 输出 JSON，并通过退出码区分错误类别
+- 面向 agent 的受限 CLI 操作流程见 [AGENTS Skill](#agents-skill)
+- Windows / macOS 目录版安装、配置文件位置、完整退出码契约见 [`lsm_cli/README.md`](lsm_cli/README.md)
 
 ## 系统架构
 
@@ -559,6 +619,39 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 - 数据库初始化是否完整执行
 - FTS 虚表和触发器是否存在
 - 是否误删了 SQLite 索引或数据库文件
+
+## AGENTS Skill
+
+仓库在 [`lsm_cli/lab-storage-manager-cli/`](lsm_cli/lab-storage-manager-cli/) 提供了一个专门用于操作 CLI 的 skill。它的作用不是解释开发约定，而是约束 agent 只能通过 `python -m lsm_cli` 与系统交互，并严格遵守当前 CLI 已暴露的命令面。
+
+### 适用场景
+
+- 需要通过 CLI 登录、查询库存、查看借用状态
+- 需要通过 CLI 创建或更新试剂订单、确认到货、一键入库
+- 需要通过 CLI 创建、更新或完成耗材订单
+- 需要在 agent 自动化中避免 raw HTTP、数据库直连、直接导入后端模块
+
+### 硬限制
+
+- 只允许调用 `python -m lsm_cli` 及其已暴露子命令
+- 禁止使用 `curl`、`Invoke-RestMethod`、`requests`、`httpx`、数据库直连或伪造本地 token
+- 写操作前必须先通过 CLI 查询拿到准确 ID；禁止猜测 ID
+- 目标不唯一、字段含义不清或单位/数量有歧义时，必须先确认，不能“先试一下”
+- 登录只允许普通用户账号；推荐 `--password-stdin`
+- 不支持 `delete`、`export`、文件上传、用户管理、会话管理、密码修改、头像修改
+
+### 推荐执行流程
+
+1. 用 `python -m lsm_cli --help` 确认目标能力是否存在。
+2. 需要认证时，用 `auth login` 登录，再用 `auth whoami` 校验身份。
+3. 对写操作先用 `list`、`get`、`cas`、`code`、`my-*` 等读命令定位准确 ID。
+4. 再执行真正的写操作，并再次核对目标 ID、动作和输入值。
+5. 如果命令失败，优先按退出码处理；不要切换到 HTTP 或数据库旁路。
+
+### 参考入口
+
+- Skill 定义：[`lsm_cli/lab-storage-manager-cli/SKILL.md`](lsm_cli/lab-storage-manager-cli/SKILL.md)
+- 命令参考：[`lsm_cli/lab-storage-manager-cli/references/commands.md`](lsm_cli/lab-storage-manager-cli/references/commands.md)
 
 ## 许可证
 

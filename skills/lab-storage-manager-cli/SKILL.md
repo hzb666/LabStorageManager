@@ -1,0 +1,133 @@
+---
+name: lab-storage-manager-cli
+description: "Use when the task must operate LabStorageManager through its local CLI (`lsm`) for login, inventory, borrow state, reagent orders, or consumable orders, and the work must stay inside the CLI's allowed command surface instead of raw HTTP, direct backend imports, or database access."
+---
+
+# Lab Storage Manager CLI
+
+通过仓库内置 CLI 操作 LabStorageManager。统一使用 `lsm ...`。
+CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
+
+## 硬限制
+
+- 只允许调用 `lsm` 及其已暴露的子命令。
+- 禁止使用 `curl`、`Invoke-WebRequest`、`Invoke-RestMethod`、`requests`、`httpx`、浏览器 `fetch`、直接导入后端模块、直接访问数据库、直接改本地配置文件伪造 token。
+- 禁止访问 CLI 未暴露的接口，即使你知道后端存在该 API。
+- 对某个具体库存/试剂/订单执行写操作前，必须先通过 CLI 查询拿到准确 ID；允许通过名称、CAS、内部编码等线索先查，再使用返回结果里的 `id` / `inventory_id` / `order_id` 执行修改。禁止猜测 ID，禁止跳过查询直接修改不确定目标。
+- 对任何操作在真正执行前，都必须再次核对目标 ID、操作类型、输入值是否与用户意图完全一致；只有在目标、动作、参数三者都明确无误时才能实施。
+- 如果目标匹配结果不唯一、字段含义不清楚、单位/数量存在歧义、操作后果不确定，或你对要执行的对象/值有任何疑问，必须先向用户确认，不能“先试一下”。
+- 任何大范围、高破坏性或批量数量较大的操作，必须先明确提醒用户影响范围与后果，并在获得用户确认后才能执行。未确认前禁止实施。
+- 登录只允许普通用户账号；管理员和 `public` 账号不能作为 CLI 入口。
+- 禁止使用明文密码参数。优先 `--password-stdin`，否则接受隐藏输入提示。
+- `auth login` 不接受 `--token`；登录成功会写本地配置。
+- `create` 命令继续使用 JSON object 负载；`--data-json` 与 `--data-file` 二选一。非 `create` 写操作优先使用显式命令参数；如果命令不接受 body，不要传 `--data-*`。
+- 禁止文件上传、导出、删除、用户管理、会话管理、密码修改、头像修改。
+- 如果目标操作没有对应 CLI 命令，立即停止并明确说明“当前 CLI 不支持该操作”。
+
+## 先决条件
+
+- 在仓库根目录执行命令。
+- CLI 已安装，且 `lsm --help` 能运行。
+- 后端 API 可达；默认地址是 `http://127.0.0.1:8000/api`。
+- 技能目录下允许放置 `.env`，用于保存首次提供的登录信息；后续默认从这里复用，不再要求用户重复说明。
+- 本地配置文件存在于：
+  - Windows 优先：`%APPDATA%\\LabStorageManager\\cli.json`
+  - 回退：`~/.labstoragemanager-cli.json`
+
+## 技能目录环境变量
+
+- 技能目录下的 `.env` 使用以下键：
+  - `LSM_BASE_URL`
+  - `LSM_USERNAME`
+  - `LSM_PASSWORD`
+- 推荐首次由用户提供一次 URL、用户名、密码后写入该文件。
+- 后续如果认证失效或本地无 token，默认先从该 `.env` 读取并尝试重新登录，不再要求用户重复提供。
+- 如果 `.env` 缺失、字段为空、或使用 `.env` 登录失败，再向用户确认。
+
+## 快速开始
+
+1. 确认命令面：`lsm --help`
+2. 首次把 URL、用户名、密码写入技能目录下的 `.env`
+3. 认证探测：先执行 `lsm auth whoami`
+4. 若未登录，则从技能目录 `.env` 读取 `LSM_BASE_URL`、`LSM_USERNAME`、`LSM_PASSWORD` 并使用 `--password-stdin` 登录
+5. 登录成功后再次执行 `lsm auth whoami`
+6. 执行目标命令并解析 stdout JSON
+
+## 允许的命令分组
+
+### auth
+- `auth login`
+- `auth whoami`
+- `auth logout`
+
+### inventory
+- `inventory list`
+- `inventory get`
+- `inventory cas`
+- `inventory code`
+- `inventory my-borrows`
+- `inventory pending-stockin`
+- `inventory borrow`
+- `inventory return`
+- `inventory manual-add`
+- `inventory update`
+
+### reagent-orders
+- `reagent-orders list`
+- `reagent-orders get`
+- `reagent-orders my`
+- `reagent-orders create`
+- `reagent-orders update`
+- `reagent-orders cas-overview`
+- `reagent-orders confirm-arrival`
+- `reagent-orders stock-in`
+
+### consumable-orders
+- `consumable-orders list`
+- `consumable-orders get`
+- `consumable-orders my`
+- `consumable-orders create`
+- `consumable-orders update`
+- `consumable-orders complete`
+
+## 标准执行流程
+
+1. 先判定任务是否存在对应 CLI 子命令。
+2. 需要认证时，默认先执行 `lsm auth whoami` 探测当前本地 token 是否可用。
+   - 若 `whoami` 成功，则继续执行目标命令
+   - 若 `whoami` 失败或本地无 token，则默认从技能目录 `.env` 读取 `LSM_BASE_URL`、`LSM_USERNAME`、`LSM_PASSWORD` 并执行登录
+   - 登录时优先使用 `--password-stdin`
+   - `--base-url` 通常只需在首次登录时显式设置一次；登录成功后会写入本地配置，后续一般无需重复设置
+   - `--token` / `--base-url` 仅作临时覆盖；对 `auth whoami` / `auth logout` 不应污染本地配置
+   - 若 `.env` 缺失、字段不完整、或使用 `.env` 登录失败，再向用户确认
+3. 对写操作目标不确定时，先用 `list`、`get`、`cas`、`code`、`my-*` 等读命令定位目标，并从返回 JSON 中读取准确 ID。
+   - 查 CAS 时，优先使用专门接口 `lsm inventory cas <cas_number>`
+   - 查名称时，不存在单独的 name 接口；使用 `lsm inventory list --param search=<name> --param search_field=name`
+   - `inventory list` 不支持按 `inventory_id` 过滤；已知 ID 时直接使用 `inventory get <inventory_id>`
+   - 查询库存时，默认应整理并返回这些关键信息：名称（`name`）、CAS（`cas_number`）、品牌（`brand`）、剩余量或规格（`remaining_quantity` / `specification`）、借用状态（`status`）以及借用人（优先 `borrower_name`）
+4. 对需要资源 ID 的写操作，如果用户只给了名称、CAS、内部编码等线索，先查 ID，再执行写操作；如果仍然不能唯一定位，立即停止并说明 CLI 当前无法安全执行。
+5. 在真正执行写操作前，再次复核：目标 ID 是否正确、动作是否正确、输入值与单位是否正确、命令是否会命中用户想要的对象；任何一项不能完全确认时，先询问用户。
+6. 读操作优先 `list`、`get`、`my-*` 这类命令，不要臆造 query/path。
+7. `create` 命令使用 JSON object 负载：
+   - 小 payload 用 `--data-json`
+   - 已有文件时用 `--data-file`
+8. 非 `create` 写操作优先使用显式命令参数；若命令保留 JSON 兼容模式，只在用户明确提供 object 负载时使用 `--data-json` / `--data-file`。
+9. `consumable-orders complete` 不传 `--data-*`。
+10. 优先按退出码分支；再结合 `error.code` 和 `error.detail` 处理。
+11. 失败后不要切换到原始 HTTP 或数据库旁路。
+
+## 失败分支
+
+- `2`：`401` 认证失败或未认证；已登录命令可重新登录或更换 token，`auth login` 则检查用户名/密码或账号角色
+- `3`：权限不足，停止，不重试
+- `4`：目标不存在，检查 id/CAS/code
+- `5`：限流，等待或按用户要求重试
+- `6`：本地文件路径错误，修正后再试
+- `7`：本地输入错误，修正参数或 JSON object 负载
+- `8`：命令行参数错误，回到允许命令表重组命令
+- `9`：网络错误，检查后端服务和 `--base-url`
+
+## 详细参考
+
+完整命令、参数、请求体、输出预期、退出码、限制能力见 [references/commands.md](references/commands.md)。
+
