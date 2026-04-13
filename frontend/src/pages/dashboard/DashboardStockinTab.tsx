@@ -1,7 +1,4 @@
-/**
- * 仪表盘 - 待入库 Tab
- * 展示当前用户暂存的待入库记录，支持一键入库（填写存放位置）
- */
+/** 仪表盘待入库 Tab。 */
 import { useMemo, useState, useCallback } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'

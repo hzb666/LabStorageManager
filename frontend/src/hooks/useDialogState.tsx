@@ -1,11 +1,6 @@
 ﻿import { useState } from 'react'
 
-/**
- * Custom hook for confirm dialog
- * @param initialState string | null
- * @returns A stateful value, and a function to update it.
- * @example const [open, setOpen] = useDialogState<"approve" | "reject">()
- */
+/** 确认类弹窗开关状态 Hook。 */
 export default function useDialogState<T extends string | boolean>(
   initialState: T | null = null
 ) {

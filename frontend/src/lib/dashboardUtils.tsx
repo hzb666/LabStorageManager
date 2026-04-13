@@ -1,7 +1,4 @@
-/**
- * Dashboard 共享工具函数、类型定义和常量
- * 纯工具文件，不包含 React 组件（避免 react-refresh/only-export-components 规则冲突）
- */
+/** Dashboard 共享工具、类型和常量。 */
 import type { ColumnDef } from '@tanstack/react-table'
 import { clearDashboardActiveTab } from '@/lib/storage/appUiStorage'
 
@@ -89,15 +86,12 @@ export type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
 
 const DASHBOARD_COUNTS_REFRESH_EVENT = 'dashboard-counts-refresh'
 
-/**
- * 清除 Dashboard Tab 持久化状态
- * 用于退出登录时清理用户特定的状态
- */
+/** 清除 Dashboard 页签持久化状态。 */
 export function clearDashboardTab(): void {
   try {
     clearDashboardActiveTab()
   } catch {
-    // ignore localStorage errors
+    // 忽略 localStorage 异常
   }
 }
 
@@ -137,10 +131,7 @@ export const BORROW_SEARCH_FIELDS = [
   { value: 'cas_number', label: 'CAS号' },
 ]
 
-/**
- * 广播“仪表盘统计需要刷新”的信号。
- * 存在原因：统计卡片使用轻量缓存，子 Tab 完成变更后需要显式通知顶部卡片同步更新。
- */
+/** 广播仪表盘统计刷新信号。 */
 export function requestDashboardCountsRefresh(): void {
   if (typeof window === 'undefined') {
     return
@@ -148,10 +139,7 @@ export function requestDashboardCountsRefresh(): void {
   window.dispatchEvent(new Event(DASHBOARD_COUNTS_REFRESH_EVENT))
 }
 
-/**
- * 订阅“仪表盘统计需要刷新”的信号，并返回清理函数。
- * 存在原因：让 Dashboard 容器可以在子 Tab 触发变更后重新拉取统计数字。
- */
+/** 订阅仪表盘统计刷新信号。 */
 export function subscribeDashboardCountsRefresh(listener: () => void): () => void {
   if (typeof window === 'undefined') {
     return () => {}

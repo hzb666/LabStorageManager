@@ -1007,8 +1007,7 @@ function useChemicalNameMapController({
   }
 }
 
-// 页面装配层负责把刷新、弹窗、表格列和导出动作收敛起来。
-// 主页面只消费这个 controller，避免在 JSX 上方继续堆叠一长串 useCallback/useMemo。
+// 收拢货架页的刷新、弹窗、表格列和导出逻辑。
 function useCommonShelfPageController(): CommonShelfPageController {
   const queryClient = useQueryClient()
   const clearRoomStale = useSSEStore((state) => state.clearRoomStale)

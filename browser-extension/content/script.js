@@ -1,5 +1,4 @@
-// 购物车同步 - Content Script
-// 购物车页面：只获取产品ID、数量、价格、详情页URL
+// 购物车同步内容脚本。
 
 (function() {
   'use strict';
@@ -134,8 +133,7 @@
       }
     }
 
-    // 2. 获取购物车项ID - 从元素ID或checkbox value获取
-    // 元素ID格式: cpdiv807440
+    // 2. 获取购物车项 ID，可从元素 ID 或 checkbox value 读取。
     const idMatch = element.id?.match(/cpdiv(\d+)/);
     if (idMatch) {
       cartItemId = idMatch[1];

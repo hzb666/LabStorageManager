@@ -1,11 +1,4 @@
-/**
- * 表格列配置抽离
- * 仿照 formConfigs.tsx 模式，集中管理表格列配置
- * 
- * 使用方式：
- * import { getInventoryTableColumns } from '@/lib/tableConfigs'
- * const columns = getInventoryTableColumns()
- */
+/** 统一管理表格列配置。 */
 import { createColumnHelper } from '@tanstack/react-table'
 import { safeString } from '@/lib/validationSchemas'
 import type { ColumnDef } from '@tanstack/react-table'

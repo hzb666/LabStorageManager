@@ -1,7 +1,4 @@
-/**
- * 列宽拖拽调整 Hook
- * 从 DataTable 中提取的纯逻辑 Hook
- */
+/** 列宽拖拽调整 Hook。 */
 import { useRef, useCallback, useState } from 'react'
 import type { Table as TableType, Header, Column } from '@tanstack/react-table'
 

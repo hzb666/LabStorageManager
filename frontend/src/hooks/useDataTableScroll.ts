@@ -1,7 +1,4 @@
-/**
- * 表格行点击展开时的滚动定位 Hook
- * 从 DataTable 中提取的行点击展开和平滑滚动逻辑
- */
+/** 表格展开时的滚动定位 Hook。 */
 import { useRef, useCallback, useEffect } from 'react'
 import type { Row } from '@tanstack/react-table'
 import type { Virtualizer } from '@tanstack/react-virtual'

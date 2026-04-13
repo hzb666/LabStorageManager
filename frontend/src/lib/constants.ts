@@ -1,9 +1,8 @@
 ﻿/**
- * Centralized mapping tables for status/reason/role display
- * Backend stores English values; frontend maps to Chinese.
+ * 集中管理状态、原因和角色展示映射。
  */
 
-// === UI Component Styles ===
+// === 界面组件样式 ===
 export const LABEL_STYLES = {
   base: "text-base mb-1.5 block",
   sm: "text-sm mb-1.5 block",
@@ -16,7 +15,7 @@ export const INPUT_STYLES = {
   lg: "h-10 text-base inline-flex leading-none",
 } as const
 
-// === Status Badge Colors ===
+// === 状态徽标颜色 ===
 export type BadgeColor = 'green' | 'blue' | 'orange' | 'gray' | 'purple' | 'red' | 'amber'
 
 export const BADGE_COLORS: Record<BadgeColor, string> = {
@@ -111,12 +110,12 @@ export const ORDER_REASON_COLORS: Record<string, BadgeColor> = {
   others: 'gray',
 }
 
-// === Session Storage Keys ===
+// === 会话存储键 ===
 export const AUTH_NOTICE_KEY = 'auth_notice'
 export const CACHE_VERSION_STORAGE_KEY = 'app_cache_version'
 export const CACHE_VERSION_RESET_NOTICE = '系统已更新，请重新登录'
 
-// === Order Status (Reagent) ===
+// === 试剂订单状态 ===
 export const REAGENT_STATUS_MAP: Record<string, string> = {
   pending: '已申购',
   approved: '已批准',
@@ -133,7 +132,7 @@ export const REAGENT_STATUS_STYLE: Record<string, string> = {
   rejected: 'bg-red-100 text-red-800',
 }
 
-// === Order Status (Consumable) ===
+// === 耗材订单状态 ===
 export const CONSUMABLE_STATUS_MAP: Record<string, string> = {
   pending: '已申购',
   approved: '已批准',
@@ -149,7 +148,7 @@ export const CONSUMABLE_STATUS_STYLE: Record<string, string> = {
   rejected: 'bg-red-100 text-red-800',
 }
 
-// === Inventory Status ===
+// === 库存状态 ===
 export const INVENTORY_STATUS_MAP: Record<string, string> = {
   in_stock: '在库',
   run_short: '快用完',
@@ -174,7 +173,7 @@ export const CHEMICAL_CATEGORY_LABELS: Record<string, string> = {
   other: '其他',
 }
 
-// === Order Reason ===
+// === 订购原因 ===
 export const ORDER_REASON_MAP: Record<string, string> = {
   none: '没有',
   running_out: '快用完',
@@ -184,7 +183,7 @@ export const ORDER_REASON_MAP: Record<string, string> = {
   reorder: '重新下单',
 }
 
-// === User Role ===
+// === 用户角色 ===
 export const USER_ROLE_MAP: Record<string, string> = {
   admin: '管理员',
   user: '普通用户',
@@ -210,7 +209,7 @@ export interface User {
   created_at: string
 }
 
-// === Import Template Columns ===
+// === 导入模板列 ===
 export interface ImportColumn {
   name: string
   required: boolean

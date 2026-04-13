@@ -32,7 +32,7 @@ function persistCacheVersion(version: string): void {
   try {
     globalThis.localStorage.setItem(CACHE_VERSION_STORAGE_KEY, version)
   } catch {
-    // ignore storage errors
+    // 忽略存储异常
   }
 }
 
@@ -40,7 +40,7 @@ function persistInvalidationNotice(): void {
   try {
     globalThis.sessionStorage.setItem(AUTH_NOTICE_KEY, CACHE_VERSION_RESET_NOTICE)
   } catch {
-    // ignore storage errors
+    // 忽略存储异常
   }
 }
 
@@ -136,7 +136,7 @@ async function requestBackendLogout(): Promise<void> {
       },
     })
   } catch {
-    // ignore network errors; backend startup reset already invalidates old sessions
+    // 忽略网络异常，后端启动时已处理旧会话失效。
   }
 }
 
@@ -149,13 +149,13 @@ async function clearClientState(queryClient: QueryClient): Promise<void> {
   try {
     globalThis.localStorage.clear()
   } catch {
-    // ignore storage errors
+    // 忽略存储异常
   }
 
   try {
     globalThis.sessionStorage.clear()
   } catch {
-    // ignore storage errors
+    // 忽略存储异常
   }
 
   await Promise.allSettled([

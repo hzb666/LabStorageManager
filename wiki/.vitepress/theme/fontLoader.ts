@@ -41,7 +41,7 @@ function rememberLocalFontPreference() {
   try {
     localStorage.setItem(LOCAL_FONT_PREFERENCE_KEY, LOCAL_FONT_PREFERENCE_VALUE)
   } catch {
-    // ignore localStorage errors
+    // 忽略 localStorage 异常
   }
 }
 
@@ -49,7 +49,7 @@ function clearLocalFontPreference() {
   try {
     localStorage.removeItem(LOCAL_FONT_PREFERENCE_KEY)
   } catch {
-    // ignore localStorage errors
+    // 忽略 localStorage 异常
   }
 }
 

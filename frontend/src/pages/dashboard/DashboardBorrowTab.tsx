@@ -1,7 +1,4 @@
-/**
- * 仪表盘 - 借用记录 Tab
- * 展示当前用户的借用列表，支持归还操作（使用量/剩余量模式）
- */
+/** 仪表盘借用记录 Tab。 */
 import React, { useMemo, useState, useCallback } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'

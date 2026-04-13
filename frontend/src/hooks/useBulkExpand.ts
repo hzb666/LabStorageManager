@@ -1,7 +1,4 @@
-/**
- * 批量展开/折叠动画 Hook
- * 从 DataTable 中提取的锚点定位和动画管理逻辑
- */
+/** 批量展开/折叠动画 Hook。 */
 import { useRef, useCallback, useState, useEffect } from 'react'
 import type { Table as TableType, Row } from '@tanstack/react-table'
 import type { Virtualizer } from '@tanstack/react-virtual'
@@ -26,10 +23,7 @@ interface BulkAnimationControls {
   timerRef: React.MutableRefObject<number | null>
 }
 
-/**
- * 批量展开动画完成后的多帧测量和锚点恢复
- * 提取为独立函数以避免嵌套回调过深
- */
+/** 批量展开结束后的多帧测量与锚点恢复。 */
 function scheduleBulkAnimationComplete(
   virtualizerRef: React.RefObject<Virtualizer<HTMLDivElement, Element> | null>,
   bulkAnchorRef: React.MutableRefObject<BulkAnchor | null>,

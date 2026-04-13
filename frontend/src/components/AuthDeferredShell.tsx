@@ -2,7 +2,14 @@ import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
 
 function ShellBlock({ className }: Readonly<{ className?: string }>) {
-  return <div className={cn("animate-pulse rounded-md bg-muted/55", className)} />;
+  return (
+    <div
+      className={cn(
+        "animate-pulse rounded-md bg-zinc-200/85 dark:bg-zinc-800/80",
+        className,
+      )}
+    />
+  );
 }
 
 function TableSurface({
@@ -11,7 +18,7 @@ function TableSurface({
   showExpandAction?: boolean;
 }>) {
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden border-0 bg-zinc-50/90 shadow-none dark:bg-zinc-950/60">
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <ShellBlock className="h-6 w-36" />
@@ -20,8 +27,8 @@ function TableSurface({
       </CardHeader>
       <CardContent className="p-0">
         <div className="px-6 pb-6">
-          <div className="w-full rounded-md border border-border bg-card">
-            <div className="border-b-2 border-border px-4 py-3">
+          <div className="w-full rounded-xl bg-zinc-100/70 dark:bg-zinc-900/70">
+            <div className="border-b border-zinc-200/80 px-4 py-3 dark:border-zinc-800/80">
               <div className="flex min-h-12 items-center gap-3">
                 <ShellBlock className="h-5 w-[5.5rem]" />
                 <ShellBlock className="h-5 w-[4.5rem]" />
@@ -30,7 +37,7 @@ function TableSurface({
                 <ShellBlock className="ml-auto h-5 w-[4.5rem]" />
               </div>
             </div>
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-zinc-200/80 dark:divide-zinc-800/80">
               {Array.from({ length: 6 }, (_, index) => (
                 <div
                   key={index}
@@ -72,8 +79,8 @@ function DashboardStatCard({
   return (
     <Card
       className={cn(
-        "transition-all",
-        active && "border bg-accent/70 dark:border-primary",
+        "border-0 bg-zinc-50/90 shadow-none transition-all dark:bg-zinc-950/60",
+        active && "bg-zinc-100/95 dark:bg-zinc-900/85",
       )}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -136,7 +143,7 @@ function ImportPageAuthShell() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="border-0 bg-zinc-50/90 shadow-none dark:bg-zinc-950/60">
           <CardHeader>
             <ShellBlock className="h-6 w-24" />
           </CardHeader>
@@ -159,7 +166,7 @@ function ImportPageAuthShell() {
 
             <div className="space-y-2">
               <ShellBlock className="h-5 w-18" />
-              <div className="flex min-h-64 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/15 p-6 text-center">
+              <div className="flex min-h-64 flex-col items-center justify-center rounded-xl bg-zinc-100/75 p-6 text-center dark:bg-zinc-900/75">
                 <ShellBlock className="mb-4 h-10 w-10 rounded-full" />
                 <ShellBlock className="h-5 w-44" />
                 <ShellBlock className="mt-3 h-4 w-36" />
@@ -170,7 +177,7 @@ function ImportPageAuthShell() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-0 bg-zinc-50/90 shadow-none dark:bg-zinc-950/60">
           <CardHeader>
             <ShellBlock className="h-6 w-24" />
           </CardHeader>

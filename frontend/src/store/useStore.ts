@@ -23,7 +23,7 @@ const createExpireStorage = <T>(expiresInMs: number): PersistStorage<T> => ({
           try {
             localStorage.removeItem(name)
           } catch {
-            // ignore storage errors
+            // 忽略存储异常
           }
           return null
         }
@@ -39,14 +39,14 @@ const createExpireStorage = <T>(expiresInMs: number): PersistStorage<T> => ({
     try {
       localStorage.setItem(name, JSON.stringify(valueWithExpiry))
     } catch {
-      // ignore storage errors
+      // 忽略存储异常
     }
   },
   removeItem: (name: string): void => {
     try {
       localStorage.removeItem(name)
     } catch {
-      // ignore storage errors
+      // 忽略存储异常
     }
   },
 })

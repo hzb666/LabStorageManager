@@ -433,7 +433,7 @@ async function submitCartImportReagentForm(
       submitSucceeded = true;
     },
     () => {
-      /* form errors shown inline */
+      /* 表单错误已内联显示 */
     },
   );
 
@@ -465,7 +465,7 @@ async function submitCartImportConsumableForm(
       submitSucceeded = true;
     },
     () => {
-      /* form errors shown inline */
+      /* 表单错误已内联显示 */
     },
   );
 

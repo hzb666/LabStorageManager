@@ -1,7 +1,4 @@
-/**
- * 表单字段配置
- * 统一管理库存、试剂订单和耗材订单的表单字段配置，供 BaseForm 组件使用
- */
+/** 统一管理表单字段配置。 */
 
 import React from 'react'
 import { AlertTriangle } from 'lucide-react'
@@ -138,8 +135,7 @@ export function getInventoryFormFields(
 // 试剂订单表单配置
 // ============================================================================
 
-// 试剂订单默认值
-// 注意：price 和 order_reason 验证为必填，但默认值允许为空（用户必须手动选择/输入）
+// 试剂订单默认值；price 和 order_reason 保持空值，交互时再由用户填写。
 export const defaultReagentOrderValues = {
   name: '',
   cas_number: '',
@@ -285,11 +281,7 @@ export const defaultReturnValues = {
 }
 
 
-/**
- * 获取归还表单字段配置
- * @param mode 归还模式（remaining 或 used）
- * @param maxQuantity 最大数量（原借用时的剩余量）
- */
+/** 获取归还表单字段配置。 */
 export function getReturnFormFields(
   mode: 'remaining' | 'used',
   maxQuantity: number,

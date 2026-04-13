@@ -489,11 +489,10 @@ function FilterTableContent({
     return (
       <div className="px-6 pb-6">
         <div
-          className="flex items-center justify-center rounded-md border border-border bg-card text-muted-foreground"
+          className="flex items-center justify-center text-zinc-400 dark:text-zinc-500"
           style={getLoadingSurfaceStyle(scrollHeight)}
         >
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-          <span>加载中...</span>
+          <Loader2 className="h-6 w-6 animate-spin" />
         </div>
       </div>
     );

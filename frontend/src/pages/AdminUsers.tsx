@@ -603,7 +603,7 @@ export function AdminUsersPage() {
     return [...getAdminUsersTableColumns(), actionColumn] as ColumnDef<User, unknown>[]
   }, [currentUser, dialogs.handleActivate, dialogs.openDeleteModal, dialogs.openEditModal, handleViewLogs])
 
-  // 这里不会把 table 实例再交给 memo comparator 缓存，按项目约定定点忽略编译器告警。
+  // table 实例只在当前 hook 内使用，这里定点忽略编译器告警。
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data,

@@ -1,5 +1,4 @@
-// 购物车同步 - Popup Script
-// 直接与内容脚本通信，不依赖 service worker
+// 购物车同步弹窗脚本。
 
 const STORAGE_KEYS = {
   CART_ITEMS: 'pendingCartItems',
@@ -213,8 +212,7 @@ function extractFieldFromLines(pageText, labels) {
 
 function parseProductDetail(html) {
   const pageText = normalizePageText(html);
-  // 表格结构固定，直接匹配 td-2 中的内容
-  // 注意：</td> 和 <td> 之间可能有换行和空格
+  // 表格结构固定，直接匹配 td-2 中的内容。
   const name = extractFieldFromHtml(html, /中文名称：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '未知';
   const englishName = extractFieldFromHtml(html, /英文名称：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
   const brand = extractFieldFromHtml(html, /品牌：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
@@ -333,7 +331,7 @@ async function getSystemTheme() {
             return { darkMode: false };
           }
         } catch {
-          // ignore malformed app-ui
+          // 忽略损坏的 app-ui 数据
         }
         return null;
       }

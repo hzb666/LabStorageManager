@@ -1,8 +1,4 @@
-// OperationLogs.tsx
-/**
- * 用户操作日志页面
- * 使用 FilterTable 架构，与库存页面完全一致
- */
+/** 用户操作日志页面。 */
 import { useMemo, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
@@ -25,6 +21,13 @@ import { safeString } from '@/lib/validationSchemas'
 // 类型定义
 interface LogItemData extends LogItem {
   id?: number
+}
+
+const getLogSummary = (item: LogItemData) => {
+  const fullData = (item.full_data || item) as Record<string, unknown>
+  const detail = item.detail || ''
+  if (fullData.is_cli !== true) return detail
+  return detail.startsWith('[cli] ') ? detail : `[cli] ${detail}`
 }
 
 // 日志类型选项（用于筛选）
@@ -107,7 +110,7 @@ const getLogColumns = () => [
     size: 500,
     minSize: 400,
     cell: info => (
-      <span>{info.getValue()}</span>
+      <span>{getLogSummary(info.row.original)}</span>
     )
   })
 ]

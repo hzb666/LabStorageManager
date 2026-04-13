@@ -1,7 +1,4 @@
-/**
- * DataTable 表体组件
- * 从 DataTable 中提取的虚拟化/非虚拟化行渲染、加载更多、空状态
- */
+/** DataTable 表体组件。 */
 import React, { memo, useCallback } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import type { Row, Cell } from '@tanstack/react-table'

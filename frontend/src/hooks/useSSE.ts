@@ -1,11 +1,4 @@
-/**
- * Generic SSE hook for room-based event streams.
- *
- * Integration:
- * 1) Build event handlers in page/domain hook.
- * 2) Call useSSE({ rooms, handlers }).
- * 3) Use store stale flag to show refresh banner.
- */
+/** 房间级事件流 SSE Hook。 */
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import { getApiBaseUrl } from '@/lib/apiConfig'
@@ -103,7 +96,7 @@ function attachAuthInvalidListener(args: {
       reason = payload.reason || reason
       code = payload.code || ''
     } catch {
-      // keep fallback reason
+      // 保留默认失效原因
     }
 
     const noticeByReason = resolveAuthNoticeByReason(reason, '登录状态已失效，请重新登录')

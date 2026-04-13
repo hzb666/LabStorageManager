@@ -37,7 +37,7 @@ export function removeLocalStorageItem(key: string): void {
   try {
     window.localStorage.removeItem(key)
   } catch {
-    // ignore storage errors
+    // 忽略存储异常
   }
 }
 
@@ -68,6 +68,6 @@ export function forEachLocalStorageKey(callback: (key: string) => void): void {
     }
     keys.forEach((key) => callback(key))
   } catch {
-    // ignore storage errors
+    // 忽略存储异常
   }
 }

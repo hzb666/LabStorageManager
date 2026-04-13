@@ -1,9 +1,4 @@
-/**
- * useErrorLogger - 前端错误日志收集Hook
- * 
- * 自动捕获前端控制台错误和网络请求错误
- * 日志仅保存在内存中，页面刷新后清除（保护隐私）
- */
+/** 前端错误日志收集 Hook。 */
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'

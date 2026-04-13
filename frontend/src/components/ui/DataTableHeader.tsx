@@ -1,7 +1,4 @@
-/**
- * DataTable 表头组件
- * 从 DataTable 中提取的表头渲染逻辑：排序、列宽调整手柄、Tooltip
- */
+/** DataTable 表头组件。 */
 import React from 'react'
 import { flexRender } from '@tanstack/react-table'
 import type { Table as TableType, Header as HeaderType } from '@tanstack/react-table'

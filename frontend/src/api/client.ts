@@ -44,6 +44,33 @@ const hasSkipAuthInvalidationHeader = (headers: unknown): boolean => {
   return raw === '1'
 }
 
+const getAuthErrorCode = (headers: unknown): string =>
+  String(
+    readHeaderValue(headers, 'x-auth-error-code')
+    ?? readHeaderValue(headers, 'X-Auth-Error-Code')
+    ?? ''
+  )
+
+const isAuthInvalidationIgnoredRequest = (requestUrl: string): boolean =>
+  requestUrl.includes('/users/login') || requestUrl.includes('/users/logout')
+
+const shouldTriggerAuthInvalidation = (args: {
+  status: number | undefined
+  authErrorCode: string
+  requestUrl: string
+  skipAuthInvalidation: boolean
+}): boolean => {
+  const { status, authErrorCode, requestUrl, skipAuthInvalidation } = args
+  const isDisabled403 = status === 403 && authErrorCode === 'AUTH_USER_DISABLED'
+  const isAuthFailure = status === 401 || isDisabled403
+
+  return (
+    isAuthFailure
+    && !isAuthInvalidationIgnoredRequest(requestUrl)
+    && !skipAuthInvalidation
+  )
+}
+
 // Request interceptor — 不再从 localStorage 读取 token，改为使用 Cookie
 api.interceptors.request.use(
   (config) => {
@@ -67,18 +94,11 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const requestUrl = String(error.config?.url ?? '')
-    const isLoginRequest = requestUrl.includes('/users/login')
-    const isLogoutRequest = requestUrl.includes('/users/logout')
     const skipAuthInvalidation = hasSkipAuthInvalidationHeader(error.config?.headers)
     const status = error.response?.status
-    const authErrorCode = String(
-      readHeaderValue(error.response?.headers, 'x-auth-error-code')
-      ?? readHeaderValue(error.response?.headers, 'X-Auth-Error-Code')
-      ?? ''
-    )
-    const isDisabled403 = status === 403 && authErrorCode === 'AUTH_USER_DISABLED'
+    const authErrorCode = getAuthErrorCode(error.response?.headers)
 
-    if ((status === 401 || isDisabled403) && !isLoginRequest && !isLogoutRequest && !skipAuthInvalidation) {
+    if (shouldTriggerAuthInvalidation({ status, authErrorCode, requestUrl, skipAuthInvalidation })) {
       const fallbackNotice = getApiErrorMessage(error, '会话已失效，请重新登录')
       const notice = resolveAuthNoticeByCode(authErrorCode || undefined, fallbackNotice)
       void triggerSessionInvalidation({ notice, skipApi: true })

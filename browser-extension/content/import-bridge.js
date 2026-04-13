@@ -1,5 +1,4 @@
-// 导入桥接脚本
-// 在系统 /import 页面读取扩展存储中的批次数据，并写入页面 localStorage。
+// 导入桥接脚本：把扩展批次数据写入系统页面 localStorage。
 
 (function () {
   'use strict';
@@ -42,7 +41,7 @@
       try {
         localStorage.removeItem(PAGE_STORAGE_KEY);
       } catch {
-        // ignore storage cleanup errors
+        // 忽略存储清理异常
       }
     }
   }

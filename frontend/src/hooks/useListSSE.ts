@@ -1,11 +1,4 @@
-/**
- * List-focused SSE integration hook.
- *
- * Policy:
- * - Stable row-field updates are patched locally.
- * - Structural changes only patch when they are obviously safe.
- * - Ambiguous cases fall back to stale banner refresh.
- */
+/** 列表页 SSE 集成 Hook。 */
 import { useEffect, useMemo, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import { useQueryClient } from '@tanstack/react-query'

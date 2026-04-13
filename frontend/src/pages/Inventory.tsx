@@ -1,5 +1,4 @@
-// Inventory.tsx
-// 库存管理页面 功能：库存列表展示、搜索筛选、手动入库、编辑、删除、借用、导出
+// 库存管理页面。
 import React, { useState, useMemo, useCallback } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'

@@ -1,9 +1,4 @@
-/**
- * SSE runtime state store.
- *
- * This file is intentionally standalone so it can be integrated page-by-page
- * without touching existing global stores.
- */
+/** SSE 运行时状态仓库。 */
 import { create } from 'zustand'
 
 export type SeqProcessResult = {
@@ -18,7 +13,7 @@ export interface SSEState {
   reconnectCount: number
   lastConnectedAt: number | null
 
-  // Track sequence per room for reliability checks.
+  // 按房间记录序号，便于检查事件连续性。
   lastSeqByRoom: Record<string, number>
   staleRooms: Set<string>
 
@@ -104,7 +99,7 @@ export const useSSEStore = create<SSEState>((set, get) => ({
   processSeq: (room, seq) => {
     const prev = get().lastSeqByRoom[room] ?? 0
 
-    // Ignore duplicate/old events.
+    // 忽略重复事件和旧事件。
     if (seq <= prev) {
       return {
         isDuplicateOrOld: true,

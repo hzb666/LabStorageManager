@@ -1,7 +1,4 @@
-/**
- * 组织仪表盘页签、统计卡片和按需加载的子页。
- * `activeTab` 会持久化到 localStorage，并按当前角色校验可见范围。
- */
+/** 仪表盘页面容器。 */
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { ShoppingCart, Package, ArrowRightLeft, Loader2 } from "lucide-react";
 
@@ -132,7 +129,7 @@ function getSavedTab(allowedTabs: DashboardTab[]): DashboardTab {
       return saved as DashboardTab;
     }
   } catch {
-    // ignore localStorage errors
+    // 忽略 localStorage 异常
   }
   return allowedTabs[0] ?? "borrows";
 }

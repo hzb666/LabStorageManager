@@ -8,13 +8,7 @@ import {
 
 export type { RememberedUser }
 
-/**
- * Hook: 记住用户信息
- * 用于实现类似微软锁屏的登录体验
- * - 登录成功后自动保存用户信息（无需勾选）
- * - Session 过期后显示锁屏模式，只需输入密码
- * - 修改用户名时清除记住信息，修改头像自动更新
- */
+/** 记住用户信息 Hook。 */
 export function useRememberedUser() {
   const [rememberedUser, setRememberedUserState] = useState<RememberedUser | null>(() => {
     try {

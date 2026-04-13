@@ -123,7 +123,7 @@ export function clearCartImportBatchStorage(): void {
   try {
     localStorage.removeItem(CART_STORAGE_KEY);
   } catch {
-    // ignore storage errors
+    // 忽略存储异常
   }
 }
 

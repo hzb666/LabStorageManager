@@ -1,9 +1,6 @@
 import { useCallback, useState } from 'react'
 
-/**
- * 验证规则类型
- * 每个规则包含字段名和对应的验证函数
- */
+/** 验证规则类型。 */
 export type ValidationRule<T> = {
   field: keyof T
   validator: (value: unknown, formData?: T) => { isValid: boolean; error?: string }
@@ -41,32 +38,7 @@ export interface UseFormModalReturn<T> {
   clearFieldError: (field: keyof T) => void
 }
 
-/**
- * 通用表单Modal Hook
- * 封装表单状态管理、验证和提交流逻辑
- * 
- * @example
- * ```tsx
- * const {
- *   formData,
- *   formErrors,
- *   submitting,
- *   handleChange,
- *   validateForm,
- *   resetForm,
- *   handleSubmit
- * } = useFormModal({
- *   initialData: { name: '', quantity: 0 },
- *   validationRules: [
- *     { field: 'name', validator: (v) => validateRequired(v, '名称') },
- *     { field: 'quantity', validator: (v) => validatePositiveNumber(v, '数量') }
- *   ],
- *   onSubmit: async (data) => {
- *     await api.save(data)
- *   }
- * })
- * ```
- */
+/** 通用表单 Modal Hook。 */
 export function useFormModal<T>({
   initialData,
   validationRules = [],
@@ -98,10 +70,7 @@ export function useFormModal<T>({
     clearFieldError(field)
   }, [clearFieldError])
 
-  /**
-   * 验证表单
-   * @returns 验证是否通过
-   */
+  /** 验证表单。 */
   const validateForm = useCallback((): boolean => {
     const errors: Partial<Record<keyof T, string>> = {}
 

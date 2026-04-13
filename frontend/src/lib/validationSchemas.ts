@@ -1,24 +1,10 @@
-/**
- * Valibot 验证 Schemas
- * 使用方法:
- * ```tsx
- * import { useForm } from 'react-hook-form'
- * import { valibotResolver } from '@hookform/resolvers/valibot'
- * import { InventorySchema } from '@/lib/validationSchemas'
- *
- * const form = useForm({
- *   resolver: valibotResolver(InventorySchema),
- *   defaultValues: {...}
- * })
- * ```
- */
+/** Valibot 表单校验 Schemas。 */
 
 import * as v from 'valibot'
 import { valibotResolver } from '@hookform/resolvers/valibot'
 import type { FieldValues, Resolver } from 'react-hook-form'
 
-// 类型化 resolver - 解决类型推断问题
-// 使用方法: resolver: createValibotResolver(InventoryFormSchema)
+// 类型化 resolver，补足类型推断。
 type GenericValibotSchema<
   TInput extends FieldValues = FieldValues,
   TOutput extends FieldValues = TInput,
@@ -47,10 +33,7 @@ const parseNumberOrNaN = (input: string | number): number => {
 // 1. 基础通用类型验证
 // ==========================================
 
-/**
- * 必填字符串验证 - 替代 validateRequired
- * @param fieldName 字段中文名称
- */
+/** 必填字符串验证。 */
 export const createRequiredStringSchema = (fieldName: string) =>
   v.pipe(
     v.string(`${fieldName}不能为空`),
@@ -58,12 +41,7 @@ export const createRequiredStringSchema = (fieldName: string) =>
     v.nonEmpty(`${fieldName}不能为空`)
   )
 
-/**
- * 字符串长度验证 - 替代 validateStringLength
- * @param fieldName 字段中文名称
- * @param min 最小长度
- * @param max 最大长度
- */
+/** 字符串长度验证。 */
 export const createStringLengthSchema = (
   fieldName: string,
   min: number,
@@ -76,11 +54,7 @@ export const createStringLengthSchema = (
     v.maxLength(max, `${fieldName}最多${max}个字符`)
   )
 
-/**
- * 字符串最大长度验证 - 仅验证最大长度，不限制最小值
- * @param fieldName 字段中文名称
- * @param max 最大长度
- */
+/** 字符串最大长度验证。 */
 export const createMaxLengthSchema = (
   fieldName: string,
   max: number
@@ -91,12 +65,7 @@ export const createMaxLengthSchema = (
     v.maxLength(max, `${fieldName}最多${max}个字符`)
   )
 
-/**
- * 正整数验证 (>=1) - 用于瓶数等必须为整数的字段
- * 支持字符串和数字输入，在 handleSubmit 中手动转换
- * 注意：不包含上限限制，具体上限由使用处单独定义
- * @param fieldName 字段中文名称
- */
+/** 正整数验证。 */
 export const createPositiveNumberSchema = (fieldName: string) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
@@ -106,11 +75,7 @@ export const createPositiveNumberSchema = (fieldName: string) =>
     v.minValue(1, `${fieldName}必须为大于等于1的整数`)
   )
 
-/**
- * 正数验证 (可小数) - 用于初始量等可以是小数 quantity 的字段
- * 支持字符串和数字输入
- * @param fieldName 字段中文名称
- */
+/** 正数验证。 */
 export const createQuantitySchema = (fieldName: string) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
@@ -119,11 +84,7 @@ export const createQuantitySchema = (fieldName: string) =>
     v.gtValue(0, `${fieldName}必须大于0`)
   )
 
-/**
- * 非负数验证 - 用于剩余量等可以为0的字段
- * 支持字符串和数字输入
- * @param fieldName 字段中文名称
- */
+/** 非负数验证。 */
 export const createNonNegativeNumberSchema = (fieldName: string) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
@@ -132,12 +93,7 @@ export const createNonNegativeNumberSchema = (fieldName: string) =>
     v.minValue(0, `${fieldName}不能为负数`)
   )
 
-/**
- * 剩余量验证 - 用于编辑时验证剩余量不超过初始量
- * 支持字符串和数字输入
- * @param fieldName 字段中文名称
- * @param maxValue 最大值（初始量）
- */
+/** 剩余量验证。 */
 export const createRemainingQuantitySchema = (fieldName: string, maxValue: number) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
@@ -147,12 +103,7 @@ export const createRemainingQuantitySchema = (fieldName: string, maxValue: numbe
     v.maxValue(maxValue, `${fieldName}不能超过初始量 (${maxValue})`)
   )
 
-/**
- * 价格验证 - 替代 validatePrice
- * 支持字符串和数字输入
- * @param min 最小值
- * @param max 最大值
- */
+/** 价格验证。 */
 export const createPriceSchema = (min = 0, max = 999999) =>
   v.pipe(
     v.union([v.string(), v.number()], '价格必须是有效数字'),
@@ -175,10 +126,7 @@ export const UsernameSchema = v.pipe(
   v.regex(/^\w+$/, '用户名只能包含字母、数字和下划线')
 )
 
-/**
- * 规格验证 - 替代 validateSpecification
- * 支持格式: 500ml, 1L, 100g, 500 ml, 1.5L 等
- */
+/** 规格验证。 */
 export const SpecificationSchema = v.pipe(
   v.string('规格不能为空'),
   v.trim(),
@@ -200,11 +148,7 @@ export function parseSpecification(spec: string): number | null {
 // 3. CAS 号高级验证逻辑
 // ==========================================
 
-/**
- * CAS 校验码计算逻辑
- * CAS号格式：三部分组成，第一部分2-6位数字，第二部分2位数字，第三部分1位校验码
- * 校验码计算：将第一二部分的数字从右到左依次乘以1,2,3...，求和后取模10
- */
+/** 计算并校验 CAS 校验位。 */
 export const validateCASLogic = (input: string): boolean => {
   if (typeof input !== 'string') return false
   const parts = input.split('-')
@@ -237,10 +181,7 @@ export const isSpecialCasValue = (input: string): boolean => {
   return input.trim().toUpperCase() === SPECIAL_CAS_VALUE
 }
 
-/**
- * CAS号验证 - 替代 validateCASNumber & normalizeCASNumber
- * 自动标准化：大写 + 去除空格
- */
+/** CAS 号验证。 */
 export const CasNumberSchema = v.pipe(
   v.string('CAS号不能为空'),
   v.trim(),
@@ -277,10 +218,7 @@ export const validateAndNormalizeCASInput = (
 // 4. 库存模块 Schema
 // ==========================================
 
-/**
- * 订单原因 Schema - 用于试剂和耗材订单
- * 支持预选选项和自定义输入
- */
+/** 订单原因 Schema。 */
 const ORDER_REASON_VALUES = [
   'running_out',
   'not_stocked',
@@ -294,11 +232,7 @@ const ORDER_REASON_VALUES = [
 
 export const OrderReasonSchema = v.picklist(ORDER_REASON_VALUES, '申购原因不能为空')
 
-/**
- * 剩余量验证（非负数，允许0，但不能是null/undefined/空字符串）
- * 使用 v.union 在最外层拒绝空字符串
- * 注意：此 Schema 用于基础验证，编辑模式下 additional 验证在 handleFormSubmit 中单独处理
- */
+/** 剩余量基础验证。 */
 const RemainingQuantitySchema = v.pipe(
   v.union([
     v.pipe(v.string(), v.trim(), v.minLength(1, '剩余数量不能为空')),
@@ -309,11 +243,7 @@ const RemainingQuantitySchema = v.pipe(
   v.minValue(0, '剩余数量不能为负数')
 )
 
-/**
- * 库存表单 Schema
- * remaining_quantity 可选（后端自动计算等于 initial_quantity）
- * 编辑模式下 remaining_quantity 必填的验证在 handleFormSubmit 中处理
- */
+/** 库存表单 Schema。 */
 export const InventoryFormSchema = v.object({
   // 基础字段
   name: createStringLengthSchema('名称', 1, 200),
@@ -404,11 +334,7 @@ export type ChemicalNameMapFormInputData = v.InferInput<typeof ChemicalNameMapSc
 // 5. 订单模块 Schema
 // ==========================================
 
-/**
- * 试剂订单 Schema
- * 前端输入: specification (规格字符串，如 500ml)
- * 后端处理: 拆分为 initial_quantity 和 unit
- */
+/** 试剂订单 Schema。 */
 export const ReagentOrderSchema = v.object({
   name: createStringLengthSchema('名称', 1, 200),
   cas_number: CasNumberSchema,
@@ -520,12 +446,7 @@ export type ChangePasswordFormData = v.InferOutput<typeof ChangePasswordWithConf
 // 8. 归还模块 Schema
 // ==========================================
 
-/**
- * 归还数量验证 Schema - 用于验证归还时的剩余量或使用量
- * 支持字符串和数字输入
- * @param fieldName 字段中文名称（如"剩余量"或"使用量"）
- * @param maxValue 最大值（原借用时的剩余量）
- */
+/** 归还数量验证 Schema。 */
 export const createReturnQuantitySchema = (fieldName: string, maxValue: number) =>
   v.pipe(
     v.union([v.string(), v.number()], `${fieldName}必须是有效数字`),
@@ -569,10 +490,7 @@ export type CommonPublicArrivalFormData = v.InferOutput<typeof CommonPublicArriv
 // 9. 设备管理模块 Schema
 // ==========================================
 
-/**
- * 设备名称验证 Schema
- * 必填，最大长度50字符
- */
+/** 设备名称验证 Schema。 */
 export const DeviceNameSchema = v.object({
   device_name: createStringLengthSchema('设备名称', 1, 50)
 })
@@ -583,13 +501,7 @@ export type DeviceNameFormData = v.InferOutput<typeof DeviceNameSchema>
 // 10. 通用工具函数
 // ==========================================
 
-/**
- * 安全的值转换为字符串
- * 避免 [object Object] 问题
- * @param value 要转换的值
- * @param fallback 回退值，默认为 '-'
- * @returns 字符串值或回退值
- */
+/** 安全地把值转成字符串。 */
 export const safeString = (value: unknown, fallback = '-'): string => {
   if (value === null || value === undefined) return fallback
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
