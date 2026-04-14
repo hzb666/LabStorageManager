@@ -1,10 +1,6 @@
 <h1 align="center">LabStorageManager</h1>
 
-
-
-<img src="D:\Code\LabStorageManager\wiki\logo.gif" alt="logo" style="zoom:40%;" />
-
-
+![3.gif](https://pic.hzb666.zone/i/2026/04/14/69de1786c5f77.gif)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.14+-blue?style=flat&logo=python" alt="Python">
