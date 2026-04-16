@@ -30,8 +30,11 @@ env/
 .cursor/
 .history/
 .claude/
+.agents/
+.codex/
 .kilocode/
 .sonar/
+.trellis/
 *.sw?
 *.sw
 CLAUDE.md

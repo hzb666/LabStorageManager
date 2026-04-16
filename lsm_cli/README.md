@@ -116,10 +116,13 @@ bash ./lsm_cli/macos/install.sh
 脚本会：
 
 - 把目录版产物复制到固定位置
-- 自动把 `~/Library/Application Support/LabStorageManager/bin` 加入 `PATH`
+- 自动把 `~/Library/Application Support/LabStorageManager/bin/lsm` 加入 `PATH`
 - 默认写入：
   - `~/.zshrc`
   - 如果当前 shell 是 bash，则写入 `~/.bash_profile`
+
+如果之前安装过旧版脚本，重新运行安装命令会移除旧的父目录
+`PATH` 条目，并追加正确的目录版 `PATH` 条目。
 
 安装完成后，重新打开终端即可直接运行：
 
@@ -290,6 +293,7 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 - 旧的 `--data-json` / `--data-file` 仍保留，作为兼容兜底
 - 参数模式与 `--data-json` / `--data-file` 互斥
 - `update` 命令只会提交你显式传入的字段
+- `inventory_id` / `order_id` 必须是单个正整数，不支持逗号列表、范围或批量写操作
 
 ## 命令总览
 
@@ -422,14 +426,16 @@ python -m lsm_cli inventory list --summary --param search=苯胺
 python -m lsm_cli inventory borrow 123
 ```
 
+`borrow` 每次只借用一个 `inventory_id`，不会按名称、CAS、
+搜索结果或逗号列表批量借用。
+
 ### inventory return
 
 对应模型：`InventoryBorrowReturn`
 
 ```json
 {
-  "remaining_quantity": 320,
-  "unit": "ml"
+  "remaining_quantity": 320
 }
 ```
 
@@ -442,13 +448,16 @@ python -m lsm_cli inventory return 123 --used-quantity 20
 该模式会先读取当前库存的剩余量，在本地换算成
 `remaining_quantity` 后再调用原接口。
 
+`return` 不接受单位参数，也不接受 JSON payload 里的
+`unit` 字段；归还时强制沿用现有库存规格单位。
+
 `--used-quantity` 与 `--data-json` / `--data-file`
 互斥。
 
 也可以直接传最终剩余量：
 
 ```bash
-python -m lsm_cli inventory return 123 --remaining-quantity 320 --unit ml
+python -m lsm_cli inventory return 123 --remaining-quantity 320
 ```
 
 ### inventory manual-add
@@ -501,6 +510,8 @@ python -m lsm_cli inventory update 123 \
   --remaining-quantity 280 \
   --notes "转移货架"
 ```
+
+`update` 每次只更新一个 `inventory_id`，且只提交显式传入的字段。
 
 ### reagent-orders create
 

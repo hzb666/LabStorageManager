@@ -6,10 +6,16 @@
 | --- | --- |
 | `--base-url <url>` | 临时覆盖 API 地址，默认 `http://127.0.0.1:8000/api`；`auth login` 成功后会写入本地配置 |
 | `--token <token>` | 临时覆盖本地 bearer token；`auth login` 不接受 |
-| `--timeout <seconds>` | HTTP 超时秒数，默认 `30.0` |
+| `--timeout <seconds>` | HTTP 超时秒数，默认 `5.0` |
 | `--param key=value` | query 参数，仅支持已暴露的 `list` 类命令，可重复 |
 | `--data-json '<json>'` | 内联 JSON object 负载；`create` 命令使用，部分非 `create` 写命令仅作兼容兜底 |
 | `--data-file <path>` | UTF-8 JSON object 文件路径，与 `--data-json` 互斥 |
+
+## ID 参数约定
+
+- `inventory_id` / `order_id` 必须是单个正整数。
+- 不支持逗号列表、范围、名称、CAS、搜索词或其它非 ID 形式作为 ID 参数。
+- CLI 没有批量借用或批量修改命令；多目标写操作必须拆成多条单目标命令，并在执行前逐个确认目标和参数。
 
 ## 输出约定
 
@@ -60,7 +66,7 @@ HTTP: `GET /inventory/`
 
 HTTP: `GET /inventory/{inventory_id}`
 
-输入：`inventory_id`
+输入：单个正整数 `inventory_id`
 
 ### cas
 
@@ -90,23 +96,34 @@ HTTP: `GET /inventory/dashboard/pending-stockin`
 
 HTTP: `POST /inventory/{inventory_id}/borrow`
 
-输入：仅 `inventory_id`，CLI 不再暴露请求体，也不支持代借人参数。
+输入：仅单个正整数 `inventory_id`，CLI 不再暴露请求体，也不支持代借人参数。
+
+每次只借用一个库存 ID，不会按名称、CAS、搜索结果、逗号列表或范围批量借用。
 
 ### return
 
 HTTP: `POST /inventory/{inventory_id}/return`
 
+输入：单个正整数 `inventory_id`
+
 输入 body：
 
 ```json
-{"remaining_quantity": 120, "unit": "mL"}
+{"remaining_quantity": 120}
 ```
 
 参数模式：
 
 - `--remaining-quantity <number>`
 - `--used-quantity <number>`：CLI 会先读取当前库存剩余量，再本地换算成 `remaining_quantity`
-- `--unit <text>` 可选
+
+单位规则：
+
+- `--used-quantity` 不做单位换算，传入值必须已经是库存 `unit` 对应的数量。
+- 用户给出的单位与库存 `unit` / `specification` 不一致时，先执行 `inventory get <inventory_id>` 核对 `remaining_quantity`、`unit`、`specification`。
+- 只有换算关系明确时，才能提交换算后的 `--used-quantity` 或 `--remaining-quantity`。
+- 如果换算需要密度、滴数、瓶容量、开瓶状态或其它上下文，必须先向用户确认，不得猜测。
+- `return` 不接受 `--unit`，也不接受 JSON payload 里的 `unit` 字段；归还时强制沿用现有库存规格单位。
 
 ### manual-add
 
@@ -131,6 +148,8 @@ HTTP: `POST /inventory/manual-add`
 
 HTTP: `PUT /inventory/{inventory_id}`
 
+输入：单个正整数 `inventory_id`
+
 允许字段：
 
 - `name`
@@ -148,6 +167,8 @@ HTTP: `PUT /inventory/{inventory_id}`
 
 参数模式：以上字段都可直接用命令参数传入，CLI 只提交显式传入的字段。
 
+每次只更新一个库存 ID；批量修改必须拆成多条单目标命令。
+
 ## reagent-orders
 
 ### list
@@ -159,6 +180,8 @@ HTTP: `GET /reagent-orders/`
 ### get
 
 HTTP: `GET /reagent-orders/{order_id}`
+
+输入：单个正整数 `order_id`
 
 ### my
 
@@ -190,6 +213,8 @@ body 字段：
 
 HTTP: `PUT /reagent-orders/{order_id}`
 
+输入：单个正整数 `order_id`
+
 允许字段：
 
 - `cas_number`
@@ -217,6 +242,8 @@ HTTP: `GET /reagent-orders/cas-overview/{cas_number}`
 
 HTTP: `POST /reagent-orders/{order_id}/confirm-arrival`
 
+输入：单个正整数 `order_id`
+
 body 字段：
 
 ```json
@@ -231,6 +258,8 @@ body 字段：
 ### stock-in
 
 HTTP: `POST /reagent-orders/{order_id}/stock-in`
+
+输入：单个正整数 `order_id`
 
 body 字段：
 
@@ -254,6 +283,8 @@ HTTP: `GET /consumable-orders/`
 ### get
 
 HTTP: `GET /consumable-orders/{order_id}`
+
+输入：单个正整数 `order_id`
 
 ### my
 
@@ -279,6 +310,8 @@ body 字段：
 
 HTTP: `PUT /consumable-orders/{order_id}`
 
+输入：单个正整数 `order_id`
+
 允许字段：
 
 - `name`
@@ -296,6 +329,8 @@ HTTP: `PUT /consumable-orders/{order_id}`
 ### complete
 
 HTTP: `POST /consumable-orders/{order_id}/complete`
+
+输入：单个正整数 `order_id`
 
 body：CLI 不接受请求体，也不暴露 `--data-*`
 
@@ -316,6 +351,8 @@ body：CLI 不接受请求体，也不暴露 `--data-*`
 如果目标操作没有对应 CLI 子命令，必须明确回复“当前 CLI 不支持该操作”，不能绕过到原始 HTTP。
 登录时优先使用 `--password-stdin`，不要把密码写进命令行参数。
 对具体库存/试剂/订单执行写操作前，先通过 CLI 查询拿到准确 ID；禁止猜测 ID，禁止在目标不确定时直接修改。
+`inventory_id` / `order_id` 必须是单个正整数；禁止把逗号列表、范围、名称、CAS 或搜索词当作 ID 参数。CLI 没有批量借用或批量修改命令，多目标写操作必须逐个确认后拆成单目标命令。
+库存归还时禁止传单位，`--used-quantity` 不做单位换算；用户单位与库存 `unit` / `specification` 不一致时，必须先查库存并明确换算，不能猜测。
 执行前再次确认目标 ID、操作类型、输入值、单位都与用户意图完全一致；有任何不确定先问用户，不能“先试一下”。
 `create` 命令使用 JSON object 负载，`--data-json` 和 `--data-file` 二选一；非 `create` 写操作优先使用显式命令参数；`consumable-orders complete` 不传 `--data-*`。
 优先按退出码处理失败：2 表示 `401` 认证失败或未认证；已登录命令可重新登录，`auth login` 则检查用户名/密码或账号角色；3 权限不足，4 资源不存在，5 限流，6 文件不存在，7 本地输入错误，8 参数错误，9 网络错误。

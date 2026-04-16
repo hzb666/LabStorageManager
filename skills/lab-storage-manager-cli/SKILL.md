@@ -14,8 +14,11 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 - 禁止使用 `curl`、`Invoke-WebRequest`、`Invoke-RestMethod`、`requests`、`httpx`、浏览器 `fetch`、直接导入后端模块、直接访问数据库、直接改本地配置文件伪造 token。
 - 禁止访问 CLI 未暴露的接口，即使你知道后端存在该 API。
 - 对某个具体库存/试剂/订单执行写操作前，必须先通过 CLI 查询拿到准确 ID；允许通过名称、CAS、内部编码等线索先查，再使用返回结果里的 `id` / `inventory_id` / `order_id` 执行修改。禁止猜测 ID，禁止跳过查询直接修改不确定目标。
+- `inventory_id` / `order_id` 参数必须是单个正整数；禁止把逗号列表、范围、名称、CAS 或搜索词塞进 ID 参数。
+- CLI 没有批量借用或批量修改命令；多目标写操作只能在用户明确列出并确认每个目标 ID、动作和值之后，按单条命令逐个执行。
 - 对任何操作在真正执行前，都必须再次核对目标 ID、操作类型、输入值是否与用户意图完全一致；只有在目标、动作、参数三者都明确无误时才能实施。
 - 如果目标匹配结果不唯一、字段含义不清楚、单位/数量存在歧义、操作后果不确定，或你对要执行的对象/值有任何疑问，必须先向用户确认，不能“先试一下”。
+- 归还库存时禁止传单位；CLI 和后端会沿用现有库存 `unit` / `specification`。如果用户给出的单位不一致，必须先查询库存并明确换算成现有单位，再把换算后的数量作为 `--used-quantity` 或 `--remaining-quantity`。
 - 任何大范围、高破坏性或批量数量较大的操作，必须先明确提醒用户影响范围与后果，并在获得用户确认后才能执行。未确认前禁止实施。
 - 登录只允许普通用户账号；管理员和 `public` 账号不能作为 CLI 入口。
 - 禁止使用明文密码参数。优先 `--password-stdin`，否则接受隐藏输入提示。
@@ -105,7 +108,13 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
    - 查名称时，不存在单独的 name 接口；使用 `lsm inventory list --param search=<name> --param search_field=name`
    - `inventory list` 不支持按 `inventory_id` 过滤；已知 ID 时直接使用 `inventory get <inventory_id>`
    - 查询库存时，默认应整理并返回这些关键信息：名称（`name`）、CAS（`cas_number`）、品牌（`brand`）、剩余量或规格（`remaining_quantity` / `specification`）、借用状态（`status`）以及借用人（优先 `borrower_name`）
+   - 查询库存时，若给出名称但精确查询查不到，可以用别名、关键词做模糊搜索，但只能列出候选和匹配依据；不得用化学知识自行认定目标。只有 CAS、内部编码、精确别名或用户确认能唯一定位时，才可继续读取 ID 或执行写操作。
 4. 对需要资源 ID 的写操作，如果用户只给了名称、CAS、内部编码等线索，先查 ID，再执行写操作；如果仍然不能唯一定位，立即停止并说明 CLI 当前无法安全执行。
+   - `inventory borrow <inventory_id>` 每次只借用一个库存 ID。
+   - `inventory return <inventory_id>` 可用 `--used-quantity`，但输入值必须已经是库存 `unit` 对应的数量；若用户单位不同，先用 `inventory get <inventory_id>` 核对 `remaining_quantity`、`unit`、`specification`，只在换算明确后提交换算后的数量；禁止传 `--unit` 或 JSON `unit` 字段。
+   - 如果单位换算需要密度、滴数、瓶容量、开瓶状态或其它上下文，必须先向用户确认，不得猜测。
+   - `inventory update <inventory_id>` 每次只更新一个库存 ID，且只提交显式传入的字段。
+   - 所有 `<inventory_id>` / `<order_id>` 都必须是单个正整数，不支持 `1,2`、`1-3` 这类批量写入形式。
 5. 在真正执行写操作前，再次复核：目标 ID 是否正确、动作是否正确、输入值与单位是否正确、命令是否会命中用户想要的对象；任何一项不能完全确认时，先询问用户。
 6. 读操作优先 `list`、`get`、`my-*` 这类命令，不要臆造 query/path。
 7. `create` 命令使用 JSON object 负载：

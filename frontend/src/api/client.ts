@@ -391,7 +391,7 @@ export const inventoryAPI = {
   getByCode: (code: string) => api.get(`/inventory/code/${code}`),
   checkCAS: (casNumber: string) => api.get(`/inventory/cas/${casNumber}`),
   borrow: (id: number, data?: { actual_borrower_id?: number }) => api.post(`/inventory/${id}/borrow`, data),
-  return: (id: number, data: { remaining_quantity: number; unit?: string }) =>
+  return: (id: number, data: { remaining_quantity: number }) =>
     api.post(`/inventory/${id}/return`, data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/inventory/${id}`, data),
   delete: (id: number) => api.delete(`/inventory/${id}`),

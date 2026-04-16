@@ -186,7 +186,6 @@ class InventoryBorrowReturn(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     remaining_quantity: float = Field(ge=0)
-    unit: Optional[str] = Field(default=None, max_length=20)
 
 
 class InventoryBorrowRequest(SQLModel):

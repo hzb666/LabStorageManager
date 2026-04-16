@@ -345,7 +345,6 @@ export function DashboardBorrowTab() {
     try {
       await inventoryAPI.return(selectedBorrow.inventory_id, {
         remaining_quantity: finalQuantity,
-        unit: selectedBorrow.unit,
       })
       setSelectedBorrow(null)
       returnForm.reset(defaultReturnValues)

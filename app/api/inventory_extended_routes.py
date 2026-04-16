@@ -599,7 +599,6 @@ def _get_latest_active_borrow_log(db: Session, inventory_id: int) -> Optional[Bo
 def _apply_return_to_inventory_item(item: Inventory, return_data: InventoryBorrowReturn) -> Optional[str]:
     item.remaining_quantity = return_data.remaining_quantity
     item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
-    item.unit = return_data.unit if return_data.unit else item.unit
     item.last_borrower_id = item.borrower_id
     item.borrower_id = None
 

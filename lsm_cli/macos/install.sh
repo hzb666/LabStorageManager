@@ -17,9 +17,37 @@ else
   RC_FILE="${HOME}/.zshrc"
 fi
 
-EXPORT_LINE="export PATH=\"${TARGET_PARENT}:\$PATH\""
+EXPORT_LINE="export PATH=\"${TARGET_DIR}:\$PATH\""
+LEGACY_EXPORT_LINE="export PATH=\"${TARGET_PARENT}:\$PATH\""
 touch "${RC_FILE}"
-if ! grep -Fq "${TARGET_PARENT}" "${RC_FILE}"; then
+
+if grep -Fqx "${LEGACY_EXPORT_LINE}" "${RC_FILE}"; then
+  TMP_RC_FILE="$(mktemp)"
+  awk -v legacy="${LEGACY_EXPORT_LINE}" '
+    $0 == legacy {
+      if (previous != "# LabStorageManager CLI" && previous != "") {
+        print previous
+      }
+      previous = ""
+      next
+    }
+    {
+      if (previous != "") {
+        print previous
+      }
+      previous = $0
+    }
+    END {
+      if (previous != "") {
+        print previous
+      }
+    }
+  ' "${RC_FILE}" > "${TMP_RC_FILE}"
+  mv "${TMP_RC_FILE}" "${RC_FILE}"
+  echo "Removed legacy PATH entry from ${RC_FILE}"
+fi
+
+if ! grep -Fq "${TARGET_DIR}" "${RC_FILE}"; then
   {
     echo ""
     echo "# LabStorageManager CLI"

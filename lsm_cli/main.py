@@ -88,6 +88,22 @@ def _add_payload_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--data-file", help="Path to JSON payload file")
 
 
+def _add_inventory_id_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "inventory_id",
+        type=_parse_positive_int,
+        help="Single positive inventory ID",
+    )
+
+
+def _add_order_id_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "order_id",
+        type=_parse_positive_int,
+        help="Single positive order ID",
+    )
+
+
 def _add_param_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--param",
@@ -446,32 +462,29 @@ def _build_inventory_return_payload(
 ) -> dict[str, Any]:
     has_explicit = any(
         getattr(args, field_name, None) is not None
-        for field_name in ("remaining_quantity", "used_quantity", "unit")
+        for field_name in ("remaining_quantity", "used_quantity")
     )
     if has_explicit and _has_inline_payload_args(args):
         raise CLILocalInputError(PAYLOAD_SOURCE_ERROR)
 
     if args.used_quantity is None and args.remaining_quantity is None:
-        if args.unit is not None:
-            raise CLILocalInputError("`--unit` must be used with --remaining-quantity or --used-quantity")
         payload = load_json_payload(args.data_json, args.data_file, required=True)
         _validate_payload_finite_numbers(payload or {}, "remaining_quantity")
+        if payload and "unit" in payload:
+            raise CLILocalInputError("inventory return does not accept `unit`; existing inventory unit is preserved")
         return payload or {}
 
     if args.used_quantity is not None and args.remaining_quantity is not None:
         raise CLILocalInputError("Use either --remaining-quantity or --used-quantity, not both")
 
     if args.remaining_quantity is not None:
-        payload: dict[str, Any] = {"remaining_quantity": args.remaining_quantity}
-        if args.unit is not None:
-            payload["unit"] = args.unit
-        return payload
+        return {"remaining_quantity": args.remaining_quantity}
 
     if args.used_quantity < 0:
         raise CLILocalInputError("used quantity must be greater than or equal to 0")
 
     inventory = client.request("GET", f"/inventory/{args.inventory_id}")
-    current_remaining, unit = _resolve_inventory_remaining_for_return(inventory)
+    current_remaining, _unit = _resolve_inventory_remaining_for_return(inventory)
     if args.used_quantity > current_remaining:
         raise CLILocalInputError(
             f"Used quantity ({args.used_quantity}) cannot exceed current remaining quantity ({current_remaining})"
@@ -480,10 +493,6 @@ def _build_inventory_return_payload(
     payload: dict[str, Any] = {
         "remaining_quantity": max(0.0, round(current_remaining - args.used_quantity, 10))
     }
-    if args.unit is not None:
-        payload["unit"] = args.unit
-    elif unit:
-        payload["unit"] = unit
     return payload
 
 
@@ -686,7 +695,7 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
 
     get_cmd = inventory_sub.add_parser("get", help="Get inventory by id")
     _add_connection_arguments(get_cmd)
-    get_cmd.add_argument("inventory_id")
+    _add_inventory_id_argument(get_cmd)
     get_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/inventory/{inventory_id}"))
 
     cas_cmd = inventory_sub.add_parser("cas", help="Get inventory summary by CAS")
@@ -709,12 +718,12 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
 
     borrow = inventory_sub.add_parser("borrow", help="Borrow an inventory item")
     _add_connection_arguments(borrow)
-    borrow.add_argument("inventory_id")
+    _add_inventory_id_argument(borrow)
     borrow.set_defaults(handler=_handle_inventory_borrow)
 
     return_cmd = inventory_sub.add_parser("return", help="Return an inventory item")
     _add_connection_arguments(return_cmd)
-    return_cmd.add_argument("inventory_id")
+    _add_inventory_id_argument(return_cmd)
     _add_payload_arguments(return_cmd)
     return_cmd.add_argument(
         "--remaining-quantity",
@@ -726,7 +735,6 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
         type=_parse_finite_float_arg,
         help="Interpret input as used quantity; CLI converts it to remaining_quantity before submit",
     )
-    return_cmd.add_argument("--unit", help="Override inventory unit in the return payload")
     return_cmd.set_defaults(handler=_handle_inventory_return)
 
     manual_add = inventory_sub.add_parser("manual-add", help="Create inventory manually")
@@ -742,7 +750,7 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
 
     update = inventory_sub.add_parser("update", help="Update inventory")
     _add_connection_arguments(update)
-    update.add_argument("inventory_id")
+    _add_inventory_id_argument(update)
     _add_payload_arguments(update)
     update.add_argument("--name")
     update.add_argument("--cas-number", dest="cas_number")
@@ -784,7 +792,7 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
 
     get_cmd = reagent_sub.add_parser("get", help="Get reagent order by id")
     _add_connection_arguments(get_cmd)
-    get_cmd.add_argument("order_id")
+    _add_order_id_argument(get_cmd)
     get_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/reagent-orders/{order_id}"))
 
     my_cmd = reagent_sub.add_parser("my", help="Get current user's reagent orders")
@@ -804,7 +812,7 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
 
     update_cmd = reagent_sub.add_parser("update", help="Update reagent order")
     _add_connection_arguments(update_cmd)
-    update_cmd.add_argument("order_id")
+    _add_order_id_argument(update_cmd)
     _add_payload_arguments(update_cmd)
     update_cmd.add_argument("--cas-number", dest="cas_number")
     update_cmd.add_argument("--name")
@@ -829,7 +837,7 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
 
     arrival_cmd = reagent_sub.add_parser("confirm-arrival", help="Confirm reagent order arrival")
     _add_connection_arguments(arrival_cmd)
-    arrival_cmd.add_argument("order_id")
+    _add_order_id_argument(arrival_cmd)
     _add_payload_arguments(arrival_cmd)
     arrival_cmd.add_argument("--arrival-notes", dest="arrival_notes")
     arrival_cmd.add_argument("--storage-location", dest="storage_location")
@@ -837,7 +845,7 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
 
     stock_in_cmd = reagent_sub.add_parser("stock-in", help="Stock in reagent order")
     _add_connection_arguments(stock_in_cmd)
-    stock_in_cmd.add_argument("order_id")
+    _add_order_id_argument(stock_in_cmd)
     _add_payload_arguments(stock_in_cmd)
     stock_in_cmd.add_argument("--storage-location", dest="storage_location")
     stock_in_cmd.add_argument("--remaining-quantity", dest="remaining_quantity", type=_parse_finite_float_arg)
@@ -869,7 +877,7 @@ def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[a
 
     get_cmd = consumable_sub.add_parser("get", help="Get consumable order by id")
     _add_connection_arguments(get_cmd)
-    get_cmd.add_argument("order_id")
+    _add_order_id_argument(get_cmd)
     get_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/consumable-orders/{order_id}"))
 
     my_cmd = consumable_sub.add_parser("my", help="Get current user's consumable orders")
@@ -889,7 +897,7 @@ def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[a
 
     update_cmd = consumable_sub.add_parser("update", help="Update consumable order")
     _add_connection_arguments(update_cmd)
-    update_cmd.add_argument("order_id")
+    _add_order_id_argument(update_cmd)
     _add_payload_arguments(update_cmd)
     update_cmd.add_argument("--name")
     update_cmd.add_argument("--english-name", dest="english_name")
@@ -904,7 +912,7 @@ def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[a
 
     complete_cmd = consumable_sub.add_parser("complete", help="Complete consumable order")
     _add_connection_arguments(complete_cmd)
-    complete_cmd.add_argument("order_id")
+    _add_order_id_argument(complete_cmd)
     complete_cmd.set_defaults(handler=lambda args: _handle_post_command(args, "/consumable-orders/{order_id}/complete"))
 
 
