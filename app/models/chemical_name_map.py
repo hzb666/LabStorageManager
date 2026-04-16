@@ -17,8 +17,6 @@ class ChemicalCategory(str, Enum):
     BASE = "base"
     SALT = "salt"
     SOLVENT = "solvent"
-    CATALYST = "catalyst"
-    INDICATOR = "indicator"
     OTHER = "other"
 
 

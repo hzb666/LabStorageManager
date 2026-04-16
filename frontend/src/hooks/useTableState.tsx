@@ -63,6 +63,8 @@ export interface UseTableStateOptions {
   expandStorageKey?: string
   // 默认是否展开全部
   defaultExpanded?: boolean
+  // 是否允许模糊搜索；禁用时即使本地存储有旧状态也不会带到请求中。
+  enableFuzzySearch?: boolean
 }
 
 type TableQueryResult = UseInfiniteQueryResult<InfiniteData<ListResponseData>, unknown>
@@ -132,6 +134,7 @@ type FilterStateOptions = {
   initialSearchField?: string
   debounceMs: number
   expandStorageId: string
+  enableFuzzySearch: boolean
 }
 
 type TableQueryState = {
@@ -269,6 +272,7 @@ function useFilterState(options: FilterStateOptions) {
     initialSearchField,
     debounceMs,
     expandStorageId,
+    enableFuzzySearch,
   } = options
   const normalizedInitialSearch = initialSearch.trim()
   const normalizedInitialSearchField = initialSearchField ?? defaultSearchField
@@ -276,15 +280,25 @@ function useFilterState(options: FilterStateOptions) {
   const [globalFilter, setGlobalFilter] = useState(normalizedInitialSearch)
   const [statusFilter, setStatusFilter] = useState(defaultStatus)
   const [searchField, setSearchField] = useState(normalizedInitialSearchField)
-  const [fuzzySearch, setFuzzySearch] = useState<boolean>(() =>
-    getFuzzySearchState(expandStorageId, false)
+  const [storedFuzzySearch, setStoredFuzzySearch] = useState<boolean>(() =>
+    enableFuzzySearch ? getFuzzySearchState(expandStorageId, false) : false
   )
+  const fuzzySearch = enableFuzzySearch ? storedFuzzySearch : false
   const [sorting, setSorting] = useState<SortingState>([])
   const normalizedSearchInput = searchInput.trim()
 
+  const setFuzzySearch = useCallback(
+    (value: boolean) => {
+      setStoredFuzzySearch(enableFuzzySearch ? value : false)
+    },
+    [enableFuzzySearch]
+  )
+
   useEffect(() => {
-    setFuzzySearchState(expandStorageId, fuzzySearch)
-  }, [fuzzySearch, expandStorageId])
+    if (enableFuzzySearch) {
+      setFuzzySearchState(expandStorageId, storedFuzzySearch)
+    }
+  }, [enableFuzzySearch, storedFuzzySearch, expandStorageId])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -338,7 +352,7 @@ function useFilterState(options: FilterStateOptions) {
     setSearchField(defaultSearchField)
     setFuzzySearch(false)
     setSorting([])
-  }, [defaultStatus, defaultSearchField])
+  }, [defaultStatus, defaultSearchField, setFuzzySearch])
 
   const hasFilter = Boolean(
     globalFilter ||
@@ -490,6 +504,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     initialSearchField,
     expandStorageKey,
     defaultExpanded = false,
+    enableFuzzySearch = true,
   } = options
   const queryClient = useQueryClient()
   const expandStorageId = expandStorageKey || tableId
@@ -501,6 +516,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     initialSearchField,
     debounceMs,
     expandStorageId,
+    enableFuzzySearch,
   })
   const { columnSizing, handleColumnSizingChange } = useColumnSizingState(
     tableId,

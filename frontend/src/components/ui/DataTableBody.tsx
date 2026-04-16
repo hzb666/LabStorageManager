@@ -52,18 +52,19 @@ function InnerRowComponent<TData>({
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (onRowClick) {
         onRowClick(e, row)
-      } else {
+      } else if (renderExpandedRow) {
         row.toggleExpanded()
       }
     },
-    [onRowClick, row]
+    [onRowClick, renderExpandedRow, row]
   )
 
   return (
     <div className="w-full">
       <div
         className={cn(
-          'flex w-full cursor-pointer transition-colors items-center hover:bg-accent dark:hover:bg-input border-b',
+          'flex w-full transition-colors items-center border-b hover:bg-accent dark:hover:bg-input',
+          renderExpandedRow && 'cursor-pointer',
           isExpanded ? 'border-transparent' : 'border-border'
         )}
         onClick={handleToggle}

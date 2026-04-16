@@ -8,7 +8,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
 import { formatDate, formatDateTime, getFullImageUrl } from '@/lib/utils'
-import { CHEMICAL_CATEGORY_LABELS } from '@/lib/constants'
+import { CHEMICAL_CATEGORY_LABELS, type BadgeColor } from '@/lib/constants'
 import { Laptop } from 'lucide-react'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 
@@ -483,6 +483,21 @@ export function renderCommonShelfCategory(category: string | null) {
   return CHEMICAL_CATEGORY_LABELS[category] || category
 }
 
+function getChemicalCategoryBadgeColor(category: string | null): BadgeColor {
+  switch (category) {
+    case 'acid':
+      return 'red'
+    case 'base':
+      return 'blue'
+    case 'salt':
+      return 'purple'
+    case 'solvent':
+      return 'green'
+    default:
+      return 'gray'
+  }
+}
+
 export function getCommonShelfGroupTableColumns(args: {
   renderActions: (row: TableRowData) => ReactNode
 }): ColumnDef<TableRowData, unknown>[] {
@@ -544,28 +559,88 @@ export function getChemicalNameMapTableColumns(args: {
   return [
     columnHelper.accessor('cas_number', {
       header: 'CAS',
-      cell: (info) => <span className="break-all">{safeString(info.getValue(), '')}</span>,
+      size: 96,
+      minSize: 84,
+      maxSize: 120,
+      cell: (info) => (
+        <span className="break-all">
+          <HighlightText
+            text={safeString(info.getValue(), '')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('name', {
       header: '中文名称',
-      cell: (info) => <span className="break-all">{safeString(info.getValue(), '')}</span>,
+      size: 180,
+      minSize: 140,
+      maxSize: 260,
+      cell: (info) => (
+        <span className="break-all">
+          <HighlightText
+            text={safeString(info.getValue(), '')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('english_name', {
       header: '英文名称',
-      cell: (info) => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
+      size: 240,
+      minSize: 180,
+      maxSize: 360,
+      cell: (info) => (
+        <span className="break-all">
+          <HighlightText
+            text={safeString(info.getValue(), '-')}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.display({
       id: 'aliases',
       header: '别名',
-      cell: (info) => <span className="break-all">{args.renderAliases(info.row.original)}</span>,
+      size: 220,
+      minSize: 160,
+      maxSize: 340,
+      enableSorting: false,
+      cell: (info) => (
+        <span className="break-all">
+          <HighlightText
+            text={args.renderAliases(info.row.original)}
+            highlight={info.table.getState().globalFilter}
+            fuzzy={info.table.options.meta?.fuzzySearch}
+          />
+        </span>
+      ),
     }),
     columnHelper.accessor('category', {
       header: '分类',
-      cell: (info) => <span>{renderCommonShelfCategory(info.getValue() as string | null)}</span>,
+      size: 72,
+      minSize: 64,
+      maxSize: 88,
+      cell: (info) => {
+        const category = info.getValue() as string | null
+        return (
+          <StatusBadge
+            status={renderCommonShelfCategory(category)}
+            color={getChemicalCategoryBadgeColor(category)}
+          />
+        )
+      },
     }),
     columnHelper.display({
       id: 'actions',
       header: '操作',
+      enableSorting: false,
+      size: 84,
+      minSize: 72,
+      maxSize: 96,
       cell: (info) => <>{args.renderActions(info.row.original)}</>,
     }),
   ]

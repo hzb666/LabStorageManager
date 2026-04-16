@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { useForm, type FieldValues, type UseFormReturn } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { Archive, ArrowUpFromLine, Plus } from 'lucide-react'
+import { Archive, ArrowUpFromLine, Plus, Trash2 } from 'lucide-react'
 
 import {
   chemicalNameMapAPI,
@@ -911,11 +911,6 @@ function useChemicalNameMapController({
   }, [openChemicalNameMapCreateDialog])
 
   const handleDeleteChemicalNameMap = useCallback(async (item: ChemicalNameMapItem) => {
-    const confirmed = window.confirm(`确认删除 CAS 主数据 ${item.cas_number} 吗？`)
-    if (!confirmed) {
-      return
-    }
-
     try {
       await chemicalNameMapAPI.delete(item.id)
       toast.success('CAS 主数据已删除')
@@ -1226,14 +1221,24 @@ function ChemicalNameMapActionButtons({
   onEdit: (item: ChemicalNameMapItem) => void
   onDelete: (item: ChemicalNameMapItem) => Promise<void>
 }) {
+  const actions = useMemo(() => [
+    {
+      id: 'delete',
+      label: '删除',
+      icon: <Trash2 className="size-4 text-destructive" />,
+      className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
+      confirm: true,
+      confirmLabel: '确认删除',
+      onClick: onDelete,
+    },
+  ], [onDelete])
+
   return (
-    <div className="flex gap-2">
-      <Button variant="secondary" size="sm" onClick={() => onEdit(item)}>
-        编辑
-      </Button>
-      <Button variant="destructive" size="sm" onClick={() => void onDelete(item)}>
-        删除
-      </Button>
-    </div>
+    <TableActionButtonsMemo
+      item={item}
+      actions={actions}
+      showEdit={true}
+      onEdit={onEdit}
+    />
   )
 }

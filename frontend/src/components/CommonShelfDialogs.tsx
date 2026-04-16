@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import { FilterTable } from '@/components/ui/FilterTable'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import type { FilterAPI } from '@/hooks/useTableState'
 import {
@@ -28,9 +29,7 @@ import {
   getCommonShelfRemoveOneFormFields,
 } from '@/lib/formConfigs'
 import {
-  CHEMICAL_NAME_MAP_SEARCH_FIELD_OPTIONS,
   COMMON_SHELF_EMPTY_LOCATION_VALUE,
-  COMMON_SHELF_GROUP_STATUS_OPTIONS,
 } from '@/lib/tableConfigs'
 import type {
   ChemicalNameMapFormData,
@@ -52,6 +51,8 @@ import {
 } from '@/lib/validationSchemas'
 
 export type CommonShelfDialogMode = 'manual-add' | 'edit' | 'add-bottles' | 'remove-one' | null
+
+const CHEMICAL_NAME_MAP_SEARCH_ONLY_OPTIONS = [{ value: 'all', label: '全部' }]
 
 // 常用货架弹窗统一使用分组 controller。
 // 页面层只关心 state/forms/actions/itemEdit 四类职责，避免继续平铺几十个字段来回透传。
@@ -152,13 +153,13 @@ function DialogSubmitActions({
   isSubmitting: boolean
 }) {
   return (
-    <div className="flex justify-end gap-2">
-      <Button type="button" variant="secondary" onClick={onCancel}>
+    <div className="flex justify-end gap-2 pt-4">
+      <Button type="button" variant="modern" size="lg" className="min-w-24" onClick={onCancel}>
         取消
       </Button>
-      <Button type="submit" disabled={isSubmitting}>
+      <LoadingButton type="submit" size="lg" className="min-w-36" isLoading={isSubmitting}>
         {submitLabel}
-      </Button>
+      </LoadingButton>
     </div>
   )
 }
@@ -547,16 +548,10 @@ export function ChemicalNameMapManagementDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[85vh] w-[96vw] max-w-6xl overflow-hidden">
+      <DialogContent className="h-[85vh] w-[98vw] min-w-[min(98vw,72rem)] max-w-[92rem] overflow-hidden md:w-[92vw]">
         <div className="flex h-full flex-col gap-4">
           <DialogHeader className="shrink-0">
-            <div className="flex items-center justify-between gap-3">
-              <DialogTitle>CAS 主数据管理</DialogTitle>
-              <Button onClick={onCreate}>
-                <Plus className="mr-1.5 h-4 w-4" />
-                新增 CAS
-              </Button>
-            </div>
+            <DialogTitle className="mb-0">CAS 主数据管理</DialogTitle>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-hidden">
             <FilterTable
@@ -564,10 +559,20 @@ export function ChemicalNameMapManagementDialog({
               queryKey={['chemical-name-map']}
               tableId="chemical-name-map-table"
               customColumns={columns}
-              statusOptions={COMMON_SHELF_GROUP_STATUS_OPTIONS}
-              searchFieldOptions={CHEMICAL_NAME_MAP_SEARCH_FIELD_OPTIONS}
+              statusOptions={[]}
+              searchFieldOptions={CHEMICAL_NAME_MAP_SEARCH_ONLY_OPTIONS}
+              showFuzzySearch={false}
+              enableExpandAll={false}
               searchPlaceholder="搜索 CAS、名称、别名..."
+              scrollHeight="calc(85vh - 17rem)"
               title="CAS 主数据"
+              cardClassName="mx-1"
+              toolbarActions={(
+                <Button onClick={onCreate} size="lg">
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  新增 CAS
+                </Button>
+              )}
             />
           </div>
         </div>

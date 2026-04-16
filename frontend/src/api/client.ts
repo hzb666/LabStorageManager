@@ -428,8 +428,6 @@ export type ChemicalCategory =
   | 'base'
   | 'salt'
   | 'solvent'
-  | 'catalyst'
-  | 'indicator'
   | 'other'
 
 export interface CommonShelfGroupIdentity {

@@ -130,6 +130,7 @@ export const UsernameSchema = v.pipe(
 export const SpecificationSchema = v.pipe(
   v.string('规格不能为空'),
   v.trim(),
+  v.nonEmpty('规格不能为空'),
   v.toLowerCase(),
   v.regex(
     /^\d+(\.\d+)?\s*(ml|l|g|kg|mg|个|瓶|支|盒|包|套)$/,
@@ -185,6 +186,7 @@ export const isSpecialCasValue = (input: string): boolean => {
 export const CasNumberSchema = v.pipe(
   v.string('CAS号不能为空'),
   v.trim(),
+  v.nonEmpty('CAS号不能为空'),
   v.toUpperCase(),
   v.check((input) => isSpecialCasValue(input) || /^\d{2,7}-\d{2}-\d$/.test(input), 'CAS号格式无效'),
   v.check((input) => isSpecialCasValue(input) || validateCASLogic(input), 'CAS号校验码错误')
@@ -312,7 +314,7 @@ export const ChemicalNameMapSchema = v.object({
   alias_2: createMaxLengthSchema('别名2', 200),
   alias_3: createMaxLengthSchema('别名3', 200),
   category: v.picklist(
-    ['acid', 'base', 'salt', 'solvent', 'catalyst', 'indicator', 'other'],
+    ['acid', 'base', 'salt', 'solvent', 'other'],
     '分类不能为空'
   ),
 })

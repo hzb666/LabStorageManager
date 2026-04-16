@@ -30,6 +30,7 @@ export interface TableFiltersProps {
   statusOptions?: FilterOption[]
   
   className?: string
+  actions?: React.ReactNode
 }
 
 export interface TableSearchInputProps {
@@ -39,6 +40,20 @@ export interface TableSearchInputProps {
   maxLength?: number
   inputClassName?: string
   containerClassName?: string
+}
+
+function shouldShowExtraControls({
+  actions,
+  showFuzzySearch,
+  showSearchFieldSelect,
+  showStatusSelect,
+}: Readonly<{
+  actions?: React.ReactNode
+  showFuzzySearch: boolean
+  showSearchFieldSelect: boolean
+  showStatusSelect: boolean
+}>) {
+  return Boolean(actions || showFuzzySearch || showSearchFieldSelect || showStatusSelect)
 }
 
 // 把搜索词和状态筛选的空态文案集中在这里，避免每个表格各写一版组合提示。
@@ -147,7 +162,17 @@ export function TableFilters({
   onStatusFilterChange,
   statusOptions = DEFAULT_STATUS_OPTIONS,
   className = '',
+  actions,
 }: Readonly<TableFiltersProps>) {
+  const showSearchFieldSelect = Boolean(searchFieldOptions && searchFieldOptions.length > 1)
+  const showStatusSelect = Boolean(statusOptions && statusOptions.length > 0 && onStatusFilterChange)
+  const showExtraControls = shouldShowExtraControls({
+    actions,
+    showFuzzySearch,
+    showSearchFieldSelect,
+    showStatusSelect,
+  })
+
   const handleFuzzySearchChange = (checked: boolean) => {
     // 把筛选重计算放到 transition，降低输入过程中主线程阻塞感。
     startTransition(() => {
@@ -176,13 +201,14 @@ export function TableFilters({
   }, [searchField, searchFieldOptions, searchPlaceholder])
 
   return (
-    <div className={`flex flex-col sm:flex-row gap-3 items-stretch sm:items-center ${className}`}>
+    <div className={`flex flex-col sm:flex-row gap-3 items-stretch sm:items-center p-1 ${className}`}>
       <TableSearchInput
         value={searchInput}
         onChange={onSearchInputChange}
         placeholder={resolvedSearchPlaceholder}
       />
-      
+
+      {showExtraControls && (
       <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">
         {showFuzzySearch && (
           <label className="flex items-center gap-2 text-base cursor-pointer whitespace-nowrap">
@@ -194,7 +220,7 @@ export function TableFilters({
           </label>
         )}
 
-        {searchFieldOptions && searchFieldOptions.length > 1 && (
+        {showSearchFieldSelect && (
           <Select value={searchField} onValueChange={onSearchFieldChange}>
             <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
               <SelectValue placeholder="全部" />
@@ -209,7 +235,7 @@ export function TableFilters({
           </Select>
         )}
 
-        {statusOptions && statusOptions.length > 0 && onStatusFilterChange && (
+        {showStatusSelect && (
           <Select value={statusFilter} onValueChange={onStatusFilterChange}>
             <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
               <SelectValue placeholder="全部状态" />
@@ -223,7 +249,10 @@ export function TableFilters({
             </SelectContent>
           </Select>
         )}
+
+        {actions}
       </div>
+      )}
     </div>
   )
 }

@@ -25,6 +25,7 @@ import type {
   SearchFieldOption,
 } from "@/hooks/useTableState";
 import { getInventoryTableColumns } from "@/lib/tableConfigs";
+import { cn } from "@/lib/utils";
 
 declare module "@tanstack/react-table" {
   interface TableMeta<TData extends RowData> {
@@ -56,7 +57,9 @@ export interface FilterTableProps {
   noteField?: string;
   scrollHeight?: number | string;
   className?: string;
+  cardClassName?: string;
   emptyText?: string;
+  toolbarActions?: React.ReactNode;
   realtime?: {
     room: string;
     eventTypes: readonly string[];
@@ -576,7 +579,9 @@ export function FilterTable({
   noteField,
   scrollHeight,
   className = "",
+  cardClassName,
   emptyText = "暂无数据",
+  toolbarActions,
   realtime,
 }: Readonly<FilterTableProps>) {
   const location = useLocation();
@@ -607,6 +612,7 @@ export function FilterTable({
     extraParams,
     initialSearch: initialUrlSearchState.search,
     initialSearchField: initialUrlSearchState.field,
+    enableFuzzySearch: showFuzzySearch,
   });
 
   const { handleRealtimeRefresh, staleKey } = useFilterTableRealtime({
@@ -624,9 +630,7 @@ export function FilterTable({
     locationSearch: location.search,
   });
 
-  const tableColumns = useMemo(() => {
-    return resolveTableColumns(customColumns);
-  }, [customColumns]);
+  const tableColumns = useMemo(() => resolveTableColumns(customColumns), [customColumns]);
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
@@ -667,7 +671,7 @@ export function FilterTable({
   const disableExpandAll = !filter.isAllExpanded && !isTableAtTop;
 
   return (
-    <div className={`space-y-6 ${className}`}>
+    <div className={cn("space-y-6", className)}>
       <TableFilters
         searchInput={filter.searchInput}
         onSearchInputChange={filter.setSearchInput}
@@ -681,9 +685,10 @@ export function FilterTable({
         searchFieldOptions={searchFieldOptions}
         searchPlaceholder={searchPlaceholder}
         showFuzzySearch={showFuzzySearch}
+        actions={toolbarActions}
       />
 
-      <Card className="relative overflow-hidden">
+      <Card className={cn("relative overflow-hidden", cardClassName)}>
         <FilterTableHeader
           title={title}
           displayCount={filter.displayCount}

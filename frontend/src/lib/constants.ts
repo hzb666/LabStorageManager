@@ -168,8 +168,6 @@ export const CHEMICAL_CATEGORY_LABELS: Record<string, string> = {
   base: '碱类',
   salt: '盐类',
   solvent: '溶剂',
-  catalyst: '催化',
-  indicator: '指示剂',
   other: '其他',
 }
 

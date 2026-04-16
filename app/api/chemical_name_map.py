@@ -20,8 +20,16 @@ from app.models.common_shelf import CommonShelf
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.common_shelf_queries import search_name_map_cas_numbers
 from app.services.pinyin_utils import to_pinyin_parts
+from app.services.sql_utils import order_with_nulls_last
 
 router = APIRouter(prefix="/chemical-name-map", tags=["Chemical Name Map"])
+
+VALID_CHEMICAL_NAME_MAP_SORT_FIELDS = {
+    "cas_number",
+    "name",
+    "english_name",
+    "category",
+}
 
 
 def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
@@ -40,6 +48,18 @@ def _validate_cas_number(raw_cas_number: str) -> str:
             detail=f"Invalid CAS number: {error_message}",
         )
     return cas_number
+
+
+def _build_name_map_order_expr(sort_by: Optional[str], sort_order: Optional[str]):
+    sort_direction = sort_order.lower() if sort_order else "desc"
+    sort_field_map = {
+        "cas_number": ChemicalNameMap.cas_number,
+        "name": ChemicalNameMap.name_pinyin,
+        "english_name": ChemicalNameMap.english_name,
+        "category": ChemicalNameMap.category,
+    }
+    order_column = sort_field_map.get(sort_by, ChemicalNameMap.updated_at)
+    return order_with_nulls_last(order_column, sort_direction)
 
 
 def _apply_name_map_payload(
@@ -87,11 +107,16 @@ def list_chemical_name_map(
     search: Optional[str] = Query(default=None, max_length=100),
     search_field: Optional[str] = Query(default=None),
     fuzzy: bool = False,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = "desc",
     skip: int = 0,
     limit: int = DEFAULT_PAGE_SIZE,
 ):
     limit = max(0, min(limit, MAX_PAGE_SIZE))
     skip = max(skip, 0)
+    if sort_by and sort_by not in VALID_CHEMICAL_NAME_MAP_SORT_FIELDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid sort field")
+
     query = select(ChemicalNameMap)
 
     if search and search.strip():
@@ -106,8 +131,9 @@ def list_chemical_name_map(
         query = query.where(ChemicalNameMap.cas_number.in_(matched_cas_numbers))
 
     total = db.exec(select(func.count()).select_from(query.subquery())).one()
+    order_expr = _build_name_map_order_expr(sort_by, sort_order)
     rows = db.exec(
-        query.order_by(ChemicalNameMap.updated_at.desc(), ChemicalNameMap.id.desc())
+        query.order_by(*order_expr, ChemicalNameMap.id.desc())
         .offset(skip)
         .limit(limit)
     ).all()

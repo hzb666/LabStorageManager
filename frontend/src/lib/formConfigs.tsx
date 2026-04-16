@@ -347,12 +347,12 @@ const CHEMICAL_CATEGORY_FORM_OPTIONS = Object.entries(CHEMICAL_CATEGORY_LABELS).
 
 export function getCommonShelfManualAddFormFields(): FieldSchema<CommonShelfManualAddInputData>[] {
   return [
-    { name: 'cas_number' as const, label: 'CAS', type: 'input' as const },
-    { name: 'name_snapshot' as const, label: '名称', type: 'input' as const },
+    { name: 'name_snapshot' as const, label: '名称', type: 'input' as const, required: true, colSpan: 2 },
+    { name: 'cas_number' as const, label: 'CAS', type: 'input' as const, required: true },
     { name: 'brand' as const, label: '品牌', type: 'input' as const },
     { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如 95%、AR、HPLC' },
-    { name: 'specification' as const, label: '规格', type: 'input' as const, placeholder: '如 500mL' },
-    { name: 'count' as const, label: '瓶数', type: 'number' as const },
+    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如 500mL' },
+    { name: 'count' as const, label: '瓶数', type: 'number' as const, required: true },
     { name: 'storage_location' as const, label: '位置', type: 'input' as const },
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 2 },
   ]
