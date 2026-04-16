@@ -15,6 +15,11 @@ from app.services.sql_utils import normalize_field_sql, normalize_search_term
 CAS_PREFIX_PATTERN = re.compile(r"^[0-9-]{1,50}$")
 DATE_DIGITS_PATTERN = re.compile(r"[^0-9]")
 TRIGRAM_FTS_MIN_LEN = 3
+PRECOMPUTED_LOWERCASE_FIELD_SUFFIXES = (
+    "_pinyin",
+    "_pinyin_initials",
+    "_initials",
+)
 
 
 class CASSearchMode(str, Enum):
@@ -67,8 +72,32 @@ def union_id_subqueries(subqueries: Iterable[Any]):
     return union_query
 
 
+def _get_search_field_name(field: Any) -> str:
+    for attr_name in ("key", "name"):
+        value = getattr(field, attr_name, None)
+        if isinstance(value, str) and value:
+            return value
+
+    expression = getattr(field, "expression", None)
+    for attr_name in ("key", "name"):
+        value = getattr(expression, attr_name, None)
+        if isinstance(value, str) and value:
+            return value
+
+    return ""
+
+
+def _is_precomputed_lowercase_field(field: Any) -> bool:
+    field_name = _get_search_field_name(field)
+    return field_name.endswith(PRECOMPUTED_LOWERCASE_FIELD_SUFFIXES)
+
+
 def build_text_search_clause(field, search_value: str, *, fuzzy: bool):
-    """Build a generic text search clause using ILIKE semantics."""
+    """Build a text search clause while preserving fast paths for normalized fields."""
+    if _is_precomputed_lowercase_field(field):
+        normalized_value = normalize_search_term(search_value) if fuzzy else search_value
+        return field.like(f"%{normalized_value.lower()}%")
+
     pattern = f"%{search_value}%"
     column = func.coalesce(field, "")
     if fuzzy:
@@ -228,8 +257,8 @@ def build_applicant_id_subquery(search_value: str, *, fuzzy: bool):
     exact_match_clause = combine_or_clauses([
         User.username == raw_term,
         User.full_name == raw_term,
-        func.coalesce(User.full_name_pinyin, "") == pinyin_term,
-        func.coalesce(User.full_name_pinyin_initials, "") == pinyin_term,
+        User.full_name_pinyin == pinyin_term,
+        User.full_name_pinyin_initials == pinyin_term,
     ])
     exact_subquery = select(User.id).where(exact_match_clause)
 

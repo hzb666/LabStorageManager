@@ -1,6 +1,6 @@
 <h1 align="center">LabStorageManager</h1>
 
-![3.gif](https://pic.hzb666.zone/i/2026/04/14/69de1786c5f77.gif)
+![logo.webp](./wiki/logo.webp)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.14+-blue?style=flat&logo=python" alt="Python">
@@ -105,20 +105,6 @@ cd LabStorageManager
 
 ```bash
 poetry install
-```
-
-如果你使用 `pip`：
-
-```bash
-python -m venv .venv
-
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
 ```
 
 ### 4. 配置前端环境
@@ -449,7 +435,6 @@ CAS 号等关键字段会在服务端清洗，避免由于大小写、空格、�
 ├── tests/                # 后端测试目录
 ├── docker-compose.yml    # 一体化部署编排
 ├── pyproject.toml        # 后端依赖与工具配置
-├── requirements.txt      # pip 安装入口
 └── README.md
 ```
 

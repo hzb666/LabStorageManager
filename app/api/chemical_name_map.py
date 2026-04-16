@@ -153,6 +153,8 @@ def update_chemical_name_map(item_id: int, payload: ChemicalNameMapUpdate, db: D
 
     update_data = payload.model_dump(exclude_unset=True)
     if "category" in update_data:
+        if update_data["category"] is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category is required")
         row.category = update_data["category"]
 
     _apply_name_map_payload(

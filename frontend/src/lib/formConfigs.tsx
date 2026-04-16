@@ -441,19 +441,34 @@ export function getChemicalNameMapFormFields(
   isEdit: boolean,
 ): FieldSchema<ChemicalNameMapFormInputData>[] {
   return [
-    { name: 'cas_number' as const, label: 'CAS', type: 'input' as const, disabled: isEdit },
+    {
+      name: 'cas_number' as const,
+      label: 'CAS',
+      type: 'input' as const,
+      disabled: isEdit,
+      required: true,
+      placeholder: '如 64-17-5',
+    },
     {
       name: 'category' as const,
       label: '分类',
-      type: 'autocomplete' as const,
+      type: 'select' as const,
       options: CHEMICAL_CATEGORY_FORM_OPTIONS,
-      placeholder: '可留空或选择分类',
+      required: true,
+      placeholder: '请选择分类',
     },
-    { name: 'name' as const, label: '中文名称', type: 'input' as const, colSpan: 2 },
-    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2 },
-    { name: 'alias_1' as const, label: '别名1', type: 'input' as const },
-    { name: 'alias_2' as const, label: '别名2', type: 'input' as const },
-    { name: 'alias_3' as const, label: '别名3', type: 'input' as const },
+    {
+      name: 'name' as const,
+      label: '中文名称',
+      type: 'input' as const,
+      required: true,
+      colSpan: 2,
+      placeholder: '如 乙醇',
+    },
+    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如 Ethanol' },
+    { name: 'alias_1' as const, label: '别名1', type: 'input' as const, placeholder: '如 酒精' },
+    { name: 'alias_2' as const, label: '别名2', type: 'input' as const, placeholder: '选填' },
+    { name: 'alias_3' as const, label: '别名3', type: 'input' as const, placeholder: '选填' },
   ]
 }
 

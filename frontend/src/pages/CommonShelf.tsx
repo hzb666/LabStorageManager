@@ -97,7 +97,7 @@ const DEFAULT_CHEMICAL_NAME_MAP_FORM: ChemicalNameMapFormInputData = {
   alias_1: '',
   alias_2: '',
   alias_3: '',
-  category: '',
+  category: 'other',
 }
 
 type ManualAddPayload = {
@@ -165,7 +165,7 @@ function buildChemicalNameMapForm(item: ChemicalNameMapItem | null): ChemicalNam
     alias_1: item.alias_1 || '',
     alias_2: item.alias_2 || '',
     alias_3: item.alias_3 || '',
-    category: item.category || '',
+    category: item.category || 'other',
   }
 }
 
@@ -1092,17 +1092,17 @@ function CommonShelfPageHeader({
   onExport: () => void
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <h1 className="card-title-placeholder text-3xl font-bold text-primary">常用货架</h1>
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <h1 className="text-3xl font-bold text-primary">常用货架</h1>
       <div className="flex flex-wrap gap-2">
         <Button onClick={onOpenManualAdd} size="lg">
           <Plus className="mr-1.5 h-4 w-4" />
           手动添加
         </Button>
-        <Button variant="secondary" size="lg" onClick={onOpenChemicalNameMapManagement}>
+        <Button variant="modern" size="lg" onClick={onOpenChemicalNameMapManagement}>
           CAS 主数据管理
         </Button>
-        <Button variant="secondary" size="lg" onClick={onExport}>
+        <Button variant="modern" size="lg" onClick={onExport}>
           <ArrowUpFromLine className="mr-1.5 h-4 w-4" />
           导出
         </Button>

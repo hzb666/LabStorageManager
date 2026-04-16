@@ -88,7 +88,7 @@ class ChemicalNameMapCreate(SQLModel):
     alias_1: Optional[str] = Field(default=None, max_length=200)
     alias_2: Optional[str] = Field(default=None, max_length=200)
     alias_3: Optional[str] = Field(default=None, max_length=200)
-    category: Optional[ChemicalCategory] = None
+    category: ChemicalCategory
 
 
 class ChemicalNameMapUpdate(SQLModel):

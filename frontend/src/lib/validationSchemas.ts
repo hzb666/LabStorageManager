@@ -311,10 +311,10 @@ export const ChemicalNameMapSchema = v.object({
   alias_1: createMaxLengthSchema('别名1', 200),
   alias_2: createMaxLengthSchema('别名2', 200),
   alias_3: createMaxLengthSchema('别名3', 200),
-  category: v.optional(v.union([
-    v.literal(''),
-    v.picklist(['acid', 'base', 'salt', 'solvent', 'catalyst', 'indicator', 'other']),
-  ])),
+  category: v.picklist(
+    ['acid', 'base', 'salt', 'solvent', 'catalyst', 'indicator', 'other'],
+    '分类不能为空'
+  ),
 })
 
 export type CommonShelfManualAddData = v.InferOutput<typeof CommonShelfManualAddSchema>

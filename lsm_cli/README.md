@@ -25,6 +25,28 @@ CLI 自身有额外限制：
 python -m lsm_cli --help
 ```
 
+## Linux / venv 独立安装
+
+`lsm_cli` 可以作为独立 Python 包安装。安装后会生成 `lsm` 命令。
+
+使用 Python 自带虚拟环境：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install ./lsm_cli
+lsm --help
+```
+
+`pip install ./lsm_cli` 会读取 `pyproject.toml`，构建包并安装依赖。
+
+如果使用 `pipx`：
+
+```bash
+pipx install ./lsm_cli
+lsm --help
+```
+
 ## 目录版 EXE 分发
 
 如果要发给普通 Windows 用户，推荐做目录版 exe，而不是单文件 exe。

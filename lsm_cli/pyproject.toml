@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lab-storage-manager-cli"
+version = "0.1.0"
+description = "Command line client for LabStorageManager"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32.5,<3",
+]
+
+[project.scripts]
+lsm = "lsm_cli.main:main"
+
+[tool.setuptools]
+packages = ["lsm_cli"]
+
+[tool.setuptools.package-dir]
+lsm_cli = "."
