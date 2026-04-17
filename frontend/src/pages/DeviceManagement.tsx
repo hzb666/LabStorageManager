@@ -5,7 +5,6 @@ import {
   getCoreRowModel,
   useReactTable,
   getSortedRowModel,
-  getFilteredRowModel,
 } from '@tanstack/react-table'
 import type { SortingState } from '@tanstack/react-table'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
@@ -39,6 +38,7 @@ import { LoadingButton } from '@/components/ui/LoadingButton'
 import { BaseForm } from '@/components/BaseForm'
 import { SEARCH_MAX_LENGTH, TableEmptyState, TableSearchInput } from '@/components/ui/TableFilters'
 import { HighlightText } from '@/components/ui/HighlightText'
+import { containsSearchText } from '@/lib/searchMatchMode'
 
 const columnHelper = createColumnHelper<SessionInfo>()
 
@@ -391,7 +391,6 @@ function useDeviceTableModel({
   isLoading,
   sorting,
   setSorting,
-  setGlobalFilter,
   currentDeviceId,
   handleOpenRenameDialog,
   handleOpenKickDialog,
@@ -401,7 +400,6 @@ function useDeviceTableModel({
   isLoading: boolean
   sorting: SortingState
   setSorting: (updater: SortingState | ((prev: SortingState) => SortingState)) => void
-  setGlobalFilter: (value: string) => void
   currentDeviceId: string
   handleOpenRenameDialog: (session: SessionInfo) => void
   handleOpenKickDialog: (session: SessionInfo) => void
@@ -411,6 +409,16 @@ function useDeviceTableModel({
     () => sortSessionsByCurrentDevice(sessionData, currentDeviceId),
     [sessionData, currentDeviceId]
   )
+
+  const filteredData = useMemo(() => {
+    if (!globalFilter) {
+      return sortedData
+    }
+    return sortedData.filter((session) =>
+      containsSearchText(session.device_name, globalFilter) ||
+      containsSearchText(session.ip_address, globalFilter)
+    )
+  }, [globalFilter, sortedData])
 
   const columns = useMemo(() => [
     columnHelper.accessor('device_name', {
@@ -471,14 +479,12 @@ function useDeviceTableModel({
   // table 实例只在当前 hook 内使用，这里定点忽略编译器告警。
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: sortedData,
+    data: filteredData,
     columns,
     columnResizeMode: 'onChange',
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
     state: {
       sorting,
       globalFilter,
@@ -486,8 +492,7 @@ function useDeviceTableModel({
   })
 
   // displayCount 由“过滤后数量/总数”推导，和空态逻辑共用一套 hasFilter 判定口径。
-  const filteredRows = table.getRowModel().rows
-  const filteredCount = filteredRows.length
+  const filteredCount = filteredData.length
   const totalCount = sortedData.length
   const hasFilter = Boolean(globalFilter)
   const displayCount = getDeviceDisplayCount(filteredCount, totalCount, hasFilter)
@@ -660,7 +665,6 @@ export default function DeviceManagement() {
     isLoading,
     sorting,
     setSorting,
-    setGlobalFilter: search.setGlobalFilter,
     currentDeviceId,
     handleOpenRenameDialog: dialogs.handleOpenRenameDialog,
     handleOpenKickDialog: dialogs.handleOpenKickDialog,

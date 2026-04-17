@@ -107,14 +107,6 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
         </span>
       ),
     }),
-    columnHelper.accessor('purity', {
-      header: '纯度',
-      size: 90,
-      minSize: 80,
-      maxSize: 120,
-      enableSorting: false,
-      cell: info => <span>{safeString(info.getValue(), '-')}</span>,
-    }),
     columnHelper.accessor('remaining_percent', {
       id: 'remaining_percent',
       header: '剩余/规格',
@@ -187,14 +179,6 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
         const value = info.getValue()
         return <span>{safeString(value, '-')}</span>
       },
-    }),
-    columnHelper.accessor('purity', {
-      header: '纯度',
-      size: 90,
-      minSize: 70,
-      maxSize: 120,
-      enableSorting: false,
-      cell: info => <span>{safeString(info.getValue(), '-')}</span>,
     }),
     columnHelper.accessor('specification', {
       header: '规格',

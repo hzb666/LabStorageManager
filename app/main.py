@@ -245,6 +245,25 @@ def _is_trusted_web_origin(origin: str | None, fallback_origin: str) -> bool:
     return normalized in trusted
 
 
+def _apply_trusted_origin_cors_headers(response: Response, request: Request) -> None:
+    """Attach CORS headers to error responses for already trusted frontend origins."""
+    origin = request.headers.get("origin")
+    fallback_origin = str(request.base_url).rstrip("/")
+    if not _is_trusted_web_origin(origin, fallback_origin):
+        return
+
+    parsed = urlparse(origin or "")
+    normalized_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    response.headers["Access-Control-Allow-Origin"] = normalized_origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+
+    vary = response.headers.get("Vary")
+    if not vary:
+        response.headers["Vary"] = "Origin"
+    elif "origin" not in {value.strip().lower() for value in vary.split(",")}:
+        response.headers["Vary"] = f"{vary}, Origin"
+
+
 def _is_upload_request(path: str) -> bool:
     return path in UPLOAD_PATHS or (path.startswith("/api/users/") and path.endswith("/avatar"))
 
@@ -559,6 +578,8 @@ async def global_exception_handler(request, exc):
         content={"detail": "Internal server error"}
     )
     response.headers["X-Request-ID"] = request_id
+    _apply_security_headers(response, request.url.path)
+    _apply_trusted_origin_cors_headers(response, request)
     return response
 
 # Mount static files with caching

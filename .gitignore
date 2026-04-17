@@ -76,6 +76,7 @@ BUGS.md
 tests/
 scripts/
 !frontend/scripts/
+.playwright-cli/
 
 # Others
 plans/

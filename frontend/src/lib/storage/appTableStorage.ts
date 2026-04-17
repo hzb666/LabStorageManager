@@ -4,6 +4,11 @@ import {
   readLocalStorageItem,
   writeLocalStorageItem,
 } from './localStorageCore'
+import {
+  DEFAULT_SEARCH_MATCH_MODE,
+  SEARCH_MATCH_MODES,
+  type SearchMatchMode,
+} from '../searchMatchMode'
 
 const APP_TABLE_STORAGE_KEY = 'app-table'
 
@@ -12,6 +17,7 @@ export type ExpandStatus = 'expanded' | 'collapsed'
 export type TableUIState = {
   expandAll?: ExpandStatus
   fuzzySearch?: boolean
+  matchMode?: SearchMatchMode
 }
 
 export type TableColumnSizing = Record<string, number>
@@ -63,6 +69,13 @@ function normalizeExpandStatus(value: unknown): ExpandStatus | undefined {
   return undefined
 }
 
+function normalizeMatchMode(value: unknown): SearchMatchMode | undefined {
+  if (value === SEARCH_MATCH_MODES.CONTAINS || value === SEARCH_MATCH_MODES.EXACT) {
+    return value
+  }
+  return undefined
+}
+
 function normalizeTableUIState(value: unknown): TableUIState {
   if (!isRecord(value)) {
     return {}
@@ -71,6 +84,7 @@ function normalizeTableUIState(value: unknown): TableUIState {
   return {
     expandAll: normalizeExpandStatus(value.expandAll),
     fuzzySearch: normalizeBoolean(value.fuzzySearch),
+    matchMode: normalizeMatchMode(value.matchMode),
   }
 }
 
@@ -249,6 +263,34 @@ export function setFuzzySearchState(tableId: string, fuzzySearch: boolean): void
 
   try {
     setTableUIState(tableId, { fuzzySearch })
+  } catch {
+    // 持久化失败不阻断当前筛选行为。
+  }
+}
+
+export function getSearchMatchModeState(
+  tableId: string,
+  defaultValue = DEFAULT_SEARCH_MATCH_MODE,
+): SearchMatchMode {
+  if (globalThis.window === undefined) return defaultValue
+
+  try {
+    const current = getTableUIState(tableId)
+    if (current.matchMode) {
+      return current.matchMode
+    }
+  } catch {
+    // 匹配模式偏好读取失败时回退默认值。
+  }
+
+  return defaultValue
+}
+
+export function setSearchMatchModeState(tableId: string, matchMode: SearchMatchMode): void {
+  if (globalThis.window === undefined) return
+
+  try {
+    setTableUIState(tableId, { matchMode })
   } catch {
     // 持久化失败不阻断当前筛选行为。
   }

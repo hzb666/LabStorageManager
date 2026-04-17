@@ -79,16 +79,35 @@ type AnnouncementDialogActionsParams = {
   formData: AnnouncementFormState
   editingId: number | null
   deleteId: number | null
+  draftUploadedImages: string[]
   setFormData: React.Dispatch<React.SetStateAction<AnnouncementFormState>>
   setFormErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>
   setFormLoading: React.Dispatch<React.SetStateAction<boolean>>
   setDeleteLoading: React.Dispatch<React.SetStateAction<boolean>>
   setUploading: React.Dispatch<React.SetStateAction<boolean>>
   setIsDragging: React.Dispatch<React.SetStateAction<boolean>>
+  setDraftUploadedImages: React.Dispatch<React.SetStateAction<string[]>>
   setDialogState: (value: AnnouncementDialogMode | null) => void
   setDeleteId: React.Dispatch<React.SetStateAction<number | null>>
   resetForm: () => void
   refetchAnnouncements: () => void
+}
+
+type AnnouncementDraftImageActionParams = {
+  formData: AnnouncementFormState
+  draftUploadedImages: string[]
+  setDraftUploadedImages: React.Dispatch<React.SetStateAction<string[]>>
+  setDialogState: (value: AnnouncementDialogMode | null) => void
+  resetForm: () => void
+}
+
+type AnnouncementImageActionParams = {
+  draftUploadedImages: string[]
+  setFormData: React.Dispatch<React.SetStateAction<AnnouncementFormState>>
+  setUploading: React.Dispatch<React.SetStateAction<boolean>>
+  setIsDragging: React.Dispatch<React.SetStateAction<boolean>>
+  setDraftUploadedImages: React.Dispatch<React.SetStateAction<string[]>>
+  markDraftUploadedImage: (url: string) => void
 }
 
 const columnHelper = createColumnHelper<Announcement>()
@@ -158,6 +177,17 @@ function validateAnnouncementImageFile(file: File) {
   }
 
   return null
+}
+
+function getAnnouncementImageFilename(url: string) {
+  return url.split('/').pop() ?? ''
+}
+
+async function deleteAnnouncementImageUrl(url: string) {
+  const filename = getAnnouncementImageFilename(url)
+  if (filename) {
+    await announcementAPI.deleteImage(filename)
+  }
 }
 
 // `create / edit` 分别映射到对应标题，删除确认不走这套标题逻辑。
@@ -651,7 +681,7 @@ function AnnouncementFormDialog({
   )
 
   return (
-    <Dialog open={isOpen} onOpenChange={dialogStateModel.handleDialogChange}>
+    <Dialog open={isOpen} onOpenChange={dialogActions.handleFormDialogChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
@@ -662,7 +692,16 @@ function AnnouncementFormDialog({
           upload={upload}
         />
         <div className="flex gap-3 mt-6">
-          <Button variant="modern" onClick={() => dialogStateModel.handleDialogChange(false)} size="lg" className="flex-1">
+          <Button
+            variant="modern"
+            onClick={() => {
+              dialogActions.handleCancelForm().catch(() => {
+                toast.error('未保存图片清理失败，请刷新后检查存储空间')
+              })
+            }}
+            size="lg"
+            className="flex-1"
+          >
             取消
           </Button>
           <Button onClick={dialogActions.handleSubmit} disabled={dialogStateModel.formLoading} size="lg" className="flex-1">
@@ -809,12 +848,19 @@ function useAnnouncementDialogStateModel() {
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [draftUploadedImages, setDraftUploadedImages] = useState<string[]>([])
 
   const resetForm = useCallback(() => {
     setFormData(getEmptyAnnouncementFormState())
     setFormErrors({})
     setEditingId(null)
+    setDraftUploadedImages([])
   }, [])
+
+  const openCreateModal = useCallback(() => {
+    resetForm()
+    setDialogState('create')
+  }, [resetForm, setDialogState])
 
   const openEditModal = useCallback((announcement: Announcement) => {
     setEditingId(announcement.id)
@@ -826,6 +872,7 @@ function useAnnouncementDialogStateModel() {
       is_visible: announcement.is_visible,
     })
     setFormErrors({})
+    setDraftUploadedImages([])
     setDialogState('edit')
   }, [setDialogState])
 
@@ -866,6 +913,7 @@ function useAnnouncementDialogStateModel() {
     deleteLoading,
     uploading,
     isDragging,
+    draftUploadedImages,
     setDialogState,
     setFormData,
     setFormErrors,
@@ -873,8 +921,10 @@ function useAnnouncementDialogStateModel() {
     setDeleteLoading,
     setUploading,
     setIsDragging,
+    setDraftUploadedImages,
     setDeleteId,
     resetForm,
+    openCreateModal,
     openEditModal,
     openDeleteModal,
     handleFormFieldChange,
@@ -884,21 +934,184 @@ function useAnnouncementDialogStateModel() {
 }
 
 // dialog actions 负责提交、删除、上传和拖拽等副作用；仅提交与删除成功后刷新列表，图片相关操作不触发表格刷新。
+function useAnnouncementDraftImageActions({
+  formData,
+  draftUploadedImages,
+  setDraftUploadedImages,
+  setDialogState,
+  resetForm,
+}: AnnouncementDraftImageActionParams) {
+  const markDraftUploadedImage = useCallback((url: string) => {
+    setDraftUploadedImages((prev) => (prev.includes(url) ? prev : [...prev, url]))
+  }, [setDraftUploadedImages])
+
+  const cleanupDraftUploadedImages = useCallback(async () => {
+    const activeImages = new Set(formData.images)
+    const imagesToDelete = draftUploadedImages.filter((url) => activeImages.has(url))
+    const results = await Promise.allSettled(imagesToDelete.map(deleteAnnouncementImageUrl))
+    const hasFailure = results.some((result) => result.status === 'rejected')
+    if (hasFailure) {
+      toast.error('未保存图片清理失败，请刷新后检查存储空间')
+    }
+  }, [draftUploadedImages, formData.images])
+
+  const handleCancelForm = useCallback(async () => {
+    setDialogState(null)
+    await cleanupDraftUploadedImages()
+    resetForm()
+  }, [cleanupDraftUploadedImages, resetForm, setDialogState])
+
+  const handleFormDialogChange = useCallback((open: boolean) => {
+    if (!open) {
+      handleCancelForm().catch(() => {
+        toast.error('未保存图片清理失败，请刷新后检查存储空间')
+      })
+    }
+  }, [handleCancelForm])
+
+  return {
+    markDraftUploadedImage,
+    handleCancelForm,
+    handleFormDialogChange,
+  }
+}
+
+function useAnnouncementImageActions({
+  draftUploadedImages,
+  setFormData,
+  setUploading,
+  setIsDragging,
+  setDraftUploadedImages,
+  markDraftUploadedImage,
+}: AnnouncementImageActionParams) {
+  const appendUploadedImage = useCallback((url: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      images: [...prev.images, url],
+    }))
+    markDraftUploadedImage(url)
+  }, [markDraftUploadedImage, setFormData])
+
+  const uploadSingleImage = useCallback(async (file: File, skipValidation = false) => {
+    if (!skipValidation) {
+      const validationMessage = validateAnnouncementImageFile(file)
+      if (validationMessage) {
+        toast.error(validationMessage)
+        return
+      }
+    }
+
+    setUploading(true)
+    try {
+      const url = await announcementAPI.uploadImage(file)
+      appendUploadedImage(url)
+      toast.success('图片上传成功')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '图片上传失败'))
+    } finally {
+      setUploading(false)
+    }
+  }, [appendUploadedImage, setUploading])
+
+  const handleUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+
+    const validationMessage = validateAnnouncementImageFile(file)
+    if (validationMessage) {
+      toast.error(validationMessage)
+      return
+    }
+
+    await uploadSingleImage(file, true)
+    event.target.value = ''
+  }, [uploadSingleImage])
+
+  const handleRemoveImage = useCallback(async (url: string) => {
+    const shouldDeleteFileNow = draftUploadedImages.includes(url)
+    try {
+      if (shouldDeleteFileNow) {
+        await deleteAnnouncementImageUrl(url)
+      }
+      setFormData((prev) => ({
+        ...prev,
+        images: prev.images.filter((imageUrl) => imageUrl !== url),
+      }))
+      if (shouldDeleteFileNow) {
+        setDraftUploadedImages((prev) => prev.filter((imageUrl) => imageUrl !== url))
+      }
+      toast.success('图片已移除')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '图片移除失败'))
+    }
+  }, [draftUploadedImages, setDraftUploadedImages, setFormData])
+
+  const handleDragEnter = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDragging(true)
+  }, [setIsDragging])
+
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDragging(false)
+  }, [setIsDragging])
+
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+  }, [])
+
+  const handleDrop = useCallback(async (event: React.DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDragging(false)
+
+    const files = Array.from(event.dataTransfer.files)
+    for (const file of files) {
+      await uploadSingleImage(file)
+    }
+  }, [setIsDragging, uploadSingleImage])
+
+  return {
+    handleUpload,
+    handleRemoveImage,
+    handleDragEnter,
+    handleDragLeave,
+    handleDragOver,
+    handleDrop,
+  }
+}
+
+// dialog actions 负责提交、删除、上传和拖拽等副作用；仅提交与删除成功后刷新列表，图片相关操作不触发表格刷新。
 function useAnnouncementDialogActions({
   formData,
   editingId,
   deleteId,
+  draftUploadedImages,
   setFormData,
   setFormErrors,
   setFormLoading,
   setDeleteLoading,
   setUploading,
   setIsDragging,
+  setDraftUploadedImages,
   setDialogState,
   setDeleteId,
   resetForm,
   refetchAnnouncements,
 }: AnnouncementDialogActionsParams) {
+  const draftImageActions = useAnnouncementDraftImageActions({
+    formData,
+    draftUploadedImages,
+    setDraftUploadedImages,
+    setDialogState,
+    resetForm,
+  })
+
   const handleSubmit = useCallback(async () => {
     const errors = validateAnnouncementForm(formData)
     setFormErrors(errors)
@@ -945,107 +1158,26 @@ function useAnnouncementDialogActions({
     }
   }, [deleteId, refetchAnnouncements, setDeleteId, setDeleteLoading, setDialogState])
 
-  const appendUploadedImage = useCallback((url: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      images: [...prev.images, url],
-    }))
-  }, [setFormData])
-
-  const uploadSingleImage = useCallback(async (file: File, skipValidation = false) => {
-    if (!skipValidation) {
-      const validationMessage = validateAnnouncementImageFile(file)
-      if (validationMessage) {
-        toast.error(validationMessage)
-        return
-      }
-    }
-
-    setUploading(true)
-    try {
-      const url = await announcementAPI.uploadImage(file)
-      appendUploadedImage(url)
-      toast.success('图片上传成功')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '图片上传失败'))
-    } finally {
-      setUploading(false)
-    }
-  }, [appendUploadedImage, setUploading])
-
-  const handleUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) {
-      return
-    }
-
-    const validationMessage = validateAnnouncementImageFile(file)
-    if (validationMessage) {
-      toast.error(validationMessage)
-      return
-    }
-
-    await uploadSingleImage(file, true)
-    event.target.value = ''
-  }, [uploadSingleImage])
-
-  const handleRemoveImage = useCallback(async (url: string) => {
-    try {
-      const filename = url.split('/').pop()
-      if (filename) {
-        await announcementAPI.deleteImage(filename)
-      }
-      setFormData((prev) => ({
-        ...prev,
-        images: prev.images.filter((imageUrl) => imageUrl !== url),
-      }))
-      toast.success('图片已移除')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '图片移除失败'))
-    }
-  }, [setFormData])
-
-  const handleDragEnter = useCallback((event: React.DragEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    setIsDragging(true)
-  }, [setIsDragging])
-
-  const handleDragLeave = useCallback((event: React.DragEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    setIsDragging(false)
-  }, [setIsDragging])
-
-  const handleDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-  }, [])
-
-  const handleDrop = useCallback(async (event: React.DragEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    setIsDragging(false)
-
-    const files = Array.from(event.dataTransfer.files)
-    if (files.length === 0) {
-      return
-    }
-
-    for (const file of files) {
-      await uploadSingleImage(file)
-    }
-  }, [setIsDragging, uploadSingleImage])
+  const imageActions = useAnnouncementImageActions({
+    draftUploadedImages,
+    setFormData,
+    setUploading,
+    setIsDragging,
+    setDraftUploadedImages,
+    markDraftUploadedImage: draftImageActions.markDraftUploadedImage,
+  })
 
   return {
+    handleFormDialogChange: draftImageActions.handleFormDialogChange,
+    handleCancelForm: draftImageActions.handleCancelForm,
     handleSubmit,
     handleDelete,
-    handleUpload,
-    handleRemoveImage,
-    handleDragEnter,
-    handleDragLeave,
-    handleDragOver,
-    handleDrop,
+    handleUpload: imageActions.handleUpload,
+    handleRemoveImage: imageActions.handleRemoveImage,
+    handleDragEnter: imageActions.handleDragEnter,
+    handleDragLeave: imageActions.handleDragLeave,
+    handleDragOver: imageActions.handleDragOver,
+    handleDrop: imageActions.handleDrop,
   }
 }
 
@@ -1059,12 +1191,14 @@ export function AnnouncementManagement() {
     formData: dialogStateModel.formData,
     editingId: dialogStateModel.editingId,
     deleteId: dialogStateModel.deleteId,
+    draftUploadedImages: dialogStateModel.draftUploadedImages,
     setFormData: dialogStateModel.setFormData,
     setFormErrors: dialogStateModel.setFormErrors,
     setFormLoading: dialogStateModel.setFormLoading,
     setDeleteLoading: dialogStateModel.setDeleteLoading,
     setUploading: dialogStateModel.setUploading,
     setIsDragging: dialogStateModel.setIsDragging,
+    setDraftUploadedImages: dialogStateModel.setDraftUploadedImages,
     setDialogState: dialogStateModel.setDialogState,
     setDeleteId: dialogStateModel.setDeleteId,
     resetForm: dialogStateModel.resetForm,
@@ -1084,7 +1218,7 @@ export function AnnouncementManagement() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">公告管理</h1>
-        <Button onClick={() => dialogStateModel.setDialogState('create')} size="lg">
+        <Button onClick={dialogStateModel.openCreateModal} size="lg">
           <Plus className="w-4 h-4 mr-1.5" />
           创建公告
         </Button>

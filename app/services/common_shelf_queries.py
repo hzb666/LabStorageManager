@@ -31,6 +31,7 @@ from app.services.common_shelf_creation import (
     normalize_storage_for_group,
 )
 from app.services.search_matchers import (
+    TextMatchMode,
     build_cas_search_clause,
     build_text_search_clause,
     combine_or_clauses,
@@ -90,6 +91,7 @@ class CommonShelfGroupListOptions:
     search: Optional[str]
     search_field: Optional[str]
     fuzzy: bool
+    match_mode: TextMatchMode
     skip: int
     limit: int
     sort_by: Optional[str]
@@ -392,19 +394,45 @@ def delete_group_items_returning(
     return exec_delete_returning_all(db, delete_stmt, CommonShelf)
 
 
-def _apply_chemical_name_like_filter(base, *, search_value: str, search_field: Optional[str], fuzzy: bool):
+def _apply_chemical_name_like_filter(
+    base,
+    *,
+    search_value: str,
+    search_field: Optional[str],
+    fuzzy: bool,
+    match_mode: TextMatchMode,
+):
     if search_field == "cas_number":
-        return base.where(build_cas_search_clause(ChemicalNameMap.cas_number, search_value, fuzzy=fuzzy))
+        return base.where(
+            build_cas_search_clause(
+                ChemicalNameMap.cas_number,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            )
+        )
 
     if search_field and search_field != "all" and search_field in CHEMICAL_NAME_MAP_SQL_FIELD_MAP:
         return base.where(
             combine_or_clauses(
-                build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                build_text_search_clause(
+                    field,
+                    search_value,
+                    fuzzy=fuzzy,
+                    match_mode=match_mode,
+                )
                 for field in CHEMICAL_NAME_MAP_SQL_FIELD_MAP[search_field]
             )
         )
 
-    clauses = [build_cas_search_clause(ChemicalNameMap.cas_number, search_value, fuzzy=fuzzy)]
+    clauses = [
+        build_cas_search_clause(
+            ChemicalNameMap.cas_number,
+            search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        )
+    ]
     for field in (
         ChemicalNameMap.name,
         ChemicalNameMap.english_name,
@@ -420,7 +448,14 @@ def _apply_chemical_name_like_filter(base, *, search_value: str, search_field: O
         ChemicalNameMap.alias_3_pinyin,
         ChemicalNameMap.alias_3_initials,
     ):
-        clauses.append(build_text_search_clause(field, search_value, fuzzy=fuzzy))
+        clauses.append(
+            build_text_search_clause(
+                field,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            )
+        )
     return base.where(combine_or_clauses(clauses))
 
 
@@ -430,13 +465,18 @@ def search_name_map_cas_numbers(
     search: str,
     search_field: Optional[str],
     fuzzy: bool,
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS,
 ) -> set[str]:
     search_value = normalize_search_term(search) if fuzzy else search.strip()
     if not search_value:
         return set()
 
     base = select(ChemicalNameMap)
-    use_fts = search_field != "cas_number" and should_use_chemical_name_map_fts(search_value)
+    use_fts = (
+        match_mode == TextMatchMode.CONTAINS
+        and search_field != "cas_number"
+        and should_use_chemical_name_map_fts(search_value)
+    )
     if use_fts:
         try:
             base = apply_chemical_name_map_fts_filter(
@@ -451,6 +491,7 @@ def search_name_map_cas_numbers(
                 search_value=search_value,
                 search_field=search_field,
                 fuzzy=fuzzy,
+                match_mode=match_mode,
             )
     else:
         base = _apply_chemical_name_like_filter(
@@ -458,6 +499,7 @@ def search_name_map_cas_numbers(
             search_value=search_value,
             search_field=search_field,
             fuzzy=fuzzy,
+            match_mode=match_mode,
         )
 
     rows = db.exec(base).all()
@@ -471,6 +513,7 @@ def _filter_common_shelf_query(
     search: Optional[str],
     search_field: Optional[str],
     fuzzy: bool,
+    match_mode: TextMatchMode,
 ):
     if not search:
         return base
@@ -480,13 +523,30 @@ def _filter_common_shelf_query(
         return base
 
     if search_field == "cas_number":
-        return base.where(build_cas_search_clause(CommonShelf.cas_number, search_value, fuzzy=fuzzy))
+        return base.where(
+            build_cas_search_clause(
+                CommonShelf.cas_number,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            )
+        )
 
     if search_field == "brand":
         return base.where(
             or_(
-                build_text_search_clause(CommonShelf.brand, search_value, fuzzy=fuzzy),
-                build_text_search_clause(CommonShelf.brand_normalized, search_value, fuzzy=fuzzy),
+                build_text_search_clause(
+                    CommonShelf.brand,
+                    search_value,
+                    fuzzy=fuzzy,
+                    match_mode=match_mode,
+                ),
+                build_text_search_clause(
+                    CommonShelf.brand_normalized,
+                    search_value,
+                    fuzzy=fuzzy,
+                    match_mode=match_mode,
+                ),
             )
         )
 
@@ -495,6 +555,7 @@ def _filter_common_shelf_query(
         search=search_value,
         search_field=search_field if search_field in {"name", "alias", "cas_number"} else None,
         fuzzy=fuzzy,
+        match_mode=match_mode,
     )
 
     if search_field in {"name", "alias"}:
@@ -506,9 +567,24 @@ def _filter_common_shelf_query(
         return base.where(cas_clause)
 
     direct_clauses = [
-        build_cas_search_clause(CommonShelf.cas_number, search_value, fuzzy=fuzzy),
-        build_text_search_clause(CommonShelf.brand, search_value, fuzzy=fuzzy),
-        build_text_search_clause(CommonShelf.brand_normalized, search_value, fuzzy=fuzzy),
+        build_cas_search_clause(
+            CommonShelf.cas_number,
+            search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        ),
+        build_text_search_clause(
+            CommonShelf.brand,
+            search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        ),
+        build_text_search_clause(
+            CommonShelf.brand_normalized,
+            search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        ),
     ]
     if matched_cas_numbers:
         direct_clauses.append(CommonShelf.cas_number.in_(matched_cas_numbers))
@@ -551,6 +627,7 @@ def list_grouped_common_shelf(
         search=options.search,
         search_field=options.search_field,
         fuzzy=options.fuzzy,
+        match_mode=options.match_mode,
     )
     filtered_subquery = filtered_base.subquery("filtered_common_shelf")
 

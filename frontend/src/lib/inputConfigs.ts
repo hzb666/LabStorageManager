@@ -17,6 +17,15 @@ export interface InputTagConfig {
   filledWhenActive?: boolean;
 }
 
+export interface InputIconButtonStyles {
+  base: string;
+  loading: string;
+  default: string;
+  active: string;
+  warningActive: string;
+  icon: string;
+}
+
 export const inputConfigs: Record<string, InputTagConfig> = {
   "[强调]": {
     icon: Star,
@@ -51,12 +60,7 @@ export const inputConfigs: Record<string, InputTagConfig> = {
 export interface InputStyles {
   wrapper: string;
   leftArea: string;
-  prefixButton: {
-    base: string;
-    loading: string;
-    default: string;
-    icon: string;
-  };
+  prefixButton: InputIconButtonStyles;
   tagButton: {
     base: string;
     inactive: string;
@@ -73,6 +77,7 @@ export interface InputStyles {
     icon: string;
   };
   suffixArea: string;
+  suffixButton: InputIconButtonStyles;
 }
 
 export const defaultInputStyles: InputStyles = {
@@ -85,6 +90,9 @@ export const defaultInputStyles: InputStyles = {
     base: "group inline-flex h-7 w-7 items-center justify-center rounded outline-none p-0 transition-all duration-300 ease-out",
     loading: "text-muted-foreground/50 cursor-default",
     default: "text-muted-foreground/50 hover:text-foreground hover:bg-muted/50",
+    active: "text-foreground hover:text-foreground",
+    warningActive:
+      "text-yellow-500 hover:text-yellow-500 dark:text-yellow-400 dark:hover:text-yellow-400",
     icon: "w-4 h-4 shrink-0 transition-all duration-300 ease-out group-hover:scale-110 group-active:scale-90",
   },
 
@@ -114,4 +122,13 @@ export const defaultInputStyles: InputStyles = {
     icon: "w-3.5 h-3.5",
   },
   suffixArea: "absolute right-1 top-1 bottom-1 flex items-center z-10 pr-2",
+  suffixButton: {
+    base: "group inline-flex h-7 w-7 items-center justify-center rounded outline-none p-0 transition-all duration-300 ease-out",
+    loading: "text-muted-foreground/50 cursor-default",
+    default: "text-muted-foreground/50 hover:text-foreground hover:bg-muted/50",
+    active: "text-foreground hover:text-foreground",
+    warningActive:
+      "text-yellow-500 hover:text-yellow-500 dark:text-yellow-400 dark:hover:text-yellow-400",
+    icon: "w-4 h-4 shrink-0 transition-all duration-300 ease-out group-hover:scale-110 group-active:scale-90",
+  },
 };

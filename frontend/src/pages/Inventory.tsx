@@ -427,13 +427,13 @@ function InventoryExpandedRow({ item }: { item: InventoryItem }) {
         <MoleculeStructure casNumber={item.cas_number} width={150} height={100} />
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
-        <div>英文名称：{item.english_name || '-'}</div>
+        <div className="col-span-2">英文名称：{item.english_name || '-'}</div>
         <div>别名：{item.alias || '-'}</div>
+        <NoteDisplay className="col-span-2" label="备注" text={item.notes ?? undefined} />
         <div>纯度：{item.purity || '-'}</div>
         <div>入库时间：{formatDate(item.created_at)}</div>
         <div>入库用户：{item.created_by_name || '-'}</div>
         <div>上次借用：{formatInventoryBorrowerDisplay(item)}</div>
-        <NoteDisplay label="备注" text={item.notes ?? undefined} />
       </div>
     </div>
   )

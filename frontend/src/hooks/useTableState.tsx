@@ -5,11 +5,17 @@ import type { SortingState, ColumnSizingState } from '@tanstack/react-table'
 import {
   getExpandAllState,
   getFuzzySearchState,
+  getSearchMatchModeState,
   setExpandAllState,
   setFuzzySearchState,
+  setSearchMatchModeState,
   getTableColumnSizing,
   setTableColumnSizing,
 } from '@/lib/storage/appTableStorage'
+import {
+  DEFAULT_SEARCH_MATCH_MODE,
+  type SearchMatchMode,
+} from '@/lib/searchMatchMode'
 
 export interface ListResponseData {
   data: unknown[]
@@ -82,6 +88,8 @@ export interface UseTableStateReturn {
   setSearchField: (value: string) => void
   fuzzySearch: boolean
   setFuzzySearch: (value: boolean) => void
+  matchMode: SearchMatchMode
+  setMatchMode: (value: SearchMatchMode) => void
   sorting: SortingState
   setSorting: (sorting: SortingState | ((prev: SortingState) => SortingState)) => void
   hasFilter: boolean
@@ -153,6 +161,7 @@ type TableQueryFilters = {
   globalFilter: string
   searchField: string
   fuzzySearch: boolean
+  matchMode: SearchMatchMode
   sorting: SortingState
 }
 
@@ -171,7 +180,7 @@ function buildListParams(args: {
     defaultStatus,
     filters,
   } = args
-  const { statusFilter, globalFilter, searchField, fuzzySearch, sorting } = filters
+  const { statusFilter, globalFilter, searchField, fuzzySearch, matchMode, sorting } = filters
   const params: Record<string, unknown> = {
     skip: pageParam,
     limit: pageSize,
@@ -186,6 +195,7 @@ function buildListParams(args: {
     params.search = globalFilter
     if (searchField !== 'all') params.search_field = searchField
     if (fuzzySearch) params.fuzzy = true
+    params.match_mode = matchMode
   }
 
   const sort = sorting[0]
@@ -284,6 +294,9 @@ function useFilterState(options: FilterStateOptions) {
     enableFuzzySearch ? getFuzzySearchState(expandStorageId, false) : false
   )
   const fuzzySearch = enableFuzzySearch ? storedFuzzySearch : false
+  const [matchMode, setMatchModeState] = useState<SearchMatchMode>(() =>
+    getSearchMatchModeState(expandStorageId, DEFAULT_SEARCH_MATCH_MODE)
+  )
   const [sorting, setSorting] = useState<SortingState>([])
   const normalizedSearchInput = searchInput.trim()
 
@@ -299,6 +312,14 @@ function useFilterState(options: FilterStateOptions) {
       setFuzzySearchState(expandStorageId, storedFuzzySearch)
     }
   }, [enableFuzzySearch, storedFuzzySearch, expandStorageId])
+
+  useEffect(() => {
+    setSearchMatchModeState(expandStorageId, matchMode)
+  }, [expandStorageId, matchMode])
+
+  const setMatchMode = useCallback((value: SearchMatchMode) => {
+    setMatchModeState(value)
+  }, [])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -351,8 +372,9 @@ function useFilterState(options: FilterStateOptions) {
     setStatusFilter(defaultStatus)
     setSearchField(defaultSearchField)
     setFuzzySearch(false)
+    setMatchMode(DEFAULT_SEARCH_MATCH_MODE)
     setSorting([])
-  }, [defaultStatus, defaultSearchField, setFuzzySearch])
+  }, [defaultStatus, defaultSearchField, setFuzzySearch, setMatchMode])
 
   const hasFilter = Boolean(
     globalFilter ||
@@ -370,6 +392,8 @@ function useFilterState(options: FilterStateOptions) {
     setSearchField,
     fuzzySearch,
     setFuzzySearch,
+    matchMode,
+    setMatchMode,
     sorting,
     handleSortingChange,
     hasFilter,
@@ -398,7 +422,15 @@ function buildBaseQueryKey(
   defaultStatus: string,
   defaultSearchField: string
 ): readonly unknown[] {
-  return [...queryKey, defaultStatus, '', defaultSearchField, false, []]
+  return [
+    ...queryKey,
+    defaultStatus,
+    '',
+    defaultSearchField,
+    false,
+    DEFAULT_SEARCH_MATCH_MODE,
+    [],
+  ]
 }
 
 // 计算下一页偏移量，供无限查询统一复用。
@@ -428,7 +460,7 @@ function useTableQueryData(args: {
     defaultStatus,
     filters,
   } = args
-  const { statusFilter, globalFilter, searchField, fuzzySearch, sorting } = filters
+  const { statusFilter, globalFilter, searchField, fuzzySearch, matchMode, sorting } = filters
 
   const queryFn = useCallback(
     async ({ pageParam = 0 }: { pageParam?: number }) => {
@@ -466,6 +498,7 @@ function useTableQueryData(args: {
       globalFilter,
       searchField,
       fuzzySearch,
+      matchMode,
       sorting,
     ],
     queryFn,
@@ -533,6 +566,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
       globalFilter: filterState.globalFilter,
       searchField: filterState.searchField,
       fuzzySearch: filterState.fuzzySearch,
+      matchMode: filterState.matchMode,
       sorting: filterState.sorting,
     }),
     [
@@ -540,6 +574,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
       filterState.globalFilter,
       filterState.searchField,
       filterState.fuzzySearch,
+      filterState.matchMode,
       filterState.sorting,
     ]
   )
@@ -581,6 +616,8 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     setSearchField: filterState.setSearchField,
     fuzzySearch: filterState.fuzzySearch,
     setFuzzySearch: filterState.setFuzzySearch,
+    matchMode: filterState.matchMode,
+    setMatchMode: filterState.setMatchMode,
     sorting: filterState.sorting,
     setSorting: filterState.handleSortingChange,
     hasFilter: filterState.hasFilter,

@@ -4,6 +4,7 @@ import { AxiosHeaders } from 'axios'
 import { getApiBaseUrl } from '@/lib/apiConfig'
 import { getApiErrorMessage } from '@/lib/validationSchemas'
 import { resolveAuthNoticeByCode, triggerSessionInvalidation } from '@/lib/authSession'
+import type { SearchMatchMode } from '@/lib/searchMatchMode'
 import { useSSEStore } from '@/store/sseStore'
 
 const API_BASE_URL = getApiBaseUrl()
@@ -22,6 +23,10 @@ const readHeaderValue = (headers: unknown, headerName: string): unknown => {
     return undefined
   }
 
+  if (headers instanceof AxiosHeaders) {
+    return headers.get(headerName)
+  }
+
   const record = headers as Record<string, unknown>
   if (headerName in record) {
     return record[headerName]
@@ -29,7 +34,7 @@ const readHeaderValue = (headers: unknown, headerName: string): unknown => {
 
   const maybeGet = (record as { get?: unknown }).get
   if (typeof maybeGet === 'function') {
-    return (maybeGet as (name: string) => unknown)(headerName)
+    return (maybeGet as (name: string) => unknown).call(headers, headerName)
   }
   return undefined
 }
@@ -203,7 +208,14 @@ export const sessionAPI = {
 
 // User Admin APIs
 export const userAdminAPI = {
-  list: (params?: { skip?: number; limit?: number; username?: string; role?: string; is_active?: boolean }) =>
+  list: (params?: {
+    skip?: number
+    limit?: number
+    username?: string
+    full_name?: string
+    role?: string
+    is_active?: boolean
+  }) =>
     api.get('/users/', { params }),
   create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' | 'public' }) =>
     api.post('/users', data),
@@ -281,6 +293,7 @@ export const reagentOrderAPI = {
     search?: string
     search_field?: string
     fuzzy?: boolean
+    match_mode?: SearchMatchMode
     sort_by?: string
     sort_order?: string
   }) => api.get('/reagent-orders/', { params }),
@@ -325,6 +338,7 @@ export const consumableOrderAPI = {
     search?: string
     search_field?: string
     fuzzy?: boolean
+    match_mode?: SearchMatchMode
     sort_by?: string
     sort_order?: string
   }) =>
@@ -383,6 +397,7 @@ export const inventoryAPI = {
     search?: string
     search_field?: string
     fuzzy?: boolean
+    match_mode?: SearchMatchMode
     sort_by?: string
     sort_order?: string
   }) =>
@@ -492,6 +507,7 @@ export const commonShelfAPI = {
     search?: string
     search_field?: string
     fuzzy?: boolean
+    match_mode?: SearchMatchMode
     sort_by?: string
     sort_order?: string
   }) => {
@@ -554,6 +570,7 @@ export const chemicalNameMapAPI = {
     search?: string
     search_field?: string
     fuzzy?: boolean
+    match_mode?: SearchMatchMode
   }) => api.get<PaginatedResponse<ChemicalNameMapItem>>('/chemical-name-map', { params }),
   create: (data: {
     cas_number: string

@@ -45,6 +45,24 @@ def enrich_with_creator_name(announcement: Announcement, db: Session) -> Announc
     return resp
 
 
+def _delete_announcement_images(image_urls: list[str] | None) -> None:
+    """Delete announcement image files, logging failures without blocking DB mutations."""
+    for image_url in image_urls or []:
+        try:
+            delete_file(image_url, required_subdir="announcements")
+        except Exception as e:
+            logger.error("Failed to delete image %s: %s", image_url, e)
+
+
+def _delete_removed_announcement_images(
+    old_images: list[str] | None,
+    new_images: list[str] | None,
+) -> None:
+    retained_images = set(new_images or [])
+    removed_images = [image_url for image_url in old_images or [] if image_url not in retained_images]
+    _delete_announcement_images(removed_images)
+
+
 # ==================== Public Endpoints ====================
 
 
@@ -207,6 +225,7 @@ def update_announcement(
         )
 
     # Update fields
+    old_images = list(announcement.images or [])
     update_data = announcement_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(announcement, field, value)
@@ -216,6 +235,9 @@ def update_announcement(
 
     db.commit()
     db.refresh(announcement)
+
+    if "images" in update_data:
+        _delete_removed_announcement_images(old_images, announcement.images)
 
     return enrich_with_creator_name(announcement, db)
 
@@ -237,12 +259,7 @@ def delete_announcement(
         )
 
     # Delete associated images
-    if announcement.images:
-        for image_url in announcement.images:
-            try:
-                delete_file(image_url, required_subdir="announcements")
-            except Exception as e:
-                logger.error("Failed to delete image %s: %s", image_url, e)
+    _delete_announcement_images(announcement.images)
 
     db.delete(announcement)
     db.commit()

@@ -427,6 +427,7 @@ export default function OperationLogsPage() {
         statusOptions={LOG_TYPE_OPTIONS}
         defaultStatus="all"
         showFuzzySearch={false}
+        showMatchMode={false}
         searchFieldOptions={[
           { value: 'all', label: '全部' },
           { value: 'detail', label: '详情' }

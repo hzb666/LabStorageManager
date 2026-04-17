@@ -7,7 +7,11 @@ import {
   type FieldPath,
   type FieldValues,
 } from "react-hook-form";
-import { Input, type PrefixButtonConfig } from "./ui/Input";
+import {
+  Input,
+  InputIconButton,
+  type PrefixButtonConfig,
+} from "./ui/Input";
 import { Checkbox } from "./ui/Checkbox";
 import { FormField } from "./ui/FormField";
 import { Autocomplete, type AutocompleteOption } from "./ui/AutoComplete";
@@ -53,6 +57,12 @@ export interface FieldSchema<T extends FieldValues> {
   enableTagToggle?: boolean;
   tag?: string;
   prefixButton?: PrefixButtonConfig;
+  suffixBooleanToggle?: {
+    name: FieldPath<T>;
+    label: string;
+    title?: string;
+    icon?: React.ElementType;
+  };
   autoComplete?: string;
   onBlur?: (value: unknown) => void;
 }
@@ -120,6 +130,7 @@ interface FieldRenderContext<T extends FieldValues> {
   inputClassName: string;
   isDisabled: boolean;
   isReadOnly: boolean;
+  suffix?: React.ReactNode;
 }
 
 // 从 react-hook-form 的错误对象中安全读取指定字段的错误信息。
@@ -300,6 +311,7 @@ function renderInputField<T extends FieldValues>({
   inputClassName,
   isDisabled,
   isReadOnly,
+  suffix,
 }: Readonly<FieldRenderContext<T>>) {
   return (
     <Input
@@ -322,11 +334,62 @@ function renderInputField<T extends FieldValues>({
       className={inputClassName}
       enableTagToggle={field.enableTagToggle}
       prefixButton={field.prefixButton}
+      suffix={suffix}
       tag={field.tag}
       onBlur={(event) => {
         // 先走 RHF 的 touched/校验，再通知外部回调，避免字段级副作用抢在表单状态更新之前。
         controllerField.onBlur();
         field.onBlur?.(event.target.value);
+      }}
+    />
+  );
+}
+
+interface BooleanSuffixToggleProps<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined,
+> {
+  control: Control<T, unknown, TTransformedValues>;
+  field: FieldSchema<T>;
+  disabled: boolean;
+}
+
+function BooleanSuffixToggle<
+  T extends FieldValues,
+  TTransformedValues extends FieldValues | undefined = undefined,
+>({
+  control,
+  field,
+  disabled,
+}: Readonly<BooleanSuffixToggleProps<T, TTransformedValues>>) {
+  const toggleConfig = field.suffixBooleanToggle;
+  if (!toggleConfig) {
+    return null;
+  }
+
+  return (
+    <Controller
+      name={toggleConfig.name}
+      control={control}
+      render={({ field: toggleField }) => {
+        const checked = Boolean(toggleField.value);
+
+        return (
+          <InputIconButton
+            config={{
+              active: checked,
+              ariaLabel: toggleConfig.title || toggleConfig.label,
+              ariaPressed: checked,
+              disabled,
+              icon: toggleConfig.icon,
+              onBlur: toggleField.onBlur,
+              onClick: () => toggleField.onChange(!checked),
+              title: toggleConfig.title || toggleConfig.label,
+              variant: "warning",
+            }}
+            placement="suffix"
+          />
+        );
       }}
     />
   );
@@ -381,6 +444,7 @@ interface BaseFormFieldControlProps<
 > extends FieldRenderState {
   field: FieldSchema<T>;
   controllerField: ControllerRenderProps<T, FieldPath<T>>;
+  suffix?: React.ReactNode;
 }
 
 // 根据字段类型分发到具体控件渲染函数，统一字段渲染入口。
@@ -391,6 +455,7 @@ function BaseFormFieldControl<T extends FieldValues>({
   isDisabled,
   isReadOnly,
   showDisabledStyle,
+  suffix,
 }: Readonly<BaseFormFieldControlProps<T>>) {
   const fieldId = getFieldId(field.name as string);
   const inputClassName = getInputClassName({
@@ -406,6 +471,7 @@ function BaseFormFieldControl<T extends FieldValues>({
     inputClassName,
     isDisabled,
     isReadOnly,
+    suffix,
   };
 
   switch (field.type) {
@@ -460,6 +526,13 @@ function BaseFormFieldRenderer<
     isReadOnly: readOnly || field.readOnly === true,
     showDisabledStyle: disabled,
   };
+  const suffix = field.suffixBooleanToggle ? (
+    <BooleanSuffixToggle<T, TTransformedValues>
+      control={control}
+      field={field}
+      disabled={renderState.isDisabled || renderState.isReadOnly}
+    />
+  ) : undefined;
 
   return (
     <Controller
@@ -480,6 +553,7 @@ function BaseFormFieldRenderer<
               errorMessage={renderState.errorMessage}
               isDisabled={renderState.isDisabled}
               isReadOnly={renderState.isReadOnly}
+              suffix={suffix}
               showDisabledStyle={renderState.showDisabledStyle}
             />
           </FormField>

@@ -124,13 +124,19 @@ function useAdminUsersFilterState() {
 }
 
 // 查询参数会裁掉空筛选项，避免把“全部”状态继续传给接口。
-function buildUserListParams(
-  currentPage: number,
-  pageSize: number,
-  roleFilter: string,
-  statusFilter: string,
+function buildUserListParams({
+  currentPage,
+  pageSize,
+  roleFilter,
+  statusFilter,
+  debouncedFilter,
+}: Readonly<{
+  currentPage: number
+  pageSize: number
+  roleFilter: string
+  statusFilter: string
   debouncedFilter: string
-): UserListParams {
+}>): UserListParams {
   const params: UserListParams = {
     skip: (currentPage - 1) * pageSize,
     limit: pageSize,
@@ -538,16 +544,23 @@ export function AdminUsersPage() {
 
   const { data: queryResult, isLoading, isPlaceholderData } = useQuery({
     // 把分页与筛选条件全部纳入 queryKey，避免不同筛选态之间缓存串页。
-    queryKey: ['adminUsers', filters.roleFilter, filters.statusFilter, filters.debouncedFilter, filters.currentPage, filters.pageSize],
+    queryKey: [
+      'adminUsers',
+      filters.roleFilter,
+      filters.statusFilter,
+      filters.debouncedFilter,
+      filters.currentPage,
+      filters.pageSize,
+    ],
     queryFn: async () => {
       const response = await userAdminAPI.list(
-        buildUserListParams(
-          filters.currentPage,
-          filters.pageSize,
-          filters.roleFilter,
-          filters.statusFilter,
-          filters.debouncedFilter
-        )
+        buildUserListParams({
+          currentPage: filters.currentPage,
+          pageSize: filters.pageSize,
+          roleFilter: filters.roleFilter,
+          statusFilter: filters.statusFilter,
+          debouncedFilter: filters.debouncedFilter,
+        })
       )
       return {
         data: response.data.data || [],

@@ -45,6 +45,7 @@ export interface FilterTableProps {
   statusOptions?: FilterOption[];
   searchFieldOptions?: SearchFieldOption[];
   showFuzzySearch?: boolean;
+  showMatchMode?: boolean;
   defaultStatus?: string;
   defaultSearchField?: string;
   pageSize?: number;
@@ -268,6 +269,7 @@ function useExpandedResetOnFilterChange({
     statusFilter: filter.statusFilter,
     searchField: filter.searchField,
     fuzzySearch: filter.fuzzySearch,
+    matchMode: filter.matchMode,
     sorting: filter.sorting,
   });
 
@@ -278,6 +280,7 @@ function useExpandedResetOnFilterChange({
       statusFilter: filter.statusFilter,
       searchField: filter.searchField,
       fuzzySearch: filter.fuzzySearch,
+      matchMode: filter.matchMode,
       sorting: filter.sorting,
     };
 
@@ -286,6 +289,7 @@ function useExpandedResetOnFilterChange({
       prev.statusFilter !== current.statusFilter ||
       prev.searchField !== current.searchField ||
       prev.fuzzySearch !== current.fuzzySearch ||
+      prev.matchMode !== current.matchMode ||
       prev.sorting !== current.sorting;
 
     if (!hasFilterChanged) {
@@ -302,6 +306,7 @@ function useExpandedResetOnFilterChange({
     filter.fuzzySearch,
     filter.globalFilter,
     filter.isAllExpanded,
+    filter.matchMode,
     filter.searchField,
     filter.sorting,
     filter.statusFilter,
@@ -388,11 +393,13 @@ function useFilterTableRealtime({
       filter.globalFilter,
       filter.searchField,
       filter.fuzzySearch,
+      filter.matchMode,
       filter.sorting,
     ];
   }, [
     filter.fuzzySearch,
     filter.globalFilter,
+    filter.matchMode,
     filter.searchField,
     filter.sorting,
     filter.statusFilter,
@@ -447,6 +454,7 @@ function useFilterTableRealtime({
       searchKeyword: filter.globalFilter,
       searchFields: activeSearchFields,
       fuzzySearch: filter.fuzzySearch,
+      matchMode: filter.matchMode,
       sortBy: currentSortBy,
       statusFilter: filter.statusFilter,
       isAtListStart: isTableAtTop,
@@ -507,6 +515,7 @@ function FilterTableContent({
         searchKeyword={filter.globalFilter}
         statusFilter={filter.statusFilter}
         hasFilter={filter.hasFilter}
+        matchMode={filter.matchMode}
         emptyText={emptyText}
         statusOptions={statusOptions}
       />
@@ -556,6 +565,45 @@ function FilterTableRealtimeBanner({
   );
 }
 
+function FilterTableControls({
+  filter,
+  searchFieldOptions,
+  searchPlaceholder,
+  showFuzzySearch,
+  showMatchMode,
+  statusOptions,
+  toolbarActions,
+}: Readonly<{
+  filter: ReturnType<typeof useTableState>;
+  searchFieldOptions: SearchFieldOption[];
+  searchPlaceholder: string;
+  showFuzzySearch?: boolean;
+  showMatchMode?: boolean;
+  statusOptions: FilterOption[];
+  toolbarActions?: React.ReactNode;
+}>) {
+  return (
+    <TableFilters
+      searchInput={filter.searchInput}
+      onSearchInputChange={filter.setSearchInput}
+      statusFilter={filter.statusFilter}
+      onStatusFilterChange={filter.setStatusFilter}
+      searchField={filter.searchField}
+      onSearchFieldChange={filter.setSearchField}
+      fuzzySearch={filter.fuzzySearch}
+      onFuzzySearchChange={filter.setFuzzySearch}
+      matchMode={filter.matchMode}
+      onMatchModeChange={filter.setMatchMode}
+      statusOptions={statusOptions}
+      searchFieldOptions={searchFieldOptions}
+      searchPlaceholder={searchPlaceholder}
+      showFuzzySearch={showFuzzySearch}
+      showMatchMode={showMatchMode}
+      actions={toolbarActions}
+    />
+  );
+}
+
 // 组合筛选栏、表格状态与数据表格渲染，是 FilterTable 的总入口。
 export function FilterTable({
   api,
@@ -567,6 +615,7 @@ export function FilterTable({
   statusOptions = DEFAULT_STATUS_OPTIONS,
   searchFieldOptions = DEFAULT_SEARCH_FIELD_OPTIONS,
   showFuzzySearch = true,
+  showMatchMode,
   defaultStatus = "all",
   defaultSearchField = "all",
   pageSize = 50,
@@ -672,20 +721,14 @@ export function FilterTable({
 
   return (
     <div className={cn("space-y-6", className)}>
-      <TableFilters
-        searchInput={filter.searchInput}
-        onSearchInputChange={filter.setSearchInput}
-        statusFilter={filter.statusFilter}
-        onStatusFilterChange={filter.setStatusFilter}
-        searchField={filter.searchField}
-        onSearchFieldChange={filter.setSearchField}
-        fuzzySearch={filter.fuzzySearch}
-        onFuzzySearchChange={filter.setFuzzySearch}
-        statusOptions={statusOptions}
+      <FilterTableControls
+        filter={filter}
         searchFieldOptions={searchFieldOptions}
         searchPlaceholder={searchPlaceholder}
         showFuzzySearch={showFuzzySearch}
-        actions={toolbarActions}
+        showMatchMode={showMatchMode}
+        statusOptions={statusOptions}
+        toolbarActions={toolbarActions}
       />
 
       <Card className={cn("relative overflow-hidden", cardClassName)}>

@@ -106,6 +106,7 @@ def build_search_log_filters(
     *,
     search_field: str | None = None,
     fuzzy: bool = False,
+    match_mode: str | Enum | None = None,
     extra_filters: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     filters = dict(_normalize_metadata_mapping(extra_filters))
@@ -113,6 +114,9 @@ def build_search_log_filters(
         filters["search_field"] = search_field
     if fuzzy:
         filters["fuzzy"] = True
+    normalized_match_mode = _normalize_metadata_value(match_mode)
+    if normalized_match_mode and normalized_match_mode != "contains":
+        filters["match_mode"] = normalized_match_mode
     return filters
 
 

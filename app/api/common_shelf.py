@@ -63,6 +63,7 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.services.search_matchers import TextMatchMode
 from app.services.xlsx_export import export_common_shelf_xlsx
 
 router = APIRouter(prefix="/common-shelf", tags=["CommonShelf"])
@@ -122,6 +123,7 @@ class CommonShelfGroupListQuery(BaseModel):
     search: Optional[str] = Query(default=None, max_length=100)
     search_field: Optional[str] = None
     fuzzy: bool = False
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS
     skip: int = 0
     limit: int = DEFAULT_PAGE_SIZE
     sort_by: Optional[str] = None
@@ -151,6 +153,7 @@ def list_common_shelf_groups(
             search=query.search,
             search_field=query.search_field,
             fuzzy=query.fuzzy,
+            match_mode=query.match_mode,
             skip=skip,
             limit=limit,
             sort_by=query.sort_by,
@@ -167,6 +170,7 @@ def list_common_shelf_groups(
         filters=build_search_log_filters(
             search_field=query.search_field if include_search_options else None,
             fuzzy=query.fuzzy if include_search_options else False,
+            match_mode=query.match_mode if include_search_options else None,
         ),
         has_effective_filter=False,
         sort=build_search_log_sort(sort_by=query.sort_by, sort_order=query.sort_order),
@@ -566,6 +570,7 @@ def export_common_shelf(request: Request, db: DBSession, current_user: CurrentUs
             search=None,
             search_field=None,
             fuzzy=False,
+            match_mode=TextMatchMode.CONTAINS,
             skip=0,
             limit=0,
             sort_by="updated_at",

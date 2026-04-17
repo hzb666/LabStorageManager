@@ -97,7 +97,7 @@ const readHeaderValue = (headers: unknown, headerName: string): unknown => {
 
   const maybeGet = (record as { get?: unknown }).get
   if (typeof maybeGet === 'function') {
-    return (maybeGet as (name: string) => unknown)(headerName)
+    return (maybeGet as (name: string) => unknown).call(headers, headerName)
   }
   return undefined
 }

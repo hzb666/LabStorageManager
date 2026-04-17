@@ -28,6 +28,11 @@ class CASSearchMode(str, Enum):
     CONTAINS = "contains"
 
 
+class TextMatchMode(str, Enum):
+    CONTAINS = "contains"
+    EXACT = "exact"
+
+
 def combine_or_clauses(clauses: Iterable[Any]):
     """Combine SQLAlchemy clauses with OR."""
     clauses_list = list(clauses)
@@ -92,14 +97,29 @@ def _is_precomputed_lowercase_field(field: Any) -> bool:
     return field_name.endswith(PRECOMPUTED_LOWERCASE_FIELD_SUFFIXES)
 
 
-def build_text_search_clause(field, search_value: str, *, fuzzy: bool):
+def build_text_search_clause(
+    field,
+    search_value: str,
+    *,
+    fuzzy: bool,
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS,
+):
     """Build a text search clause while preserving fast paths for normalized fields."""
     if _is_precomputed_lowercase_field(field):
         normalized_value = normalize_search_term(search_value) if fuzzy else search_value
-        return field.like(f"%{normalized_value.lower()}%")
+        lowered_value = normalized_value.lower()
+        if match_mode == TextMatchMode.EXACT:
+            return field == lowered_value
+        return field.like(f"%{lowered_value}%")
+
+    column = func.coalesce(field, "")
+    if match_mode == TextMatchMode.EXACT:
+        if fuzzy:
+            normalized_value = normalize_search_term(search_value).lower()
+            return func.lower(normalize_field_sql(column)) == normalized_value
+        return func.lower(column) == search_value.lower()
 
     pattern = f"%{search_value}%"
-    column = func.coalesce(field, "")
     if fuzzy:
         return normalize_field_sql(column).ilike(pattern)
     return column.ilike(pattern)
@@ -126,8 +146,23 @@ def classify_cas_search(search_value: str, *, fuzzy: bool) -> tuple[CASSearchMod
     return CASSearchMode.CONTAINS, term
 
 
-def build_cas_search_clause(field, search_value: str, *, fuzzy: bool):
+def build_cas_search_clause(
+    field,
+    search_value: str,
+    *,
+    fuzzy: bool,
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS,
+):
     """Build CAS-aware clause: exact(=) / prefix(LIKE xxx%) / contains(ILIKE)."""
+    if match_mode == TextMatchMode.EXACT:
+        term = search_value.strip()
+        if not term:
+            return func.coalesce(field, "").ilike("%%")
+        if fuzzy:
+            normalized_term = normalize_search_term(term)
+            return normalize_field_sql(func.coalesce(field, "")) == normalized_term
+        return field == normalize_cas(term)
+
     mode, term = classify_cas_search(search_value, fuzzy=fuzzy)
     if not term:
         return func.coalesce(field, "").ilike("%%")
@@ -139,7 +174,7 @@ def build_cas_search_clause(field, search_value: str, *, fuzzy: bool):
         # Prefix LIKE can use B-Tree index on normalized CAS column.
         return field.like(f"{term}%")
 
-    return build_text_search_clause(field, term, fuzzy=fuzzy)
+    return build_text_search_clause(field, term, fuzzy=fuzzy, match_mode=match_mode)
 
 
 def normalize_date_search_term(search_value: str) -> str:
@@ -229,7 +264,12 @@ def should_use_trigram_fts(search_value: str, *, fuzzy: bool) -> bool:
     return all((ch.isascii() and (ch.isalnum() or ch in allowed)) for ch in term)
 
 
-def build_applicant_id_subquery(search_value: str, *, fuzzy: bool):
+def build_applicant_id_subquery(
+    search_value: str,
+    *,
+    fuzzy: bool,
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS,
+):
     """Build unified applicant-id subquery for order pages.
 
     Priority:
@@ -242,6 +282,36 @@ def build_applicant_id_subquery(search_value: str, *, fuzzy: bool):
     raw_term = search_value.strip()
     if not raw_term:
         return select(User.id).where(sql_false())
+
+    if match_mode == TextMatchMode.EXACT:
+        return select(User.id).where(
+            combine_or_clauses([
+                build_text_search_clause(
+                    User.username,
+                    raw_term,
+                    fuzzy=fuzzy,
+                    match_mode=TextMatchMode.EXACT,
+                ),
+                build_text_search_clause(
+                    User.full_name,
+                    raw_term,
+                    fuzzy=fuzzy,
+                    match_mode=TextMatchMode.EXACT,
+                ),
+                build_text_search_clause(
+                    User.full_name_pinyin,
+                    raw_term,
+                    fuzzy=fuzzy,
+                    match_mode=TextMatchMode.EXACT,
+                ),
+                build_text_search_clause(
+                    User.full_name_pinyin_initials,
+                    raw_term,
+                    fuzzy=fuzzy,
+                    match_mode=TextMatchMode.EXACT,
+                ),
+            ])
+        )
 
     if fuzzy:
         term = normalize_search_term(raw_term)

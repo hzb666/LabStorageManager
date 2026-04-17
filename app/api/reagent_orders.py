@@ -40,6 +40,7 @@ from app.services.spec_utils import parse_specification, SpecificationError, for
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     CASSearchMode,
+    TextMatchMode,
     build_applicant_id_subquery,
     build_cas_search_clause,
     build_date_search_clause,
@@ -147,6 +148,7 @@ class ReagentOrderSingleFieldSearchOptions:
     search_field: Optional[str]
     search_value: str
     fuzzy: bool
+    match_mode: TextMatchMode
     applicant_id_subquery: Any
     cas_exact_or_prefix: bool
     fts_clause: Any
@@ -161,6 +163,7 @@ class ReagentOrderListQuery(BaseModel):
     search: Optional[str] = Query(default=None, max_length=100)
     search_field: Optional[str] = None
     fuzzy: bool = False
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS
     sort_by: Optional[str] = None
     sort_order: Optional[str] = "desc"
 
@@ -228,11 +231,17 @@ def _build_reagent_order_fts_state(
     search_value: str,
     search_field: Optional[str],
     fuzzy: bool,
+    match_mode: TextMatchMode,
     cas_exact_or_prefix: bool,
 ) -> ReagentOrderFTSState:
     # 构建试剂订单 FTS 条件，异常时返回空状态并回退 SQL LIKE。
 
-    use_fts = (not fuzzy) and should_use_order_fts(search_value) and not cas_exact_or_prefix
+    use_fts = (
+        match_mode == TextMatchMode.CONTAINS
+        and (not fuzzy)
+        and should_use_order_fts(search_value)
+        and not cas_exact_or_prefix
+    )
     if not use_fts:
         return ReagentOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
     try:
@@ -277,19 +286,34 @@ def _apply_reagent_order_single_field_search(
         filtered = base.where(build_date_search_clause(ReagentOrder.created_at, options.search_value))
     elif search_field in {'cas', 'cas_number'} and options.cas_exact_or_prefix:
         filtered = base.where(
-            build_cas_search_clause(ReagentOrder.cas_number, options.search_value, fuzzy=options.fuzzy)
+            build_cas_search_clause(
+                ReagentOrder.cas_number,
+                options.search_value,
+                fuzzy=options.fuzzy,
+                match_mode=options.match_mode,
+            )
         )
     elif options.fts_clause is not None and search_field in REAGENT_ORDER_SEARCH_FTS_FIELD_MAP:
         filtered = base.where(options.fts_clause)
     elif search_field in REAGENT_ORDER_SEARCH_SQL_FIELD_MAP:
         if search_field in {'cas', 'cas_number'}:
             filtered = base.where(
-                build_cas_search_clause(ReagentOrder.cas_number, options.search_value, fuzzy=options.fuzzy)
+                build_cas_search_clause(
+                    ReagentOrder.cas_number,
+                    options.search_value,
+                    fuzzy=options.fuzzy,
+                    match_mode=options.match_mode,
+                )
             )
         else:
             filtered = base.where(
                 combine_or_clauses(
-                    build_text_search_clause(field, options.search_value, fuzzy=options.fuzzy)
+                    build_text_search_clause(
+                        field,
+                        options.search_value,
+                        fuzzy=options.fuzzy,
+                        match_mode=options.match_mode,
+                    )
                     for field in REAGENT_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
                 )
             )
@@ -302,6 +326,7 @@ def _build_reagent_order_all_search_clause(
     *,
     search_value: str,
     fuzzy: bool,
+    match_mode: TextMatchMode,
     applicant_id_subquery,
     fts_rowid_subquery,
 ):
@@ -318,7 +343,12 @@ def _build_reagent_order_all_search_clause(
         )
     else:
         all_clauses.append(
-            build_cas_search_clause(ReagentOrder.cas_number, search_value, fuzzy=fuzzy)
+            build_cas_search_clause(
+                ReagentOrder.cas_number,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            )
         )
         text_fields = collect_search_fields(
             REAGENT_ORDER_SEARCH_SQL_FIELD_MAP,
@@ -327,7 +357,12 @@ def _build_reagent_order_all_search_clause(
         if text_fields:
             all_clauses.append(
                 combine_or_clauses(
-                    build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                    build_text_search_clause(
+                        field,
+                        search_value,
+                        fuzzy=fuzzy,
+                        match_mode=match_mode,
+                    )
                     for field in text_fields
                 )
             )
@@ -340,6 +375,7 @@ def _apply_reagent_order_filters(
     search: Optional[str],
     search_field: Optional[str],
     fuzzy: bool,
+    match_mode: TextMatchMode,
 ):
     # 应用试剂订单列表筛选，保持搜索语义并降低主流程复杂度。
 
@@ -350,13 +386,18 @@ def _apply_reagent_order_filters(
     if not search_value:
         return base
 
-    applicant_id_subquery = build_applicant_id_subquery(search_value, fuzzy=fuzzy)
+    applicant_id_subquery = build_applicant_id_subquery(
+        search_value,
+        fuzzy=fuzzy,
+        match_mode=match_mode,
+    )
     cas_mode, _ = classify_cas_search(search_value, fuzzy=fuzzy)
     cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
     fts_state = _build_reagent_order_fts_state(
         search_value=search_value,
         search_field=search_field,
         fuzzy=fuzzy,
+        match_mode=match_mode,
         cas_exact_or_prefix=cas_exact_or_prefix,
     )
 
@@ -367,6 +408,7 @@ def _apply_reagent_order_filters(
                 search_field=search_field,
                 search_value=search_value,
                 fuzzy=fuzzy,
+                match_mode=match_mode,
                 applicant_id_subquery=applicant_id_subquery,
                 cas_exact_or_prefix=cas_exact_or_prefix,
                 fts_clause=fts_state.fts_clause,
@@ -378,6 +420,7 @@ def _apply_reagent_order_filters(
     all_search_clause = _build_reagent_order_all_search_clause(
         search_value=search_value,
         fuzzy=fuzzy,
+        match_mode=match_mode,
         applicant_id_subquery=applicant_id_subquery,
         fts_rowid_subquery=fts_state.fts_rowid_subquery,
     )
@@ -485,6 +528,7 @@ def list_reagent_orders(
     search = query.search
     search_field = query.search_field
     fuzzy = query.fuzzy
+    match_mode = query.match_mode
     sort_by = query.sort_by
     sort_order = query.sort_order
 
@@ -492,7 +536,10 @@ def list_reagent_orders(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
 
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
-    cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
+    cache_key = (
+        f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:"
+        f"{search_field or ''}:{fuzzy}:{match_mode.value}:{sort_by or ''}:{sort_order or ''}"
+    )
 
     # 尝试从缓存获取（仅当是第一页且无搜索条件时）
     is_first_page = skip == 0
@@ -542,11 +589,25 @@ def list_reagent_orders(
         base = select(ReagentOrder).select_from(
             sqljoin(ReagentOrder, User, ReagentOrder.applicant_id == User.id)
         )
-        base = _apply_reagent_order_filters(base, status_filter, search, search_field, fuzzy)
+        base = _apply_reagent_order_filters(
+            base,
+            status_filter,
+            search,
+            search_field,
+            fuzzy,
+            match_mode,
+        )
 
         order_column = func.coalesce(User.full_name_pinyin, User.full_name)
     else:
-        base = _apply_reagent_order_filters(base, status_filter, search, search_field, fuzzy)
+        base = _apply_reagent_order_filters(
+            base,
+            status_filter,
+            search,
+            search_field,
+            fuzzy,
+            match_mode,
+        )
         order_column = sort_field_map.get(sort_by, ReagentOrder.created_at)
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
@@ -601,6 +662,7 @@ def list_reagent_orders(
         filters=build_search_log_filters(
             search_field=search_field if include_search_options else None,
             fuzzy=fuzzy if include_search_options else False,
+            match_mode=match_mode if include_search_options else None,
             extra_filters={"status_filter": status_filter},
         ),
         has_effective_filter=bool(status_filter),
@@ -835,6 +897,16 @@ def _normalize_reagent_order_update_data(order_update: ReagentOrderUpdate) -> di
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Status must be changed via workflow endpoints",
         )
+
+    if "specification" in update_data:
+        specification = update_data.pop("specification")
+        if specification is not None:
+            try:
+                initial_quantity, unit = parse_specification(specification)
+            except SpecificationError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            update_data["initial_quantity"] = initial_quantity
+            update_data["unit"] = unit
 
     optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'purity', 'unit', 'notes']
     normalized_strings = empty_to_none(update_data, optional_string_fields)

@@ -51,6 +51,7 @@ from app.services.inventory_queries import (
 )
 from app.services.search_matchers import (
     CASSearchMode,
+    TextMatchMode,
     build_cas_search_clause,
     build_text_search_clause,
     classify_cas_search,
@@ -133,6 +134,7 @@ class InventoryFilterOptions:
     search: Optional[str]
     search_field: Optional[str]
     fuzzy: bool
+    match_mode: TextMatchMode
 
 
 class InventoryListQuery(BaseModel):
@@ -146,6 +148,7 @@ class InventoryListQuery(BaseModel):
     search: Optional[str] = Query(default=None, max_length=100)
     search_field: Optional[str] = None
     fuzzy: bool = False
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS
     sort_by: Optional[str] = None
     sort_order: Optional[str] = "desc"
 
@@ -159,6 +162,7 @@ class InventoryListQuery(BaseModel):
             search=self.search,
             search_field=self.search_field,
             fuzzy=self.fuzzy,
+            match_mode=self.match_mode,
         )
 
 
@@ -241,18 +245,29 @@ def _apply_inventory_single_field_search(
     search_field: Optional[str],
     search_value: str,
     fuzzy: bool,
+    match_mode: TextMatchMode,
     cas_exact_or_prefix: bool,
 ):
     # 处理指定字段搜索，优先命中精确 CAS 和 FTS，再回退到 LIKE。
 
-    if search_field == 'cas_number' and cas_exact_or_prefix:
-        return base.where(build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy))
-    if not should_use_inventory_fts(search_value):
+    if search_field == 'cas_number' and (
+        cas_exact_or_prefix or match_mode == TextMatchMode.EXACT
+    ):
+        return base.where(
+            build_cas_search_clause(
+                Inventory.cas_number,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            )
+        )
+    if match_mode == TextMatchMode.EXACT or not should_use_inventory_fts(search_value):
         return _apply_inventory_like_filters(
             base,
             search_value=search_value,
             search_field=search_field,
             fuzzy=fuzzy,
+            match_mode=match_mode,
         )
     try:
         return apply_inventory_fts_filter(
@@ -270,6 +285,7 @@ def _apply_inventory_single_field_search(
         search_value=search_value,
         search_field=search_field,
         fuzzy=fuzzy,
+        match_mode=match_mode,
     )
 
 
@@ -278,16 +294,26 @@ def _apply_inventory_all_field_search(
     *,
     search_value: str,
     fuzzy: bool,
+    match_mode: TextMatchMode,
     cas_exact_or_prefix: bool,
 ):
     # 处理 ALL 搜索模式，能走 FTS 时优先 FTS，否则回退到 LIKE 聚合。
 
-    can_use_fts_all = (not fuzzy) and should_use_inventory_fts(search_value) and not cas_exact_or_prefix
+    can_use_fts_all = (
+        match_mode == TextMatchMode.CONTAINS
+        and (not fuzzy)
+        and should_use_inventory_fts(search_value)
+        and not cas_exact_or_prefix
+    )
     if can_use_fts_all:
         fts_rowid_subquery = _build_inventory_all_fts_subquery(search_value)
         if fts_rowid_subquery is not None:
             return base.where(Inventory.id.in_(fts_rowid_subquery))
-    all_like_subquery = _build_inventory_all_like_subquery(search_value=search_value, fuzzy=fuzzy)
+    all_like_subquery = _build_inventory_all_like_subquery(
+        search_value=search_value,
+        fuzzy=fuzzy,
+        match_mode=match_mode,
+    )
     if all_like_subquery is None:
         return base
     return base.where(Inventory.id.in_(all_like_subquery))
@@ -297,12 +323,18 @@ def _build_inventory_all_like_subquery(
     *,
     search_value: str,
     fuzzy: bool,
+    match_mode: TextMatchMode,
 ):
     # 构建 ALL 模式 LIKE 回退子查询，避免大 OR 导致的扫描放大。
 
     all_candidates = [
         select(Inventory.id).where(
-            build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+            build_cas_search_clause(
+                Inventory.cas_number,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            )
         )
     ]
     text_fields = collect_search_fields(
@@ -313,7 +345,12 @@ def _build_inventory_all_like_subquery(
         all_candidates.append(
             select(Inventory.id).where(
                 combine_or_clauses(
-                    build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                    build_text_search_clause(
+                        field,
+                        search_value,
+                        fuzzy=fuzzy,
+                        match_mode=match_mode,
+                    )
                     for field in text_fields
                 )
             )
@@ -337,6 +374,7 @@ def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
             filtered,
             search_value=search_value,
             fuzzy=options.fuzzy,
+            match_mode=options.match_mode,
             cas_exact_or_prefix=cas_exact_or_prefix,
         )
     return _apply_inventory_single_field_search(
@@ -344,6 +382,7 @@ def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
         search_field=options.search_field,
         search_value=search_value,
         fuzzy=options.fuzzy,
+        match_mode=options.match_mode,
         cas_exact_or_prefix=cas_exact_or_prefix,
     )
 
@@ -354,15 +393,26 @@ def _apply_inventory_like_filters(
     search_value: str,
     search_field: Optional[str],
     fuzzy: bool,
+    match_mode: TextMatchMode,
 ):
     if search_field and search_field != 'all' and search_field in INVENTORY_SEARCH_SQL_FIELD_MAP:
         if search_field == 'cas_number':
             return base.where(
-                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+                build_cas_search_clause(
+                    Inventory.cas_number,
+                    search_value,
+                    fuzzy=fuzzy,
+                    match_mode=match_mode,
+                )
             )
         return base.where(
             combine_or_clauses(
-                build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                build_text_search_clause(
+                    field,
+                    search_value,
+                    fuzzy=fuzzy,
+                    match_mode=match_mode,
+                )
                 for field in INVENTORY_SEARCH_SQL_FIELD_MAP[search_field]
             )
         )
@@ -371,11 +421,21 @@ def _apply_inventory_like_filters(
     for field_key, fields in INVENTORY_SEARCH_SQL_FIELD_MAP.items():
         if field_key == 'cas_number':
             all_clauses.append(
-                build_cas_search_clause(Inventory.cas_number, search_value, fuzzy=fuzzy)
+                build_cas_search_clause(
+                    Inventory.cas_number,
+                    search_value,
+                    fuzzy=fuzzy,
+                    match_mode=match_mode,
+                )
             )
             continue
         all_clauses.extend(
-            build_text_search_clause(field, search_value, fuzzy=fuzzy)
+            build_text_search_clause(
+                field,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            )
             for field in fields
         )
     return base.where(combine_or_clauses(all_clauses))
@@ -506,10 +566,15 @@ def list_inventory(
     search = query.search
     search_field = query.search_field
     fuzzy = query.fuzzy
+    match_mode = query.match_mode
     sort_by = query.sort_by
     sort_order = query.sort_order
 
-    cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
+    cache_key = (
+        f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:"
+        f"{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:"
+        f"{match_mode.value}:{sort_by or ''}:{sort_order or ''}"
+    )
 
     if sort_by and sort_by not in VALID_INVENTORY_SORT_FIELDS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
@@ -576,6 +641,7 @@ def list_inventory(
         filters=build_search_log_filters(
             search_field=search_field if include_search_options else None,
             fuzzy=fuzzy if include_search_options else False,
+            match_mode=match_mode if include_search_options else None,
             extra_filters={
                 "status_filter": status_filter,
                 "cas_filter": cas_filter,

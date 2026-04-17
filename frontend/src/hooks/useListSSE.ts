@@ -6,6 +6,11 @@ import type { InfiniteData } from '@tanstack/react-query'
 
 import { useSSE, type SSEEventEnvelope, type SSEEventHandler } from '@/hooks/useSSE'
 import type { ListResponseData } from '@/hooks/useTableState'
+import {
+  DEFAULT_SEARCH_MATCH_MODE,
+  matchesSearchText,
+  type SearchMatchMode,
+} from '@/lib/searchMatchMode'
 import { useSSEStore } from '@/store/sseStore'
 
 export interface ListSSEContext {
@@ -14,6 +19,7 @@ export interface ListSSEContext {
   searchKeyword: string
   searchFields: string[]
   fuzzySearch: boolean
+  matchMode: SearchMatchMode
   sortBy?: string
   statusFilter?: string
   isAtListStart?: boolean
@@ -95,7 +101,14 @@ function matchesSearchFilter(item: AnyRecord, context: ListSSEContext): boolean 
       ? context.searchFields
       : Object.keys(item)
 
-  return fields.some((field) => normalizeText(item[field]).includes(keyword))
+  return fields.some((field) =>
+    matchesSearchText(
+      item[field],
+      keyword,
+      context.matchMode ?? DEFAULT_SEARCH_MATCH_MODE,
+      context.fuzzySearch,
+    )
+  )
 }
 
 function matchesCurrentFilters(item: AnyRecord, context: ListSSEContext): boolean {

@@ -1,5 +1,5 @@
 /** 前端错误日志收集 Hook。 */
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
 
@@ -66,8 +66,21 @@ interface UseErrorLoggerReturn {
   getLogsContent: () => string
 }
 
+function useMountedRef() {
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [isMountedRef])
+
+  return isMountedRef
+}
+
 export function useErrorLogger(): UseErrorLoggerReturn {
   const [errorLogs, setErrorLogs] = useState<ErrorLogEntry[]>([])
+  const isMountedRef = useMountedRef()
   const user = useAuthStore((state) => state.user)
   
   // 格式化时间
@@ -84,6 +97,10 @@ export function useErrorLogger(): UseErrorLoggerReturn {
   
   // 添加错误日志
   const addErrorLog = useCallback((entry: Omit<ErrorLogEntry, 'timestamp'>) => {
+    if (!isMountedRef.current) {
+      return
+    }
+
     const newEntry: ErrorLogEntry = {
       ...entry,
       timestamp: formatTime(new Date()),
@@ -97,7 +114,7 @@ export function useErrorLogger(): UseErrorLoggerReturn {
       }
       return newLogs
     })
-  }, [])
+  }, [isMountedRef])
   
   // 捕获console.error
   useEffect(() => {
@@ -114,11 +131,12 @@ export function useErrorLogger(): UseErrorLoggerReturn {
       // 过滤掉一些常见的无关错误
       if (!message.includes('ReactDOM.render') && 
           !message.includes('Download the React DevTools')) {
-        addErrorLog({
+        const entry = {
           type: 'console',
           message,
           stack: args.find(arg => arg instanceof Error)?.stack,
-        })
+        } satisfies Omit<ErrorLogEntry, 'timestamp'>
+        queueMicrotask(() => addErrorLog(entry))
       }
       
       originalError.apply(console, args)

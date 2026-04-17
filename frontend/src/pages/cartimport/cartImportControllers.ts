@@ -649,11 +649,15 @@ export function useCartImportFormController(
 
       // 所有切卡、切类型都走同一条草稿持久化路径，避免再次出现草稿丢失。
       const nextOrderType = forcedType || orderType;
+      const reagentDraft =
+        orderType === "reagent" ? reagentForm.getValues() : currentItem.reagent_draft;
+      const consumableDraft =
+        orderType === "consumable" ? consumableForm.getValues() : currentItem.consumable_draft;
       const nextItem = updateImportItemWithDrafts({
         item: currentItem,
         orderType: nextOrderType,
-        reagentDraft: reagentForm.getValues(),
-        consumableDraft: consumableForm.getValues(),
+        reagentDraft,
+        consumableDraft,
         defaults: cartImportDraftDefaults,
       });
 

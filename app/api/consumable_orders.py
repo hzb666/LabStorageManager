@@ -32,6 +32,7 @@ from app.models.user import User, UserRole
 from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
+    TextMatchMode,
     build_applicant_id_subquery,
     build_date_search_clause,
     build_text_search_clause,
@@ -121,6 +122,7 @@ class ConsumableOrderSingleFieldSearchOptions:
     search_field: Optional[str]
     search_value: str
     fuzzy: bool
+    match_mode: TextMatchMode
     applicant_id_subquery: Any
     fts_clause: Any
 
@@ -134,6 +136,7 @@ class ConsumableOrderListQuery(BaseModel):
     search: Optional[str] = Query(default=None, max_length=100)
     search_field: Optional[str] = None
     fuzzy: bool = False
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS
     sort_by: Optional[str] = None
     sort_order: Optional[str] = "desc"
 
@@ -205,10 +208,15 @@ def _build_consumable_order_fts_state(
     search_value: str,
     search_field: Optional[str],
     fuzzy: bool,
+    match_mode: TextMatchMode,
 ) -> ConsumableOrderFTSState:
     # 构建耗材订单 FTS 条件，失败时返回空状态并回退 SQL LIKE。
 
-    use_fts = (not fuzzy) and should_use_order_fts(search_value)
+    use_fts = (
+        match_mode == TextMatchMode.CONTAINS
+        and (not fuzzy)
+        and should_use_order_fts(search_value)
+    )
     if not use_fts:
         return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
     try:
@@ -256,7 +264,12 @@ def _apply_consumable_order_single_field_search(
     elif search_field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP:
         filtered = base.where(
             combine_or_clauses(
-                build_text_search_clause(field, options.search_value, fuzzy=options.fuzzy)
+                build_text_search_clause(
+                    field,
+                    options.search_value,
+                    fuzzy=options.fuzzy,
+                    match_mode=options.match_mode,
+                )
                 for field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
             )
         )
@@ -269,6 +282,7 @@ def _build_consumable_order_all_search_clause(
     *,
     search_value: str,
     fuzzy: bool,
+    match_mode: TextMatchMode,
     applicant_id_subquery,
     fts_rowid_subquery,
 ):
@@ -291,7 +305,12 @@ def _build_consumable_order_all_search_clause(
         if text_fields:
             all_clauses.append(
                 combine_or_clauses(
-                    build_text_search_clause(field, search_value, fuzzy=fuzzy)
+                    build_text_search_clause(
+                        field,
+                        search_value,
+                        fuzzy=fuzzy,
+                        match_mode=match_mode,
+                    )
                     for field in text_fields
                 )
             )
@@ -304,6 +323,7 @@ def _apply_consumable_order_filters(
     search: Optional[str],
     search_field: Optional[str],
     fuzzy: bool,
+    match_mode: TextMatchMode,
 ):
     # 应用耗材订单列表筛选，保持搜索语义并降低主流程复杂度。
 
@@ -314,11 +334,16 @@ def _apply_consumable_order_filters(
     if not search_value:
         return base
 
-    applicant_id_subquery = build_applicant_id_subquery(search_value, fuzzy=fuzzy)
+    applicant_id_subquery = build_applicant_id_subquery(
+        search_value,
+        fuzzy=fuzzy,
+        match_mode=match_mode,
+    )
     fts_state = _build_consumable_order_fts_state(
         search_value=search_value,
         search_field=search_field,
         fuzzy=fuzzy,
+        match_mode=match_mode,
     )
 
     if search_field and search_field != 'all':
@@ -328,6 +353,7 @@ def _apply_consumable_order_filters(
                 search_field=search_field,
                 search_value=search_value,
                 fuzzy=fuzzy,
+                match_mode=match_mode,
                 applicant_id_subquery=applicant_id_subquery,
                 fts_clause=fts_state.fts_clause,
             ),
@@ -338,6 +364,7 @@ def _apply_consumable_order_filters(
     all_search_clause = _build_consumable_order_all_search_clause(
         search_value=search_value,
         fuzzy=fuzzy,
+        match_mode=match_mode,
         applicant_id_subquery=applicant_id_subquery,
         fts_rowid_subquery=fts_state.fts_rowid_subquery,
     )
@@ -411,6 +438,7 @@ def list_consumable_orders(
     search = query.search
     search_field = query.search_field
     fuzzy = query.fuzzy
+    match_mode = query.match_mode
     sort_by = query.sort_by
     sort_order = query.sort_order
 
@@ -418,7 +446,10 @@ def list_consumable_orders(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
 
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
-    cache_key = f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:{search_field or ''}:{fuzzy}:{sort_by or ''}:{sort_order or ''}"
+    cache_key = (
+        f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:"
+        f"{search_field or ''}:{fuzzy}:{match_mode.value}:{sort_by or ''}:{sort_order or ''}"
+    )
 
     # 尝试从缓存获取（仅当是第一页且无搜索条件时）
     is_first_page = skip == 0
@@ -463,11 +494,25 @@ def list_consumable_orders(
         base = select(ConsumableOrder).select_from(
             sqljoin(ConsumableOrder, User, ConsumableOrder.applicant_id == User.id)
         )
-        base = _apply_consumable_order_filters(base, status_filter, search, search_field, fuzzy)
+        base = _apply_consumable_order_filters(
+            base,
+            status_filter,
+            search,
+            search_field,
+            fuzzy,
+            match_mode,
+        )
 
         order_column = func.coalesce(User.full_name_pinyin, User.full_name)
     else:
-        base = _apply_consumable_order_filters(base, status_filter, search, search_field, fuzzy)
+        base = _apply_consumable_order_filters(
+            base,
+            status_filter,
+            search,
+            search_field,
+            fuzzy,
+            match_mode,
+        )
         order_column = sort_field_map.get(sort_by, ConsumableOrder.created_at)
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
@@ -519,6 +564,7 @@ def list_consumable_orders(
         filters=build_search_log_filters(
             search_field=search_field if include_search_options else None,
             fuzzy=fuzzy if include_search_options else False,
+            match_mode=match_mode if include_search_options else None,
             extra_filters={"status_filter": status_filter},
         ),
         has_effective_filter=bool(status_filter),

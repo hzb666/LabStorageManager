@@ -1,6 +1,11 @@
 /** Dashboard 共享工具、类型和常量。 */
 import type { ColumnDef } from '@tanstack/react-table'
 import { clearDashboardActiveTab } from '@/lib/storage/appUiStorage'
+import {
+  DEFAULT_SEARCH_MATCH_MODE,
+  matchesSearchText,
+  type SearchMatchMode,
+} from '@/lib/searchMatchMode'
 
 // ============================================================================
 // 类型定义
@@ -76,6 +81,7 @@ export type DashboardParams = {
   sort_by?: string
   sort_order?: string
   fuzzy?: boolean
+  match_mode?: SearchMatchMode
 }
 
 export type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
@@ -223,6 +229,8 @@ export function buildLocalListData<T extends Record<string, unknown>>(
     search_field,
     sort_by,
     sort_order,
+    fuzzy,
+    match_mode = DEFAULT_SEARCH_MATCH_MODE,
   } = params
 
   let filtered = rows
@@ -232,10 +240,9 @@ export function buildLocalListData<T extends Record<string, unknown>>(
   }
 
   if (search) {
-    const keyword = search.toLowerCase()
     filtered = filtered.filter((row) => {
       const fields = search_field && search_field !== 'all' ? [search_field] : defaultSearchFields
-      return fields.some((field) => normalizeValue(row[field]).includes(keyword))
+      return fields.some((field) => matchesSearchText(row[field], search, match_mode, fuzzy))
     })
   }
 

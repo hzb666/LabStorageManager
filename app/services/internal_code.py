@@ -112,7 +112,7 @@ def _seed_sequence_prefix(session: Session, *, prefix: str) -> None:
             ON CONFLICT(prefix) DO NOTHING
             """
         ),
-        {"prefix": prefix, "current_seq": max_seq},
+        params={"prefix": prefix, "current_seq": max_seq},
     )
 
 
@@ -137,7 +137,7 @@ def _reserve_sequence_range(
                 RETURNING current_seq
                 """
             ),
-            {
+            params={
                 "prefix": prefix,
                 "quantity": quantity,
                 "max_sequence": INTERNAL_CODE_MAX_SEQUENCE,
@@ -158,7 +158,7 @@ def _reserve_sequence_range(
                   AND current_seq + :quantity <= :max_sequence
                 """
             ),
-            {
+            params={
                 "prefix": prefix,
                 "quantity": quantity,
                 "max_sequence": INTERNAL_CODE_MAX_SEQUENCE,
@@ -170,7 +170,7 @@ def _reserve_sequence_range(
             text(
                 "SELECT current_seq FROM internal_code_sequences WHERE prefix = :prefix"
             ),
-            {"prefix": prefix},
+            params={"prefix": prefix},
         ).first()
         if reserved_row is None:
             raise ValueError("internal code sequence limit reached")

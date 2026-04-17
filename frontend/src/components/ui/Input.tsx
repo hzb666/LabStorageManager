@@ -1,14 +1,30 @@
 import * as React from "react"
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { defaultInputStyles, inputConfigs, type InputStyles, type InputTagConfig } from "@/lib/inputConfigs"
+import { Tooltip, TooltipContent, TooltipTrigger } from "./Tooltip"
+import {
+  defaultInputStyles,
+  inputConfigs,
+  type InputIconButtonStyles,
+  type InputStyles,
+  type InputTagConfig,
+} from "@/lib/inputConfigs"
 
-export interface PrefixButtonConfig {
+export interface InputIconButtonConfig {
   onClick: () => void
+  onBlur?: React.FocusEventHandler<HTMLButtonElement>
   title?: string
+  ariaLabel?: string
+  ariaPressed?: boolean
   loading?: boolean
+  disabled?: boolean
   icon?: React.ElementType
+  active?: boolean
+  variant?: "default" | "warning"
 }
+
+export type PrefixButtonConfig = InputIconButtonConfig
+type InputIconButtonPlacement = "prefix" | "suffix"
 
 export interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "prefix"> {
   step?: number | string
@@ -23,6 +39,75 @@ export interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElem
 }
 
 const DEFAULT_TAG = "[强调]"
+
+function getIconButtonStateClass(
+  config: InputIconButtonConfig,
+  buttonStyles: InputIconButtonStyles
+) {
+  if (config.loading) {
+    return buttonStyles.loading
+  }
+
+  if (config.active && config.variant === "warning") {
+    return buttonStyles.warningActive
+  }
+
+  if (config.active) {
+    return buttonStyles.active
+  }
+
+  return buttonStyles.default
+}
+
+export function InputIconButton({
+  config,
+  fallbackIcon,
+  placement = "prefix",
+  styles = defaultInputStyles,
+}: Readonly<{
+  config: InputIconButtonConfig
+  fallbackIcon?: React.ElementType
+  placement?: InputIconButtonPlacement
+  styles?: InputStyles
+}>) {
+  const Icon = config.icon ?? fallbackIcon
+  const isDisabled = config.disabled || config.loading
+  const tooltipText = config.title || config.ariaLabel || "点击操作"
+  const buttonStyles =
+    placement === "suffix" ? styles.suffixButton : styles.prefixButton
+
+  const button = (
+    <button
+      type="button"
+      aria-label={config.ariaLabel || config.title || "点击操作"}
+      aria-pressed={config.ariaPressed}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={config.onClick}
+      onBlur={config.onBlur}
+      disabled={isDisabled}
+      className={cn(
+        buttonStyles.base,
+        getIconButtonStateClass(config, buttonStyles),
+        isDisabled && "cursor-not-allowed opacity-50",
+      )}
+    >
+      {config.loading ? (
+        <Loader2 className="w-4 h-4 animate-spin" />
+      ) : (
+        Icon && (
+          <Icon className={cn(buttonStyles.icon, "fill-transparent")} />
+        )
+      )}
+    </button>
+  )
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="bottom">{tooltipText}</TooltipContent>
+    </Tooltip>
+  )
+}
 
 // 根据当前标签名获取样式配置，不存在时回退到默认标签配置。
 const getActiveConfig = (tag: string): InputTagConfig =>
@@ -112,27 +197,13 @@ const renderLeftArea = ({
   styles: InputStyles
 }) => {
   if (prefixButton) {
-    const PrefixButtonIcon = prefixButton.icon ?? DefaultIcon
-
     return (
       <div className={styles.leftArea}>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={prefixButton.onClick}
-          title={prefixButton.title || "点击操作"}
-          disabled={prefixButton.loading}
-          className={cn(
-            styles.prefixButton.base,
-            prefixButton.loading ? styles.prefixButton.loading : styles.prefixButton.default
-          )}
-        >
-          {prefixButton.loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <PrefixButtonIcon className={cn(styles.prefixButton.icon, "fill-transparent")} />
-          )}
-        </button>
+        <InputIconButton
+          config={prefixButton}
+          fallbackIcon={DefaultIcon}
+          styles={styles}
+        />
       </div>
     )
   }

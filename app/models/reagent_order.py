@@ -164,6 +164,7 @@ class ReagentOrderUpdate(SQLModel):
     category: Optional[str] = None
     brand: Optional[str] = None
     purity: Optional[str] = None
+    specification: Optional[str] = None
     initial_quantity: Optional[float] = None
     unit: Optional[str] = None
     quantity: Optional[int] = None

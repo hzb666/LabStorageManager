@@ -20,6 +20,7 @@ from app.models.common_shelf import CommonShelf
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.common_shelf_queries import search_name_map_cas_numbers
 from app.services.pinyin_utils import to_pinyin_parts
+from app.services.search_matchers import TextMatchMode
 from app.services.sql_utils import order_with_nulls_last
 
 router = APIRouter(prefix="/chemical-name-map", tags=["Chemical Name Map"])
@@ -107,6 +108,7 @@ def list_chemical_name_map(
     search: Optional[str] = Query(default=None, max_length=100),
     search_field: Optional[str] = Query(default=None),
     fuzzy: bool = False,
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = "desc",
     skip: int = 0,
@@ -125,6 +127,7 @@ def list_chemical_name_map(
             search=search,
             search_field=search_field,
             fuzzy=fuzzy,
+            match_mode=match_mode,
         )
         if not matched_cas_numbers:
             return {"data": [], "total": 0, "skip": skip, "limit": limit}

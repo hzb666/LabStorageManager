@@ -1,6 +1,5 @@
 /** 统一管理表单字段配置。 */
 
-import React from 'react'
 import { AlertTriangle } from 'lucide-react'
 import type { FieldValues } from 'react-hook-form'
 import type { FieldSchema } from '../components/BaseForm'
@@ -107,7 +106,20 @@ export function getInventoryFormFields(
     ]
 
   return [
-    { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
+    {
+      name: 'name' as const,
+      label: '试剂名称',
+      type: 'input' as const,
+      required: true,
+      colSpan: 2,
+      placeholder: '如: 乙醇',
+      suffixBooleanToggle: {
+        name: 'is_hazardous' as const,
+        label: '危险品',
+        title: '标记为危险品',
+        icon: AlertTriangle,
+      },
+    },
     { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
@@ -116,17 +128,6 @@ export function getInventoryFormFields(
     { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: brandOptions, placeholder: '输入品牌名称' },
     { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如: 95%、AR、HPLC' },
     { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: categoryOptions, placeholder: '输入分类名称' },
-    {
-      name: 'is_hazardous' as const,
-      label: '危险品',
-      type: 'checkbox' as const,
-      checkboxLabel: (
-        <span className="flex items-center gap-1">
-          <AlertTriangle className="w-4 h-4 text-yellow-500" />
-          危险品
-        </span>
-      )
-    },
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
   ]
 }
@@ -168,7 +169,20 @@ export const defaultConsumableOrderValues: ConsumableOrderFormInputData = {
 // 获取试剂订单表单字段配置
 export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormInputData>[] {
   return [
-    { name: 'name' as const, label: '试剂名称', type: 'input' as const, required: true, colSpan: 2, placeholder: '如: 乙醇' },
+    {
+      name: 'name' as const,
+      label: '试剂名称',
+      type: 'input' as const,
+      required: true,
+      colSpan: 2,
+      placeholder: '如: 乙醇',
+      suffixBooleanToggle: {
+        name: 'is_hazardous' as const,
+        label: '危险品',
+        title: '标记为危险品',
+        icon: AlertTriangle,
+      },
+    },
     { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
@@ -191,17 +205,6 @@ export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormInputDa
       options: ORDER_REASON_OPTIONS,
       required: true,
       placeholder: '请选择订购原因'
-    },
-    {
-      name: 'is_hazardous' as const,
-      label: '危险品',
-      type: 'checkbox' as const,
-      checkboxLabel: (
-        <span className="flex items-center gap-1">
-          <AlertTriangle className="w-4 h-4 text-yellow-500" />
-          危险品
-        </span>
-      )
     },
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
   ]
