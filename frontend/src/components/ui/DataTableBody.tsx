@@ -207,9 +207,16 @@ export function DataTableBody<TData>({
               <div
                 key={virtualRow.key}
                 className="absolute top-0 left-0 w-full"
-                style={{ transform: `translateY(${virtualRow.start}px)` }}
+                style={{
+                  transform: `translate3d(0, ${virtualRow.start}px, 0)`,
+                  willChange: 'transform',
+                }}
               >
-                <div ref={rowVirtualizer.measureElement} data-index={virtualRow.index}>
+                <div
+                  ref={rowVirtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  style={{ contain: 'layout paint' }}
+                >
                   <InnerRow
                     row={row}
                     isExpanded={row.getIsExpanded()}

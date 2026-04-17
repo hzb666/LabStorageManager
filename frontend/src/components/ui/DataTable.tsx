@@ -130,8 +130,8 @@ export function DataTable<TData>({
     table, rows, enableExpandAll, isAllExpanded, bodyScrollRef,
   })
 
-  const { handleInfiniteScroll, handleRowClick, setVirtualizerForScroll } = useDataTableScroll<TData>({
-    bodyScrollRef, hasNextPage, isFetchingNextPage, fetchNextPage,
+  const { handleContainerScroll, handleRowClick, setVirtualizerForScroll } = useDataTableScroll<TData>({
+    bodyScrollRef, headerScrollRef, hasNextPage, isFetchingNextPage, fetchNextPage, onIsAtTopChange,
   })
 
   const shouldUseVirtualization = scrollHeight !== 'auto'
@@ -167,12 +167,6 @@ export function DataTable<TData>({
   // 批量展开和滚动逻辑必须消费同一个 virtualizer，否则测量和滚动基准会分叉。
   useEffect(() => { setVirtualizer(rowVirtualizer) }, [rowVirtualizer, setVirtualizer])
   useSyncVirtualizerRef(rowVirtualizer, setVirtualizerForScroll)
-
-  const handleContainerScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    if (headerScrollRef.current) headerScrollRef.current.scrollLeft = e.currentTarget.scrollLeft
-    if (onIsAtTopChange) onIsAtTopChange(e.currentTarget.scrollTop <= 2)
-    handleInfiniteScroll()
-  }, [handleInfiniteScroll, onIsAtTopChange])
 
   return (
     <div

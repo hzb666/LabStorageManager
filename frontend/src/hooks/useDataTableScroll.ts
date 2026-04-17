@@ -1,5 +1,6 @@
 /** 表格展开时的滚动定位 Hook。 */
 import { useRef, useCallback, useEffect } from 'react'
+import type { RefObject, MutableRefObject, MouseEvent, UIEvent } from 'react'
 import type { Row } from '@tanstack/react-table'
 import type { Virtualizer } from '@tanstack/react-virtual'
 
@@ -31,20 +32,48 @@ function animateScrollTo(el: HTMLDivElement, targetY: number, duration: number) 
 }
 
 interface UseDataTableScrollOptions {
-  bodyScrollRef: React.RefObject<HTMLDivElement | null>
+  bodyScrollRef: RefObject<HTMLDivElement | null>
+  headerScrollRef?: RefObject<HTMLDivElement | null>
   hasNextPage?: boolean
   isFetchingNextPage?: boolean
   fetchNextPage?: () => void
+  onIsAtTopChange?: (isAtTop: boolean) => void
+}
+
+function syncHeaderScroll(
+  headerScrollRef: RefObject<HTMLDivElement | null> | undefined,
+  scrollTarget: HTMLDivElement,
+) {
+  if (headerScrollRef?.current) {
+    headerScrollRef.current.scrollLeft = scrollTarget.scrollLeft
+  }
+}
+
+function updateIsAtTop(
+  isAtTopRef: MutableRefObject<boolean>,
+  scrollTop: number,
+  onIsAtTopChange?: (isAtTop: boolean) => void,
+) {
+  const nextIsAtTop = scrollTop <= 2
+  if (onIsAtTopChange && isAtTopRef.current !== nextIsAtTop) {
+    isAtTopRef.current = nextIsAtTop
+    onIsAtTopChange(nextIsAtTop)
+  }
 }
 
 // 管理无限滚动触发与点击展开时的滚动修正。
 export function useDataTableScroll<TData>({
   bodyScrollRef,
+  headerScrollRef,
   hasNextPage,
   isFetchingNextPage,
   fetchNextPage,
+  onIsAtTopChange,
 }: UseDataTableScrollOptions) {
   const scrollLockRef = useRef(false)
+  const scrollFrameRef = useRef<number | null>(null)
+  const pendingScrollTargetRef = useRef<HTMLDivElement | null>(null)
+  const isAtTopRef = useRef(true)
   const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null)
 
   // 记录最新的 virtualizer，供滚动判断和点击展开时使用。
@@ -71,8 +100,33 @@ export function useDataTableScroll<TData>({
     })
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, bodyScrollRef])
 
+  const flushScrollFrame = useCallback(() => {
+    scrollFrameRef.current = null
+    const scrollTarget = pendingScrollTargetRef.current
+    if (!scrollTarget) return
+
+    syncHeaderScroll(headerScrollRef, scrollTarget)
+    updateIsAtTop(isAtTopRef, scrollTarget.scrollTop, onIsAtTopChange)
+    handleInfiniteScroll()
+  }, [handleInfiniteScroll, headerScrollRef, onIsAtTopChange])
+
+  const handleContainerScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
+    pendingScrollTargetRef.current = e.currentTarget
+    if (scrollFrameRef.current !== null) return
+
+    scrollFrameRef.current = window.requestAnimationFrame(flushScrollFrame)
+  }, [flushScrollFrame])
+
+  useEffect(() => {
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current)
+      }
+    }
+  }, [])
+
   // 展开位于视口上方的行时，把该行平滑滚回可见区域顶部。
-  const handleRowClick = useCallback((e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => {
+  const handleRowClick = useCallback((e: MouseEvent<HTMLDivElement>, row: Row<TData>) => {
     const isExpanding = !row.getIsExpanded()
     row.toggleExpanded()
 
@@ -90,7 +144,7 @@ export function useDataTableScroll<TData>({
   }, [bodyScrollRef])
 
   return {
-    handleInfiniteScroll,
+    handleContainerScroll,
     handleRowClick,
     setVirtualizerForScroll,
   }
