@@ -1,6 +1,6 @@
 # 购物车同步扩展
 
-本页说明浏览器扩展、`/cart-import` 页面和后端订单接口之间的职责边界。当前实现里，扩展只负责采集、分类和桥接数据，不直接写数据库；真正落库仍由系统前端页面和后端标准订单 API 完成。
+本页说明浏览器扩展、`/cart-import` 页面和后端订单接口之间的职责边界。扩展只负责采集、分类和桥接数据，不直接写数据库；真正落库由系统前端页面和后端标准订单 API 完成。
 
 ## 权限与资源
 
@@ -9,15 +9,15 @@
 - 批次数据统一使用 2 小时 TTL。扩展 popup 在保存批次前会清理旧批次；`import-bridge.js` 会在页面加载时清理页面侧过期缓存。
 - 后台 `service-worker` 负责解析目标购物车标签页、记录最近活跃购物车页面、协调 popup 与 content script 的通信，不负责最终导入。
 
-## 当前批次数据形态
+## 批次数据形态
 
 扩展写入的批次并不只是“商品数组”，还包含一组面向导入页的中间字段：
 
-- `batch_id`：当前导入批次标识，用于页面加载和桥接校验。
+- `batch_id`：导入批次标识，用于页面加载和桥接校验。
 - `created_at`：批次创建时间，桥接脚本和前端都会用它做 TTL 判断。
 - `items[]`：每一项至少包含 `name`、`specification`、`brand`、`cas_number`、`product_id`、`detail_url`。
 - `items[].suggested_order_type`：扩展根据 CAS、规格、详情页文本预判是试剂还是耗材。
-- `items[].order_type`：当前导入时采用的类型，导入页允许用户切换。
+- `items[].order_type`：导入时采用的类型，导入页允许用户切换。
 - `items[].classification_reason`：扩展对类型判断的解释，方便人工确认。
 - `items[].detail_fetch_status`：详情页拉取结果，例如成功、超时、回退基础信息。
 
@@ -34,7 +34,7 @@
 7. React 侧的 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/cartimport/cartImportControllers.ts" /> 会先尝试从本地批次缓存读取草稿；如果桥接稍晚到达，会监听 `IMPORT_BATCH_READY` 再补读一次，并最多重试若干轮。
 8. 用户在 `CartImport` 页面逐条确认、切换类型、补录字段后，前端分别调用标准的 `reagentOrderAPI.create` 或 `consumableOrderAPI.create`。
 
-当前前端并没有直接调用 `cartSyncAPI.importItems`。`/api/cart-sync/import` 仍然存在于后端，但导入页主链路已经切到标准订单创建接口，保证页面行为和普通手工建单保持一致。
+导入页落库统一使用标准订单创建接口，保证校验、日志、缓存和 SSE 流程一致。
 
 ## 前端导入页职责
 
@@ -43,16 +43,15 @@
 - `useCartImportBatchController` 负责读取桥接批次、维护当前条目索引、跟踪 `submittedIds` 和返回跳转。
 - `useCartImportFormController` 负责在试剂表单与耗材表单之间切换，并把用户未提交的修改保存回草稿。
 - 试剂条目会额外接入 CAS 重复预警和英文名自动补全；耗材条目直接走耗材 schema。
-- 所有条目都是“逐条提交”，不是一次性批量导入。这样做的结果是：哪怕某一项校验失败，也不会影响之前已经成功提交的条目。
+- 所有条目都是“逐条提交”，不是一次性批量导入。这样做的结果是：哪怕某一项校验失败，也不会影响已成功提交的条目。
 
 ## 后端接口
 
-- `POST /api/cart-sync`：接收购物车商品并尝试匹配现有订单。当前仓库里更多像一个兼容接口或辅助接口。
-- `POST /api/cart-sync/import`：根据传入的 `order_type` 批量创建试剂订单或耗材订单，会清洗文本、规范 CAS、解析规格，并在一个请求中统一提交。
-- `POST /api/reagent-orders`：当前 `CartImport` 页面提交试剂条目时实际调用的接口。
-- `POST /api/consumable-orders`：当前 `CartImport` 页面提交耗材条目时实际调用的接口。
+- `POST /api/cart-sync`：接收购物车商品并尝试匹配现有订单，用于导入前分析。
+- `POST /api/reagent-orders`：`CartImport` 页面提交试剂条目时调用的接口。
+- `POST /api/consumable-orders`：`CartImport` 页面提交耗材条目时调用的接口。
 
-排查“扩展导入成功，但页面没有落单”时，应先确认是桥接阶段失败，还是页面逐条调用标准订单 API 失败，而不是默认怀疑 `/api/cart-sync/import`。
+排查“扩展导入成功，但页面没有落单”时，应先确认是桥接阶段失败，还是页面逐条调用标准订单 API 失败。
 
 ## 安全与边界
 

@@ -50,6 +50,7 @@ AGENTS.md
 # Logs
 *.log
 logs/
+dev-logs/
 
 # OS
 .DS_Store

@@ -14,7 +14,7 @@
 
 ## 启动初始化
 
-`lifespan` 是 `asynccontextmanager`。启动阶段会打印 banner、执行 `init_db()`，并在关闭阶段停止 `sse_manager` 监听器，避免后台任务残留。
+`lifespan` 是 `asynccontextmanager`。启动阶段会打印 banner、执行 `init_db()`，初始化搜索查询日志库并启动后台写入线程；关闭阶段会停止搜索日志线程、关闭异步文件日志并停止 `sse_manager` 监听器，避免后台任务残留。
 
 `init_db()` 的顺序不能打乱：
 
@@ -25,6 +25,8 @@
 5. 创建默认管理员。
 
 这意味着数据库结构、索引、全文检索和基础账号都属于启动期职责，而不是事后补齐的运维动作。
+
+搜索查询日志使用独立 SQLite 文件，不写入主业务库。启动阶段由 `init_query_log_db()` 创建 `search_logs` 表和索引，再由 `start_search_query_log_worker()` 启动低优先级写入线程。列表页搜索会先进入内存缓冲，达到批量阈值或等待时间后写入独立库；关闭时会先 flush 待写入队列。
 
 ## SQLite 与 WAL
 
@@ -38,7 +40,7 @@
 - WAL 是并发写入的基础，不应去掉。
 - 外键约束必须始终开启，否则模型关系会失真。
 
-`ensure_sqlite_performance_indexes` 负责创建复合索引，覆盖库存、订单、借还日志和会话等高频查询路径。`ensure_sqlite_inventory_fts` 则负责 `inventory_fts`、`reagent_order_fts`、`consumable_order_fts`、`users_fts` 以及对应触发器的创建与重建。启动结束后还会执行 `ANALYZE`、`PRAGMA optimize` 和一致性检查。
+`ensure_sqlite_performance_indexes` 负责创建复合索引，覆盖库存、订单、借还日志和会话等高频查询路径。`ensure_sqlite_inventory_fts` 则负责 `inventory_fts`、`reagent_order_fts`、`consumable_order_fts`、`users_fts`、`chemical_name_map_fts` 以及对应触发器的创建与重建。启动结束后还会执行 `ANALYZE`、`PRAGMA optimize` 和一致性检查。
 
 如果需要重建搜索索引，`reset_db()` 可以跳过触发器后重新初始化，但它会清空数据，必须谨慎使用。
 
@@ -66,6 +68,18 @@ Redis 相关封装主要承担三件事：
 - `CachedStaticFiles` 为 `/static` 资源写入长期缓存头，减少图片和导出文件的重复下载。
 
 前者只适合短时间重复查询，写操作后必须清理对应缓存前缀。后者只负责静态传输，不承担权限判断或业务状态缓存。
+
+## 日志分库与归档
+
+日志存储分为三类：
+
+- 业务操作日志仍在主业务库中，包括库存、试剂订单、耗材订单和用户操作日志。
+- 搜索查询日志写入独立 SQLite 文件，由 `app/search_query_log_db.py` 管理。
+- 请求、审计和错误日志写入运行期日志文件，由 `app/services/log_queue.py` 统一配置异步文件写入。
+
+归档脚本负责把三个月以前的历史日志复制到独立归档库，并在复制校验成功后从源库删除。`app/archive_logs.py` 处理主业务库中的操作日志表、公共架日志及对应 `log_timeline` 行，`app/archive_query_logs.py` 处理搜索查询日志库中的 `search_logs` 表。`borrowlog` 是借还业务数据表，不属于当前日志归档删除范围。两个脚本都支持 `--dry-run`、`--tables` 和 `--output-dir`，归档库内会写入 `archive_meta` 记录批次、源库、目标库、截止时间和归档行数。删除阶段必须在归档库提交成功后才会开始，并且源库删除运行在同一个事务中；任一表删除行数和归档行数不一致都会回滚源库删除。
+
+如果不希望额外配置 cron，可以通过 `ARCHIVE_SCHEDULER_ENABLED=true` 启用后端内置归档调度。调度器在 `lifespan` 启动阶段挂载，按 `ARCHIVE_STARTUP_DELAY_SECONDS` 和 `ARCHIVE_INTERVAL_HOURS` 周期执行两类归档，并用归档目录下的 `.archive-scheduler.lock` 避免多 worker 重复运行。归档失败只记录日志，不中断后端启动或请求处理。
 
 ## SSE 与中间件
 
@@ -104,3 +118,6 @@ Redis 相关封装主要承担三件事：
 - [app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
+- [app/search_query_log_db.py](https://github.com/hzb666/LabStorageManager/blob/main/app/search_query_log_db.py)
+- [app/archive_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/archive_logs.py)
+- [app/archive_query_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/archive_query_logs.py)

@@ -49,7 +49,8 @@
 1. 扩展从外部采购平台采集数据。
 2. 扩展把批次写入 `chrome.storage.local`。
 3. `import-bridge.js` 在 `/cart-import` 页面把批次同步到页面环境。
-4. 前端导入页再调用 `/api/cart-sync` 和 `/api/cart-sync/import`。
+4. 前端导入页逐条调用标准试剂订单或耗材订单创建接口。
+5. `/api/cart-sync` 用于匹配分析，导入落库统一走标准订单创建接口。
 
 因此扩展更像外部采集器，不是系统自己的第二前端。
 

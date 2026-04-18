@@ -55,7 +55,7 @@
 
 - 用途：前端类型系统。
 
-### Vite 7
+### Vite 8
 
 - 用途：前端构建与开发服务器。
 - 落点：`frontend/`
@@ -97,7 +97,8 @@
 
 - 用途：采集外部购物车并导入系统。
 - 落点：`browser-extension/`
-- 关键桥接路径：`/cart-import`、`/api/cart-sync`、`/api/cart-sync/import`
+- 关键桥接路径：`/cart-import`、`reagentOrderAPI.create`、`consumableOrderAPI.create`
+- 匹配分析接口：`/api/cart-sync`
 
 ## 文档与部署
 

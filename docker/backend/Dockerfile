@@ -17,8 +17,7 @@ RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
 COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
-    && poetry install --without dev,scripts --no-root --no-interaction --no-ansi \
-    && pip install --no-cache-dir redis
+    && poetry install --without dev,scripts --no-root --no-interaction --no-ansi
 
 COPY app ./app
 COPY docker/backend/entrypoint.sh /entrypoint.sh

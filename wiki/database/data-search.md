@@ -16,7 +16,7 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 ## 标准化与拼音预计算
 
-系统的搜索先统一输入，再决定查询路径。当前实现中：
+系统的搜索先统一输入，再决定查询路径：
 
 - CAS 通过 `cas_utils.py` 做空格清理、大小写归一和格式校验。
 - 规格、位置、货架等格式性字段都在后端完成清洗。
@@ -26,12 +26,13 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 ## FTS 表与触发器
 
-系统维护了四张 FTS5 虚拟表：
+系统维护五张 FTS5 虚拟表：
 
 - `inventory_fts`
 - `reagent_order_fts`
 - `consumable_order_fts`
 - `users_fts`
+- `chemical_name_map_fts`
 
 它们都使用 trigram 分词，并通过 `INSERT`、`UPDATE`、`DELETE` 触发器与主表同步。启动时系统会检查触发器是否齐全、FTS 行数是否与主表一致；若发现缺口，会自动执行 rebuild SQL 重建内容。
 
@@ -51,9 +52,9 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 库存和常用货架共用 `Inventory` 模型，但查询路径并不混用。[app/services/inventory_queries.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/inventory_queries.py) 提供 `regular_inventory_clause` 与 `common_inventory_clause`，大部分索引和 FTS 查询也都带有 `is_common` 维度。写查询或加索引时，必须先确认场景属于普通库存还是常用货架。
 
-## 当前实现里的优化点
+## 已落地的优化点
 
-当前系统已经落地的查询优化主要包括：
+系统已经落地的查询优化主要包括：
 
 - 复合索引覆盖库存状态、借用记录、用户会话、订单筛选等高频路径。
 - 拼音字段和拼音首字母字段直接参与排序与搜索。
@@ -65,16 +66,16 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 ## 变更检查
 
-1. 新字段是否参与搜索、排序或聚合。
-2. 是否需要新增标准化逻辑或拼音预计算字段。
-3. 是否需要同步更新 `SQLITE_*_FTS_SETUP`、触发器和 rebuild SQL。
-4. 是否需要补充索引，而不是继续依赖全表扫描。
-5. FTS 失败回退到 `LIKE` 后，结果是否仍然正确。
+1. 确认新字段是否参与搜索、排序或聚合。
+2. 确认是否需要新增标准化逻辑或拼音预计算字段。
+3. 同步更新相关 `SQLITE_*_FTS_SETUP`、触发器和 rebuild SQL。
+4. 补充必要索引，避免新增全表扫描路径。
+5. 验证 FTS 失败回退到 `LIKE` 后的结果正确性。
 
 ## 验证建议
 
 - 核对 `PRAGMA journal_mode;` 与 `PRAGMA foreign_keys;`。
-- 对比四张 FTS 表与主表 `COUNT(*)` 是否一致。
+- 对比五张 FTS 表与主表 `COUNT(*)` 是否一致。
 - 分别用中文、全拼、首字母、CAS 精确值和短关键字测试库存与订单搜索。
 - 临时破坏一个 FTS 触发器后重启，确认系统会自动重建。
 

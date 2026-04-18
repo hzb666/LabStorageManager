@@ -16,6 +16,50 @@
 - 确认 `/static` 能正常返回公告图片、上传文件和模板。
 - 抽查 `/cart-import?import=true`，确认前端仍能读取最新导入批次。
 
+## 日志分库与归档操作
+
+当前日志分库由代码直接定义：
+
+- 主业务库路径由 `DATABASE_URL` 决定，默认指向 `lab_inventory.db`。
+- 搜索查询日志库由 `app/search_query_log_db.py` 管理，默认写入 `logs/query_logs.db`。
+- 业务操作日志归档脚本是 `app/archive_logs.py`，副本保存在 `dev-logs/archive_logs.py`。
+- 搜索查询日志归档脚本是 `app/archive_query_logs.py`，副本保存在 `dev-logs/archive_query_logs.py`。
+
+业务操作日志归档默认覆盖：`inventory_operation_log`、`reagent_order_operation_log`、`consumable_order_operation_log`、`common_shelf_operation_log` 和 `user_operation_log`，并同步处理这些源日志对应的 `log_timeline` 行。`borrowlog` 是借还业务数据表，不属于当前日志归档删除范围。搜索查询日志归档覆盖独立日志库中的 `search_logs` 表。两个脚本默认只处理三个月以前的数据，输出独立 SQLite 归档库，并在复制、`archive_meta` 写入和行数校验成功后删除源表中的已归档行。源库删除使用事务保护，任一删除行数不匹配都会回滚。
+
+执行前先预览归档范围：
+
+```bash
+python -m app.archive_logs --dry-run
+python -m app.archive_query_logs --dry-run
+```
+
+确认后再执行归档：
+
+```bash
+python -m app.archive_logs --output-dir logs
+python -m app.archive_query_logs --output-dir logs
+```
+
+若希望归档随后端自动定期运行，在 `.env` 中设置：
+
+```bash
+ARCHIVE_SCHEDULER_ENABLED=true
+ARCHIVE_INTERVAL_HOURS=24
+ARCHIVE_STARTUP_DELAY_SECONDS=300
+ARCHIVE_OUTPUT_DIR=/data/logs
+```
+
+调度器会先运行主业务库操作日志归档，再运行搜索查询日志归档。归档目录下的 `.archive-scheduler.lock` 用于避免多 worker 重复执行同一轮任务。
+
+只归档指定业务日志表时使用 `--tables`：
+
+```bash
+python -m app.archive_logs --tables inventory_operation_log common_shelf_operation_log --dry-run
+```
+
+Docker 部署时需要保证主业务库、搜索日志库和归档输出目录位于可持久化位置。若调整搜索查询日志库位置，应同步更新 `app/search_query_log_db.py` 中的路径常量，并检查容器卷挂载策略。
+
 ## 常见故障
 
 ### 启动失败
@@ -54,6 +98,9 @@
 ## 参考代码
 
 - [app/core/config.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/config.py)
+- [app/archive_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/archive_logs.py)
+- [app/archive_query_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/archive_query_logs.py)
+- [app/search_query_log_db.py](https://github.com/hzb666/LabStorageManager/blob/main/app/search_query_log_db.py)
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)
 - [docker/backend/entrypoint.sh](https://github.com/hzb666/LabStorageManager/blob/main/docker/backend/entrypoint.sh)
 - [docker/nginx/default.conf](https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf)

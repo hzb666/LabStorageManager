@@ -59,7 +59,7 @@
 
 ## 接手时容易漏掉的点
 
-- 当前 `CartImport` 页面主链路不是批量调用 `/api/cart-sync/import`，而是逐条走标准订单创建接口。
+- `CartImport` 页面主链路逐条走标准订单创建接口。
 - `temporary_keeper_id` 是库存暂管字段，不是用户角色。
 - `arrived` 不是“已正式入库”，而是试剂已到货但尚未完成正式落位。
 - `COMMON_PUBLIC` 订单在确认到货时可能直接进入常用货架，不一定创建普通库存。

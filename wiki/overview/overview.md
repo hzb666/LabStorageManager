@@ -1,16 +1,16 @@
 # 项目概览
 
-LabStorageManager 是面向实验室采购与库存管理的业务系统。当前实现围绕试剂、耗材、库存、借用、会话与公告展开，目标是把采购、到货、入库、借用、归还和审计放在同一条可追踪链路里。
+LabStorageManager 是面向实验室采购与库存管理的业务系统，围绕试剂、耗材、库存、借用、会话与公告展开，目标是把采购、到货、入库、借用、归还和审计放在同一条可追踪链路里。
 
 ## 职责边界
 
-当前仓库覆盖的主要子系统如下：
+仓库覆盖的主要子系统如下：
 
 - `app/`：FastAPI 后端，负责业务规则、认证、数据存储、静态资源和事件推送。
 - `frontend/`：React 单页应用，负责页面路由、表格、表单和交互状态。
 - `browser-extension/`：浏览器扩展，负责采集外部购物车并桥接到 `/cart-import`。
 - `docker/` 与 `docker-compose.yml`：部署镜像、Nginx 代理和服务编排。
-- `wiki/`：当前文档站源码。
+- `wiki/`：文档站源码。
 
 ## 核心对象
 
@@ -24,11 +24,11 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统。当�
 
 ## 子系统概览
 
-1. `app/` 是后端事实源，承担业务校验、认证、持久化和静态资源服务。
+1. `app/` 承担后端业务校验、认证、持久化和静态资源服务。
 2. `frontend/` 是用户交互入口，承担路由、列表页、表单页和实时刷新。
 3. `browser-extension/` 是外部数据采集入口，只负责抓取和桥接，不直接写数据库。
 
-## 代码事实源与职责
+## 关键代码与职责
 
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />：创建 FastAPI 应用，注册中间件、生命周期、路由和 `/cart-import` 重定向。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />：初始化 SQLite 引擎，启用 WAL 和外键，创建索引、FTS 与默认管理员。
@@ -41,7 +41,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统。当�
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts" /> 与 `store/sseStore.ts`：维护 SSE 连接、序号处理和 stale 提示。
 - `browser-extension/`：`manifest.json`、`popup/` 和 `content/import-bridge.js` 共同完成外部购物车到导入页的桥接。
 
-## 当前特征
+## 系统特征
 
 - 试剂与耗材采用双链路处理。
 - CAS 号重复提醒用于降低重复采购。
@@ -58,19 +58,12 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统。当�
 - 列表页通过 `/api/...` 接口获取快照，并通过 `useSSE` 订阅 `/api/events?rooms=...` 进行增量刷新。
 - 试剂工作流由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" /> 负责，按审批、到货和入库推进状态。
 - 耗材工作流由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py" /> 负责，完成后直接结束，不进入库存。
-- SSE 推送由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py" /> 对外提供，导入流程还会经过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" /> 广播相关事件。
+- SSE 推送由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py" /> 对外提供，扩展导入页提交成功后由标准订单接口广播相关事件。
 - 扩展通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js" /> 采集购物车，再由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" /> 写入页面缓存，最终进入前端导入页。
-
-## 这套 wiki 的口径
-
-- 以当前代码行为为准。
-- 历史设计稿和旧文档仅作辅助背景。
-- 演进中的功能统一写成“当前实现”。
-- 文档标题与正文保持陈述式表达。
 
 ## 技术栈速览
 
-| 层级 | 当前实现 |
+| 层级 | 技术 |
 | --- | --- |
 | 后端 | FastAPI + SQLModel + SQLite(WAL) + Redis |
 | 前端 | React 19 + TypeScript + Vite + React Router |

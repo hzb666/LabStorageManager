@@ -93,7 +93,7 @@ erDiagram
 ## 索引与 FTS
 
 - `ensure_sqlite_performance_indexes` 会在启动时创建复合索引，覆盖订单状态、库存状态、借用日志和用户会话等高频筛选字段。
-- `inventory_fts`、`reagent_order_fts`、`consumable_order_fts`、`users_fts` 使用 trigram 分词，并通过 insert/update/delete 触发器保持同步。
+- `inventory_fts`、`reagent_order_fts`、`consumable_order_fts`、`users_fts`、`chemical_name_map_fts` 使用 trigram 分词，并通过 insert/update/delete 触发器保持同步。
 - 启动时会对比源表与 FTS 表行数，不一致时自动重建；触发器缺失时也会触发重建。
 
 这些索引并不是装饰，而是支撑 SQLite 在普通库存、常用货架、拼音搜索和大列表排序场景下保持可用的基础。
@@ -108,7 +108,7 @@ erDiagram
 ## 验证建议
 
 - 启动后核对 `PRAGMA journal_mode;` 和 `PRAGMA foreign_keys;`。
-- 检查四张 FTS 表与源表的行数是否一致。
+- 检查五张 FTS 表与源表的行数是否一致。
 - 新增字段后重新启动，确认会触发 FTS 重建日志。
 
 ## 模型同步检查

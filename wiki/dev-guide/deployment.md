@@ -76,7 +76,7 @@ APP_PORT=80 docker compose up -d --build
 - 若 Nginx 前面还有受信代理，需把 `TRUST_PROXY_HEADERS` 设为 `true`，并确保代理透传 `X-Forwarded-*`。
 - 自定义域名或 TLS 场景下，需要补充 `listen 443 ssl`、证书路径和 `server_name`，同时保持 `/api` 与前端路由边界不变。
 - `VITE_API_URL` 必须与代理路径对齐；如果前端部署在独立子域，不要继续使用默认 `/api` 假设。
-- 上传大小同时受后端和 Nginx 限制，Nginx 当前 `client_max_body_size` 为 `20m`。
+- 上传大小同时受后端和 Nginx 限制，默认单次请求上限为 `5MB`，Nginx `client_max_body_size` 为 `5m`。
 
 ## 最小验证清单
 

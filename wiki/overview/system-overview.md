@@ -2,7 +2,7 @@
 
 ## 一句话理解
 
-当前系统以 FastAPI + SQLite 作为事实源，前端负责业务操作和实时刷新，浏览器扩展只负责把外部购物车数据送到 `/cart-import`，不直接参与后端写入。
+当前系统以 FastAPI + SQLite 作为事实源，前端负责业务操作和实时刷新，浏览器扩展只负责把外部购物车批次桥接到 `/cart-import`，不直接参与后端写入。
 
 ## 架构分层
 
@@ -17,9 +17,9 @@
 flowchart TD
     Browser["用户浏览器"] --> Web["frontend/App (QueryClient + Router)"]
     Extension["Chrome 扩展"] --> ImportPage["/cart-import 页面"]
-    ImportPage --> CartSync["cartSyncAPI.importItems"]
+    ImportPage --> OrderApis["reagentOrderAPI / consumableOrderAPI"]
     Web --> Api["FastAPI /api/*"]
-    CartSync --> Api["FastAPI /api/cart-sync"]
+    OrderApis --> Api["FastAPI /api/reagent-orders 或 /api/consumable-orders"]
     Api --> Db["SQLite (app/database.py + SQLModel)"]
     Api --> Cache["Redis (app/core/redis.py + rate_limit/session)"]
     Api --> Fs["static/ (CachedStaticFiles)"]
@@ -31,7 +31,7 @@ flowchart TD
 
 - `frontend/`：`App.tsx` 负责路由守卫和页面加载，`useSSE.ts` 连接 `/api/events?rooms=...`，`useListSSE.ts` 为列表页维护房间切换和 stale 标记。
 - `app/`：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" /> 负责中间件、生命周期和路由注入；`inventory.py`、`reagent_orders.py`、`reagent_orders_workflow.py`、`consumable_orders.py`、`cart_sync.py` 和 `events.py` 分别覆盖库存、订单、导入和事件；<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/services" /> 提供清洗、缓存和 SSE 支撑。
-- `browser-extension/`：`manifest.json` 声明权限，`content/script.js` 抓取购物车，`content/import-bridge.js` 把数据同步到页面缓存，最终由前端调用 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" />。
+- `browser-extension/`：`manifest.json` 声明权限，`content/script.js` 抓取购物车，`content/import-bridge.js` 把数据同步到页面缓存；`CartImport` 页面逐条调用标准试剂或耗材订单创建接口。
 
 ## 关键边界与安全
 
@@ -53,7 +53,7 @@ flowchart TD
 - 页面切换与筛选应保持顺畅，列表页主要依赖分页、拼音和 FTS。
 - 审计链路应能追踪审批、入库、借用和完成等关键动作。
 - SSE 应只承担实时刷新，不替代主查询接口。
-- 扩展导入的最终数据链路应能回到 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" />。
+- 扩展导入的最终数据链路应回到标准订单创建接口；<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" /> 提供匹配分析接口。
 
 ## 面向开发者的关键校验点
 
@@ -61,13 +61,13 @@ flowchart TD
 - 试剂必须走完整的审批、到货和入库链路，耗材完成后不应写入库存。
 - 修改库存或订单后，应能看到对应 SSE 房间事件。
 - 列表写操作后要检查缓存失效和前端 stale 提示。
-- 扩展只能采集和桥接，导入入口仍然是 `/api/cart-sync/import`。
+- 扩展只能采集和桥接，导入页主链路应逐条调用标准订单创建接口。
 
-## 从 zread 融合到当前代码的差异说明
+## 实现边界说明
 
 - 本地联调由前端 `VITE_API_URL` 指向后端 API，不依赖 Vite dev proxy。
-- 常用货架前端路径是 `/common-shelf`，接口路径是 `/api/inventory/common-shelf*`。
-- 当前数据库 FTS 覆盖 `inventory`、`reagent_order`、`consumable_order` 和 `users`。
+- 常用货架前端路径是 `/common-shelf`，接口路径是 `/api/common-shelf*`。
+- 数据库 FTS 覆盖 `inventory`、`reagent_order`、`consumable_order`、`users` 和 `chemical_name_map`。
 - Redis 是增强层，不是唯一事实源；不可用时系统仍保持 SQLite 可用。
 
 ## 参考代码

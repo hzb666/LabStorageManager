@@ -6,6 +6,7 @@
 
 - 普通用户认证
 - 库存查询与普通用户可执行的库存操作
+- 常用货架查询、手动添加、加瓶与扣减 1 瓶
 - 试剂订单查询与普通用户可执行的订单操作
 - 耗材订单查询与普通用户可执行的订单操作
 
@@ -13,6 +14,7 @@ CLI 自身有额外限制：
 
 - 不开放 `delete`
 - 不开放 `export`
+- 不开放常用货架分组编辑、条目编辑、删除、导出或 CAS 主数据接口
 - 不开放文件上传
 - 不开放用户自助和管理接口，除了 `login/token`、`logout`、`me`
 - 不开放任何 CLI 未显式暴露的 API
@@ -303,6 +305,14 @@ python -m lsm_cli inventory list --summary --param search=苯胺
 python -m lsm_cli inventory borrow 12
 python -m lsm_cli inventory return 12 --used-quantity 20
 python -m lsm_cli inventory update 12 --storage-location A-02 --notes "转移货架"
+python -m lsm_cli inventory name 乙醇
+python -m lsm_cli reagent-orders cas 64-17-5
+python -m lsm_cli reagent-orders name 乙醇
+python -m lsm_cli consumable-orders name 手套
+python -m lsm_cli common-shelf cas 64-17-5
+python -m lsm_cli common-shelf alias 酒精
+python -m lsm_cli common-shelf add-bottles <group_key> --count 2 --storage-location A-02
+python -m lsm_cli common-shelf remove-one <group_key> --storage-location A-02
 python -m lsm_cli reagent-orders update 18 --price 199 --brand 国药
 python -m lsm_cli reagent-orders confirm-arrival 18 --storage-location B-01
 python -m lsm_cli reagent-orders stock-in 18 --storage-location B-01 --remaining-quantity 450
@@ -334,6 +344,7 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 | `inventory list` | 列出库存 | `GET /inventory/` |
 | `inventory get <inventory_id>` | 查看单条库存 | `GET /inventory/{inventory_id}` |
 | `inventory cas <cas_number>` | 按 CAS 查询库存概览 | `GET /inventory/cas/{cas_number}` |
+| `inventory name <keyword>` | 按名称搜索库存列表 | `GET /inventory/?search=...&search_field=name` |
 | `inventory code <internal_code>` | 按内部编码查询库存 | `GET /inventory/code/{internal_code}` |
 | `inventory my-borrows` | 查看当前用户借用中的库存 | `GET /inventory/dashboard/my-borrows` |
 | `inventory pending-stockin` | 查看当前用户待补全入库项 | `GET /inventory/dashboard/pending-stockin` |
@@ -348,6 +359,8 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 | --- | --- | --- |
 | `reagent-orders list` | 列出试剂订单 | `GET /reagent-orders/` |
 | `reagent-orders get <order_id>` | 查看单条试剂订单 | `GET /reagent-orders/{order_id}` |
+| `reagent-orders cas <cas_number>` | 按 CAS 搜索试剂订单列表 | `GET /reagent-orders/?search=...&search_field=cas_number` |
+| `reagent-orders name <keyword>` | 按名称搜索试剂订单列表 | `GET /reagent-orders/?search=...&search_field=name` |
 | `reagent-orders my` | 查看当前用户试剂订单 | `GET /reagent-orders/dashboard/my-reagent-orders` |
 | `reagent-orders create` | 新建试剂订单 | `POST /reagent-orders/` |
 | `reagent-orders update <order_id>` | 更新试剂订单 | `PUT /reagent-orders/{order_id}` |
@@ -355,12 +368,25 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 | `reagent-orders confirm-arrival <order_id>` | 确认到货 | `POST /reagent-orders/{order_id}/confirm-arrival` |
 | `reagent-orders stock-in <order_id>` | 订单入库 | `POST /reagent-orders/{order_id}/stock-in` |
 
+### common-shelf
+
+| 命令 | 说明 | 对应 API |
+| --- | --- | --- |
+| `common-shelf list` | 列出常用货架分组 | `GET /common-shelf/groups` |
+| `common-shelf cas <cas_number>` | 按 CAS 查询常用货架分组 | `GET /common-shelf/groups?search=...&search_field=cas_number` |
+| `common-shelf alias <keyword>` | 按别名查询常用货架分组 | `GET /common-shelf/groups?search=...&search_field=alias` |
+| `common-shelf locations <group_key>` | 查看分组位置统计 | `GET /common-shelf/groups/{group_key}/locations` |
+| `common-shelf manual-add` | 手工添加常用货架瓶 | `POST /common-shelf/manual-add` |
+| `common-shelf add-bottles <group_key>` | 给分组加瓶 | `POST /common-shelf/groups/{group_key}/add-bottles` |
+| `common-shelf remove-one <group_key>` | 从指定位置扣减 1 瓶 | `POST /common-shelf/groups/{group_key}/remove-one` |
+
 ### consumable-orders
 
 | 命令 | 说明 | 对应 API |
 | --- | --- | --- |
 | `consumable-orders list` | 列出耗材订单 | `GET /consumable-orders/` |
 | `consumable-orders get <order_id>` | 查看单条耗材订单 | `GET /consumable-orders/{order_id}` |
+| `consumable-orders name <keyword>` | 按名称搜索耗材订单列表 | `GET /consumable-orders/?search=...&search_field=name` |
 | `consumable-orders my` | 查看当前用户耗材订单 | `GET /consumable-orders/dashboard/my-consumable-orders` |
 | `consumable-orders create` | 新建耗材订单 | `POST /consumable-orders/` |
 | `consumable-orders update <order_id>` | 更新耗材订单 | `PUT /consumable-orders/{order_id}` |
@@ -435,6 +461,27 @@ python -m lsm_cli inventory list --summary --param search=苯胺
 | `fuzzy` | `true` / `false` |
 | `sort_by` | 排序字段 |
 | `sort_order` | `asc` / `desc` |
+
+### common-shelf list
+
+支持：
+
+| 参数 | 说明 |
+| --- | --- |
+| `skip` | 跳过条数 |
+| `limit` | 返回条数，默认 `50`，最大 `100`；传 `0` 时仅返回 `total/skip/limit` |
+| `search` | 搜索词 |
+| `search_field` | `name` / `alias` / `cas_number` / `brand` / `all` |
+| `fuzzy` | `true` / `false` |
+| `match_mode` | 文本匹配模式 |
+| `sort_by` | `cas_number` / `name` / `category` / `brand` / `specification` / `bottle_count` / `location_count` / `created_at` / `updated_at` |
+| `sort_order` | `asc` / `desc` |
+
+说明：
+
+- `common-shelf list` 返回的 `group.group_key` 是 `add-bottles`、`remove-one` 和 `locations` 的目标参数。
+- `common-shelf locations <group_key>` 可在扣减前确认该分组下有哪些位置和各位置瓶数。
+- 常用 CAS 或别名查询可直接用 `common-shelf cas <cas_number>` 和 `common-shelf alias <keyword>`，它们仍然只调用分组查询接口。
 
 ## 请求体参数
 
@@ -534,6 +581,79 @@ python -m lsm_cli inventory update 123 \
 ```
 
 `update` 每次只更新一个 `inventory_id`，且只提交显式传入的字段。
+
+### common-shelf manual-add
+
+对应模型：`CommonShelfManualCreate`
+
+```json
+{
+  "cas_number": "64-17-5",
+  "name_snapshot": "乙醇",
+  "brand": "国药",
+  "purity": "AR",
+  "specification": "500ml",
+  "count": 2,
+  "storage_location": "A-01",
+  "notes": "常用货架补充"
+}
+```
+
+示例：
+
+```bash
+python -m lsm_cli common-shelf manual-add --data-file common-shelf.json
+```
+
+### common-shelf add-bottles
+
+对应模型：`CommonShelfAddBottlesRequest`
+
+参数模式：
+
+```bash
+python -m lsm_cli common-shelf add-bottles <group_key> \
+  --count 2 \
+  --storage-location A-02 \
+  --purity AR \
+  --notes "补充常用瓶"
+```
+
+也支持 JSON object 负载：
+
+```json
+{
+  "count": 2,
+  "storage_location": "A-02",
+  "purity": "AR",
+  "notes": "补充常用瓶"
+}
+```
+
+`group_key` 来自 `common-shelf list` 返回的 `group.group_key`。
+
+### common-shelf remove-one
+
+对应模型：`CommonShelfRemoveOneRequest`
+
+参数模式：
+
+```bash
+python -m lsm_cli common-shelf remove-one <group_key> \
+  --storage-location A-02
+```
+
+省略 `--storage-location` 时，扣减该分组中未填写位置的最早一瓶。
+
+也支持 JSON object 负载：
+
+```json
+{
+  "storage_location": "A-02"
+}
+```
+
+建议先执行 `common-shelf locations <group_key>`，确认目标位置和瓶数后再扣减。
 
 ### reagent-orders create
 
@@ -752,6 +872,8 @@ python -m lsm_cli auth whoami --base-url http://127.0.0.1:9/api
 
 - 所有 `delete`
 - 所有 `export`
+- 常用货架分组编辑、条目编辑、删除、导出
+- CAS 主数据管理
 - 文件上传
 - 用户资料修改、用户名修改、密码修改、头像相关
 - 用户管理、会话管理

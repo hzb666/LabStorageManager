@@ -2,7 +2,7 @@
 
 ## 前置环境
 
-- Python 3.11+、Node.js 20+、npm 9+。
+- Python 3.11+、Node.js 20+、npm 10+。
 - 可选 Redis 6+，用于登录限流和会话缓存。
 - 需要 Git 和 Docker，若使用 Compose 还要保证镜像可拉取、依赖可安装。
 
@@ -32,7 +32,7 @@ poetry install
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- 启动后可访问 `http://localhost:8000/docs`、`/redoc` 和 `/health`。
+- 开发模式下可访问 `http://localhost:8000/docs`、`/redoc` 和 `/health`；安全运行模式下默认只保留业务接口和健康检查。
 
 ## 启动前端
 

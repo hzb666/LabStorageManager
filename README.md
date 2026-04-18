@@ -3,16 +3,16 @@
 ![logo.webp](./wiki/logo.webp)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.14+-blue?style=flat&logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/Node.js-24+-blue?style=flat&logo=node.js" alt="Node.js">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat&logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/Node.js-20+-blue?style=flat&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/SQLite-WAL-green?style=flat&logo=sqlite" alt="SQLite">
   <img src="https://img.shields.io/badge/License-Apache%202.0-green?style=flat" alt="License">
-  <a href="https://zread.ai/hzb666/LabStorageManager" target="_blank"><img src="https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=565656&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff" alt="zread"/></a>
-<img src="https://img.shields.io/badge/Ask_Deepwiki-_.svg?style=flat&color=00b0aa&labelColor=565656&logo=data:image/svg+xml;charset=utf-8;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0NjAiIGhlaWdodD0iNTAwIiBjbGFzcz0ic2l6ZS00IHRyYW5zZm9ybSB0cmFuc2l0aW9uLXRyYW5zZm9ybSBkdXJhdGlvbi03MDAgZ3JvdXAtaG92ZXI6cm90YXRlLTE4MCBbJmFtcDtfcGF0aF06c3Ryb2tlLTAiIHZpZXdCb3g9IjExMCAxMTAgNDYwIDUwMCI+PHBhdGggZD0iTTQxOSAzMzJxMTYtNyAzMiAwbDI1IDE1IDMgMSAzIDEgMy0xIDMtMSA1MS0yOXE2LTMgNi0xMXYtNThxMC04LTYtMTFsLTUxLTI5cS02LTMtMTIgMGwtNTEgMjl2MWwtMiAxLTIgMnYxbC0xIDJ2MWwtMSAzdjI5YTMyIDMyIDAgMCAxLTQ4IDI4bC0yNS0xNS0zLTEtMy0xLTMgMS0zIDEtNTEgMjlxLTUgMy02IDExdjU4cTEgOCA2IDExbDUxIDI5IDMgMSAzIDEgMy0xIDMtMSAyNS0xNWEzMiAzMiAwIDAgMSA0OCAyOHYyOWwxIDN2MWwxIDJ2MWwyIDIgMiAyIDUxIDI5IDYgMiA2LTIgNTEtMjlxNi0zIDYtMTF2LTU4cTAtOC02LTExbC01MS0yOS0zLTEtMy0xLTMgMS0zIDEtMjUgMTVhMzIgMzIgMCAwIDEtNDgtMjhxMS0xOCAxNi0yOCIgc3R5bGU9ImZpbGw6IzIxYzE5YSIvPjxwYXRoIGQ9Im0xNDEgMzE4IDUxIDI5IDYgMiA2LTIgNTEtMjl2LTFsMi0xIDItMnYtMWwxLTJ2LTFsMS0zdi0yOWEzMiAzMiAwIDAgMSA0OC0yOGwyNSAxNSAzIDEgMyAxIDMtMSAzLTEgNTEtMjlxNi0zIDYtMTF2LTU4cTAtOC02LTExbC01MS0yOXEtNi0zLTEyIDBsLTUxIDI5LTIgMmgtMWwtMSAydjFsLTEgMnYxbC0xIDN2MjlhMzIgMzIgMCAwIDEtNDggMjhsLTI1LTE1LTMtMS0zLTEtMyAxLTMgMS01MSAyOXEtNiAzLTYgMTF2NThxMCA4IDYgMTEiIHN0eWxlPSJmaWxsOiMzOTY5Y2EiLz48cGF0aCBkPSJtMzk3IDQ4NC01MS0yOS0zLTEtMy0xLTMgMS0zIDEtMjUgMTVhMzIgMzIgMCAwIDEtNDgtMjh2LTI5bC0xLTN2LTFsLTEtMnYtMWwtMi0yLTItMXYtMWwtNTEtMjlxLTYtMy0xMiAwbC01MSAyOXEtNiAzLTYgMTF2NThxMCA4IDYgMTFsNTEgMjkgMyAxIDMgMSAzLTEgMy0xIDI1LTE1YTMyIDMyIDAgMCAxIDQ4IDI4djI5bDEgM3YxbDEgMnYxbDIgMiAyIDIgNTEgMjkgNiAyIDYtMiA1MS0yOXE2LTMgNi0xMXYtNThxMC04LTYtMTEiIHN0eWxlPSJmaWxsOiMwMjk0ZGUiLz48L3N2Zz4=" alt="deepwiki"/>
+  <a href="https://zread.ai/hzb666/LabStorageManager" target="_blank"><img src="https://img.shields.io/badge/Zread-_.svg?style=flat&color=00b0aa&labelColor=565656&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff" alt="zread"/></a>
+<img src="https://img.shields.io/badge/DeepWiki-_.svg?style=flat&color=00b0aa&labelColor=565656&logo=data:image/svg+xml;charset=utf-8;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0NjAiIGhlaWdodD0iNTAwIiBjbGFzcz0ic2l6ZS00IHRyYW5zZm9ybSB0cmFuc2l0aW9uLXRyYW5zZm9ybSBkdXJhdGlvbi03MDAgZ3JvdXAtaG92ZXI6cm90YXRlLTE4MCBbJmFtcDtfcGF0aF06c3Ryb2tlLTAiIHZpZXdCb3g9IjExMCAxMTAgNDYwIDUwMCI+PHBhdGggZD0iTTQxOSAzMzJxMTYtNyAzMiAwbDI1IDE1IDMgMSAzIDEgMy0xIDMtMSA1MS0yOXE2LTMgNi0xMXYtNThxMC04LTYtMTFsLTUxLTI5cS02LTMtMTIgMGwtNTEgMjl2MWwtMiAxLTIgMnYxbC0xIDJ2MWwtMSAzdjI5YTMyIDMyIDAgMCAxLTQ4IDI4bC0yNS0xNS0zLTEtMy0xLTMgMS0zIDEtNTEgMjlxLTUgMy02IDExdjU4cTEgOCA2IDExbDUxIDI5IDMgMSAzIDEgMy0xIDMtMSAyNS0xNWEzMiAzMiAwIDAgMSA0OCAyOHYyOWwxIDN2MWwxIDJ2MWwyIDIgMiAyIDUxIDI5IDYgMiA2LTIgNTEtMjlxNi0zIDYtMTF2LTU4cTAtOC02LTExbC01MS0yOS0zLTEtMy0xLTMgMS0zIDEtMjUgMTVhMzIgMzIgMCAwIDEtNDgtMjhxMS0xOCAxNi0yOCIgc3R5bGU9ImZpbGw6IzIxYzE5YSIvPjxwYXRoIGQ9Im0xNDEgMzE4IDUxIDI5IDYgMiA2LTIgNTEtMjl2LTFsMi0xIDItMnYtMWwxLTJ2LTFsMS0zdi0yOWEzMiAzMiAwIDAgMSA0OC0yOGwyNSAxNSAzIDEgMyAxIDMtMSAzLTEgNTEtMjlxNi0zIDYtMTF2LTU4cTAtOC02LTExbC01MS0yOXEtNi0zLTEyIDBsLTUxIDI5LTIgMmgtMWwtMSAydjFsLTEgMnYxbC0xIDN2MjlhMzIgMzIgMCAwIDEtNDggMjhsLTI1LTE1LTMtMS0zLTEtMyAxLTMgMS01MSAyOXEtNiAzLTYgMTF2NThxMCA4IDYgMTEiIHN0eWxlPSJmaWxsOiMzOTY5Y2EiLz48cGF0aCBkPSJtMzk3IDQ4NC01MS0yOS0zLTEtMy0xLTMgMS0zIDEtMjUgMTVhMzIgMzIgMCAwIDEtNDgtMjh2LTI5bC0xLTN2LTFsLTEtMnYtMWwtMi0yLTItMXYtMWwtNTEtMjlxLTYtMy0xMiAwbC01MSAyOXEtNiAzLTYgMTF2NThxMCA4IDYgMTFsNTEgMjkgMyAxIDMgMSAzLTEgMy0xIDI1LTE1YTMyIDMyIDAgMCAxIDQ4IDI4djI5bDEgM3YxbDEgMnYxbDIgMiAyIDIgNTEgMjkgNiAyIDYtMiA1MS0yOXE2LTMgNi0xMXYtNThxMC04LTYtMTEiIHN0eWxlPSJmaWxsOiMwMjk0ZGUiLz48L3N2Zz4=" alt="deepwiki"/>
 </p>
 
 
-面向实验室场景的试剂与耗材管理系统，覆盖申购、审批、到货、入库、借用、归还、公告、设备会话管理等完整流程。项目采用 FastAPI + React 前后端分离架构，后端以 SQLite WAL 模式为核心存储，前端基于 React 19 和 Vite 8 构建，适合单实验室或中小团队快速部署。
+面向实验室场景的试剂与耗材管理系统，覆盖申购、审批、到货、入库、借用、归还、公告、设备会话管理等完整流程。项目采用 FastAPI + React 前后端分离架构，适合单实验室或中小团队快速部署。
 
 ## 目录
 
@@ -30,7 +30,7 @@
 - [部署说明](#部署说明)
 - [附属模块](#附属模块)
 - [故障排查](#故障排查)
-- [AGENTS Skill](#agents-skill)
+- [CLI 访问边界](#cli-访问边界)
 - [许可证](#许可证)
 
 ## 项目简介
@@ -64,8 +64,8 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
   支持 HttpOnly Cookie 登录、设备列表、批量注销、IP/设备数量限制。
 - 公告与图片上传
   公告支持图片，图片文件落地到 `static/`，并受尺寸、类型、上传频率控制。
-- CLI 与自动化入口
-  提供 `python -m lsm_cli` 命令行入口，适合脚本、agent 和无 UI 场景操作。
+- CLI 与脚本入口
+  提供 `python -m lsm_cli` 命令行入口，适合脚本任务和无 UI 场景操作。
 - 部署简单
   内置 Docker Compose，可快速拉起 `frontend + backend + redis`。
 
@@ -133,7 +133,8 @@ cp .env.example .env
 | `CORS_ORIGINS` | 前端地址白名单，开发时通常为 `http://localhost:5173` |
 | `DEFAULT_ADMIN_PASSWORD` | 必填；后端首次启动会用它初始化管理员 |
 | `ALGORITHM` | 默认 `RS256` |
-| `DATABASE_URL` | 默认 SQLite 文件 |
+| `DATABASE_URL` | 主库 SQLite 连接串 |
+| `QUERY_LOG_DIR` | 搜索日志库目录 |
 
 开发环境建议：
 
@@ -187,14 +188,20 @@ npm run dev
 
 ### 常用项
 
-| 变量 | 默认值 | 说明 |
+| 变量 | 示例值 | 说明 |
 | --- | --- | --- |
-| `DATABASE_URL` | `sqlite:///./lab_inventory.db` | SQLite 数据库连接串 |
-| `TRUST_PROXY_HEADERS` | `false` | 是否信任反向代理头 |
+| `DATABASE_URL` | `sqlite:///./lab_inventory.db` | 主库 SQLite 连接串；Compose 生产默认 `/data/lab_inventory.db` |
+| `QUERY_LOG_DIR` | `logs` | 搜索日志库目录；Compose 生产默认 `/data/logs` |
+| `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署建议 true；本地开发或无可信反代时设为 false |
+| `CACHE_VERSION` | `0.1.0` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | 登录态默认 7 天 |
 | `SESSION_EXPIRE_HOURS` | `72` | 会话有效期 |
 | `MAX_IP_PER_USER` | `5` | 每个用户允许的最大 IP 数 |
 | `MAX_DEVICE_PER_USER` | `10` | 每个用户允许的最大设备数 |
+| `CLI_RATE_LIMIT_COUNT` | `60` | CLI API 单窗口请求次数 |
+| `CLI_RATE_LIMIT_WINDOW_SECONDS` | `60` | CLI API 限流窗口秒数 |
+| `CLI_LOGIN_RATE_LIMIT_COUNT` | `3` | CLI 登录单窗口尝试次数 |
+| `CLI_LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `300` | CLI 登录限流窗口秒数 |
 | `REDIS_HOST` | `127.0.0.1` | Redis 主机 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
 | `REDIS_DB` | `1` | Redis 逻辑库 |
@@ -202,16 +209,25 @@ npm run dev
 
 ### 上传与图片
 
-| 变量 | 默认值 | 说明 |
+| 变量 | 示例值 | 说明 |
 | --- | --- | --- |
 | `MAX_FILE_SIZE_MB` | `10` | 单文件体积限制 |
-| `MAX_UPLOAD_REQUEST_SIZE_MB` | `12` | 单次请求总上传限制 |
-| `ALLOWED_IMAGE_TYPES` | `image/jpeg,image/png,image/webp` | 允许的 MIME 类型 |
+| `MAX_UPLOAD_REQUEST_SIZE_MB` | `5` | 单次请求总上传限制 |
+| `ALLOWED_IMAGE_TYPES` | `["image/jpeg", "image/png", "image/webp"]` | JSON 数组字符串 |
 | `MAX_IMAGE_WIDTH` | `800` | 最大宽度 |
 | `MAX_IMAGE_HEIGHT` | `800` | 最大高度 |
 | `MAX_IMAGE_SIZE_KB` | `100` | 压缩后图片大小上限 |
 | `UPLOAD_RATE_LIMIT_COUNT` | `10` | 上传限流次数 |
 | `UPLOAD_RATE_LIMIT_WINDOW_SECONDS` | `300` | 上传限流时间窗口 |
+
+### 公告与外部信息
+
+| 变量 | 示例值 | 说明 |
+| --- | --- | --- |
+| `MAX_TOTAL_ANNOUNCEMENTS` | `10` | 单管理员公告总数上限 |
+| `MAX_VISIBLE_ANNOUNCEMENTS` | `5` | 单管理员可见公告数上限 |
+| `NIUTRANS_APPID` | 空 | 牛翻 API AppID；未配置时不启用 |
+| `NIUTRANS_APIKEY` | 空 | 牛翻 API Key；未配置时不启用 |
 
 ### JWT 与密钥
 
@@ -263,9 +279,13 @@ docker compose logs -f frontend
 docker compose logs -f redis
 ```
 
+Compose 默认把主库写入 `/data/lab_inventory.db`，搜索日志库写入 `/data/logs/query_logs.db`，
+两者都在 `app_data` volume 中。备份 SQLite 主库前建议先做 checkpoint，或同时备份
+`lab_inventory.db`、`lab_inventory.db-wal`、`lab_inventory.db-shm`。
+
 ## CLI 支持
 
-仓库提供本地命令行入口 [`lsm_cli/README.md`](lsm_cli/README.md)，适合 agent、脚本任务和不想打开前端的开发者。CLI 只通过后端 API 工作，不直接访问数据库，也不导入服务层。
+仓库提供本地命令行入口 [`lsm_cli/README.md`](lsm_cli/README.md)，适合脚本任务和不打开前端的开发者。CLI 只通过后端 API 工作，不直接访问数据库，也不导入服务层。
 
 ### 支持范围
 
@@ -308,9 +328,9 @@ python -m lsm_cli auth whoami
 
 - 默认 API 地址为 `http://127.0.0.1:8000/api`
 - `auth login` 支持 `--base-url` 与 `--timeout`
-- 自动化脚本推荐使用 `--password-stdin` 传递密码，避免明文出现在 shell history
+- 脚本登录推荐使用 `--password-stdin` 传递密码，避免明文出现在 shell history
 - 所有命令向 `stdout` 输出 JSON，并通过退出码区分错误类别
-- 面向 agent 的受限 CLI 操作流程见 [AGENTS Skill](#agents-skill)
+- 受限 CLI 操作流程见 [CLI 访问边界](#cli-访问边界)
 - Windows / macOS 目录版安装、配置文件位置、完整退出码契约见 [`lsm_cli/README.md`](lsm_cli/README.md)
 
 ## 系统架构
@@ -385,7 +405,7 @@ SQLite (WAL) + Redis + static/
 
 ### 搜索与性能
 
-- `inventory`、`reagent_order`、`consumable_order`、`users` 建有 SQLite FTS5 虚表。
+- `inventory`、`reagent_order`、`consumable_order`、`users`、`chemical_name_map` 建有 SQLite FTS5 虚表。
 - 名称、拼音、拼音首字母等字段会被索引，便于中文检索。
 - 大量列表查询配套了状态、申请人、时间、公共货架等复合索引。
 
@@ -430,9 +450,9 @@ CAS 号等关键字段会在服务端清洗，避免由于大小写、空格、�
 ├── frontend/             # React 前端
 ├── browser-extension/    # 浏览器扩展，用于购物车导入等场景
 ├── docker/               # Dockerfile、Nginx、入口脚本
+├── lsm_cli/              # 本地命令行客户端
 ├── static/               # 图片与静态文件
-├── docs/                 # 项目文档
-├── tests/                # 后端测试目录
+├── wiki/                 # VitePress 知识库源码
 ├── docker-compose.yml    # 一体化部署编排
 ├── pyproject.toml        # 后端依赖与工具配置
 └── README.md
@@ -462,6 +482,8 @@ app/
 - `cart_sync.py`
 - `events.py`
 - `error_logs.py`
+- `common_shelf.py`
+- `chemical_name_map.py`
 
 ### 前端
 
@@ -501,6 +523,18 @@ cp .env.example .env
 - `CORS_ORIGINS`
 - `REDIS_PASSWORD`
 - `ENV`
+
+如果保持默认 `ALGORITHM=RS256`，首次启动前需要在 Compose 的持久化卷里生成密钥：
+
+```bash
+docker compose run --rm --entrypoint sh backend -c \
+  'mkdir -p /data/keys && \
+   openssl genrsa -out /data/keys/private.pem 2048 && \
+   openssl rsa -in /data/keys/private.pem -pubout -out /data/keys/public.pem'
+```
+
+后端启动时会把 `/data/keys` 映射到容器内的 `/app/.keys`，与 `.env` 中的
+`PRIVATE_KEY_PATH=.keys/private.pem`、`PUBLIC_KEY_PATH=.keys/public.pem` 对齐。
 
 然后启动：
 
@@ -568,11 +602,13 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 - `CORS_ORIGINS` 未正确配置
 - 浏览器与后端地址不匹配
 - 在无 HTTPS 的环境使用了 `production`
+- 外层 HTTPS 代理部署时未启用 `TRUST_PROXY_HEADERS`
 
 处理：
 
 - 开发时设为 `ENV=development`
 - 检查前端域名是否在 `CORS_ORIGINS` 中
+- 生产 Compose 部署保持 `TRUST_PROXY_HEADERS=true`
 - 确认浏览器实际请求携带 Cookie
 
 ### Redis 连不上
@@ -601,16 +637,16 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 - FTS 虚表和触发器是否存在
 - 是否误删了 SQLite 索引或数据库文件
 
-## AGENTS Skill
+## CLI 访问边界
 
-仓库在 [`lsm_cli/lab-storage-manager-cli/`](lsm_cli/lab-storage-manager-cli/) 提供了一个专门用于操作 CLI 的 skill。它的作用不是解释开发约定，而是约束 agent 只能通过 `python -m lsm_cli` 与系统交互，并严格遵守当前 CLI 已暴露的命令面。
+CLI 面向脚本化操作提供稳定命令面。脚本化操作应通过 `python -m lsm_cli` 或安装后的 `lsm` 命令与系统交互，并遵守当前 CLI 已暴露的能力范围。
 
 ### 适用场景
 
 - 需要通过 CLI 登录、查询库存、查看借用状态
 - 需要通过 CLI 创建或更新试剂订单、确认到货、一键入库
 - 需要通过 CLI 创建、更新或完成耗材订单
-- 需要在 agent 自动化中避免 raw HTTP、数据库直连、直接导入后端模块
+- 需要避免 raw HTTP、数据库直连、直接导入后端模块
 
 ### 硬限制
 
@@ -631,8 +667,8 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 
 ### 参考入口
 
-- Skill 定义：[`lsm_cli/lab-storage-manager-cli/SKILL.md`](lsm_cli/lab-storage-manager-cli/SKILL.md)
-- 命令参考：[`lsm_cli/lab-storage-manager-cli/references/commands.md`](lsm_cli/lab-storage-manager-cli/references/commands.md)
+- CLI 说明：[`lsm_cli/README.md`](lsm_cli/README.md)
+- 后端 CLI 访问控制：[`app/main.py`](app/main.py)
 
 ## 许可证
 

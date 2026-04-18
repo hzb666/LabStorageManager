@@ -1,6 +1,6 @@
 # 购物车同步插件
 
-TODO: 未完成功能。Chrome浏览器插件，用于将试剂管理平台的购物车同步到实验室库存管理系统。
+Chrome 浏览器插件用于采集试剂管理平台购物车数据，并把导入批次桥接到实验室库存管理系统的 `/cart-import` 页面。
 
 ## 功能特点
 
@@ -78,6 +78,8 @@ chrome://extensions/
 ```
 browser-extension/
 ├── manifest.json          # 扩展配置文件
+├── .env.example           # 构建期域名配置模板
+├── build-config.mjs       # 从 env 生成 manifest 和运行配置
 ├── background/
 │   └── service-worker.js # 后台服务脚本（获取详情页数据）
 ├── content/
@@ -85,17 +87,21 @@ browser-extension/
 ├── popup/
 │   ├── popup.html        # 弹出窗口
 │   └── popup.js          # 弹出窗口逻辑
+├── shared/
+│   ├── generated-config.js # 构建期生成的运行配置
+│   └── site-config.js      # 站点配置读取逻辑
 └── icons/                # 图标文件
 ```
 
 ## API接口
 
-后端提供以下接口：
+扩展负责采集和桥接，不直接写数据库。`/cart-import` 页面提交导入条目时调用标准订单接口。
 
 | 接口                      | 方法 | 说明                     |
 | ------------------------- | ---- | ------------------------ |
-| `/api/cart-sync`        | POST | 同步购物车并匹配现有订单 |
-| `/api/cart-sync/import` | POST | 导入选中的商品到系统     |
+| `/api/cart-sync`        | POST | 匹配分析购物车条目与现有订单 |
+| `/api/reagent-orders`   | POST | 创建试剂订单 |
+| `/api/consumable-orders` | POST | 创建耗材订单 |
 
 请求格式：
 
@@ -135,17 +141,17 @@ browser-extension/
 
 ## 常见问题
 
-### Q: 提示"请先打开购物车页面"
+### 提示“请先打开购物车页面”
 
-A: 请确保购物车页面（URL包含 `page=gwc`）已在Chrome其他标签页中打开
+请确保购物车页面（URL 包含 `page=gwc`）已在 Chrome 其他标签页中打开。
 
-### Q: 获取到的商品数量为0
+### 获取到的商品数量为 0
 
-A: 请确认购物车中有已提交的订单，未提交的订单不会被识别
+请确认购物车中有已提交的订单，未提交的订单不会被识别。
 
-### Q: 获取失败
+### 获取失败
 
-A: 请检查：
+请检查：
 
 - 购物车页面是否已登录
 - 控制台是否有错误信息
@@ -154,7 +160,7 @@ A: 请检查：
 
 如需修改或扩展功能：
 
-1. 修改 `manifest.json` 配置
+1. 修改 `browser-extension/.env` 后运行 `npm run build:extension`
 2. 修改 `content/script.js` 调整购物车数据提取逻辑
 3. 修改 `background/service-worker.js` 调整详情页解析逻辑
 4. 修改 `popup/popup.js` 和 `popup/popup.html` 调整界面
@@ -162,9 +168,9 @@ A: 请检查：
 
 ## 部署说明
 
-- `manifest.json` 必须是严格 JSON，不能包含注释。
-- 生产环境请在 `host_permissions` 和 `content_scripts.matches` 中替换本地地址：
-  - 移除 `localhost` / `127.0.0.1` 域名。
-  - 添加你的正式域名（例如 `https://inventory.example.com/*`）。
-- 当前默认仅放行 `5173` 开发端口；如你使用 `3000` 或 `8000`，请在上述两个字段中显式增加匹配规则。
+- 复制 `browser-extension/.env.example` 为 `browser-extension/.env`。
+- 设置 `BROWSER_EXTENSION_SYSTEM_ORIGIN` 为实验室管理系统域名，例如 `https://inventory.example.com`。
+- 设置 `BROWSER_EXTENSION_REAGENT_SITE_ORIGIN` 为试剂平台域名，例如 `https://reagent.bjmu.edu.cn`。
+- 运行 `npm run build:extension` 生成 `manifest.json` 和 `shared/generated-config.js`。
+- 生产域名不会在插件弹窗里修改；Chrome 扩展权限必须由构建期 env 写入 manifest。
 - 修改后需要在 `chrome://extensions/` 重新加载扩展。

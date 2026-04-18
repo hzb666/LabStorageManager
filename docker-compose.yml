@@ -27,10 +27,13 @@ services:
     env_file:
       - .env
     environment:
+      ENV: "${ENV:-production}"
+      DATABASE_URL: "${DATABASE_URL:-sqlite:////data/lab_inventory.db}"
+      QUERY_LOG_DIR: "${QUERY_LOG_DIR:-/data/logs}"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
-      TRUST_PROXY_HEADERS: "false"
+      TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-true}"
     volumes:
       - app_data:/data
     depends_on:

@@ -62,10 +62,12 @@
 
 ## 购物车同步
 
-`cart_sync` 不是“扩展直接发请求”这么简单，而是分成两步：
+浏览器扩展导入链路分为“批次桥接”和“订单创建”两段：
 
-1. `POST /api/cart-sync` 根据扩展采集到的商品，对已有试剂订单做匹配分析。
-2. `POST /api/cart-sync/import` 把选中的商品导入系统，生成试剂订单或耗材订单。
+1. 扩展把采集到的商品批次写入 `chrome.storage.local`。
+2. `import-bridge.js` 在 `/cart-import` 页面把批次复制到页面 `localStorage`。
+3. 前端导入页逐条调用 `reagentOrderAPI.create` 或 `consumableOrderAPI.create`。
+4. `POST /api/cart-sync` 提供后端匹配分析能力；导入落库统一走标准订单创建接口。
 
 扩展、前端导入页和后端路由之间通过批次数据衔接，详见 [购物车同步扩展](/dev-guide/cart-sync)。
 
@@ -79,7 +81,7 @@
 
 ### 试剂订单
 
-- 状态枚举：`PENDING/APPROVED/REJECTED/ARRIVED/STOCKED/DELETED`。
+- 状态枚举：`PENDING/APPROVED/REJECTED/ARRIVED/STOCKED`。
 - 审批：`/{id}/approve` 与 `/{id}/reject` 仅管理员可用，更新状态并写入操作日志。
 - 到货确认：`/{id}/confirm-arrival` 可直接进入暂存或常用货架，状态置为 `ARRIVED`。
 - 一键入库：`/{id}/stock-in` 将订单复制到 `inventory`，保留 `source_order_id`，支持写入常用货架或普通库存，入库后状态变为 `STOCKED`。
@@ -98,15 +100,15 @@
 - 删除保护：已借出状态禁止编辑/删除，需先归还。
 - FTS 与缓存：库存写操作会重建缓存并通过 SSE 推送 `inventory` / `common_shelf` 房间。
 
-### 购物车同步
+### 购物车导入
 
-- 阶段 1 匹配：`POST /api/cart-sync/sync` 按 CAS / 名称匹配已有库存或订单，返回匹配结果。
-- 阶段 2 导入：`POST /api/cart-sync/import` 将匹配结果落地为试剂/耗材订单，失败条目逐条记录日志。
-- SSE：导入完成后广播 `cart_sync` / `reagent_orders` / `consumable_orders` 更新。
+- 主链路：`/cart-import` 页面逐条提交标准试剂/耗材订单创建请求。
+- 匹配分析：`POST /api/cart-sync` 按 CAS / 名称匹配已有试剂订单，返回匹配结果。
+- 事件：标准订单接口会广播 `reagent_orders` 或 `consumable_orders` 更新。
 
 ### 导入导出
 
-- Excel 导入：`/api/inventory/import` 支持 `.csv/.xlsx/.xls`，单文件 2MB，逐行错误返回；成功后推送 SSE 并刷新缓存。
+- Excel 导入：`/api/inventory/import/preview` 和 `/api/inventory/import/confirm` 支持预览后确认，单文件 2MB，逐行错误返回；确认成功后推送 SSE 并刷新缓存。
 - 导出：库存与订单都提供导出接口，走后台生成文件再下载。
 
 ## 边界与风险
@@ -121,13 +123,13 @@
 - 试剂流程：新建 -> 审批 -> 到货 -> 入库，确认库存生成且 `source_order_id` 回填。
 - 耗材流程：新建 -> 审批 -> 完成，确认不会生成库存记录。
 - 借用流程：借用后状态应锁定编辑，归还后可恢复；日志应记录 borrower/returner。
-- 购物车导入：模拟扩展提交批次，确认能返回匹配结果并在导入后生成订单与 SSE 推送。
+- 购物车导入：模拟扩展提交批次，确认页面能逐条生成标准试剂或耗材订单。
 
 ## 二次开发建议
 
 - 新增业务接口时，先判断它是“对象 CRUD”还是“工作流动作”，后者通常更适合单独放在 workflow 路由中。
 - 任何会改动列表结果的接口，都要同时考虑缓存失效和 SSE 广播。
-- 库存相关新路由若是命名路由，必须在 `/{inventory_id}` 之前注册。
+- 库存相关新路由若是命名路由，必须优先于 `/{inventory_id}` 注册。
 - 面向前端或扩展的正式接口，最好同时在 [API 参考](/backend/api-reference) 中登记。
 
 ## 参考代码

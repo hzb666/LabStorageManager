@@ -27,6 +27,7 @@ lab_inventory.db
 lab_inventory.db-shm
 lab_inventory.db-wal
 logs
+dev-logs
 report
 plans
 scripts

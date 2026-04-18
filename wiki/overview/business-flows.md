@@ -46,15 +46,18 @@ flowchart LR
     Storage --> Bridge["import-bridge.js"]
     Bridge --> PageCache["cart_import_batch_latest"]
     PageCache --> Import["/cart-import 页面"]
-    Import --> ApiCartSync["cartSyncAPI.importItems"]
-    ApiCartSync --> CartSync["app/api/cart_sync.py"]
+    Import --> ReagentApi["reagentOrderAPI.create"]
+    Import --> ConsumableApi["consumableOrderAPI.create"]
+    ReagentApi --> ReagentOrders["app/api/reagent_orders.py"]
+    ConsumableApi --> ConsumableOrders["app/api/consumable_orders.py"]
 ```
 
 说明：
 
 - 扩展通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js" /> 抓取购物车数据，并写入 `chrome.storage.local.import_batch_latest`。
 - `/cart-import` 页面再通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" /> 读取页面缓存。
-- 前端导入页最终调用 `cartSyncAPI.importItems`，由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" /> 创建试剂或耗材订单。
+- 前端导入页逐条调用标准的 `reagentOrderAPI.create` 或 `consumableOrderAPI.create`，由试剂订单与耗材订单路由完成落库。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" /> 提供 `/api/cart-sync`，用于匹配分析场景。
 - 导入前会做基础校验和标准化，减少重复和脏数据进入数据库。
 
 ## 库存借用与常用货架
