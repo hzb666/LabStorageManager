@@ -32,6 +32,7 @@
 - [故障排查](#故障排查)
 - [AGENTS Skill](#agents-skill)
 - [许可证](#许可证)
+- [微信公众号机器人模块](./README_WECHAT_BOT.md)
 
 ## 项目简介
 

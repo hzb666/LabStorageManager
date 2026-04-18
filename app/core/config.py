@@ -26,6 +26,19 @@ class Settings(BaseSettings):
     # 数据库
     database_url: str = "sqlite:///./lab_inventory.db"
     
+
+    # WeChat + LLM
+    wechat_token: str = Field(default="", description="WeChat callback token")
+    wechat_app_id: str = Field(default="", description="WeChat app id")
+    wechat_app_secret: str = Field(default="", description="WeChat app secret")
+    wechat_encoding_aes_key: str | None = Field(default=None, description="WeChat AES key for secure mode")
+    redis_url: str | None = Field(default=None, description="Optional redis URL for cache/dedupe")
+    openai_api_key: str = Field(default="", description="OpenAI API key")
+    openai_model: str = Field(default="gpt-4.1-mini", description="OpenAI model")
+    llm_timeout_seconds: float = Field(default=5.0, description="LLM request timeout")
+    memory_window_size: int = Field(default=10, description="Recent memory window size")
+    memory_summary_trigger_count: int = Field(default=20, description="Summary trigger threshold")
+
     # JWT 认证
     secret_key: str = Field(default="", description="JWT secret key (for HS256 in development)")
     algorithm: str = "RS256"  # 从 HS256 切到 RS256 以提升安全性

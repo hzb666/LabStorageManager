@@ -50,6 +50,7 @@ from app.api import (
     user_logs,
     user_sessions,
     users,
+    wechat,
 )
 from app.services import chemical_info
 from app.services.cache_reset_service import apply_startup_cache_reset_if_needed
@@ -602,6 +603,7 @@ app.include_router(error_logs.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(common_shelf.router, prefix="/api")
 app.include_router(chemical_name_map.router, prefix="/api")
+app.include_router(wechat.router)
 
 
 @app.get("/")
