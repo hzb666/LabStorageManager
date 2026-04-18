@@ -10,7 +10,6 @@ import type { SortingState } from '@tanstack/react-table'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { Label } from '@/components/ui/Label'
 import { Textarea } from '@/components/ui/Textarea'
 import { LABEL_STYLES, INPUT_STYLES } from '@/lib/constants'
@@ -22,6 +21,7 @@ import { getApiErrorMessage } from '@/lib/validationSchemas'
 import { formatDate, cn, getFullImageUrl } from '@/lib/utils'
 import useDialogState from '@/hooks/useDialogState'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
+import { TableLoadingState, TooltipSelect } from '@/components/ui/TableFilters'
 import {
   Megaphone,
   Loader2,
@@ -111,6 +111,16 @@ type AnnouncementImageActionParams = {
 }
 
 const columnHelper = createColumnHelper<Announcement>()
+const ANNOUNCEMENT_VISIBILITY_FILTER_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'visible', label: '显示' },
+  { value: 'hidden', label: '隐藏' },
+]
+const ANNOUNCEMENT_PINNED_FILTER_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'pinned', label: '置顶' },
+  { value: 'unpinned', label: '未置顶' },
+]
 
 function getEmptyAnnouncementFormState(): AnnouncementFormState {
   return {
@@ -419,33 +429,21 @@ function AnnouncementFiltersBar({
   return (
     <div className="flex items-center gap-3">
       <AnnouncementStorageBar storageInfo={listController.storageInfo} />
-      <Select
+      <TooltipSelect
         value={listController.visibilityFilter}
         onValueChange={(value) => listController.setVisibilityFilter(value as VisibilityFilter)}
-      >
-        <SelectTrigger className="w-30 min-h-10">
-          <SelectValue placeholder="显示状态" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部状态</SelectItem>
-          <SelectItem value="visible">显示</SelectItem>
-          <SelectItem value="hidden">隐藏</SelectItem>
-        </SelectContent>
-      </Select>
+        options={ANNOUNCEMENT_VISIBILITY_FILTER_OPTIONS}
+        placeholder="显示状态"
+        tooltip="筛选"
+      />
 
-      <Select
+      <TooltipSelect
         value={listController.pinnedFilter}
         onValueChange={(value) => listController.setPinnedFilter(value as PinnedFilter)}
-      >
-        <SelectTrigger className="w-30 min-h-10">
-          <SelectValue placeholder="置顶状态" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部状态</SelectItem>
-          <SelectItem value="pinned">置顶</SelectItem>
-          <SelectItem value="unpinned">未置顶</SelectItem>
-        </SelectContent>
-      </Select>
+        options={ANNOUNCEMENT_PINNED_FILTER_OPTIONS}
+        placeholder="置顶状态"
+        tooltip="筛选"
+      />
     </div>
   )
 }
@@ -460,11 +458,7 @@ function AnnouncementTableContent({
   table: ReturnType<typeof useReactTable<Announcement>>
 }) {
   if (isLoading && rowCount === 0) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    )
+    return <TableLoadingState className="mx-6" />
   }
 
   if (rowCount === 0) {

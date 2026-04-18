@@ -67,7 +67,7 @@ function CartImportItemList(
                   isCurrent ? "text-primary" : "",
                 )}
               >
-                {item.name}
+                {item.name || "待填写名称"}
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 flex flex-row items-center justify-between text-muted-foreground">

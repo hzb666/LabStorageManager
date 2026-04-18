@@ -16,7 +16,17 @@ export const INPUT_STYLES = {
 } as const
 
 // === 状态徽标颜色 ===
-export type BadgeColor = 'green' | 'blue' | 'orange' | 'gray' | 'purple' | 'red' | 'amber'
+export type BadgeColor =
+  | 'green'
+  | 'blue'
+  | 'orange'
+  | 'gray'
+  | 'purple'
+  | 'red'
+  | 'amber'
+  | 'cyan'
+  | 'teal'
+  | 'indigo'
 
 export const BADGE_COLORS: Record<BadgeColor, string> = {
   green: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 border border-green-300 dark:border-green-700',
@@ -26,6 +36,9 @@ export const BADGE_COLORS: Record<BadgeColor, string> = {
   purple: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 border border-purple-300 dark:border-purple-700',
   red: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 border border-red-300 dark:border-red-700',
   amber: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700',
+  cyan: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200 border border-cyan-300 dark:border-cyan-700',
+  teal: 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200 border border-teal-300 dark:border-teal-700',
+  indigo: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-700',
 }
 
 export const STATUS_COLORS = {

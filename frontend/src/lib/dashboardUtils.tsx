@@ -1,5 +1,6 @@
 /** Dashboard 共享工具、类型和常量。 */
 import type { ColumnDef } from '@tanstack/react-table'
+import type { FilterOption } from '@/hooks/useTableState'
 import { clearDashboardActiveTab } from '@/lib/storage/appUiStorage'
 import {
   DEFAULT_SEARCH_MATCH_MODE,
@@ -32,8 +33,17 @@ export interface PendingStockinItem {
   order_id?: number | null
   name: string
   cas_number: string
+  english_name?: string | null
+  alias?: string | null
+  category?: string | null
+  brand?: string | null
+  purity?: string | null
+  specification?: string | null
   initial_quantity: number
+  remaining_quantity?: number | null
   unit: string
+  is_hazardous?: boolean
+  notes?: string | null
   stockin_time: string
 }
 
@@ -55,6 +65,7 @@ export interface DashboardReagentOrder extends DashboardOrderBase {
   brand?: string | null
   specification?: string
   initial_quantity?: number | null
+  remaining_quantity?: number | null
   unit?: string | null
   quantity: number
   price?: number | null
@@ -106,7 +117,6 @@ export const REAGENT_STATUS_OPTIONS = [
   { value: 'pending', label: '待审批' },
   { value: 'approved', label: '已批准' },
   { value: 'rejected', label: '未通过' },
-  { value: 'arrived', label: '已到货' },
 ]
 
 export const CONSUMABLE_STATUS_OPTIONS = [
@@ -115,6 +125,8 @@ export const CONSUMABLE_STATUS_OPTIONS = [
   { value: 'approved', label: '已批准' },
   { value: 'rejected', label: '未通过' },
 ]
+
+export const DASHBOARD_EMPTY_STATUS_OPTIONS: FilterOption[] = []
 
 export const DASHBOARD_REAGENT_SEARCH_FIELDS = [
   { value: 'all', label: '全部' },

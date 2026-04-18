@@ -13,7 +13,6 @@ import { useNavigate } from 'react-router-dom'
 import { valibotResolver } from '@hookform/resolvers/valibot'
 import { Button } from '@/components/ui/Button'
 import { Label } from '@/components/ui/Label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
@@ -23,7 +22,6 @@ import { getApiErrorMessage } from '@/lib/validationSchemas'
 import { useAuthStore } from '@/store/useStore'
 import {
   Users,
-  Loader2,
   UserPlus,
   FileText,
   UserCheck,
@@ -40,7 +38,13 @@ import { defaultUserValues, getUserCreateFormFields, USER_ROLE_OPTIONS } from '@
 import type { PaginationParams } from '@/api/client'
 import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import { LoadingButton } from '@/components/ui/LoadingButton'
-import { SEARCH_MAX_LENGTH, TableEmptyState, TableSearchInput } from '@/components/ui/TableFilters'
+import {
+  SEARCH_MAX_LENGTH,
+  TableEmptyState,
+  TableLoadingState,
+  TableSearchInput,
+  TooltipSelect,
+} from '@/components/ui/TableFilters'
 import { getAdminUsersTableColumns } from '@/lib/tableConfigs'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 
@@ -57,6 +61,17 @@ type AdminUsersDialogMode = 'create' | 'edit' | 'delete'
 
 // 为用户表格列定义保留字段级类型推导。
 const columnHelper = createColumnHelper<User>()
+const ADMIN_USER_ROLE_FILTER_OPTIONS = [
+  { value: 'all', label: '全部角色' },
+  { value: 'admin', label: '管理员' },
+  { value: 'user', label: '用户' },
+  { value: 'public', label: '公用' },
+]
+const ADMIN_USER_STATUS_FILTER_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'active', label: '已启用' },
+  { value: 'inactive', label: '已禁用' },
+]
 
 // 统一管理搜索输入、防抖筛选和分页重置。
 function useAdminUsersFilterState() {
@@ -309,27 +324,20 @@ function AdminUsersFilters({
         placeholder="搜索用户名、姓名..."
         inputClassName="h-10"
       />
-      <Select value={filters.roleFilter} onValueChange={filters.setRoleFilter}>
-        <SelectTrigger className="w-30 min-h-10">
-          <SelectValue placeholder="全部角色" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部角色</SelectItem>
-          <SelectItem value="admin">管理员</SelectItem>
-          <SelectItem value="user">用户</SelectItem>
-          <SelectItem value="public">公用</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select value={filters.statusFilter} onValueChange={filters.setStatusFilter}>
-        <SelectTrigger className="w-30 min-h-10">
-          <SelectValue placeholder="已启用" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部状态</SelectItem>
-          <SelectItem value="active">已启用</SelectItem>
-          <SelectItem value="inactive">已禁用</SelectItem>
-        </SelectContent>
-      </Select>
+      <TooltipSelect
+        value={filters.roleFilter}
+        onValueChange={filters.setRoleFilter}
+        options={ADMIN_USER_ROLE_FILTER_OPTIONS}
+        placeholder="全部角色"
+        tooltip="筛选"
+      />
+      <TooltipSelect
+        value={filters.statusFilter}
+        onValueChange={filters.setStatusFilter}
+        options={ADMIN_USER_STATUS_FILTER_OPTIONS}
+        placeholder="已启用"
+        tooltip="筛选"
+      />
     </div>
   )
 }
@@ -364,9 +372,7 @@ function AdminUsersTableCard({
       </CardHeader>
       <CardContent className="p-0">
         {tableState.isLoading && tableState.rowCount === 0 && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          </div>
+          <TableLoadingState className="mx-6" />
         )}
         {!tableState.isLoading && tableState.rowCount === 0 && (
           <TableEmptyState

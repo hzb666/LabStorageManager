@@ -446,13 +446,13 @@ export function getCommonShelfTableColumns(): ColumnDef<TableRowData, unknown>[]
   ]
 }
 
-export const COMMON_SHELF_GROUP_STATUS_OPTIONS = [{ value: 'all', label: '全部' }]
 export const COMMON_SHELF_GROUP_SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'cas_number', label: 'CAS' },
   { value: 'name', label: '名称' },
   { value: 'alias', label: '别名' },
   { value: 'brand', label: '品牌' },
+  { value: 'storage_location', label: '位置' },
 ]
 export const CHEMICAL_NAME_MAP_SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
@@ -506,27 +506,15 @@ export function getCommonShelfGroupTableColumns(args: {
       header: '品牌',
       cell: (info) => <span>{safeString(info.getValue(), '-')}</span>,
     }),
-    columnHelper.accessor((row) => safeString((row.display as Record<string, unknown>)?.purity, ''), {
-      id: 'purity',
-      header: '纯度',
-      enableSorting: false,
-      cell: (info) => <span>{safeString(info.getValue(), '-')}</span>,
-    }),
     columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.specification_text, ''), {
       id: 'specification',
       header: '规格',
       cell: (info) => <span>{safeString(info.getValue(), '-')}</span>,
     }),
-    columnHelper.accessor((row) => safeString((row.display as Record<string, unknown>)?.notes, ''), {
-      id: 'notes',
-      header: '备注',
-      enableSorting: false,
-      cell: (info) => <span className="break-all">{safeString(info.getValue(), '-')}</span>,
-    }),
     columnHelper.accessor((row) => Number(row.bottle_count ?? 0), {
       id: 'bottle_count',
       header: '剩余瓶数',
-      cell: (info) => <span className="font-medium text-green-700">{info.getValue()} 瓶</span>,
+      cell: (info) => <span className="font-medium">{info.getValue()} 瓶</span>,
     }),
     columnHelper.display({
       id: 'actions',

@@ -28,6 +28,31 @@ const parseNumberOrNaN = (input: string | number): number => {
   return Number.isNaN(parsed) ? Number.NaN : parsed
 }
 
+const SPECIFICATION_UNIT_CANONICAL = {
+  ml: 'mL',
+  l: 'L',
+  g: 'g',
+  kg: 'kg',
+  mg: 'mg',
+  个: '个',
+  瓶: '瓶',
+  支: '支',
+  盒: '盒',
+  包: '包',
+  套: '套',
+} as const
+
+type SpecificationUnitKey = keyof typeof SPECIFICATION_UNIT_CANONICAL
+
+const SPECIFICATION_PATTERN = new RegExp(
+  `^(\\d+(?:\\.\\d+)?)\\s*(${Object.keys(SPECIFICATION_UNIT_CANONICAL).join('|')})$`,
+  'i'
+)
+
+interface ParsedSpecification {
+  quantity: number
+  unit: string
+}
 
 // ==========================================
 // 1. 基础通用类型验证
@@ -132,17 +157,51 @@ export const SpecificationSchema = v.pipe(
   v.trim(),
   v.nonEmpty('规格不能为空'),
   v.toLowerCase(),
-  v.regex(
-    /^\d+(\.\d+)?\s*(ml|l|g|kg|mg|个|瓶|支|盒|包|套)$/,
-    '规格格式无效'
-  )
+  v.regex(SPECIFICATION_PATTERN, '规格格式无效'),
+  v.check((spec) => (parseSpecification(spec) ?? 0) > 0, '规格数值必须大于0')
 )
+
+export function parseSpecificationParts(spec: string): ParsedSpecification | null {
+  const match = SPECIFICATION_PATTERN.exec(spec.trim())
+  if (!match) return null
+
+  const unitKey = match[2].toLowerCase() as SpecificationUnitKey
+  const unit = SPECIFICATION_UNIT_CANONICAL[unitKey]
+  if (!unit) return null
+
+  return {
+    quantity: Number.parseFloat(match[1]),
+    unit,
+  }
+}
 
 // 规格解析辅助函数 - 从规格字符串提取数值
 export function parseSpecification(spec: string): number | null {
-  if (!spec) return null
-  const match = /^(\d+(?:\.\d+)?)\s*/i.exec(spec)
-  return match ? Number.parseFloat(match[1]) : null
+  return parseSpecificationParts(spec)?.quantity ?? null
+}
+
+export function parseSpecificationUnit(spec: string): string | null {
+  return parseSpecificationParts(spec)?.unit ?? null
+}
+
+export function resolveSpecificationQuantity(
+  specification: string | null | undefined,
+  fallback: number | null | undefined,
+): number | null | undefined {
+  if (specification === null || specification === undefined) return fallback
+  const normalizedSpecification = specification?.trim()
+  if (!normalizedSpecification) return null
+  return parseSpecification(normalizedSpecification)
+}
+
+export function resolveSpecificationUnit(
+  specification: string | null | undefined,
+  fallback: string | null | undefined,
+): string | undefined {
+  if (specification === null || specification === undefined) return fallback ?? undefined
+  const normalizedSpecification = specification?.trim()
+  if (!normalizedSpecification) return undefined
+  return parseSpecificationUnit(normalizedSpecification) ?? undefined
 }
 
 // ==========================================
@@ -178,16 +237,18 @@ export const validateCASLogic = (input: string): boolean => {
 
 export const SPECIAL_CAS_VALUE = '生物试剂'
 
+export const normalizeCASInputValue = (input: string): string =>
+  input.replace(/\s+/g, '').toUpperCase()
+
 export const isSpecialCasValue = (input: string): boolean => {
-  return input.trim().toUpperCase() === SPECIAL_CAS_VALUE
+  return normalizeCASInputValue(input) === SPECIAL_CAS_VALUE
 }
 
 /** CAS 号验证。 */
 export const CasNumberSchema = v.pipe(
   v.string('CAS号不能为空'),
-  v.trim(),
+  v.transform(normalizeCASInputValue),
   v.nonEmpty('CAS号不能为空'),
-  v.toUpperCase(),
   v.check((input) => isSpecialCasValue(input) || /^\d{2,7}-\d{2}-\d$/.test(input), 'CAS号格式无效'),
   v.check((input) => isSpecialCasValue(input) || validateCASLogic(input), 'CAS号校验码错误')
 )
@@ -196,7 +257,7 @@ export const CasNumberSchema = v.pipe(
 export const validateAndNormalizeCASInput = (
   casValue: string
 ): { normalized: string } | { error: string } => {
-  const normalized = casValue.trim().toUpperCase()
+  const normalized = normalizeCASInputValue(casValue)
   if (!normalized) {
     return { error: '请先输入 CAS 号' }
   }
@@ -255,7 +316,7 @@ export const InventoryFormSchema = v.object({
   category: createMaxLengthSchema('分类', 100),
   brand: createMaxLengthSchema('品牌', 100),
   purity: createMaxLengthSchema('纯度', 20),
-  specification: v.optional(SpecificationSchema),
+  specification: SpecificationSchema,
   storage_location: createMaxLengthSchema('存储位置', 200),
   notes: createMaxLengthSchema('备注', 500),
 
@@ -300,6 +361,8 @@ export const CommonShelfGroupEditSchema = v.object({
 export const CommonShelfAddBottlesSchema = v.object({
   count: v.pipe(createPositiveNumberSchema('新增瓶数'), v.maxValue(99, '新增瓶数不能超过99')),
   storage_location: createMaxLengthSchema('存放位置', 200),
+  purity: createMaxLengthSchema('纯度', 20),
+  notes: createMaxLengthSchema('备注', 100),
 })
 
 export const CommonShelfRemoveOneSchema = v.object({
@@ -352,6 +415,19 @@ export const ReagentOrderSchema = v.object({
   is_hazardous: v.boolean('危险品必须是布尔值'),
   notes: createMaxLengthSchema('备注', 500)
 })
+
+const ReagentWorkflowEditableFields = {
+  name: createStringLengthSchema('名称', 1, 200),
+  cas_number: CasNumberSchema,
+  english_name: createMaxLengthSchema('英文名称', 200),
+  alias: createMaxLengthSchema('别名', 200),
+  category: createMaxLengthSchema('分类', 100),
+  brand: createMaxLengthSchema('品牌', 100),
+  purity: createMaxLengthSchema('纯度', 20),
+  specification: SpecificationSchema,
+  is_hazardous: v.boolean('危险品必须是布尔值'),
+  notes: createMaxLengthSchema('备注', 500),
+}
 
 // 耗材订单 Schema
 export const ConsumableOrderSchema = v.object({
@@ -467,13 +543,25 @@ export const ReturnFormSchema = v.object({
     v.number('数量必须是有效数字'),
     v.minValue(0, '数量不能为负数')
   ),
+  notes: createMaxLengthSchema('备注', 500),
 })
 
 export type ReturnFormData = v.InferOutput<typeof ReturnFormSchema>
 export type ReturnFormInputData = v.InferInput<typeof ReturnFormSchema>
 
+// 到货表单 Schema
+export const ConfirmArrivalFormSchema = v.object({
+  ...ReagentWorkflowEditableFields,
+  remaining_quantity: createQuantitySchema('剩余量'),
+  storage_location: createMaxLengthSchema('库存位置', 200),
+})
+
+export type ConfirmArrivalFormData = v.InferOutput<typeof ConfirmArrivalFormSchema>
+export type ConfirmArrivalFormInputData = v.InferInput<typeof ConfirmArrivalFormSchema>
+
 // 入库表单 Schema
 export const StockInFormSchema = v.object({
+  ...ReagentWorkflowEditableFields,
   remaining_quantity: createQuantitySchema('剩余量'),
   storage_location: createRequiredStringSchema('库存位置'),
 })
@@ -482,6 +570,7 @@ export type StockInFormInputData = v.InferInput<typeof StockInFormSchema>
 export type StockInFormData = v.InferOutput<typeof StockInFormSchema>
 
 export const CommonPublicArrivalFormSchema = v.object({
+  ...ReagentWorkflowEditableFields,
   storage_location: createRequiredStringSchema('常用货架位置'),
 })
 

@@ -20,14 +20,9 @@
     }
   }
 
-  console.log('[Content] 购物车同步插件内容脚本已加载');
-
   // 监听来自popup的消息
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('[Content] 收到消息:', message.action);
-
     if (message.action === 'ping') {
-      console.log('[Content] Ping received');
       sendResponse({ success: true, data: 'pong' });
     }
 
@@ -109,7 +104,6 @@
       });
     }
 
-    console.log('[Content] 提取到已提交订单:', items.length, '条');
     return items;
   }
 
@@ -171,8 +165,6 @@
     const hasDangerText = textContent.includes('危险品');
     const hasMsdsLink = !!element.querySelector('a[href*="page=msdsxq"]');
     isDangerous = Boolean(dangerousImg) || hasDangerText || hasMsdsLink;
-
-    console.log('[Content] 提取基本信息: productId=', productId, 'cartItemId=', cartItemId, 'quantity=', quantity, 'price=', price, 'detailUrl=', detailUrl, 'isDangerous=', isDangerous);
 
     return {
       productId: productId,

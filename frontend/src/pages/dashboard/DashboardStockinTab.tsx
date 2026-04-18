@@ -4,18 +4,19 @@ import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowRightLeft } from 'lucide-react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import * as v from 'valibot'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
-import { LoadingButton } from '@/components/ui/LoadingButton'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { BaseForm } from '@/components/BaseForm'
+import { EditDialogActions } from '@/components/EditDialogActions'
 import { toast } from '@/lib/toast'
-import { formatDateTime } from '@/lib/utils'
+import { formatDateTime, processNotes } from '@/lib/utils'
 
 import { inventoryAPI, reagentOrderAPI } from '@/api/client'
+import type { StockInPayload } from '@/api/client'
 import type { FilterAPI } from '@/hooks/useTableState'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 import { useSSEStore } from '@/store/sseStore'
@@ -23,10 +24,13 @@ import { useAuthStore } from '@/store/useStore'
 import {
   StockInFormSchema,
   type StockInFormInputData,
+  type StockInFormData,
   createValibotResolver,
   createRemainingQuantitySchema,
   extractApiErrorDetail,
   normalizeApiErrorMessage,
+  resolveSpecificationQuantity,
+  resolveSpecificationUnit,
   toValidationErrors,
 } from '@/lib/validationSchemas'
 import { defaultStockInValues, getStockInFormFields } from '@/lib/formConfigs'
@@ -35,6 +39,7 @@ import {
   type PendingStockinItem,
   type DashboardParams,
   BORROW_SEARCH_FIELDS,
+  DASHBOARD_EMPTY_STATUS_OPTIONS,
   buildLocalListData,
   requestDashboardCountsRefresh,
 } from '../../lib/dashboardUtils'
@@ -85,12 +90,49 @@ function createStockinColumns(
       header: '操作',
       size: 140,
       cell: (info) => (
-        <Button size="sm" onClick={() => openStockinModal(info.row.original)}>
+        <Button
+          size="sm"
+          className="text-sm"
+          onClick={() => openStockinModal(info.row.original)}
+        >
           入库
         </Button>
       ),
     }),
   ] as ColumnDef<Record<string, unknown>, unknown>[]
+}
+
+function buildPendingStockinFormValues(item: PendingStockinItem): StockInFormInputData {
+  return {
+    name: item.name || '',
+    cas_number: item.cas_number || '',
+    english_name: item.english_name || '',
+    alias: item.alias || '',
+    category: item.category || '',
+    brand: item.brand || '',
+    purity: item.purity || '',
+    specification: item.specification || '',
+    is_hazardous: Boolean(item.is_hazardous),
+    notes: item.notes || '',
+    remaining_quantity: item.remaining_quantity ?? '',
+    storage_location: '',
+  }
+}
+
+function buildPendingStockinPayload(formData: StockInFormData): StockInPayload {
+  return {
+    name: formData.name,
+    english_name: formData.english_name || '',
+    alias: formData.alias || '',
+    category: formData.category || '',
+    brand: formData.brand || '',
+    purity: formData.purity || '',
+    specification: formData.specification,
+    is_hazardous: formData.is_hazardous,
+    notes: processNotes(formData.notes),
+    storage_location: formData.storage_location,
+    remaining_quantity: formData.remaining_quantity,
+  }
 }
 
 // 弹窗展示当前待入库记录名称、CAS、数量，并承载统一的入库表单。
@@ -99,7 +141,7 @@ function DashboardStockinDialog({
 }: Readonly<{
   dialog: {
     selectedStockin: PendingStockinItem | null
-    stockinForm: ReturnType<typeof useForm<StockInFormInputData>>
+    stockinForm: ReturnType<typeof useForm<StockInFormInputData, unknown, StockInFormData>>
     stockinLoading: boolean
     onClose: () => void
     onSubmit: () => void
@@ -112,48 +154,37 @@ function DashboardStockinDialog({
     onClose,
     onSubmit,
   } = dialog
+  const watchedSpecification = useWatch({
+    control: stockinForm.control,
+    name: 'specification',
+  })
+  const stockinUnit = resolveSpecificationUnit(watchedSpecification, selectedStockin?.unit)
 
   return (
-    <Dialog open={selectedStockin !== null} onOpenChange={(nextOpen) => { if (!nextOpen) onClose() }}>
-      <DialogContent>
+    <Dialog
+      open={selectedStockin !== null}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && !stockinLoading) onClose()
+      }}
+    >
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>入库</DialogTitle>
         </DialogHeader>
 
         <form className="space-y-4" onSubmit={onSubmit}>
-          <div>
-            <p>{selectedStockin?.name}</p>
-            <p className="text-sm text-muted-foreground">
-              CAS: {selectedStockin?.cas_number} • {selectedStockin?.initial_quantity} {selectedStockin?.unit}
-            </p>
-          </div>
-
           <BaseForm
             form={stockinForm}
-            fields={getStockInFormFields(selectedStockin?.unit)}
-            layout="stack"
+            fields={getStockInFormFields(stockinUnit)}
           />
 
-          <div className="flex gap-3 mt-8">
-            <Button
-              type="button"
-              variant="modern"
-              onClick={onClose}
-              className="flex-1"
-              size="lg"
-            >
-              取消
-            </Button>
-            <LoadingButton
-              type="submit"
-              isLoading={stockinLoading}
-              loadingText="处理中..."
-              className="flex-1"
-              size="lg"
-            >
-              确认入库
-            </LoadingButton>
-          </div>
+          <EditDialogActions
+            mode="add"
+            onCancel={onClose}
+            submitLabelEdit="确认入库"
+            submitLabelAdd="确认入库"
+            isSubmitting={stockinLoading}
+          />
         </form>
       </DialogContent>
     </Dialog>
@@ -169,7 +200,7 @@ export function DashboardStockinTab() {
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
   const [stockinLoading, setStockinLoading] = useState(false)
 
-  const stockinForm = useForm<StockInFormInputData>({
+  const stockinForm = useForm<StockInFormInputData, unknown, StockInFormData>({
     resolver: createValibotResolver(StockInFormSchema),
     defaultValues: defaultStockInValues,
     shouldFocusError: false,
@@ -189,10 +220,10 @@ export function DashboardStockinTab() {
     []
   )
 
-  // 每次打开待入库弹窗都恢复 `defaultStockInValues`，避免上一条记录的输入残留到下一次。
+  // 每次打开待入库弹窗都回填当前暂存记录，避免上一条记录的输入残留到下一次。
   const openStockinModal = useCallback((item: PendingStockinItem) => {
     setSelectedStockin(item)
-    stockinForm.reset(defaultStockInValues)
+    stockinForm.reset(buildPendingStockinFormValues(item))
   }, [stockinForm])
 
   // 提交前先在前端校验 `remaining_quantity` 上限；成功后失效 `dashboard/stockin`、`inventory` 并刷新统计。
@@ -203,8 +234,11 @@ export function DashboardStockinTab() {
       return
     }
 
-    const remaining = Number(formData.remaining_quantity)
-    const maxValue = selectedStockin.initial_quantity
+    const remaining = formData.remaining_quantity
+    const maxValue = resolveSpecificationQuantity(
+      formData.specification,
+      selectedStockin.initial_quantity,
+    )
     if (typeof maxValue === 'number') {
       const check = createRemainingQuantitySchema('剩余量', maxValue)
       const parsed = v.safeParse(check, remaining)
@@ -216,10 +250,7 @@ export function DashboardStockinTab() {
 
     setStockinLoading(true)
     try {
-      await reagentOrderAPI.stockIn(selectedStockin.order_id, {
-        storage_location: formData.storage_location,
-        remaining_quantity: remaining,
-      })
+      await reagentOrderAPI.stockIn(selectedStockin.order_id, buildPendingStockinPayload(formData))
       setSelectedStockin(null)
       stockinForm.reset(defaultStockInValues)
       await refreshTables()
@@ -243,9 +274,10 @@ export function DashboardStockinTab() {
 
   // 关闭弹窗时清空 `selectedStockin` 并恢复 `defaultStockInValues`。
   const closeStockinModal = useCallback(() => {
+    if (stockinLoading) return
     setSelectedStockin(null)
     stockinForm.reset(defaultStockInValues)
-  }, [stockinForm])
+  }, [stockinForm, stockinLoading])
 
   const stockinColumns = useMemo(
     () => createStockinColumns(openStockinModal),
@@ -292,7 +324,7 @@ export function DashboardStockinTab() {
           },
         }}
         customColumns={stockinColumns}
-        statusOptions={[{ value: 'all', label: '全部' }]}
+        statusOptions={DASHBOARD_EMPTY_STATUS_OPTIONS}
         searchFieldOptions={BORROW_SEARCH_FIELDS}
         searchPlaceholder="搜索名称、CAS号..."
         title={<><ArrowRightLeft className="w-5 h-5" /> 待入库（暂存）</>}

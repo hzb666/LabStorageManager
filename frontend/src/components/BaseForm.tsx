@@ -46,6 +46,8 @@ export interface FieldSchema<T extends FieldValues> {
   inputType?: "text" | "number";
   placeholder?: string;
   options?: AutocompleteOption[];
+  autocompleteMinSearchLength?: number;
+  autocompleteShowAllOnFocus?: boolean;
   readOnly?: boolean;
   disabled?: boolean;
   colSpan?: number;
@@ -320,12 +322,7 @@ function renderInputField<T extends FieldValues>({
       type={field.type === "number" ? "number" : field.inputType || "text"}
       value={controllerField.value ?? ""}
       onChange={(event) => {
-        if (field.type === "number") {
-          const num = event.target.valueAsNumber
-          controllerField.onChange(Number.isNaN(num) ? undefined : num)
-        } else {
-          controllerField.onChange(event.target.value)
-        }
+        controllerField.onChange(event.target.value)
       }}
       placeholder={field.placeholder}
       disabled={isDisabled}
@@ -410,6 +407,8 @@ function renderAutocompleteField<T extends FieldValues>({
       placeholder={field.placeholder}
       disabled={isDisabled}
       className={inputClassName}
+      minSearchLength={field.autocompleteMinSearchLength}
+      showAllOnFocus={field.autocompleteShowAllOnFocus}
     />
   );
 }

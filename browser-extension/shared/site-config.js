@@ -1,9 +1,9 @@
 (function initExtensionSiteConfig(root) {
+  const generatedConfig = root.ExtensionEnvConfig || {};
   const DEFAULT_SYSTEM_CONFIG = {
-    systemUrl: "http://localhost:5173",
-    reagentSiteUrl: "https://reagent.bjmu.edu.cn",
+    systemUrl: generatedConfig.systemUrl || "http://localhost:5173",
+    reagentSiteUrl: generatedConfig.reagentSiteUrl || "https://reagent.bjmu.edu.cn",
   };
-  const SYSTEM_CONFIG_STORAGE_KEY = "systemConfig";
 
   function parseHttpUrl(urlValue) {
     try {
@@ -52,7 +52,6 @@
 
   const api = {
     DEFAULT_SYSTEM_CONFIG,
-    SYSTEM_CONFIG_STORAGE_KEY,
     buildProductDetailUrl,
     buildSiteUrlPattern,
     normalizeExtensionConfig,

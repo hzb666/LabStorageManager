@@ -18,6 +18,8 @@ interface AutocompleteProps {
   placeholder?: string
   disabled?: boolean
   className?: string
+  minSearchLength?: number
+  showAllOnFocus?: boolean
 }
 
 interface OptionSearchIndex {
@@ -32,7 +34,6 @@ interface CachedOptionSearchIndex {
 }
 
 const HANZI_REGEX = /[\u3400-\u9fff]/
-const ENGLISH_LETTER_REGEX = /[A-Za-z]/g
 const SEARCH_SEPARATOR_REGEX = /[\s_.-]+/g
 const OPTION_SEARCH_INDEX_CACHE_MAX_SIZE = 500
 const OPTION_SEARCH_INDEX_CACHE_TTL_MS = 10 * 60 * 1000
@@ -55,7 +56,7 @@ const pruneOptionSearchIndexCache = (now: number): void => {
 const normalizeSearchKeyword = (value: string) =>
   value.trim().replaceAll(SEARCH_SEPARATOR_REGEX, '').toLowerCase()
 
-const shouldStartSearch = (value: string): boolean => {
+const shouldStartSearch = (value: string, minSearchLength: number): boolean => {
   const trimmed = value.trim()
   if (!trimmed) return false
 
@@ -63,8 +64,7 @@ const shouldStartSearch = (value: string): boolean => {
     return true
   }
 
-  const englishCharCount = (trimmed.match(ENGLISH_LETTER_REGEX) ?? []).length
-  return englishCharCount >= 2
+  return normalizeSearchKeyword(trimmed).length >= minSearchLength
 }
 
 const getOptionSearchIndex = (label: string): OptionSearchIndex => {
@@ -121,6 +121,8 @@ export function Autocomplete({
   placeholder,
   disabled,
   className,
+  minSearchLength = 2,
+  showAllOnFocus = false,
 }: Readonly<AutocompleteProps>) {
   const [open, setOpen] = React.useState(false)
   const [inputValue, setInputValue] = React.useState(value)
@@ -129,9 +131,10 @@ export function Autocomplete({
   // 选中建议项后抑制搜索，防止下拉菜单闪烁
   const justSelectedRef = React.useRef(false)
   const canSearch = React.useMemo(
-    () => shouldStartSearch(debouncedInputValue),
-    [debouncedInputValue]
+    () => shouldStartSearch(debouncedInputValue, minSearchLength),
+    [debouncedInputValue, minSearchLength]
   )
+  const shouldShowAllOptions = showAllOnFocus && !normalizeSearchKeyword(debouncedInputValue)
 
   // 监听外部 value 的变化（保证组件内部状态同步更新）
   React.useEffect(() => {
@@ -154,16 +157,17 @@ export function Autocomplete({
 
   // 过滤建议列表 (忽略大小写)
   const filteredOptions = React.useMemo(() => {
+    if (shouldShowAllOptions) return options
     if (!canSearch) return []
     return options.filter((opt) => isOptionMatched(opt, debouncedInputValue))
-  }, [options, debouncedInputValue, canSearch])
+  }, [options, debouncedInputValue, canSearch, shouldShowAllOptions])
 
-  // 处理输入变化与双字符触发逻辑
+  // 处理输入变化与搜索触发逻辑
   const handleValueChange = (val: string) => {
     setInputValue(val)
     onChange?.(val)
 
-    setOpen(shouldStartSearch(val))
+    setOpen(showAllOnFocus || shouldStartSearch(val, minSearchLength))
   }
 
   // 直接处理 Input 的 onChange 事件
@@ -189,7 +193,10 @@ export function Autocomplete({
       shouldFilter={false}
       className={cn('relative w-full', className)}
     >
-      <Popover open={open && canSearch && filteredOptions.length > 0} onOpenChange={setOpen}>
+      <Popover
+        open={open && (canSearch || shouldShowAllOptions) && filteredOptions.length > 0}
+        onOpenChange={setOpen}
+      >
         <PopoverTrigger asChild>
           {/* Command.Input 会接管键盘的上下箭头和回车事件 */}
           <Command.Input
@@ -203,7 +210,14 @@ export function Autocomplete({
               className="w-full"
               onChange={handleInputChange}
               // 点击输入框时，满足搜索门槛才展开
-              onClick={() => shouldStartSearch(inputValue) && setOpen(true)}
+              onClick={() => (
+                showAllOnFocus ||
+                shouldStartSearch(inputValue, minSearchLength)
+              ) && setOpen(true)}
+              onFocus={() => (
+                showAllOnFocus ||
+                shouldStartSearch(inputValue, minSearchLength)
+              ) && setOpen(true)}
             />
           </Command.Input>
         </PopoverTrigger>

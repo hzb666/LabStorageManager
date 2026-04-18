@@ -42,6 +42,7 @@ import {
   extractApiErrorDetail,
   getApiErrorMessage,
   isSpecialCasValue,
+  normalizeCASInputValue,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
@@ -109,6 +110,7 @@ const REAGENT_SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'cas', label: 'CAS号' },
   { value: 'name', label: '名称' },
+  { value: 'category', label: '分类' },
   { value: 'brand', label: '品牌' },
   { value: 'applicant', label: '订购人' },
   { value: 'created_at', label: '订购时间' },
@@ -170,6 +172,7 @@ function createReagentOrderCreatePayload(formData: ReagentOrderFormData) {
 function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
   return {
     name: formData.name,
+    cas_number: formData.cas_number,
     english_name: formData.english_name || '',
     alias: formData.alias || '',
     category: formData.category || '',
@@ -224,7 +227,7 @@ function useReagentOrderCasController(params: {
   useEffect(() => {
     const subscription = form.watch((value, field) => {
       if (field.name === 'cas_number') {
-        const currentValue = (value.cas_number || '').trim().toUpperCase()
+        const currentValue = normalizeCASInputValue(value.cas_number || '')
         form.clearErrors('cas_number')
         handleCasValueChange(currentValue)
       }

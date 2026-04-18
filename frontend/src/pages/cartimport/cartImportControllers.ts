@@ -30,6 +30,7 @@ import {
   extractApiErrorDetail,
   getApiErrorMessage,
   isSpecialCasValue,
+  normalizeCASInputValue,
   normalizeApiErrorMessage,
   toValidationErrors,
   validateAndNormalizeCASInput,
@@ -361,7 +362,7 @@ function useCartImportReagentFormState(params: {
   useEffect(() => {
     const subscription = reagentForm.watch((value, field) => {
       if (field.name === "cas_number") {
-        const currentValue = (value.cas_number || "").trim().toUpperCase();
+        const currentValue = normalizeCASInputValue(value.cas_number || "");
         invalidateReagentAsyncRequests();
         reagentForm.clearErrors("cas_number");
         handleCasValueChange(currentValue);

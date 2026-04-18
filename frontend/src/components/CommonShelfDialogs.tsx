@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { Check, Plus, Save, Trash2 } from 'lucide-react'
+import { Check, Loader2, Plus, Save, Trash2 } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useForm, type UseFormReturn } from 'react-hook-form'
 
@@ -17,8 +17,14 @@ import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import { FilterTable } from '@/components/ui/FilterTable'
+import { Label } from '@/components/ui/Label'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/RadioGroup'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/Tooltip'
 import type { FilterAPI } from '@/hooks/useTableState'
 import {
   getChemicalNameMapFormFields,
@@ -49,8 +55,15 @@ import {
   CommonShelfItemEditRowSchema,
   createValibotResolver,
 } from '@/lib/validationSchemas'
+import { cn } from '@/lib/utils'
 
 export type CommonShelfDialogMode = 'manual-add' | 'edit' | 'add-bottles' | 'remove-one' | null
+type CommonShelfEditMode = 'group' | 'items'
+
+interface CommonShelfEditModeState {
+  groupKey: string | null
+  selectedMode: CommonShelfEditMode
+}
 
 const CHEMICAL_NAME_MAP_SEARCH_ONLY_OPTIONS = [{ value: 'all', label: '全部' }]
 
@@ -128,17 +141,24 @@ function handleDialogSubmit(
   }
 }
 
-// 统一承载弹窗里的说明/对象摘要，减少多个模式各自维护相同的卡片样式。
-function DialogInfoCard({
-  children,
+// 统一承载弹窗对象摘要，沿用归还弹窗的轻量信息区样式。
+function DialogEntitySummary({
+  title,
+  details,
 }: {
-  children: ReactNode
+  title: ReactNode
+  details: ReactNode
 }) {
   return (
-    <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm">
-      {children}
+    <div className="space-y-1">
+      <p className="font-medium">{title}</p>
+      <p className="text-sm text-muted-foreground">{details}</p>
     </div>
   )
+}
+
+function DialogHint({ children }: { children: ReactNode }) {
+  return <p className="text-base text-muted-foreground">{children}</p>
 }
 
 // 通用的取消/提交按钮区。
@@ -177,6 +197,17 @@ function getCommonShelfDialogTitle(mode: CommonShelfDialogMode) {
     default:
       return ''
   }
+}
+
+function getCommonShelfDialogContentClassName(mode: CommonShelfDialogMode) {
+  if (mode === 'edit') {
+    return 'max-h-[85vh] w-[96vw] max-w-5xl overflow-y-auto'
+  }
+  if (mode === 'manual-add') {
+    return 'max-h-[85vh] w-[92vw] max-w-3xl overflow-y-auto'
+  }
+
+  return 'max-h-[85vh] w-[92vw] max-w-lg overflow-y-auto'
 }
 
 function renderManualAddDialog(dialog: CommonShelfDialogController) {
@@ -231,7 +262,7 @@ function CommonShelfItemEditRow({
 
   return (
     <form
-      className="rounded-md border border-border bg-background px-3 py-3"
+      className="border-b border-border pb-3 last:border-b-0"
       onSubmit={handleDialogSubmit(async () => {
         await form.handleSubmit(async (data) => {
           await itemEdit.handleSubmitEditItem(item, data, (fieldName, message) => {
@@ -252,26 +283,102 @@ function CommonShelfItemEditRow({
             columns={3}
           />
         </div>
-        <div className="flex shrink-0 items-center justify-end gap-2 lg:pt-7">
-          <Button type="submit" size="sm" disabled={isSubmitting}>
-            <Save className="mr-1.5 size-4" />
-            保存
-          </Button>
-          <Button
-            type="button"
-            size="icon"
-            variant={isDeleteConfirm ? 'destructive' : 'secondary'}
-            disabled={isSubmitting}
-            onClick={() => {
-              itemEdit.handleDeleteEditItem(item).catch(() => undefined)
-            }}
-            title={isDeleteConfirm ? '再次点击确认删除' : '删除当前条目'}
-          >
-            {isDeleteConfirm ? <Check className="size-4" /> : <Trash2 className="size-4" />}
-          </Button>
+        <div className="flex shrink-0 items-center justify-end gap-1 lg:pt-7">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <LoadingButton
+                type="submit"
+                size="sm"
+                variant="modern"
+                className="h-8 w-8 p-0 text-green-600 hover:bg-green-100 hover:text-green-700 dark:text-green-400 dark:hover:bg-green-950 dark:hover:text-green-300"
+                disabled={isSubmitting}
+                isLoading={isSubmitting}
+                aria-label="保存当前条目"
+              >
+                <Save className="size-4" />
+              </LoadingButton>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>保存当前条目</p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="sm"
+                variant="modern"
+                className={cn(
+                  'h-8 w-8 p-0',
+                  isDeleteConfirm
+                    ? 'bg-destructive text-white hover:bg-destructive/70 [&_svg]:text-white dark:bg-destructive dark:hover:bg-destructive/70'
+                    : 'text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20',
+                )}
+                disabled={isSubmitting}
+                onClick={() => {
+                  itemEdit.handleDeleteEditItem(item).catch(() => undefined)
+                }}
+                aria-label={isDeleteConfirm ? '确认删除当前条目' : '删除当前条目'}
+              >
+                {isDeleteConfirm ? <Check className="size-4" /> : <Trash2 className="size-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>{isDeleteConfirm ? '确认删除' : '删除当前条目'}</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </form>
+  )
+}
+
+function resolveSelectedEditMode(
+  editModeState: CommonShelfEditModeState,
+  selectedGroupKey: string | null,
+): CommonShelfEditMode {
+  return editModeState.groupKey === selectedGroupKey ? editModeState.selectedMode : 'group'
+}
+
+function resolveRenderedEditMode(
+  selectedEditMode: CommonShelfEditMode,
+  hasItemsResult: boolean,
+): CommonShelfEditMode {
+  return selectedEditMode === 'items' && hasItemsResult ? 'items' : 'group'
+}
+
+function buildItemEditContent({
+  dialog,
+  isError,
+  items,
+}: {
+  dialog: CommonShelfDialogController
+  isError: boolean
+  items?: CommonShelfGroupItem[]
+}) {
+  if (isError) {
+    return (
+      <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+        组内条目加载失败
+      </div>
+    )
+  }
+
+  if (items && items.length > 0) {
+    return items.map((item, index) => (
+      <CommonShelfItemEditRow
+        key={item.id}
+        item={item}
+        index={index}
+        dialog={dialog}
+      />
+    ))
+  }
+
+  return (
+    <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+      当前分组没有可编辑条目
+    </div>
   )
 }
 
@@ -282,13 +389,18 @@ function CommonShelfEditDialogContent({
   dialog: CommonShelfDialogController
   showDelete: boolean
 }) {
-  const [editMode, setEditMode] = useState<'group' | 'items'>('group')
+  const [editModeState, setEditModeState] = useState<CommonShelfEditModeState>({
+    groupKey: null,
+    selectedMode: 'group',
+  })
   const { actions, forms, state } = dialog
   const selectedGroup = state.selectedGroup
+  const selectedGroupKey = selectedGroup?.group.group_key ?? null
+  const selectedEditMode = resolveSelectedEditMode(editModeState, selectedGroupKey)
 
   const groupItemsQuery = useQuery({
-    queryKey: ['common-shelf-group-items', selectedGroup?.group.group_key],
-    enabled: editMode === 'items' && Boolean(selectedGroup),
+    queryKey: ['common-shelf-group-items', selectedGroupKey],
+    enabled: selectedEditMode === 'items' && Boolean(selectedGroup),
     queryFn: async () => {
       const response = await commonShelfAPI.getGroupItems(selectedGroup!.group.group_key)
       return response.data
@@ -299,63 +411,59 @@ function CommonShelfEditDialogContent({
     return null
   }
 
-  let itemEditContent: React.ReactNode
-  if (groupItemsQuery.isLoading) {
-    itemEditContent = (
-      <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-        正在加载组内条目...
-      </div>
-    )
-  } else if (groupItemsQuery.data && groupItemsQuery.data.length > 0) {
-    itemEditContent = groupItemsQuery.data.map((item, index) => (
-      <CommonShelfItemEditRow
-        key={item.id}
-        item={item}
-        index={index}
-        dialog={dialog}
-      />
-    ))
-  } else {
-    itemEditContent = (
-      <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-        当前分组没有可编辑条目
-      </div>
-    )
-  }
+  const hasItemsResult = groupItemsQuery.data !== undefined || groupItemsQuery.isError
+  const renderedEditMode = resolveRenderedEditMode(selectedEditMode, hasItemsResult)
+  const itemEditContent = buildItemEditContent({
+    dialog,
+    isError: groupItemsQuery.isError,
+    items: groupItemsQuery.data,
+  })
+  const isItemModeLoading = selectedEditMode === 'items' && renderedEditMode !== 'items'
 
   return (
     <div className="space-y-4">
-      <DialogInfoCard>
-        <div>CAS：{selectedGroup.group.cas_number}</div>
-        <div>名称：{selectedGroup.display.name}</div>
-        <div>品牌：{selectedGroup.group.brand || '无品牌'}</div>
-        <div>规格：{selectedGroup.group.specification_text}</div>
-      </DialogInfoCard>
+      <DialogEntitySummary
+        title={selectedGroup.display.name}
+        details={(
+          <>
+            CAS: {selectedGroup.group.cas_number} • 品牌: {selectedGroup.group.brand || '无品牌'} • 规格: {selectedGroup.group.specification_text}
+          </>
+        )}
+      />
 
-      <div className="rounded-md border border-border px-3 py-3">
+      <div className="flex flex-wrap items-center gap-4">
         <RadioGroup
-          className="grid gap-3 sm:grid-cols-2"
-          value={editMode}
-          onValueChange={(value) => setEditMode(value as 'group' | 'items')}
+          className="flex flex-row gap-4"
+          value={selectedEditMode}
+          onValueChange={(value) => {
+            setEditModeState({
+              groupKey: selectedGroupKey,
+              selectedMode: value as 'group' | 'items',
+            })
+          }}
         >
-          <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-2">
-            <RadioGroupItem value="group" />
-            <div className="space-y-1">
-              <div className="text-sm font-medium">分组修改</div>
-              <div className="text-xs text-muted-foreground">只修改品牌和规格</div>
-            </div>
-          </label>
-          <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-2">
-            <RadioGroupItem value="items" />
-            <div className="space-y-1">
-              <div className="text-sm font-medium">条目修改</div>
-              <div className="text-xs text-muted-foreground">逐条修改纯度、位置、备注</div>
-            </div>
-          </label>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="group" id="commonShelfEditMode-group" />
+            <Label htmlFor="commonShelfEditMode-group" className="cursor-pointer text-base">
+              分组修改
+            </Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="items" id="commonShelfEditMode-items" />
+            <Label htmlFor="commonShelfEditMode-items" className="cursor-pointer text-base">
+              单条修改
+            </Label>
+          </div>
         </RadioGroup>
+        {isItemModeLoading && (
+          <span className="inline-flex items-center gap-1.5 text-base text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            加载中...
+          </span>
+        )}
       </div>
 
-      {editMode === 'group' ? (
+      {renderedEditMode === 'group' ? (
         <form className="space-y-4" onSubmit={handleDialogSubmit(actions.handleSubmitEdit)}>
           {state.editNeedsMergeConfirm && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -407,12 +515,10 @@ function renderAddBottlesDialog(
 
   return (
     <form className="space-y-4" onSubmit={handleDialogSubmit(actions.handleSubmitAddBottles)}>
-      <DialogInfoCard>
-        <div>{state.selectedGroup.display.name}</div>
-        <div className="text-muted-foreground">
-          {state.selectedGroup.group.brand || '无品牌'} / {state.selectedGroup.group.specification_text}
-        </div>
-      </DialogInfoCard>
+      <DialogEntitySummary
+        title={state.selectedGroup.display.name}
+        details={`${state.selectedGroup.group.brand || '无品牌'} / ${state.selectedGroup.group.specification_text}`}
+      />
       <BaseForm
         form={forms.addBottlesForm}
         fields={getCommonShelfAddBottlesFormFields(locationSuggestions)}
@@ -435,9 +541,9 @@ function renderRemoveOneDialog(
 
   return (
     <form className="space-y-4" onSubmit={handleDialogSubmit(actions.handleSubmitRemoveOne)}>
-      <DialogInfoCard>
+      <DialogHint>
         将从所选位置删除最早入库的 1 瓶。
-      </DialogInfoCard>
+      </DialogHint>
       <BaseForm
         form={forms.removeOneForm}
         fields={getCommonShelfRemoveOneFormFields(locationOptions)}
@@ -486,7 +592,7 @@ export function CommonShelfDialogs({
 
   return (
     <Dialog open={mode !== null} onOpenChange={actions.handleOpenChange}>
-      <DialogContent className="max-h-[85vh] w-[96vw] max-w-5xl overflow-y-auto">
+      <DialogContent className={getCommonShelfDialogContentClassName(mode)}>
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
@@ -566,6 +672,7 @@ export function ChemicalNameMapManagementDialog({
               searchPlaceholder="搜索 CAS、名称、别名..."
               scrollHeight="calc(85vh - 17rem)"
               title="CAS 主数据"
+              filterClassName="px-1"
               cardClassName="mx-1"
               toolbarActions={(
                 <Button onClick={onCreate} size="lg">

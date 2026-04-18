@@ -14,6 +14,7 @@ import type {
   CommonShelfAddBottlesInputData,
   CommonShelfRemoveOneInputData,
   ChemicalNameMapFormInputData,
+  ConfirmArrivalFormInputData,
   CommonPublicArrivalFormInputData,
   UserUpdateFormData,
   StockInFormInputData,
@@ -278,9 +279,10 @@ export function getConsumableOrderFormFields(): FieldSchema<ConsumableOrderFormI
 // ============================================================================
 
 // 归还表单默认值
-export const defaultReturnValues = {
+export const defaultReturnValues: ReturnFormInputData = {
   return_mode: 'used' as const,
   return_quantity: '',
+  notes: '',
 }
 
 
@@ -301,6 +303,13 @@ export function getReturnFormFields(
       required: true,
       placeholder: mode === 'remaining' ? `如: ${maxQuantity}` : `如: 0`,
     },
+    {
+      name: 'notes' as const,
+      label: '修改备注',
+      type: 'input' as const,
+      enableTagToggle: true,
+      placeholder: '选填，留空则清空备注',
+    },
   ]
 }
 
@@ -308,9 +317,70 @@ export function getReturnFormFields(
 // 入库表单配置
 // ============================================================================
 
+const defaultReagentWorkflowValues = {
+  name: '',
+  cas_number: '',
+  english_name: '',
+  alias: '',
+  category: '',
+  brand: '',
+  purity: '',
+  specification: '',
+  is_hazardous: false,
+  notes: '',
+}
+
+const reagentWorkflowBaseFields = [
+  {
+    name: 'name',
+    label: '试剂名称',
+    type: 'input',
+    required: true,
+    colSpan: 2,
+    placeholder: '如: 乙醇',
+    suffixBooleanToggle: {
+      name: 'is_hazardous',
+      label: '危险品',
+      title: '标记为危险品',
+      icon: AlertTriangle,
+    },
+  },
+  { name: 'cas_number', label: 'CAS号', type: 'input', required: true, readOnly: true, placeholder: 'CAS号不可修改' },
+  { name: 'english_name', label: '英文名称', type: 'input', colSpan: 2, placeholder: '如: Ethanol' },
+  { name: 'alias', label: '别名', type: 'input', placeholder: '如: 酒精' },
+]
+
+const reagentWorkflowTrailingFields = [
+  { name: 'specification', label: '规格', type: 'input', required: true, placeholder: '如: 500ml' },
+  { name: 'brand', label: '品牌', type: 'autocomplete', options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称' },
+  { name: 'purity', label: '纯度', type: 'input', placeholder: '如: 95%、AR、HPLC' },
+  { name: 'category', label: '分类', type: 'autocomplete', options: REAGENT_CATEGORY_OPTIONS, placeholder: '输入分类名称' },
+  { name: 'notes', label: '备注', type: 'input', colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
+]
+
+function getReagentWorkflowBaseFields<T extends StockInFormInputData | ConfirmArrivalFormInputData | CommonPublicArrivalFormInputData>(): FieldSchema<T>[] {
+  return reagentWorkflowBaseFields as unknown as FieldSchema<T>[]
+}
+
+function getReagentWorkflowTrailingFields<T extends StockInFormInputData | ConfirmArrivalFormInputData | CommonPublicArrivalFormInputData>(): FieldSchema<T>[] {
+  return reagentWorkflowTrailingFields as unknown as FieldSchema<T>[]
+}
+
 // 入库表单默认值
 export const defaultStockInValues: StockInFormInputData = {
+  ...defaultReagentWorkflowValues,
   remaining_quantity: '',
+  storage_location: '',
+}
+
+export const defaultConfirmArrivalValues: ConfirmArrivalFormInputData = {
+  ...defaultReagentWorkflowValues,
+  remaining_quantity: '',
+  storage_location: '',
+}
+
+export const defaultCommonPublicArrivalValues: CommonPublicArrivalFormInputData = {
+  ...defaultReagentWorkflowValues,
   storage_location: '',
 }
 
@@ -320,22 +390,47 @@ export function getStockInFormFields(
   locationOptions?: { label: string; value: string }[],
 ): FieldSchema<StockInFormInputData>[] {
   return [
+    ...getReagentWorkflowBaseFields<StockInFormInputData>(),
+    {
+      name: 'storage_location' as const,
+      label: '存放位置',
+      type: locationOptions ? 'autocomplete' as const : 'input' as const,
+      options: locationOptions,
+      required: true,
+      placeholder: '如: A-1-1 柜',
+    },
     {
       name: 'remaining_quantity' as const,
       label: unit ? `剩余量 (${unit})` : '剩余量',
       type: 'input' as const,
       inputType: 'number' as const,
       required: true,
-      placeholder: '请输入剩余量',
+      placeholder: '如: 100',
     },
+    ...getReagentWorkflowTrailingFields<StockInFormInputData>(),
+  ]
+}
+
+export function getConfirmArrivalFormFields(
+  unit?: string,
+): FieldSchema<ConfirmArrivalFormInputData>[] {
+  return [
+    ...getReagentWorkflowBaseFields<ConfirmArrivalFormInputData>(),
     {
       name: 'storage_location' as const,
-      label: '库存位置',
-      type: locationOptions ? 'autocomplete' as const : 'input' as const,
-      options: locationOptions,
-      required: true,
-      placeholder: '如: A-1-1 柜',
+      label: '存放位置',
+      type: 'input' as const,
+      placeholder: '留空则暂存即可',
     },
+    {
+      name: 'remaining_quantity' as const,
+      label: unit ? `剩余量 (${unit})` : '剩余量',
+      type: 'input' as const,
+      inputType: 'number' as const,
+      required: true,
+      placeholder: '如: 100',
+    },
+    ...getReagentWorkflowTrailingFields<ConfirmArrivalFormInputData>(),
   ]
 }
 
@@ -353,7 +448,12 @@ export function getCommonShelfManualAddFormFields(): FieldSchema<CommonShelfManu
     { name: 'name_snapshot' as const, label: '名称', type: 'input' as const, required: true, colSpan: 2 },
     { name: 'cas_number' as const, label: 'CAS', type: 'input' as const, required: true },
     { name: 'brand' as const, label: '品牌', type: 'input' as const },
-    { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如 95%、AR、HPLC' },
+    {
+      name: 'purity' as const,
+      label: '纯度',
+      type: 'input' as const,
+      placeholder: '如 95%、AR、HPLC',
+    },
     { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如 500mL' },
     { name: 'count' as const, label: '瓶数', type: 'number' as const, required: true },
     { name: 'storage_location' as const, label: '位置', type: 'input' as const },
@@ -364,7 +464,7 @@ export function getCommonShelfManualAddFormFields(): FieldSchema<CommonShelfManu
 export function getCommonShelfEditFormFields(): FieldSchema<CommonShelfGroupEditInputData>[] {
   return [
     { name: 'brand' as const, label: '品牌', type: 'input' as const },
-    { name: 'specification' as const, label: '规格', type: 'input' as const },
+    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true },
   ]
 }
 
@@ -400,14 +500,18 @@ export function getCommonPublicArrivalFormFields(
   locationSuggestions: string[],
 ): FieldSchema<CommonPublicArrivalFormInputData>[] {
   return [
+    ...getReagentWorkflowBaseFields<CommonPublicArrivalFormInputData>(),
     {
       name: 'storage_location' as const,
-      label: '常用货架位置',
+      label: '存放位置',
       type: 'autocomplete' as const,
       options: locationSuggestions.map((item) => ({ label: item, value: item })),
+      autocompleteMinSearchLength: 1,
+      autocompleteShowAllOnFocus: true,
       required: true,
-      placeholder: '输入或选择当前位置',
+      placeholder: '如: A-1-1 柜',
     },
+    ...getReagentWorkflowTrailingFields<CommonPublicArrivalFormInputData>(),
   ]
 }
 
@@ -415,14 +519,23 @@ export function getCommonShelfAddBottlesFormFields(
   locationSuggestions: string[],
 ): FieldSchema<CommonShelfAddBottlesInputData>[] {
   return [
-    { name: 'count' as const, label: '新增瓶数', type: 'number' as const },
+    { name: 'count' as const, label: '新增瓶数', type: 'number' as const, required: true },
     {
       name: 'storage_location' as const,
       label: '位置',
       type: 'autocomplete' as const,
       options: locationSuggestions.map((item) => ({ label: item, value: item })),
+      autocompleteMinSearchLength: 1,
+      autocompleteShowAllOnFocus: true,
       placeholder: '输入或选择当前位置',
     },
+    {
+      name: 'purity' as const,
+      label: '纯度',
+      type: 'input' as const,
+      placeholder: '如 95%、AR、HPLC',
+    },
+    { name: 'notes' as const, label: '备注', type: 'input' as const, placeholder: '选填' },
   ]
 }
 

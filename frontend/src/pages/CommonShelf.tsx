@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { useForm, type FieldValues, type UseFormReturn } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { Archive, ArrowUpFromLine, Plus, Trash2 } from 'lucide-react'
+import { Archive, ArrowUpFromLine, Minus, Plus, Trash2 } from 'lucide-react'
 
 import {
   chemicalNameMapAPI,
@@ -16,13 +16,12 @@ import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { Button } from '@/components/ui/Button'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
-import type { FilterAPI } from '@/hooks/useTableState'
+import type { FilterAPI, FilterOption } from '@/hooks/useTableState'
 import { UserRoles } from '@/lib/constants'
 import { COMMON_SHELF_SSE_EVENTS } from '@/lib/sseEvents'
 import {
   COMMON_SHELF_EMPTY_LOCATION_VALUE,
   COMMON_SHELF_GROUP_SEARCH_FIELD_OPTIONS,
-  COMMON_SHELF_GROUP_STATUS_OPTIONS,
   getChemicalNameMapTableColumns,
   getCommonShelfGroupTableColumns,
   renderCommonShelfCategory,
@@ -84,6 +83,8 @@ const DEFAULT_EDIT_FORM: CommonShelfGroupEditInputData = {
 const DEFAULT_ADD_BOTTLES_FORM: CommonShelfAddBottlesInputData = {
   count: '1',
   storage_location: '',
+  purity: '',
+  notes: '',
 }
 
 const DEFAULT_REMOVE_ONE_FORM: CommonShelfRemoveOneInputData = {
@@ -99,6 +100,7 @@ const DEFAULT_CHEMICAL_NAME_MAP_FORM: ChemicalNameMapFormInputData = {
   alias_3: '',
   category: 'other',
 }
+const COMMON_SHELF_STATUS_FILTER_OPTIONS: FilterOption[] = []
 
 type ManualAddPayload = {
   cas_number: string
@@ -300,14 +302,9 @@ function CommonShelfExpandedRow({ item }: { item: CommonShelfGroup }) {
         <div>中文名称：{item.display.name || '-'}</div>
         <div>英文名称：{item.display.english_name || '-'}</div>
         <div>分类：{renderCommonShelfCategory(item.display.category)}</div>
-        <div>纯度：{item.display.purity || '-'}</div>
-        <div>CAS号：{item.group.cas_number}</div>
-        <div>品牌：{item.group.brand || '-'}</div>
-        <div>规格：{item.group.specification_text || '-'}</div>
         <div>现有瓶数：{item.bottle_count} 瓶</div>
         <div>位置数：{item.location_count} 处</div>
         <div>最新入库名称：{item.latest_name_snapshot || '-'}</div>
-        <div className="col-span-2 md:col-span-3">备注：{item.display.notes || '-'}</div>
         <div>创建时间：{formatDate(item.created_at)}</div>
         <div>更新时间：{formatDate(item.updated_at)}</div>
       </div>
@@ -516,6 +513,8 @@ async function executeCommonShelfAddBottles(params: {
     await commonShelfAPI.addBottles(groupKey, {
       count: data.count,
       storage_location: normalizeOptionalText(data.storage_location),
+      purity: normalizeOptionalText(data.purity),
+      notes: normalizeOptionalText(data.notes),
     })
     toast.success('常用货架已加瓶')
     resetDialogState()
@@ -1166,7 +1165,7 @@ export function CommonShelfPage() {
           onRefresh: refreshCommonShelf,
         }}
         customColumns={columns}
-        statusOptions={COMMON_SHELF_GROUP_STATUS_OPTIONS}
+        statusOptions={COMMON_SHELF_STATUS_FILTER_OPTIONS}
         searchFieldOptions={COMMON_SHELF_GROUP_SEARCH_FIELD_OPTIONS}
         title={<><Archive className="h-5 w-5" /> 常用货架</>}
         searchPlaceholder="搜索名称、别名、CAS号、品牌..."
@@ -1192,11 +1191,17 @@ const CommonShelfActionButtons = function CommonShelfActionButtons({
     {
       id: 'add-bottles',
       label: '加瓶',
+      icon: <Plus className="size-4.5" />,
+      variant: 'modern' as const,
+      className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
       onClick: onAddBottles,
     },
     {
       id: 'remove-one',
-      label: '扣减1瓶',
+      label: '扣减 1 瓶',
+      icon: <Minus className="size-4.5" />,
+      variant: 'modern' as const,
+      className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
       onClick: onRemoveOne,
       showWhen: (currentItem: CommonShelfGroup) => currentItem.bottle_count > 0,
     },

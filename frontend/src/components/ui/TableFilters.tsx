@@ -1,5 +1,5 @@
-import React, { startTransition, useMemo } from 'react'
-import { Search, X } from 'lucide-react'
+import React, { startTransition, useMemo, useState } from 'react'
+import { Loader2, Search, X } from 'lucide-react'
 import { Input } from './Input'
 import { Checkbox } from './Checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './Select'
@@ -11,6 +11,7 @@ import {
   SEARCH_MATCH_MODES,
   type SearchMatchMode,
 } from '@/lib/searchMatchMode'
+import { cn } from '@/lib/utils'
 
 export const SEARCH_MAX_LENGTH = 100
 const DEFAULT_SEARCH_FIELD_ALL_VALUE = 'all'
@@ -19,6 +20,7 @@ export interface TableFiltersProps {
   searchInput: string
   onSearchInputChange: (value: string) => void
   searchPlaceholder?: string
+  searchActions?: React.ReactNode
   
   // 模糊搜索
   fuzzySearch: boolean
@@ -49,6 +51,28 @@ export interface TableSearchInputProps {
   maxLength?: number
   inputClassName?: string
   containerClassName?: string
+}
+
+export function TableLoadingState({
+  className,
+  label = '加载中',
+}: Readonly<{
+  className?: string
+  label?: string
+}>) {
+  return (
+    <div
+      className={cn(
+        'flex min-h-[25.5rem] items-center justify-center text-muted-foreground',
+        className,
+      )}
+      role="status"
+      aria-label={label}
+    >
+      <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </div>
+  )
 }
 
 function shouldShowExtraControls({
@@ -109,6 +133,66 @@ function TooltipCheckbox({
   )
 }
 
+export function TooltipSelect({
+  onValueChange,
+  options,
+  placeholder,
+  tooltip,
+  value,
+}: Readonly<{
+  onValueChange: (value: string) => void
+  options: ReadonlyArray<{ value: string; label: string }>
+  placeholder: string
+  tooltip: string
+  value: string
+}>) {
+  const [isSelectOpen, setIsSelectOpen] = useState(false)
+  const [isTooltipOpen, setIsTooltipOpen] = useState(false)
+
+  const handleSelectOpenChange = (open: boolean) => {
+    setIsSelectOpen(open)
+    if (open) {
+      setIsTooltipOpen(false)
+    }
+  }
+
+  const handleValueChange = (nextValue: string) => {
+    setIsTooltipOpen(false)
+    onValueChange(nextValue)
+  }
+
+  return (
+    <Tooltip open={!isSelectOpen && isTooltipOpen}>
+      <Select
+        value={value}
+        onValueChange={handleValueChange}
+        onOpenChange={handleSelectOpenChange}
+      >
+        <TooltipTrigger asChild>
+          <SelectTrigger
+            className="w-1/3 sm:w-30 min-h-10"
+            onPointerEnter={() => setIsTooltipOpen(true)}
+            onPointerLeave={() => setIsTooltipOpen(false)}
+            onBlur={() => setIsTooltipOpen(false)}
+          >
+            <SelectValue placeholder={placeholder} />
+          </SelectTrigger>
+        </TooltipTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <TooltipContent side="bottom">
+        <p>{tooltip}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function TableFilterExtraControls({
   actions,
   fuzzySearch,
@@ -141,6 +225,7 @@ function TableFilterExtraControls({
   const showSearchFieldSelect = searchFieldOptions.length > 1
   const showStatusSelect = statusOptions.length > 0 && Boolean(onStatusFilterChange)
   const canShowMatchMode = showMatchMode && Boolean(onMatchModeChange)
+  const handleStatusFilterChange = onStatusFilterChange ?? (() => undefined)
   const showExtraControls = shouldShowExtraControls({
     actions,
     showFuzzySearch,
@@ -204,33 +289,23 @@ function TableFilterExtraControls({
       )}
 
       {showSearchFieldSelect && (
-        <Select value={searchField} onValueChange={onSearchFieldChange}>
-          <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
-            <SelectValue placeholder="全部" />
-          </SelectTrigger>
-          <SelectContent>
-            {searchFieldOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TooltipSelect
+          value={searchField}
+          onValueChange={onSearchFieldChange}
+          options={searchFieldOptions}
+          placeholder="全部"
+          tooltip="搜索字段"
+        />
       )}
 
       {showStatusSelect && (
-        <Select value={statusFilter} onValueChange={onStatusFilterChange}>
-          <SelectTrigger className="w-1/3 sm:w-30 min-h-10">
-            <SelectValue placeholder="全部状态" />
-          </SelectTrigger>
-          <SelectContent>
-            {statusOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TooltipSelect
+          value={statusFilter}
+          onValueChange={handleStatusFilterChange}
+          options={statusOptions}
+          placeholder="全部状态"
+          tooltip="筛选"
+        />
       )}
 
       {actions}
@@ -322,6 +397,7 @@ export function TableSearchInput({
         {value && (
           <button
             type="button"
+            aria-label="清空搜索"
             onClick={() => onChange('')}
             className="text-muted-foreground hover:text-foreground shrink-0 p-1 pointer-events-auto flex items-center justify-center mr-0.5"
           >
@@ -337,6 +413,7 @@ export function TableFilters({
   searchInput,
   onSearchInputChange,
   searchPlaceholder = '搜索名称、CAS号、位置...',
+  searchActions,
   fuzzySearch,
   onFuzzySearchChange,
   showFuzzySearch = true,
@@ -358,12 +435,19 @@ export function TableFilters({
   }, [searchField, searchFieldOptions, searchPlaceholder])
 
   return (
-    <div className={`flex flex-col sm:flex-row gap-3 items-stretch sm:items-center p-1 ${className}`}>
-      <TableSearchInput
-        value={searchInput}
-        onChange={onSearchInputChange}
-        placeholder={resolvedSearchPlaceholder}
-      />
+    <div className={`flex flex-col sm:flex-row gap-3 items-stretch sm:items-center ${className}`}>
+      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+        <TableSearchInput
+          value={searchInput}
+          onChange={onSearchInputChange}
+          placeholder={resolvedSearchPlaceholder}
+        />
+        {searchActions && (
+          <div className="flex items-center">
+            {searchActions}
+          </div>
+        )}
+      </div>
 
       <TableFilterExtraControls
         actions={actions}

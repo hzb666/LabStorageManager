@@ -573,7 +573,7 @@ const ActionButtons = React.memo(function ActionButtons({
       {
         value: 'borrowed',
         label: item.borrower_name ? `${item.borrower_name}借用` : '借用中',
-        className: 'text-blue-800 dark:text-blue-200',
+        className: 'text-base text-blue-800 dark:text-blue-200',
         title: item.borrower_name ? `借用者: ${item.borrower_name}` : undefined
       }
     ]
@@ -582,7 +582,7 @@ const ActionButtons = React.memo(function ActionButtons({
       statusList.push({
         value: 'in_stock',
         label: `${item.temporary_keeper_name}暂存`,
-        className: 'text-orange-700 dark:text-orange-300',
+        className: 'text-base text-orange-700 dark:text-orange-300',
         title: `暂存人: ${item.temporary_keeper_name}`
       })
     }

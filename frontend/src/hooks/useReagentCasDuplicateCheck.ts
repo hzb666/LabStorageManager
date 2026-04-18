@@ -1,7 +1,11 @@
 import { useCallback, useRef, useState } from 'react'
 
 import { reagentOrderAPI, type CASOverviewResponse } from '@/api/client'
-import { isSpecialCasValue, validateAndNormalizeCASInput } from '@/lib/validationSchemas'
+import {
+  isSpecialCasValue,
+  normalizeCASInputValue,
+  validateAndNormalizeCASInput,
+} from '@/lib/validationSchemas'
 
 export function useReagentCasDuplicateCheck() {
   const [casWarning, setCasWarning] = useState<CASOverviewResponse | null>(null)
@@ -17,7 +21,7 @@ export function useReagentCasDuplicateCheck() {
   }, [])
 
   const handleCasValueChange = useCallback((casInput: string | null | undefined) => {
-    const currentValue = (casInput || '').trim().toUpperCase()
+    const currentValue = normalizeCASInputValue(casInput || '')
     if (!lastCheckedCasRef.current || currentValue !== lastCheckedCasRef.current) {
       casRequestIdRef.current += 1
       setCasWarning(null)

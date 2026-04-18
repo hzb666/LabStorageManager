@@ -2,6 +2,7 @@
 // 处理跨标签页通信和后端API调用
 
 importScripts('cart-tab-selection.js');
+importScripts('../shared/generated-config.js');
 importScripts('../shared/site-config.js');
 
 const REQUEST_TIMEOUT_MS = 15000;
@@ -10,23 +11,16 @@ const cartTabActivityById = Object.create(null);
 const { isCartPageUrl, selectPreferredCartTab } = globalThis.CartTabSelection;
 const {
   DEFAULT_SYSTEM_CONFIG,
-  SYSTEM_CONFIG_STORAGE_KEY,
   buildProductDetailUrl,
   buildSiteUrlPattern,
-  normalizeExtensionConfig,
 } = globalThis.ExtensionSiteConfig;
 let trackedCartUrlPattern = null;
 
-console.log('[Background] Service Worker 加载中...');
-
 // 监听来自popup或内容脚本的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[Background] 收到消息:', message.type);
-
   if (message.type === 'GET_CART_DATA') {
     getCartDataFromTargetSite()
       .then(data => {
-        console.log('[Background] GET_CART_DATA 成功:', data);
         sendResponse({ success: true, data });
       })
       .catch(error => {
@@ -85,14 +79,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   delete cartTabActivityById[tabId];
 });
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'local' || !changes[SYSTEM_CONFIG_STORAGE_KEY]) {
-    return;
-  }
-
-  void syncCartRequestTracking();
-});
-
 async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
   const timerId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
@@ -104,11 +90,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
 }
 
 async function getSystemConfig() {
-  const data = await chrome.storage.local.get([SYSTEM_CONFIG_STORAGE_KEY]);
-  return normalizeExtensionConfig(
-    data?.[SYSTEM_CONFIG_STORAGE_KEY],
-    DEFAULT_SYSTEM_CONFIG
-  );
+  return DEFAULT_SYSTEM_CONFIG;
 }
 
 async function syncCartRequestTracking() {
@@ -141,25 +123,19 @@ async function resolveCartTab() {
 
 // 从目标网站获取购物车数据
 async function getCartDataFromTargetSite() {
-  console.log('[Background] 开始获取购物车数据...');
-
   const targetTab = await resolveCartTab();
-  console.log('[Background] 目标标签页:', targetTab);
 
   if (!targetTab) {
     throw new Error('请先打开试剂平台的购物车页面');
   }
 
-  console.log('[Background] 向内容脚本发送消息...');
   const response = await chrome.tabs.sendMessage(targetTab.id, { action: 'GET_CART' });
-  console.log('[Background] 内容脚本响应:', response);
 
   if (!response?.success) {
     throw new Error(response?.error || '获取购物车数据失败');
   }
 
   const cartItems = response.data;
-  console.log('[Background] 购物车数据:', cartItems);
 
   if (!cartItems || cartItems.length === 0) {
     return [];
@@ -168,20 +144,17 @@ async function getCartDataFromTargetSite() {
   // 获取每个产品的详情
   const items = [];
   for (const cartItem of cartItems) {
-    console.log('[Background] 获取产品详情:', cartItem.productId);
     try {
       const detail = await fetchProductDetail(cartItem.productId);
       if (detail) {
         detail.quantity = cartItem.quantity;
         items.push(detail);
-        console.log('[Background] 产品详情获取成功:', detail.name);
       }
     } catch (error) {
       console.error('[Background] 获取产品详情失败:', cartItem.productId, error);
     }
   }
 
-  console.log('[Background] 最终商品列表:', items);
   return items;
 }
 
@@ -189,24 +162,18 @@ async function getCartDataFromTargetSite() {
 async function fetchProductDetail(productId) {
   const config = await getSystemConfig();
   const url = buildProductDetailUrl(config.reagentSiteUrl, productId);
-  console.log('[Background] 请求详情页:', url);
 
   try {
     // 使用fetch需要目标网站在host_permissions中
     const response = await fetchWithTimeout(url);
-    console.log('[Background] 详情页响应状态:', response.status);
 
     if (!response.ok) {
-      console.log('[Background] HTTP错误，返回基本信息');
       return createBasicItem(productId, config.reagentSiteUrl);
     }
 
     const html = await response.text();
-    console.log('[Background] 详情页HTML长度:', html.length);
 
-    const detail = parseProductDetail(html, productId, config.reagentSiteUrl);
-    console.log('[Background] 解析结果:', detail);
-    return detail;
+    return parseProductDetail(html, productId, config.reagentSiteUrl);
   } catch (error) {
     console.error('[Background] 请求失败:', error);
     return createBasicItem(productId, config.reagentSiteUrl);
@@ -280,5 +247,3 @@ async function checkTargetTab() {
 }
 
 void syncCartRequestTracking();
-
-console.log('[Background] Service Worker 加载完成');

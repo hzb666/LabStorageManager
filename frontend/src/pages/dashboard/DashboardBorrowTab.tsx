@@ -39,6 +39,7 @@ import {
   type MyBorrowItem,
   type DashboardParams,
   BORROW_SEARCH_FIELDS,
+  DASHBOARD_EMPTY_STATUS_OPTIONS,
   buildLocalListData,
   requestDashboardCountsRefresh,
 } from '../../lib/dashboardUtils'
@@ -316,7 +317,7 @@ export function DashboardBorrowTab() {
   const openReturnModal = useCallback((item: MyBorrowItem) => {
     setSelectedBorrow(item)
     setReturnMode('used')
-    returnForm.reset({ return_mode: 'used', return_quantity: '' })
+    returnForm.reset({ return_mode: 'used', return_quantity: '', notes: item.notes ?? '' })
   }, [returnForm])
 
   // 提交时按当前模式校验并换算最终剩余量；成功后失效借用/库存查询并刷新统计卡片。
@@ -345,6 +346,7 @@ export function DashboardBorrowTab() {
     try {
       await inventoryAPI.return(selectedBorrow.inventory_id, {
         remaining_quantity: finalQuantity,
+        notes: formData.notes,
       })
       setSelectedBorrow(null)
       returnForm.reset(defaultReturnValues)
@@ -424,7 +426,7 @@ export function DashboardBorrowTab() {
           },
         }}
         customColumns={borrowColumns}
-        statusOptions={[{ value: 'all', label: '全部' }]}
+        statusOptions={DASHBOARD_EMPTY_STATUS_OPTIONS}
         searchFieldOptions={BORROW_SEARCH_FIELDS}
         searchPlaceholder="搜索名称、CAS号..."
         title={<><Package className="w-5 h-5" /> 我的借用记录</>}

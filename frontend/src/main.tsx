@@ -5,23 +5,25 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
 import { bootstrapCacheVersion } from '@/lib/cacheVersionBootstrap'
 
-const LSM_BANNER = [
-  '╔═══════════════════════════════════════════╗',
-  '║                                           ║',
-  '║     ██╗        ███████╗   ███╗   ███╗     ║',
-  '║     ██║        ██╔════╝   ████╗ ████║     ║',
-  '║     ██║        ███████╗   ██╔████╔██║     ║',
-  '║     ██║        ╚════██║   ██║╚██╔╝██║     ║',
-  '║     ███████╗   ███████║   ██║ ╚═╝ ██║     ║',
-  '║     ╚══════╝   ╚══════╝   ╚═╝     ╚═╝     ║',
-  '║                                           ║',
-  '╚══════      Lab Storage Manager      ══════╝'
-].join('\n')
+if (import.meta.env.DEV) {
+  const LSM_BANNER = [
+    '╔═══════════════════════════════════════════╗',
+    '║                                           ║',
+    '║     ██╗        ███████╗   ███╗   ███╗     ║',
+    '║     ██║        ██╔════╝   ████╗ ████║     ║',
+    '║     ██║        ███████╗   ██╔████╔██║     ║',
+    '║     ██║        ╚════██║   ██║╚██╔╝██║     ║',
+    '║     ███████╗   ███████║   ██║ ╚═╝ ██║     ║',
+    '║     ╚══════╝   ╚══════╝   ╚═╝     ╚═╝     ║',
+    '║                                           ║',
+    '╚══════      Lab Storage Manager      ══════╝'
+  ].join('\n')
 
-console.log(
-  '%c' + LSM_BANNER,
-  'color: #3b82f6; font-weight: bold; font-family: "Courier New", Courier, monospace; font-size: 12px; line-height: 12px;'
-)
+  console.log(
+    '%c' + LSM_BANNER,
+    'color: #3b82f6; font-weight: bold; font-family: "Courier New", Courier, monospace; font-size: 12px; line-height: 12px;'
+  )
+}
 
 // 2. 创建一个 QueryClient 实例
 const queryClient = new QueryClient({

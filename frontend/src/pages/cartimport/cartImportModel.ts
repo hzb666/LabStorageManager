@@ -1,3 +1,5 @@
+import { normalizeCASInputValue } from "@/lib/validationSchemas";
+
 export const CART_STORAGE_KEY = "cart_import_batch_latest";
 const BATCH_TTL_MS = 2 * 60 * 60 * 1000;
 
@@ -320,9 +322,9 @@ export function readCartImportBatchFromStorage(
       };
     }
 
-    const parsedItems = (batch.items || [])
-      .map((item, index) => toImportItem(item, index, defaults))
-      .filter((item) => item.name.trim());
+    const parsedItems = (batch.items || []).map((item, index) =>
+      toImportItem(item, index, defaults),
+    );
 
     if (parsedItems.length === 0) {
       return {
@@ -418,7 +420,7 @@ export function updateImportItemWithDrafts(params: {
 }
 
 export function normalizeReagentAsyncCas(casNumber: string | null | undefined): string {
-  return String(casNumber || "").trim().toUpperCase();
+  return normalizeCASInputValue(String(casNumber || ""));
 }
 
 export function getCartImportReagentCasOnSelection(

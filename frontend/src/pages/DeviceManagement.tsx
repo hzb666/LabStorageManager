@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   createColumnHelper,
   flexRender,
@@ -12,10 +13,10 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import StatusBadge from '@/components/ui/StatusBadge'
-import { sessionAPI, authAPI, type SessionInfo } from '@/api/client'
+import { sessionAPI, authAPI, userAdminAPI, type SessionInfo } from '@/api/client'
 import { formatDateTime } from '@/lib/utils'
 import { getDeviceId } from '@/lib/storage/appAuthMetaStorage'
-import { type User } from '@/lib/constants'
+import { UserRoles, type User } from '@/lib/constants'
 import useDialogState from '@/hooks/useDialogState'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import {
@@ -27,16 +28,22 @@ import {
   Shield,
   Edit,
   Pencil,
+  FileText,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
 import { UserEditDialog } from '@/components/UserEditDialog'
 import { useForm } from 'react-hook-form'
 import { valibotResolver } from '@hookform/resolvers/valibot'
-import { DeviceNameSchema, type DeviceNameFormData } from '@/lib/validationSchemas'
+import { DeviceNameSchema, getApiErrorMessage, type DeviceNameFormData } from '@/lib/validationSchemas'
 import { defaultDeviceNameValues, getDeviceNameFormFields } from '@/lib/formConfigs'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { BaseForm } from '@/components/BaseForm'
-import { SEARCH_MAX_LENGTH, TableEmptyState, TableSearchInput } from '@/components/ui/TableFilters'
+import {
+  SEARCH_MAX_LENGTH,
+  TableEmptyState,
+  TableLoadingState,
+  TableSearchInput,
+} from '@/components/ui/TableFilters'
 import { HighlightText } from '@/components/ui/HighlightText'
 import { containsSearchText } from '@/lib/searchMatchMode'
 
@@ -328,11 +335,7 @@ function buildDeviceTableContent({
   table: ReturnType<typeof useReactTable<SessionInfo>>
 }) {
   if (isLoading && totalCount === 0) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    )
+    return <TableLoadingState className="mx-6" />
   }
 
   if (filteredCount === 0) {
@@ -624,9 +627,11 @@ function useDeviceDialogState(
 }
 
 export default function DeviceManagement() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [sorting, setSorting] = useState<SortingState>([])
   const [dialogState, setDialogState] = useDialogState<DeviceDialogMode>()
+  const [logsLoading, setLogsLoading] = useState(false)
   const search = useDeviceSearchState()
 
   const editForm = useForm<DeviceNameFormData>({
@@ -680,11 +685,39 @@ export default function DeviceManagement() {
     }
   }
 
+  const canViewLogs = userData?.role === UserRoles.ADMIN || userData?.role === UserRoles.USER
+
+  const handleViewLogs = useCallback(async () => {
+    if (!userData || !canViewLogs) {
+      return
+    }
+
+    setLogsLoading(true)
+    try {
+      const response = await userAdminAPI.generateLogsToken(userData.id)
+      navigate('/logs', { state: { logsToken: response.data.token, backPath: '/devices' } })
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '获取日志访问失败'))
+    } finally {
+      setLogsLoading(false)
+    }
+  }, [canViewLogs, navigate, userData])
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">个人账户</h1>
         <div className="flex flex-wrap gap-2">
+          {canViewLogs && (
+            <Button onClick={handleViewLogs} size="lg" variant="modern" disabled={logsLoading}>
+              {logsLoading ? (
+                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+              ) : (
+                <FileText className="w-4 h-4 mr-1.5" />
+              )}
+              查看日志
+            </Button>
+          )}
           <Button onClick={() => dialogs.setEditDialogOpen(true)} size="lg" variant="modern">
             <Edit className="w-4 h-4 mr-1.5" />
             修改信息

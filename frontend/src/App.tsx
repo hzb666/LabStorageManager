@@ -20,7 +20,6 @@ const CartImportPage = lazy(() => import('@/pages/CartImport').then(m => ({ defa
 const AdminUsersPage = lazy(() => import('@/pages/AdminUsers').then(m => ({ default: m.AdminUsersPage })))
 const ReagentOrdersPage = lazy(() => import('@/pages/ReagentOrders').then(m => ({ default: m.ReagentOrdersPage })))
 const ConsumableOrdersPage = lazy(() => import('@/pages/ConsumableOrders').then(m => ({ default: m.ConsumableOrdersPage })))
-const TestErrorPage = lazy(() => import('@/pages/TestError').then(m => ({ default: m.TestErrorPage })))
 const NotFoundPage = lazy(() => import('@/pages/NotFound').then(m => ({ default: m.NotFoundPage })))
 const DeviceManagement = lazy(() => import('@/pages/DeviceManagement').then(m => ({ default: m.default })))
 const AnnouncementManagement = lazy(() => import('@/pages/AnnouncementManagement').then(m => ({ default: m.AnnouncementManagement })))
@@ -111,7 +110,6 @@ function AppContent() {
               </ProtectedRoute>
             }
           />
-          <Route path="/test-error" element={<TestErrorPage />} />
           <Route path="*" element={<NotFoundPage />} />
           <Route
             path="/"
@@ -170,6 +168,11 @@ function AppContent() {
             <Route path="devices" element={
               <Suspense fallback={<AuthDeferredShell pathname="/devices" />}>
                 <DeviceManagement />
+              </Suspense>
+            } />
+            <Route path="logs" element={
+              <Suspense fallback={<AuthDeferredShell pathname="/logs" />}>
+                <OperationLogsPage />
               </Suspense>
             } />
             <Route

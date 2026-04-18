@@ -55,7 +55,7 @@ interface ConsumableOrder {
   name: string
   english_name: string | null
   product_number: string | null
-  specification: string
+  specification: string | null
   unit: string | null
   quantity: number
   price: number | null
@@ -84,6 +84,7 @@ const CONSUMABLE_SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
   { value: 'specification', label: '规格' },
+  { value: 'communication', label: '订购信息' },
   { value: 'applicant', label: '订购人' },
   { value: 'created_at', label: '订购时间' },
 ]

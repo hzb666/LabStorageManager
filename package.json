@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "build:extension": "node browser-extension/build-config.mjs"
+  },
   "dependencies": {
     "@floating-ui/react": "^0.27.18",
     "tailwindcss-animate": "^1.0.7"

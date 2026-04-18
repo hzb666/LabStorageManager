@@ -148,6 +148,29 @@ export enum ReagentOrderReason {
   OTHERS = "others",
 }
 
+export interface ReagentWorkflowEditPayload {
+  name?: string
+  english_name?: string
+  alias?: string
+  category?: string
+  brand?: string
+  purity?: string
+  specification?: string
+  is_hazardous?: boolean
+  notes?: string
+}
+
+export interface ConfirmArrivalPayload extends ReagentWorkflowEditPayload {
+  arrival_notes?: string
+  storage_location?: string
+  remaining_quantity?: number
+}
+
+export interface StockInPayload extends ReagentWorkflowEditPayload {
+  storage_location: string
+  remaining_quantity?: number
+}
+
 // Consumable Order Status Enum
 export enum ConsumableOrderStatus {
   PENDING = "pending",
@@ -318,9 +341,9 @@ export const reagentOrderAPI = {
   approve: (id: number) => api.post(`/reagent-orders/${id}/approve`),
   reject: (id: number, reason: string) =>
     api.post(`/reagent-orders/${id}/reject`, { reason }),
-  confirmArrival: (id: number, data?: { arrival_notes?: string; storage_location?: string }) =>
+  confirmArrival: (id: number, data?: ConfirmArrivalPayload) =>
     api.post(`/reagent-orders/${id}/confirm-arrival`, data ?? {}),
-  stockIn: (id: number, data: { storage_location: string; remaining_quantity?: number }) =>
+  stockIn: (id: number, data: StockInPayload) =>
     api.post(`/reagent-orders/${id}/stock-in`, data),
   getCASOverview: (
     casNumber: string,
@@ -365,27 +388,9 @@ export const consumableOrderAPI = {
   exportOrders: () => api.get('/consumable-orders/export', { responseType: 'blob' as const }),
 }
 
-export type CartSyncOrderType = 'reagent' | 'consumable'
-
-export interface CartSyncItemPayload {
-  name: string
-  specification?: string
-  quantity: number
-  price?: number
-  brand?: string
-  cas_number?: string
-  english_name?: string
-  alias?: string
-  unit?: string
-  product_number?: string
-  is_hazardous?: boolean
-  product_id?: string
-  detail_url?: string
-}
-
-export const cartSyncAPI = {
-  importItems: (data: { items: CartSyncItemPayload[]; order_type: CartSyncOrderType }) =>
-    api.post('/cart-sync/import', data),
+export interface InventoryReturnPayload {
+  remaining_quantity: number
+  notes?: string
 }
 
 // Inventory APIs
@@ -406,7 +411,7 @@ export const inventoryAPI = {
   getByCode: (code: string) => api.get(`/inventory/code/${code}`),
   checkCAS: (casNumber: string) => api.get(`/inventory/cas/${casNumber}`),
   borrow: (id: number, data?: { actual_borrower_id?: number }) => api.post(`/inventory/${id}/borrow`, data),
-  return: (id: number, data: { remaining_quantity: number }) =>
+  return: (id: number, data: InventoryReturnPayload) =>
     api.post(`/inventory/${id}/return`, data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/inventory/${id}`, data),
   delete: (id: number) => api.delete(`/inventory/${id}`),
@@ -458,8 +463,6 @@ export interface CommonShelfGroupDisplay {
   name: string
   english_name: string | null
   category: ChemicalCategory | null
-  purity: string | null
-  notes: string | null
 }
 
 export interface CommonShelfGroup {
@@ -556,7 +559,12 @@ export const commonShelfAPI = {
   }) => api.put(`/common-shelf/groups/${groupKey}/items/${itemId}`, data),
   deleteItem: (groupKey: string, itemId: number) =>
     api.delete(`/common-shelf/groups/${groupKey}/items/${itemId}`),
-  addBottles: (groupKey: string, data: { count: number; storage_location?: string }) =>
+  addBottles: (groupKey: string, data: {
+    count: number
+    storage_location?: string
+    purity?: string
+    notes?: string
+  }) =>
     api.post(`/common-shelf/groups/${groupKey}/add-bottles`, data),
   removeOne: (groupKey: string, data: { storage_location?: string }) =>
     api.post(`/common-shelf/groups/${groupKey}/remove-one`, data),
@@ -684,13 +692,14 @@ export interface LogsAPI {
     skip?: number
     limit?: number
     search?: string
-    log_type?: string
+    category?: string
     status_filter?: string
+    include_search_logs?: boolean
   }) => Promise<{ data: { data: LogItem[]; total: number } }>
 }
 
 // 创建日志 API 适配器（用于 FilterTable）
-// 注意：FilterTable 使用 status_filter 参数，但日志 API 需要 log_type，需要转换
+// 注意：FilterTable 使用 status_filter 参数，但日志 API 需要 category，需要转换
 export const createLogsAPI = (token: string): LogsAPI => ({
   list: async (params) => {
     const payload: {
@@ -698,17 +707,19 @@ export const createLogsAPI = (token: string): LogsAPI => ({
       skip?: number
       limit?: number
       keyword?: string
-      log_type?: string
+      category?: string
+      include_search_logs?: boolean
     } = { token }
 
     if (params.skip !== undefined) payload.skip = params.skip
     if (params.limit !== undefined) payload.limit = params.limit
     if (params.search) payload.keyword = params.search
+    if (params.include_search_logs === true) payload.include_search_logs = true
 
-    // 将 status_filter 转换为 log_type（FilterTable 使用 status_filter，日志 API 需要 log_type）
+    // 将 status_filter 转换为 category（FilterTable 使用 status_filter，日志 API 需要 category）
     // 注意：'all' 表示全部类型，不传参给后端
     if (params.status_filter && params.status_filter !== 'all') {
-      payload.log_type = params.status_filter
+      payload.category = params.status_filter
     }
 
     const response = await api.post<LogsResponse>('/admin/users/logs/query', payload)

@@ -6,13 +6,13 @@ import {
 } from "@tanstack/react-table";
 import type { ColumnDef, RowData, Table } from "@tanstack/react-table";
 import { useLocation } from "react-router-dom";
-import { ChevronsDownUp, ChevronsUpDown, Loader2 } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { DataTable } from "@/components/ui/DataTable";
 import { StaleBanner } from "@/components/ui/StaleBanner";
-import { TableEmptyState, TableFilters } from "@/components/ui/TableFilters";
+import { TableEmptyState, TableFilters, TableLoadingState } from "@/components/ui/TableFilters";
 import { useListSSE } from "@/hooks/useListSSE";
 import {
   DEFAULT_SEARCH_FIELD_OPTIONS,
@@ -52,12 +52,14 @@ export interface FilterTableProps {
   debounceMs?: number;
   extraParams?: Record<string, unknown>;
   searchPlaceholder?: string;
+  searchActions?: React.ReactNode;
   title?: React.ReactNode;
   enableExpandAll?: boolean;
   renderExpandedRow?: (item: Record<string, unknown>) => React.ReactNode;
   noteField?: string;
   scrollHeight?: number | string;
   className?: string;
+  filterClassName?: string;
   cardClassName?: string;
   emptyText?: string;
   toolbarActions?: React.ReactNode;
@@ -134,19 +136,6 @@ function getScrollHeight(
   }
 
   return "calc(100vh - 112px - 16px)";
-}
-
-// 首屏无数据时仍给 loading 容器保留稳定高度，避免鉴权骨架切换后表格区域塌陷。
-function getLoadingSurfaceStyle(scrollHeight: number | string): React.CSSProperties {
-  if (typeof scrollHeight === "number") {
-    return { height: `${scrollHeight}px` };
-  }
-
-  if (scrollHeight !== "auto") {
-    return { height: scrollHeight };
-  }
-
-  return { minHeight: "25.5rem" };
 }
 
 function resolveTableColumns(
@@ -497,16 +486,7 @@ function FilterTableContent({
   tableId,
 }: Readonly<FilterTableContentProps>) {
   if (filter.isLoading && filter.data.length === 0) {
-    return (
-      <div className="px-6 pb-6">
-        <div
-          className="flex items-center justify-center text-zinc-400 dark:text-zinc-500"
-          style={getLoadingSurfaceStyle(scrollHeight)}
-        >
-          <Loader2 className="h-6 w-6 animate-spin" />
-        </div>
-      </div>
-    );
+    return <TableLoadingState className="mx-6" />;
   }
 
   if (filter.data.length === 0) {
@@ -568,22 +548,27 @@ function FilterTableRealtimeBanner({
 function FilterTableControls({
   filter,
   searchFieldOptions,
+  searchActions,
   searchPlaceholder,
   showFuzzySearch,
   showMatchMode,
   statusOptions,
+  filterClassName,
   toolbarActions,
 }: Readonly<{
   filter: ReturnType<typeof useTableState>;
   searchFieldOptions: SearchFieldOption[];
+  searchActions?: React.ReactNode;
   searchPlaceholder: string;
   showFuzzySearch?: boolean;
   showMatchMode?: boolean;
   statusOptions: FilterOption[];
+  filterClassName?: string;
   toolbarActions?: React.ReactNode;
 }>) {
   return (
     <TableFilters
+      className={filterClassName}
       searchInput={filter.searchInput}
       onSearchInputChange={filter.setSearchInput}
       statusFilter={filter.statusFilter}
@@ -596,12 +581,88 @@ function FilterTableControls({
       onMatchModeChange={filter.setMatchMode}
       statusOptions={statusOptions}
       searchFieldOptions={searchFieldOptions}
+      searchActions={searchActions}
       searchPlaceholder={searchPlaceholder}
       showFuzzySearch={showFuzzySearch}
       showMatchMode={showMatchMode}
       actions={toolbarActions}
     />
   );
+}
+
+function useValidStatusFilter({
+  defaultStatus,
+  setStatusFilter,
+  statusFilter,
+  statusOptions,
+}: Readonly<{
+  defaultStatus: string;
+  setStatusFilter: (value: string) => void;
+  statusFilter: string;
+  statusOptions: FilterOption[];
+}>) {
+  useEffect(() => {
+    const hasCurrentStatus = statusOptions.some((option) => option.value === statusFilter);
+    if (!hasCurrentStatus) {
+      setStatusFilter(defaultStatus);
+    }
+  }, [defaultStatus, setStatusFilter, statusFilter, statusOptions]);
+}
+
+function useInitialUrlSearchState({
+  defaultSearchField,
+  locationSearch,
+  searchFieldOptions,
+}: Readonly<{
+  defaultSearchField: string;
+  locationSearch: string;
+  searchFieldOptions: SearchFieldOption[];
+}>) {
+  return useMemo(() => {
+    return getInitialUrlSearchState({
+      defaultSearchField,
+      locationSearch,
+      searchFieldOptions,
+    });
+  }, [defaultSearchField, locationSearch, searchFieldOptions]);
+}
+
+function useFilterTableInstance({
+  actionRefs,
+  customColumns,
+  filter,
+}: Readonly<{
+  actionRefs: ReturnType<typeof useActionRefs>;
+  customColumns?: ColumnDef<Record<string, unknown>, unknown>[];
+  filter: ReturnType<typeof useTableState>;
+}>) {
+  const tableColumns = useMemo(() => resolveTableColumns(customColumns), [customColumns]);
+
+  // eslint-disable-next-line react-hooks/incompatible-library
+  return useReactTable({
+    defaultColumn: { sortDescFirst: false, sortingFn: "text" },
+    data: filter.data as Record<string, unknown>[],
+    columns: tableColumns,
+    getRowId: getTableRowId,
+    getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    getRowCanExpand: () => true,
+    columnResizeMode: "onChange",
+    enableColumnResizing: true,
+    onColumnSizingChange: filter.setColumnSizing,
+    manualSorting: true,
+    onSortingChange: filter.setSorting,
+    state: {
+      sorting: filter.sorting,
+      columnSizing: filter.columnSizing,
+      globalFilter: filter.globalFilter,
+    },
+    meta: {
+      fuzzySearch: filter.fuzzySearch,
+      onEdit: (item) => actionRefs.onEditRef.current?.(item),
+      onBorrowSuccess: () => actionRefs.onBorrowSuccessRef.current?.(),
+    },
+  });
 }
 
 // 组合筛选栏、表格状态与数据表格渲染，是 FilterTable 的总入口。
@@ -622,31 +683,28 @@ export function FilterTable({
   debounceMs = 300,
   extraParams = {},
   searchPlaceholder = "搜索名称、CAS号、位置...",
+  searchActions,
   title,
   enableExpandAll = true,
   renderExpandedRow,
   noteField,
   scrollHeight,
   className = "",
+  filterClassName,
   cardClassName,
   emptyText = "暂无数据",
   toolbarActions,
   realtime,
 }: Readonly<FilterTableProps>) {
   const location = useLocation();
-  const { onEditRef, onBorrowSuccessRef } = useActionRefs({
-    onEdit,
-    onBorrowSuccess,
-  });
+  const actionRefs = useActionRefs({ onEdit, onBorrowSuccess });
   const [isTableAtTop, setIsTableAtTop] = useState(true);
 
-  const initialUrlSearchState = useMemo(() => {
-    return getInitialUrlSearchState({
-      defaultSearchField,
-      locationSearch: location.search,
-      searchFieldOptions,
-    });
-  }, [defaultSearchField, location.search, searchFieldOptions]);
+  const initialUrlSearchState = useInitialUrlSearchState({
+    defaultSearchField,
+    locationSearch: location.search,
+    searchFieldOptions,
+  });
 
   const filter = useTableState({
     api,
@@ -664,6 +722,13 @@ export function FilterTable({
     enableFuzzySearch: showFuzzySearch,
   });
 
+  useValidStatusFilter({
+    defaultStatus,
+    setStatusFilter: filter.setStatusFilter,
+    statusFilter: filter.statusFilter,
+    statusOptions,
+  });
+
   const { handleRealtimeRefresh, staleKey } = useFilterTableRealtime({
     filter,
     isTableAtTop,
@@ -679,36 +744,7 @@ export function FilterTable({
     locationSearch: location.search,
   });
 
-  const tableColumns = useMemo(() => resolveTableColumns(customColumns), [customColumns]);
-
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const table = useReactTable({
-    defaultColumn: {
-      sortDescFirst: false,
-      sortingFn: "text",
-    },
-    data: filter.data as Record<string, unknown>[],
-    columns: tableColumns,
-    getRowId: getTableRowId,
-    getCoreRowModel: getCoreRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getRowCanExpand: () => true,
-    columnResizeMode: "onChange",
-    enableColumnResizing: true,
-    onColumnSizingChange: filter.setColumnSizing,
-    manualSorting: true,
-    onSortingChange: filter.setSorting,
-    state: {
-      sorting: filter.sorting,
-      columnSizing: filter.columnSizing,
-      globalFilter: filter.globalFilter,
-    },
-    meta: {
-      fuzzySearch: filter.fuzzySearch,
-      onEdit: (item) => onEditRef.current?.(item),
-      onBorrowSuccess: () => onBorrowSuccessRef.current?.(),
-    },
-  });
+  const table = useFilterTableInstance({ actionRefs, customColumns, filter });
 
   useExpandedResetOnFilterChange({ enableExpandAll, filter, table });
 
@@ -724,10 +760,12 @@ export function FilterTable({
       <FilterTableControls
         filter={filter}
         searchFieldOptions={searchFieldOptions}
+        searchActions={searchActions}
         searchPlaceholder={searchPlaceholder}
         showFuzzySearch={showFuzzySearch}
         showMatchMode={showMatchMode}
         statusOptions={statusOptions}
+        filterClassName={filterClassName}
         toolbarActions={toolbarActions}
       />
 

@@ -3,16 +3,15 @@
 const STORAGE_KEYS = {
   CART_ITEMS: 'pendingCartItems',
   IMPORT_BATCH_LATEST: 'import_batch_latest',
-  SYSTEM_CONFIG: 'systemConfig',
 };
 
-const DEFAULT_SYSTEM_CONFIG = {
-  // 开发环境默认（会自动检测当前打开的页面）
-  systemUrl: 'http://localhost:5173',
-  reagentSiteUrl: 'https://reagent.bjmu.edu.cn',
-};
+const extensionConfigApi = globalThis.ExtensionSiteConfig;
+if (!extensionConfigApi) {
+  throw new Error('扩展环境配置加载失败');
+}
+const { DEFAULT_SYSTEM_CONFIG } = extensionConfigApi;
+const systemConfig = DEFAULT_SYSTEM_CONFIG;
 
-let systemConfig = { ...DEFAULT_SYSTEM_CONFIG };
 const orderTypeDetectionApi = globalThis.OrderTypeDetection;
 if (!orderTypeDetectionApi) {
   throw new Error('订单类型识别模块加载失败');
@@ -65,24 +64,6 @@ function isCartPageUrl(url) {
 
 async function resolveSystemUrl() {
   return systemConfig.systemUrl;
-}
-
-function parseHttpUrl(urlValue) {
-  try {
-    const parsed = new URL(urlValue);
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      return null;
-    }
-    if (!parsed.hostname) {
-      return null;
-    }
-    if (parsed.username || parsed.password) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -277,32 +258,7 @@ async function fetchProductDetail(detailUrl) {
   }
 }
 
-async function loadSystemConfig() {
-  try {
-    const data = await chrome.storage.local.get([STORAGE_KEYS.SYSTEM_CONFIG]);
-    if (data?.[STORAGE_KEYS.SYSTEM_CONFIG]) {
-      systemConfig = { ...DEFAULT_SYSTEM_CONFIG, ...data[STORAGE_KEYS.SYSTEM_CONFIG] };
-    }
-  } catch (error) {
-    console.warn('[Popup] 加载配置失败，使用默认配置:', error);
-  }
-}
-
-async function getSiteTheme() {
-  try {
-    const targetTab = await findCartTab();
-    if (!targetTab?.id) {
-      return null;
-    }
-    const response = await sendMessageWithAutoInject(targetTab.id, { action: 'GET_THEME' });
-    return response?.success ? response.data : null;
-  } catch (error) {
-    console.warn('[Popup] 获取网站主题失败:', error);
-    return null;
-  }
-}
-
-// 动态注入脚本检测系统主题（用户自定义域名）
+// 动态注入脚本检测系统主题。
 async function getSystemTheme() {
   try {
     // 查找系统 URL 对应的标签页
@@ -349,11 +305,8 @@ async function getSystemTheme() {
 
 // 立即初始化，避免 DOMContentLoaded 不触发
 (async function init() {
-  await loadSystemConfig();
-
   const mainSection = document.getElementById('mainSection');
   const previewSection = document.getElementById('previewSection');
-  const configSection = document.getElementById('configSection');
   const fetchBtn = document.getElementById('fetchBtn');
   const targetStatus = document.getElementById('targetStatus');
   const result = document.getElementById('result');
@@ -362,12 +315,6 @@ async function getSystemTheme() {
   const selectAll = document.getElementById('selectAll');
   const backBtn = document.getElementById('backBtn');
   const importBtn = document.getElementById('importBtn');
-  const configBtn = document.getElementById('configBtn');
-  const configBackBtn = document.getElementById('configBackBtn');
-  const configSaveBtn = document.getElementById('configSaveBtn');
-  const systemUrlInput = document.getElementById('systemUrl');
-  const reagentSiteUrlInput = document.getElementById('reagentSiteUrl');
-  const siteThemeStatus = document.getElementById('siteThemeStatus');
 
   let cartItems = [];
 
@@ -481,86 +428,11 @@ async function getSystemTheme() {
 
   function showMainSection() {
     previewSection.classList.add('hidden');
-    configSection.classList.add('hidden');
     mainSection.classList.remove('hidden');
     fetchBtn.disabled = false;
     fetchBtn.textContent = '获取购物车';
     result.className = 'message';
     result.textContent = '';
-  }
-
-  function showConfigSection() {
-    mainSection.classList.add('hidden');
-    previewSection.classList.add('hidden');
-    configSection.classList.remove('hidden');
-
-    // 填充当前配置
-    systemUrlInput.value = systemConfig.systemUrl;
-    reagentSiteUrlInput.value = systemConfig.reagentSiteUrl;
-
-    // 检测网站主题
-    detectSiteTheme();
-  }
-
-  async function detectSiteTheme() {
-    siteThemeStatus.textContent = '检测中...';
-    siteThemeStatus.className = 'badge badge-info';
-
-    // 只检测系统 URL 的主题
-    const theme = await getSystemTheme();
-
-    if (theme) {
-      if (theme.darkMode === true) {
-        siteThemeStatus.textContent = '🌙 深色模式';
-        siteThemeStatus.className = 'badge badge-secondary';
-        // 同步插件深色模式
-        document.body.classList.add('dark-mode');
-      } else if (theme.darkMode === false) {
-        siteThemeStatus.textContent = '☀️ 浅色模式';
-        siteThemeStatus.className = 'badge badge-warning';
-        // 同步插件浅色模式
-        document.body.classList.remove('dark-mode');
-      }
-    } else {
-      siteThemeStatus.textContent = '请先打开系统网站';
-      siteThemeStatus.className = 'badge badge-error';
-    }
-  }
-
-  async function saveConfig() {
-    const url = systemUrlInput.value.trim();
-    const reagentSiteUrl = reagentSiteUrlInput.value.trim() || DEFAULT_SYSTEM_CONFIG.reagentSiteUrl;
-
-    const parsedSystemUrl = parseHttpUrl(url);
-    if (!parsedSystemUrl) {
-      alert('请输入有效的系统 URL');
-      return;
-    }
-
-    const parsedReagentSiteUrl = parseHttpUrl(reagentSiteUrl);
-    if (!parsedReagentSiteUrl) {
-      alert('请输入有效的试剂网站 URL');
-      return;
-    }
-
-    const newConfig = {
-      systemUrl: parsedSystemUrl.origin,
-      reagentSiteUrl: parsedReagentSiteUrl.origin,
-    };
-
-    try {
-      await chrome.storage.local.set({ [STORAGE_KEYS.SYSTEM_CONFIG]: newConfig });
-      systemConfig = { ...DEFAULT_SYSTEM_CONFIG, ...newConfig };
-      showMainSection();
-      result.className = 'message message-success show';
-      result.textContent = '配置已保存';
-      setTimeout(() => {
-        result.className = 'message';
-        result.textContent = '';
-      }, 2000);
-    } catch (error) {
-      alert('保存失败: ' + error.message);
-    }
   }
 
   function showPreview() {
@@ -693,7 +565,4 @@ async function getSystemTheme() {
   selectAll.addEventListener('change', toggleSelectAll);
   backBtn.addEventListener('click', showMainSection);
   importBtn.addEventListener('click', importSelected);
-  configBtn.addEventListener('click', showConfigSection);
-  configBackBtn.addEventListener('click', showMainSection);
-  configSaveBtn.addEventListener('click', saveConfig);
 })();

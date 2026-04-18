@@ -51,6 +51,18 @@ ORDER_LIST_PARAM_KEYS = frozenset(
         "sort_order",
     }
 )
+COMMON_SHELF_LIST_PARAM_KEYS = frozenset(
+    {
+        "skip",
+        "limit",
+        "search",
+        "search_field",
+        "fuzzy",
+        "match_mode",
+        "sort_by",
+        "sort_order",
+    }
+)
 
 
 class CLIArgumentParser(argparse.ArgumentParser):
@@ -104,6 +116,13 @@ def _add_order_id_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_common_shelf_group_key_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "group_key",
+        help="Common shelf group key from `lsm common-shelf list`",
+    )
+
+
 def _add_param_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--param",
@@ -115,6 +134,10 @@ def _add_param_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _add_list_arguments(parser: argparse.ArgumentParser) -> None:
     _add_param_arguments(parser)
+    _add_pagination_arguments(parser)
+
+
+def _add_pagination_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--page",
         type=_parse_positive_int,
@@ -620,6 +643,78 @@ def _handle_reagent_stock_in(args: argparse.Namespace) -> None:
     )
 
 
+def _build_common_shelf_add_bottles_payload(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_payload_from_command_args(
+        args,
+        explicit_fields=("count", "storage_location", "purity", "notes"),
+        command_label="common-shelf add-bottles",
+    )
+    if payload is None or payload.get("count") is None:
+        raise CLILocalInputError(
+            "common-shelf add-bottles requires `--count` or JSON field `count`"
+        )
+    return payload
+
+
+def _handle_common_shelf_add_bottles(args: argparse.Namespace) -> None:
+    client = _client_from_args(args)
+    payload = _build_common_shelf_add_bottles_payload(args)
+    _request_with_payload(
+        client=client,
+        method="POST",
+        path=f"/common-shelf/groups/{args.group_key}/add-bottles",
+        json_body=payload,
+    )
+
+
+def _handle_field_search(
+    args: argparse.Namespace,
+    *,
+    path: str,
+    search_attr: str,
+    search_field: str,
+    allowed_params: frozenset[str],
+    command_label: str,
+    match_mode: str | None = None,
+) -> None:
+    search_value = str(getattr(args, search_attr, "") or "").strip()
+    if not search_value:
+        raise CLILocalInputError(f"{command_label} requires a non-empty search value")
+    args.param = [f"search={search_value}", f"search_field={search_field}"]
+    if match_mode and "match_mode" in allowed_params:
+        args.param.append(f"match_mode={match_mode}")
+    args.allowed_params = allowed_params
+    args.list_command_label = command_label
+    _handle_list_command(args, path)
+
+
+def _build_common_shelf_remove_one_payload(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_payload_from_command_args(
+        args,
+        explicit_fields=("storage_location",),
+        command_label="common-shelf remove-one",
+        allow_empty=True,
+    )
+    if payload is None:
+        return {}
+
+    if "storage_location" in payload:
+        storage_location = str(payload.get("storage_location") or "").strip()
+        payload["storage_location"] = storage_location or None
+    return payload
+
+
+def _handle_common_shelf_remove_one(args: argparse.Namespace) -> None:
+    client = _client_from_args(args)
+    payload = _build_common_shelf_remove_one_payload(args)
+    _request_with_payload(
+        client=client,
+        method="POST",
+        path=f"/common-shelf/groups/{args.group_key}/remove-one",
+        json_body=payload,
+    )
+
+
 def _handle_consumable_order_update(args: argparse.Namespace) -> None:
     client = _client_from_args(args)
     payload = _load_payload_from_command_args(
@@ -702,6 +797,21 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
     _add_connection_arguments(cas_cmd)
     cas_cmd.add_argument("cas_number")
     cas_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/inventory/cas/{cas_number}"))
+
+    name_cmd = inventory_sub.add_parser("name", help="Search inventory by name")
+    _add_connection_arguments(name_cmd)
+    name_cmd.add_argument("keyword")
+    _add_pagination_arguments(name_cmd)
+    name_cmd.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path="/inventory/",
+            search_attr="keyword",
+            search_field="name",
+            allowed_params=INVENTORY_LIST_PARAM_KEYS,
+            command_label="inventory name",
+        )
+    )
 
     code_cmd = inventory_sub.add_parser("code", help="Get inventory by internal code")
     _add_connection_arguments(code_cmd)
@@ -795,6 +905,36 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
     _add_order_id_argument(get_cmd)
     get_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/reagent-orders/{order_id}"))
 
+    cas_cmd = reagent_sub.add_parser("cas", help="List reagent orders by CAS")
+    _add_connection_arguments(cas_cmd)
+    cas_cmd.add_argument("cas_number")
+    _add_pagination_arguments(cas_cmd)
+    cas_cmd.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path="/reagent-orders/",
+            search_attr="cas_number",
+            search_field="cas_number",
+            allowed_params=ORDER_LIST_PARAM_KEYS,
+            command_label="reagent-orders cas",
+        )
+    )
+
+    name_cmd = reagent_sub.add_parser("name", help="Search reagent orders by name")
+    _add_connection_arguments(name_cmd)
+    name_cmd.add_argument("keyword")
+    _add_pagination_arguments(name_cmd)
+    name_cmd.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path="/reagent-orders/",
+            search_attr="keyword",
+            search_field="name",
+            allowed_params=ORDER_LIST_PARAM_KEYS,
+            command_label="reagent-orders name",
+        )
+    )
+
     my_cmd = reagent_sub.add_parser("my", help="Get current user's reagent orders")
     _add_connection_arguments(my_cmd)
     my_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/reagent-orders/dashboard/my-reagent-orders"))
@@ -852,6 +992,120 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
     stock_in_cmd.set_defaults(handler=_handle_reagent_stock_in)
 
 
+def _register_common_shelf_commands(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    common_shelf = subparsers.add_parser("common-shelf", help="Common shelf commands")
+    common_shelf_sub = common_shelf.add_subparsers(
+        dest="common_shelf_command",
+        required=True,
+    )
+
+    list_cmd = common_shelf_sub.add_parser(
+        "list",
+        help="List common shelf groups",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    _add_connection_arguments(list_cmd)
+    _add_list_arguments(list_cmd)
+    _set_list_command_help(
+        list_cmd,
+        command_label="common-shelf list",
+        allowed_params=COMMON_SHELF_LIST_PARAM_KEYS,
+        known_id_hint="Use the returned group.group_key for add-bottles or remove-one.",
+    )
+    list_cmd.set_defaults(
+        handler=lambda args: _handle_list_command(args, "/common-shelf/groups"),
+        allowed_params=COMMON_SHELF_LIST_PARAM_KEYS,
+        list_command_label="common-shelf list",
+    )
+
+    cas_cmd = common_shelf_sub.add_parser("cas", help="Search common shelf groups by CAS")
+    _add_connection_arguments(cas_cmd)
+    cas_cmd.add_argument("cas_number")
+    _add_pagination_arguments(cas_cmd)
+    cas_cmd.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path="/common-shelf/groups",
+            search_attr="cas_number",
+            search_field="cas_number",
+            allowed_params=COMMON_SHELF_LIST_PARAM_KEYS,
+            command_label="common-shelf cas",
+            match_mode="exact",
+        )
+    )
+
+    alias_cmd = common_shelf_sub.add_parser("alias", help="Search common shelf groups by alias")
+    _add_connection_arguments(alias_cmd)
+    alias_cmd.add_argument("keyword")
+    _add_pagination_arguments(alias_cmd)
+    alias_cmd.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path="/common-shelf/groups",
+            search_attr="keyword",
+            search_field="alias",
+            allowed_params=COMMON_SHELF_LIST_PARAM_KEYS,
+            command_label="common-shelf alias",
+        )
+    )
+
+    locations_cmd = common_shelf_sub.add_parser(
+        "locations",
+        help="List locations for a common shelf group",
+    )
+    _add_connection_arguments(locations_cmd)
+    _add_common_shelf_group_key_argument(locations_cmd)
+    locations_cmd.set_defaults(
+        handler=lambda args: _handle_get_command(
+            args,
+            "/common-shelf/groups/{group_key}/locations",
+        )
+    )
+
+    manual_add = common_shelf_sub.add_parser(
+        "manual-add",
+        help="Create common shelf bottles manually",
+    )
+    _add_connection_arguments(manual_add)
+    _add_payload_arguments(manual_add)
+    manual_add.set_defaults(
+        handler=lambda args: _handle_post_command(
+            args,
+            "/common-shelf/manual-add",
+            payload_required=True,
+        )
+    )
+
+    add_bottles = common_shelf_sub.add_parser(
+        "add-bottles",
+        help="Add bottles to a common shelf group",
+    )
+    _add_connection_arguments(add_bottles)
+    _add_common_shelf_group_key_argument(add_bottles)
+    _add_payload_arguments(add_bottles)
+    add_bottles.add_argument("--count", type=_parse_positive_int, help="Bottle count to add")
+    add_bottles.add_argument("--storage-location", dest="storage_location")
+    add_bottles.add_argument("--purity")
+    add_bottles.add_argument("--notes")
+    add_bottles.set_defaults(handler=_handle_common_shelf_add_bottles)
+
+    remove_one = common_shelf_sub.add_parser(
+        "remove-one",
+        help="Remove one bottle from a group location",
+    )
+    _add_connection_arguments(remove_one)
+    _add_common_shelf_group_key_argument(remove_one)
+    _add_payload_arguments(remove_one)
+    remove_one.add_argument(
+        "--storage-location",
+        dest="storage_location",
+        help="Target storage location to decrement; omit to decrement a bottle with no location",
+    )
+    remove_one.set_defaults(handler=_handle_common_shelf_remove_one)
+
+
 def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     consumable = subparsers.add_parser("consumable-orders", help="Consumable order commands")
     consumable_sub = consumable.add_subparsers(dest="consumable_command", required=True)
@@ -879,6 +1133,21 @@ def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[a
     _add_connection_arguments(get_cmd)
     _add_order_id_argument(get_cmd)
     get_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/consumable-orders/{order_id}"))
+
+    name_cmd = consumable_sub.add_parser("name", help="Search consumable orders by name")
+    _add_connection_arguments(name_cmd)
+    name_cmd.add_argument("keyword")
+    _add_pagination_arguments(name_cmd)
+    name_cmd.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path="/consumable-orders/",
+            search_attr="keyword",
+            search_field="name",
+            allowed_params=ORDER_LIST_PARAM_KEYS,
+            command_label="consumable-orders name",
+        )
+    )
 
     my_cmd = consumable_sub.add_parser("my", help="Get current user's consumable orders")
     _add_connection_arguments(my_cmd)
@@ -922,6 +1191,7 @@ def build_parser() -> argparse.ArgumentParser:
     _register_auth_commands(subparsers)
     _register_inventory_commands(subparsers)
     _register_reagent_order_commands(subparsers)
+    _register_common_shelf_commands(subparsers)
     _register_consumable_order_commands(subparsers)
     return parser
 
