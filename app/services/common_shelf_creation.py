@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.models.chemical_name_map import ChemicalNameMap
-from app.models.common_shelf import CommonShelf, CommonShelfManualCreate
+from app.models.common_shelf import CommonShelf, CommonShelfGroup, CommonShelfManualCreate
 from app.models.reagent_order import ReagentOrder
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.internal_code import (
@@ -17,6 +17,11 @@ from app.services.internal_code import (
     generate_internal_code,
     is_internal_code_unique_violation,
 )
+from app.services.common_shelf_group_records import (
+    ensure_active_common_shelf_group,
+    is_common_shelf_group_identity_violation,
+)
+from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.spec_utils import SpecificationError, UNIT_CANONICAL, format_specification, parse_specification
 from app.services.shelf_utils import normalize_storage_location
 
@@ -144,6 +149,7 @@ def _create_common_shelf_rows(
 
     brand_normalized = normalize_brand_for_group(brand)
     storage_location_normalized = normalize_storage_for_group(storage_location)
+    pinyin_fields = compute_pinyin_fields(storage_location=storage_location)
     normalized_purity = (purity or "").strip()[:20] or None
     normalized_notes = (notes or "").strip()[:100] or None
     normalized_quantity, normalized_unit, specification_normalized, specification_text = (
@@ -160,6 +166,18 @@ def _create_common_shelf_rows(
         try:
             with db.begin_nested():
                 # Savepoint rollback only affects this batch, preserving outer confirm-arrival updates.
+                ensure_active_common_shelf_group(
+                    db,
+                    cas_number=cas_number,
+                    name_snapshot=normalized_snapshot,
+                    brand=brand,
+                    brand_normalized=brand_normalized,
+                    specification_text=specification_text,
+                    spec_quantity=normalized_quantity,
+                    spec_unit=normalized_unit,
+                    specification_normalized=specification_normalized,
+                    created_by_id=created_by_id,
+                )
                 for internal_code in internal_codes:
                     row = CommonShelf(
                         internal_code=internal_code,
@@ -174,6 +192,10 @@ def _create_common_shelf_rows(
                         specification_normalized=specification_normalized,
                         storage_location=storage_location,
                         storage_location_normalized=storage_location_normalized,
+                        storage_location_pinyin=pinyin_fields.get("storage_location_pinyin"),
+                        storage_location_pinyin_initials=pinyin_fields.get(
+                            "storage_location_pinyin_initials"
+                        ),
                         notes=normalized_notes,
                         source_order_id=source_order_id,
                         created_by_id=created_by_id,
@@ -183,6 +205,13 @@ def _create_common_shelf_rows(
                 db.flush()
             return created_items
         except IntegrityError as exc:
+            if is_common_shelf_group_identity_violation(exc):
+                if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="常用货架分组正在被并发创建，请重试",
+                    ) from exc
+                continue
             if not is_internal_code_unique_violation(exc):
                 raise
             if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
@@ -271,30 +300,31 @@ def create_manual_common_shelf_items(
     )
 
 
-def create_common_shelf_items_for_group(
+def create_common_shelf_items_for_group_record(
     db: Session,
-    sample_item: CommonShelf,
+    group: CommonShelfGroup,
     *,
     count: int,
     storage_location: Optional[str],
+    purity: Optional[str],
+    notes: Optional[str],
     created_by_id: int,
 ) -> list[CommonShelf]:
-    """Create more bottles by copying an existing common shelf group's fields."""
+    """Create more bottles by copying a persistent common shelf group."""
     if count <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="count must be greater than 0")
 
     return _create_common_shelf_rows(
         db,
-        cas_number=sample_item.cas_number,
-        name_snapshot=sample_item.name_snapshot,
-        brand=sample_item.brand,
-        purity=sample_item.purity,
-        spec_quantity=sample_item.spec_quantity,
-        spec_unit=sample_item.spec_unit,
+        cas_number=group.cas_number,
+        name_snapshot=group.name_snapshot,
+        brand=group.brand,
+        purity=purity,
+        spec_quantity=group.spec_quantity,
+        spec_unit=group.spec_unit,
         quantity_bottles=count,
         storage_location=normalize_storage_location(storage_location),
-        notes=sample_item.notes,
-        # 手工加瓶是对现有货架的人工补录，不应继续继承原订单来源。
+        notes=notes,
         source_order_id=None,
         created_by_id=created_by_id,
     )

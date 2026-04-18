@@ -6,7 +6,7 @@ from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import Column, Enum as SAEnum, Index
 from sqlmodel import Field, SQLModel
 
@@ -28,7 +28,7 @@ class ConsumableOrderBase(SQLModel):
     # 货号
     product_number: Optional[str] = Field(None, max_length=200)
     # 规格型号，如 "500ml"、M 码
-    specification: str = Field(max_length=100)
+    specification: Optional[str] = Field(default=None, max_length=100)
     # 单位，如 "箱"、"个"，选填
     unit: Optional[str] = Field(None, max_length=20)
     # 订购数量，必填且大于 0
@@ -91,29 +91,56 @@ class ConsumableOrderCreate(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(max_length=200)
-    english_name: Optional[str] = None
-    product_number: Optional[str] = None  # 货号，选填
+    english_name: Optional[str] = Field(default=None, max_length=200)
+    product_number: Optional[str] = Field(default=None, max_length=200)  # 货号，选填
     specification: str = Field(max_length=100)  # 规格型号，必填
-    unit: Optional[str] = None  # 单位，选填
+    unit: Optional[str] = Field(default=None, max_length=20)  # 单位，选填
     quantity: int = Field(gt=0)  # 数量，必填，大于0
-    price: Optional[float] = None
-    communication: Optional[str] = None
-    notes: Optional[str] = None
+    price: Optional[float] = Field(default=None, ge=0)
+    communication: Optional[str] = Field(default=None, max_length=100)
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name", "specification")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
 
 
 class ConsumableOrderUpdate(SQLModel):
     """DTO for updating consumable order information"""
     model_config = ConfigDict(extra="forbid")
 
-    name: Optional[str] = None
-    english_name: Optional[str] = None
-    product_number: Optional[str] = None
-    specification: Optional[str] = None
-    unit: Optional[str] = None
-    quantity: Optional[int] = None
-    price: Optional[float] = None
-    communication: Optional[str] = None
-    notes: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=200)
+    english_name: Optional[str] = Field(default=None, max_length=200)
+    product_number: Optional[str] = Field(default=None, max_length=200)
+    specification: Optional[str] = Field(default=None, max_length=100)
+    unit: Optional[str] = Field(default=None, max_length=20)
+    quantity: Optional[int] = Field(default=None, gt=0)
+    price: Optional[float] = Field(default=None, ge=0)
+    communication: Optional[str] = Field(default=None, max_length=100)
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name", "specification", mode="before")
+    @classmethod
+    def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            raise ValueError("不能为空")
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
+
+    @field_validator("quantity", mode="before")
+    @classmethod
+    def reject_null_quantity(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            raise ValueError("数量不能为空")
+        return value
 
 
 class ConsumableOrderResponse(BaseResponse):
@@ -122,7 +149,7 @@ class ConsumableOrderResponse(BaseResponse):
     name: str
     english_name: Optional[str]
     product_number: Optional[str]
-    specification: str
+    specification: Optional[str]
     unit: Optional[str]
     quantity: int
     price: Optional[float]

@@ -7,7 +7,7 @@ from app.models.base import BaseResponse
 from enum import Enum
 from typing import Optional
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import Column, Enum as SAEnum, Index
 from sqlmodel import Field, SQLModel
 
@@ -140,38 +140,65 @@ class ReagentOrderCreate(SQLModel):
 
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
-    english_name: Optional[str] = None
-    alias: Optional[str] = None
-    category: Optional[str] = None
-    brand: Optional[str] = None
+    english_name: Optional[str] = Field(default=None, max_length=200)
+    alias: Optional[str] = Field(default=None, max_length=200)
+    category: Optional[str] = Field(default=None, max_length=100)
+    brand: Optional[str] = Field(default=None, max_length=100)
     purity: Optional[str] = Field(default=None, max_length=20)
     specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500ml"
     quantity: int = Field(gt=0, le=MAX_ORDER_QUANTITY)  # 数量限制：1-99
     price: float = Field(gt=0)  # 价格必填，必须大于0
     order_reason: ReagentOrderReason  # 必填，前端只能选择枚举值
     is_hazardous: bool = False
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("cas_number", "name", "specification")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
 
 
 class ReagentOrderUpdate(SQLModel):
     """DTO for updating reagent order information"""
     model_config = ConfigDict(extra="forbid")
 
-    cas_number: Optional[str] = None
-    name: Optional[str] = None
-    english_name: Optional[str] = None
-    alias: Optional[str] = None
-    category: Optional[str] = None
-    brand: Optional[str] = None
-    purity: Optional[str] = None
-    specification: Optional[str] = None
-    initial_quantity: Optional[float] = None
-    unit: Optional[str] = None
-    quantity: Optional[int] = None
-    price: Optional[float] = None
+    cas_number: Optional[str] = Field(default=None, max_length=50)
+    name: Optional[str] = Field(default=None, max_length=200)
+    english_name: Optional[str] = Field(default=None, max_length=200)
+    alias: Optional[str] = Field(default=None, max_length=200)
+    category: Optional[str] = Field(default=None, max_length=100)
+    brand: Optional[str] = Field(default=None, max_length=100)
+    purity: Optional[str] = Field(default=None, max_length=20)
+    specification: Optional[str] = Field(default=None, max_length=100)
+    initial_quantity: Optional[float] = Field(default=None, gt=0)
+    unit: Optional[str] = Field(default=None, max_length=20)
+    quantity: Optional[int] = Field(default=None, gt=0, le=MAX_ORDER_QUANTITY)
+    price: Optional[float] = Field(default=None, gt=0)
     order_reason: Optional[ReagentOrderReason] = None
     is_hazardous: Optional[bool] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("cas_number", "name", "specification", mode="before")
+    @classmethod
+    def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            raise ValueError("不能为空")
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
+
+    @field_validator("quantity", "price", mode="before")
+    @classmethod
+    def reject_null_required_number(cls, value: Optional[float]) -> Optional[float]:
+        if value is None:
+            raise ValueError("不能为空")
+        return value
 
 
 class ReagentOrderResponse(BaseResponse):

@@ -27,6 +27,7 @@ class RedisDeleteByPrefixResult:
     success: bool
     deleted_count: int
 
+
 def get_redis() -> Optional[redis.Redis]:
     """获取 Redis 客户端（带简易熔断机制）"""
     global _redis_client, _last_error_time
@@ -45,11 +46,11 @@ def get_redis() -> Optional[redis.Redis]:
             password=settings.redis_password if settings.redis_password else None,
             decode_responses=True,
             socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
-            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS
+            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
         )
         client = redis.Redis(connection_pool=pool)
         client.ping()
-        
+
         _redis_client = client
         _last_error_time = 0.0
         return _redis_client
@@ -69,11 +70,29 @@ def redis_key(raw_key: str) -> str:
 def session_key(token_hash: str) -> str:
     return redis_key(f"session:{token_hash}")
 
+
+def _redact_redis_key(key: str) -> str:
+    if not key:
+        return ""
+
+    keys = key.split(",")
+    if len(keys) > 1:
+        return f"<{len(keys)} redis keys>"
+
+    parts = key.split(":")
+    if "session" not in parts:
+        return key
+
+    session_index = parts.index("session")
+    return ":".join([*parts[: session_index + 1], "<redacted>"])
+
+
 def _handle_redis_error(e: Exception, operation: str, key: str):
-    logger.error(f"{operation} 失败 (Key: {key}): {e}")
+    logger.error("%s 失败 key=%s: %s", operation, _redact_redis_key(key), e)
     global _redis_client, _last_error_time
     _redis_client = None
     _last_error_time = time.time()
+
 
 def cache_session(token_hash: str, session_data: dict, ttl_seconds: int) -> None:
     redis_client = get_redis()
@@ -88,6 +107,7 @@ def cache_session(token_hash: str, session_data: dict, ttl_seconds: int) -> None
     except TypeError as e:
         logger.error(f"Session 数据序列化失败: {e}")
 
+
 def get_cached_session(token_hash: str) -> Optional[dict]:
     redis_client = get_redis()
     if redis_client is None:
@@ -101,16 +121,17 @@ def get_cached_session(token_hash: str) -> Optional[dict]:
     except redis.RedisError as e:
         _handle_redis_error(e, "读取 Session 缓存", key)
     except json.JSONDecodeError as e:
-        logger.error(f"Session 缓存数据损坏 (Key: {key}): {e}")
+        logger.error("Session 缓存数据损坏 key=%s: %s", _redact_redis_key(key), e)
         delete_cached_session(token_hash)
-        
+
     return None
+
 
 def delete_cached_session(token_hash: str) -> None:
     redis_client = get_redis()
     if redis_client is None:
         return
-        
+
     key = session_key(token_hash)
     try:
         redis_client.delete(key)

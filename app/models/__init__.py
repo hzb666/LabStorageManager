@@ -9,7 +9,7 @@ from .inventory import (
     BorrowLogResponse,
     InventoryResponse,
 )
-from .common_shelf import CommonShelf, CommonShelfResponse
+from .common_shelf import CommonShelf, CommonShelfGroup, CommonShelfResponse
 from .chemical_name_map import (
     ChemicalCategory,
     ChemicalNameMap,
@@ -87,6 +87,7 @@ __all__ = [
     "BorrowLogResponse",
     "InventoryResponse",
     "CommonShelf",
+    "CommonShelfGroup",
     "CommonShelfResponse",
     "ChemicalCategory",
     "ChemicalNameMap",

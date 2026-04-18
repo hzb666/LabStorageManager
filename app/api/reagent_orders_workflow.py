@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select, delete
 
@@ -22,7 +22,7 @@ from app.models.reagent_order import (
 from app.models.common_shelf import CommonShelf, CommonShelfResponse
 from app.models.inventory import Inventory, InventoryResponse, InventoryStatus
 from app.core.constants import SSEEventType, SSERoom
-from app.services.api_utils import clear_cache_by_prefix
+from app.services.api_utils import clear_cache_by_prefix, empty_to_none
 from app.services.common_shelf_creation import create_common_shelf_items_from_order
 from app.services.common_shelf_operation_logger import log_common_shelf_stock_in
 from app.services.internal_code import (
@@ -38,12 +38,13 @@ from app.services.inventory_operation_logger import (
 from app.services.inventory_queries import regular_inventory_query
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.shelf_utils import normalize_storage_location
-from app.services.spec_utils import format_specification
+from app.services.spec_utils import SpecificationError, format_specification, parse_specification
 from app.services.sse_manager import sse_manager
 from app.services.user_utils import batch_get_user_names
 from app.services.order_operation_logger import (
     log_reagent_order_approve,
     log_reagent_order_delete,
+    log_reagent_order_update,
     log_reagent_order_reject,
 )
 
@@ -53,17 +54,31 @@ DELETE_ORDER_FORBIDDEN_DETAIL = "Only the order applicant or admin can delete th
 DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL = "Public account cannot delete orders"
 
 
-class ConfirmArrivalRequest(BaseModel):
+class ReagentWorkflowEditableFields(BaseModel):
+    # 到货/入库时允许再次校正的试剂信息；CAS、价格、订购原因和瓶数不在此处修改。
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, max_length=200)
+    english_name: Optional[str] = Field(default=None, max_length=200)
+    alias: Optional[str] = Field(default=None, max_length=200)
+    category: Optional[str] = Field(default=None, max_length=100)
+    brand: Optional[str] = Field(default=None, max_length=100)
+    purity: Optional[str] = Field(default=None, max_length=20)
+    specification: Optional[str] = Field(default=None, max_length=100)
+    is_hazardous: Optional[bool] = None
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class ConfirmArrivalRequest(ReagentWorkflowEditableFields):
     # confirm-arrival 操作请求体。
-    model_config = ConfigDict(extra="forbid")
 
-    arrival_notes: Optional[str] = None
+    arrival_notes: Optional[str] = Field(default=None, max_length=500)
     storage_location: Optional[str] = None
+    remaining_quantity: Optional[float] = None
 
 
-class StockInRequest(BaseModel):
+class StockInRequest(ReagentWorkflowEditableFields):
     # stock-in 操作请求体。
-    model_config = ConfigDict(extra="forbid")
 
     storage_location: str
     remaining_quantity: Optional[float] = None
@@ -78,7 +93,6 @@ class InventoryCreateOptions:
     storage_location: Optional[str]
     inventory_status: InventoryStatus
     remaining_quantity: Optional[float] = None
-    note_suffix: Optional[str] = None
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -87,6 +101,25 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
     if remaining is None:
         return None
     return remaining / initial
+
+
+def _validate_positive_remaining_quantity(
+    remaining_quantity: Optional[float],
+    *,
+    initial_quantity: Optional[float],
+) -> None:
+    if remaining_quantity is None:
+        return
+    if remaining_quantity <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity must be greater than 0")
+    if initial_quantity is not None and remaining_quantity > initial_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"remaining_quantity ({remaining_quantity}) cannot exceed "
+                f"initial_quantity ({initial_quantity})"
+            ),
+        )
 
 
 def _get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
@@ -138,6 +171,95 @@ def _serialize_common_shelf_items(db: Session, items: list[CommonShelf]) -> list
         item_dict["created_by_name"] = users_map.get(item.created_by_id)
         serialized_items.append(item_dict)
     return serialized_items
+
+
+def _normalize_workflow_order_updates(payload: ReagentWorkflowEditableFields) -> dict[str, Any]:
+    # 将到货/入库弹窗里的可编辑试剂信息标准化为订单字段更新。
+    update_data = payload.model_dump(exclude_unset=True)
+    arrival_notes = update_data.pop("arrival_notes", None)
+    update_data.pop("storage_location", None)
+    update_data.pop("remaining_quantity", None)
+
+    if "notes" not in update_data and arrival_notes is not None:
+        update_data["notes"] = arrival_notes
+
+    if "name" in update_data:
+        normalized_name = update_data["name"].strip() if update_data["name"] else ""
+        if not normalized_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="name is required")
+        update_data["name"] = normalized_name
+
+    if "specification" in update_data:
+        specification = update_data.pop("specification")
+        if specification is not None:
+            try:
+                initial_quantity, unit = parse_specification(specification)
+            except SpecificationError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            update_data["initial_quantity"] = initial_quantity
+            update_data["unit"] = unit
+
+    optional_string_fields = ["english_name", "alias", "category", "brand", "purity", "unit", "notes"]
+    normalized_strings = empty_to_none(update_data, optional_string_fields)
+    for field in optional_string_fields:
+        if field in update_data:
+            update_data[field] = normalized_strings[field]
+
+    return update_data
+
+
+def _apply_order_pinyin_updates(order: ReagentOrder, *, update_data: dict[str, Any]) -> None:
+    # 名称/分类/品牌变更后同步刷新订单拼音字段。
+    if not any(key in update_data for key in ("name", "category", "brand")):
+        return
+    pinyin_fields = compute_pinyin_fields(
+        name=update_data.get("name", order.name),
+        category=update_data.get("category", order.category),
+        brand=update_data.get("brand", order.brand),
+    )
+    update_data["name_pinyin"] = pinyin_fields.get("name_pinyin")
+    update_data["name_pinyin_initials"] = pinyin_fields.get("name_pinyin_initials")
+    update_data["category_pinyin"] = pinyin_fields.get("category_pinyin")
+    update_data["category_pinyin_initials"] = pinyin_fields.get("category_pinyin_initials")
+    update_data["brand_pinyin"] = pinyin_fields.get("brand_pinyin")
+    update_data["brand_pinyin_initials"] = pinyin_fields.get("brand_pinyin_initials")
+
+
+def _apply_workflow_order_updates(
+    order: ReagentOrder,
+    payload: ReagentWorkflowEditableFields,
+) -> Optional[ReagentOrder]:
+    # 返回更新前快照用于审计；没有实际字段变化时不生成日志。
+    update_data = _normalize_workflow_order_updates(payload)
+    _apply_order_pinyin_updates(order, update_data=update_data)
+    if not update_data:
+        return None
+    if all(getattr(order, field, None) == value for field, value in update_data.items()):
+        return None
+
+    before_order = ReagentOrder.model_validate(order)
+    for field, value in update_data.items():
+        setattr(order, field, value)
+    return before_order
+
+
+def _log_workflow_order_update(
+    db: Session,
+    *,
+    before_order: Optional[ReagentOrder],
+    order: ReagentOrder,
+    operator_id: int,
+    is_cli: bool,
+) -> None:
+    if before_order is None:
+        return
+    log_reagent_order_update(
+        db,
+        before_order=before_order,
+        after_order=order,
+        actor_user_id=operator_id,
+        is_cli=is_cli,
+    )
 
 
 def _clear_inventory_projection_cache() -> None:
@@ -210,10 +332,6 @@ def _create_inventory_items_from_order(
         storage_location=options.storage_location,
     )
 
-    notes = order.notes
-    if options.note_suffix:
-        notes = f"{notes}\n{options.note_suffix}" if notes else options.note_suffix
-
     effective_remaining = order.initial_quantity if options.remaining_quantity is None else options.remaining_quantity
     if effective_remaining is not None and effective_remaining <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity must be greater than 0")
@@ -250,7 +368,7 @@ def _create_inventory_items_from_order(
                         temporary_keeper_id=options.temporary_keeper_id,
                         source_order_id=order.id,
                         created_by_id=options.created_by_id,
-                        notes=notes,
+                        notes=order.notes,
                         **pinyin_fields,
                     )
                     db.add(inv)
@@ -417,8 +535,11 @@ def _register_arrival_routes(
                 detail=f"Cannot confirm arrival for order with status: {order.status}. Order must be APPROVED first.",
             )
 
-        if body.arrival_notes:
-            order.notes = body.arrival_notes
+        before_order = _apply_workflow_order_updates(order, body)
+        _validate_positive_remaining_quantity(
+            body.remaining_quantity,
+            initial_quantity=order.initial_quantity,
+        )
 
         direct_storage_location = body.storage_location.strip() if body.storage_location else None
 
@@ -431,6 +552,13 @@ def _register_arrival_routes(
             )
             order.status = ReagentOrderStatus.STOCKED
             message = "已到货并加入常用货架"
+            _log_workflow_order_update(
+                db,
+                before_order=before_order,
+                order=order,
+                operator_id=current_user.id,
+                is_cli=get_request_is_cli(request),
+            )
             _log_common_stock_in_operations(
                 db,
                 items=common_shelf_items,
@@ -464,12 +592,12 @@ def _register_arrival_routes(
                     temporary_keeper_id=None,
                     storage_location=target_location,
                     inventory_status=InventoryStatus.IN_STOCK,
+                    remaining_quantity=body.remaining_quantity,
                 ),
             )
             order.status = ReagentOrderStatus.STOCKED
             message = "已到货并入库"
         else:
-            keeper_name = current_user.full_name or current_user.username or "当前用户"
             inventory_items = _create_inventory_items_from_order(
                 db,
                 order,
@@ -478,12 +606,19 @@ def _register_arrival_routes(
                     temporary_keeper_id=current_user.id,
                     storage_location=None,
                     inventory_status=InventoryStatus.IN_STOCK,
-                    note_suffix=f"{keeper_name}暂存",
+                    remaining_quantity=body.remaining_quantity,
                 ),
             )
             order.status = ReagentOrderStatus.ARRIVED
             message = "已到货并进入暂存区，请及时补全入库信息"
 
+        _log_workflow_order_update(
+            db,
+            before_order=before_order,
+            order=order,
+            operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
+        )
         _log_stock_in_operations(
             db,
             items=inventory_items,
@@ -545,7 +680,6 @@ def _register_dashboard_routes(router: APIRouter) -> None:
             ReagentOrderStatus.PENDING,
             ReagentOrderStatus.APPROVED,
             ReagentOrderStatus.REJECTED,
-            ReagentOrderStatus.ARRIVED,
         ]
         statement = select(ReagentOrder).where(
             ReagentOrder.applicant_id == current_user.id,
@@ -558,7 +692,6 @@ def _register_dashboard_routes(router: APIRouter) -> None:
             ReagentOrderStatus.PENDING.value: "已申购",
             ReagentOrderStatus.APPROVED.value: "已批准",
             ReagentOrderStatus.REJECTED.value: "未通过",
-            ReagentOrderStatus.ARRIVED.value: "已到货",
         }
         grouped_orders: dict[str, dict[str, Any]] = {
             status.value: {"orders": [], "count": 0, "label": status_labels[status.value]}
@@ -571,6 +704,9 @@ def _register_dashboard_routes(router: APIRouter) -> None:
                 "cas_number": order.cas_number,
                 "name": order.name,
                 "english_name": order.english_name,
+                "alias": order.alias,
+                "category": order.category,
+                "brand": order.brand,
                 "specification": format_specification(order.initial_quantity, order.unit),
                 "initial_quantity": order.initial_quantity,
                 "unit": order.unit,
@@ -607,12 +743,11 @@ def _validate_stock_in_payload(payload: StockInRequest) -> None:
         )
 
 
-# 校验 stock-in 的权限和订单状态，确保接口契约与错误文案不变。
-def _validate_stock_in_order(
+# 校验 stock-in 的权限和订单状态，确保更新字段前不会越权变更订单。
+def _validate_stock_in_order_access(
     order: ReagentOrder,
     *,
     current_user: CurrentUser,
-    payload: StockInRequest,
 ) -> None:
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
@@ -624,6 +759,19 @@ def _validate_stock_in_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Order must be in APPROVED or ARRIVED status to stock in, current: {order.status}.",
         )
+    if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Common-public orders are stocked at confirm-arrival time",
+        )
+
+
+# 校验 stock-in 的订单数据和入库数量，允许前置同步字段先修正规格。
+def _validate_stock_in_order(
+    order: ReagentOrder,
+    *,
+    payload: StockInRequest,
+) -> None:
     if order.quantity is None or order.quantity <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid order quantity")
     if order.initial_quantity is None or order.unit is None:
@@ -632,23 +780,9 @@ def _validate_stock_in_order(
             detail="Order missing initial_quantity or unit. Please update the order.",
         )
 
-    if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Common-public orders are stocked at confirm-arrival time",
-        )
     if not payload.storage_location.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="storage_location is required")
-    if payload.remaining_quantity is not None and payload.remaining_quantity <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity must be greater than 0")
-    if payload.remaining_quantity is not None and payload.remaining_quantity > order.initial_quantity:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"remaining_quantity ({payload.remaining_quantity}) cannot exceed "
-                f"initial_quantity ({order.initial_quantity})"
-            ),
-        )
+    _validate_positive_remaining_quantity(payload.remaining_quantity, initial_quantity=order.initial_quantity)
     if order.status == ReagentOrderStatus.ARRIVED and payload.remaining_quantity is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -713,7 +847,16 @@ def _apply_arrived_items_stock_in(
     effective_remaining: float,
 ) -> None:
     for item in target_items:
+        item.name = order.name
+        item.english_name = order.english_name
+        item.alias = order.alias
+        item.category = order.category
+        item.brand = order.brand
         item.purity = order.purity
+        item.initial_quantity = order.initial_quantity
+        item.unit = order.unit
+        item.is_hazardous = order.is_hazardous
+        item.notes = order.notes
         item.storage_location = target_location
         item.remaining_quantity = effective_remaining
         item.remaining_percent = _compute_remaining_percent(effective_remaining, item.initial_quantity)
@@ -832,7 +975,9 @@ def _register_stock_in_route(
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
 
-        _validate_stock_in_order(order, current_user=current_user, payload=payload)
+        _validate_stock_in_order_access(order, current_user=current_user)
+        before_order = _apply_workflow_order_updates(order, payload)
+        _validate_stock_in_order(order, payload=payload)
         stock_context = _build_stock_in_context(order, payload)
         target_location, effective_remaining = stock_context
 
@@ -846,6 +991,13 @@ def _register_stock_in_route(
             _log_stock_in_operations(
                 db,
                 items=inventory_items,
+                operator_id=current_user.id,
+                is_cli=get_request_is_cli(request),
+            )
+            _log_workflow_order_update(
+                db,
+                before_order=before_order,
+                order=order,
                 operator_id=current_user.id,
                 is_cli=get_request_is_cli(request),
             )
@@ -878,6 +1030,13 @@ def _register_stock_in_route(
                 operator_id=current_user.id,
                 is_cli=get_request_is_cli(request),
             )
+        _log_workflow_order_update(
+            db,
+            before_order=before_order,
+            order=order,
+            operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
+        )
         await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
         _clear_inventory_projection_cache()
         await _broadcast_inventory_projection_events(db, target_items, created=False)

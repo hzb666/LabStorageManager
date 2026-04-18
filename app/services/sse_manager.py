@@ -294,7 +294,7 @@ class SSEManager:
         try:
             redis_pubsub.publish(channel, event)
         except Exception:  # noqa: BLE001
-            logger.exception("SSE revoke publish failed token_hash=%s", token_hash)
+            logger.exception("SSE revoke publish failed reason=%s", reason)
 
         if self._loop and self._loop.is_running():
             def _schedule_revoke() -> None:

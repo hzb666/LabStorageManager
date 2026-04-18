@@ -52,6 +52,7 @@ from app.api import (
     users,
 )
 from app.services import chemical_info
+from app.services.archive_scheduler import start_archive_scheduler, stop_archive_scheduler
 from app.services.cache_reset_service import apply_startup_cache_reset_if_needed
 from app.services.error_logger import log_error
 from app.services.inventory_import_preview_sessions import cleanup_expired_inventory_import_preview_artifacts
@@ -102,6 +103,11 @@ CLI_ALLOWED_ROUTE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("PUT", r"^/api/consumable-orders/\d+$"),
     ("GET", r"^/api/consumable-orders/dashboard/my-consumable-orders$"),
     ("POST", r"^/api/consumable-orders/\d+/complete$"),
+    ("GET", r"^/api/common-shelf/groups$"),
+    ("GET", r"^/api/common-shelf/groups/[A-Za-z0-9_-]+/locations$"),
+    ("POST", r"^/api/common-shelf/manual-add$"),
+    ("POST", r"^/api/common-shelf/groups/[A-Za-z0-9_-]+/add-bottles$"),
+    ("POST", r"^/api/common-shelf/groups/[A-Za-z0-9_-]+/remove-one$"),
 )
 
 
@@ -327,6 +333,7 @@ async def lifespan(app: FastAPI):
     init_db()
     init_query_log_db()
     start_search_query_log_worker()
+    start_archive_scheduler()
     logger.info("Database initialized (WAL mode enabled)")
     try:
         cache_reset_result = apply_startup_cache_reset_if_needed()
@@ -339,6 +346,7 @@ async def lifespan(app: FastAPI):
         logger.exception("Startup cache reset failed; continue without version-based reset")
     print_banner()
     yield
+    await stop_archive_scheduler()
     stop_search_query_log_worker()
     shutdown_async_file_logging()
     await sse_manager.stop_listener()
@@ -646,6 +654,7 @@ from app.models import (  # noqa: E402, F401
     BorrowLog,
     ChemicalNameMap,
     CommonShelf,
+    CommonShelfGroup,
     CommonShelfOperationLog,
     ConsumableOrder,
     Inventory,

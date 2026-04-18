@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlmodel import Session
 
-from app.models.common_shelf import CommonShelf
+from app.models.common_shelf import CommonShelf, CommonShelfGroup
 from app.models.common_shelf_operation_log import (
     CommonShelfOperationAction,
     CommonShelfOperationLog,
@@ -36,6 +36,7 @@ SNAPSHOT_KEY_MAP = {
     "lc": "location",
     "bf": "before",
     "af": "after",
+    "gi": "group_id",
 }
 
 
@@ -61,6 +62,43 @@ def build_common_shelf_snapshot(item: CommonShelf) -> dict[str, Any]:
         "cr": item.created_at.isoformat() if item.created_at else None,
         "up": item.updated_at.isoformat() if item.updated_at else None,
     }
+
+
+def build_common_shelf_group_snapshot(group: CommonShelfGroup) -> dict[str, Any]:
+    """Build a stable snapshot payload from a common shelf group record."""
+    return {
+        "id": None,
+        "gi": group.id,
+        "ic": None,
+        "ca": group.cas_number,
+        "na": group.name_snapshot,
+        "br": group.brand,
+        "bn": group.brand_normalized,
+        "pu": None,
+        "st": group.specification_text,
+        "sq": group.spec_quantity,
+        "su": group.spec_unit,
+        "sn": group.specification_normalized,
+        "sl": None,
+        "sln": None,
+        "nt": None,
+        "oi": None,
+        "cb": group.created_by_id,
+        "cr": group.created_at.isoformat() if group.created_at else None,
+        "up": group.updated_at.isoformat() if group.updated_at else None,
+    }
+
+
+def _build_common_shelf_entity_snapshot(item: CommonShelf | CommonShelfGroup) -> dict[str, Any]:
+    if isinstance(item, CommonShelfGroup):
+        return build_common_shelf_group_snapshot(item)
+    return build_common_shelf_snapshot(item)
+
+
+def _resolve_common_shelf_entity_id(item: CommonShelf | CommonShelfGroup) -> int:
+    if isinstance(item, CommonShelfGroup):
+        return 0
+    return item.id or 0
 
 
 def parse_common_shelf_snapshot(snapshot_json: str) -> dict[str, Any]:
@@ -134,26 +172,26 @@ def log_common_shelf_stock_in(
 def log_common_shelf_add_bottles(
     db: Session,
     *,
-    sample_item: CommonShelf,
+    sample_item: CommonShelf | CommonShelfGroup,
     operator_id: int,
     count: int,
     location: str | None,
     is_cli: bool,
 ) -> CommonShelfOperationLog:
     snapshot = {
-        **build_common_shelf_snapshot(sample_item),
+        **_build_common_shelf_entity_snapshot(sample_item),
         "ct": count,
         "lc": location,
     }
     return _create_common_shelf_operation_log(
         db,
-        common_shelf_id=sample_item.id or 0,
+        common_shelf_id=_resolve_common_shelf_entity_id(sample_item),
         operator_id=operator_id,
         action=CommonShelfOperationAction.ADD_BOTTLES,
         item_name=sample_item.name_snapshot,
         cas_number=sample_item.cas_number,
         snapshot=snapshot,
-        notes=sample_item.notes,
+        notes=sample_item.notes if isinstance(sample_item, CommonShelf) else None,
         is_cli=is_cli,
     )
 
@@ -181,15 +219,15 @@ def log_common_shelf_remove_one(
 def log_common_shelf_group_update(
     db: Session,
     *,
-    before_item: CommonShelf,
-    after_item: CommonShelf,
+    before_item: CommonShelf | CommonShelfGroup,
+    after_item: CommonShelf | CommonShelfGroup,
     operator_id: int,
     merged: bool,
     is_cli: bool,
 ) -> CommonShelfOperationLog:
     snapshot = {
-        "bf": build_common_shelf_snapshot(before_item),
-        "af": build_common_shelf_snapshot(after_item),
+        "bf": _build_common_shelf_entity_snapshot(before_item),
+        "af": _build_common_shelf_entity_snapshot(after_item),
     }
     action = (
         CommonShelfOperationAction.MERGE_GROUP
@@ -198,13 +236,14 @@ def log_common_shelf_group_update(
     )
     return _create_common_shelf_operation_log(
         db,
-        common_shelf_id=after_item.id or before_item.id or 0,
+        common_shelf_id=_resolve_common_shelf_entity_id(after_item)
+        or _resolve_common_shelf_entity_id(before_item),
         operator_id=operator_id,
         action=action,
         item_name=after_item.name_snapshot,
         cas_number=after_item.cas_number,
         snapshot=snapshot,
-        notes=after_item.notes,
+        notes=after_item.notes if isinstance(after_item, CommonShelf) else None,
         is_cli=is_cli,
     )
 
@@ -238,19 +277,29 @@ def log_common_shelf_item_update(
 def log_common_shelf_group_delete(
     db: Session,
     *,
-    item: CommonShelf,
     operator_id: int,
     is_cli: bool,
+    item: CommonShelf | None = None,
+    group: CommonShelfGroup | None = None,
+    deleted_count: int | None = None,
 ) -> CommonShelfOperationLog:
+    if item is None and group is None:
+        raise ValueError("item or group is required")
+    source = item or group
+    if source is None:
+        raise ValueError("item or group is required")
+    snapshot = _build_common_shelf_entity_snapshot(source)
+    if deleted_count is not None:
+        snapshot["ct"] = deleted_count
     return _create_common_shelf_operation_log(
         db,
-        common_shelf_id=item.id or 0,
+        common_shelf_id=_resolve_common_shelf_entity_id(source),
         operator_id=operator_id,
         action=CommonShelfOperationAction.DELETE_GROUP,
-        item_name=item.name_snapshot,
-        cas_number=item.cas_number,
-        snapshot=build_common_shelf_snapshot(item),
-        notes=item.notes,
+        item_name=source.name_snapshot,
+        cas_number=source.cas_number,
+        snapshot=snapshot,
+        notes=source.notes if isinstance(source, CommonShelf) else None,
         is_cli=is_cli,
     )
 

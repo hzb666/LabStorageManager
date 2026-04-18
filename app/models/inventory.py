@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import Column, Enum as SAEnum, Index
 from app.core.constants import MAX_BOTTLES_PER_IMPORT
 from app.core.time_utils import get_utc_now
@@ -166,10 +166,10 @@ class InventoryUpdate(SQLModel):
     # 安全边界：拒绝未声明字段，避免静默忽略带来的越权探测面
     model_config = ConfigDict(extra="forbid")
 
-    name: Optional[str] = None
-    cas_number: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=200)
+    cas_number: Optional[str] = Field(default=None, max_length=50)
     storage_location: Optional[str] = None
-    remaining_quantity: Optional[float] = None
+    remaining_quantity: Optional[float] = Field(default=None, ge=0)
     notes: Optional[str] = None
     english_name: Optional[str] = None
     alias: Optional[str] = None
@@ -178,7 +178,19 @@ class InventoryUpdate(SQLModel):
     purity: Optional[str] = None
     is_hazardous: Optional[bool] = None
     # 规格字段：前端传入规格字符串（如 "500ml"），后端用 parse_specification 解析
-    specification: Optional[str] = None
+    specification: Optional[str] = Field(default=None, max_length=50)
+
+    @field_validator("name", "cas_number", "specification", mode="before")
+    @classmethod
+    def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            raise ValueError("不能为空")
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
 
 
 class InventoryBorrowReturn(SQLModel):
@@ -186,6 +198,7 @@ class InventoryBorrowReturn(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     remaining_quantity: float = Field(ge=0)
+    notes: Optional[str] = Field(default=None, max_length=500)
 
 
 class InventoryBorrowRequest(SQLModel):
@@ -284,3 +297,11 @@ class ManualInventoryCreate(SQLModel):
     brand: Optional[str] = None
     purity: Optional[str] = Field(default=None, max_length=20)
     notes: Optional[str] = None
+
+    @field_validator("cas_number", "name", "specification")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped

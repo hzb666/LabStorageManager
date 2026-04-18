@@ -15,7 +15,7 @@ from app.search_query_log_db import insert_search_log_rows
 
 logger = logging.getLogger(__name__)
 
-QUIET_WINDOW_SECONDS = 1.0
+QUIET_WINDOW_SECONDS = 1.2
 RECENT_COMMIT_SUPPRESSION_SECONDS = 3.0
 WORKER_POLL_INTERVAL_SECONDS = 0.2
 READY_BATCH_SIZE_THRESHOLD = 10

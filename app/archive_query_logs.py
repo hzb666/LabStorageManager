@@ -14,6 +14,7 @@ from typing import Iterable
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.config import settings
 from app.core.time_utils import get_utc_now
 from app.search_query_log_db import QUERY_LOG_DB_PATH
 
@@ -352,6 +353,7 @@ def _run_archive(
     output_dir: Path,
     selected_tables: list[str],
     dry_run: bool,
+    emit_summary: bool = True,
 ) -> int:
     if not source_db_path.exists():
         raise FileNotFoundError(f"Source database not found: {source_db_path}")
@@ -364,12 +366,14 @@ def _run_archive(
         total_rows = sum(plan.row_count for plan in plans)
         archivable_plans = [plan for plan in plans if plan.row_count > 0]
         if total_rows == 0:
-            _print_plan_summary(plans, cutoff=cutoff, dry_run=dry_run, archive_path=None)
-            print("No rows eligible for archive.")
+            if emit_summary:
+                _print_plan_summary(plans, cutoff=cutoff, dry_run=dry_run, archive_path=None)
+                print("No rows eligible for archive.")
             return 0
 
         if dry_run:
-            _print_plan_summary(plans, cutoff=cutoff, dry_run=True, archive_path=None)
+            if emit_summary:
+                _print_plan_summary(plans, cutoff=cutoff, dry_run=True, archive_path=None)
             return 0
 
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -426,14 +430,42 @@ def _run_archive(
                 archive_path.unlink(missing_ok=True)
             raise
 
-    _print_plan_summary(plans, cutoff=cutoff, dry_run=False, archive_path=archive_path)
-    for result in deleted_results:
-        print(
-            f"archived_table={result.logical_name} "
-            f"archived_rows={result.archived_rows} "
-            f"deleted_rows={result.deleted_rows}"
-        )
+    if emit_summary:
+        _print_plan_summary(plans, cutoff=cutoff, dry_run=False, archive_path=archive_path)
+        for result in deleted_results:
+            print(
+                f"archived_table={result.logical_name} "
+                f"archived_rows={result.archived_rows} "
+                f"deleted_rows={result.deleted_rows}"
+            )
     return 0
+
+
+def resolve_query_log_archive_output_dir(output_dir: str | Path) -> Path:
+    """Resolve the archive output directory using the CLI-compatible rules."""
+    return _resolve_output_dir(str(output_dir))
+
+
+def run_query_log_archive(
+    *,
+    output_dir: str | Path | None = None,
+    selected_tables: list[str] | None = None,
+    dry_run: bool = False,
+    emit_summary: bool = True,
+) -> int:
+    """Archive search query logs for backend services and CLI callers."""
+    requested_tables = selected_tables
+    if requested_tables is None:
+        requested_tables = [
+            name for name, config in QUERY_LOG_TABLE_MAP.items() if config.enabled
+        ]
+    return _run_archive(
+        source_db_path=QUERY_LOG_DB_PATH,
+        output_dir=resolve_query_log_archive_output_dir(output_dir or settings.query_log_dir),
+        selected_tables=_resolve_selected_tables(list(requested_tables)),
+        dry_run=dry_run,
+        emit_summary=emit_summary,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -446,7 +478,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-dir",
-        default="logs",
+        default=settings.query_log_dir,
         help="Directory for archive database files",
     )
     parser.add_argument(
@@ -461,11 +493,9 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
     try:
-        selected_tables = _resolve_selected_tables(list(args.tables))
-        return _run_archive(
-            source_db_path=QUERY_LOG_DB_PATH,
-            output_dir=_resolve_output_dir(args.output_dir),
-            selected_tables=selected_tables,
+        return run_query_log_archive(
+            output_dir=args.output_dir,
+            selected_tables=list(args.tables),
             dry_run=bool(args.dry_run),
         )
     except Exception as exc:  # noqa: BLE001

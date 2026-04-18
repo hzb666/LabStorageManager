@@ -1,12 +1,13 @@
 """Lab Storage Manager 配置。"""
+import json
 import logging
 import secrets
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated, Any, List, Optional
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, NoDecode
 from app.core.constants import CAS_PATTERN, RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
 
 
@@ -21,10 +22,29 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     cache_version: str = ""
     debug: bool = False
-    env: str = "development"  # development 或 production
+    env: str = "development"  # 生产部署通过 ENV=production 覆盖
     
     # 数据库
     database_url: str = "sqlite:///./lab_inventory.db"
+    query_log_dir: str = Field(default="logs", description="Directory for search query log DB")
+    archive_scheduler_enabled: bool = Field(
+        default=False,
+        description="Enable the in-process periodic SQLite log archive scheduler",
+    )
+    archive_interval_hours: int = Field(
+        default=24,
+        ge=1,
+        description="Hours between scheduled log archive runs",
+    )
+    archive_startup_delay_seconds: int = Field(
+        default=300,
+        ge=0,
+        description="Seconds to wait after backend startup before the first archive run",
+    )
+    archive_output_dir: str = Field(
+        default="logs",
+        description="Directory for generated archive database files",
+    )
     
     # JWT 认证
     secret_key: str = Field(default="", description="JWT secret key (for HS256 in development)")
@@ -45,7 +65,11 @@ class Settings(BaseSettings):
     # 文件上传
     max_file_size_mb: int = 10
     max_upload_request_size_mb: int = 5
-    allowed_image_types: tuple = ("image/jpeg", "image/png", "image/webp")
+    allowed_image_types: Annotated[tuple[str, ...], NoDecode] = (
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    )
     max_image_width: int = 800
     max_image_height: int = 800
     max_image_size_kb: int = 100  # 关键规则 #3：小于 100KB
@@ -96,6 +120,24 @@ class Settings(BaseSettings):
         if v not in ["HS256", "RS256"]:
             raise ValueError("JWT algorithm must be HS256 or RS256")
         return v
+
+    @field_validator("allowed_image_types", mode="before")
+    @classmethod
+    def parse_allowed_image_types(cls, value: Any) -> tuple[str, ...] | Any:
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        if not stripped:
+            return ()
+
+        if stripped.startswith("["):
+            parsed = json.loads(stripped)
+            if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+                raise ValueError("ALLOWED_IMAGE_TYPES JSON value must be a string array")
+            return tuple(item.strip() for item in parsed if item.strip())
+
+        return tuple(item.strip() for item in stripped.split(",") if item.strip())
     
     def get_private_key(self) -> str:
         """Load or generate RSA private key"""

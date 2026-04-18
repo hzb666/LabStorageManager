@@ -4,7 +4,8 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime
+from typing import Optional, Protocol
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, delete, func, or_
@@ -12,9 +13,10 @@ from sqlmodel import Session, select
 
 from app.core.db_compat import exec_delete_returning_first, exec_delete_returning_all
 from app.core.time_utils import get_utc_now
-from app.models.chemical_name_map import ChemicalNameMap
+from app.models.chemical_name_map import ChemicalCategory, ChemicalNameMap
 from app.models.common_shelf import (
     CommonShelf,
+    CommonShelfGroup,
     CommonShelfGroupDisplay,
     CommonShelfGroupIdentity,
     CommonShelfGroupListResponse,
@@ -30,6 +32,7 @@ from app.services.chemical_name_map_fts import (
 from app.services.common_shelf_creation import (
     normalize_storage_for_group,
 )
+from app.services.common_shelf_group_records import get_active_common_shelf_group
 from app.services.search_matchers import (
     TextMatchMode,
     build_cas_search_clause,
@@ -98,64 +101,20 @@ class CommonShelfGroupListOptions:
     sort_order: Optional[str]
 
 
-def _join_unique_texts(values: list[Optional[str]]) -> Optional[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for value in values:
-        normalized = (value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        ordered.append(normalized)
-    return "; ".join(ordered) if ordered else None
-
-
-def _collect_group_display_texts(
-    db: Session,
-    *,
-    filtered_subquery,
-    page_rows_subquery,
-) -> dict[str, dict[str, Optional[str]]]:
-    items = db.exec(
-        select(
-            filtered_subquery.c.cas_number,
-            filtered_subquery.c.brand_normalized,
-            filtered_subquery.c.specification_normalized,
-            filtered_subquery.c.purity,
-            filtered_subquery.c.notes,
-            filtered_subquery.c.created_at,
-            filtered_subquery.c.id,
-        )
-        .select_from(filtered_subquery)
-        .join(
-            page_rows_subquery,
-            and_(
-                filtered_subquery.c.cas_number == page_rows_subquery.c.cas_number,
-                filtered_subquery.c.brand_normalized == page_rows_subquery.c.brand_normalized,
-                filtered_subquery.c.specification_normalized == page_rows_subquery.c.specification_normalized,
-            ),
-        )
-        .order_by(filtered_subquery.c.created_at.asc(), filtered_subquery.c.id.asc())
-    ).all()
-
-    grouped: dict[str, dict[str, list[Optional[str]]]] = {}
-    for item in items:
-        group_key = build_group_key(
-            cas_number=item.cas_number,
-            brand_normalized=item.brand_normalized,
-            specification_normalized=item.specification_normalized,
-        )
-        current = grouped.setdefault(group_key, {"purity": [], "notes": []})
-        current["purity"].append(item.purity)
-        current["notes"].append(item.notes)
-
-    return {
-        group_key: {
-            "purity": _join_unique_texts(values["purity"]),
-            "notes": _join_unique_texts(values["notes"]),
-        }
-        for group_key, values in grouped.items()
-    }
+class CommonShelfGroupRow(Protocol):
+    cas_number: str
+    brand: Optional[str]
+    brand_normalized: str
+    specification_text: str
+    specification_normalized: str
+    name_snapshot: str
+    bottle_count: int
+    location_count: int
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+    map_name: Optional[str]
+    map_english_name: Optional[str]
+    map_category: Optional[ChemicalCategory]
 
 
 def build_group_key(*, cas_number: str, brand_normalized: str, specification_normalized: str) -> str:
@@ -205,6 +164,34 @@ def get_group_identity_from_item(item: CommonShelf) -> CommonShelfGroupIdentity:
     )
 
 
+def get_group_identity_from_group(group: CommonShelfGroup) -> CommonShelfGroupIdentity:
+    return CommonShelfGroupIdentity(
+        group_key=build_group_key(
+            cas_number=group.cas_number,
+            brand_normalized=group.brand_normalized,
+            specification_normalized=group.specification_normalized,
+        ),
+        cas_number=group.cas_number,
+        brand=group.brand,
+        brand_normalized=group.brand_normalized,
+        specification_text=group.specification_text,
+        specification_normalized=group.specification_normalized,
+    )
+
+
+def get_active_group_from_fields(
+    db: Session,
+    *,
+    group_fields: CommonShelfGroupFields,
+) -> Optional[CommonShelfGroup]:
+    return get_active_common_shelf_group(
+        db,
+        cas_number=group_fields.cas_number,
+        brand_normalized=group_fields.brand_normalized,
+        specification_normalized=group_fields.specification_normalized,
+    )
+
+
 def get_group_items(
     db: Session,
     *,
@@ -219,23 +206,6 @@ def get_group_items(
     ).all()
 
 
-def get_latest_group_item(db: Session, *, group_fields: CommonShelfGroupFields) -> CommonShelf:
-    item = db.exec(
-        select(CommonShelf)
-        .where(CommonShelf.cas_number == group_fields.cas_number)
-        .where(CommonShelf.brand_normalized == group_fields.brand_normalized)
-        .where(CommonShelf.specification_normalized == group_fields.specification_normalized)
-        .order_by(CommonShelf.created_at.desc(), CommonShelf.id.desc())
-    ).first()
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=COMMON_SHELF_NOT_FOUND)
-    return item
-
-
-def get_latest_group_item_from_key(db: Session, group_key: str) -> CommonShelf:
-    return get_latest_group_item(db, group_fields=parse_group_key(group_key))
-
-
 def get_group_name_map(db: Session, *, cas_number: str) -> Optional[ChemicalNameMap]:
     return db.exec(select(ChemicalNameMap).where(ChemicalNameMap.cas_number == cas_number)).first()
 
@@ -245,17 +215,16 @@ def locate_merge_target(
     *,
     current_group_fields: CommonShelfGroupFields,
     target_group_fields: CommonShelfGroupFields,
-) -> Optional[CommonShelf]:
+) -> Optional[CommonShelfGroup]:
     if current_group_fields == target_group_fields:
         return None
 
-    return db.exec(
-        select(CommonShelf)
-        .where(CommonShelf.cas_number == target_group_fields.cas_number)
-        .where(CommonShelf.brand_normalized == target_group_fields.brand_normalized)
-        .where(CommonShelf.specification_normalized == target_group_fields.specification_normalized)
-        .order_by(CommonShelf.created_at.desc(), CommonShelf.id.desc())
-    ).first()
+    return get_active_common_shelf_group(
+        db,
+        cas_number=target_group_fields.cas_number,
+        brand_normalized=target_group_fields.brand_normalized,
+        specification_normalized=target_group_fields.specification_normalized,
+    )
 
 
 def list_group_locations(
@@ -265,7 +234,9 @@ def list_group_locations(
 ) -> list[CommonShelfLocationSummaryResponse]:
     items = get_group_items(db, group_fields=group_fields)
     if not items:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=COMMON_SHELF_NOT_FOUND)
+        if get_active_group_from_fields(db, group_fields=group_fields) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=COMMON_SHELF_NOT_FOUND)
+        return []
 
     grouped: dict[str, dict[str, object]] = {}
     for item in items:
@@ -506,7 +477,65 @@ def search_name_map_cas_numbers(
     return {row.cas_number for row in rows if row.cas_number}
 
 
-def _filter_common_shelf_query(
+def _build_common_shelf_location_search_clause(
+    search_value: str,
+    *,
+    fuzzy: bool,
+    match_mode: TextMatchMode,
+):
+    return combine_or_clauses(
+        [
+            build_text_search_clause(
+                CommonShelf.storage_location,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            ),
+            build_text_search_clause(
+                CommonShelf.storage_location_normalized,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            ),
+            build_text_search_clause(
+                CommonShelf.storage_location_pinyin,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            ),
+            build_text_search_clause(
+                CommonShelf.storage_location_pinyin_initials,
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            ),
+        ]
+    )
+
+
+def _build_group_location_exists_clause(
+    search_value: str,
+    *,
+    fuzzy: bool,
+    match_mode: TextMatchMode,
+):
+    return (
+        select(CommonShelf.id)
+        .where(CommonShelf.cas_number == CommonShelfGroup.cas_number)
+        .where(CommonShelf.brand_normalized == CommonShelfGroup.brand_normalized)
+        .where(CommonShelf.specification_normalized == CommonShelfGroup.specification_normalized)
+        .where(
+            _build_common_shelf_location_search_clause(
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
+            )
+        )
+        .exists()
+    )
+
+
+def _filter_common_shelf_group_query(
     base,
     *,
     db: Session,
@@ -525,7 +554,7 @@ def _filter_common_shelf_query(
     if search_field == "cas_number":
         return base.where(
             build_cas_search_clause(
-                CommonShelf.cas_number,
+                CommonShelfGroup.cas_number,
                 search_value,
                 fuzzy=fuzzy,
                 match_mode=match_mode,
@@ -536,17 +565,26 @@ def _filter_common_shelf_query(
         return base.where(
             or_(
                 build_text_search_clause(
-                    CommonShelf.brand,
+                    CommonShelfGroup.brand,
                     search_value,
                     fuzzy=fuzzy,
                     match_mode=match_mode,
                 ),
                 build_text_search_clause(
-                    CommonShelf.brand_normalized,
+                    CommonShelfGroup.brand_normalized,
                     search_value,
                     fuzzy=fuzzy,
                     match_mode=match_mode,
                 ),
+            )
+        )
+
+    if search_field == "storage_location":
+        return base.where(
+            _build_group_location_exists_clause(
+                search_value,
+                fuzzy=fuzzy,
+                match_mode=match_mode,
             )
         )
 
@@ -560,34 +598,39 @@ def _filter_common_shelf_query(
 
     if search_field in {"name", "alias"}:
         cas_clause = (
-            CommonShelf.id == -1
+            CommonShelfGroup.id == -1
             if not matched_cas_numbers
-            else CommonShelf.cas_number.in_(matched_cas_numbers)
+            else CommonShelfGroup.cas_number.in_(matched_cas_numbers)
         )
         return base.where(cas_clause)
 
     direct_clauses = [
         build_cas_search_clause(
-            CommonShelf.cas_number,
+            CommonShelfGroup.cas_number,
             search_value,
             fuzzy=fuzzy,
             match_mode=match_mode,
         ),
         build_text_search_clause(
-            CommonShelf.brand,
+            CommonShelfGroup.brand,
             search_value,
             fuzzy=fuzzy,
             match_mode=match_mode,
         ),
         build_text_search_clause(
-            CommonShelf.brand_normalized,
+            CommonShelfGroup.brand_normalized,
+            search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        ),
+        _build_group_location_exists_clause(
             search_value,
             fuzzy=fuzzy,
             match_mode=match_mode,
         ),
     ]
     if matched_cas_numbers:
-        direct_clauses.append(CommonShelf.cas_number.in_(matched_cas_numbers))
+        direct_clauses.append(CommonShelfGroup.cas_number.in_(matched_cas_numbers))
     return base.where(combine_or_clauses(direct_clauses))
 
 
@@ -596,15 +639,14 @@ def _build_group_order_expressions(
     sort_by: Optional[str],
     sort_order: Optional[str],
     grouped_subquery,
-    latest_subquery,
 ):
     reverse = sort_order != "asc"
     sort_expr_map = {
         "cas_number": grouped_subquery.c.cas_number,
-        "name": func.coalesce(ChemicalNameMap.name, latest_subquery.c.name_snapshot),
+        "name": func.coalesce(ChemicalNameMap.name, grouped_subquery.c.name_snapshot),
         "category": func.coalesce(ChemicalNameMap.category, ""),
-        "brand": func.coalesce(latest_subquery.c.brand, ""),
-        "specification": func.coalesce(latest_subquery.c.specification_text, ""),
+        "brand": func.coalesce(grouped_subquery.c.brand, ""),
+        "specification": func.coalesce(grouped_subquery.c.specification_text, ""),
         "bottle_count": grouped_subquery.c.bottle_count,
         "location_count": grouped_subquery.c.location_count,
         "created_at": grouped_subquery.c.created_at,
@@ -616,92 +658,65 @@ def _build_group_order_expressions(
     return [sort_expr.asc(), grouped_subquery.c.updated_at.desc(), grouped_subquery.c.cas_number.asc()]
 
 
-def list_grouped_common_shelf(
-    db: Session,
-    *,
-    options: CommonShelfGroupListOptions,
-) -> CommonShelfGroupListResponse:
-    filtered_base = _filter_common_shelf_query(
-        select(CommonShelf),
-        db=db,
-        search=options.search,
-        search_field=options.search_field,
-        fuzzy=options.fuzzy,
-        match_mode=options.match_mode,
-    )
-    filtered_subquery = filtered_base.subquery("filtered_common_shelf")
-
-    grouped_subquery = (
+def _build_common_shelf_item_counts_subquery(filtered_groups):
+    return (
         select(
-            filtered_subquery.c.cas_number.label("cas_number"),
-            filtered_subquery.c.brand_normalized.label("brand_normalized"),
-            filtered_subquery.c.specification_normalized.label("specification_normalized"),
-            func.count(filtered_subquery.c.id).label("bottle_count"),
-            func.count(func.distinct(func.coalesce(filtered_subquery.c.storage_location_normalized, ""))).label(
+            CommonShelf.cas_number.label("cas_number"),
+            CommonShelf.brand_normalized.label("brand_normalized"),
+            CommonShelf.specification_normalized.label("specification_normalized"),
+            func.count(CommonShelf.id).label("bottle_count"),
+            func.count(func.distinct(func.coalesce(CommonShelf.storage_location_normalized, ""))).label(
                 "location_count"
             ),
-            func.min(filtered_subquery.c.created_at).label("created_at"),
-            func.max(filtered_subquery.c.updated_at).label("updated_at"),
+        )
+        .select_from(CommonShelf)
+        .join(
+            filtered_groups,
+            and_(
+                CommonShelf.cas_number == filtered_groups.c.cas_number,
+                CommonShelf.brand_normalized == filtered_groups.c.brand_normalized,
+                CommonShelf.specification_normalized == filtered_groups.c.specification_normalized,
+            ),
         )
         .group_by(
-            filtered_subquery.c.cas_number,
-            filtered_subquery.c.brand_normalized,
-            filtered_subquery.c.specification_normalized,
+            CommonShelf.cas_number,
+            CommonShelf.brand_normalized,
+            CommonShelf.specification_normalized,
+        )
+        .subquery("common_shelf_item_counts")
+    )
+
+
+def _build_common_shelf_grouped_subquery(filtered_groups, item_counts):
+    return (
+        select(
+            filtered_groups.c.id.label("group_id"),
+            filtered_groups.c.cas_number,
+            filtered_groups.c.brand,
+            filtered_groups.c.brand_normalized,
+            filtered_groups.c.specification_text,
+            filtered_groups.c.specification_normalized,
+            filtered_groups.c.name_snapshot,
+            func.coalesce(item_counts.c.bottle_count, 0).label("bottle_count"),
+            func.coalesce(item_counts.c.location_count, 0).label("location_count"),
+            filtered_groups.c.created_at,
+            filtered_groups.c.updated_at,
+        )
+        .select_from(filtered_groups)
+        .join(
+            item_counts,
+            and_(
+                item_counts.c.cas_number == filtered_groups.c.cas_number,
+                item_counts.c.brand_normalized == filtered_groups.c.brand_normalized,
+                item_counts.c.specification_normalized == filtered_groups.c.specification_normalized,
+            ),
+            isouter=True,
         )
         .subquery("grouped_common_shelf")
     )
 
-    # Keep window ranking constrained to the filtered subset to avoid full-table scans.
-    latest_ranked_subquery = (
-        select(
-            filtered_subquery.c.cas_number.label("cas_number"),
-            filtered_subquery.c.brand_normalized.label("brand_normalized"),
-            filtered_subquery.c.specification_normalized.label("specification_normalized"),
-            filtered_subquery.c.brand.label("brand"),
-            filtered_subquery.c.specification_text.label("specification_text"),
-            filtered_subquery.c.name_snapshot.label("name_snapshot"),
-            filtered_subquery.c.id.label("id"),
-            func.row_number()
-            .over(
-                partition_by=(
-                    filtered_subquery.c.cas_number,
-                    filtered_subquery.c.brand_normalized,
-                    filtered_subquery.c.specification_normalized,
-                ),
-                order_by=(filtered_subquery.c.created_at.desc(), filtered_subquery.c.id.desc()),
-            )
-            .label("rn"),
-        )
-        .subquery("latest_group_ranked")
-    )
-    latest_group_subquery = (
-        select(
-            latest_ranked_subquery.c.cas_number,
-            latest_ranked_subquery.c.brand_normalized,
-            latest_ranked_subquery.c.specification_normalized,
-            latest_ranked_subquery.c.brand,
-            latest_ranked_subquery.c.specification_text,
-            latest_ranked_subquery.c.name_snapshot,
-        )
-        .where(latest_ranked_subquery.c.rn == 1)
-        .subquery("latest_group_item")
-    )
 
-    total = int(
-        db.exec(
-            select(func.count()).select_from(grouped_subquery)
-        ).one()
-        or 0
-    )
-    if total == 0:
-        return CommonShelfGroupListResponse(
-            data=[],
-            current=0,
-            total=0,
-            skip=options.skip,
-            limit=options.limit,
-        )
-
+def _build_common_shelf_group_page_query(grouped_subquery, *, sort_by: Optional[str], sort_order: Optional[str]):
     page_query = (
         select(
             grouped_subquery.c.cas_number,
@@ -711,44 +726,32 @@ def list_grouped_common_shelf(
             grouped_subquery.c.location_count,
             grouped_subquery.c.created_at,
             grouped_subquery.c.updated_at,
-            latest_group_subquery.c.brand,
-            latest_group_subquery.c.specification_text,
-            latest_group_subquery.c.name_snapshot,
+            grouped_subquery.c.brand,
+            grouped_subquery.c.specification_text,
+            grouped_subquery.c.name_snapshot,
             ChemicalNameMap.name.label("map_name"),
             ChemicalNameMap.english_name.label("map_english_name"),
             ChemicalNameMap.category.label("map_category"),
         )
         .select_from(grouped_subquery)
-        .join(
-            latest_group_subquery,
-            and_(
-                latest_group_subquery.c.cas_number == grouped_subquery.c.cas_number,
-                latest_group_subquery.c.brand_normalized == grouped_subquery.c.brand_normalized,
-                latest_group_subquery.c.specification_normalized == grouped_subquery.c.specification_normalized,
-            ),
-        )
         .join(ChemicalNameMap, ChemicalNameMap.cas_number == grouped_subquery.c.cas_number, isouter=True)
     )
-    page_query = page_query.order_by(
+    return page_query.order_by(
         *_build_group_order_expressions(
-            sort_by=options.sort_by,
-            sort_order=options.sort_order,
+            sort_by=sort_by,
+            sort_order=sort_order,
             grouped_subquery=grouped_subquery,
-            latest_subquery=latest_group_subquery,
         )
     )
-    if options.skip > 0:
-        page_query = page_query.offset(options.skip)
-    if options.limit > 0:
-        page_query = page_query.limit(options.limit)
 
-    page_rows_subquery = page_query.subquery("page_group_rows")
-    rows = db.exec(page_query).all()
-    group_display_texts = _collect_group_display_texts(
-        db,
-        filtered_subquery=filtered_subquery,
-        page_rows_subquery=page_rows_subquery,
-    )
+
+def _build_group_list_response(
+    *,
+    rows: list[CommonShelfGroupRow],
+    total: int,
+    skip: int,
+    limit: int,
+) -> CommonShelfGroupListResponse:
     data: list[CommonShelfGroupResponse] = []
     for row in rows:
         group_key = build_group_key(
@@ -756,34 +759,76 @@ def list_grouped_common_shelf(
             brand_normalized=row.brand_normalized,
             specification_normalized=row.specification_normalized,
         )
-        display_texts = group_display_texts.get(group_key, {})
-        data.append(
-            CommonShelfGroupResponse(
-                group=CommonShelfGroupIdentity(
-                    group_key=group_key,
-                    cas_number=row.cas_number,
-                    brand=row.brand,
-                    brand_normalized=row.brand_normalized,
-                    specification_text=row.specification_text,
-                    specification_normalized=row.specification_normalized,
-                ),
-                display=CommonShelfGroupDisplay(
-                    name=row.map_name or row.name_snapshot,
-                    english_name=row.map_english_name,
-                    category=row.map_category,
-                    purity=display_texts.get("purity"),
-                    notes=display_texts.get("notes"),
-                ),
-                bottle_count=int(row.bottle_count or 0),
-                location_count=int(row.location_count or 0),
-                latest_name_snapshot=row.name_snapshot,
-                created_at=row.created_at or get_utc_now(),
-                updated_at=row.updated_at or row.created_at or get_utc_now(),
-            )
+        data.append(_build_group_response(row, group_key))
+    return CommonShelfGroupListResponse(data=data, current=len(data), total=total, skip=skip, limit=limit)
+
+
+def _build_group_response(
+    row: CommonShelfGroupRow,
+    group_key: str,
+) -> CommonShelfGroupResponse:
+    return CommonShelfGroupResponse(
+        group=CommonShelfGroupIdentity(
+            group_key=group_key,
+            cas_number=row.cas_number,
+            brand=row.brand,
+            brand_normalized=row.brand_normalized,
+            specification_text=row.specification_text,
+            specification_normalized=row.specification_normalized,
+        ),
+        display=CommonShelfGroupDisplay(
+            name=row.map_name or row.name_snapshot,
+            english_name=row.map_english_name,
+            category=row.map_category,
+        ),
+        bottle_count=int(row.bottle_count or 0),
+        location_count=int(row.location_count or 0),
+        latest_name_snapshot=row.name_snapshot,
+        created_at=row.created_at or get_utc_now(),
+        updated_at=row.updated_at or row.created_at or get_utc_now(),
+    )
+
+
+def list_grouped_common_shelf(
+    db: Session,
+    *,
+    options: CommonShelfGroupListOptions,
+) -> CommonShelfGroupListResponse:
+    filtered_base = _filter_common_shelf_group_query(
+        select(CommonShelfGroup).where(CommonShelfGroup.is_deleted.is_(False)),
+        db=db,
+        search=options.search,
+        search_field=options.search_field,
+        fuzzy=options.fuzzy,
+        match_mode=options.match_mode,
+    )
+    filtered_groups = filtered_base.subquery("filtered_common_shelf_group")
+    item_counts = _build_common_shelf_item_counts_subquery(filtered_groups)
+    grouped_subquery = _build_common_shelf_grouped_subquery(filtered_groups, item_counts)
+
+    total = int(db.exec(select(func.count()).select_from(grouped_subquery)).one() or 0)
+    if total == 0:
+        return CommonShelfGroupListResponse(
+            data=[],
+            current=0,
+            total=0,
+            skip=options.skip,
+            limit=options.limit,
         )
-    return CommonShelfGroupListResponse(
-        data=data,
-        current=len(data),
+
+    page_query = _build_common_shelf_group_page_query(
+        grouped_subquery,
+        sort_by=options.sort_by,
+        sort_order=options.sort_order,
+    )
+    if options.skip > 0:
+        page_query = page_query.offset(options.skip)
+    if options.limit > 0:
+        page_query = page_query.limit(options.limit)
+
+    rows = db.exec(page_query).all()
+    return _build_group_list_response(
+        rows=rows,
         total=total,
         skip=options.skip,
         limit=options.limit,

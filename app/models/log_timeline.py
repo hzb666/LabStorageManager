@@ -28,7 +28,6 @@ class LogTimeline(SQLModel, table=True):
     __tablename__ = "log_timeline"
     __table_args__ = (
         Index("ix_log_timeline_occurred_at_id", "occurred_at", "id"),
-        Index("ix_log_timeline_log_type_occurred_at_id", "log_type", "occurred_at", "id"),
         Index(
             "ix_log_timeline_actor_occurred_at_id",
             "actor_user_id",
@@ -42,6 +41,20 @@ class LogTimeline(SQLModel, table=True):
             "id",
         ),
         Index(
+            "ix_log_timeline_actor_source_table_occurred_at_id",
+            "actor_user_id",
+            "source_table",
+            "occurred_at",
+            "id",
+        ),
+        Index(
+            "ix_log_timeline_subject_source_table_occurred_at_id",
+            "subject_user_id",
+            "source_table",
+            "occurred_at",
+            "id",
+        ),
+        Index(
             "ux_log_timeline_source_table_source_log_id",
             "source_table",
             "source_log_id",
@@ -51,7 +64,6 @@ class LogTimeline(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     occurred_at: datetime = Field(default_factory=get_utc_now)
-    log_type: str = Field(max_length=50)
     is_cli: bool = Field(default=False)
     actor_user_id: Optional[int] = Field(
         default=None,
@@ -78,3 +90,4 @@ class LogTimeline(SQLModel, table=True):
     source_log_id: int = Field(index=False)
     search_text: str = Field(sa_column=Column(Text, nullable=False, default=""))
     search_text_pinyin: str = Field(sa_column=Column(Text, nullable=False, default=""))
+    detail_search_text: str = Field(sa_column=Column(Text, nullable=False, default=""))

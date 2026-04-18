@@ -336,6 +336,7 @@ def _register_manual_and_dashboard_routes(
                     "cas_number": item.cas_number,
                     "remaining_quantity": item.remaining_quantity,
                     "unit": item.unit,
+                    "notes": item.notes,
                     "borrow_time": utc_iso_str(item.updated_at),
                     "borrower_name": (
                         users_map.get(
@@ -372,8 +373,17 @@ def _register_manual_and_dashboard_routes(
                     "order_id": item.source_order_id,
                     "name": item.name,
                     "cas_number": item.cas_number,
+                    "english_name": item.english_name,
+                    "alias": item.alias,
+                    "category": item.category,
+                    "brand": item.brand,
+                    "purity": item.purity,
+                    "specification": format_specification(item.initial_quantity, item.unit),
                     "initial_quantity": item.initial_quantity,
+                    "remaining_quantity": item.remaining_quantity,
                     "unit": item.unit,
+                    "is_hazardous": item.is_hazardous,
+                    "notes": item.notes,
                     "stockin_time": utc_iso_str(item.created_at),
                 }
                 for item in items
@@ -595,12 +605,19 @@ def _get_latest_active_borrow_log(db: Session, inventory_id: int) -> Optional[Bo
     ).first()
 
 
+def _normalize_return_notes(notes: Optional[str]) -> Optional[str]:
+    normalized = (notes or "").strip()
+    return normalized or None
+
+
 # 应用归还后的库存状态变更，并返回低库存提示文案（若有）。
 def _apply_return_to_inventory_item(item: Inventory, return_data: InventoryBorrowReturn) -> Optional[str]:
     item.remaining_quantity = return_data.remaining_quantity
     item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
     item.last_borrower_id = item.borrower_id
     item.borrower_id = None
+    if "notes" in return_data.model_fields_set:
+        item.notes = _normalize_return_notes(return_data.notes)
 
     low_quantity_warning = None
     if return_data.remaining_quantity > 0:
@@ -723,6 +740,13 @@ def _register_return_route(
             borrow_log.quantity_returned = return_data.remaining_quantity
 
         low_quantity_warning = _apply_return_to_inventory_item(item, return_data)
+        if borrow_log:
+            project_borrow_log(
+                db,
+                log=borrow_log,
+                inventory=item,
+                is_cli=get_request_is_cli(request),
+            )
         db.commit()
         db.refresh(item)
         clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)

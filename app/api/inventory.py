@@ -753,6 +753,18 @@ def _apply_inventory_remaining_quantity_update(
 
     if 'remaining_quantity' not in update_data:
         if specification_updated:
+            if (
+                item.remaining_quantity is not None
+                and item.initial_quantity is not None
+                and item.remaining_quantity > item.initial_quantity
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Invalid remaining quantity: {item.remaining_quantity} cannot exceed "
+                        f"initial quantity {item.initial_quantity}"
+                    ),
+                )
             item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
         return
 

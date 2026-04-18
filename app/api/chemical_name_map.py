@@ -16,7 +16,7 @@ from app.models.chemical_name_map import (
     ChemicalNameMapResponse,
     ChemicalNameMapUpdate,
 )
-from app.models.common_shelf import CommonShelf
+from app.models.common_shelf import CommonShelf, CommonShelfGroup
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.common_shelf_queries import search_name_map_cas_numbers
 from app.services.pinyin_utils import to_pinyin_parts
@@ -211,7 +211,13 @@ def delete_chemical_name_map(item_id: int, db: DBSession):
         .where(CommonShelf.cas_number == row.cas_number)
         .limit(1)
     ).first()
-    if referenced_item_id is not None:
+    referenced_group_id = db.exec(
+        select(CommonShelfGroup.id)
+        .where(CommonShelfGroup.cas_number == row.cas_number)
+        .where(CommonShelfGroup.is_deleted.is_(False))
+        .limit(1)
+    ).first()
+    if referenced_item_id is not None or referenced_group_id is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="CAS master data is referenced by CommonShelf and cannot be deleted",

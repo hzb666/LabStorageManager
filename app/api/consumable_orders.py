@@ -393,11 +393,13 @@ async def create_consumable_order(
     db_order = ConsumableOrder(
         name=normalized.get('name', order.name),
         english_name=normalized.get('english_name'),
+        product_number=normalized.get('product_number'),
         specification=order.specification,
         unit=normalized.get('unit'),
         quantity=order.quantity,
         price=order.price,
         communication=normalized.get('communication'),
+        notes=normalized.get('notes'),
         applicant_id=current_user.id,
         **pinyin_fields,
     )
