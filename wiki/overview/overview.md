@@ -9,6 +9,9 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 - `app/`：FastAPI 后端，负责业务规则、认证、数据存储、静态资源和事件推送。
 - `frontend/`：React 单页应用，负责页面路由、表格、表单和交互状态。
 - `browser-extension/`：浏览器扩展，负责采集外部购物车并桥接到 `/cart-import`。
+- `lsm_cli/`：本地命令行客户端，只通过后端 API 操作。
+- `lsm_mcp/`：受控 MCP 工具服务，按白名单映射到 CLI 命令。
+- `robot/`：企业微信智能机器人与微信客服入口。
 - `docker/` 与 `docker-compose.yml`：部署镜像、Nginx 代理和服务编排。
 - `wiki/`：文档站源码。
 
@@ -27,6 +30,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 1. `app/` 承担后端业务校验、认证、持久化和静态资源服务。
 2. `frontend/` 是用户交互入口，承担路由、列表页、表单页和实时刷新。
 3. `browser-extension/` 是外部数据采集入口，只负责抓取和桥接，不直接写数据库。
+4. `lsm_cli/`、`lsm_mcp/` 和 `robot/` 共同提供受控自动化入口，最终仍回到后端 API。
 
 ## 关键代码与职责
 
@@ -39,7 +43,10 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/main.tsx" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" />：挂载查询客户端、认证状态、SSE hook 和路由树。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" />：统一 Axios 实例、Cookie 登录和各业务 API 的调用方式。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts" /> 与 `store/sseStore.ts`：维护 SSE 连接、序号处理和 stale 提示。
-- `browser-extension/`：`manifest.json`、`popup/` 和 `content/import-bridge.js` 共同完成外部购物车到导入页的桥接。
+- `browser-extension/`：构建期 manifest、`popup/` 和 `content/import-bridge.js` 共同完成外部购物车到导入页的桥接。
+- `lsm_cli/`：提供 `auth`、`inventory`、`reagent-orders`、`consumable-orders`、`common-shelf` 和 `chemical-name-map` 命令面。
+- `lsm_mcp/`：通过 CLI 子进程暴露受控 MCP 工具，不直接访问数据库。
+- `robot/`：复用 MCP 工具面处理企业微信智能机器人和微信客服消息。
 
 ## 系统特征
 
@@ -71,6 +78,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 | 大表格与搜索 | TanStack Table + Virtual + 后端检索/拼音字段 |
 | 认证与会话 | JWT + 多设备会话管理 |
 | 扩展 | Chrome Manifest V3 |
+| 自动化入口 | CLI + MCP + 企业微信智能机器人 + 微信客服 |
 
 ## 数据与缓存
 

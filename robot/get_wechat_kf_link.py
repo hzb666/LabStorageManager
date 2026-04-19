@@ -20,6 +20,7 @@ async def _main() -> int:
     parser.add_argument("--scene", default="lsm", help="Scene string, default: lsm")
     parser.add_argument("--scene-param", default="", help="Optional scene parameter appended to URL")
     parser.add_argument("--json", action="store_true", help="Print full API response as JSON")
+    parser.add_argument("--list-accounts", action="store_true", help="List KF accounts and exit")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -33,6 +34,11 @@ async def _main() -> int:
         secret=settings.secret,
         api_base_url=settings.api_base_url,
     )
+    if args.list_accounts:
+        result = await client._post("/cgi-bin/kf/account/list", {"offset": 0, "limit": 100})
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
     result = await client.add_contact_way(
         open_kfid=settings.open_kfid,
         scene=args.scene,

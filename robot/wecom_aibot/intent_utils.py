@@ -10,18 +10,37 @@ from typing import Any
 CAS_PATTERN = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
 ID_PATTERN = re.compile(r"\b\d+\b")
 BIND_PATTERN = re.compile(r"^绑定\s+(\S+)\s+(.+)$")
-USED_PATTERN = re.compile(r"(?:用量|用了|消耗|使用)\s*([0-9]+(?:\.[0-9]+)?)")
-REMAINING_PATTERN = re.compile(r"(?:剩余|剩下|余量)\s*([0-9]+(?:\.[0-9]+)?)")
-HELP_KEYWORDS = ("帮助", "help", "怎么用", "指令")
+QUANTITY_PATTERN_TEXT = r"([0-9]+(?:\.[0-9]+)?)\s*([A-Za-zμµ\u4e00-\u9fff]*)"
+USED_PATTERN = re.compile(r"(?:用量|用了|消耗|使用)\s*" + QUANTITY_PATTERN_TEXT)
+REMAINING_PATTERN = re.compile(
+    r"(?:归还量|剩余量|剩余|剩下|余量|还剩)\s*" + QUANTITY_PATTERN_TEXT
+)
+SELECTION_PATTERN = re.compile(
+    r"^\s*(?:我(?:要|想)?|帮我)?\s*(?:选(?:择)?|借用|归还|还|用)?\s*(?:第)?\s*"
+    r"([0-9]{1,3})\s*(?:个|项|号|瓶|条)?\s*$"
+)
 LOW_STOCK_KEYWORDS = ("低库存", "快没", "不足", "缺货")
 BORROW_KEYWORDS = ("借用", "帮我借")
-RETURN_KEYWORDS = ("归还", "还瓶", "还药")
+RETURN_KEYWORDS = ("归还", "还瓶", "还药", "还了", "还回")
 REAGENT_ORDER_KEYWORDS = ("试剂订单", "试剂申购", "试剂采购", "reagent")
 CONSUMABLE_ORDER_KEYWORDS = ("耗材订单", "耗材申购", "耗材采购", "consumable")
 COMMON_SHELF_KEYWORDS = ("常用货架", "公共货架", "货架")
+MY_BORROW_KEYWORDS = ("我的借用", "我借了", "我借的", "借用中", "我借用的")
+MY_REAGENT_ORDER_KEYWORDS = ("我的试剂订单", "我的试剂申购", "我申请的试剂", "我订的试剂")
+MY_CONSUMABLE_ORDER_KEYWORDS = ("我的耗材订单", "我的耗材申购", "我申请的耗材", "我订的耗材")
+MY_PENDING_STOCKIN_KEYWORDS = ("我的暂存", "我的待补全入库", "待补全入库", "我的待入库", "待入库")
 CONFIRM_WORDS = {"确认", "确定", "yes", "y"}
 CANCEL_WORDS = {"取消", "放弃", "不", "no", "n"}
 STATE_TTL_MINUTES = 5
+STATUS_LABELS = {
+    "not_in_stock": "未入库",
+    "in_stock": "在库",
+    "run_short": "低库存",
+    "borrowed": "已借用",
+    "consumed": "已耗尽",
+}
+BORROWABLE_STATUSES = {"in_stock", "run_short"}
+NON_BORROWABLE_STATUSES = {"not_in_stock", "borrowed", "consumed"}
 QUERY_STOP_WORDS = (
     "查询",
     "查一下",
@@ -56,11 +75,14 @@ def help_text() -> str:
         [
             "可以这样问我：",
             "1. 查询乙醇库存",
-            "2. 64-17-5 在哪里",
-            "3. 有哪些低库存",
-            "4. 绑定 alice 密码（请私聊发送）",
-            "5. 借用乙醇",
-            "6. 归还乙醇 用量20",
+            "2. 精确查询乙醇库存",
+            "3. 64-17-5 在哪里",
+            "4. 有哪些低库存",
+            "5. 绑定 alice 密码（请私聊发送）",
+            "6. 借用乙醇",
+            "7. 归还乙醇 用量20mL / 归还量0.2L",
+            "8. 我的借用 / 我的试剂订单 / 我的耗材订单 / 我的暂存",
+            "下单、入库、更新、删除等操作暂不支持在机器人里执行。",
         ]
     )
 
@@ -80,6 +102,11 @@ def build_actor(payload: dict[str, Any]) -> ActorContext:
 def has_any(text: str, keywords: tuple[str, ...]) -> bool:
     lower = text.lower()
     return any(keyword.lower() in lower for keyword in keywords)
+
+
+def is_help_request(text: str) -> bool:
+    normalized = text.strip().lower()
+    return normalized in {"帮助", "help", "指令", "怎么用", "使用说明"}
 
 
 def is_borrow_intent(text: str) -> bool:
@@ -111,21 +138,29 @@ def extract_query(text: str) -> str:
 
 def extract_write_query(text: str, keywords: tuple[str, ...]) -> str:
     cleaned = text
-    for word in keywords + ("请", "帮我", "一下"):
-        cleaned = cleaned.replace(word, " ")
     cleaned = USED_PATTERN.sub(" ", cleaned)
     cleaned = REMAINING_PATTERN.sub(" ", cleaned)
+    for word in keywords + ("请", "帮我", "一下"):
+        cleaned = cleaned.replace(word, " ")
     return extract_query(cleaned)
 
 
-def extract_return_quantity(text: str) -> dict[str, float]:
+def extract_return_quantity(text: str) -> dict[str, Any]:
     remaining = REMAINING_PATTERN.search(text)
     if remaining:
-        return {"remaining_quantity": float(remaining.group(1))}
+        return _quantity_args("remaining", remaining)
     used = USED_PATTERN.search(text)
     if used:
-        return {"used_quantity": float(used.group(1))}
+        return _quantity_args("used", used)
     return {}
+
+
+def extract_candidate_selection(text: str) -> int | None:
+    match = SELECTION_PATTERN.match(text)
+    if not match:
+        return None
+    value = int(match.group(1))
+    return value if value > 0 else None
 
 
 def result_ok(result: dict[str, Any]) -> bool:
@@ -138,8 +173,16 @@ def payload_data(result: dict[str, Any]) -> Any:
     return payload.get("data") if isinstance(payload, dict) else None
 
 
-def extract_inventory_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
-    return [_candidate(item) for item in _extract_items(payload_data(result)) if _candidate(item)]
+def extract_inventory_candidates(
+    result: dict[str, Any],
+    *,
+    borrowable_only: bool = False,
+) -> list[dict[str, Any]]:
+    candidates = [_candidate(item) for item in _extract_items(payload_data(result))]
+    candidates = [candidate for candidate in candidates if candidate]
+    if borrowable_only:
+        return [candidate for candidate in candidates if _is_borrowable_candidate(candidate)]
+    return candidates
 
 
 def filter_candidates(candidates: list[dict[str, Any]], keyword: str) -> list[dict[str, Any]]:
@@ -202,7 +245,17 @@ def _candidate(item: Any) -> dict[str, Any]:
     if inventory_id is None:
         return {}
     display = _display_inventory(item)
-    return {"inventory_id": inventory_id, "display": display, "search_text": _search_text(item)}
+    return {
+        "inventory_id": inventory_id,
+        "display": display,
+        "search_text": _search_text(item),
+        "remaining_quantity": item.get("remaining_quantity"),
+        "initial_quantity": item.get("initial_quantity"),
+        "unit": item.get("unit"),
+        "specification": item.get("specification"),
+        "status": _first_text(item, "status"),
+        "temporary_keeper_name": _first_text(item, "temporary_keeper_name"),
+    }
 
 
 def _read_id(item: dict[str, Any]) -> int | None:
@@ -217,16 +270,48 @@ def _read_id(item: dict[str, Any]) -> int | None:
 def _display_inventory(item: dict[str, Any]) -> str:
     parts = [
         _first_text(item, "name", "name_snapshot", "chemical_name") or "未命名",
+        _wrap(_first_text(item, "english_name"), "英文名 "),
+        _wrap(_first_text(item, "alias"), "别名 "),
         _wrap(_first_text(item, "cas_number"), "CAS "),
+        _wrap(_first_text(item, "brand"), "品牌 "),
+        _wrap(_first_text(item, "purity"), "纯度 "),
+        _wrap(_first_text(item, "specification"), "规格 "),
         _format_quantity(item),
         _wrap(_first_text(item, "storage_location", "location"), "位置 "),
-        _wrap(_first_text(item, "status"), "状态 "),
+        _format_status(item),
+        _wrap(_first_text(item, "borrower_name"), "借用人 "),
+        _wrap(_first_text(item, "temporary_keeper_name"), "暂存人 "),
+        _wrap(_first_text(item, "last_borrower_name"), "最近借用人 "),
+        _wrap(_first_text(item, "created_at"), "创建时间 "),
+        _wrap(_first_text(item, "updated_at"), "更新时间 "),
+        _wrap(_first_text(item, "notes"), "备注 "),
     ]
     return "，".join(part for part in parts if part)
 
 
+def _is_borrowable_candidate(candidate: dict[str, Any]) -> bool:
+    status = str(candidate.get("status") or "").strip()
+    if status in NON_BORROWABLE_STATUSES:
+        return False
+    if status and status not in BORROWABLE_STATUSES:
+        return False
+    if candidate.get("temporary_keeper_name") and status not in BORROWABLE_STATUSES:
+        return False
+    remaining = _read_float(candidate.get("remaining_quantity"))
+    return remaining is None or remaining > 0
+
+
 def _search_text(item: dict[str, Any]) -> str:
-    keys = ("name", "name_snapshot", "chemical_name", "cas_number", "storage_location", "brand")
+    keys = (
+        "name",
+        "name_snapshot",
+        "chemical_name",
+        "english_name",
+        "alias",
+        "cas_number",
+        "storage_location",
+        "brand",
+    )
     return " ".join(str(item.get(key) or "") for key in keys)
 
 
@@ -238,12 +323,40 @@ def _format_quantity(item: dict[str, Any]) -> str:
     return ""
 
 
+def _read_float(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_status(item: dict[str, Any]) -> str:
+    status = _first_text(item, "status")
+    if not status:
+        return ""
+    return "状态 " + STATUS_LABELS.get(status, status)
+
+
 def _quantity_text(args: dict[str, Any]) -> str:
+    summary = args.get("quantity_summary")
+    if isinstance(summary, str) and summary.strip():
+        return "，" + summary.strip()
     if "used_quantity" in args:
         return f"，用量 {args['used_quantity']}"
     if "remaining_quantity" in args:
         return f"，剩余 {args['remaining_quantity']}"
     return ""
+
+
+def _quantity_args(mode: str, match: re.Match[str]) -> dict[str, Any]:
+    unit = match.group(2).strip() if match.group(2) else ""
+    return {
+        "quantity_mode": mode,
+        "quantity_value": float(match.group(1)),
+        "quantity_unit": unit,
+    }
 
 
 def _first_text(item: dict[str, Any], *keys: str) -> str:

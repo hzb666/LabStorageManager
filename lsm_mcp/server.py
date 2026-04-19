@@ -33,10 +33,14 @@ def inventory_search_by_name(
     keyword: str,
     user_token: str,
     limit: int = DEFAULT_LIMIT,
+    exact: bool = False,
 ) -> dict[str, Any]:
-    """按名称搜索库存。"""
+    """按名称搜索库存；exact=True 时使用名称精确匹配。"""
     return _run_user_cli(
-        ["inventory", "name", keyword, "--page-size", str(_clamp_limit(limit))],
+        _with_exact_flag(
+            ["inventory", "name", keyword, "--page-size", str(_clamp_limit(limit))],
+            exact,
+        ),
         user_token,
     )
 
@@ -76,6 +80,12 @@ def inventory_my_borrows(user_token: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def inventory_pending_stockin(user_token: str) -> dict[str, Any]:
+    """查询绑定用户自己的待补全入库项。"""
+    return _run_user_cli(["inventory", "pending-stockin"], user_token)
+
+
+@mcp.tool()
 def inventory_borrow(inventory_id: int, user_token: str) -> dict[str, Any]:
     """借用库存；调用前必须完成用户绑定和二次确认。"""
     return _run_user_cli(["inventory", "borrow", str(inventory_id)], user_token)
@@ -102,10 +112,14 @@ def reagent_orders_search_by_name(
     keyword: str,
     user_token: str,
     limit: int = DEFAULT_LIMIT,
+    exact: bool = False,
 ) -> dict[str, Any]:
-    """按名称搜索试剂订单。"""
+    """按名称搜索试剂订单；exact=True 时使用名称精确匹配。"""
     return _run_user_cli(
-        ["reagent-orders", "name", keyword, "--page-size", str(_clamp_limit(limit))],
+        _with_exact_flag(
+            ["reagent-orders", "name", keyword, "--page-size", str(_clamp_limit(limit))],
+            exact,
+        ),
         user_token,
     )
 
@@ -136,14 +150,24 @@ def reagent_orders_get_cas_overview(cas_number: str, user_token: str) -> dict[st
 
 
 @mcp.tool()
+def reagent_orders_my(user_token: str) -> dict[str, Any]:
+    """查询绑定用户自己的试剂订单。"""
+    return _run_user_cli(["reagent-orders", "my"], user_token)
+
+
+@mcp.tool()
 def consumable_orders_search_by_name(
     keyword: str,
     user_token: str,
     limit: int = DEFAULT_LIMIT,
+    exact: bool = False,
 ) -> dict[str, Any]:
-    """按名称搜索耗材订单。"""
+    """按名称搜索耗材订单；exact=True 时使用名称精确匹配。"""
     return _run_user_cli(
-        ["consumable-orders", "name", keyword, "--page-size", str(_clamp_limit(limit))],
+        _with_exact_flag(
+            ["consumable-orders", "name", keyword, "--page-size", str(_clamp_limit(limit))],
+            exact,
+        ),
         user_token,
     )
 
@@ -152,6 +176,12 @@ def consumable_orders_search_by_name(
 def consumable_orders_get_by_id(order_id: int, user_token: str) -> dict[str, Any]:
     """查看单条耗材订单。"""
     return _run_user_cli(["consumable-orders", "get", str(order_id)], user_token)
+
+
+@mcp.tool()
+def consumable_orders_my(user_token: str) -> dict[str, Any]:
+    """查询绑定用户自己的耗材订单。"""
+    return _run_user_cli(["consumable-orders", "my"], user_token)
 
 
 @mcp.tool()
@@ -214,6 +244,12 @@ def chemical_name_map_search_by_cas(
 
 def _run_user_cli(args: list[str], user_token: str) -> dict[str, Any]:
     return run_lsm_cli(args, token=user_token, use_service_token=False)
+
+
+def _with_exact_flag(args: list[str], exact: bool) -> list[str]:
+    if exact:
+        args.append("--exact")
+    return args
 
 
 def _clamp_limit(limit: int) -> int:

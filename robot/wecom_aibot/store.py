@@ -43,18 +43,52 @@ class ProcessedMessageStore:
         payload = json.loads(row[0])
         return payload if isinstance(payload, dict) else None
 
+    def claim_response(self, msgid: str) -> bool:
+        """Reserve a message id before slow processing starts."""
+        if not msgid:
+            return False
+        response_json = json.dumps({"status": "processing"}, ensure_ascii=False)
+        try:
+            with closing(self._connect()) as connection:
+                with connection:
+                    connection.execute(
+                        """
+                        INSERT INTO processed_wecom_aibot_message (msgid, response_json)
+                        VALUES (?, ?)
+                        """,
+                        (msgid, response_json),
+                    )
+        except sqlite3.IntegrityError:
+            return False
+        return True
+
     def save_response(self, msgid: str, response: dict[str, Any]) -> None:
         if not msgid:
             return
         response_json = json.dumps(response, ensure_ascii=False, separators=(",", ":"))
         with closing(self._connect()) as connection:
             with connection:
+                cursor = connection.execute(
+                    "UPDATE processed_wecom_aibot_message SET response_json = ? WHERE msgid = ?",
+                    (response_json, msgid),
+                )
+                if cursor.rowcount == 0:
+                    connection.execute(
+                        """
+                        INSERT INTO processed_wecom_aibot_message (msgid, response_json)
+                        VALUES (?, ?)
+                        """,
+                        (msgid, response_json),
+                    )
+
+    def release_response(self, msgid: str) -> None:
+        if not msgid:
+            return
+        with closing(self._connect()) as connection:
+            with connection:
                 connection.execute(
-                    """
-                    INSERT OR IGNORE INTO processed_wecom_aibot_message (msgid, response_json)
-                    VALUES (?, ?)
-                    """,
-                    (msgid, response_json),
+                    "DELETE FROM processed_wecom_aibot_message WHERE msgid = ?",
+                    (msgid,),
                 )
 
     def _connect(self) -> sqlite3.Connection:

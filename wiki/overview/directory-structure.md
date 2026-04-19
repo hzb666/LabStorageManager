@@ -1,6 +1,6 @@
 # 目录结构
 
-这个仓库同时包含 FastAPI 后端、React 前端、浏览器扩展、Docker/Nginx 部署文件和 VitePress wiki。先明确目录边界，再去看业务流程和接口，会更高效。
+这个仓库同时包含 FastAPI 后端、React 前端、浏览器扩展、CLI、MCP 服务、企业微信入口、Docker/Nginx 部署文件和 VitePress wiki。先明确目录边界，再去看业务流程和接口，会更高效。
 
 ## 顶层目录
 
@@ -8,7 +8,10 @@
 | --- | --- | --- |
 | `app/` | FastAPI 后端入口、路由、服务、模型与核心基础设施 | `main.py`、`api/`、`services/`、`models/` |
 | `frontend/` | React 19 前端，页面、组件、hooks、状态管理 | `src/App.tsx`、`src/pages/`、`src/hooks/` |
-| `browser-extension/` | Chrome 扩展，采集外部购物车并桥接到系统 | `manifest.json`、`content/`、`popup/` |
+| `browser-extension/` | Chrome 扩展，采集外部购物车并桥接到系统 | `build-config.mjs`、`content/`、`popup/` |
+| `lsm_cli/` | 本地命令行客户端，只通过后端 API 工作 | `__main__.py`、`commands/` |
+| `lsm_mcp/` | 受控 MCP 工具服务，调用 CLI 子进程 | `http_app.py`、`cli_runner.py` |
+| `robot/` | 企业微信智能机器人和微信客服入口 | `wecom_aibot/`、`wechat_kf/` |
 | `docker/` | 前后端镜像与 Nginx 反向代理配置 | `docker-compose.yml`、`docker/nginx/default.conf` |
 | `static/` | 上传图片、模板等静态资源目录 | 上传链路、公告图片、导入模板 |
 | `wiki/` | 当前知识库源码 | 站点配置、主题定制与各章节页面 |
@@ -117,12 +120,23 @@ Zustand 状态层用于：
 
 | 路径 | 作用 |
 | --- | --- |
-| `browser-extension/manifest.json` | 扩展权限、入口和内容脚本声明 |
+| `browser-extension/build-config.mjs` | 根据扩展 env 生成 manifest 和运行配置 |
 | `browser-extension/content/script.js` | 抓取购物车或商品详情 |
 | `browser-extension/content/import-bridge.js` | 把批次数据桥接到系统 `/cart-import` 页面 |
 | `browser-extension/popup/` | 扩展弹窗 UI |
 
 扩展不是后端的第二套前端，而是采集器和投递器。
+
+## CLI、MCP 与机器人目录
+
+| 路径 | 作用 |
+| --- | --- |
+| `lsm_cli/` | 面向脚本和 MCP 的命令行入口，输出 JSON，不直接访问数据库 |
+| `lsm_mcp/` | MCP Streamable HTTP 服务，按白名单映射到 CLI 命令 |
+| `robot/wecom_aibot/` | 企业微信智能机器人实现 |
+| `robot/wechat_kf/` | 微信客服一对一会话入口 |
+| `robot/create_wechat_kf_account.py` | 创建微信客服账号并可写入 `WECHAT_KF_OPEN_KFID` |
+| `robot/get_wechat_kf_link.py` | 获取客服账号列表或联系链接 |
 
 ## 部署与运行目录
 
@@ -169,3 +183,6 @@ Zustand 状态层用于：
 - [frontend/src/components](https://github.com/hzb666/LabStorageManager/tree/main/frontend/src/components)
 - [frontend/src/hooks](https://github.com/hzb666/LabStorageManager/tree/main/frontend/src/hooks)
 - [frontend/src/lib](https://github.com/hzb666/LabStorageManager/tree/main/frontend/src/lib)
+- [lsm_cli](https://github.com/hzb666/LabStorageManager/tree/main/lsm_cli)
+- [lsm_mcp](https://github.com/hzb666/LabStorageManager/tree/main/lsm_mcp)
+- [robot](https://github.com/hzb666/LabStorageManager/tree/main/robot)

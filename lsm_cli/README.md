@@ -344,7 +344,7 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 | `inventory list` | 列出库存 | `GET /inventory/` |
 | `inventory get <inventory_id>` | 查看单条库存 | `GET /inventory/{inventory_id}` |
 | `inventory cas <cas_number>` | 按 CAS 查询库存概览 | `GET /inventory/cas/{cas_number}` |
-| `inventory name <keyword>` | 按名称搜索库存列表 | `GET /inventory/?search=...&search_field=name` |
+| `inventory name <keyword> [--exact]` | 按名称搜索库存列表；`--exact` 为名称精确匹配 | `GET /inventory/?search=...&search_field=name[&match_mode=exact]` |
 | `inventory code <internal_code>` | 按内部编码查询库存 | `GET /inventory/code/{internal_code}` |
 | `inventory my-borrows` | 查看当前用户借用中的库存 | `GET /inventory/dashboard/my-borrows` |
 | `inventory pending-stockin` | 查看当前用户待补全入库项 | `GET /inventory/dashboard/pending-stockin` |
@@ -360,7 +360,7 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 | `reagent-orders list` | 列出试剂订单 | `GET /reagent-orders/` |
 | `reagent-orders get <order_id>` | 查看单条试剂订单 | `GET /reagent-orders/{order_id}` |
 | `reagent-orders cas <cas_number>` | 按 CAS 搜索试剂订单列表 | `GET /reagent-orders/?search=...&search_field=cas_number` |
-| `reagent-orders name <keyword>` | 按名称搜索试剂订单列表 | `GET /reagent-orders/?search=...&search_field=name` |
+| `reagent-orders name <keyword> [--exact]` | 按名称搜索试剂订单列表；`--exact` 为名称精确匹配 | `GET /reagent-orders/?search=...&search_field=name[&match_mode=exact]` |
 | `reagent-orders my` | 查看当前用户试剂订单 | `GET /reagent-orders/dashboard/my-reagent-orders` |
 | `reagent-orders create` | 新建试剂订单 | `POST /reagent-orders/` |
 | `reagent-orders update <order_id>` | 更新试剂订单 | `PUT /reagent-orders/{order_id}` |
@@ -394,7 +394,7 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 | --- | --- | --- |
 | `consumable-orders list` | 列出耗材订单 | `GET /consumable-orders/` |
 | `consumable-orders get <order_id>` | 查看单条耗材订单 | `GET /consumable-orders/{order_id}` |
-| `consumable-orders name <keyword>` | 按名称搜索耗材订单列表 | `GET /consumable-orders/?search=...&search_field=name` |
+| `consumable-orders name <keyword> [--exact]` | 按名称搜索耗材订单列表；`--exact` 为名称精确匹配 | `GET /consumable-orders/?search=...&search_field=name[&match_mode=exact]` |
 | `consumable-orders my` | 查看当前用户耗材订单 | `GET /consumable-orders/dashboard/my-consumable-orders` |
 | `consumable-orders create` | 新建耗材订单 | `POST /consumable-orders/` |
 | `consumable-orders update <order_id>` | 更新耗材订单 | `PUT /consumable-orders/{order_id}` |

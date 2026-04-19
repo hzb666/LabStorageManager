@@ -35,6 +35,8 @@ class WechatKfSettings(BaseSettings):
     callback_max_body_bytes: int = Field(default=1_048_576, ge=1024)
     sync_limit: int = Field(default=100, ge=1, le=1000)
     sync_max_pages: int = Field(default=5, ge=1, le=20)
+    rate_limit_max_messages: int = Field(default=3, ge=1, le=60)
+    rate_limit_window_seconds: int = Field(default=10, ge=1, le=3600)
 
     @field_validator(
         "corp_id",

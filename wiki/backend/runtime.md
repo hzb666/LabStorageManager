@@ -77,9 +77,9 @@ Redis 相关封装主要承担三件事：
 - 搜索查询日志写入独立 SQLite 文件，由 `app/search_query_log_db.py` 管理。
 - 请求、审计和错误日志写入运行期日志文件，由 `app/services/log_queue.py` 统一配置异步文件写入。
 
-归档脚本负责把三个月以前的历史日志复制到独立归档库，并在复制校验成功后从源库删除。`app/archive_logs.py` 处理主业务库中的操作日志表、公共架日志及对应 `log_timeline` 行，`app/archive_query_logs.py` 处理搜索查询日志库中的 `search_logs` 表。`borrowlog` 是借还业务数据表，不属于当前日志归档删除范围。两个脚本都支持 `--dry-run`、`--tables` 和 `--output-dir`，归档库内会写入 `archive_meta` 记录批次、源库、目标库、截止时间和归档行数。删除阶段必须在归档库提交成功后才会开始，并且源库删除运行在同一个事务中；任一表删除行数和归档行数不一致都会回滚源库删除。
+归档脚本负责把三个月以前的历史日志复制到独立归档库，并在复制校验成功后从源库删除。`app/archive_logs.py` 处理主业务库中的操作日志表、常用货架日志及对应 `log_timeline` 行，`app/archive_query_logs.py` 处理搜索查询日志库中的 `search_logs` 表。`borrowlog` 是借还业务数据表，不属于当前日志归档删除范围。两个脚本都支持 `--dry-run`、`--tables` 和 `--output-dir`，归档库内会写入 `archive_meta` 记录批次、源库、目标库、截止时间和归档行数。删除阶段必须在归档库提交成功后才会开始，并且源库删除运行在同一个事务中；任一表删除行数和归档行数不一致都会回滚源库删除。
 
-如果不希望额外配置 cron，可以通过 `ARCHIVE_SCHEDULER_ENABLED=true` 启用后端内置归档调度。调度器在 `lifespan` 启动阶段挂载，按 `ARCHIVE_STARTUP_DELAY_SECONDS` 和 `ARCHIVE_INTERVAL_HOURS` 周期执行两类归档，并用归档目录下的 `.archive-scheduler.lock` 避免多 worker 重复运行。归档失败只记录日志，不中断后端启动或请求处理。
+如果不希望额外配置 cron，可以通过 `ARCHIVE_SCHEDULER_ENABLED=true` 启用后端内置归档调度。调度器在 `lifespan` 启动阶段挂载，支持三种模式：设置 `ARCHIVE_RUN_AT_TIME` 时按服务器本地系统时间每天执行；同时设置 `ARCHIVE_RUN_WEEKDAY` 时每周指定星期执行；未设置固定时间时按 `ARCHIVE_STARTUP_DELAY_SECONDS` 和 `ARCHIVE_INTERVAL_HOURS` 周期执行。归档目录下的 `.archive-scheduler.lock` 用于避免多 worker 重复运行。归档失败只记录日志，不中断后端启动或请求处理。
 
 ## SSE 与中间件
 

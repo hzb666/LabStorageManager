@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -53,6 +54,16 @@ class WechatKfClient:
         body: dict[str, Any] = {"open_kfid": open_kfid, "scene": scene}
         return await self._post("/cgi-bin/kf/add_contact_way", body)
 
+    async def add_account(self, *, name: str, media_id: str = "") -> dict[str, Any]:
+        body: dict[str, Any] = {"name": name}
+        if media_id:
+            body["media_id"] = media_id
+        return await self._post("/cgi-bin/kf/account/add", body)
+
+    async def upload_image(self, image_path: Path) -> dict[str, Any]:
+        access_token = await self._get_access_token()
+        return await asyncio.to_thread(self._upload_image_sync, image_path, access_token)
+
     async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         access_token = await self._get_access_token()
         return await asyncio.to_thread(self._post_sync, path, access_token, body)
@@ -82,6 +93,16 @@ class WechatKfClient:
         )
         return _checked_response(response)
 
+    def _upload_image_sync(self, image_path: Path, access_token: str) -> dict[str, Any]:
+        with image_path.open("rb") as file_obj:
+            response = requests.post(
+                self._url("/cgi-bin/media/upload"),
+                params={"access_token": access_token, "type": "image"},
+                files={"media": (image_path.name, file_obj, _image_content_type(image_path))},
+                timeout=self.timeout_seconds,
+            )
+        return _checked_response(response)
+
     def _url(self, path: str) -> str:
         return self.api_base_url.rstrip("/") + path
 
@@ -95,7 +116,8 @@ def _checked_response(response: requests.Response) -> dict[str, Any]:
         raise WechatKfApiError("WeChat KF API returned invalid response")
     errcode = data.get("errcode")
     if errcode not in (None, 0):
-        raise WechatKfApiError(f"WeChat KF API failed errcode={errcode}")
+        errmsg = data.get("errmsg")
+        raise WechatKfApiError(f"WeChat KF API failed errcode={errcode} errmsg={errmsg}")
     return data
 
 
@@ -104,3 +126,12 @@ def _required_text(data: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise WechatKfApiError(f"WeChat KF API response missing {key}")
     return value
+
+
+def _image_content_type(image_path: Path) -> str:
+    suffix = image_path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".webp":
+        return "image/webp"
+    return "image/png"

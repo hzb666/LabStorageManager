@@ -4,7 +4,8 @@
 
 ## 权限与资源
 
-- 插件 manifest（<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json" />）声明了 `tabs`、`storage`、`scripting`、`webRequest` 权限，以及对试剂平台与本地系统地址的 `host_permissions`。
+- 插件 manifest 由 `browser-extension/build-config.mjs` 根据 `browser-extension/.env` 生成，声明 `tabs`、`storage`、`scripting`、`webRequest` 权限，以及对试剂平台与系统地址的 `host_permissions`。
+- `browser-extension/manifest.json` 和 `browser-extension/shared/generated-config.js` 是构建期产物，不提交到 Git。
 - 扩展侧批次缓存写入 `chrome.storage.local.import_batch_latest`；页面侧桥接缓存写入 `localStorage.cart_import_batch_latest`。
 - 批次数据统一使用 2 小时 TTL。扩展 popup 在保存批次前会清理旧批次；`import-bridge.js` 会在页面加载时清理页面侧过期缓存。
 - 后台 `service-worker` 负责解析目标购物车标签页、记录最近活跃购物车页面、协调 popup 与 content script 的通信，不负责最终导入。
@@ -76,7 +77,8 @@
 - [browser-extension/background/service-worker.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/background/service-worker.js)
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)
 - [browser-extension/content/script.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js)
-- [browser-extension/manifest.json](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json)
+- [browser-extension/build-config.mjs](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/build-config.mjs)
+- [browser-extension/shared/site-config.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/shared/site-config.js)
 - [browser-extension/popup/popup.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/popup/popup.js)
 - [frontend/src/api/client.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts)
 - [frontend/src/pages/CartImport.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx)

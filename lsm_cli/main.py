@@ -39,6 +39,7 @@ INVENTORY_LIST_PARAM_KEYS = frozenset(
         "sort_order",
     }
 )
+INVENTORY_NAME_SEARCH_PARAM_KEYS = INVENTORY_LIST_PARAM_KEYS | {"match_mode"}
 ORDER_LIST_PARAM_KEYS = frozenset(
     {
         "skip",
@@ -51,6 +52,7 @@ ORDER_LIST_PARAM_KEYS = frozenset(
         "sort_order",
     }
 )
+ORDER_NAME_SEARCH_PARAM_KEYS = ORDER_LIST_PARAM_KEYS | {"match_mode"}
 COMMON_SHELF_LIST_PARAM_KEYS = frozenset(
     {
         "skip",
@@ -165,6 +167,14 @@ def _add_pagination_arguments(parser: argparse.ArgumentParser) -> None:
         "--summary",
         action="store_true",
         help="Only fetch and print total/skip/limit summary without row details",
+    )
+
+
+def _add_exact_search_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--exact",
+        action="store_true",
+        help="Use exact text matching for this name search",
     )
 
 
@@ -693,8 +703,11 @@ def _handle_field_search(
     if not search_value:
         raise CLILocalInputError(f"{command_label} requires a non-empty search value")
     args.param = [f"search={search_value}", f"search_field={search_field}"]
-    if match_mode and "match_mode" in allowed_params:
-        args.param.append(f"match_mode={match_mode}")
+    resolved_match_mode = match_mode
+    if resolved_match_mode is None and getattr(args, "exact", False):
+        resolved_match_mode = "exact"
+    if resolved_match_mode and "match_mode" in allowed_params:
+        args.param.append(f"match_mode={resolved_match_mode}")
     args.allowed_params = allowed_params
     args.list_command_label = command_label
     _handle_list_command(args, path)
@@ -814,13 +827,14 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
     _add_connection_arguments(name_cmd)
     name_cmd.add_argument("keyword")
     _add_pagination_arguments(name_cmd)
+    _add_exact_search_argument(name_cmd)
     name_cmd.set_defaults(
         handler=lambda args: _handle_field_search(
             args,
             path="/inventory/",
             search_attr="keyword",
             search_field="name",
-            allowed_params=INVENTORY_LIST_PARAM_KEYS,
+            allowed_params=INVENTORY_NAME_SEARCH_PARAM_KEYS,
             command_label="inventory name",
         )
     )
@@ -936,13 +950,14 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
     _add_connection_arguments(name_cmd)
     name_cmd.add_argument("keyword")
     _add_pagination_arguments(name_cmd)
+    _add_exact_search_argument(name_cmd)
     name_cmd.set_defaults(
         handler=lambda args: _handle_field_search(
             args,
             path="/reagent-orders/",
             search_attr="keyword",
             search_field="name",
-            allowed_params=ORDER_LIST_PARAM_KEYS,
+            allowed_params=ORDER_NAME_SEARCH_PARAM_KEYS,
             command_label="reagent-orders name",
         )
     )
@@ -1209,13 +1224,14 @@ def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[a
     _add_connection_arguments(name_cmd)
     name_cmd.add_argument("keyword")
     _add_pagination_arguments(name_cmd)
+    _add_exact_search_argument(name_cmd)
     name_cmd.set_defaults(
         handler=lambda args: _handle_field_search(
             args,
             path="/consumable-orders/",
             search_attr="keyword",
             search_field="name",
-            allowed_params=ORDER_LIST_PARAM_KEYS,
+            allowed_params=ORDER_NAME_SEARCH_PARAM_KEYS,
             command_label="consumable-orders name",
         )
     )

@@ -8,6 +8,7 @@
 - 用 React + Vite 提供高密度业务界面。
 - 用 Redis 增强会话、限流和 SSE，同时允许降级。
 - 用浏览器扩展对接外部采购平台。
+- 用 CLI、MCP 和企业微信入口提供受控自动化访问。
 
 ## 后端
 
@@ -100,6 +101,19 @@
 - 关键桥接路径：`/cart-import`、`reagentOrderAPI.create`、`consumableOrderAPI.create`
 - 匹配分析接口：`/api/cart-sync`
 
+### CLI 与 MCP
+
+- 用途：为脚本、企业微信智能机器人和微信客服提供受控命令面。
+- CLI 落点：`lsm_cli/`
+- MCP 落点：`lsm_mcp/`
+- 边界：MCP 通过 CLI 子进程调用后端 API，不直接访问数据库。
+
+### 企业微信入口
+
+- 用途：通过企业微信智能机器人和微信客服处理库存、订单、常用货架、借用和归还。
+- 落点：`robot/`
+- 边界：写操作需要先确认，实际执行仍通过 MCP、CLI 和后端 API。
+
 ## 文档与部署
 
 ### VitePress
@@ -125,6 +139,9 @@ flowchart LR
     H["Browser Extension"] --> I["/cart-import"]
     I --> A
     A --> C
+    J["WeCom / WeChat KF"] --> K["lsm_mcp"]
+    K --> L["lsm_cli"]
+    L --> C
 ```
 
 ## 开发时最常接触的工具链
@@ -135,6 +152,7 @@ flowchart LR
 | 前端 lint | `cd frontend && npm run lint` |
 | wiki 本地开发 | `cd wiki && npm run dev` |
 | wiki 构建 | `cd wiki && npm run build` |
+| 扩展配置生成 | `npm run build:extension` |
 | 后端启动 | `python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` |
 | 前端启动 | `cd frontend && npm run dev` |
 
@@ -150,8 +168,11 @@ flowchart LR
 - [app/core/auth.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
-- [browser-extension/manifest.json](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json)
+- [browser-extension/build-config.mjs](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/build-config.mjs)
 - [docker-compose.yml](https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml)
 - [frontend/src/App.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx)
 - [frontend/src/lib/validationSchemas.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/validationSchemas.ts)
 - [frontend/src/store/useStore.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/useStore.ts)
+- [lsm_cli](https://github.com/hzb666/LabStorageManager/tree/main/lsm_cli)
+- [lsm_mcp](https://github.com/hzb666/LabStorageManager/tree/main/lsm_mcp)
+- [robot](https://github.com/hzb666/LabStorageManager/tree/main/robot)

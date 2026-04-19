@@ -102,6 +102,7 @@ flowchart TD
 | `chemical_info.py` | CAS 对应化学信息获取与翻译 |
 | `error_logger.py` | 错误记录能力 |
 | `api_utils.py` | API 层缓存清理和通用辅助 |
+| `archive_scheduler.py` | 后端内置日志归档调度，支持固定时间、每周和周期模式 |
 
 ## 实时能力
 

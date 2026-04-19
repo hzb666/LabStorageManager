@@ -58,14 +58,16 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
   名称、分类、品牌、位置等字段会预计算拼音，并结合 SQLite FTS5 提供搜索能力。
 - 库存借还闭环
   支持借出、归还、借用历史、当前借用人、临时保管人等字段。
-- 公共货架与常用试剂
-  支持公共库存场景，便于管理共享样品或常备试剂。
+- 常用货架与常用试剂
+  支持常用货架分组、CAS 主数据、位置统计、加瓶和扣减。
 - 用户、设备、会话治理
   支持 HttpOnly Cookie 登录、设备列表、批量注销、IP/设备数量限制。
 - 公告与图片上传
   公告支持图片，图片文件落地到 `static/`，并受尺寸、类型、上传频率控制。
 - CLI 与脚本入口
   提供 `python -m lsm_cli` 命令行入口，适合脚本任务和无 UI 场景操作。
+- MCP 与企业微信入口
+  提供受控 MCP 工具面，支持企业微信智能机器人和微信客服查询链路。
 - 部署简单
   内置 Docker Compose，可快速拉起 `frontend + backend + redis`。
 
@@ -78,6 +80,7 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
 | UI | Radix UI, Tailwind CSS 4, Lucide React, Framer Motion |
 | 表格与数据 | TanStack Table 8, TanStack Virtual, Axios |
 | 化学相关 | RDKit（前端分子结构渲染） |
+| 自动化入口 | `lsm_cli`, `lsm_mcp`, 企业微信智能机器人, 微信客服 |
 | 构建与校验 | Poetry, npm, ruff, ESLint, TypeScript build |
 | 部署 | Docker Compose, Nginx, Uvicorn |
 
@@ -205,14 +208,26 @@ npm run dev
 | `REDIS_HOST` | `127.0.0.1` | Redis 主机 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
 | `REDIS_DB` | `1` | Redis 逻辑库 |
+| `REDIS_PASSWORD` | 空 | Redis 仅监听本机时可留空；对外监听时必须设置 |
 | `REDIS_KEY_PREFIX` | `lsm` | Redis key 前缀 |
+
+### 日志归档
+
+| 变量 | 示例值 | 说明 |
+| --- | --- | --- |
+| `ARCHIVE_SCHEDULER_ENABLED` | `true` | 启用后端内置日志归档调度 |
+| `ARCHIVE_RUN_AT_TIME` | `03:30` | 按服务器本地系统时间执行归档 |
+| `ARCHIVE_RUN_WEEKDAY` | `sun` | 设置后每周指定星期执行；留空则每天执行 |
+| `ARCHIVE_INTERVAL_HOURS` | `168` | 未设置固定时间时使用的周期小时数 |
+| `ARCHIVE_STARTUP_DELAY_SECONDS` | `300` | 未设置固定时间时首次运行前的延迟 |
+| `ARCHIVE_OUTPUT_DIR` | `logs` | 归档库输出目录 |
 
 ### 上传与图片
 
 | 变量 | 示例值 | 说明 |
 | --- | --- | --- |
 | `MAX_FILE_SIZE_MB` | `10` | 单文件体积限制 |
-| `MAX_UPLOAD_REQUEST_SIZE_MB` | `5` | 单次请求总上传限制 |
+| `MAX_UPLOAD_REQUEST_SIZE_MB` | `12` | 单次请求总上传限制；生产 Nginx 需保持一致 |
 | `ALLOWED_IMAGE_TYPES` | `["image/jpeg", "image/png", "image/webp"]` | JSON 数组字符串 |
 | `MAX_IMAGE_WIDTH` | `800` | 最大宽度 |
 | `MAX_IMAGE_HEIGHT` | `800` | 最大高度 |
@@ -297,6 +312,10 @@ Compose 默认把主库写入 `/data/lab_inventory.db`，搜索日志库写入 `
   支持列表、创建、更新、到货确认、一键入库等试剂订单流程
 - `consumable-orders`
   支持列表、创建、更新、完成等耗材订单流程
+- `common-shelf`
+  支持常用货架列表、CAS/别名查询、位置统计、加瓶和扣减
+- `chemical-name-map`
+  支持 CAS 主数据列表、关键词查询和 CAS 精确查询
 
 限制说明：
 
@@ -354,6 +373,11 @@ FastAPI
         |
         v
 SQLite (WAL) + Redis + static/
+
+WeCom / WeChat KF
+        |
+        v
+lsm_mcp -> python -m lsm_cli -> FastAPI API
 ```
 
 ### 后端特点
@@ -451,6 +475,8 @@ CAS 号等关键字段会在服务端清洗，避免由于大小写、空格、�
 ├── browser-extension/    # 浏览器扩展，用于购物车导入等场景
 ├── docker/               # Dockerfile、Nginx、入口脚本
 ├── lsm_cli/              # 本地命令行客户端
+├── lsm_mcp/              # 受控 MCP 工具服务
+├── robot/                # 企业微信智能机器人与微信客服入口
 ├── static/               # 图片与静态文件
 ├── wiki/                 # VitePress 知识库源码
 ├── docker-compose.yml    # 一体化部署编排
@@ -521,8 +547,9 @@ cp .env.example .env
 
 - `DEFAULT_ADMIN_PASSWORD`
 - `CORS_ORIGINS`
-- `REDIS_PASSWORD`
 - `ENV`
+
+如果 Redis 仅监听 `127.0.0.1` 或 Compose 内网，可让 `REDIS_PASSWORD` 为空；Redis 对外监听或跨机器访问时必须设置强密码。
 
 如果保持默认 `ALGORITHM=RS256`，首次启动前需要在 Compose 的持久化卷里生成密钥：
 
@@ -556,7 +583,7 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 - 后端镜像基于 `python:3.11-slim`，使用 `uvicorn` 启动。
 - Compose 会把 Redis 地址注入为容器内部服务名 `redis`。
 
-### 方案二：本地前后端分开跑
+### 方案二：本地前后端分开
 
 适合开发调试。
 
@@ -565,11 +592,47 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 3. 启动前端 `vite`
 4. 前端通过 `CORS_ORIGINS` 与 API 基地址访问后端
 
+### 方案三：生产静态前端 + pip 后端
+
+适合服务器上由 Nginx 托管前端静态文件、后端由进程管理器启动的部署方式。
+
+前端构建：
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+将 `frontend/dist` 放到 Nginx 站点根目录。浏览器扩展需要单独设置 `browser-extension/.env` 后执行 `npm run build:extension`。
+
+后端安装与启动：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install --only-binary=:all: -r requirements.txt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+根目录不要执行 `pip install .`；当前仓库根 `pyproject.toml` 使用非包模式，生产依赖应通过本地已导出的 `requirements.txt` 安装。
+
 ## 附属模块
 
 ### 浏览器扩展
 
 仓库包含 `browser-extension/`，用于浏览器侧导入或购物车同步相关场景。后端提供了 `/cart-import` 路由，会将入口跳转到前端页面。
+
+`browser-extension/manifest.json` 和 `browser-extension/shared/generated-config.js` 是构建期文件，不提交到 Git。生产部署扩展前，先设置 `browser-extension/.env` 中的系统域名，再运行：
+
+```bash
+npm run build:extension
+```
+
+### MCP 与机器人
+
+`lsm_mcp/` 通过 `python -m lsm_cli` 暴露受控 MCP 工具，不直接访问数据库。企业微信智能机器人和微信客服入口位于 `robot/`，查询和借还流程都通过 MCP、CLI 与后端 API 完成。
 
 ### 公告图片与静态资源
 
@@ -618,7 +681,7 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 
 处理：
 
-- 确认 `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD`
+- 确认 `REDIS_HOST`、`REDIS_PORT`；Redis 对外监听时再确认 `REDIS_PASSWORD`
 - 检查容器或本地 Redis 是否已启动
 
 ### 图片上传失败
@@ -646,6 +709,7 @@ CLI 面向脚本化操作提供稳定命令面。脚本化操作应通过 `pytho
 - 需要通过 CLI 登录、查询库存、查看借用状态
 - 需要通过 CLI 创建或更新试剂订单、确认到货、一键入库
 - 需要通过 CLI 创建、更新或完成耗材订单
+- 需要通过 CLI 查询常用货架或 CAS 主数据
 - 需要避免 raw HTTP、数据库直连、直接导入后端模块
 
 ### 硬限制

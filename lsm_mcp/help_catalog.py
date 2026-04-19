@@ -23,11 +23,14 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "inventory_search_by_name",
-        "cli": "inventory name <keyword>",
-        "robot": "查询库存名称、别名、英文名或位置",
+        "cli": "inventory name <keyword> [--exact]",
+        "robot": "查询库存名称",
         "requires_binding": True,
         "write": False,
-        "description": "按名称搜索库存；库存为空时机器人可追加 CAS 主数据和常用货架查询。",
+        "description": (
+            "按名称搜索库存；默认包含搜索，exact=true 时名称精确匹配；"
+            "库存为空时机器人可追加 CAS 主数据和常用货架查询。"
+        ),
     },
     {
         "name": "inventory_get_by_cas",
@@ -56,10 +59,18 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
     {
         "name": "inventory_my_borrows",
         "cli": "inventory my-borrows",
-        "robot": "查询本人借用中库存",
+        "robot": "查询我的借用",
         "requires_binding": True,
         "write": False,
         "description": "只返回绑定用户自己的借用记录。",
+    },
+    {
+        "name": "inventory_pending_stockin",
+        "cli": "inventory pending-stockin",
+        "robot": "查询我的暂存/待补全入库",
+        "requires_binding": True,
+        "write": False,
+        "description": "只返回绑定用户自己的待补全入库项。",
     },
     {
         "name": "inventory_borrow",
@@ -79,11 +90,11 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "reagent_orders_search_by_name",
-        "cli": "reagent-orders name <keyword>",
+        "cli": "reagent-orders name <keyword> [--exact]",
         "robot": "查询试剂订单",
         "requires_binding": True,
         "write": False,
-        "description": "按名称搜索试剂订单。",
+        "description": "按名称搜索试剂订单；默认包含搜索，exact=true 时名称精确匹配。",
     },
     {
         "name": "reagent_orders_search_by_cas",
@@ -102,12 +113,44 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
         "description": "查看指定 CAS 的订购与库存概览。",
     },
     {
+        "name": "reagent_orders_get_by_id",
+        "cli": "reagent-orders get <order_id>",
+        "robot": "候选详情查询",
+        "requires_binding": True,
+        "write": False,
+        "description": "查看单条试剂订单；用户通常不需要知道内部 ID。",
+    },
+    {
+        "name": "reagent_orders_my",
+        "cli": "reagent-orders my",
+        "robot": "查询我的试剂订单",
+        "requires_binding": True,
+        "write": False,
+        "description": "只返回绑定用户自己的试剂订单。",
+    },
+    {
         "name": "consumable_orders_search_by_name",
-        "cli": "consumable-orders name <keyword>",
+        "cli": "consumable-orders name <keyword> [--exact]",
         "robot": "查询耗材订单",
         "requires_binding": True,
         "write": False,
-        "description": "按名称搜索耗材订单。",
+        "description": "按名称搜索耗材订单；默认包含搜索，exact=true 时名称精确匹配。",
+    },
+    {
+        "name": "consumable_orders_get_by_id",
+        "cli": "consumable-orders get <order_id>",
+        "robot": "候选详情查询",
+        "requires_binding": True,
+        "write": False,
+        "description": "查看单条耗材订单；用户通常不需要知道内部 ID。",
+    },
+    {
+        "name": "consumable_orders_my",
+        "cli": "consumable-orders my",
+        "robot": "查询我的耗材订单",
+        "requires_binding": True,
+        "write": False,
+        "description": "只返回绑定用户自己的耗材订单。",
     },
     {
         "name": "common_shelf_search_by_alias",
@@ -124,6 +167,14 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
         "requires_binding": True,
         "write": False,
         "description": "按 CAS 查询常用货架分组。",
+    },
+    {
+        "name": "common_shelf_locations",
+        "cli": "common-shelf locations <group_key>",
+        "robot": "常用货架位置详情",
+        "requires_binding": True,
+        "write": False,
+        "description": "查看常用货架分组的位置统计；group_key 不面向用户展示。",
     },
     {
         "name": "chemical_name_map_search",
@@ -153,6 +204,10 @@ def build_help_result(topic: str = "") -> dict[str, Any]:
         "count": len(tools),
         "notes": [
             "所有业务查询、借用和归还都需要绑定用户 token。",
+            "库存、试剂订单和耗材订单名称查询默认包含搜索；明确要求精确时使用 exact=true。",
+            "库存为空时先查 CAS 主数据；是否补查常用货架由主数据分类和 LLM 常用性判断决定。",
+            "名称或别名无匹配时，可用通用知识或网络搜索解析 CAS；网络搜索不能用于其他目的。",
+            "我的借用、我的试剂订单、我的耗材订单、我的暂存都只返回绑定用户自己的记录。",
             "借用和归还是写操作，机器人必须先展示候选并等待用户确认。",
             "内部编码不面向企业微信用户展示。",
         ],

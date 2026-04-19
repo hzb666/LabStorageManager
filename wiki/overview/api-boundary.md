@@ -4,10 +4,13 @@
 
 ## 调用方
 
-当前调用后端的主体有三类：
+当前调用后端的主体有五类：
 
 - React 前端，通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" /> 访问后端。
 - 浏览器扩展，通过桥接脚本把外部购物车批次送到导入页，再由前端调用后端。
+- CLI，通过 `python -m lsm_cli` 访问后端 API。
+- MCP，通过 `lsm_mcp` 调用 CLI 子进程，不直接访问数据库。
+- 企业微信智能机器人和微信客服，通过 MCP、CLI 与后端 API 完成查询和确认后的写操作。
 - 调试脚本或运维工具，通过 Bearer Token 或开发环境文档页访问 FastAPI。
 
 从系统边界上看，业务后端只有一个，即 FastAPI。
@@ -54,6 +57,12 @@
 
 因此扩展更像外部采集器，不是系统自己的第二前端。
 
+## CLI、MCP 与机器人边界
+
+`lsm_cli/` 是脚本化入口，只暴露明确列入 README 的命令。`lsm_mcp/` 在 HTTP 层提供 MCP 工具，但工具实现仍调用 CLI 子进程，并继承 CLI 的命令白名单和退出码契约。
+
+企业微信智能机器人和微信客服入口位于 `robot/`。它们不直接访问数据库，也不生成任意命令；查询和写操作都要经过 MCP、CLI 和后端 API。借用和归还等写操作必须在候选明确后等待用户确认。
+
 ## 代理与部署边界
 
 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" /> 把前后端统一到一个入口：
@@ -70,6 +79,7 @@
 - 这是对象 CRUD，还是工作流动作。
 - 是否补齐 `get_current_user` 或 `require_admin`。
 - 是否要触发 SSE 广播与缓存失效。
+- CLI 或 MCP 是否需要同步暴露该能力。
 - 是否涉及上传体积保护、CSRF、CORS 或代理头。
 - 是否需要同步更新 [API 参考](/backend/api-reference)。
 
@@ -89,3 +99,6 @@
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)
 - [docker/nginx/default.conf](https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf)
 - [frontend/src/api/client.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts)
+- [lsm_cli](https://github.com/hzb666/LabStorageManager/tree/main/lsm_cli)
+- [lsm_mcp](https://github.com/hzb666/LabStorageManager/tree/main/lsm_mcp)
+- [robot](https://github.com/hzb666/LabStorageManager/tree/main/robot)

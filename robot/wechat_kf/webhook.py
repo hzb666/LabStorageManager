@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 import json
 import logging
 import xml.etree.ElementTree as ET
@@ -10,13 +9,15 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Any
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from robot.wechat_kf.binding import WechatKfBindStore
+from robot.wechat_kf.bind_pages import bind_form_html, bind_success_html
 from robot.wechat_kf.client import WechatKfClient
 from robot.wechat_kf.config import get_settings
 from robot.wechat_kf.processor import WechatKfMessageProcessor
+from robot.wechat_kf.rate_limit import WechatKfRateLimiter
 from robot.wecom_aibot.config import get_settings as get_aibot_settings
 from robot.wecom_aibot.conversation_store import WecomConversationStore
 from robot.wecom_aibot.crypto import WecomAesCipher, WecomCryptoError, verify_signature
@@ -46,6 +47,16 @@ def get_processed_store() -> ProcessedMessageStore:
 def get_bind_store() -> WechatKfBindStore:
     settings = get_settings()
     return WechatKfBindStore(settings.state_db, settings.bind_token_ttl_minutes * 60)
+
+
+@lru_cache
+def get_rate_limiter() -> WechatKfRateLimiter:
+    settings = get_settings()
+    return WechatKfRateLimiter(
+        settings.state_db,
+        max_messages=settings.rate_limit_max_messages,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
 
 
 @lru_cache
@@ -91,6 +102,7 @@ def get_processor() -> WechatKfMessageProcessor:
         conversation_store=get_conversation_store(),
         processed_store=get_processed_store(),
         bind_store=get_bind_store(),
+        rate_limiter=get_rate_limiter(),
     )
 
 
@@ -101,6 +113,7 @@ async def lifespan(_: FastAPI):
     get_processed_store().init()
     get_conversation_store().init()
     get_bind_store().init()
+    get_rate_limiter().init()
     yield
 
 
@@ -124,6 +137,7 @@ async def verify_callback_url(
 @app.post("/wechat/kf/callback", response_class=PlainTextResponse)
 async def receive_callback(
     request: Request,
+    background_tasks: BackgroundTasks,
     msg_signature: str = Query(...),
     timestamp: str = Query(...),
     nonce: str = Query(...),
@@ -139,7 +153,7 @@ async def receive_callback(
         logger.warning("wechat_kf_callback_parse_failed type=%s", type(exc).__name__)
         raise HTTPException(status_code=400, detail="Invalid WeChat KF callback payload") from exc
     if _event_name(event) == "kf_msg_or_event":
-        await get_processor().process_event(event, _request_base_url(request))
+        background_tasks.add_task(_process_callback_event, event, _request_base_url(request))
     return "success"
 
 
@@ -148,7 +162,7 @@ async def bind_form(state: str) -> str:
     token = get_bind_store().get_active(state)
     if token is None:
         raise HTTPException(status_code=404, detail="Binding link expired")
-    return _bind_form_html(state, "")
+    return bind_form_html(state, "")
 
 
 @app.post("/wechat/kf/bind/{state}", response_class=HTMLResponse)
@@ -166,10 +180,10 @@ async def submit_bind_form(
         {"username": clean_username, "password": password},
     )
     if not result_ok(result):
-        return _bind_form_html(state, "绑定失败，请检查用户名或密码。")
+        return bind_form_html(state, "绑定失败，请检查用户名或密码。")
     data = payload_data(result)
     if not isinstance(data, dict) or not isinstance(data.get("access_token"), str):
-        return _bind_form_html(state, "绑定失败，请稍后再试。")
+        return bind_form_html(state, "绑定失败，请稍后再试。")
     user = data.get("user") if isinstance(data.get("user"), dict) else {}
     get_conversation_store().save_binding(
         wecom_userid=token.actor_id,
@@ -178,7 +192,7 @@ async def submit_bind_form(
         user=user,
     )
     get_bind_store().mark_used(state)
-    return _bind_success_html(user, clean_username)
+    return bind_success_html(user, clean_username)
 
 
 async def _read_limited_body(request: Request) -> bytes:
@@ -193,6 +207,15 @@ def _decrypt_callback(encrypted: str, signature: str, timestamp: str, nonce: str
     verify_signature(settings.token, signature, timestamp, nonce, encrypted)
     plaintext = get_cipher().decrypt_plaintext(encrypted)
     return _parse_plaintext(plaintext)
+
+
+async def _process_callback_event(event: dict[str, Any], base_url: str) -> None:
+    try:
+        sent_count = await get_processor().process_event(event, base_url)
+    except Exception:
+        logger.exception("wechat_kf_process_event_failed")
+        return
+    logger.info("wechat_kf_callback_processed sent_count=%d", sent_count)
 
 
 def _extract_encrypted_body(body: bytes) -> str:
@@ -252,47 +275,3 @@ def _event_name(event: dict[str, Any]) -> str:
 
 def _request_base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
-
-
-def _bind_form_html(state: str, error: str) -> str:
-    error_html = f"<p class=\"error\">{html.escape(error)}</p>" if error else ""
-    safe_state = html.escape(state, quote=True)
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>绑定 LabStorageManager</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }}
-    label {{ display: block; margin: 16px 0 6px; }}
-    input {{ box-sizing: border-box; width: 100%; padding: 10px; }}
-    button {{ margin-top: 18px; width: 100%; padding: 10px; }}
-    .error {{ color: #b00020; }}
-  </style>
-</head>
-<body>
-  <h1>绑定账号</h1>
-  <p>请输入 LabStorageManager 账号。密码只提交给本系统，不会发送到微信客服聊天中。</p>
-  {error_html}
-  <form method="post" action="/wechat/kf/bind/{safe_state}">
-    <label for="username">用户名</label>
-    <input id="username" name="username" autocomplete="username" required>
-    <label for="password">密码</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit">绑定</button>
-  </form>
-</body>
-</html>"""
-
-
-def _bind_success_html(user: dict[str, Any], username: str) -> str:
-    display = html.escape(str(user.get("full_name") or user.get("username") or username))
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-<body>
-  <h1>绑定成功</h1>
-  <p>当前已绑定：{display}。请回到微信客服继续查询、借用或归还。</p>
-</body>
-</html>"""

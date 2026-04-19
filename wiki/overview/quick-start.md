@@ -19,11 +19,12 @@ cp .env.example .env
 - `DEFAULT_ADMIN_PASSWORD`
 - `ENV`
 - `CORS_ORIGINS`
-- `REDIS_PASSWORD`
 - `REDIS_HOST`
 - `ALGORITHM`
 - `PRIVATE_KEY_PATH`
 - `PUBLIC_KEY_PATH`
+
+Redis 仅监听本机或 Compose 内网时，`REDIS_PASSWORD` 可以留空。
 
 ## 启动后端
 
@@ -45,6 +46,7 @@ npm run dev
 - 开发模式默认监听 5173。
 - 前端 API 基址通常由 `VITE_API_URL` 指向 `http://localhost:8000/api`。
 - 生产构建使用 `npm run build`。
+- 浏览器扩展构建使用 `npm run build:extension`，该命令会根据 `browser-extension/.env` 生成 `manifest.json` 和 `shared/generated-config.js`。
 
 ## Docker Compose 运行整套服务
 
@@ -70,7 +72,7 @@ APP_PORT=80 docker compose up -d --build
 3. 登录后检查 `/api/users/me`。
 4. 打开 `/docs` 和 `/redoc`，确认文档入口可用。
 5. 检查 `/cart-import?import=true` 是否能被扩展桥接。
-6. `redis-cli -a <REDIS_PASSWORD> ping`
+6. Redis 无密码时执行 `redis-cli ping`；有密码时执行 `redis-cli -a <REDIS_PASSWORD> ping`
 
 ## 常见排障命令
 
@@ -78,7 +80,7 @@ APP_PORT=80 docker compose up -d --build
 docker compose ps
 docker compose logs --tail 200 backend
 docker compose logs --tail 200 frontend
-docker compose exec redis redis-cli -a "$REDIS_PASSWORD" ping
+docker compose exec redis redis-cli ping
 curl -i http://localhost:8000/health
 ```
 
@@ -98,6 +100,6 @@ npm run dev
 - [.env.example](https://github.com/hzb666/LabStorageManager/blob/main/.env.example)
 - [app/core/config.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/config.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
-- [browser-extension/manifest.json](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json)
+- [browser-extension/build-config.mjs](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/build-config.mjs)
 - [docker-compose.yml](https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml)
 - [frontend/src/App.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx)

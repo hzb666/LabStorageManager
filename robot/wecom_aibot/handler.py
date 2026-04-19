@@ -37,8 +37,13 @@ class WecomAibotHandler:
             return text_reply("消息格式不完整，请发送文字查询。")
 
         cached = self.store.get_response(message.msgid)
-        if cached is not None:
+        if _is_complete_reply(cached):
             return cached
+        if message.msgid and not self.store.claim_response(message.msgid):
+            cached = self.store.get_response(message.msgid)
+            if _is_complete_reply(cached):
+                return cached
+            return text_reply("正在处理，请稍后。")
 
         try:
             answer = await self.orchestrator.answer(text=message.content, payload=payload)
@@ -49,3 +54,9 @@ class WecomAibotHandler:
 
         self.store.save_response(message.msgid, response)
         return response
+
+
+def _is_complete_reply(response: dict[str, Any] | None) -> bool:
+    if response is None:
+        return False
+    return response.get("status") != "processing"

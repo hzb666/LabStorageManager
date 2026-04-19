@@ -1,10 +1,29 @@
-"""Format MCP/CLI results as short Chinese replies for WeCom users."""
+"""Format MCP/CLI results as safe short Chinese replies for WeCom users."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 MAX_ITEMS = 5
+COLLECTION_KEYS = (
+    "items",
+    "records",
+    "results",
+    "organic",
+    "data",
+    "orders",
+    "inventories",
+    "groups",
+    "tools",
+)
+STATUS_LABELS = {
+    "not_in_stock": "未入库",
+    "in_stock": "在库",
+    "run_short": "低库存",
+    "borrowed": "已借用",
+    "consumed": "已耗尽",
+}
 ERROR_MESSAGES = {
     2: "认证失败或登录已过期，请私聊机器人重新绑定账号。",
     3: "当前账号没有权限执行这个查询。",
@@ -14,28 +33,191 @@ ERROR_MESSAGES = {
     8: "参数不完整或格式不正确。",
     9: "后端服务暂时不可达，请稍后再试。",
 }
+SAFE_FIELD_LABELS = {
+    "name": "名称",
+    "name_snapshot": "名称",
+    "latest_name_snapshot": "最近名称",
+    "chemical_name": "名称",
+    "title": "标题",
+    "english_name": "英文名",
+    "map_english_name": "英文名",
+    "cas_number": "CAS",
+    "alias": "别名",
+    "alias_1": "别名1",
+    "alias_2": "别名2",
+    "alias_3": "别名3",
+    "category": "分类",
+    "map_category": "分类",
+    "product_number": "货号",
+    "brand": "品牌",
+    "purity": "纯度",
+    "specification": "规格",
+    "specification_text": "规格",
+    "initial_quantity": "初始量",
+    "remaining_quantity": "剩余量",
+    "remaining_percent": "剩余比例",
+    "total_remaining": "总剩余量",
+    "quantity": "数量",
+    "bottle_count": "瓶数",
+    "count": "数量",
+    "unit": "单位",
+    "storage_location": "位置",
+    "location": "位置",
+    "location_count": "位置数",
+    "status": "状态",
+    "borrower_name": "借用人",
+    "temporary_keeper_name": "暂存人",
+    "last_borrower_name": "最近借用人",
+    "created_by_name": "创建人",
+    "requester_name": "申请人",
+    "applicant_name": "申请人",
+    "price": "价格",
+    "order_reason": "申购原因",
+    "communication": "沟通记录",
+    "notes": "备注",
+    "description": "说明",
+    "snippet": "摘要",
+    "date": "日期",
+    "created_at": "创建时间",
+    "updated_at": "更新时间",
+    "stockin_time": "入库时间",
+    "borrow_time": "借用时间",
+    "link": "链接",
+    "url": "链接",
+    "cli": "CLI",
+    "robot": "机器人能力",
+    "requires_binding": "需要绑定",
+    "write": "写操作",
+    "is_hazardous": "危险品",
+    "exists_in_inventory": "库存存在",
+}
+SAFE_FIELD_ORDER = tuple(SAFE_FIELD_LABELS.keys())
+QUANTITY_KEYS = {
+    "initial_quantity",
+    "remaining_quantity",
+    "total_remaining",
+    "quantity",
+}
+INTERNAL_EXACT_KEYS = {
+    "id",
+    "inventory_id",
+    "order_id",
+    "user_id",
+    "borrower_id",
+    "temporary_keeper_id",
+    "last_borrower_id",
+    "created_by_id",
+    "applicant_id",
+    "requester_id",
+    "group_key",
+    "msgid",
+    "chatid",
+    "aibotid",
+    "open_kfid",
+    "external_userid",
+    "userid",
+    "corp_id",
+    "bot_id",
+    "request_id",
+    "status_code",
+    "access_token",
+    "refresh_token",
+    "authorization",
+    "cookie",
+    "session",
+    "password",
+    "secret",
+    "credential",
+    "stderr",
+    "stdout",
+    "traceback",
+    "stack",
+    "headers",
+    "config_path",
+    "internal_code",
+    "msg_signature",
+    "nonce",
+    "timestamp",
+    "encoding_aes_key",
+}
+INTERNAL_KEY_PARTS = (
+    "token",
+    "password",
+    "secret",
+    "credential",
+    "session",
+    "authorization",
+    "cookie",
+    "traceback",
+    "stderr",
+    "stdout",
+    "headers",
+    "internal_code",
+    "pinyin",
+    "initials",
+    "normalized",
+    "signature",
+    "encoding_aes",
+    "cipher",
+    "encrypt",
+    "external_userid",
+    "userid",
+    "openid",
+)
+SENSITIVE_VALUE_PATTERN = re.compile(
+    r"(sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]+|eyJ[A-Za-z0-9_-]{20,}\.)",
+    re.IGNORECASE,
+)
 
 
 def format_tool_result(result: dict[str, Any], *, title: str, empty_text: str) -> str:
+    return format_safe_facts(build_safe_facts(result, title=title, empty_text=empty_text))
+
+
+def build_safe_facts(result: dict[str, Any], *, title: str, empty_text: str) -> dict[str, Any]:
+    """Build a safe, user-facing facts payload from a CLI/MCP result."""
     if not _is_success(result):
-        return _format_error(result)
+        return {"text": _format_error(result), "empty": False}
 
     data = _extract_payload_data(result)
     items = _extract_items(data)
     total = _extract_total(data, len(items))
     if items:
-        lines = [f"{title}："]
-        lines.extend(_format_item(item, index) for index, item in enumerate(items[:MAX_ITEMS], 1))
-        if total > len(items[:MAX_ITEMS]):
+        safe_items = [_safe_record(item) for item in items[:MAX_ITEMS]]
+        safe_items = [item for item in safe_items if item]
+        if safe_items:
+            return {"title": title, "items": safe_items, "total": total, "empty_text": empty_text}
+
+    if _is_empty_collection(data, total):
+        return {"text": empty_text, "empty": True}
+
+    if isinstance(data, dict) and data:
+        record = _safe_record(data)
+        if record:
+            return {"title": title, "record": record, "empty_text": empty_text}
+    return {"text": empty_text, "empty": True}
+
+
+def format_safe_facts(facts: dict[str, Any]) -> str:
+    text = facts.get("text")
+    if isinstance(text, str):
+        return text
+
+    title = str(facts.get("title") or "查询结果")
+    lines = [f"{title}："]
+    items = facts.get("items")
+    if isinstance(items, list) and items:
+        lines.extend(_format_item(item, index) for index, item in enumerate(items, 1))
+        total = facts.get("total")
+        if isinstance(total, int) and total > len(items):
             lines.append(f"... 共 {total} 条，已显示前 {MAX_ITEMS} 条。")
         return "\n".join(lines)
 
-    if _is_empty_collection(data, total):
-        return empty_text
-
-    if isinstance(data, dict) and data:
-        return f"{title}：\n" + _format_record(data)
-    return empty_text
+    record = facts.get("record")
+    if isinstance(record, dict) and record:
+        lines.append(_format_record(record))
+        return "\n".join(lines)
+    return str(facts.get("empty_text") or "没有查到匹配记录。")
 
 
 def _is_success(result: dict[str, Any]) -> bool:
@@ -59,17 +241,7 @@ def _extract_items(data: Any) -> list[Any]:
         return data
     if not isinstance(data, dict):
         return []
-    for key in (
-        "items",
-        "records",
-        "results",
-        "organic",
-        "data",
-        "orders",
-        "inventories",
-        "groups",
-        "tools",
-    ):
+    for key in COLLECTION_KEYS:
         value = data.get(key)
         if isinstance(value, list):
             return value
@@ -90,18 +262,7 @@ def _is_empty_collection(data: Any, total: int) -> bool:
         return False
     if data.get("exists_in_inventory") is False:
         return True
-    collection_keys = (
-        "items",
-        "records",
-        "results",
-        "organic",
-        "data",
-        "orders",
-        "inventories",
-        "groups",
-        "tools",
-    )
-    return total == 0 and any(isinstance(data.get(key), list) for key in collection_keys)
+    return total == 0 and any(isinstance(data.get(key), list) for key in COLLECTION_KEYS)
 
 
 def _format_error(result: dict[str, Any]) -> str:
@@ -117,48 +278,91 @@ def _format_error(result: dict[str, Any]) -> str:
 def _format_item(item: Any, index: int) -> str:
     if not isinstance(item, dict):
         return f"{index}. {item}"
-    record = item.get("group") if isinstance(item.get("group"), dict) else item
-    return f"{index}. {_format_record(record)}"
+    return f"{index}. {_format_record(item)}"
 
 
 def _format_record(record: dict[str, Any]) -> str:
-    parts = [
-        _first_text(record, "name", "name_snapshot", "chemical_name", "title") or "未命名",
-        _wrap(_first_text(record, "cas_number"), "CAS "),
-        _wrap(_first_text(record, "product_number"), "货号 "),
-        _format_quantity(record),
-        _wrap(_first_text(record, "storage_location", "location"), "位置 "),
-        _wrap(_first_text(record, "status"), "状态 "),
-        _wrap(_first_text(record, "brand"), "品牌 "),
-        _wrap(_first_text(record, "date"), "日期 "),
-        _wrap(_first_text(record, "link", "url"), "链接 "),
-        _wrap(_first_text(record, "description"), "说明 "),
-        _wrap(_first_text(record, "snippet"), "摘要 "),
-        _wrap(_first_text(record, "cli"), "CLI "),
-    ]
-    return "，".join(part for part in parts if part)
+    parts: list[str] = []
+    for label, value in record.items():
+        if label in {"名称", "标题"}:
+            parts.append(str(value))
+        else:
+            parts.append(f"{label} {value}")
+    return "，".join(parts) if parts else "无可展示信息"
 
 
-def _format_quantity(record: dict[str, Any]) -> str:
-    for key in ("remaining_quantity", "initial_quantity", "quantity", "bottle_count", "count"):
-        value = record.get(key)
-        if value is not None:
-            unit = _first_text(record, "unit")
-            if not unit and key == "bottle_count":
-                unit = "瓶"
-            return f"数量 {value}{unit}"
+def _safe_record(record: Any) -> dict[str, str]:
+    if not isinstance(record, dict):
+        return {"名称": str(record)} if record is not None else {}
+    flattened = _flatten_record(record)
+    safe: dict[str, str] = {}
+    for key in SAFE_FIELD_ORDER:
+        if _is_internal_key(key) or key not in flattened:
+            continue
+        if key == "unit" and _has_quantity(flattened):
+            continue
+        value = _format_value(key, flattened[key], flattened)
+        if value:
+            safe[SAFE_FIELD_LABELS[key]] = value
+    return safe
+
+
+def _flatten_record(record: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for nested_key in ("group", "display"):
+        nested = record.get(nested_key)
+        if isinstance(nested, dict):
+            merged.update(nested)
+    for key, value in record.items():
+        if key in {"group", "display"}:
+            continue
+        if isinstance(value, (dict, list, tuple, set)):
+            continue
+        merged[key] = value
+    return merged
+
+
+def _format_value(key: str, value: Any, record: dict[str, Any]) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped or _is_sensitive_value(stripped):
+            return ""
+        if key == "status":
+            return STATUS_LABELS.get(stripped, stripped)
+        return stripped
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, (int, float)):
+        return _format_number_value(key, value, record)
     return ""
 
 
-def _first_text(record: dict[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = record.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-        if isinstance(value, (int, float)):
-            return str(value)
-    return ""
+def _format_number_value(key: str, value: int | float, record: dict[str, Any]) -> str:
+    if key == "remaining_percent":
+        percent = value * 100 if 0 <= value <= 1 else value
+        return f"{percent:g}%"
+    if key == "bottle_count":
+        return f"{value:g}瓶"
+    if key in QUANTITY_KEYS:
+        unit = str(record.get("unit") or "").strip()
+        return f"{value:g}{unit}"
+    return f"{value:g}"
 
 
-def _wrap(value: str, prefix: str) -> str:
-    return f"{prefix}{value}" if value else ""
+def _has_quantity(record: dict[str, Any]) -> bool:
+    return any(record.get(key) not in (None, "") for key in QUANTITY_KEYS | {"bottle_count", "count"})
+
+
+def _is_internal_key(key: str) -> bool:
+    normalized = key.strip().casefold()
+    if normalized in INTERNAL_EXACT_KEYS or normalized.endswith("_id"):
+        return True
+    return any(part in normalized for part in INTERNAL_KEY_PARTS)
+
+
+def _is_sensitive_value(value: str) -> bool:
+    lowered = value.casefold()
+    sensitive_words = ("access_token", "refresh_token", "api key", "apikey", "密钥", "密码")
+    return any(word in lowered for word in sensitive_words) or bool(SENSITIVE_VALUE_PATTERN.search(value))

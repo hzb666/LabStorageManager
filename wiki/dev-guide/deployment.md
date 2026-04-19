@@ -11,15 +11,26 @@
 - `DEFAULT_ADMIN_PASSWORD`
 - `ENV`
 - `CORS_ORIGINS`
-- `REDIS_PASSWORD`
 
 如果使用 `RS256`，还需要准备 `.keys/private.pem` 与 `.keys/public.pem`；若开发环境暂时改用 `HS256`，必须同时提供高熵 `SECRET_KEY`。
+
+Redis 仅监听 `127.0.0.1` 或 Compose 内网时，`REDIS_PASSWORD` 可以留空；Redis 对外监听或跨机器访问时必须设置强密码。
 
 ### 启动后端
 
 ```bash
 poetry install
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+使用 pip 部署时，应安装本地生成的生产依赖文件，而不是对仓库根目录执行 `pip install .`：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install --only-binary=:all: -r requirements.txt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 ### 启动前端
@@ -31,6 +42,16 @@ npm run dev
 ```
 
 默认前端访问 `http://localhost:5173`，API 前缀是 `http://localhost:8000/api`。如需覆盖，可通过 `VITE_API_URL` 调整。
+
+生产环境前端按静态站点部署：
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+将 `frontend/dist` 放到 Nginx 站点根目录。后端代码、`app/`、`static/`、`.keys/`、数据库文件和运行依赖放在后端目录，由进程管理器启动 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`。
 
 ## Docker Compose 部署
 
@@ -76,12 +97,12 @@ APP_PORT=80 docker compose up -d --build
 - 若 Nginx 前面还有受信代理，需把 `TRUST_PROXY_HEADERS` 设为 `true`，并确保代理透传 `X-Forwarded-*`。
 - 自定义域名或 TLS 场景下，需要补充 `listen 443 ssl`、证书路径和 `server_name`，同时保持 `/api` 与前端路由边界不变。
 - `VITE_API_URL` 必须与代理路径对齐；如果前端部署在独立子域，不要继续使用默认 `/api` 假设。
-- 上传大小同时受后端和 Nginx 限制，默认单次请求上限为 `5MB`，Nginx `client_max_body_size` 为 `5m`。
+- 上传大小同时受后端和 Nginx 限制，生产配置建议 `MAX_UPLOAD_REQUEST_SIZE_MB=12`，Nginx `client_max_body_size 12m`。公告图片和头像仍由业务代码限制为 5MB。
 
 ## 最小验证清单
 
 1. `curl http://localhost:${APP_PORT:-80}/health`
-2. `redis-cli -a <REDIS_PASSWORD> ping`
+2. Redis 无密码时执行 `redis-cli ping`；有密码时执行 `redis-cli -a <REDIS_PASSWORD> ping`
 3. 浏览器访问 `<host>:${APP_PORT}`，确认前端静态资源与接口请求正常
 4. 登录后验证 `/api/users/me`
 5. 检查 `/static/*` 资源能否被正常访问

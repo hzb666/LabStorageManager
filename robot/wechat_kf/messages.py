@@ -12,12 +12,18 @@ def actor_id(open_kfid: str, external_userid: str) -> str:
     return f"wxkf:{open_kfid}:{external_userid}"
 
 
-def is_customer_text_message(message: dict[str, Any]) -> bool:
+def is_customer_message(message: dict[str, Any]) -> bool:
     return (
         _origin(message.get("origin")) == CUSTOMER_ORIGIN
-        and message.get("msgtype") == TEXT
         and isinstance(message.get("external_userid"), str)
         and isinstance(message.get("open_kfid"), str)
+    )
+
+
+def is_customer_text_message(message: dict[str, Any]) -> bool:
+    return (
+        is_customer_message(message)
+        and message.get("msgtype") == TEXT
         and isinstance(message.get("text"), dict)
         and isinstance(message["text"].get("content"), str)
     )

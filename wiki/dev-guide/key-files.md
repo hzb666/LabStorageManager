@@ -55,12 +55,20 @@
 
 ## 购物车导入与扩展桥接
 
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json" />：扩展权限、content script 注入范围和 popup 入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/build-config.mjs" />：根据扩展 env 生成 manifest 和运行配置。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/background/service-worker.js" />：目标购物车标签页解析、后台消息路由、详情页抓取辅助。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/popup/popup.js" />：抓取、详情补齐、类型判断、批次保存和跳转系统页面。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" />：把扩展批次复制到页面 `localStorage` 并发出 `IMPORT_BATCH_READY` 消息。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx" />：购物车导入 UI 布局。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/cartimport/cartImportControllers.ts" />：批次加载、草稿持久化、CAS 预警和逐条提交逻辑。
+
+## CLI、MCP 与企业微信入口
+
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/lsm_cli" />：本地命令行客户端，所有命令输出 JSON，并通过后端 API 工作。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/lsm_mcp/http_app.py" />：MCP Streamable HTTP 入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/lsm_mcp/cli_runner.py" />：MCP 到 CLI 子进程的执行边界，会注入仓库根目录到 `PYTHONPATH`。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/robot/wecom_aibot" />：企业微信智能机器人实现。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/robot/wechat_kf" />：微信客服入口。
 
 ## 部署与运行环境
 
@@ -95,7 +103,7 @@
 - [app/services/sse_manager.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py)
 - [browser-extension/background/service-worker.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/background/service-worker.js)
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)
-- [browser-extension/manifest.json](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/manifest.json)
+- [browser-extension/build-config.mjs](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/build-config.mjs)
 - [browser-extension/popup/popup.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/popup/popup.js)
 - [docker-compose.yml](https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml)
 - [docker/nginx/default.conf](https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf)

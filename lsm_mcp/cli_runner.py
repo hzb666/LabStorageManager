@@ -19,7 +19,7 @@ PROCESS_TIMEOUT_GRACE_SECONDS = 2.0
 STDOUT_PREVIEW_CHARS = 2000
 
 load_dotenv(REPO_ROOT / ".env", override=False)
-load_dotenv(REPO_ROOT / "robot" / ".env", override=False)
+load_dotenv(REPO_ROOT / "robot" / ".env", override=True)
 
 
 def run_lsm_cli(
@@ -77,7 +77,12 @@ def _run_command(
             encoding="utf-8",
             timeout=timeout_seconds + PROCESS_TIMEOUT_GRACE_SECONDS,
             shell=False,
-            env={**os.environ, "PYTHONIOENCODING": "utf-8", **(extra_env or {})},
+            env={
+                **os.environ,
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONPATH": str(REPO_ROOT),
+                **(extra_env or {}),
+            },
         )
     except subprocess.TimeoutExpired as exc:
         return _error_result(

@@ -7,7 +7,7 @@
 ### 服务与依赖
 
 - 访问 `/health` 确认后端整体存活。
-- 使用 `redis-cli -a <REDIS_PASSWORD> ping` 确认 Redis 可用。
+- Redis 无密码时使用 `redis-cli ping` 确认可用；有密码时使用 `redis-cli -a <REDIS_PASSWORD> ping`。
 - 查看 `docker compose logs backend` 与 `docker compose logs frontend`，优先关注启动错误、Redis 连接失败和静态资源异常。
 
 ### 数据与文件
@@ -45,12 +45,14 @@ python -m app.archive_query_logs --output-dir logs
 
 ```bash
 ARCHIVE_SCHEDULER_ENABLED=true
-ARCHIVE_INTERVAL_HOURS=24
+ARCHIVE_RUN_AT_TIME=03:30
+ARCHIVE_RUN_WEEKDAY=sun
+ARCHIVE_INTERVAL_HOURS=168
 ARCHIVE_STARTUP_DELAY_SECONDS=300
 ARCHIVE_OUTPUT_DIR=/data/logs
 ```
 
-调度器会先运行主业务库操作日志归档，再运行搜索查询日志归档。归档目录下的 `.archive-scheduler.lock` 用于避免多 worker 重复执行同一轮任务。
+设置 `ARCHIVE_RUN_AT_TIME` 和 `ARCHIVE_RUN_WEEKDAY` 后，调度器按服务器本地系统时间每周运行一次。调度器会先运行主业务库操作日志归档，再运行搜索查询日志归档。归档目录下的 `.archive-scheduler.lock` 用于避免多 worker 重复执行同一轮任务。
 
 只归档指定业务日志表时使用 `--tables`：
 
@@ -70,7 +72,7 @@ Docker 部署时需要保证主业务库、搜索日志库和归档输出目录�
 
 ### Redis 与会话异常
 
-- `NOAUTH` 或连接失败：核对 `REDIS_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`。
+- `NOAUTH` 或连接失败：核对 `REDIS_HOST`、`REDIS_PORT`；Redis 对外监听时还要核对 `REDIS_PASSWORD`。
 - Redis 不可用时，登录限流和会话缓存会降级，功能可能仍可用，但吞吐和安全边界会下降。
 - 如前端收到 `X-Redis-Status: unavailable`，应优先检查 Redis，而不是直接怀疑业务接口。
 
@@ -82,7 +84,7 @@ Docker 部署时需要保证主业务库、搜索日志库和归档输出目录�
 
 ### 扩展导入异常
 
-- 扩展 host 权限不匹配：检查 `manifest.json` 中的 `host_permissions`。
+- 扩展 host 权限不匹配：检查构建后的 `manifest.json` 中的 `host_permissions`，必要时调整 `browser-extension/.env` 后重新运行 `npm run build:extension`。
 - 批次数据过期或未落盘：检查 `chrome.storage.local.import_batch_latest` 与页面 `localStorage.cart_import_batch_latest`。
 - `batch_id` 不一致：确认扩展打开的跳转链路与当前系统地址一致。
 
