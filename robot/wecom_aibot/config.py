@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,60 @@ class WecomAibotSettings(BaseSettings):
     low_stock_threshold: float = Field(default=0.2, ge=0, le=1)
     callback_max_body_bytes: int = Field(default=1_048_576, ge=1024)
     welcome_text: str = "你好，我是实验室库存助手。可以问我库存、位置、低库存和借用状态。"
+    mcp_url: str = Field(
+        default="http://127.0.0.1:8030/mcp",
+        validation_alias=AliasChoices("LSM_MCP_URL", "WECOM_AIBOT_MCP_URL"),
+    )
+    mcp_timeout_seconds: float = Field(
+        default=15.0,
+        ge=1,
+        le=120,
+        validation_alias=AliasChoices("LSM_MCP_TIMEOUT_SECONDS", "WECOM_AIBOT_MCP_TIMEOUT_SECONDS"),
+    )
+    web_search_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("WECOM_AIBOT_WEB_SEARCH_ENABLED"),
+    )
+    minimax_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "WECOM_AIBOT_MINIMAX_API_KEY",
+            "MINIMAX_API_KEY",
+            "OPENAI_API_KEY",
+        ),
+    )
+    minimax_api_host: str = Field(
+        default="https://api.minimaxi.com",
+        validation_alias=AliasChoices("WECOM_AIBOT_MINIMAX_API_HOST", "MINIMAX_API_HOST"),
+    )
+    minimax_mcp_command: str = Field(
+        default="uvx",
+        validation_alias=AliasChoices("WECOM_AIBOT_MINIMAX_MCP_COMMAND"),
+    )
+    minimax_mcp_timeout_seconds: float = Field(
+        default=25.0,
+        ge=3,
+        le=120,
+        validation_alias=AliasChoices("WECOM_AIBOT_MINIMAX_MCP_TIMEOUT_SECONDS"),
+    )
+    llm_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("WECOM_AIBOT_LLM_API_KEY", "OPENAI_API_KEY"),
+    )
+    llm_model: str = Field(
+        default="gpt-5",
+        validation_alias=AliasChoices("WECOM_AIBOT_LLM_MODEL", "OPENAI_MODEL"),
+    )
+    llm_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("WECOM_AIBOT_LLM_BASE_URL", "OPENAI_BASE_URL"),
+    )
+    llm_responses_url: str = Field(
+        default="https://api.openai.com/v1/responses",
+        validation_alias=AliasChoices("WECOM_AIBOT_LLM_RESPONSES_URL", "OPENAI_RESPONSES_URL"),
+    )
+    llm_timeout_seconds: float = Field(default=8.0, ge=1, le=60)
+    llm_max_output_tokens: int = Field(default=400, ge=64, le=2000)
 
     @field_validator(
         "bot_id",
@@ -40,6 +94,14 @@ class WecomAibotSettings(BaseSettings):
         "receive_id",
         "ws_url",
         "welcome_text",
+        "mcp_url",
+        "minimax_api_key",
+        "minimax_api_host",
+        "minimax_mcp_command",
+        "llm_api_key",
+        "llm_model",
+        "llm_base_url",
+        "llm_responses_url",
         mode="before",
     )
     @classmethod
@@ -76,4 +138,3 @@ class WecomAibotSettings(BaseSettings):
 @lru_cache
 def get_settings() -> WecomAibotSettings:
     return WecomAibotSettings()
-

@@ -380,6 +380,14 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 | `common-shelf add-bottles <group_key>` | 给分组加瓶 | `POST /common-shelf/groups/{group_key}/add-bottles` |
 | `common-shelf remove-one <group_key>` | 从指定位置扣减 1 瓶 | `POST /common-shelf/groups/{group_key}/remove-one` |
 
+### chemical-name-map
+
+| 命令 | 说明 | 对应 API |
+| --- | --- | --- |
+| `chemical-name-map list` | 列出 CAS 主数据 | `GET /chemical-name-map` |
+| `chemical-name-map search <keyword>` | 按名称、英文名、别名或 CAS 查询 CAS 主数据 | `GET /chemical-name-map?search=...&search_field=all` |
+| `chemical-name-map cas <cas_number>` | 按 CAS 精确查询 CAS 主数据 | `GET /chemical-name-map?search=...&search_field=cas_number&match_mode=exact` |
+
 ### consumable-orders
 
 | 命令 | 说明 | 对应 API |

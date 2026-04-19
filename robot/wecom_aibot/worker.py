@@ -7,8 +7,12 @@ import logging
 from typing import Any
 
 from robot.wecom_aibot.config import get_settings
+from robot.wecom_aibot.conversation_store import WecomConversationStore
 from robot.wecom_aibot.handler import WecomAibotHandler
-from robot.wecom_aibot.inventory_answer import InventoryAnswerService
+from robot.wecom_aibot.llm_planner import build_llm_planner
+from robot.wecom_aibot.lsm_orchestrator import LSMRobotOrchestrator
+from robot.wecom_aibot.mcp_client import LSMMcpClient
+from robot.wecom_aibot.minimax_web_search import build_web_search_client
 from robot.wecom_aibot.replies import text_reply
 from robot.wecom_aibot.store import ProcessedMessageStore
 
@@ -27,10 +31,16 @@ async def main() -> None:
 
     store = ProcessedMessageStore(settings.state_db)
     store.init()
+    conversation_store = WecomConversationStore(settings.state_db)
+    conversation_store.init()
+    mcp_client = LSMMcpClient(settings.mcp_url, read_timeout_seconds=settings.mcp_timeout_seconds)
     handler = WecomAibotHandler(
-        answer_service=InventoryAnswerService(
+        orchestrator=LSMRobotOrchestrator(
+            mcp_client=mcp_client,
+            conversation_store=conversation_store,
+            llm_planner=build_llm_planner(settings),
+            web_search_client=build_web_search_client(settings),
             search_limit=settings.search_limit,
-            low_stock_threshold=settings.low_stock_threshold,
         ),
         store=store,
         welcome_text=settings.welcome_text,
@@ -40,8 +50,8 @@ async def main() -> None:
 
     async def on_text(frame: dict[str, Any]) -> None:
         stream_id = generate_req_id("lsm")
-        await ws_client.reply_stream(frame, stream_id, "正在查询库存...", False)
-        response = handler.handle_payload(frame.get("body", {}))
+        await ws_client.reply_stream(frame, stream_id, "正在查询...", False)
+        response = await handler.handle_payload(frame.get("body", {}))
         await ws_client.reply_stream(frame, stream_id, _extract_text(response), True)
 
     async def on_enter_chat(frame: dict[str, Any]) -> None:
@@ -59,4 +69,3 @@ def _extract_text(response: dict[str, Any]) -> str:
     if isinstance(text, dict) and isinstance(text.get("content"), str):
         return text["content"]
     return "已收到。"
-

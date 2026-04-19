@@ -63,6 +63,18 @@ COMMON_SHELF_LIST_PARAM_KEYS = frozenset(
         "sort_order",
     }
 )
+CHEMICAL_NAME_MAP_LIST_PARAM_KEYS = frozenset(
+    {
+        "skip",
+        "limit",
+        "search",
+        "search_field",
+        "fuzzy",
+        "match_mode",
+        "sort_by",
+        "sort_order",
+    }
+)
 
 
 class CLIArgumentParser(argparse.ArgumentParser):
@@ -1106,6 +1118,65 @@ def _register_common_shelf_commands(
     remove_one.set_defaults(handler=_handle_common_shelf_remove_one)
 
 
+def _register_chemical_name_map_commands(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    name_map = subparsers.add_parser(
+        "chemical-name-map",
+        help="Chemical CAS master data commands",
+    )
+    name_map_sub = name_map.add_subparsers(dest="chemical_name_map_command", required=True)
+
+    list_cmd = name_map_sub.add_parser(
+        "list",
+        help="List chemical CAS master data",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    _add_connection_arguments(list_cmd)
+    _add_list_arguments(list_cmd)
+    _set_list_command_help(
+        list_cmd,
+        command_label="chemical-name-map list",
+        allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS,
+    )
+    list_cmd.set_defaults(
+        handler=lambda args: _handle_list_command(args, "/chemical-name-map"),
+        allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS,
+        list_command_label="chemical-name-map list",
+    )
+
+    search_cmd = name_map_sub.add_parser("search", help="Search chemical CAS master data")
+    _add_connection_arguments(search_cmd)
+    search_cmd.add_argument("keyword")
+    _add_pagination_arguments(search_cmd)
+    search_cmd.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path="/chemical-name-map",
+            search_attr="keyword",
+            search_field="all",
+            allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS,
+            command_label="chemical-name-map search",
+        )
+    )
+
+    cas_cmd = name_map_sub.add_parser("cas", help="Search chemical CAS master data by CAS")
+    _add_connection_arguments(cas_cmd)
+    cas_cmd.add_argument("cas_number")
+    _add_pagination_arguments(cas_cmd)
+    cas_cmd.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path="/chemical-name-map",
+            search_attr="cas_number",
+            search_field="cas_number",
+            allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS,
+            command_label="chemical-name-map cas",
+            match_mode="exact",
+        )
+    )
+
+
 def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     consumable = subparsers.add_parser("consumable-orders", help="Consumable order commands")
     consumable_sub = consumable.add_subparsers(dest="consumable_command", required=True)
@@ -1192,6 +1263,7 @@ def build_parser() -> argparse.ArgumentParser:
     _register_inventory_commands(subparsers)
     _register_reagent_order_commands(subparsers)
     _register_common_shelf_commands(subparsers)
+    _register_chemical_name_map_commands(subparsers)
     _register_consumable_order_commands(subparsers)
     return parser
 

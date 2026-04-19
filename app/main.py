@@ -108,6 +108,7 @@ CLI_ALLOWED_ROUTE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("POST", r"^/api/common-shelf/manual-add$"),
     ("POST", r"^/api/common-shelf/groups/[A-Za-z0-9_-]+/add-bottles$"),
     ("POST", r"^/api/common-shelf/groups/[A-Za-z0-9_-]+/remove-one$"),
+    ("GET", r"^/api/chemical-name-map$"),
 )
 
 

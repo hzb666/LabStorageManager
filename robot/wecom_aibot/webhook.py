@@ -12,9 +12,13 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from robot.wecom_aibot.config import get_settings
+from robot.wecom_aibot.conversation_store import WecomConversationStore
 from robot.wecom_aibot.crypto import WecomAesCipher, WecomCryptoError
 from robot.wecom_aibot.handler import WecomAibotHandler
-from robot.wecom_aibot.inventory_answer import InventoryAnswerService
+from robot.wecom_aibot.llm_planner import build_llm_planner
+from robot.wecom_aibot.lsm_orchestrator import LSMRobotOrchestrator
+from robot.wecom_aibot.mcp_client import LSMMcpClient
+from robot.wecom_aibot.minimax_web_search import build_web_search_client
 from robot.wecom_aibot.store import ProcessedMessageStore
 
 logger = logging.getLogger(__name__)
@@ -24,6 +28,12 @@ logger = logging.getLogger(__name__)
 def get_store() -> ProcessedMessageStore:
     settings = get_settings()
     return ProcessedMessageStore(settings.state_db)
+
+
+@lru_cache
+def get_conversation_store() -> WecomConversationStore:
+    settings = get_settings()
+    return WecomConversationStore(settings.state_db)
 
 
 @lru_cache
@@ -39,10 +49,14 @@ def get_cipher() -> WecomAesCipher:
 @lru_cache
 def get_handler() -> WecomAibotHandler:
     settings = get_settings()
+    mcp_client = LSMMcpClient(settings.mcp_url, read_timeout_seconds=settings.mcp_timeout_seconds)
     return WecomAibotHandler(
-        answer_service=InventoryAnswerService(
+        orchestrator=LSMRobotOrchestrator(
+            mcp_client=mcp_client,
+            conversation_store=get_conversation_store(),
+            llm_planner=build_llm_planner(settings),
+            web_search_client=build_web_search_client(settings),
             search_limit=settings.search_limit,
-            low_stock_threshold=settings.low_stock_threshold,
         ),
         store=get_store(),
         welcome_text=settings.welcome_text,
@@ -53,6 +67,7 @@ def get_handler() -> WecomAibotHandler:
 async def lifespan(_: FastAPI):
     get_settings().require_webhook()
     get_store().init()
+    get_conversation_store().init()
     yield
 
 
@@ -93,7 +108,7 @@ async def receive_callback(
             timestamp=timestamp,
             nonce=nonce,
         )
-        response = get_handler().handle_payload(payload)
+        response = await get_handler().handle_payload(payload)
         encrypted_response = get_cipher().encrypt_payload(response)
     except WecomCryptoError as exc:
         logger.warning("wecom_aibot_callback_crypto_failed reason=%s", exc)
@@ -111,4 +126,3 @@ def _extract_encrypted_body(body: bytes) -> str:
     if not isinstance(parsed, dict) or not isinstance(parsed.get("encrypt"), str):
         raise HTTPException(status_code=400, detail="Callback JSON must include encrypt")
     return parsed["encrypt"]
-
