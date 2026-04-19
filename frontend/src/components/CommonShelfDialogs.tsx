@@ -92,6 +92,7 @@ export interface CommonShelfDialogController {
       setFieldError: (fieldName: string, message: string) => void,
     ) => Promise<void>
     handleDeleteEditItem: (item: CommonShelfGroupItem) => Promise<void>
+    handleCancelDeleteEditItemConfirm: (item: CommonShelfGroupItem) => void
   }
   actions: {
     handleOpenChange: (open: boolean) => void
@@ -262,7 +263,7 @@ function CommonShelfItemEditRow({
 
   return (
     <form
-      className="border-b border-border pb-3 last:border-b-0"
+      className="px-3 pb-3"
       onSubmit={handleDialogSubmit(async () => {
         await form.handleSubmit(async (data) => {
           await itemEdit.handleSubmitEditItem(item, data, (fieldName, message) => {
@@ -283,7 +284,7 @@ function CommonShelfItemEditRow({
             columns={3}
           />
         </div>
-        <div className="flex shrink-0 items-center justify-end gap-1 lg:pt-7">
+        <div className="flex shrink-0 items-center justify-end gap-1 lg:h-10 lg:w-[4.5rem]">
           <Tooltip>
             <TooltipTrigger asChild>
               <LoadingButton
@@ -318,6 +319,7 @@ function CommonShelfItemEditRow({
                 onClick={() => {
                   itemEdit.handleDeleteEditItem(item).catch(() => undefined)
                 }}
+                onBlur={() => itemEdit.handleCancelDeleteEditItemConfirm(item)}
                 aria-label={isDeleteConfirm ? '确认删除当前条目' : '删除当前条目'}
               >
                 {isDeleteConfirm ? <Check className="size-4" /> : <Trash2 className="size-4" />}
@@ -487,14 +489,23 @@ function CommonShelfEditDialogContent({
         </form>
       ) : (
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-4 px-3 text-sm font-medium text-muted-foreground">
-            <div>纯度</div>
-            <div>位置</div>
-            <div>备注</div>
+          <div className="hidden gap-3 px-3 text-center text-base font-semibold text-foreground sm:flex">
+            <div className="grid min-w-0 flex-1 grid-cols-3 gap-4">
+              <div>纯度</div>
+              <div>位置</div>
+              <div>备注</div>
+            </div>
+            <div className="hidden shrink-0 lg:block lg:w-[4.5rem]" aria-hidden="true" />
           </div>
           {itemEditContent}
           <div className="flex justify-end">
-            <Button type="button" variant="secondary" onClick={() => actions.handleOpenChange(false)}>
+            <Button
+              type="button"
+              variant="modern"
+              size="lg"
+              className="min-w-24"
+              onClick={() => actions.handleOpenChange(false)}
+            >
               关闭
             </Button>
           </div>

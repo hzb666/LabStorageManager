@@ -2,6 +2,7 @@
 import json
 import logging
 import secrets
+from datetime import datetime, time as datetime_time
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, List, Optional
@@ -12,6 +13,23 @@ from app.core.constants import CAS_PATTERN, RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONE
 
 
 logger = logging.getLogger(__name__)
+
+ARCHIVE_WEEKDAY_ALIASES = {
+    "mon": 0,
+    "monday": 0,
+    "tue": 1,
+    "tuesday": 1,
+    "wed": 2,
+    "wednesday": 2,
+    "thu": 3,
+    "thursday": 3,
+    "fri": 4,
+    "friday": 4,
+    "sat": 5,
+    "saturday": 5,
+    "sun": 6,
+    "sunday": 6,
+}
 
 
 class Settings(BaseSettings):
@@ -40,6 +58,16 @@ class Settings(BaseSettings):
         default=300,
         ge=0,
         description="Seconds to wait after backend startup before the first archive run",
+    )
+    archive_run_at_time: datetime_time | None = Field(
+        default=None,
+        description="Optional local system time for daily archive runs, formatted as HH:MM",
+    )
+    archive_run_weekday: int | None = Field(
+        default=None,
+        ge=0,
+        le=6,
+        description="Optional weekday for archive runs, 0=Monday and 6=Sunday",
     )
     archive_output_dir: str = Field(
         default="logs",
@@ -120,6 +148,42 @@ class Settings(BaseSettings):
         if v not in ["HS256", "RS256"]:
             raise ValueError("JWT algorithm must be HS256 or RS256")
         return v
+
+    @field_validator("archive_run_at_time", mode="before")
+    @classmethod
+    def parse_archive_run_at_time(cls, value: Any) -> datetime_time | None | Any:
+        if value is None or isinstance(value, datetime_time):
+            return value
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        if not stripped:
+            return None
+
+        for fmt in ("%H:%M", "%H:%M:%S"):
+            try:
+                return datetime.strptime(stripped, fmt).time()
+            except ValueError:
+                continue
+        raise ValueError("ARCHIVE_RUN_AT_TIME must use HH:MM or HH:MM:SS")
+
+    @field_validator("archive_run_weekday", mode="before")
+    @classmethod
+    def parse_archive_run_weekday(cls, value: Any) -> int | None | Any:
+        if value is None or isinstance(value, int):
+            return value
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip().lower()
+        if not stripped:
+            return None
+        if stripped in ARCHIVE_WEEKDAY_ALIASES:
+            return ARCHIVE_WEEKDAY_ALIASES[stripped]
+        if stripped.isdigit():
+            return int(stripped)
+        raise ValueError("ARCHIVE_RUN_WEEKDAY must use 0-6 or weekday name")
 
     @field_validator("allowed_image_types", mode="before")
     @classmethod

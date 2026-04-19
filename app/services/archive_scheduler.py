@@ -4,9 +4,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import os
 import time
 from collections.abc import Callable, Iterator
+from datetime import datetime, time as datetime_time, timedelta
 from pathlib import Path
 
 from app.archive_logs import resolve_log_archive_output_dir, run_log_archive
@@ -92,7 +94,7 @@ def start_archive_scheduler() -> None:
     global _archive_stop_event, _archive_task
 
     if not settings.archive_scheduler_enabled:
-        logger.info("archive_scheduler_disabled enabled=false")
+        logger.info("archive_scheduler_skipped enabled=false")
         return
     if _archive_task is not None and not _archive_task.done():
         logger.warning("archive_scheduler_already_running")
@@ -103,12 +105,29 @@ def start_archive_scheduler() -> None:
         _archive_scheduler_loop(_archive_stop_event),
         name="archive-scheduler",
     )
-    logger.info(
-        "archive_scheduler_started interval_hours=%s startup_delay_seconds=%s output_dir=%s",
-        settings.archive_interval_hours,
-        settings.archive_startup_delay_seconds,
-        settings.archive_output_dir,
-    )
+    if settings.archive_run_at_time is not None:
+        if settings.archive_run_weekday is not None:
+            logger.info(
+                "archive_scheduler_started mode=weekly run_weekday=%s "
+                "run_at_time=%s output_dir=%s",
+                settings.archive_run_weekday,
+                _format_run_at_time(settings.archive_run_at_time),
+                settings.archive_output_dir,
+            )
+        else:
+            logger.info(
+                "archive_scheduler_started mode=daily run_at_time=%s output_dir=%s",
+                _format_run_at_time(settings.archive_run_at_time),
+                settings.archive_output_dir,
+            )
+    else:
+        logger.info(
+            "archive_scheduler_started mode=interval interval_hours=%s "
+            "startup_delay_seconds=%s output_dir=%s",
+            settings.archive_interval_hours,
+            settings.archive_startup_delay_seconds,
+            settings.archive_output_dir,
+        )
 
 
 async def stop_archive_scheduler() -> None:
@@ -140,6 +159,17 @@ async def run_scheduled_archive_once() -> None:
 
 
 async def _archive_scheduler_loop(stop_event: asyncio.Event) -> None:
+    if settings.archive_run_at_time is not None:
+        if settings.archive_run_weekday is not None:
+            await _run_weekly_archive_loop(
+                stop_event,
+                settings.archive_run_at_time,
+                settings.archive_run_weekday,
+            )
+        else:
+            await _run_daily_archive_loop(stop_event, settings.archive_run_at_time)
+        return
+
     if await _wait_for_stop(stop_event, settings.archive_startup_delay_seconds):
         return
 
@@ -148,6 +178,81 @@ async def _archive_scheduler_loop(stop_event: asyncio.Event) -> None:
         interval_seconds = settings.archive_interval_hours * 60 * 60
         if await _wait_for_stop(stop_event, interval_seconds):
             return
+
+
+async def _run_daily_archive_loop(
+    stop_event: asyncio.Event,
+    run_at_time: datetime_time,
+) -> None:
+    while not stop_event.is_set():
+        delay_seconds = _seconds_until_next_daily_run(run_at_time)
+        logger.info(
+            "archive_scheduler_next_run run_at_time=%s delay_seconds=%s",
+            _format_run_at_time(run_at_time),
+            delay_seconds,
+        )
+        if await _wait_for_stop(stop_event, delay_seconds):
+            return
+        await run_scheduled_archive_once()
+
+
+async def _run_weekly_archive_loop(
+    stop_event: asyncio.Event,
+    run_at_time: datetime_time,
+    run_weekday: int,
+) -> None:
+    while not stop_event.is_set():
+        delay_seconds = _seconds_until_next_weekly_run(run_at_time, run_weekday)
+        logger.info(
+            "archive_scheduler_next_run run_weekday=%s run_at_time=%s delay_seconds=%s",
+            run_weekday,
+            _format_run_at_time(run_at_time),
+            delay_seconds,
+        )
+        if await _wait_for_stop(stop_event, delay_seconds):
+            return
+        await run_scheduled_archive_once()
+
+
+def _seconds_until_next_daily_run(run_at_time: datetime_time) -> int:
+    now = datetime.now()
+    next_run = _next_daily_run_at(now, run_at_time)
+    return max(1, math.ceil((next_run - now).total_seconds()))
+
+
+def _seconds_until_next_weekly_run(run_at_time: datetime_time, run_weekday: int) -> int:
+    now = datetime.now()
+    next_run = _next_weekly_run_at(now, run_at_time, run_weekday)
+    return max(1, math.ceil((next_run - now).total_seconds()))
+
+
+def _next_daily_run_at(now: datetime, run_at_time: datetime_time) -> datetime:
+    next_run = now.replace(
+        hour=run_at_time.hour,
+        minute=run_at_time.minute,
+        second=run_at_time.second,
+        microsecond=0,
+    )
+    if next_run <= now:
+        next_run += timedelta(days=1)
+    return next_run
+
+
+def _next_weekly_run_at(
+    now: datetime,
+    run_at_time: datetime_time,
+    run_weekday: int,
+) -> datetime:
+    next_run = _next_daily_run_at(now, run_at_time)
+    days_until_weekday = (run_weekday - next_run.weekday()) % 7
+    next_run += timedelta(days=days_until_weekday)
+    if next_run <= now:
+        next_run += timedelta(days=7)
+    return next_run
+
+
+def _format_run_at_time(run_at_time: datetime_time) -> str:
+    return run_at_time.strftime("%H:%M:%S")
 
 
 async def _wait_for_stop(stop_event: asyncio.Event, seconds: int) -> bool:

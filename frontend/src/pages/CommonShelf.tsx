@@ -621,6 +621,10 @@ function useCommonShelfItemEditActions(params: {
     }
   }, [deleteItemConfirmId, refreshCommonShelf, resetDialogState, selectedGroup])
 
+  const handleCancelDeleteEditItemConfirm = useCallback((item: CommonShelfGroupItem) => {
+    setDeleteItemConfirmId((currentId) => (currentId === item.id ? null : currentId))
+  }, [])
+
   useEffect(() => {
     if (mode === 'edit') {
       return
@@ -634,6 +638,7 @@ function useCommonShelfItemEditActions(params: {
     deleteItemConfirmId,
     handleSubmitEditItem,
     handleDeleteEditItem,
+    handleCancelDeleteEditItemConfirm,
   }
 }
 
@@ -794,6 +799,7 @@ function useCommonShelfDialogController({
     deleteItemConfirmId,
     handleSubmitEditItem,
     handleDeleteEditItem,
+    handleCancelDeleteEditItemConfirm,
   } = useCommonShelfItemEditActions({
     mode,
     selectedGroup,
@@ -830,6 +836,7 @@ function useCommonShelfDialogController({
       deleteItemConfirmId,
       handleSubmitEditItem,
       handleDeleteEditItem,
+      handleCancelDeleteEditItemConfirm,
     },
     actions: {
       handleOpenChange,

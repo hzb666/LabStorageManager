@@ -4,6 +4,20 @@
 .env.*.local
 login.json
 
+# Local production deployment overrides (never commit these!)
+.env.production.local
+frontend/.env.production.local
+browser-extension/.env
+browser-extension/.env.production.local
+
+# Local browser extension packages/build outputs
+browser-extension/manifest.json
+browser-extension/shared/generated-config.js
+browser-extension-dist/
+browser-extension/dist/
+browser-extension/*.zip
+browser-extension/*.crx
+
 # Python
 __pycache__/
 *.py[cod]
@@ -18,6 +32,11 @@ build/
 *.egg
 requirements.txt
 .mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage/
 
 # Virtual environments
 venv/
@@ -49,8 +68,16 @@ AGENTS.md
 
 # Logs
 *.log
+*.out.log
+*.err.log
 logs/
 dev-logs/
+.dev-logs/
+
+# Local temp/cache
+tmp/
+temp/
+.cache/
 
 # OS
 .DS_Store
@@ -64,7 +91,12 @@ public.pem
 # Frontend (already in frontend/.gitignore but keeping for root)
 node_modules/
 dist/
+dist-ssr/
 *.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Template/External projects (do not commit)
 shadcn-admin/
@@ -84,3 +116,5 @@ plans/
 static/
 report/
 video/
+wiki/.vitepress/cache/
+wiki/.vitepress/dist/

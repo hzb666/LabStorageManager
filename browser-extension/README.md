@@ -12,6 +12,19 @@ Chrome 浏览器插件用于采集试剂管理平台购物车数据，并把导�
 
 ## 安装方法
 
+### 0. 生成扩展配置
+
+`manifest.json` 和 `shared/generated-config.js` 是构建期生成文件，不提交到 Git。
+首次加载或切换环境前，先复制本地 env 并生成配置：
+
+```bash
+cp browser-extension/.env.example browser-extension/.env
+npm run build:extension
+```
+
+生产环境请把 `browser-extension/.env` 中的 `BROWSER_EXTENSION_SYSTEM_ORIGIN`
+改为真实系统域名后再运行构建命令。
+
 ### 1. 打开Chrome扩展程序页面
 
 在Chrome浏览器地址栏输入：
@@ -77,7 +90,7 @@ chrome://extensions/
 
 ```
 browser-extension/
-├── manifest.json          # 扩展配置文件
+├── manifest.json          # 构建期生成的扩展配置文件
 ├── .env.example           # 构建期域名配置模板
 ├── build-config.mjs       # 从 env 生成 manifest 和运行配置
 ├── background/

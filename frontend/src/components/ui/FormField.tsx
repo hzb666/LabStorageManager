@@ -7,7 +7,7 @@ export interface FormFieldProps extends React.HTMLAttributes<HTMLDivElement> {
   error?: string
   required?: boolean
   children: React.ReactNode
-  hideLabel?: boolean  // 是否隐藏标签（用 ::before 占据位置）
+  hideLabel?: boolean  // 是否隐藏可见标签
 }
 
 /**
@@ -31,10 +31,12 @@ const FormField = React.forwardRef<HTMLDivElement, FormFieldProps>(
   ({ className, label, error, required, children, hideLabel, ...props }, ref) => {
     return (
       <div ref={ref} className={cn("flex flex-col", className)} {...props}>
-        <Label className={cn("text-base mb-1.5 block", hideLabel && "before:content-[''] before:h-[22px] before:block")}>
-          {hideLabel ? '' : label}
-          {required && !hideLabel && <span className="text-destructive text-lg leading-4">&thinsp;*</span>}
-        </Label>
+        {!hideLabel && (
+          <Label className="text-base mb-1.5 block">
+            {label}
+            {required && <span className="text-destructive text-lg leading-4">&thinsp;*</span>}
+          </Label>
+        )}
         {children}
         {error && (
           <p className="text-sm text-destructive mt-1">{error}</p>

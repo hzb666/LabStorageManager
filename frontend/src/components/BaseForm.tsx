@@ -327,6 +327,7 @@ function renderInputField<T extends FieldValues>({
       placeholder={field.placeholder}
       disabled={isDisabled}
       readOnly={isReadOnly}
+      aria-label={field.hideLabel ? field.label : undefined}
       autoComplete={field.autoComplete}
       className={inputClassName}
       enableTagToggle={field.enableTagToggle}
