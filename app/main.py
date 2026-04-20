@@ -40,6 +40,7 @@ from app.database import engine, init_db
 from app.api import (
     announcements,
     cart_sync,
+    chem,
     chemical_name_map,
     common_shelf,
     consumable_orders,
@@ -60,6 +61,7 @@ from app.services.log_queue import get_request_logger, initialize_async_file_log
 from app.services.rate_limit import enforce_rate_limit
 from app.services.search_query_log_service import stop_search_query_log_worker, start_search_query_log_worker
 from app.services.sse_manager import sse_manager
+from app.services.structure_index import structure_index
 from app.search_query_log_db import init_query_log_db
 from sqlmodel import Session
 
@@ -333,6 +335,10 @@ async def lifespan(app: FastAPI):
     cleanup_expired_inventory_import_preview_artifacts()
     init_db()
     init_query_log_db()
+    if settings.chem_structure_feature_enabled:
+        with Session(engine) as db:
+            structure_index.rebuild(db)
+        logger.info("Structure index rebuilt on startup")
     start_search_query_log_worker()
     start_archive_scheduler()
     logger.info("Database initialized (WAL mode enabled)")
@@ -611,6 +617,7 @@ app.include_router(error_logs.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(common_shelf.router, prefix="/api")
 app.include_router(chemical_name_map.router, prefix="/api")
+app.include_router(chem.router, prefix="/api")
 
 
 @app.get("/")
