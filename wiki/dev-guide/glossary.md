@@ -31,7 +31,9 @@
 ## 技术术语
 
 - `WAL`：SQLite 的 Write-Ahead Logging 模式。当前项目在每个新连接上显式执行 `PRAGMA journal_mode=WAL`。
-- `FTS`：全文检索。当前实现基于 SQLite FTS5，并分别维护 `inventory_fts`、`reagent_order_fts`、`consumable_order_fts`、`users_fts`、`chemical_name_map_fts`。
+- `FTS`：全文检索。当前实现基于 SQLite FTS5，并分别维护 `inventory_fts`、`reagent_order_fts`、`consumable_order_fts`、`users_fts`、`chemical_name_map_fts`、`log_timeline_fts`。
+- `结构缓存`：`CompoundStructureCache`，按 CAS 保存 SMILES、MolBlock、InChIKey、来源和人工确认状态。
+- `日志时间线`：`LogTimeline`，把库存、订单、常用货架、用户和借还源日志投影成统一分页搜索读模型。
 - `拼音字段`：写入或更新时预计算的 `*_pinyin`、`*_pinyin_initials` 字段，用于中文排序和搜索。
 - `短 TTL 列表缓存`：后端 `api_utils.py` 提供的内存缓存，只用于降低第一页无搜索条件列表的重复查询开销。
 - `SSE`：Server-Sent Events。当前系统通过 `/api/events?rooms=...` 建立只读事件流。
@@ -63,16 +65,17 @@
 - `borrower`：借用人。
 - `last_borrower`：最近一次借用该库存的人。
 
-## 扩展导入术语
+## 浏览器插件导入术语
 
-- `batch_id`：扩展导入批次标识。
+- `batch_id`：浏览器插件导入批次标识。
 - `IMPORT_BATCH_READY`：桥接脚本写入页面缓存后发送给页面的消息类型。
-- `suggested_order_type`：扩展根据详情页信息给出的建议类型。
-- `classification_reason`：扩展对类型判断的原因说明。
+- `suggested_order_type`：浏览器插件根据详情页信息给出的建议类型。
+- `classification_reason`：浏览器插件对类型判断的说明。
 - `detail_fetch_status`：详情页抓取状态，例如成功、超时、回退基础信息。
 
 ## 参考代码
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
+- [app/db_bootstrap](https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap)
 - [app/models/consumable_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order.py)
 - [app/models/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory.py)
 - [app/models/reagent_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py)

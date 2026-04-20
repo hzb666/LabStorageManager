@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from fastapi import UploadFile, HTTPException
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import io
 
 from app.core.config import settings, BASE_DIR, UPLOADS_DIR
@@ -14,12 +14,21 @@ from app.core.constants import (
     AVATAR_MAX_WIDTH,
     DEFAULT_IMAGE_MAX_MB,
     DIRECTORY_STORAGE_MAX_MB,
+    IMAGE_MAX_PIXELS,
     IMAGE_QUALITY_DEFAULT,
     IMAGE_QUALITY_MIN,
+    IMAGE_UPLOAD_READ_CHUNK_SIZE,
     TIMESTAMP_FILENAME_FORMAT,
     UPLOAD_FILENAME_UUID_PREFIX_LEN,
 )
 from app.core.time_utils import get_utc_now
+
+IMAGE_OUTPUT_FORMAT = "JPEG"
+IMAGE_OUTPUT_EXTENSION = ".jpg"
+IMAGE_TYPE_ERROR_DETAIL = "Invalid image type. Allowed: JPG, PNG, WebP"
+IMAGE_CONTENT_ERROR_DETAIL = "Invalid image content"
+
+Image.MAX_IMAGE_PIXELS = IMAGE_MAX_PIXELS
 
 
 def _resolve_static_path(file_path: str, required_subdir: str | None = None) -> Path | None:
@@ -82,28 +91,42 @@ def _sanitize_static_relative_path(file_path: str) -> Path | None:
     return Path(*relative_path.parts)
 
 
-def validate_image_type_and_get_bytes(file: UploadFile) -> tuple[bool, bytes]:
+def validate_image_type_and_get_bytes(
+    file: UploadFile,
+    *,
+    max_size_mb: float = DEFAULT_IMAGE_MAX_MB,
+) -> tuple[bool, bytes]:
     if file.content_type not in settings.allowed_image_types:
-        return False, b''
-    
-    # 读取后要把文件指针复位，避免后续保存拿到空内容。
+        return False, b""
+
+    content = read_upload_bytes_limited(file, max_size_mb=max_size_mb)
+    return _header_matches_content_type(file.content_type or "", content[:16]), content
+
+
+def read_upload_bytes_limited(
+    file: UploadFile,
+    *,
+    max_size_mb: float = DEFAULT_IMAGE_MAX_MB,
+) -> bytes:
+    max_size_bytes = int(max_size_mb * 1024 * 1024)
+    chunks: list[bytes] = []
+    total_size = 0
+
     file.file.seek(0)
-    content = file.file.read()
-    file.file.seek(0)
-    
-    header = content[:16]
-    is_valid = False
-    
-    if header.startswith(b'\xff\xd8\xff'):  # JPEG
-        is_valid = file.content_type in ['image/jpeg', 'image/jpg']
-    elif header.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
-        is_valid = file.content_type == 'image/png'
-    elif header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):  # GIF
-        is_valid = file.content_type == 'image/gif'
-    elif header[:4] == b'RIFF' and header[8:12] == b'WEBP':  # WebP
-        is_valid = file.content_type == 'image/webp'
-    
-    return is_valid, content
+    try:
+        while True:
+            remaining = max_size_bytes + 1 - total_size
+            chunk = file.file.read(min(IMAGE_UPLOAD_READ_CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            total_size += len(chunk)
+            if total_size > max_size_bytes:
+                raise _image_size_error(max_size_mb)
+            chunks.append(chunk)
+    finally:
+        file.file.seek(0)
+
+    return b"".join(chunks)
 
 
 def validate_image_size_from_bytes(content: bytes, max_size_mb: float = DEFAULT_IMAGE_MAX_MB) -> bool:
@@ -118,19 +141,8 @@ def validate_image_type(file: UploadFile) -> bool:
     file.file.seek(0)
     header = file.file.read(16)
     file.file.seek(0)
-    
-    is_valid = False
-    
-    if header.startswith(b'\xff\xd8\xff'):  # JPEG
-        is_valid = file.content_type in ['image/jpeg', 'image/jpg']
-    elif header.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
-        is_valid = file.content_type == 'image/png'
-    elif header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):  # GIF
-        is_valid = file.content_type == 'image/gif'
-    elif header[:4] == b'RIFF' and header[8:12] == b'WEBP':  # WebP
-        is_valid = file.content_type == 'image/webp'
-    
-    return is_valid
+
+    return _header_matches_content_type(file.content_type or "", header)
 
 
 def validate_image_size(file: UploadFile, max_size_mb: float = DEFAULT_IMAGE_MAX_MB) -> bool:
@@ -141,6 +153,50 @@ def validate_image_size(file: UploadFile, max_size_mb: float = DEFAULT_IMAGE_MAX
     file.file.seek(0)  
     
     return size <= max_size_bytes
+
+
+def _header_matches_content_type(content_type: str, header: bytes) -> bool:
+    if header.startswith(b"\xff\xd8\xff"):
+        return content_type in {"image/jpeg", "image/jpg"}
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return content_type == "image/png"
+    if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return content_type == "image/webp"
+    return False
+
+
+def _open_verified_image(content: bytes) -> Image.Image:
+    try:
+        with Image.open(io.BytesIO(content)) as probe:
+            probe.verify()
+        image = Image.open(io.BytesIO(content))
+        if image.width * image.height > IMAGE_MAX_PIXELS:
+            image.close()
+            raise HTTPException(status_code=400, detail=IMAGE_CONTENT_ERROR_DETAIL)
+        image.load()
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=IMAGE_CONTENT_ERROR_DETAIL) from exc
+
+    return image
+
+
+def _to_jpeg_ready_image(image: Image.Image) -> Image.Image:
+    if image.mode == "RGB":
+        return image
+    if image.mode in {"RGBA", "LA"}:
+        rgba_image = image.convert("RGBA")
+        background = Image.new("RGB", rgba_image.size, "white")
+        background.paste(rgba_image, mask=rgba_image.getchannel("A"))
+        rgba_image.close()
+        return background
+    return image.convert("RGB")
+
+
+def _image_size_error(max_size_mb: float) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail=f"Image size exceeds {max_size_mb:g}MB limit",
+    )
 
 
 def compress_image(
@@ -252,18 +308,15 @@ def get_directory_storage_info(subdir: str) -> dict:
 
 
 def save_avatar(file: UploadFile, user_id: int) -> str:
-    is_valid, file_content = validate_image_type_and_get_bytes(file)
+    is_valid, file_content = validate_image_type_and_get_bytes(
+        file,
+        max_size_mb=AVATAR_MAX_SIZE_MB,
+    )
 
     if not is_valid:
         raise HTTPException(
             status_code=400,
-            detail="Invalid image type. Allowed: JPG, PNG, GIF, WebP"
-        )
-
-    if not validate_image_size_from_bytes(file_content, AVATAR_MAX_SIZE_MB):
-        raise HTTPException(
-            status_code=400,
-            detail="Image size exceeds 5MB limit"
+            detail=IMAGE_TYPE_ERROR_DETAIL,
         )
 
     avatars_dir = BASE_DIR / "static" / "avatars"
@@ -273,37 +326,54 @@ def save_avatar(file: UploadFile, user_id: int) -> str:
     unique_id = str(uuid.uuid4())[:UPLOAD_FILENAME_UUID_PREFIX_LEN]
     filename = f"avatar_{user_id}_{timestamp}_{unique_id}.jpg"
 
-    image = Image.open(io.BytesIO(file_content))
-    compressed_image = compress_image(image, max_size_kb=settings.max_image_size_kb, max_width=AVATAR_MAX_WIDTH, max_height=AVATAR_MAX_HEIGHT)
-
+    image = _open_verified_image(file_content)
+    compressed_image = compress_image(
+        image,
+        max_size_kb=settings.max_image_size_kb,
+        max_width=AVATAR_MAX_WIDTH,
+        max_height=AVATAR_MAX_HEIGHT,
+    )
     save_path = avatars_dir / filename
-    compressed_image.save(save_path, format="JPEG", quality=IMAGE_QUALITY_DEFAULT, optimize=True)
+    compressed_image.save(
+        save_path,
+        format=IMAGE_OUTPUT_FORMAT,
+        quality=IMAGE_QUALITY_DEFAULT,
+        optimize=True,
+    )
+    image.close()
+    compressed_image.close()
 
     return f"/static/avatars/{filename}"
 
 
 def save_announcement_image(file: UploadFile) -> str:
-    is_valid, content = validate_image_type_and_get_bytes(file)
+    is_valid, content = validate_image_type_and_get_bytes(
+        file,
+        max_size_mb=ANNOUNCEMENT_IMAGE_MAX_MB,
+    )
     if not is_valid:
         raise HTTPException(
             status_code=400,
-            detail="Invalid image type. Allowed: JPG, PNG, GIF, WebP"
+            detail=IMAGE_TYPE_ERROR_DETAIL,
         )
-        
-    if not validate_image_size_from_bytes(content, max_size_mb=ANNOUNCEMENT_IMAGE_MAX_MB):
-        raise HTTPException(
-            status_code=400,
-            detail="Image size exceeds 5MB limit"
-        )
-        
-    file_ext = Path(file.filename).suffix.lower() if file.filename else ".jpg"
+
+    image = _open_verified_image(content)
     unique_id = str(uuid.uuid4())
-    filename = f"{unique_id}{file_ext}"
+    filename = f"{unique_id}{IMAGE_OUTPUT_EXTENSION}"
     
     announcement_dir = BASE_DIR / "static" / "announcements"
     announcement_dir.mkdir(parents=True, exist_ok=True)
     
     file_path = announcement_dir / filename
-    file_path.write_bytes(content)
+    jpeg_image = _to_jpeg_ready_image(image)
+    jpeg_image.save(
+        file_path,
+        format=IMAGE_OUTPUT_FORMAT,
+        quality=IMAGE_QUALITY_DEFAULT,
+        optimize=True,
+    )
+    if jpeg_image is not image:
+        jpeg_image.close()
+    image.close()
     
     return f"/static/announcements/{filename}"

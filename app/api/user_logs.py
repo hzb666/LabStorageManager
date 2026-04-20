@@ -274,6 +274,48 @@ def _append_candidate(
     )
 
 
+ORDER_EXPORT_SCOPE_LABELS: dict[str, str] = {
+    "reagent_orders": "试剂订单",
+    "consumable_orders": "耗材订单",
+}
+
+
+def _read_export_count(snapshot: dict[str, object]) -> object:
+    return snapshot.get("count", snapshot.get("ct", 0)) or 0
+
+
+def _build_order_export_row(
+    *,
+    created_at: str,
+    export_scope: str,
+    log_id: int | None,
+    actor_user_id: int | None,
+    action_value: str,
+    snapshot: dict[str, object],
+    is_cli: bool | None = None,
+) -> dict[str, object]:
+    export_label = ORDER_EXPORT_SCOPE_LABELS.get(export_scope, "订单")
+    export_count = _read_export_count(snapshot)
+    full_data: dict[str, object] = {
+        "id": log_id,
+        "actor_user_id": actor_user_id,
+        "action": action_value,
+        "export_scope": export_scope,
+        "count": export_count,
+        "snapshot": snapshot,
+        "created_at": created_at,
+    }
+    if is_cli is not None:
+        full_data["is_cli"] = is_cli
+
+    return {
+        "time": created_at,
+        "type": "export",
+        "detail": f"导出{export_label} {export_count} 条",
+        "full_data": full_data,
+    }
+
+
 LOG_TIMELINE_DETAIL_KEYWORDS_BY_CATEGORY: dict[str, tuple[str, ...]] = {
     "reagent_order": (
         "试剂订单",
@@ -411,6 +453,16 @@ def _append_reagent_order_candidates(context: LogsCollectContext, candidates: li
             detail_prefix=detail_prefix,
             action_value=action_value,
         ):
+            if action_value == "export":
+                return _build_order_export_row(
+                    created_at=created_at,
+                    export_scope="reagent_orders",
+                    log_id=log.id,
+                    actor_user_id=log.actor_user_id,
+                    action_value=action_value,
+                    snapshot=snapshot,
+                )
+
             before_snapshot = snapshot.get("before")
             after_snapshot = snapshot.get("after")
             display_snapshot = after_snapshot or before_snapshot or snapshot
@@ -488,6 +540,16 @@ def _append_consumable_order_candidates(context: LogsCollectContext, candidates:
             detail_prefix=detail_prefix,
             action_value=action_value,
         ):
+            if action_value == "export":
+                return _build_order_export_row(
+                    created_at=created_at,
+                    export_scope="consumable_orders",
+                    log_id=log.id,
+                    actor_user_id=log.actor_user_id,
+                    action_value=action_value,
+                    snapshot=snapshot,
+                )
+
             before_snapshot = snapshot.get("before")
             after_snapshot = snapshot.get("after")
             return {
@@ -1440,6 +1502,17 @@ def _render_reagent_timeline_row(
     ):
         detail_prefix = f"{actor_name or '管理员'}{action_label}"
 
+    if action_value == "export":
+        return _build_order_export_row(
+            created_at=created_at,
+            export_scope="reagent_orders",
+            log_id=log.id,
+            actor_user_id=log.actor_user_id,
+            action_value=action_value,
+            snapshot=snapshot,
+            is_cli=timeline_row.is_cli,
+        )
+
     before_snapshot = snapshot.get("before")
     after_snapshot = snapshot.get("after")
     display_snapshot = after_snapshot or before_snapshot or snapshot
@@ -1498,6 +1571,17 @@ def _render_consumable_timeline_row(
         and log.actor_user_id != user_id
     ):
         detail_prefix = f"{actor_name or '管理员'}{action_label}"
+
+    if action_value == "export":
+        return _build_order_export_row(
+            created_at=created_at,
+            export_scope="consumable_orders",
+            log_id=log.id,
+            actor_user_id=log.actor_user_id,
+            action_value=action_value,
+            snapshot=snapshot,
+            is_cli=timeline_row.is_cli,
+        )
 
     before_snapshot = snapshot.get("before")
     after_snapshot = snapshot.get("after")

@@ -37,6 +37,13 @@ const COMMON_SHELF_ACTION_LABELS: Record<string, string> = {
   export: '导出',
 }
 
+const EXPORT_SCOPE_LABELS: Record<string, string> = {
+  inventory: '库存',
+  common_shelf: '常用货架',
+  reagent_orders: '试剂订单',
+  consumable_orders: '耗材订单',
+}
+
 function formatAction(value: unknown, labels: Record<string, string>): string {
   const action = formatText(value, '')
   return labels[action] ?? action
@@ -279,10 +286,11 @@ function buildBorrowSections(fullData: LogRecord): DetailSection[] {
 }
 
 function buildExportSections(fullData: LogRecord): DetailSection[] {
+  const exportScope = formatText(fullData.export_scope, '')
   return [
     section('导出信息', [
       field('操作', '导出'),
-      field('导出对象', fullData.export_scope === 'common_shelf' ? '常用货架' : '库存'),
+      field('导出对象', EXPORT_SCOPE_LABELS[exportScope] ?? exportScope),
       field('导出条数', fullData.count),
       dateField('导出时间', fullData.created_at),
     ]),

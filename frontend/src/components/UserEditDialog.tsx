@@ -74,7 +74,6 @@ const ALLOWED_TYPES = [
   "image/jpg",
   "image/png",
   "image/webp",
-  "image/gif",
 ];
 const AUTH_LOCAL_STORAGE_KEYS = ["auth-storage"];
 const MAX_SIZE_MB = 5;
@@ -141,7 +140,7 @@ function resetAvatarInput() {
 // 在上传前校验头像格式和大小，并返回用户可读的错误文案。
 function validateAvatarFile(file: File) {
   if (!ALLOWED_TYPES.includes(file.type)) {
-    return "仅支持 JPG、PNG、GIF、WebP 格式的图片";
+    return "仅支持 JPG、PNG、WebP 格式的图片";
   }
 
   if (file.size > MAX_SIZE_MB * 1024 * 1024) {

@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: LabStorageManager
-  text: 全生命周期资产管理系统
-  tagline: 可追溯、易使用、强协同
+  text: 智能化全生命周期资产管理系统
+  tagline: 可追溯、高智能、强协同
   actions:
     - theme: brand
       text: 使用者指南
@@ -16,21 +16,24 @@ hero:
       text: 系统架构
       link: /overview/overview
     - theme: alt
+      text: 自动化边界
+      link: /overview/api-boundary
+    - theme: alt
       text: 开发入门
       link: /dev-guide/zero-to-hero
     - theme: alt
-      text: 更新日志
+      text: 版本记录
       link: /changelog
 
 features:
-  - title: 试剂与耗材双流程
-    details: 试剂支持 CAS、到货与入库链路；耗材走更轻量的采购与完成流程。
-  - title: 库存借还可追溯
-    details: 支持库存查询、借用、归还、待入库管理和用户操作留痕。
-  - title: 常用货架与批量导入
-    details: 适合公用试剂沉淀、集中补录库存，以及共享场景下的快速查找。
-  - title: 公告与设备管理
-    details: 提供公告发布、未读提醒、设备会话管理和多终端使用支持。
+  - title: Agent 与 CLI 受控入口
+    details: Agent skill、脚本和运维任务通过 CLI 命令面访问后端，不直连数据库。
+  - title: MCP 与智能机器人
+    details: MCP 调用 CLI 子进程，企业微信智能机器人和微信客服复用同一套查询与确认流程。
+  - title: 浏览器插件导入
+    details: 插件采集外部购物车，导入页逐项确认后调用标准订单接口。
+  - title: 试剂、耗材与库存闭环
+    details: 申购、审批、到货、入库、借用、归还和操作日志都回到统一业务 API。
 ---
 
 ## 系统核心能力
@@ -40,7 +43,8 @@ features:
 - 库存管理：支持搜索、借用、归还、手动入库、导出和位置维护。
 - 常用货架：沉淀公用试剂，减少重复采购。
 - 会话与公告：支持设备管理、公告通知和管理员发布。
-- 扩展桥接：支持浏览器扩展把外部购物车导入系统。
+- 自动化入口：支持 CLI、Agent skill、MCP、企业微信智能机器人和微信客服。
+- 浏览器插件：支持把外部购物车导入系统。
 
 ## 角色业务
 
@@ -52,11 +56,11 @@ features:
 
 - 使用者先看：[系统总览](/user-guide/overview)、[使用入门](/user-guide/quick-start)、[仪表盘](/user-guide/dashboard)。
 - 日常使用：[角色与导航](/user-guide/roles-and-navigation)、[订单、采购与入库](/user-guide/orders-and-procurement)、[库存与借还](/user-guide/inventory-and-borrowing)。
-- 账户与支持：[账户、公告与支持](/user-guide/account-and-support)、[管理员指南](/user-guide/admin-guide)、[常见问题](/user-guide/faq)。
+- 账户与支持：[账户、公告与支持](/user-guide/account-and-support)、[管理员指南](/user-guide/admin-guide)、[使用排障](/user-guide/faq)。
 - 新成员接手：[项目概览](/overview/overview)、[快速部署](/overview/quick-start)、[从零到上手](/dev-guide/zero-to-hero)。
 - 理解系统设计：[系统总览](/overview/system-overview)、[目录结构](/overview/directory-structure)、[技术栈](/overview/tech-stack)、[数据模型](/database/data-model)。
-- 二次开发重点：[API 参考](/backend/api-reference)、[API 边界与导航](/overview/api-boundary)、[后端服务地图](/backend/service-map)、[前端 Hooks](/frontend/hooks)、[前端 Lib 工具箱](/frontend/lib-overview)。
-- 部署与维护：[部署指南](/dev-guide/deployment)、[Docker 与 Nginx](/dev-guide/docker-nginx)、[更新日志](/changelog)。
+- 二次开发重点：[API 参考](/backend/api-reference)、[API 边界与导航](/overview/api-boundary)、[后端服务地图](/backend/service-map)、[CLI、MCP 与机器人入口](/dev-guide/key-files)、[前端 Hooks](/frontend/hooks)、[前端 Lib 工具箱](/frontend/lib-overview)。
+- 部署与维护：[部署指南](/dev-guide/deployment)、[Docker 与 Nginx](/dev-guide/docker-nginx)、[版本记录](/changelog)。
 
 ## 开源与版权
 

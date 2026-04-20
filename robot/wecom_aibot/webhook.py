@@ -33,7 +33,7 @@ def get_store() -> ProcessedMessageStore:
 @lru_cache
 def get_conversation_store() -> WecomConversationStore:
     settings = get_settings()
-    return WecomConversationStore(settings.state_db)
+    return WecomConversationStore(settings.state_db, **settings.conversation_store_options())
 
 
 @lru_cache
@@ -65,7 +65,9 @@ def get_handler() -> WecomAibotHandler:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    get_settings().require_webhook()
+    settings = get_settings()
+    settings.require_webhook()
+    settings.require_token_storage()
     get_store().init()
     get_conversation_store().init()
     yield

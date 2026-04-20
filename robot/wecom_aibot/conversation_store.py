@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from robot.wecom_aibot.token_crypto import TokenCipher, TokenCryptoError, is_encrypted_token
+
 CONTEXT_MAX_TURNS = 5
 CONTEXT_TTL_HOURS = 2
 CONTEXT_TEXT_LIMIT = 1200
@@ -17,8 +19,18 @@ CONTEXT_TEXT_LIMIT = 1200
 class WecomConversationStore:
     """Stores user bindings and pending confirmation state."""
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(
+        self,
+        database_path: Path,
+        *,
+        token_encryption_key: str = "",
+        allow_plaintext_tokens: bool = True,
+    ) -> None:
         self.database_path = database_path
+        self._token_cipher = (
+            TokenCipher(token_encryption_key) if token_encryption_key.strip() else None
+        )
+        self._allow_plaintext_tokens = allow_plaintext_tokens
 
     def init(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +87,10 @@ class WecomConversationStore:
         if row is None:
             return None
         user = json.loads(row[1]) if row[1] else {}
-        return {"username": row[0], "user": user, "access_token": row[2]}
+        stored_token = str(row[2])
+        access_token = self._decode_access_token(stored_token)
+        self._migrate_plaintext_token(wecom_userid, stored_token, access_token)
+        return {"username": row[0], "user": user, "access_token": access_token}
 
     def save_binding(
         self,
@@ -86,6 +101,7 @@ class WecomConversationStore:
         user: dict[str, Any] | None = None,
     ) -> None:
         user_json = json.dumps(user or {}, ensure_ascii=False, separators=(",", ":"))
+        stored_token = self._encode_access_token(access_token)
         with closing(self._connect()) as connection:
             with connection:
                 connection.execute(
@@ -99,7 +115,7 @@ class WecomConversationStore:
                       lsm_access_token = excluded.lsm_access_token,
                       updated_at = CURRENT_TIMESTAMP
                     """,
-                    (wecom_userid, username, user_json, access_token),
+                    (wecom_userid, username, user_json, stored_token),
                 )
 
     def delete_binding(self, wecom_userid: str) -> None:
@@ -236,6 +252,42 @@ class WecomConversationStore:
         connection = sqlite3.connect(self.database_path)
         connection.execute("PRAGMA busy_timeout=1000;")
         return connection
+
+    def _encode_access_token(self, access_token: str) -> str:
+        if self._token_cipher is not None:
+            return self._token_cipher.encrypt(access_token)
+        if self._allow_plaintext_tokens:
+            return access_token
+        raise TokenCryptoError("Plaintext LSM access token storage is disabled")
+
+    def _decode_access_token(self, stored_token: str) -> str:
+        if is_encrypted_token(stored_token):
+            if self._token_cipher is None:
+                raise TokenCryptoError("Missing token encryption key for stored LSM token")
+            return self._token_cipher.decrypt(stored_token)
+        if self._token_cipher is not None or self._allow_plaintext_tokens:
+            return stored_token
+        raise TokenCryptoError("Plaintext LSM access token storage is disabled")
+
+    def _migrate_plaintext_token(
+        self,
+        wecom_userid: str,
+        stored_token: str,
+        access_token: str,
+    ) -> None:
+        if self._token_cipher is None or is_encrypted_token(stored_token):
+            return
+        encrypted_token = self._encode_access_token(access_token)
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    UPDATE wecom_aibot_user_binding
+                    SET lsm_access_token = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE wecom_userid = ? AND lsm_access_token = ?
+                    """,
+                    (encrypted_token, wecom_userid, stored_token),
+                )
 
 
 def _context_expired(updated_at: str) -> bool:

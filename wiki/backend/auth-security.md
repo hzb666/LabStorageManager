@@ -11,7 +11,7 @@
 - 浏览器交互使用 `HttpOnly` Cookie。
 - 调试或脚本可以直接携带 `Authorization: Bearer ...`。
 
-令牌解析依赖 `settings.algorithm`。生产环境必须使用 `RS256` 并加载 `.keys/private.pem` 与 `.keys/public.pem`；开发环境可以退回到 `HS256`，并在缺失密钥时生成短期 secret。
+令牌解析依赖 `settings.algorithm`。生产环境必须使用 `RS256` 并加载 RSA 私钥与公钥；开发环境可以退回到 `HS256`，并在缺失密钥时生成短期 secret。
 
 ## JWT 与会话生命周期
 
@@ -88,7 +88,7 @@
 
 ## 验证建议
 
-- 删除 `.keys/*` 后启动开发环境，确认会自动生成临时密钥。
+- 清空开发密钥后启动开发环境，确认会自动生成临时密钥。
 - 在生产模式下移除密钥，确认应用无法正常启动。
 - 连续失败登录同一 IP，确认会触发 429；关闭 Redis 后确认开发环境可回退。
 - 设定 `max_devices_per_user=1` 后连续登录，确认第二次会被拒绝。

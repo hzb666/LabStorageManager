@@ -1,6 +1,6 @@
 # 后端服务地图
 
-后端代码按“HTTP 入口 -> 业务服务 -> 数据模型 -> 运行时基础设施”分层组织。`app/api/*.py` 负责请求入口和权限边界，`app/services/` 承担可复用业务逻辑，`app/models/` 定义实体与 DTO，`app/core/` 则集中认证、配置、Redis 与运行时常量。本页用于快速定位代码归属和新增逻辑的推荐落点。
+后端代码按“HTTP 入口 -> 业务服务 -> 数据模型 -> 运行时基础设施”分层组织。`app/api/*.py` 负责请求入口和权限边界，`app/services/` 承担可复用业务逻辑，`app/models/` 定义实体与 DTO，`app/core/` 集中认证、配置、Redis 与运行时常量，`app/db_bootstrap/` 承担 SQLite 启动期准备。本页用于快速定位代码归属和新增逻辑的推荐落点。
 
 ## 分层总览
 
@@ -10,6 +10,7 @@ flowchart TD
     B --> C["app/services"]
     B --> D["app/models"]
     B --> E["app/core"]
+    E --> G["app/db_bootstrap"]
     C --> D
     C --> E
     E --> F["SQLite + Redis"]
@@ -38,6 +39,7 @@ flowchart TD
 | `consumable_orders.py` | 耗材订单 CRUD 与状态流转 |
 | `announcements.py` | 公告管理与图片上传 |
 | `cart_sync.py` | 购物车匹配与导入 |
+| `chem.py` | 结构缓存、PubChem 解析和子结构检索 |
 | `events.py` | SSE 长连接入口 |
 
 ## 认证、配置与运行时 `app/core/`
@@ -73,7 +75,6 @@ flowchart TD
 | `spec_utils.py` | 规格字符串解析与格式化 |
 | `shelf_utils.py` | 货架位置标准化 |
 | `pinyin_utils.py` | 拼音与首字母预计算 |
-| `common_name_utils.py` | 名称归一化辅助 |
 
 ### 库存创建与编号
 
@@ -104,6 +105,28 @@ flowchart TD
 | `api_utils.py` | API 层缓存清理和通用辅助 |
 | `archive_scheduler.py` | 后端内置日志归档调度，支持固定时间、每周和周期模式 |
 
+### 化学结构
+
+| 文件 | 作用 |
+| --- | --- |
+| `pubchem_resolver.py` | PubChem CAS 与 CID 解析 |
+| `structure_cache_repo.py` | 结构缓存读写 |
+| `structure_cache_workflow.py` | 自动解析、候选确认和人工结构写入 |
+| `structure_index.py` | RDKit 子结构索引 |
+| `structure_inventory_summary.py` | 结构检索结果的库存汇总 |
+| `structure_normalizer.py` | MolBlock 规范化 |
+
+### 操作日志时间线
+
+| 文件 | 作用 |
+| --- | --- |
+| `order_operation_logger.py` | 试剂与耗材订单操作日志 |
+| `inventory_operation_logger.py` | 库存操作日志 |
+| `common_shelf_operation_logger.py` | 常用货架操作日志 |
+| `user_operation_logger.py` | 用户操作日志 |
+| `log_timeline_projection.py` | 源日志投影到时间线读模型 |
+| `log_timeline_detail_text.py` | 日志详情搜索文本构造 |
+
 ## 实时能力
 
 | 文件 | 作用 |
@@ -111,11 +134,20 @@ flowchart TD
 | `sse_manager.py` | 本地 SSE 客户端管理、序号、心跳 |
 | `sse_redis.py` | 跨实例 pub/sub |
 
+## 数据库启动层 `app/db_bootstrap/`
+
+| 文件 | 作用 |
+| --- | --- |
+| `schema_upgrades.py` | 兼容字段、常用货架分组和结构缓存字段补齐 |
+| `sqlite_indexes.py` | SQLite 复合索引和统计信息刷新 |
+| `sqlite_fts.py` | FTS 表、触发器、重建和一致性检查 |
+| `schema_consistency.py` | SQLModel metadata 与 SQLite schema 对齐检查 |
+
 ## 数据模型层 `app/models/`
 
 模型层通常分成两类：
 
-- 表模型：`User`、`Inventory`、`ReagentOrder`、`ConsumableOrder`、`Announcement`、`UserSession`、`BorrowLog`
+- 表模型：`User`、`Inventory`、`CommonShelf`、`CommonShelfGroup`、`ReagentOrder`、`ConsumableOrder`、`Announcement`、`UserSession`、`BorrowLog`、`CompoundStructureCache`、`LogTimeline`
 - DTO / Response：`Create`、`Update`、`Response` 等输入输出模型
 
 实体关系和字段职责可继续对照 [数据模型](/database/data-model) 与 [字段参考](/database/field-reference)。
@@ -168,5 +200,6 @@ flowchart TD
 - [app/api](https://github.com/hzb666/LabStorageManager/tree/main/app/api)
 - [app/core/auth.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py)
 - [app/core/config.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/config.py)
+- [app/db_bootstrap](https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap)
 - [app/models](https://github.com/hzb666/LabStorageManager/tree/main/app/models)
 - [app/services](https://github.com/hzb666/LabStorageManager/tree/main/app/services)

@@ -1,13 +1,14 @@
 # API 边界与导航
 
-本页说明系统对外入口的边界，以及前端、扩展、代理和后端之间的职责分工。具体接口路径仍以 [API 参考](/backend/api-reference) 为准。
+本页说明系统对外入口的边界，以及前端、浏览器插件、代理和后端之间的职责分工。具体接口路径仍以 [API 参考](/backend/api-reference) 为准。
 
 ## 调用方
 
-当前调用后端的主体有五类：
+当前调用后端的主体有六类：
 
 - React 前端，通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" /> 访问后端。
-- 浏览器扩展，通过桥接脚本把外部购物车批次送到导入页，再由前端调用后端。
+- 浏览器插件，通过桥接脚本把外部购物车批次送到导入页，再由前端调用后端。
+- Agent skill，通过 CLI 命令面访问后端 API。
 - CLI，通过 `python -m lsm_cli` 访问后端 API。
 - MCP，通过 `lsm_mcp` 调用 CLI 子进程，不直接访问数据库。
 - 企业微信智能机器人和微信客服，通过 MCP、CLI 与后端 API 完成查询和确认后的写操作。
@@ -45,21 +46,21 @@
 
 如果需要继续定位页面入口、状态逻辑和工具函数，可分别查看 [应用骨架](/frontend/app-shell)、[前端 Hooks](/frontend/hooks) 和 [前端 Lib 工具箱](/frontend/lib-overview)。
 
-## 扩展边界
+## 浏览器插件边界
 
-扩展和后端不是直连强耦合，而是通过导入页完成桥接：
+浏览器插件和后端不是直连强耦合，而是通过导入页完成桥接：
 
-1. 扩展从外部采购平台采集数据。
-2. 扩展把批次写入 `chrome.storage.local`。
+1. 插件从外部采购平台采集数据。
+2. 插件把批次写入 `chrome.storage.local`。
 3. `import-bridge.js` 在 `/cart-import` 页面把批次同步到页面环境。
 4. 前端导入页逐条调用标准试剂订单或耗材订单创建接口。
 5. `/api/cart-sync` 用于匹配分析，导入落库统一走标准订单创建接口。
 
-因此扩展更像外部采集器，不是系统自己的第二前端。
+因此浏览器插件是外部采集器，不是系统的第二套前端。
 
 ## CLI、MCP 与机器人边界
 
-`lsm_cli/` 是脚本化入口，只暴露明确列入 README 的命令。`lsm_mcp/` 在 HTTP 层提供 MCP 工具，但工具实现仍调用 CLI 子进程，并继承 CLI 的命令白名单和退出码契约。
+Agent skill 和脚本应统一走 `lsm_cli/`。`lsm_cli/` 只暴露明确列入 README 的命令。`lsm_mcp/` 在 HTTP 层提供 MCP 工具，但工具实现仍调用 CLI 子进程，并继承 CLI 的命令白名单和退出码契约。
 
 企业微信智能机器人和微信客服入口位于 `robot/`。它们不直接访问数据库，也不生成任意命令；查询和写操作都要经过 MCP、CLI 和后端 API。借用和归还等写操作必须在候选明确后等待用户确认。
 
@@ -68,11 +69,11 @@
 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" /> 把前后端统一到一个入口：
 
 - `/api/` 反代到后端。
-- `/static/` 透传到后端静态资源。
+- `/static/` 透传到后端。
 - `/docs`、`/redoc` 和 `/openapi.json` 单独透传。
 - `/` 落到前端产物并回退到 `index.html`。
 
-部署层是统一入口，但安全头、CSRF、CORS 和静态缓存仍由 FastAPI 主导。
+部署层是统一入口，但安全头、CSRF、CORS 和 `/static/` 缓存仍由 FastAPI 主导。
 
 ## 新增接口前检查清单
 

@@ -755,7 +755,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /File is empty/i, message: '文件为空' },
   { pattern: /Invalid XLSX file format/i, message: '无效的 XLSX 文件格式' },
   { pattern: /Invalid XLS file format/i, message: '无效的 XLS 文件格式' },
-  { pattern: /Invalid image type/i, message: '不支持该图像格式，仅支持 JPG、PNG、GIF、WebP' },
+  { pattern: /Invalid image type/i, message: '不支持该图像格式，仅支持 JPG、PNG、WebP' },
   { pattern: /Image size exceeds/i, message: '图片大小超过限制' },
   { pattern: /Invalid filename/i, message: '文件名无效' },
   { pattern: /Image not found/i, message: '图片未找到' },

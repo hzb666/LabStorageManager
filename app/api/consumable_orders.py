@@ -59,6 +59,7 @@ from app.services.order_operation_logger import (
     log_consumable_order_arrival_complete,
     log_consumable_order_create,
     log_consumable_order_delete,
+    log_consumable_order_export,
     log_consumable_order_reject,
     log_consumable_order_update,
 )
@@ -78,6 +79,19 @@ LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
 DELETE_ORDER_FORBIDDEN_DETAIL = "Only the order applicant or admin can delete this order"
 DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL = "Public account cannot delete orders"
+DELETE_APPROVED_ORDER_FORBIDDEN_DETAIL = "Approved or completed consumable orders cannot be deleted"
+CONSUMABLE_ORDER_DELETE_LOCKED_STATUSES = frozenset(
+    {
+        ConsumableOrderStatus.APPROVED,
+        ConsumableOrderStatus.COMPLETED,
+    }
+)
+CONSUMABLE_ORDER_REJECTABLE_STATUSES = frozenset(
+    {
+        ConsumableOrderStatus.PENDING,
+        ConsumableOrderStatus.APPROVED,
+    }
+)
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
 VALID_CONSUMABLE_SORT_FIELDS = {
@@ -154,20 +168,46 @@ def _delete_consumable_order_with_permission(
             detail=DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL,
         )
 
-    delete_stmt = delete(ConsumableOrder).where(ConsumableOrder.id == order_id)
+    delete_stmt = (
+        delete(ConsumableOrder)
+        .where(ConsumableOrder.id == order_id)
+        .where(~ConsumableOrder.status.in_(CONSUMABLE_ORDER_DELETE_LOCKED_STATUSES))
+    )
     if current_user.role != UserRole.ADMIN:
         delete_stmt = delete_stmt.where(ConsumableOrder.applicant_id == current_user.id)
     deleted_item = exec_delete_returning_first(db, delete_stmt, ConsumableOrder)
     if deleted_item is not None:
         return deleted_item
 
-    order_exists = db.exec(select(ConsumableOrder.id).where(ConsumableOrder.id == order_id)).first()
-    if order_exists is None:
+    existing_order = get_consumable_order_by_id(db, order_id)
+    if existing_order is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+    if existing_order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=DELETE_ORDER_FORBIDDEN_DETAIL,
+        )
+    _ensure_consumable_order_deletable(existing_order)
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=DELETE_ORDER_FORBIDDEN_DETAIL,
     )
+
+
+def _ensure_consumable_order_deletable(order: ConsumableOrder) -> None:
+    if order.status in CONSUMABLE_ORDER_DELETE_LOCKED_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=DELETE_APPROVED_ORDER_FORBIDDEN_DETAIL,
+        )
+
+
+def _ensure_consumable_order_rejectable(order: ConsumableOrder) -> None:
+    if order.status not in CONSUMABLE_ORDER_REJECTABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot reject order with status: {order.status}",
+        )
 
 
 def _add_specification(item_dict: dict) -> dict:
@@ -581,7 +621,9 @@ def list_consumable_orders(
 
 @router.get("/export", dependencies=[Depends(require_admin)])
 def export_consumable_orders(
+    request: Request,
     db: DBSession,
+    current_user: CurrentUser,
 ):
     # Export consumable orders as a downloadable XLSX file.
     from app.services.xlsx_export import export_consumable_orders_xlsx
@@ -593,7 +635,15 @@ def export_consumable_orders(
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    return export_consumable_orders_xlsx(orders, all_users_map)
+    response = export_consumable_orders_xlsx(orders, all_users_map)
+    log_consumable_order_export(
+        db,
+        exported_count=len(orders),
+        actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
+    )
+    db.commit()
+    return response
 
 
 @router.get("/{order_id}", response_model=ConsumableOrderResponse, dependencies=[Depends(get_current_user)])
@@ -754,6 +804,7 @@ async def reject_consumable_order(
             detail=ORDER_NOT_FOUND
         )
     
+    _ensure_consumable_order_rejectable(order)
     before_order = ConsumableOrder.model_validate(order)
     order.status = ConsumableOrderStatus.REJECTED
     log_consumable_order_reject(

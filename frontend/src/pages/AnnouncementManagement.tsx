@@ -43,6 +43,7 @@ type AnnouncementDialogMode = 'create' | 'edit' | 'delete'
 type VisibilityFilter = 'all' | 'visible' | 'hidden'
 // `all` 表示不过滤，`pinned / unpinned` 分别映射 `is_pinned` 的两种状态。
 type PinnedFilter = 'all' | 'pinned' | 'unpinned'
+const ANNOUNCEMENT_IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp'
 
 // 创建和编辑共用这份本地表单草稿，也是 `create / update` 提交时使用的数据形状。
 interface AnnouncementFormState {
@@ -591,7 +592,7 @@ function AnnouncementImageUploader({
       </div>
       <input
         type="file"
-        accept="image/*"
+        accept={ANNOUNCEMENT_IMAGE_ACCEPT}
         onChange={(event) => void onUpload(event)}
         disabled={uploading}
         className="hidden"
@@ -650,7 +651,7 @@ function AnnouncementFormFields({
           <AnnouncementImageUploader
             {...upload}
           />
-          <p className="text-sm text-muted-foreground">支持 jpg, png, gif, webp 格式，最大 5MB</p>
+          <p className="text-sm text-muted-foreground">支持 jpg, png, webp 格式，最大 5MB</p>
         </div>
       </div>
     </div>

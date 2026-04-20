@@ -81,7 +81,7 @@ export default defineConfig({
           { text: "库存、借还与常用货架", link: "/user-guide/inventory-and-borrowing" },
           { text: "账户、公告与使用支持", link: "/user-guide/account-and-support" },
           { text: "管理员指南", link: "/user-guide/admin-guide" },
-          { text: "常见情况说明", link: "/user-guide/faq" },
+          { text: "使用排障", link: "/user-guide/faq" },
         ],
       },
       {
@@ -140,7 +140,7 @@ export default defineConfig({
           { text: "关键文件索引", link: "/dev-guide/key-files" },
           { text: "开发、部署与代理", link: "/dev-guide/deployment" },
           { text: "运维与排障", link: "/dev-guide/docker-nginx" },
-          { text: "购物车同步扩展", link: "/dev-guide/cart-sync" },
+          { text: "浏览器插件购物车同步", link: "/dev-guide/cart-sync" },
           { text: "术语表", link: "/dev-guide/glossary" },
         ],
       },

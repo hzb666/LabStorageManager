@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 import requests
 
 from lsm_cli.config import DEFAULT_BASE_URL, load_config
+
+CLI_TOKEN_ENV = "LSM_CLI_TOKEN"
 
 
 class CLIRequestError(Exception):
@@ -75,13 +78,21 @@ class APIClient:
         base_url: str | None = None,
         token: str | None = None,
         timeout: float = 5.0,
+        use_env_token: bool = True,
     ) -> None:
         config = load_config()
         # `--token` 和 `--base-url` 应能覆盖本地配置，方便 agent 在单次调用里切换目标。
         resolved_base_url = base_url or str(config.get("base_url") or DEFAULT_BASE_URL)
         self.base_url = resolved_base_url.rstrip("/")
         self.timeout = timeout
-        self.token = token or config.get("access_token")
+        env_token = get_env_token() if use_env_token else ""
+        config_token = config.get("access_token")
+        self.token = token or env_token or config_token
+        self.token_source = _resolve_token_source(
+            argument_token=token,
+            env_token=env_token,
+            config_token=config_token,
+        )
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -128,3 +139,22 @@ class APIClient:
             status_code=response.status_code,
             payload=payload,
         )
+
+
+def get_env_token() -> str:
+    return os.getenv(CLI_TOKEN_ENV, "").strip()
+
+
+def _resolve_token_source(
+    *,
+    argument_token: str | None,
+    env_token: str,
+    config_token: Any,
+) -> str:
+    if argument_token:
+        return "argument"
+    if env_token:
+        return "environment"
+    if config_token:
+        return "config"
+    return "none"

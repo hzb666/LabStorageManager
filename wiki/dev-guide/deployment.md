@@ -6,13 +6,25 @@
 
 ### 配置准备
 
-将 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/.env.example" /> 复制为 `.env`，至少填写：
+以 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/.env.example" /> 为模板准备本地运行配置，至少填写：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+非 PowerShell 环境可使用：
+
+```bash
+cp .env.example .env
+```
 
 - `DEFAULT_ADMIN_PASSWORD`
 - `ENV`
 - `CORS_ORIGINS`
+- `DATABASE_URL`
+- `QUERY_LOG_DIR`
 
-如果使用 `RS256`，还需要准备 `.keys/private.pem` 与 `.keys/public.pem`；若开发环境暂时改用 `HS256`，必须同时提供高熵 `SECRET_KEY`。
+如果使用 `RS256`，还需要准备 RSA 私钥与公钥；若开发环境暂时改用 `HS256`，必须同时提供高熵 `SECRET_KEY`。
 
 Redis 仅监听 `127.0.0.1` 或 Compose 内网时，`REDIS_PASSWORD` 可以留空；Redis 对外监听或跨机器访问时必须设置强密码。
 
@@ -23,13 +35,13 @@ poetry install
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-使用 pip 部署时，应安装本地生成的生产依赖文件，而不是对仓库根目录执行 `pip install .`：
+使用虚拟环境部署时，应按 Poetry 依赖清单安装运行依赖：
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install --only-binary=:all: -r requirements.txt
+poetry install --without dev,scripts --no-root
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -51,7 +63,9 @@ npm ci
 npm run build
 ```
 
-将 `frontend/dist` 放到 Nginx 站点根目录。后端代码、`app/`、`static/`、`.keys/`、数据库文件和运行依赖放在后端目录，由进程管理器启动 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`。
+将前端构建产物放到 Nginx 站点根目录。后端代码、上传资源、密钥、数据库文件和运行依赖放在后端运行目录，由进程管理器启动 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`。
+
+本地 `.env.example` 默认主库是 `sqlite:///./lab_inventory.db`，搜索日志目录是 `logs`。Docker Compose 会把它们覆盖到 `/data/lab_inventory.db` 和 `/data/logs`，并把上传资源保存到 `/data/static`。
 
 ## Docker Compose 部署
 
@@ -70,27 +84,26 @@ APP_PORT=80 docker compose up -d --build
 当前部署约束如下：
 
 - `backend` 依赖 `redis`
-- `/data/static`、`.keys` 和 `lab_inventory.db` 会挂载到持久化卷
+- `/data/lab_inventory.db`、`/data/logs`、`/data/static` 和 `/data/keys` 会挂载到持久化 volume
 - `frontend` 对外暴露 `${APP_PORT:-80}`
 - 前端镜像内的 `VITE_API_URL` 默认配置为 `/api`
 
 ## 镜像与入口点
 
-- 后端镜像基于 `python:3.11-slim`，安装 Poetry 和运行时依赖，entrypoint 负责准备 `.keys`、静态目录和数据库挂载。
-- 前端镜像采用多阶段构建：Node 阶段执行 `npm ci` 与 `npm run build`，最终由 `nginx:1.27-alpine` 托管 `dist`。
-- 后端启动后会在 `lifespan` 中完成数据库初始化、WAL/FTS/索引准备和默认管理员检查。
+- 后端镜像基于 `python:3.11-slim`，安装 Poetry 和运行时依赖，entrypoint 负责准备 `/data/keys`、`/data/static` 和 `/data/lab_inventory.db`。
+- 前端镜像采用多阶段构建：Node 阶段执行 `npm ci` 与 `npm run build`，最终由安装 Nginx 与 Brotli 模块的 Alpine 镜像托管构建产物。
+- 后端启动后会在 `lifespan` 中完成数据库初始化、schema 补齐、WAL/FTS/索引准备、结构索引重建和默认管理员检查。
 
 ## Nginx 代理边界
 
 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" /> 当前承担以下职责：
 
 - `/api/` 代理到后端
-- `/api/static/` 重写为 `/static/` 后再代理到后端
-- `/static/` 直接代理到后端静态资源
+- `/static/` 代理到后端
 - `/docs`、`/redoc`、`/openapi.json`、`/health` 代理到后端
 - `/` 通过 `try_files ... /index.html` 支持前端 history 路由
 
-代理层是统一入口，但认证、CORS、CSRF、安全头和静态资源缓存策略仍由 FastAPI 主导。
+代理层是统一入口，但认证、CORS、CSRF、安全头和 `/static/` 缓存策略仍由 FastAPI 主导。
 
 ## 生产配置注意事项
 
@@ -105,11 +118,10 @@ APP_PORT=80 docker compose up -d --build
 2. Redis 无密码时执行 `redis-cli ping`；有密码时执行 `redis-cli -a <REDIS_PASSWORD> ping`
 3. 浏览器访问 `<host>:${APP_PORT}`，确认前端静态资源与接口请求正常
 4. 登录后验证 `/api/users/me`
-5. 检查 `/static/*` 资源能否被正常访问
+5. 检查 `/static/` 上传资源能否被正常访问
 
 ## 参考代码
 
-- [.env.example](https://github.com/hzb666/LabStorageManager/blob/main/.env.example)
 - [docker-compose.yml](https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml)
 - [docker/backend/Dockerfile](https://github.com/hzb666/LabStorageManager/blob/main/docker/backend/Dockerfile)
 - [docker/backend/entrypoint.sh](https://github.com/hzb666/LabStorageManager/blob/main/docker/backend/entrypoint.sh)

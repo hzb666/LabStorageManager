@@ -5,13 +5,13 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select, delete
+from sqlmodel import Session, select, delete, update as sql_update
 
 from app.database import DBSession
 from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.db_compat import exec_delete_returning_first
 from app.core.request_utils import get_request_is_cli
-from app.core.time_utils import utc_iso_str
+from app.core.time_utils import get_utc_now, utc_iso_str
 from app.models.user import UserRole
 from app.models.reagent_order import (
     ReagentOrder,
@@ -52,6 +52,14 @@ ORDER_NOT_FOUND = "Order not found"
 LIST_CACHE_PREFIX = "list:"
 DELETE_ORDER_FORBIDDEN_DETAIL = "Only the order applicant or admin can delete this order"
 DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL = "Public account cannot delete orders"
+DELETE_APPROVED_ORDER_FORBIDDEN_DETAIL = "Approved, arrived, or stocked orders cannot be deleted"
+REAGENT_ORDER_DELETE_LOCKED_STATUSES = frozenset(
+    {
+        ReagentOrderStatus.APPROVED,
+        ReagentOrderStatus.ARRIVED,
+        ReagentOrderStatus.STOCKED,
+    }
+)
 
 
 class ReagentWorkflowEditableFields(BaseModel):
@@ -124,6 +132,46 @@ def _validate_positive_remaining_quantity(
 
 def _get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
     return db.get(ReagentOrder, order_id)
+
+
+def _status_value(value: ReagentOrderStatus) -> str:
+    return value.value if hasattr(value, "value") else str(value)
+
+
+def _claim_reagent_order_status_transition(
+    db: Session,
+    *,
+    order_id: int,
+    expected_status: ReagentOrderStatus,
+    target_status: ReagentOrderStatus,
+) -> None:
+    result = db.exec(
+        sql_update(ReagentOrder)
+        .where(ReagentOrder.id == order_id)
+        .where(ReagentOrder.status == expected_status)
+        .values(status=target_status, updated_at=get_utc_now())
+    )
+    if result.rowcount != 0:
+        return
+
+    latest_status = db.exec(select(ReagentOrder.status).where(ReagentOrder.id == order_id)).first()
+    if latest_status is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "Order status already changed to "
+            f"{_status_value(latest_status)}, please refresh and retry"
+        ),
+    )
+
+
+def _ensure_reagent_order_deletable(order: ReagentOrder) -> None:
+    if order.status in REAGENT_ORDER_DELETE_LOCKED_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=DELETE_APPROVED_ORDER_FORBIDDEN_DETAIL,
+        )
 
 
 def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]:
@@ -542,6 +590,18 @@ def _register_arrival_routes(
         )
 
         direct_storage_location = body.storage_location.strip() if body.storage_location else None
+        target_status = (
+            ReagentOrderStatus.STOCKED
+            if order.order_reason == ReagentOrderReason.COMMON_PUBLIC or direct_storage_location
+            else ReagentOrderStatus.ARRIVED
+        )
+        _claim_reagent_order_status_transition(
+            db,
+            order_id=order_id,
+            expected_status=ReagentOrderStatus.APPROVED,
+            target_status=target_status,
+        )
+        order.status = target_status
 
         if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
             common_shelf_items = create_common_shelf_items_from_order(
@@ -550,7 +610,6 @@ def _register_arrival_routes(
                 created_by_id=current_user.id,
                 storage_location=direct_storage_location,
             )
-            order.status = ReagentOrderStatus.STOCKED
             message = "已到货并加入常用货架"
             _log_workflow_order_update(
                 db,
@@ -595,7 +654,6 @@ def _register_arrival_routes(
                     remaining_quantity=body.remaining_quantity,
                 ),
             )
-            order.status = ReagentOrderStatus.STOCKED
             message = "已到货并入库"
         else:
             inventory_items = _create_inventory_items_from_order(
@@ -609,7 +667,6 @@ def _register_arrival_routes(
                     remaining_quantity=body.remaining_quantity,
                 ),
             )
-            order.status = ReagentOrderStatus.ARRIVED
             message = "已到货并进入暂存区，请及时补全入库信息"
 
         _log_workflow_order_update(
@@ -820,7 +877,12 @@ def _stock_in_approved_order(
 
 
 # 获取 ARRIVED 订单的待补全库存项，并保持原数量不足时报错语义。
-def _get_arrived_pending_items(db: Session, order: ReagentOrder) -> list[Inventory]:
+def _get_arrived_pending_items(
+    db: Session,
+    order: ReagentOrder,
+    *,
+    current_user: CurrentUser,
+) -> list[Inventory]:
     pending_items = db.exec(
         regular_inventory_query()
         .where(
@@ -834,6 +896,11 @@ def _get_arrived_pending_items(db: Session, order: ReagentOrder) -> list[Invento
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No enough pending stock items found for this order",
+        )
+    if any(item.temporary_keeper_id != current_user.id for item in pending_items[: order.quantity]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the temporary keeper can stock in pending items",
         )
     return pending_items[: order.quantity]
 
@@ -904,16 +971,26 @@ def _delete_reagent_order_with_permission(
             detail=DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL,
         )
 
-    delete_stmt = delete(ReagentOrder).where(ReagentOrder.id == order_id)
+    delete_stmt = (
+        delete(ReagentOrder)
+        .where(ReagentOrder.id == order_id)
+        .where(~ReagentOrder.status.in_(REAGENT_ORDER_DELETE_LOCKED_STATUSES))
+    )
     if current_user.role != UserRole.ADMIN:
         delete_stmt = delete_stmt.where(ReagentOrder.applicant_id == current_user.id)
     deleted_item = exec_delete_returning_first(db, delete_stmt, ReagentOrder)
     if deleted_item is not None:
         return deleted_item
 
-    order_exists = db.exec(select(ReagentOrder.id).where(ReagentOrder.id == order_id)).first()
-    if order_exists is None:
+    existing_order = _get_reagent_order_by_id(db, order_id)
+    if existing_order is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+    if existing_order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=DELETE_ORDER_FORBIDDEN_DETAIL,
+        )
+    _ensure_reagent_order_deletable(existing_order)
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=DELETE_ORDER_FORBIDDEN_DETAIL,
@@ -981,7 +1058,16 @@ def _register_stock_in_route(
         stock_context = _build_stock_in_context(order, payload)
         target_location, effective_remaining = stock_context
 
-        if order.status == ReagentOrderStatus.APPROVED:
+        original_status = order.status
+        _claim_reagent_order_status_transition(
+            db,
+            order_id=order_id,
+            expected_status=original_status,
+            target_status=ReagentOrderStatus.STOCKED,
+        )
+        order.status = ReagentOrderStatus.STOCKED
+
+        if original_status == ReagentOrderStatus.APPROVED:
             inventory_items = _stock_in_approved_order(
                 db,
                 order=order,
@@ -1014,7 +1100,7 @@ def _register_stock_in_route(
                 "inventory_ids": [item.id for item in inventory_items],
             }
 
-        target_items = _get_arrived_pending_items(db, order)
+        target_items = _get_arrived_pending_items(db, order, current_user=current_user)
         before_items = [Inventory.model_validate(item) for item in target_items]
         _apply_arrived_items_stock_in(
             target_items,

@@ -6,6 +6,7 @@
 
 - `announcements.router` -> `/api`
 - `cart_sync.router` -> `/api`
+- `chem.router` -> `/api`
 - `chemical_info.router` -> `/api`
 - `chemical_name_map.router` -> `/api`
 - `common_shelf.router` -> `/api`
@@ -209,6 +210,18 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/chemical-info/{cas_number}` | `get_chemical_info` | 已登录用户 | path: `cas_number` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/chemical_info.py#L442" /> |
 
+### 化学结构接口 (`chem`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/chem/index/status` | `get_structure_index_status` | 已登录用户 | — | `StructureIndexStatusResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" /> |
+| `POST` | `/api/chem/index/rebuild` | `rebuild_structure_index` | 管理员 | — | `StructureIndexStatusResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" /> |
+| `GET` | `/api/chem/structures/cache/{cas_number}` | `get_structure_cache_status` | 已登录用户 | path: `cas_number` | `CompoundStructureCacheResponse or None` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" /> |
+| `POST` | `/api/chem/structures/resolve-cas` | `resolve_structure_cas` | 管理员 | body: `ResolveCasRequest` | `CompoundStructureCacheResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" /> |
+| `PUT` | `/api/chem/structures/cache/{cas_number}/manual` | `save_manual_structure` | 管理员 | path: `cas_number`；body: `ManualStructureRequest` | `CompoundStructureCacheResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" /> |
+| `POST` | `/api/chem/structures/cache/{cas_number}/confirm-pubchem` | `confirm_pubchem_candidate` | 管理员 | path: `cas_number`；body: `ConfirmPubChemCidRequest` | `CompoundStructureCacheResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" /> |
+| `POST` | `/api/chem/search/substructure` | `search_substructure` | 已登录用户 | body: `SubstructureSearchRequest` | `SubstructureSearchResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" /> |
+
 ## 二次开发建议
 
 - 新增 API 时，优先沿用现有依赖模式（`CurrentUser` / `AdminUser`），避免权限漂移。
@@ -218,6 +231,7 @@
 ## 参考代码
 - [app/api/announcements.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py)（行52，81，93，130，177，194，224，252，276，300，330）
 - [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)（行138，170）
+- [app/api/chem.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py)
 - [app/api/common_shelf.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py)（行591，679，757，783，862，895）
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py)（行203，244，356，373，388，463，496，523，572，627）
 - [app/api/error_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/error_logs.py)（行34）

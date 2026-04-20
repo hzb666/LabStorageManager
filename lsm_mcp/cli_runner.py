@@ -17,6 +17,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000/api"
 DEFAULT_CLI_TIMEOUT_SECONDS = 5.0
 PROCESS_TIMEOUT_GRACE_SECONDS = 2.0
 STDOUT_PREVIEW_CHARS = 2000
+CLI_TOKEN_ENV = "LSM_CLI_TOKEN"
 
 load_dotenv(REPO_ROOT / ".env", override=False)
 load_dotenv(REPO_ROOT / "robot" / ".env", override=True)
@@ -33,10 +34,9 @@ def run_lsm_cli(
     timeout_seconds = _read_float_env("LSM_MCP_CLI_TIMEOUT", DEFAULT_CLI_TIMEOUT_SECONDS)
     resolved_token = token or (os.getenv("LSM_MCP_SERVICE_TOKEN", "") if use_service_token else "")
     command = _build_command(args, base_url=base_url, timeout_seconds=timeout_seconds)
-    if resolved_token:
-        command.extend(["--token", resolved_token])
 
-    return _run_command(command, timeout_seconds=timeout_seconds)
+    extra_env = {CLI_TOKEN_ENV: resolved_token} if resolved_token else None
+    return _run_command(command, timeout_seconds=timeout_seconds, extra_env=extra_env)
 
 
 def login_lsm_cli(username: str, password: str) -> dict[str, Any]:
@@ -77,12 +77,7 @@ def _run_command(
             encoding="utf-8",
             timeout=timeout_seconds + PROCESS_TIMEOUT_GRACE_SECONDS,
             shell=False,
-            env={
-                **os.environ,
-                "PYTHONIOENCODING": "utf-8",
-                "PYTHONPATH": str(REPO_ROOT),
-                **(extra_env or {}),
-            },
+            env=_build_subprocess_env(extra_env),
         )
     except subprocess.TimeoutExpired as exc:
         return _error_result(
@@ -144,6 +139,17 @@ def _build_command(args: list[str], *, base_url: str, timeout_seconds: float) ->
         "--timeout",
         str(timeout_seconds),
     ]
+
+
+def _build_subprocess_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    env = {
+        **os.environ,
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONPATH": str(REPO_ROOT),
+    }
+    env.pop(CLI_TOKEN_ENV, None)
+    env.update(extra_env or {})
+    return env
 
 
 def _parse_process_output(*, exit_code: int, stdout: str, stderr: str) -> dict[str, Any]:

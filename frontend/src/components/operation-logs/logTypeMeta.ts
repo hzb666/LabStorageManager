@@ -34,6 +34,7 @@ const LOG_TYPE_BADGE_META: Record<string, LogTypeBadgeMeta> = {
   borrow: { label: '借用', color: 'cyan' },
   session: { label: '会话', color: 'teal' },
   user: { label: '用户', color: 'indigo' },
+  export: { label: '导出', color: 'orange' },
   search: { label: '搜索', color: 'orange' },
 }
 

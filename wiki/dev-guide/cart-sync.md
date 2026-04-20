@@ -1,28 +1,28 @@
-# 购物车同步扩展
+# 浏览器插件购物车同步
 
-本页说明浏览器扩展、`/cart-import` 页面和后端订单接口之间的职责边界。扩展只负责采集、分类和桥接数据，不直接写数据库；真正落库由系统前端页面和后端标准订单 API 完成。
+本页说明浏览器插件（Chrome 扩展）、`/cart-import` 页面和后端订单接口之间的职责边界。插件只负责采集、分类和桥接数据，不直接写数据库；真正落库由系统前端页面和后端标准订单 API 完成。
 
 ## 权限与资源
 
 - 插件 manifest 由 `browser-extension/build-config.mjs` 根据 `browser-extension/.env` 生成，声明 `tabs`、`storage`、`scripting`、`webRequest` 权限，以及对试剂平台与系统地址的 `host_permissions`。
 - `browser-extension/manifest.json` 和 `browser-extension/shared/generated-config.js` 是构建期产物，不提交到 Git。
-- 扩展侧批次缓存写入 `chrome.storage.local.import_batch_latest`；页面侧桥接缓存写入 `localStorage.cart_import_batch_latest`。
-- 批次数据统一使用 2 小时 TTL。扩展 popup 在保存批次前会清理旧批次；`import-bridge.js` 会在页面加载时清理页面侧过期缓存。
+- 插件侧批次缓存写入 `chrome.storage.local.import_batch_latest`；页面侧桥接缓存写入 `localStorage.cart_import_batch_latest`。
+- 批次数据统一使用 2 小时 TTL。插件 popup 在保存批次前会清理旧批次；`import-bridge.js` 会在页面加载时清理页面侧过期缓存。
 - 后台 `service-worker` 负责解析目标购物车标签页、记录最近活跃购物车页面、协调 popup 与 content script 的通信，不负责最终导入。
 
 ## 批次数据形态
 
-扩展写入的批次并不只是“商品数组”，还包含一组面向导入页的中间字段：
+插件写入的批次并不只是“商品数组”，还包含一组面向导入页的中间字段：
 
 - `batch_id`：导入批次标识，用于页面加载和桥接校验。
 - `created_at`：批次创建时间，桥接脚本和前端都会用它做 TTL 判断。
 - `items[]`：每一项至少包含 `name`、`specification`、`brand`、`cas_number`、`product_id`、`detail_url`。
-- `items[].suggested_order_type`：扩展根据 CAS、规格、详情页文本预判是试剂还是耗材。
+- `items[].suggested_order_type`：插件根据 CAS、规格、详情页文本预判是试剂还是耗材。
 - `items[].order_type`：导入时采用的类型，导入页允许用户切换。
-- `items[].classification_reason`：扩展对类型判断的解释，方便人工确认。
+- `items[].classification_reason`：插件对类型判断的解释，方便人工确认。
 - `items[].detail_fetch_status`：详情页拉取结果，例如成功、超时、回退基础信息。
 
-这意味着扩展桥接传递的是“待人工确认的导入草稿”，不是已经符合后端 DTO 的最终请求体。
+这意味着插件桥接传递的是“待人工确认的导入草稿”，不是已经符合后端 DTO 的最终请求体。
 
 ## 数据链路
 
@@ -30,7 +30,7 @@
 2. popup 通过 `sendMessageWithAutoInject` 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js" /> 通信，抓取购物车条目。
 3. popup 再并发抓取商品详情页，补齐中文名、英文名、规格、货号、CAS、品牌，并给每个条目写入 `suggested_order_type`、`classification_reason`、`detail_fetch_status`。
 4. popup 调用 `saveImportBatch` 把批次写入 `chrome.storage.local.import_batch_latest`，然后打开 `${systemUrl}/cart-import?import=true&batch_id=...`。
-5. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" /> 只在 `/cart-import` 页面生效。它会校验 `import=true`、`batch_id`、TTL，并把扩展批次拷贝到页面 `localStorage.cart_import_batch_latest`。
+5. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" /> 只在 `/cart-import` 页面生效。它会校验 `import=true`、`batch_id`、TTL，并把插件批次拷贝到页面 `localStorage.cart_import_batch_latest`。
 6. 桥接脚本写入成功后，会向页面发送 `postMessage({ source: 'lab-storage-extension', type: 'IMPORT_BATCH_READY' ... })`。
 7. React 侧的 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/cartimport/cartImportControllers.ts" /> 会先尝试从本地批次缓存读取草稿；如果桥接稍晚到达，会监听 `IMPORT_BATCH_READY` 再补读一次，并最多重试若干轮。
 8. 用户在 `CartImport` 页面逐条确认、切换类型、补录字段后，前端分别调用标准的 `reagentOrderAPI.create` 或 `consumableOrderAPI.create`。
@@ -52,23 +52,23 @@
 - `POST /api/reagent-orders`：`CartImport` 页面提交试剂条目时调用的接口。
 - `POST /api/consumable-orders`：`CartImport` 页面提交耗材条目时调用的接口。
 
-排查“扩展导入成功，但页面没有落单”时，应先确认是桥接阶段失败，还是页面逐条调用标准订单 API 失败。
+排查“浏览器插件导入成功，但页面没有落单”时，应先确认是桥接阶段失败，还是页面逐条调用标准订单 API 失败。
 
 ## 安全与边界
 
-- 扩展不持有后端登录凭证，也不会直接写数据库。
+- 浏览器插件不持有后端登录凭证，也不会直接写数据库。
 - 页面桥接只发生在匹配的系统域名和 `/cart-import` 路径上，且依赖查询参数 `import=true`。
-- `import-bridge.js` 只把扩展批次复制到页面本地存储，并通过 `postMessage` 通知页面；它不做业务校验，不做订单创建。
+- `import-bridge.js` 只把插件批次复制到页面本地存储，并通过 `postMessage` 通知页面；它不做业务校验，不做订单创建。
 - 最终订单创建仍受当前登录态约束，公共账号不能导入订单。
-- 扩展分类结果只是建议值，前端允许把条目在“试剂/耗材”之间人工切换。
+- 浏览器插件分类结果只是建议值，前端允许把条目在“试剂/耗材”之间人工切换。
 
 ## 常见排查点
 
-- 扩展 popup 提示“请先打开购物车页面”时，先检查目标站点标签页 URL 是否仍满足当前匹配规则。
+- 插件 popup 提示“请先打开购物车页面”时，先检查目标站点标签页 URL 是否仍满足当前匹配规则。
 - 页面提示找不到批次时，先看 `chrome.storage.local.import_batch_latest` 和 `localStorage.cart_import_batch_latest` 是否存在且未过期。
 - 如果 bridge 已写入缓存但页面仍为空，优先检查 `IMPORT_BATCH_READY` 消息是否发出，以及批次 `batch_id` 是否与 URL 一致。
 - 试剂条目导入失败但耗材正常时，优先检查 CAS、规格字符串和试剂表单 schema。
-- 若你要调整导入链路，优先在导入页和标准订单 API 收口业务规则，不要把大量业务判断复制进扩展。
+- 调整导入链路时，优先在导入页和标准订单 API 收口业务规则，不要把大量业务判断复制进浏览器插件。
 
 ## 参考代码
 - [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)

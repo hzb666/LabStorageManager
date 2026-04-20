@@ -34,7 +34,11 @@ logger = logging.getLogger(__name__)
 @lru_cache
 def get_conversation_store() -> WecomConversationStore:
     settings = get_settings()
-    return WecomConversationStore(settings.state_db)
+    aibot_settings = get_aibot_settings()
+    return WecomConversationStore(
+        settings.state_db,
+        **aibot_settings.conversation_store_options(),
+    )
 
 
 @lru_cache
@@ -110,6 +114,7 @@ def get_processor() -> WechatKfMessageProcessor:
 async def lifespan(_: FastAPI):
     settings = get_settings()
     settings.require_webhook()
+    get_aibot_settings().require_token_storage()
     get_processed_store().init()
     get_conversation_store().init()
     get_bind_store().init()

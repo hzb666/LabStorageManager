@@ -7,8 +7,9 @@
 - 用 SQLite 支撑中小规模实验室业务，并保持可接受的检索能力。
 - 用 React + Vite 提供高密度业务界面。
 - 用 Redis 增强会话、限流和 SSE，同时允许降级。
-- 用浏览器扩展对接外部采购平台。
-- 用 CLI、MCP 和企业微信入口提供受控自动化访问。
+- 用 RDKit 和 Ketcher 支撑可选结构检索。
+- 用浏览器插件对接外部采购平台。
+- 用 Agent skill、CLI、MCP 和企业微信入口提供受控自动化访问。
 
 ## 后端
 
@@ -25,7 +26,7 @@
 ### SQLite
 
 - 用途：主数据库。
-- 落点：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />
+- 落点：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" />
 - 关键配置：`WAL`、`foreign_keys=ON`、复合索引、FTS5 虚拟表和触发器。
 
 ### JWT + python-jose
@@ -94,19 +95,26 @@
 - 后端：`app/api/events.py`、`app/services/sse_manager.py`
 - 前端：`frontend/src/hooks/useSSE.ts`、`frontend/src/hooks/useListSSE.ts`
 
-### 浏览器扩展
+### 浏览器插件
 
 - 用途：采集外部购物车并导入系统。
 - 落点：`browser-extension/`
 - 关键桥接路径：`/cart-import`、`reagentOrderAPI.create`、`consumableOrderAPI.create`
 - 匹配分析接口：`/api/cart-sync`
 
-### CLI 与 MCP
+### 结构检索
 
-- 用途：为脚本、企业微信智能机器人和微信客服提供受控命令面。
+- 用途：按绘制结构或结构文本检索库存 CAS。
+- 后端：`app/api/chem.py`、`app/models/compound_structure.py`、`app/services/structure_index.py`
+- 前端：`frontend/src/components/chem/StructureSearchDialog.tsx`、`frontend/src/api/structureSearchApi.ts`
+- 边界：默认关闭，需启用 `CHEM_STRUCTURE_FEATURE_ENABLED`。
+
+### Agent skill、CLI 与 MCP
+
+- 用途：为 Agent skill、脚本、企业微信智能机器人和微信客服提供受控命令面。
 - CLI 落点：`lsm_cli/`
 - MCP 落点：`lsm_mcp/`
-- 边界：MCP 通过 CLI 子进程调用后端 API，不直接访问数据库。
+- 边界：Agent skill 直接复用 CLI；MCP 通过 CLI 子进程调用后端 API，不直接访问数据库。
 
 ### 企业微信入口
 
@@ -136,6 +144,7 @@ flowchart LR
     D --> E["SQLite WAL + FTS"]
     C --> F["Redis"]
     C --> G["SSE"]
+    C --> M["RDKit Structure Index"]
     H["Browser Extension"] --> I["/cart-import"]
     I --> A
     A --> C
@@ -152,7 +161,7 @@ flowchart LR
 | 前端 lint | `cd frontend && npm run lint` |
 | wiki 本地开发 | `cd wiki && npm run dev` |
 | wiki 构建 | `cd wiki && npm run build` |
-| 扩展配置生成 | `npm run build:extension` |
+| 浏览器插件配置生成 | `npm run build:extension` |
 | 后端启动 | `python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` |
 | 前端启动 | `cd frontend && npm run dev` |
 
@@ -167,6 +176,8 @@ flowchart LR
 ## 参考代码
 - [app/core/auth.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
+- [app/db_bootstrap](https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap)
+- [app/api/chem.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py)
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
 - [browser-extension/build-config.mjs](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/build-config.mjs)
 - [docker-compose.yml](https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml)

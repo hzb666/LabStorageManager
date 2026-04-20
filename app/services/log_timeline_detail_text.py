@@ -9,6 +9,7 @@ REAGENT_ORDER_ACTION_LABELS: dict[str, str] = {
     "delete": "删除试剂申购",
     "approve": "审批通过试剂申购",
     "reject": "审批拒绝试剂申购",
+    "export": "导出试剂订单",
 }
 
 CONSUMABLE_ORDER_ACTION_LABELS: dict[str, str] = {
@@ -18,6 +19,7 @@ CONSUMABLE_ORDER_ACTION_LABELS: dict[str, str] = {
     "approve": "审批通过耗材申购",
     "reject": "审批拒绝耗材申购",
     "arrival_complete": "确认耗材到货",
+    "export": "导出耗材订单",
 }
 
 USER_OPERATION_ACTION_LABELS: dict[str, str] = {
@@ -95,6 +97,10 @@ def build_reagent_order_detail_text(
     order_name: str | None,
     snapshot: dict[str, Any],
 ) -> str:
+    if detail_prefix.endswith("导出试剂订单"):
+        export_count = read_snapshot_value(snapshot, "count", "ct") or 0
+        return join_detail_parts(detail_prefix, export_count, "条")
+
     display_snapshot = resolve_display_snapshot(snapshot)
     initial_quantity = read_snapshot_value(display_snapshot, "initial_quantity", "iq")
     unit = read_snapshot_value(display_snapshot, "unit", "un")
@@ -113,6 +119,10 @@ def build_consumable_order_detail_text(
     specification: str | None,
     snapshot: dict[str, Any],
 ) -> str:
+    if detail_prefix.endswith("导出耗材订单"):
+        export_count = read_snapshot_value(snapshot, "count", "ct") or 0
+        return join_detail_parts(detail_prefix, export_count, "条")
+
     quantity = read_snapshot_value(snapshot, "quantity", "qt")
     return join_detail_parts(detail_prefix, order_name, specification, f"x{clean_detail_value(quantity)}")
 

@@ -18,7 +18,7 @@
 
 1. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/README.md" />：确认项目定位、运行方式和部署入口。
 2. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />：理解后端入口、中间件、生命周期、路由挂载和 `/cart-import` 重定向。
-3. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />：理解 SQLite、WAL、索引、FTS 和默认管理员初始化。
+3. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" />：理解 SQLite、WAL、索引、FTS 和默认管理员初始化。
 4. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/main.tsx" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" />：理解前端启动、QueryClient、路由分层和守卫。
 5. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/models" />：先分清用户、试剂订单、耗材订单、库存、公告、会话、借用日志这些对象。
 6. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/api" />：把对象和接口一一对上。
@@ -40,7 +40,7 @@
 
 这个仓库有一条容易被忽略、但很关键的外围链路：
 
-- 扩展 popup 抓购物车
+- 浏览器插件 popup 抓购物车
 - bridge 脚本把批次桥接到 `/cart-import`
 - 导入页逐条提交成标准订单
 
@@ -51,12 +51,12 @@
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx" />
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/cartimport/cartImportControllers.ts" />
 
-这条链路的重点不是“能抓到数据”，而是“扩展只是桥接，最终仍走系统自身的订单创建规则”。
+这条链路的重点不是“能抓到数据”，而是“插件只是桥接，最终仍走系统自身的订单创建规则”。
 
 ## 第五阶段：常见改动入口
 
 - 后端入口、中间件、安全策略：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />
-- SQLite、索引、FTS、默认管理员：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />
+- SQLite、索引、FTS、默认管理员：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" />
 - 试剂工作流：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" />
 - 耗材工作流：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py" />
 - 库存借还与导入：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" />
@@ -75,7 +75,7 @@
 3. 跟踪一遍试剂订购 -> 审批 -> 到货 -> 入库。
 4. 跟踪一遍耗材订购 -> 审批 -> 完成。
 5. 跟踪一遍库存借用 -> 归还。
-6. 跟踪扩展把购物车桥接到 `/cart-import` 的链路。
+6. 跟踪浏览器插件把购物车桥接到 `/cart-import` 的链路。
 7. 打开两个页面标签，验证写操作后 SSE 是否让列表进入刷新或 stale 状态。
 
 完成这几步后，再读 [关键文件索引](/dev-guide/key-files) 和 [核心导读](/dev-guide/principal-guide) 会更容易把文件、职责和运行时现象对应起来。
@@ -91,6 +91,7 @@
 
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
+- [app/db_bootstrap](https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap)
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py)
 - [app/api/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py)
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)

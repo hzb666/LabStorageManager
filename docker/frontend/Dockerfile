@@ -1,4 +1,4 @@
-FROM node:20-alpine AS frontend-builder
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -12,7 +12,7 @@ ENV VITE_API_URL=${VITE_API_URL}
 
 RUN npm run build
 
-FROM alpine:3.20
+FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
 RUN apk add --no-cache nginx nginx-mod-http-brotli
 

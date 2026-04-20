@@ -70,6 +70,7 @@ from app.services.sse_manager import sse_manager
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.services.order_operation_logger import (
     log_reagent_order_create,
+    log_reagent_order_export,
     log_reagent_order_update,
 )
 from app.services.search_query_log_service import (
@@ -678,7 +679,9 @@ def list_reagent_orders(
 
 @router.get("/export", dependencies=[Depends(require_admin)])
 def export_reagent_orders(
+    request: Request,
     db: DBSession,
+    current_user: CurrentUser,
 ):
     # Export reagent orders as a downloadable XLSX file.
     from app.services.xlsx_export import export_reagent_orders_xlsx
@@ -690,7 +693,15 @@ def export_reagent_orders(
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    return export_reagent_orders_xlsx(orders, all_users_map)
+    response = export_reagent_orders_xlsx(orders, all_users_map)
+    log_reagent_order_export(
+        db,
+        exported_count=len(orders),
+        actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
+    )
+    db.commit()
+    return response
 
 
 @router.get("/cas-overview/{cas_number}", dependencies=[Depends(get_current_user)])

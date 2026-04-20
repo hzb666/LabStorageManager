@@ -22,6 +22,7 @@ from robot.wecom_aibot.lsm_orchestrator import LSMRobotOrchestrator
 from robot.wecom_aibot.messages import parse_text_message
 from robot.wecom_aibot.replies import clamp_text, text_reply
 from robot.wecom_aibot.store import ProcessedMessageStore
+from robot.wecom_aibot.token_crypto import TOKEN_CIPHER_PREFIX
 
 
 def _test_encoding_aes_key() -> str:
@@ -520,6 +521,81 @@ class WecomAibotSelfTest(unittest.TestCase):
         context = store.get_context("chat:u1")
         self.assertEqual(5, len(context))
         self.assertEqual({f"用户{index}" for index in range(5)}, {item["user"] for item in context})
+        _remove_sqlite_files(database_path)
+
+    def test_binding_token_is_encrypted_at_rest(self) -> None:
+        workspace_tmp = Path("tmp")
+        workspace_tmp.mkdir(exist_ok=True)
+        database_path = workspace_tmp / "robot-binding-token-state.db"
+        _remove_sqlite_files(database_path)
+        store = WecomConversationStore(
+            database_path,
+            token_encryption_key="unit-test-secret",
+            allow_plaintext_tokens=False,
+        )
+        store.init()
+        store.save_binding(
+            wecom_userid="u1",
+            username="alice",
+            access_token="user-secret-token",
+            user={"username": "alice"},
+        )
+
+        connection = store._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT lsm_access_token
+                FROM wecom_aibot_user_binding
+                WHERE wecom_userid = ?
+                """,
+                ("u1",),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertIsNotNone(row)
+        self.assertNotEqual("user-secret-token", row[0])
+        self.assertTrue(str(row[0]).startswith(TOKEN_CIPHER_PREFIX))
+        self.assertEqual("user-secret-token", store.get_binding("u1")["access_token"])
+        _remove_sqlite_files(database_path)
+
+    def test_plaintext_binding_token_migrates_on_secure_read(self) -> None:
+        workspace_tmp = Path("tmp")
+        workspace_tmp.mkdir(exist_ok=True)
+        database_path = workspace_tmp / "robot-binding-token-migrate-state.db"
+        _remove_sqlite_files(database_path)
+        plain_store = WecomConversationStore(database_path)
+        plain_store.init()
+        plain_store.save_binding(
+            wecom_userid="u1",
+            username="alice",
+            access_token="legacy-token",
+            user={"username": "alice"},
+        )
+
+        secure_store = WecomConversationStore(
+            database_path,
+            token_encryption_key="unit-test-secret",
+            allow_plaintext_tokens=False,
+        )
+        self.assertEqual("legacy-token", secure_store.get_binding("u1")["access_token"])
+
+        connection = secure_store._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT lsm_access_token
+                FROM wecom_aibot_user_binding
+                WHERE wecom_userid = ?
+                """,
+                ("u1",),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertIsNotNone(row)
+        self.assertTrue(str(row[0]).startswith(TOKEN_CIPHER_PREFIX))
         _remove_sqlite_files(database_path)
 
     def test_handler_replays_duplicate_msgid_without_requery(self) -> None:

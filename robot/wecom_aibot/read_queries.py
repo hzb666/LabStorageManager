@@ -84,8 +84,6 @@ SPECIALTY_CAS_HINT_KEYWORDS = (
 )
 CHEMICAL_ABBREVIATION_MAX_LENGTH = 48
 CHEMICAL_ABBREVIATION_SYMBOLS = frozenset("()[]+-/.")
-SHORT_ENGLISH_CHEMICAL_TOKEN_MIN_LENGTH = 3
-SHORT_ENGLISH_CHEMICAL_TOKEN_MAX_LENGTH = 8
 
 
 async def answer_with_llm_plan(
@@ -117,6 +115,20 @@ async def answer_with_llm_plan(
     if plan.tool_name == "web_search":
         return "联网搜索只用于辅助识别化学名称或别名对应的 CAS（系统内部），不能干别的。"
     result = await mcp_client.call_tool(plan.tool_name, _with_user_token(plan.arguments, user_token))
+    if plan.tool_name == "inventory_search_by_name":
+        keyword = str(plan.arguments.get("keyword") or "").strip()
+        broadened_reply = await _try_broaden_inventory_name_search(
+            mcp_client=mcp_client,
+            llm_planner=llm_planner,
+            search_limit=search_limit,
+            text=text,
+            keyword=keyword,
+            user_token=user_token,
+            inventory_result=result,
+            conversation_context=conversation_context,
+        )
+        if broadened_reply:
+            return broadened_reply
     fallback = await _maybe_llm_plan_common_shelf_fallback(
         mcp_client=mcp_client,
         llm_planner=llm_planner,
@@ -411,6 +423,18 @@ async def _answer_inventory_by_name(
         {"keyword": keyword, "limit": search_limit},
         user_token,
     )
+    broadened_reply = await _try_broaden_inventory_name_search(
+        mcp_client=mcp_client,
+        llm_planner=llm_planner,
+        search_limit=search_limit,
+        text=text,
+        keyword=keyword,
+        user_token=user_token,
+        inventory_result=result,
+        conversation_context=conversation_context,
+    )
+    if broadened_reply:
+        return broadened_reply
     fallback = await _maybe_common_shelf_fallback(
         mcp_client=mcp_client,
         llm_planner=llm_planner,
@@ -437,6 +461,85 @@ async def _answer_inventory_by_name(
         user_text=text,
         conversation_context=conversation_context,
     )
+
+
+async def _try_broaden_inventory_name_search(
+    *,
+    mcp_client: LSMMcpClient,
+    llm_planner: LSMIntentPlanner | None,
+    search_limit: int,
+    text: str,
+    keyword: str,
+    user_token: str,
+    inventory_result: dict[str, Any],
+    conversation_context: list[dict[str, str]] | None = None,
+) -> str:
+    if not _is_empty_success_result(inventory_result):
+        return ""
+    broadener = getattr(llm_planner, "broaden_name_search_queries", None)
+    if broadener is None:
+        return ""
+    broadened_queries = await broadener(user_text=text, failed_query=keyword)
+    if not isinstance(broadened_queries, list):
+        return ""
+
+    successful_results: list[tuple[str, dict[str, Any]]] = []
+    for query in _clean_broadened_queries(broadened_queries, keyword):
+        result = await _raw_call(
+            mcp_client,
+            "inventory_search_by_name",
+            {"keyword": query, "limit": search_limit},
+            user_token,
+        )
+        if not _is_empty_success_result(result):
+            successful_results.append((query, result))
+
+    if not successful_results:
+        return ""
+    reply = _format_broadened_inventory_results(keyword, successful_results)
+    return await _maybe_polish_reply(
+        llm_planner,
+        text,
+        reply,
+        facts_text=reply,
+        conversation_context=conversation_context,
+    )
+
+
+def _clean_broadened_queries(queries: list[Any], original_keyword: str) -> list[str]:
+    normalized_original = original_keyword.strip()
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in queries:
+        if not isinstance(item, str):
+            continue
+        query = item.strip()
+        if not query or query == normalized_original or query in seen:
+            continue
+        result.append(query)
+        seen.add(query)
+        if len(result) >= 3:
+            break
+    return result
+
+
+def _format_broadened_inventory_results(
+    original_keyword: str,
+    successful_results: list[tuple[str, dict[str, Any]]],
+) -> str:
+    queries = "、".join(query for query, _ in successful_results)
+    sections = [
+        f"“{original_keyword}”没有直接查到库存；已按更宽关键词“{queries}”继续查询："
+    ]
+    for query, result in successful_results:
+        sections.append(
+            format_tool_result(
+                result,
+                title=f"“{query}”库存候选",
+                empty_text="没有查到匹配记录。",
+            )
+        )
+    return "\n".join(sections)
 
 
 async def _maybe_llm_plan_common_shelf_fallback(
@@ -786,11 +889,7 @@ def _resolved_cas_prefix(query: str, cas_number: str, source_text: str) -> str:
 
 
 def _can_resolve_cas_with_web_search(text: str, query: str) -> bool:
-    if not query.strip():
-        return False
-    if _has_explicit_cas_resolution_intent(text):
-        return True
-    return not has_any(text, GENERAL_WEB_SEARCH_KEYWORDS)
+    return bool(query.strip())
 
 
 def _has_explicit_cas_resolution_intent(text: str) -> bool:
@@ -799,9 +898,10 @@ def _has_explicit_cas_resolution_intent(text: str) -> bool:
 
 
 def _cas_web_search_query(text: str, query: str) -> str:
-    if _should_prioritize_cas_resolution(text, query) or _has_short_english_chemical_token(query):
-        return f"{query} CAS号 CAS number 配体 催化剂 ligand catalyst"
-    return f"{query} CAS号 化学品"
+    search_query = f"{query} CAS号 CAS number chemical name alias synonym 化学品 别名 英文名"
+    if _should_prioritize_cas_resolution(text, query):
+        search_query += " ligand catalyst 配体 催化剂 金属配合物"
+    return search_query
 
 
 def _should_prioritize_cas_resolution(text: str, query: str) -> bool:
@@ -816,12 +916,14 @@ async def _should_continue_cas_resolution(
     text: str,
     query: str,
 ) -> bool:
-    if _should_prioritize_cas_resolution(text, query):
-        return True
     resolver = getattr(llm_planner, "should_try_cas_resolution", None)
-    if resolver is None:
+    if resolver is not None:
+        return await resolver(user_text=text, query=query) is True
+    if _has_explicit_cas_resolution_intent(text):
+        return True
+    if has_any(text, GENERAL_WEB_SEARCH_KEYWORDS):
         return False
-    return await resolver(user_text=text, query=query) is True
+    return _should_prioritize_cas_resolution(text, query)
 
 
 def _looks_like_chemical_abbreviation(query: str) -> bool:
@@ -839,13 +941,6 @@ def _looks_like_chemical_abbreviation(query: str) -> bool:
         return True
     if any(char.isdigit() or char in CHEMICAL_ABBREVIATION_SYMBOLS for char in compact):
         return True
-    return False
-
-
-def _has_short_english_chemical_token(query: str) -> bool:
-    for token in re.findall(r"\b[A-Za-z]+\b", query):
-        if SHORT_ENGLISH_CHEMICAL_TOKEN_MIN_LENGTH <= len(token) <= SHORT_ENGLISH_CHEMICAL_TOKEN_MAX_LENGTH:
-            return True
     return False
 
 

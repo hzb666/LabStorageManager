@@ -142,15 +142,23 @@ $env:WECOM_AIBOT_MODE="websocket"
 $env:WECOM_AIBOT_BOT_ID="replace-with-bot-id"
 $env:WECOM_AIBOT_SECRET="replace-with-secret"
 $env:LSM_MCP_URL="http://127.0.0.1:8030/mcp"
+$env:WECOM_AIBOT_TOKEN_ENCRYPTION_KEY="replace-with-random-secret"
 $env:WECOM_AIBOT_LLM_API_KEY="replace-with-openai-key"
 $env:WECOM_AIBOT_LLM_MODEL="gpt-5"
 poetry run python robot/run_wecom_worker.py
 ```
 
+机器人绑定态会保存 LabStorageManager access token。`ENV` / `APP_ENV` /
+`WECOM_AIBOT_ENV` 不为 `development`、`dev`、`local`、`test` 或 `testing` 时，
+必须配置 `WECOM_AIBOT_TOKEN_ENCRYPTION_KEY`；读取到历史明文绑定时会在下次访问时自动重写为加密值。
+
 LLM 相关变量：
 
 | 变量 | 说明 |
 | --- | --- |
+| `ENV` / `APP_ENV` / `WECOM_AIBOT_ENV` | 运行环境，默认 `development` |
+| `WECOM_AIBOT_TOKEN_ENCRYPTION_KEY` | 机器人绑定 token 的本地加密密钥，生产环境必填 |
+| `WECOM_AIBOT_ALLOW_PLAINTEXT_TOKEN_STORAGE` | 仅开发环境有效；允许无加密密钥时明文保存，默认 `true` |
 | `WECOM_AIBOT_LLM_API_KEY` / `OPENAI_API_KEY` | LLM API Key；不配置时走规则兜底 |
 | `WECOM_AIBOT_LLM_BASE_URL` / `OPENAI_BASE_URL` | OpenAI-compatible Chat Completions base URL；设置后调用 `<base>/chat/completions` |
 | `WECOM_AIBOT_LLM_MODEL` / `OPENAI_MODEL` | 默认 `gpt-5` |

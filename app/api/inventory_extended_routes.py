@@ -662,6 +662,7 @@ def _register_borrow_route(
             sql_update(Inventory)
             .where(Inventory.id == inventory_id)
             .where(Inventory.status == InventoryStatus.IN_STOCK)
+            .where(Inventory.temporary_keeper_id.is_(None))
             .values(
                 status=InventoryStatus.BORROWED,
                 borrower_id=borrower_id,
@@ -672,6 +673,11 @@ def _register_borrow_route(
         result = db.exec(update_statement)
         if result.rowcount == 0:
             latest_item = _get_by_id(db, inventory_id)
+            if latest_item and latest_item.temporary_keeper_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Pending stock-in item cannot be borrowed before stock-in",
+                )
             if latest_item and latest_item.status == InventoryStatus.BORROWED:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,

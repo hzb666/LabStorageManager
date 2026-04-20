@@ -7,7 +7,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from lsm_cli.client import APIClient, CLILocalInputError, CLINetworkError, CLIRequestError, load_json_payload, parse_key_value_pairs
+from lsm_cli.client import (
+    APIClient,
+    CLILocalInputError,
+    CLINetworkError,
+    CLIRequestError,
+    get_env_token,
+    load_json_payload,
+    parse_key_value_pairs,
+)
 from lsm_cli.config import clear_auth_data, load_config, save_config
 from lsm_cli.output import fail, succeed
 
@@ -203,13 +211,17 @@ def _client_from_args(args: argparse.Namespace) -> APIClient:
 
 
 def _uses_connection_override(args: argparse.Namespace) -> bool:
-    return getattr(args, "base_url", None) is not None or getattr(args, "token", None) is not None
+    return (
+        getattr(args, "base_url", None) is not None
+        or getattr(args, "token", None) is not None
+        or bool(get_env_token())
+    )
 
 
 def _handle_auth_login(args: argparse.Namespace) -> None:
     if getattr(args, "token", None) is not None:
         raise CLILocalInputError("auth login does not accept --token")
-    client = APIClient(base_url=args.base_url, timeout=args.timeout)
+    client = APIClient(base_url=args.base_url, timeout=args.timeout, use_env_token=False)
     payload = {
         "username": args.username,
         "password": _resolve_login_password(args),

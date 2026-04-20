@@ -27,6 +27,18 @@ class WecomAibotSettings(BaseSettings):
     receive_id: str = ""
     ws_url: str = "wss://openws.work.weixin.qq.com"
     state_db: Path = Path("robot/wecom_aibot_state.db")
+    environment: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENV", "APP_ENV", "WECOM_AIBOT_ENV"),
+    )
+    token_encryption_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("WECOM_AIBOT_TOKEN_ENCRYPTION_KEY"),
+    )
+    allow_plaintext_token_storage: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("WECOM_AIBOT_ALLOW_PLAINTEXT_TOKEN_STORAGE"),
+    )
     search_limit: int = Field(default=5, ge=1, le=10)
     low_stock_threshold: float = Field(default=0.2, ge=0, le=1)
     callback_max_body_bytes: int = Field(default=1_048_576, ge=1024)
@@ -95,6 +107,8 @@ class WecomAibotSettings(BaseSettings):
         "ws_url",
         "welcome_text",
         "mcp_url",
+        "environment",
+        "token_encryption_key",
         "minimax_api_key",
         "minimax_api_host",
         "minimax_mcp_command",
@@ -133,6 +147,23 @@ class WecomAibotSettings(BaseSettings):
         ]
         if missing:
             raise RuntimeError("Missing websocket settings: " + ", ".join(missing))
+
+    def require_token_storage(self) -> None:
+        if not self._is_development_runtime() and not self.token_encryption_key:
+            raise RuntimeError(
+                "Missing token storage setting: WECOM_AIBOT_TOKEN_ENCRYPTION_KEY"
+            )
+
+    def conversation_store_options(self) -> dict[str, str | bool]:
+        return {
+            "token_encryption_key": self.token_encryption_key,
+            "allow_plaintext_tokens": (
+                self._is_development_runtime() and self.allow_plaintext_token_storage
+            ),
+        }
+
+    def _is_development_runtime(self) -> bool:
+        return self.environment.lower() in {"", "development", "dev", "local", "test", "testing"}
 
 
 @lru_cache

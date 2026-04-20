@@ -49,6 +49,10 @@ from app.services.inventory_queries import (
     get_regular_inventory_by_id,
     regular_inventory_query,
 )
+from app.services.inventory_state_guards import (
+    ensure_inventory_deletable,
+    ensure_inventory_editable,
+)
 from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
@@ -679,7 +683,7 @@ async def update_inventory(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
     before_item = Inventory.model_validate(item)
 
-    _ensure_inventory_editable(item)
+    ensure_inventory_editable(item)
 
     update_data = update.model_dump(exclude_unset=True)
     _validate_inventory_update_cas(update_data)
@@ -719,16 +723,6 @@ async def update_inventory(
         actor_client_id=get_sse_client_id(request),
     )
     return response
-
-
-def _ensure_inventory_editable(item: Inventory) -> None:
-    # 校验库存记录可编辑状态，避免借用中数据被直接修改。
-
-    if item.status == InventoryStatus.BORROWED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot edit item while borrowed, please return first",
-        )
 
 
 def _validate_inventory_update_cas(update_data: dict) -> None:
@@ -812,13 +806,24 @@ async def delete_inventory(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
+    pending_stockin_clause = (
+        Inventory.storage_location.is_(None)
+        & Inventory.temporary_keeper_id.is_not(None)
+    )
     item = exec_delete_returning_first(
         db,
-        delete(Inventory).where(Inventory.id == inventory_id),
+        delete(Inventory)
+        .where(Inventory.id == inventory_id)
+        .where(Inventory.status != InventoryStatus.BORROWED)
+        .where(~pending_stockin_clause),
         Inventory,
     )
     if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+        existing = _get_by_id(db, inventory_id)
+        if not existing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+        ensure_inventory_deletable(existing)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Inventory item cannot be deleted")
     log_inventory_delete(
         db,
         inventory=item,
