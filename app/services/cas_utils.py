@@ -5,10 +5,17 @@ This is the foundation for deduplication in the system.
 """
 import re
 from typing import Optional
+
 from app.core.constants import CAS_PATTERN
 
 
 BIOLOGICAL_REAGENT_CAS = "生物试剂"
+DASH_TRANSLATION = str.maketrans({
+    "－": "-",
+    "–": "-",
+    "—": "-",
+    "‑": "-",
+})
 
 
 def is_special_cas_value(cas: str) -> bool:
@@ -17,7 +24,7 @@ def is_special_cas_value(cas: str) -> bool:
 
 
 
-def normalize_cas(cas: str) -> str:
+def normalize_cas(cas: str | None) -> str:
     """
     Normalize CAS number: remove spaces, convert to uppercase.
     
@@ -35,8 +42,8 @@ def normalize_cas(cas: str) -> str:
     if not cas:
         return ""
     
-    # Remove all whitespace
-    normalized = cas.replace(" ", "").replace("\t", "").upper()
+    # Remove all whitespace and normalize common dash variants.
+    normalized = re.sub(r"\s+", "", str(cas).translate(DASH_TRANSLATION)).upper()
     return normalized
 
 
@@ -111,6 +118,15 @@ def validate_cas_format(cas: str) -> tuple[bool, Optional[str]]:
         return False, f"Invalid CAS check digit. Expected: {expected_check_digit}"
     
     return True, None
+
+
+def is_valid_cas(cas: str | None) -> bool:
+    """Return True when the normalized value is a real CAS number with a valid check digit."""
+    normalized = normalize_cas(cas)
+    if not normalized or normalized == BIOLOGICAL_REAGENT_CAS:
+        return False
+    is_valid, _error = validate_cas_format(normalized)
+    return is_valid
 
 
 def validate_and_normalize_cas(cas: str) -> tuple[bool, Optional[str], str]:

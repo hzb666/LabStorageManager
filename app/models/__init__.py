@@ -17,6 +17,13 @@ from .chemical_name_map import (
     ChemicalNameMapResponse,
     ChemicalNameMapUpdate,
 )
+from .compound_structure import (
+    CompoundStructureCache,
+    CompoundStructureCacheResponse,
+    CompoundStructureSource,
+    CompoundStructureStatus,
+    StructureCacheStatusCount,
+)
 from .inventory_operation_log import (
     InventoryOperationAction,
     InventoryOperationLog,
@@ -94,6 +101,11 @@ __all__ = [
     "ChemicalNameMapCreate",
     "ChemicalNameMapUpdate",
     "ChemicalNameMapResponse",
+    "CompoundStructureCache",
+    "CompoundStructureCacheResponse",
+    "CompoundStructureSource",
+    "CompoundStructureStatus",
+    "StructureCacheStatusCount",
     "InventoryOperationAction",
     "InventoryOperationLog",
     "InventoryOperationLogResponse",
