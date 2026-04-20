@@ -9,6 +9,7 @@ import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 // UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import { StructureSearchResultsPanel } from '@/components/chem/StructureSearchResultsPanel'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/lib/toast'
 
@@ -24,6 +25,8 @@ import type { FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { inventoryAPI, chemicalAPI } from '@/api/client'
+import type { SubstructureSearchResponse } from '@/api/structureSearchApi'
+import { isStructureSearchFeatureEnabled } from '@/lib/apiConfig'
 import { downloadBlobResponse, formatDate, processNotes } from '@/lib/utils'
 import {
   InventoryFormSchema,
@@ -91,6 +94,8 @@ export interface InventoryItem {
 type InventoryDialogState = 'edit' | 'add' | null
 
 const columnHelper = createColumnHelper<InventoryItem>()
+const StructureSearchDialog = React.lazy(() => import('@/components/chem/StructureSearchDialog'))
+const structureSearchEnabled = isStructureSearchFeatureEnabled()
 
 // ============================================================================
 // 页面辅助函数
@@ -447,6 +452,8 @@ function InventoryExpandedRow({ item }: { item: InventoryItem }) {
 export function InventoryPage() {
   const queryClient = useQueryClient()
   const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
+  const [structureDialogOpen, setStructureDialogOpen] = useState(false)
+  const [structureResults, setStructureResults] = useState<SubstructureSearchResponse | null>(null)
   const loadInventory = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['inventory'] })
     clearRoomStale('inventory')
@@ -467,6 +474,25 @@ export function InventoryPage() {
     const item = itemRaw as unknown as InventoryItem
     return <InventoryExpandedRow item={item} />
   }, [])
+  const handleStructureResults = useCallback((payload: SubstructureSearchResponse) => {
+    setStructureResults(payload)
+  }, [])
+  const structureSearchAction = useMemo(() => (
+    <Button type="button" variant="modern" onClick={() => setStructureDialogOpen(true)}>
+      <ScanSearch className="size-4" />
+      结构检索
+    </Button>
+  ), [])
+  const structureDialogFallback = useMemo(() => (
+    <Dialog open={structureDialogOpen} onOpenChange={setStructureDialogOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="mb-4">结构检索</DialogTitle>
+        </DialogHeader>
+        <div className="text-sm text-muted-foreground">结构编辑器加载中...</div>
+      </DialogContent>
+    </Dialog>
+  ), [structureDialogOpen])
 
   return (
     <div className="space-y-6">
@@ -481,6 +507,13 @@ export function InventoryPage() {
           </Button>
         </div>
       </div>
+      {structureSearchEnabled && structureResults && (
+        <StructureSearchResultsPanel
+          payload={structureResults}
+          onClear={() => setStructureResults(null)}
+          onSearchAgain={() => setStructureDialogOpen(true)}
+        />
+      )}
       <Dialog open={dialogController.dialogState !== null} onOpenChange={dialogController.handleDialogOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -504,6 +537,15 @@ export function InventoryPage() {
           </form>
         </DialogContent>
       </Dialog>
+      {structureSearchEnabled && structureDialogOpen && (
+        <React.Suspense fallback={structureDialogFallback}>
+          <StructureSearchDialog
+            open={structureDialogOpen}
+            onOpenChange={setStructureDialogOpen}
+            onResults={handleStructureResults}
+          />
+        </React.Suspense>
+      )}
       <FilterTable
         api={inventoryAPI as FilterAPI}
         queryKey={['inventory']}
@@ -518,6 +560,7 @@ export function InventoryPage() {
         onBorrowSuccess={loadInventory}
         title={<><Package className="w-5 h-5" /> 库存列表</>}
         searchPlaceholder="搜索名称、CAS号、位置..."
+        searchActions={structureSearchEnabled ? structureSearchAction : undefined}
         noteField="notes"
         renderExpandedRow={renderExpandedRow}
       />

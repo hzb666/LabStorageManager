@@ -589,7 +589,7 @@ function useDesktopSidebarTooltipGuard({
   toggleSidebar: () => void
 }) {
   const [sidebarTooltipSuspended, setSidebarTooltipSuspended] = useState(false)
-  const sidebarTooltipTimerRef = useRef<number | null>(null)
+  const sidebarTooltipTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
 
   const blurActiveElement = useCallback(() => {
     const activeElement = document.activeElement
