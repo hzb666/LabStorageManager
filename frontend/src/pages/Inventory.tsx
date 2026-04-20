@@ -440,7 +440,7 @@ function InventoryExpandedRow({ item }: { item: InventoryItem }) {
         <div>入库时间：{formatDate(item.created_at)}</div>
         <div>入库用户：{item.created_by_name || '-'}</div>
         <div>上次借用：{formatInventoryBorrowerDisplay(item)}</div>
-        <StructureCachePanel casNumber={item.cas_number} />
+        {structureSearchEnabled && <StructureCachePanel casNumber={item.cas_number} />}
       </div>
     </div>
   )

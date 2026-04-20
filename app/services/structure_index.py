@@ -84,6 +84,7 @@ class SubstructureIndex:
         query_format: str,
         limit: int,
         use_chirality: bool,
+        allowed_cas_numbers: set[str] | None = None,
     ) -> list[StructureSearchHit]:
         query_mol = _parse_query_molecule(query=query, query_format=query_format)
         with self._lock:
@@ -91,8 +92,14 @@ class SubstructureIndex:
                 raise RuntimeError("Structure index is empty; rebuild after cache backfill")
             params = Chem.SubstructMatchParameters()
             params.useChirality = use_chirality
-            match_indices = self._library.GetMatches(query_mol, params, -1, limit)
-            return [_record_to_hit(self._records[index]) for index in match_indices]
+            max_results = -1 if allowed_cas_numbers is not None else limit
+            match_indices = self._library.GetMatches(query_mol, params, -1, max_results)
+            return _select_limited_hits(
+                records=self._records,
+                match_indices=match_indices,
+                limit=limit,
+                allowed_cas_numbers=allowed_cas_numbers,
+            )
 
 
 def _load_resolved_records(db: Session) -> list[StructureIndexRecord]:
@@ -144,6 +151,24 @@ def _parse_query_molecule(*, query: str, query_format: str):
     if mol is None:
         raise ValueError("Invalid structure query")
     return mol
+
+
+def _select_limited_hits(
+    *,
+    records: list[StructureIndexRecord],
+    match_indices,
+    limit: int,
+    allowed_cas_numbers: set[str] | None,
+) -> list[StructureSearchHit]:
+    hits: list[StructureSearchHit] = []
+    for index in match_indices:
+        record = records[index]
+        if allowed_cas_numbers is not None and record.cas_number not in allowed_cas_numbers:
+            continue
+        hits.append(_record_to_hit(record))
+        if len(hits) >= limit:
+            break
+    return hits
 
 
 def _record_to_hit(record: StructureIndexRecord) -> StructureSearchHit:

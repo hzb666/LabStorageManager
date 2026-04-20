@@ -1,6 +1,7 @@
 """Write workflows for structure cache resolve and manual confirmation."""
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 from sqlmodel import Session
@@ -65,6 +66,33 @@ def _ensure_manual_can_be_overwritten(
         raise StructureManualProtectedError("Manual structure is protected")
 
 
+def _stored_candidate_cids(existing: CompoundStructureCache | None) -> set[int]:
+    if not existing or not existing.candidates_json:
+        return set()
+    try:
+        candidates = json.loads(existing.candidates_json)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(candidates, list):
+        return set()
+    return {
+        cid
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        and isinstance((cid := candidate.get("cid")), int)
+    }
+
+
+def _ensure_cid_is_stored_candidate(
+    existing: CompoundStructureCache | None,
+    cid: int,
+) -> None:
+    if existing is None or existing.status != CompoundStructureStatus.AMBIGUOUS:
+        raise StructureValidationError("Resolve CAS before confirming a PubChem candidate")
+    if cid not in _stored_candidate_cids(existing):
+        raise StructureValidationError("PubChem CID is not a stored candidate for this CAS")
+
+
 def _write_cache_result(
     db: Session,
     payload: StructureCacheWrite,
@@ -118,8 +146,10 @@ async def confirm_pubchem_cid_to_cache(
 ) -> CompoundStructureCache:
     """Persist a manually selected PubChem CID as a verified cache row."""
     _ensure_pubchem_enabled()
-    existing = get_structure_cache(db, cas_number)
+    normalized_cas = _normalize_valid_cas(cas_number)
+    existing = get_structure_cache(db, normalized_cas)
     _ensure_manual_can_be_overwritten(existing, overwrite_manual=overwrite_manual)
+    _ensure_cid_is_stored_candidate(existing, cid)
 
     async with create_pubchem_client(
         timeout_seconds=settings.chem_pubchem_timeout_seconds,
@@ -130,7 +160,7 @@ async def confirm_pubchem_cid_to_cache(
             min_interval_seconds=_min_interval_seconds(settings.chem_pubchem_rate_limit_per_second),
             max_retries=settings.chem_pubchem_max_retries,
         )
-        result = await resolver.resolve_pubchem_cid(cas_number, cid)
+        result = await resolver.resolve_pubchem_cid(normalized_cas, cid)
     payload = result.to_cache_write()
     if payload.status == CompoundStructureStatus.RESOLVED:
         payload = replace(payload, manually_verified=True)

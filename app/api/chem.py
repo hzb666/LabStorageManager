@@ -1,6 +1,7 @@
 """Chemical structure cache and search APIs."""
 from __future__ import annotations
 
+import logging
 from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -27,9 +28,16 @@ from app.services.structure_index import (
     StructureQueryFormat,
     structure_index,
 )
-from app.services.structure_inventory_summary import get_inventory_summaries_by_cas
+from app.services.structure_inventory_summary import (
+    get_inventory_summaries_by_cas,
+    get_visible_inventory_cas_numbers,
+)
 
 router = APIRouter(prefix="/chem", tags=["Chem"])
+logger = logging.getLogger(__name__)
+
+STRUCTURE_QUERY_MAX_LENGTH = 20_000
+STRUCTURE_MOLBLOCK_MAX_LENGTH = 250_000
 
 
 class StructureIndexStatusResponse(BaseModel):
@@ -41,7 +49,7 @@ class StructureIndexStatusResponse(BaseModel):
 class SubstructureSearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=STRUCTURE_QUERY_MAX_LENGTH)
     format: StructureQueryFormat
     limit: int = Field(default=100, ge=1, le=1000)
     use_chirality: bool = False
@@ -59,7 +67,7 @@ class ResolveCasRequest(BaseModel):
 class ManualStructureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    molblock: str = Field(min_length=1)
+    molblock: str = Field(min_length=1, max_length=STRUCTURE_MOLBLOCK_MAX_LENGTH)
 
 
 class ConfirmPubChemCidRequest(BaseModel):
@@ -117,7 +125,19 @@ def _map_structure_write_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, StructureValidationError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    logger.exception("Structure cache write failed")
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Structure cache write failed",
+    )
+
+
+def _ensure_structure_index_current(db: DBSession) -> StructureIndexStatusResponse:
+    snapshot = structure_index.status()
+    if snapshot.dirty:
+        snapshot = structure_index.rebuild(db)
+        logger.info("Structure index rebuilt before search")
+    return _serialize_index_status(snapshot)
 
 
 @router.get(
@@ -218,17 +238,30 @@ def search_substructure(
 ) -> SubstructureSearchResponse:
     started = perf_counter()
     limit = min(payload.limit, settings.chem_structure_search_max_results)
+    index_status = _ensure_structure_index_current(db)
+    allowed_cas_numbers = (
+        get_visible_inventory_cas_numbers(db) if payload.only_in_stock else None
+    )
     try:
-        hits = structure_index.search(
-            query=payload.query,
-            query_format=payload.format,
-            limit=limit,
-            use_chirality=payload.use_chirality,
+        hits = (
+            []
+            if allowed_cas_numbers is not None and not allowed_cas_numbers
+            else structure_index.search(
+                query=payload.query,
+                query_format=payload.format,
+                limit=limit,
+                use_chirality=payload.use_chirality,
+                allowed_cas_numbers=allowed_cas_numbers,
+            )
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        logger.warning("Structure search unavailable: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Structure index is unavailable",
+        ) from exc
 
     summaries = get_inventory_summaries_by_cas(
         db,
@@ -254,6 +287,6 @@ def search_substructure(
         total=len(results),
         limit=limit,
         elapsed_ms=round((perf_counter() - started) * 1000, 2),
-        index=_serialize_index_status(structure_index.status()),
+        index=index_status,
         results=results,
     )

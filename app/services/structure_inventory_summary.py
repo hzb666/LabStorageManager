@@ -57,6 +57,16 @@ def get_inventory_summaries_by_cas(
     return summaries
 
 
+def get_visible_inventory_cas_numbers(db: Session) -> set[str]:
+    """Return normalized CAS values that currently have visible stock rows."""
+    rows = db.exec(
+        select(func.distinct(_normalized_inventory_cas_expr()))
+        .where(Inventory.cas_number != "")
+        .where(Inventory.status.in_(VISIBLE_STOCK_STATUSES))
+    ).all()
+    return {normalized for row in rows if (normalized := normalize_cas(row))}
+
+
 def _normalize_cas_order(cas_numbers: list[str]) -> list[str]:
     seen: set[str] = set()
     normalized_order: list[str] = []
