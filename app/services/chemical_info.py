@@ -9,6 +9,7 @@ import requests
 from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlmodel import Session
 
 from app.core.config import settings
 from app.core.constants import (
@@ -21,7 +22,14 @@ from app.core.constants import (
     TRANSLATED_NAME_SUFFIX,
 )
 from app.core.auth import get_current_user
+from app.database import DBSession
+from app.models.compound_structure import CompoundStructureCache
 from app.services.cas_utils import validate_and_normalize_cas, is_special_cas_value
+from app.services.structure_cache_repo import (
+    StructureNameCacheWrite,
+    get_structure_cache,
+    upsert_structure_cache_names,
+)
 
 logger = logging.getLogger(__name__)
 PUBCHEM_PRIMARY_TIMEOUT_SECONDS = 3
@@ -286,6 +294,165 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
     return (english_name if english_name else None), warning_message
 
 
+def _get_cache_smiles(cache: CompoundStructureCache | None) -> Optional[str]:
+    if cache is None:
+        return None
+    return cache.smiles_canonical or cache.smiles_isomeric
+
+
+def _cache_to_chemical_info(cas: str, cache: CompoundStructureCache | None) -> Dict[str, Any]:
+    if cache is None:
+        return {
+            "cas_number": cas,
+            "name": None,
+            "english_name": None,
+            "warning": None,
+            "smiles": None,
+            "chinese_name_is_translated": False,
+        }
+
+    return {
+        "cas_number": cas,
+        "name": cache.chinese_name,
+        "english_name": cache.english_name,
+        "warning": cache.name_error_message,
+        "smiles": _get_cache_smiles(cache),
+        "chinese_name_is_translated": cache.chinese_name_is_translated,
+    }
+
+
+def _set_chemical_info_memory_cache(cas: str, result: Dict[str, Any]) -> None:
+    _set_cached(cas, {
+        "chinese_name": result.get("name"),
+        "english_name": result.get("english_name"),
+        "warning": result.get("warning"),
+        "smiles": result.get("smiles"),
+        "chinese_name_is_translated": result.get("chinese_name_is_translated"),
+    })
+
+
+def _has_required_names(result: Dict[str, Any], *, skip_chinese: bool) -> bool:
+    if skip_chinese:
+        return bool(result.get("english_name"))
+    return bool(result.get("name")) and bool(result.get("english_name"))
+
+
+def _query_chinese_name_safely(cas: str) -> Optional[str]:
+    try:
+        return query_chinese_name(cas)
+    except Exception as exc:
+        logger.warning(f"Failed to get Chinese name for CAS {cas}: {exc}")
+        return None
+
+
+def _query_english_name_safely(cas: str) -> tuple[Optional[str], Optional[str]]:
+    try:
+        return query_english_name(cas)
+    except Exception as exc:
+        logger.warning(f"Failed to get English name for CAS {cas}: {exc}")
+        return None, "英文名查询超时，已跳过 PubChem 补充识别"
+
+
+def _query_missing_external_names(
+    cas: str,
+    *,
+    need_chinese: bool,
+    need_english: bool,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    if need_chinese and need_english:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_chinese = executor.submit(query_chinese_name, cas)
+            future_english = executor.submit(query_english_name, cas)
+            chinese_name = _read_chinese_future(cas, future_chinese)
+            english_name, warning_message = _read_english_future(cas, future_english)
+        return chinese_name, english_name, warning_message
+
+    chinese_name = _query_chinese_name_safely(cas) if need_chinese else None
+    if need_english:
+        english_name, warning_message = _query_english_name_safely(cas)
+        return chinese_name, english_name, warning_message
+    return chinese_name, None, None
+
+
+def _read_chinese_future(cas: str, future) -> Optional[str]:
+    try:
+        return future.result(timeout=CHEMICAL_INFO_PRIMARY_FUTURE_TIMEOUT_SECONDS)
+    except Exception as exc:
+        logger.warning(f"Failed to get Chinese name for CAS {cas}: {exc}")
+        return None
+
+
+def _read_english_future(cas: str, future) -> tuple[Optional[str], Optional[str]]:
+    try:
+        return future.result(timeout=CHEMICAL_INFO_FALLBACK_FUTURE_TIMEOUT_SECONDS)
+    except Exception as exc:
+        logger.warning(f"Failed to get English name for CAS {cas}: {exc}")
+        return None, "英文名查询超时，已跳过 PubChem 补充识别"
+
+
+def _fill_translated_chinese_name(
+    cas: str,
+    *,
+    chinese_name: Optional[str],
+    english_name: Optional[str],
+) -> tuple[Optional[str], bool]:
+    if chinese_name or not english_name:
+        return chinese_name, False
+
+    logger.info(
+        "Chinese name not found for CAS %s, trying to translate English name: %s",
+        cas,
+        english_name,
+    )
+    translated_name = translate_text(english_name)
+    if not translated_name:
+        return None, False
+
+    result = f"{translated_name}{TRANSLATED_NAME_SUFFIX}"
+    logger.info(f"Translated Chinese name for CAS {cas}: {result}")
+    return result, True
+
+
+def _resolve_and_store_missing_names(
+    db: Session,
+    cas: str,
+    result: Dict[str, Any],
+    *,
+    skip_chinese: bool,
+) -> Dict[str, Any]:
+    need_chinese = not skip_chinese and not result.get("name")
+    need_english = not result.get("english_name")
+    chinese_name, english_name, warning_message = _query_missing_external_names(
+        cas,
+        need_chinese=need_chinese,
+        need_english=need_english,
+    )
+
+    resolved_chinese_name = result.get("name") or chinese_name
+    resolved_english_name = result.get("english_name") or english_name
+    chinese_name_is_translated = bool(result.get("chinese_name_is_translated"))
+    if need_chinese:
+        resolved_chinese_name, chinese_name_is_translated = _fill_translated_chinese_name(
+            cas,
+            chinese_name=resolved_chinese_name,
+            english_name=resolved_english_name,
+        )
+
+    cache = upsert_structure_cache_names(
+        db,
+        StructureNameCacheWrite(
+            cas_number=cas,
+            english_name=resolved_english_name,
+            chinese_name=resolved_chinese_name,
+            chinese_name_is_translated=chinese_name_is_translated,
+            name_error_message=warning_message,
+        ),
+    )
+    db.commit()
+    db.refresh(cache)
+    return _cache_to_chemical_info(cas, cache)
+
+
 def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Optional[str]:
     if not text:
         return None
@@ -330,72 +497,48 @@ def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Opt
     return None
 
 
-def query_chemical_info(cas_number: str) -> Dict[str, Optional[str]]:
+def query_chemical_info(
+    db: Session,
+    cas_number: str,
+    *,
+    skip_chinese: bool = False,
+    cache_only: bool = False,
+) -> Dict[str, Any]:
     cas = str(cas_number).strip()
     if not cas:
-        return {"name": None, "english_name": None}
-    
-    cached = _get_cached(cas)
-    if cached:
-        return {
-            "name": cached.get('chinese_name'),
-            "english_name": cached.get('english_name'),
-            "warning": cached.get('warning'),
-        }
-    
-    # 并行查询中文名和英文名
-    chinese_name = None
-    english_name = None
-    warning_message: Optional[str] = None
-    
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_chinese = executor.submit(query_chinese_name, cas)
-        future_english = executor.submit(query_english_name, cas)
-        
-        # 等待两个任务完成
-        try:
-            chinese_name = future_chinese.result(timeout=CHEMICAL_INFO_PRIMARY_FUTURE_TIMEOUT_SECONDS)
-        except Exception as e:
-            logger.warning(f"Failed to get Chinese name for CAS {cas}: {e}")
-        
-        try:
-            english_name, warning_message = future_english.result(timeout=CHEMICAL_INFO_FALLBACK_FUTURE_TIMEOUT_SECONDS)
-        except Exception as e:
-            logger.warning(f"Failed to get English name for CAS {cas}: {e}")
-            warning_message = "英文名查询超时，已跳过 PubChem 补充识别"
-    
-    # 如果中文名为空但英文名存在，尝试翻译英文名作为备选
-    if not chinese_name and english_name:
-        logger.info(f"Chinese name not found for CAS {cas}, trying to translate English name: {english_name}")
-        translated_name = translate_text(english_name)
-        if translated_name:
-            # 翻译的中文名添加后缀标记
-            chinese_name = f"{translated_name}{TRANSLATED_NAME_SUFFIX}"
-            logger.info(f"Translated Chinese name for CAS {cas}: {chinese_name}")
-    
-    # 保存到缓存
-    result = {
-        "name": chinese_name,
-        "english_name": english_name,
-        "warning": warning_message,
-    }
-    _set_cached(cas, {
-        "chinese_name": chinese_name,
-        "english_name": english_name,
-        "warning": warning_message,
-    })
-    
-    logger.info(
-        f"Chemical info for CAS {cas}: name={chinese_name}, english_name={english_name}, warning={warning_message}"
+        return _cache_to_chemical_info(cas, None)
+
+    cache = get_structure_cache(db, cas)
+    result = _cache_to_chemical_info(cas, cache)
+    if cache_only or _has_required_names(result, skip_chinese=skip_chinese):
+        _set_chemical_info_memory_cache(cas, result)
+        return result
+
+    result = _resolve_and_store_missing_names(
+        db,
+        cas,
+        result,
+        skip_chinese=skip_chinese,
     )
-    
+    _set_chemical_info_memory_cache(cas, result)
+
+    logger.info(
+        "Chemical info for CAS %s: name=%s, english_name=%s, warning=%s",
+        cas,
+        result["name"],
+        result["english_name"],
+        result.get("warning"),
+    )
+
     return result
 
 
 @router.get("/{cas_number}", dependencies=[Depends(get_current_user)])
 def get_chemical_info(
     cas_number: str,
+    db: DBSession,
     skip_chinese: bool = False,
+    cache_only: bool = False,
 ):
     is_valid, error_msg, normalized_cas = validate_and_normalize_cas(cas_number)
     if not is_valid:
@@ -410,20 +553,18 @@ def get_chemical_info(
             detail="Biological reagents do not support CAS query",
         )
 
-    if skip_chinese:
-        english_name, warning_message = query_english_name(normalized_cas)
-        return {
-            "cas_number": normalized_cas,
-            "name": None,
-            "english_name": english_name,
-            "warning": warning_message,
-        }
-
-    result = query_chemical_info(normalized_cas)
+    result = query_chemical_info(
+        db,
+        normalized_cas,
+        skip_chinese=skip_chinese,
+        cache_only=cache_only,
+    )
 
     return {
         "cas_number": normalized_cas,
         "name": result["name"],
         "english_name": result["english_name"],
         "warning": result.get("warning"),
+        "smiles": result.get("smiles"),
+        "chinese_name_is_translated": result.get("chinese_name_is_translated"),
     }

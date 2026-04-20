@@ -606,12 +606,17 @@ export interface ChemicalInfo {
   name: string | null
   english_name: string | null
   warning?: string | null
+  smiles?: string | null
+  chinese_name_is_translated?: boolean
 }
 
 export const chemicalAPI = {
-  getInfo: (casNumber: string, options?: { skipChinese?: boolean }) =>
+  getInfo: (casNumber: string, options?: { skipChinese?: boolean; cacheOnly?: boolean }) =>
     api.get<ChemicalInfo>(`/chemical-info/${casNumber}`, {
-      params: options?.skipChinese ? { skip_chinese: true } : undefined,
+      params: {
+        skip_chinese: options?.skipChinese || undefined,
+        cache_only: options?.cacheOnly || undefined,
+      },
     }),
 }
 

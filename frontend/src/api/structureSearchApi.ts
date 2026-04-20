@@ -59,6 +59,11 @@ export interface CompoundStructureCache {
   inchikey: string | null
   molecular_formula: string | null
   molecular_weight: number | null
+  english_name: string | null
+  chinese_name: string | null
+  chinese_name_is_translated: boolean
+  name_error_message: string | null
+  name_last_resolved_at: string | null
   source: string | null
   source_id: string | null
   source_url: string | null

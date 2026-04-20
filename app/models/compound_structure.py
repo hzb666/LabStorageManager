@@ -50,6 +50,11 @@ class CompoundStructureCache(SQLModel, table=True):
     inchikey: str | None = Field(default=None, max_length=64)
     molecular_formula: str | None = Field(default=None, max_length=100)
     molecular_weight: float | None = Field(default=None)
+    english_name: str | None = Field(default=None, max_length=500)
+    chinese_name: str | None = Field(default=None, max_length=500)
+    chinese_name_is_translated: bool = Field(default=False)
+    name_error_message: str | None = Field(default=None, max_length=1000)
+    name_last_resolved_at: datetime | None = Field(default=None)
     source: CompoundStructureSource | None = Field(
         default=None,
         sa_column=Column(
@@ -104,6 +109,11 @@ class CompoundStructureCacheResponse(BaseResponse):
     inchikey: str | None
     molecular_formula: str | None
     molecular_weight: float | None
+    english_name: str | None
+    chinese_name: str | None
+    chinese_name_is_translated: bool
+    name_error_message: str | None
+    name_last_resolved_at: datetime | None
     source: CompoundStructureSource | None
     source_id: str | None
     source_url: str | None

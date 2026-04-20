@@ -291,6 +291,24 @@ SQLITE_LOG_TIMELINE_DETAIL_SEARCH_COLUMN_UPGRADES: tuple[tuple[str, str], ...] =
     ),
 )
 
+SQLITE_COMPOUND_STRUCTURE_CACHE_NAME_COLUMN_UPGRADES: tuple[tuple[str, str], ...] = (
+    ("english_name", "ALTER TABLE compound_structure_cache ADD COLUMN english_name VARCHAR(500)"),
+    ("chinese_name", "ALTER TABLE compound_structure_cache ADD COLUMN chinese_name VARCHAR(500)"),
+    (
+        "chinese_name_is_translated",
+        "ALTER TABLE compound_structure_cache "
+        "ADD COLUMN chinese_name_is_translated BOOLEAN NOT NULL DEFAULT 0",
+    ),
+    (
+        "name_error_message",
+        "ALTER TABLE compound_structure_cache ADD COLUMN name_error_message VARCHAR(1000)",
+    ),
+    (
+        "name_last_resolved_at",
+        "ALTER TABLE compound_structure_cache ADD COLUMN name_last_resolved_at DATETIME",
+    ),
+)
+
 SQLITE_INVENTORY_OPERATION_LOG_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_operator_created_at ON inventory_operation_log (operator_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_operation_log_action_created_at ON inventory_operation_log (action, created_at DESC)",
@@ -1425,6 +1443,15 @@ def ensure_sqlite_log_timeline_detail_search_text(connection: Connection) -> Non
         logger.info("Backfilled %d log timeline detail search rows.", updated_rows)
 
 
+def ensure_sqlite_compound_structure_cache_name_columns(connection: Connection) -> None:
+    """Ensure external name cache fields exist on compound_structure_cache."""
+    existing_columns = _get_sqlite_table_columns(connection, "compound_structure_cache")
+    for column_name, alter_statement in SQLITE_COMPOUND_STRUCTURE_CACHE_NAME_COLUMN_UPGRADES:
+        if column_name not in existing_columns:
+            connection.execute(text(alter_statement))
+            logger.info("Added compound_structure_cache.%s column.", column_name)
+
+
 def _sqlite_fts_columns_match(connection: Connection, config: SQLiteFTSTableConfig) -> bool:
     table_info_statement = f"PRAGMA table_info({_quote_sqlite_identifier(config.fts_table)})"
     db_columns = [
@@ -1572,6 +1599,7 @@ def init_db() -> None:
     with engine.begin() as connection:
         ensure_sqlite_common_shelf_location_pinyin_columns(connection)
         ensure_sqlite_log_timeline_detail_search_text(connection)
+        ensure_sqlite_compound_structure_cache_name_columns(connection)
         ensure_sqlite_common_shelf_groups(connection)
         ensure_sqlite_performance_indexes(connection)
         ensure_log_timeline_source_delete_triggers(connection)

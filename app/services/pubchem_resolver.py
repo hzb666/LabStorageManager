@@ -20,7 +20,7 @@ PUBCHEM_BASE_URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
 PUBCHEM_RETRY_STATUSES = {429, 500, 502, 503, 504}
 PUBCHEM_PROPERTIES = (
     "SMILES,ConnectivitySMILES,CanonicalSMILES,IsomericSMILES,"
-    "InChIKey,MolecularFormula,MolecularWeight"
+    "InChIKey,MolecularFormula,MolecularWeight,IUPACName"
 )
 
 
@@ -37,6 +37,7 @@ class ResolvedStructure:
     inchikey: str | None = None
     molecular_formula: str | None = None
     molecular_weight: float | None = None
+    english_name: str | None = None
     confidence: int = 0
     candidate_count: int = 0
     candidates: list[dict[str, Any]] | None = None
@@ -288,6 +289,7 @@ def _resolved_result(
         inchikey=normalized.inchikey or _optional_text(row, "InChIKey"),
         molecular_formula=_optional_text(row, "MolecularFormula"),
         molecular_weight=_optional_float(row, "MolecularWeight"),
+        english_name=_optional_text(row, "IUPACName"),
         confidence=100,
         candidate_count=1,
         candidates=candidates,
