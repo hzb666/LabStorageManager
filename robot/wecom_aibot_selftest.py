@@ -20,6 +20,7 @@ from robot.wecom_aibot.llm_planner import (
 )
 from robot.wecom_aibot.lsm_orchestrator import LSMRobotOrchestrator
 from robot.wecom_aibot.messages import parse_text_message
+from robot.wecom_aibot.replies import clamp_text, text_reply
 from robot.wecom_aibot.store import ProcessedMessageStore
 
 
@@ -46,6 +47,12 @@ class SlowFakeOrchestrator(FakeOrchestrator):
     async def answer(self, *, text: str, payload: dict) -> str:
         await asyncio.sleep(0.05)
         return await super().answer(text=text, payload=payload)
+
+
+class ThinkingFakeOrchestrator(FakeOrchestrator):
+    async def answer(self, *, text: str, payload: dict) -> str:
+        self.calls += 1
+        return "<think>内部推理不要发出去</think>\n可以查询库存。"
 
 
 class FakeMcpClient:
@@ -386,6 +393,35 @@ def _auth_expired_result() -> dict:
 
 
 class WecomAibotSelfTest(unittest.TestCase):
+    def test_text_reply_strips_complete_think_blocks(self) -> None:
+        response = text_reply("<think>先分析</think>\n库存有 3 瓶。")
+
+        content = response["text"]["content"]
+        self.assertEqual("库存有 3 瓶。", content)
+        self.assertNotIn("<think>", content)
+
+    def test_clamp_text_strips_unclosed_think_blocks_with_fallback(self) -> None:
+        self.assertEqual(
+            "我没有拿到可发送的回复，请换个问法再试。",
+            clamp_text("<think>只返回了内部推理", 3500),
+        )
+
+    def test_handler_strips_think_blocks_from_orchestrator_reply(self) -> None:
+        database_path = Path("tmp") / "robot-think-reply-state.db"
+        _remove_sqlite_files(database_path)
+        store = ProcessedMessageStore(database_path)
+        store.init()
+        handler = WecomAibotHandler(
+            orchestrator=ThinkingFakeOrchestrator(),
+            store=store,
+            welcome_text="welcome",
+        )
+
+        response = asyncio.run(handler.handle_payload(_payload()))
+
+        self.assertEqual("可以查询库存。", response["text"]["content"])
+        _remove_sqlite_files(database_path)
+
     def test_crypto_round_trip(self) -> None:
         cipher = WecomAesCipher(token="token", encoding_aes_key=_test_encoding_aes_key())
         encrypted = cipher.encrypt_payload(

@@ -13,6 +13,7 @@ from robot.wecom_aibot.llm_planner import (
     ACTION_START_RETURN,
     LSMToolPlan,
     _compact_conversation_context,
+    _instructions,
     _parse_plan,
     is_safe_llm_reply,
 )
@@ -271,6 +272,13 @@ def _pending_stockin() -> dict[str, Any]:
 
 
 class WecomReadQuerySelfTest(unittest.TestCase):
+    def test_planner_instructions_do_not_force_inventory_search_for_stock_words(self) -> None:
+        instructions = _instructions(5)
+
+        self.assertNotIn("必须优先选择 inventory_search_by_name", instructions)
+        self.assertIn("不要被单个关键词固定到某个工具", instructions)
+        self.assertIn("不等同于 exact=true", instructions)
+
     def test_empty_inventory_uses_master_data_before_common_shelf(self) -> None:
         mcp = FakeMcpClient(
             {
