@@ -132,6 +132,41 @@ class Settings(BaseSettings):
     
     # CAS 设置
     cas_pattern: str = CAS_PATTERN
+    chem_structure_feature_enabled: bool = Field(
+        default=False,
+        description="Enable local structure cache and substructure search features",
+    )
+    chem_resolver_pubchem_enabled: bool = Field(
+        default=True,
+        description="Enable explicit PubChem CAS structure resolution flows",
+    )
+    chem_pubchem_rate_limit_per_second: float = Field(
+        default=2.0,
+        gt=0,
+        le=5,
+        description="Conservative PubChem PUG-REST request rate limit",
+    )
+    chem_pubchem_timeout_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        description="HTTP timeout for PubChem PUG-REST requests",
+    )
+    chem_pubchem_max_retries: int = Field(
+        default=3,
+        ge=0,
+        le=5,
+        description="Retry count for PubChem 429, 5xx, and timeout failures",
+    )
+    chem_pubchem_user_agent: str = Field(
+        default="LabStorageManager/0.1.0",
+        description="User-Agent sent to PubChem PUG-REST",
+    )
+    chem_structure_search_max_results: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Default upper bound for structure search results",
+    )
     
     # 小牛翻译 API
     niutrans_appid: str = Field(default="", description="Niutrans API appId")

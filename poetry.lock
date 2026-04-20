@@ -30,7 +30,7 @@ version = "4.12.1"
 description = "High-level concurrency and networking framework on top of asyncio or Trio"
 optional = false
 python-versions = ">=3.9"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "anyio-4.12.1-py3-none-any.whl", hash = "sha256:d405828884fc140aa80a3c667b8beed277f1dfedec42ba031bd6ac3db606ab6c"},
     {file = "anyio-4.12.1.tar.gz", hash = "sha256:41cfcc3a4c85d3f05c932da7c26d0201ac36f72abd4435ba90d0464a3ffed703"},
@@ -151,7 +151,7 @@ version = "2026.2.25"
 description = "Python package for providing Mozilla's CA Bundle."
 optional = false
 python-versions = ">=3.7"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "certifi-2026.2.25-py3-none-any.whl", hash = "sha256:027692e4402ad994f1c42e52a4997a9763c646b73e4096e4d5d6db8af1d6f0fa"},
     {file = "certifi-2026.2.25.tar.gz", hash = "sha256:e887ab5cee78ea814d3472169153c2d12cd43b14bd03329a39a9c6e2e80bfba7"},
@@ -623,7 +623,7 @@ version = "0.16.0"
 description = "A pure-Python, bring-your-own-I/O implementation of HTTP/1.1"
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"},
     {file = "h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1"},
@@ -635,7 +635,7 @@ version = "1.0.9"
 description = "A minimal low-level HTTP client."
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55"},
     {file = "httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8"},
@@ -710,7 +710,7 @@ version = "0.28.1"
 description = "The next generation HTTP client."
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"},
     {file = "httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc"},
@@ -747,7 +747,7 @@ version = "3.11"
 description = "Internationalized Domain Names in Applications (IDNA)"
 optional = false
 python-versions = ">=3.8"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "idna-3.11-py3-none-any.whl", hash = "sha256:771a87f49d9defaf64091e6e6fe9c18d4833f140bd19464795bc32d966ca37ea"},
     {file = "idna-3.11.tar.gz", hash = "sha256:795dafcc9c04ed0c1fb032c2aa73654d8e8c5023a7df64a53f39190ada629902"},
@@ -1696,6 +1696,40 @@ files = [
 ]
 
 [[package]]
+name = "rdkit"
+version = "2026.3.1"
+description = "A collection of chemoinformatics and machine-learning software written in C++ and Python"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "rdkit-2026.3.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:bdcd6ff790ad7397a743bd9f6e0750993a926dff43440dbeb1563a226620d4f1"},
+    {file = "rdkit-2026.3.1-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:d437efa1d70d75379f0bd6675a4e5ce39c7b1a31b10489c17b352748a4cda0f3"},
+    {file = "rdkit-2026.3.1-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:ce538ef325642c288de7cb00eecf220962cf11a913a027a76f1aa6a1edaf1ff7"},
+    {file = "rdkit-2026.3.1-cp310-cp310-win_amd64.whl", hash = "sha256:37a971ccfac6b909e4a4601a7c64c55fcf8d8eb9ae02397f45ec74553919b49a"},
+    {file = "rdkit-2026.3.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:41edffacdf49ddb502688e00a7e349cdfe895bfeefc59a4859b9387f7839985a"},
+    {file = "rdkit-2026.3.1-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:092cc114ba3fd76c85da0c9a1e8831be53dc70236448b671d70919c2e8c52384"},
+    {file = "rdkit-2026.3.1-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:97cd3081224629caf169a531d6350c8f5b3fcc16dc85e6dad0209a7a15a909f4"},
+    {file = "rdkit-2026.3.1-cp311-cp311-win_amd64.whl", hash = "sha256:394b15d92df6fb011744502322b3e4de94ef939f628c384fea83aabb224ea8c7"},
+    {file = "rdkit-2026.3.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:14e050ffa5d6c5b6b8c87435888c017dcc9fb1fde763f5a49c78bb331aac8c8b"},
+    {file = "rdkit-2026.3.1-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:7b2480bdbbf8d20cf857a635a40de249a97d619a5ae270d840771cc6bdb4979c"},
+    {file = "rdkit-2026.3.1-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:a84112a2f33256789319e1142f005f19333161549b1b3e86a0945d6545ace851"},
+    {file = "rdkit-2026.3.1-cp312-cp312-win_amd64.whl", hash = "sha256:8be158d43c7f5a31822a8195e6f036e4227a085d3029636a815a00f6ec3dfa5e"},
+    {file = "rdkit-2026.3.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:e36ed2109bf3a540e99331605e23bf88a5192a47f601c1f3c911f51fb95eac93"},
+    {file = "rdkit-2026.3.1-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:352ac0ed1505dd9d19bdc785aebd8710553f17a70b3843a3d20f9ca5e5318772"},
+    {file = "rdkit-2026.3.1-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:af2e141a7a885155ecf956adb04c26809146db8a8fc4ab1ad8946e108e174969"},
+    {file = "rdkit-2026.3.1-cp313-cp313-win_amd64.whl", hash = "sha256:219e65da7e627f0fe2f1bfaa431edf00cf25aecf7f747850938c3cdfcf400460"},
+    {file = "rdkit-2026.3.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:7c63c1bda78f07ac38b050b9f84c040981c64567678ec3f3213b3296b63af1a0"},
+    {file = "rdkit-2026.3.1-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:ffef0ddd49214b9e74a2588efd9eedfad7ca3bf4f4350cdc0fe1b5e54f8c1ba4"},
+    {file = "rdkit-2026.3.1-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:53a0718228697c3ebc746386a658258d910b2a47ac75c37408902c3321d69cd2"},
+    {file = "rdkit-2026.3.1-cp314-cp314-win_amd64.whl", hash = "sha256:b5fede0a828bea8c672ccf670f6364468980326f3bc8c74fb64a4d7c92c152ed"},
+]
+
+[package.dependencies]
+numpy = "*"
+Pillow = "*"
+
+[[package]]
 name = "redis"
 version = "7.4.0"
 description = "Python client for Redis database and key-value store"
@@ -2463,4 +2497,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "c3cfe3f4c3b2d7d6385b963e44697a05b46056d502f3367c053cde96447890b6"
+content-hash = "c48ae80ce814f6a1135ee106f3ac3020785c7a824d95f1b24aff26774fa9af2d"
