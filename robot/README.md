@@ -247,6 +247,7 @@ https://your-domain.example.com/wechat/kf/bind/{state}
 用户在网页中提交 LabStorageManager 用户名和密码；绑定成功后回到微信客服继续查询、借用或归还。链接默认 10 分钟有效，变量 `WECHAT_KF_BIND_TOKEN_TTL_MINUTES` 可调整。
 
 注意微信客服平台限制：用户必须先发起会话，企业才可回复；回复受微信客服会话窗口和条数限制影响。因此借用/归还流程应尽量保持“一次候选确认 + 一次结果回复”。
+同一用户连续发送的多条文字会先经过默认 1 秒的短静默窗口合并，再交给机器人生成一次回复；静默窗口可通过 `WECHAT_KF_REPLY_DEBOUNCE_SECONDS` 调整。
 
 回调处理会记录同步页数、跳过消息、重复消息和回复结果，日志中的 `open_kfid`、`external_userid` 等标识会做掩码处理。
 

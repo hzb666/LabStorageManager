@@ -37,6 +37,9 @@ class WechatKfRateLimiter:
                 )
 
     def allow(self, actor_id: str) -> bool:
+        return self.reserve(actor_id) is not None
+
+    def reserve(self, actor_id: str) -> int | None:
         now = int(time.time())
         since = now - self.window_seconds
         with closing(self._connect()) as connection:
@@ -54,15 +57,24 @@ class WechatKfRateLimiter:
                     (actor_id, since),
                 ).fetchone()[0]
                 if int(count) >= self.max_messages:
-                    return False
-                connection.execute(
+                    return None
+                cursor = connection.execute(
                     """
                     INSERT INTO wechat_kf_rate_limit (actor_id, created_at)
                     VALUES (?, ?)
                     """,
                     (actor_id, now),
                 )
-        return True
+                return int(cursor.lastrowid)
+
+    def release(self, reservation_id: int) -> None:
+        """Remove one previously reserved message slot for superseded processing."""
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    "DELETE FROM wechat_kf_rate_limit WHERE rowid = ?",
+                    (reservation_id,),
+                )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)

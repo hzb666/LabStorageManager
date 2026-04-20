@@ -74,12 +74,19 @@ class LSMRobotOrchestrator:
     web_search_client: MiniMaxWebSearchClient | None = None
     search_limit: int = 5
 
-    async def answer(self, *, text: str, payload: dict[str, Any]) -> str:
+    async def answer(
+        self,
+        *,
+        text: str,
+        payload: dict[str, Any],
+        remember_context: bool = True,
+    ) -> str:
         normalized = text.strip()
         actor = build_actor(payload)
         binding_reply = await self._handle_binding_command(actor, normalized)
         if binding_reply:
-            self._append_context_turn(actor.chat_key, normalized, binding_reply)
+            if remember_context:
+                self._append_context_turn(actor.chat_key, normalized, binding_reply)
             return binding_reply
 
         conversation_context = self._get_context(actor.chat_key)
@@ -99,8 +106,14 @@ class LSMRobotOrchestrator:
             )
         except BindingExpiredError:
             reply = BINDING_EXPIRED_REPLY
-        self._append_context_turn(actor.chat_key, normalized, reply)
+        if remember_context:
+            self._append_context_turn(actor.chat_key, normalized, reply)
         return reply
+
+    def remember_context_turn(self, *, text: str, payload: dict[str, Any], reply: str) -> None:
+        normalized = text.strip()
+        actor = build_actor(payload)
+        self._append_context_turn(actor.chat_key, normalized, reply)
 
     async def _answer_current(
         self,

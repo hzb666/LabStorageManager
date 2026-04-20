@@ -62,19 +62,66 @@ class FakeWechatKfClient:
 class FakeOrchestrator:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.remembered: list[dict[str, Any]] = []
 
-    async def answer(self, *, text: str, payload: dict[str, Any]) -> str:
-        self.calls.append({"text": text, "payload": payload})
+    async def answer(
+        self,
+        *,
+        text: str,
+        payload: dict[str, Any],
+        remember_context: bool = True,
+    ) -> str:
+        self.calls.append({"text": text, "payload": payload, "remember_context": remember_context})
         return f"已查询：{text}"
+
+    def remember_context_turn(self, *, text: str, payload: dict[str, Any], reply: str) -> None:
+        self.remembered.append({"text": text, "payload": payload, "reply": reply})
 
 
 class SlowFakeOrchestrator(FakeOrchestrator):
-    async def answer(self, *, text: str, payload: dict[str, Any]) -> str:
+    async def answer(
+        self,
+        *,
+        text: str,
+        payload: dict[str, Any],
+        remember_context: bool = True,
+    ) -> str:
         await asyncio.sleep(0.05)
-        return await super().answer(text=text, payload=payload)
+        return await super().answer(
+            text=text,
+            payload=payload,
+            remember_context=remember_context,
+        )
+
+
+class SignalSlowFakeOrchestrator(FakeOrchestrator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started: asyncio.Event | None = None
+
+    async def answer(
+        self,
+        *,
+        text: str,
+        payload: dict[str, Any],
+        remember_context: bool = True,
+    ) -> str:
+        if self.started is not None:
+            self.started.set()
+        await asyncio.sleep(0.05)
+        return await super().answer(
+            text=text,
+            payload=payload,
+            remember_context=remember_context,
+        )
 
 
 class WechatKfSelfTest(unittest.TestCase):
+    def test_reply_debounce_defaults_to_one_second(self) -> None:
+        settings = WechatKfSettings(_env_file=None)
+
+        self.assertEqual(1.0, settings.reply_debounce_seconds)
+
     def test_message_conversion_uses_external_user_identity(self) -> None:
         message = _customer_text("m1", "乙醇在哪里")
 
@@ -152,6 +199,114 @@ class WechatKfSelfTest(unittest.TestCase):
         self.assertEqual(1, len(orchestrator.calls))
         _remove_sqlite_files(database_path)
 
+    def test_sync_batch_replies_only_latest_customer_message(self) -> None:
+        database_path = Path("tmp") / "wechat-kf-batch-latest.db"
+        _remove_sqlite_files(database_path)
+        _, processor, client, orchestrator, conversation = _processor(database_path)
+        conversation.save_binding(
+            wecom_userid=actor_id("kf", "user1"),
+            username="alice",
+            access_token="token",
+            user={"username": "alice"},
+        )
+        client.messages = [
+            {**_customer_text("m1", "你好1"), "send_time": 100},
+            {**_customer_text("m2", "你好2"), "send_time": 101},
+            {**_customer_text("m3", "你好3"), "send_time": 102},
+            {**_customer_text("m4", "你好4"), "send_time": 103},
+        ]
+
+        first = asyncio.run(processor.process_event({"Token": "sync-token", "OpenKfId": "kf"}, ""))
+        second = asyncio.run(processor.process_event({"Token": "sync-token", "OpenKfId": "kf"}, ""))
+
+        self.assertEqual(1, first)
+        self.assertEqual(0, second)
+        self.assertEqual(
+            [{"touser": "user1", "open_kfid": "kf", "content": "已查询：你好1\n你好2\n你好3\n你好4"}],
+            client.sent,
+        )
+        self.assertEqual(["你好1\n你好2\n你好3\n你好4"], [call["text"] for call in orchestrator.calls])
+        _remove_sqlite_files(database_path)
+
+    def test_newer_message_supersedes_slow_inflight_reply(self) -> None:
+        database_path = Path("tmp") / "wechat-kf-supersede.db"
+        _remove_sqlite_files(database_path)
+        _, processor, client, orchestrator, conversation = _processor(
+            database_path,
+            orchestrator=SlowFakeOrchestrator(),
+            reply_debounce_seconds=0.02,
+        )
+        conversation.save_binding(
+            wecom_userid=actor_id("kf", "user1"),
+            username="alice",
+            access_token="token",
+            user={"username": "alice"},
+        )
+
+        async def run_callbacks() -> list[int]:
+            client.messages = [{**_customer_text("m1", "你好"), "send_time": 100}]
+            first_task = asyncio.create_task(
+                processor.process_event({"Token": "sync-token-1", "OpenKfId": "kf"}, "")
+            )
+            await asyncio.sleep(0.01)
+            client.messages = [{**_customer_text("m2", "我要查乙醇"), "send_time": 101}]
+            second = await processor.process_event({"Token": "sync-token-2", "OpenKfId": "kf"}, "")
+            first = await first_task
+            return [first, second]
+
+        sent_counts = asyncio.run(run_callbacks())
+
+        self.assertEqual(1, sum(sent_counts))
+        self.assertEqual(
+            [{"touser": "user1", "open_kfid": "kf", "content": "已查询：你好\n我要查乙醇"}],
+            client.sent,
+        )
+        self.assertEqual(["你好\n我要查乙醇"], [call["text"] for call in orchestrator.calls])
+        _remove_sqlite_files(database_path)
+
+    def test_newer_message_before_send_discards_old_reply_and_merges_text(self) -> None:
+        database_path = Path("tmp") / "wechat-kf-before-send.db"
+        _remove_sqlite_files(database_path)
+        signal_orchestrator = SignalSlowFakeOrchestrator()
+        _, processor, client, orchestrator, conversation = _processor(
+            database_path,
+            orchestrator=signal_orchestrator,
+            reply_debounce_seconds=0,
+        )
+        conversation.save_binding(
+            wecom_userid=actor_id("kf", "user1"),
+            username="alice",
+            access_token="token",
+            user={"username": "alice"},
+        )
+
+        async def run_callbacks() -> list[int]:
+            started = asyncio.Event()
+            signal_orchestrator.started = started
+            client.messages = [{**_customer_text("m1", "你好"), "send_time": 100}]
+            first_task = asyncio.create_task(
+                processor.process_event({"Token": "sync-token-1", "OpenKfId": "kf"}, "")
+            )
+            await started.wait()
+            client.messages = [{**_customer_text("m2", "我要查乙醇"), "send_time": 101}]
+            second = await processor.process_event({"Token": "sync-token-2", "OpenKfId": "kf"}, "")
+            first = await first_task
+            return [first, second]
+
+        sent_counts = asyncio.run(run_callbacks())
+
+        self.assertEqual(1, sum(sent_counts))
+        self.assertEqual(
+            [{"touser": "user1", "open_kfid": "kf", "content": "已查询：你好\n我要查乙醇"}],
+            client.sent,
+        )
+        self.assertEqual(
+            ["你好", "你好\n我要查乙醇"],
+            [call["text"] for call in orchestrator.calls],
+        )
+        self.assertEqual(["你好\n我要查乙醇"], [item["text"] for item in orchestrator.remembered])
+        _remove_sqlite_files(database_path)
+
     def test_unbound_user_gets_web_bind_link(self) -> None:
         database_path = Path("tmp") / "wechat-kf-bind-link.db"
         _remove_sqlite_files(database_path)
@@ -189,9 +344,13 @@ class WechatKfSelfTest(unittest.TestCase):
             access_token="token",
             user={"username": "alice"},
         )
-        client.messages = [_customer_text(f"m{index}", f"查询乙醇库存{index}") for index in range(1, 5)]
 
-        sent_count = asyncio.run(processor.process_event({"Token": "sync-token", "OpenKfId": "kf"}, ""))
+        sent_count = 0
+        for index in range(1, 5):
+            client.messages = [_customer_text(f"m{index}", f"查询乙醇库存{index}")]
+            sent_count += asyncio.run(
+                processor.process_event({"Token": "sync-token", "OpenKfId": "kf"}, "")
+            )
 
         self.assertEqual(4, sent_count)
         self.assertEqual(3, len(orchestrator.calls))
@@ -271,6 +430,7 @@ def _processor(
     database_path: Path,
     *,
     orchestrator: FakeOrchestrator | None = None,
+    reply_debounce_seconds: float = 0,
 ) -> tuple[
     WechatKfSettings,
     WechatKfMessageProcessor,
@@ -286,6 +446,7 @@ def _processor(
         open_kfid="kf",
         state_db=database_path,
         bind_base_url="https://example.test",
+        reply_debounce_seconds=reply_debounce_seconds,
         _env_file=None,
     )
     conversation = WecomConversationStore(database_path)
