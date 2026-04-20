@@ -44,8 +44,6 @@ class ResolvedStructure:
 
     def to_cache_write(self) -> StructureCacheWrite:
         return StructureCacheWrite(**asdict(self))
-
-
 class PubChemResolver:
     def __init__(
         self,
@@ -77,6 +75,24 @@ class PubChemResolver:
                 status=CompoundStructureStatus.ERROR,
                 error_message=_format_error(exc),
             )
+
+    async def resolve_pubchem_cid(self, cas_number: str, cid: int) -> ResolvedStructure:
+        cas = normalize_cas(cas_number)
+        if not is_valid_cas(cas):
+            return ResolvedStructure(
+                cas_number=cas or cas_number,
+                status=CompoundStructureStatus.INVALID_CAS,
+                error_message="Invalid CAS checksum or format",
+            )
+        try:
+            return await self._resolve_single_cid(
+                cas,
+                cid,
+                [{"cid": cid, "selected_manually": True}],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PubChem CID resolve failed for %s/%s: %s", cas, cid, exc)
+            return ResolvedStructure(cas, CompoundStructureStatus.ERROR, error_message=_format_error(exc))
 
     async def _resolve_valid_cas(self, cas: str) -> ResolvedStructure:
         cids = await self._load_candidate_cids(cas)
@@ -211,16 +227,12 @@ def _extract_synonyms(payload: Mapping[str, Any]) -> list[str]:
         return []
     synonyms = rows[0].get("Synonym", [])
     return [str(synonym) for synonym in synonyms]
-
-
 def _optional_text(row: Mapping[str, Any], key: str) -> str | None:
     value = row.get(key)
     if value is None:
         return None
     text = str(value).strip()
     return text or None
-
-
 def _optional_float(row: Mapping[str, Any], key: str) -> float | None:
     value = row.get(key)
     if value is None:
@@ -229,12 +241,8 @@ def _optional_float(row: Mapping[str, Any], key: str) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
 def _read_canonical_smiles(row: Mapping[str, Any]) -> str | None:
     return _optional_text(row, "ConnectivitySMILES") or _optional_text(row, "CanonicalSMILES")
-
-
 def _read_isomeric_smiles(row: Mapping[str, Any]) -> str | None:
     return _optional_text(row, "SMILES") or _optional_text(row, "IsomericSMILES")
 

@@ -9,7 +9,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.auth import get_current_user, require_admin
 from app.core.config import settings
 from app.database import DBSession
-from app.models.compound_structure import CompoundStructureSource
+from app.models.compound_structure import (
+    CompoundStructureCacheResponse,
+    CompoundStructureSource,
+)
+from app.services.structure_cache_repo import get_structure_cache
+from app.services.structure_cache_workflow import (
+    StructureFeatureDisabledError,
+    StructureManualProtectedError,
+    StructureValidationError,
+    confirm_pubchem_cid_to_cache,
+    resolve_cas_to_cache,
+    save_manual_molblock_to_cache,
+)
 from app.services.structure_index import (
     StructureIndexSnapshot,
     StructureQueryFormat,
@@ -34,6 +46,27 @@ class SubstructureSearchRequest(BaseModel):
     limit: int = Field(default=100, ge=1, le=1000)
     use_chirality: bool = False
     only_in_stock: bool = True
+
+
+class ResolveCasRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cas_number: str = Field(min_length=1, max_length=50)
+    force: bool = False
+    overwrite_manual: bool = False
+
+
+class ManualStructureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    molblock: str = Field(min_length=1)
+
+
+class ConfirmPubChemCidRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cid: int = Field(ge=1)
+    overwrite_manual: bool = False
 
 
 class InventorySummaryResponse(BaseModel):
@@ -77,6 +110,16 @@ def _serialize_index_status(snapshot: StructureIndexSnapshot) -> StructureIndexS
     )
 
 
+def _map_structure_write_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, StructureFeatureDisabledError):
+        return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    if isinstance(exc, StructureManualProtectedError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, StructureValidationError):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
 @router.get(
     "/index/status",
     response_model=StructureIndexStatusResponse,
@@ -93,6 +136,75 @@ def get_structure_index_status() -> StructureIndexStatusResponse:
 )
 def rebuild_structure_index(db: DBSession) -> StructureIndexStatusResponse:
     return _serialize_index_status(structure_index.rebuild(db))
+
+
+@router.get(
+    "/structures/cache/{cas_number}",
+    response_model=CompoundStructureCacheResponse | None,
+    dependencies=[Depends(get_current_user), Depends(ensure_structure_feature_enabled)],
+)
+def get_structure_cache_status(
+    cas_number: str,
+    db: DBSession,
+) -> CompoundStructureCacheResponse | None:
+    return get_structure_cache(db, cas_number)
+
+
+@router.post(
+    "/structures/resolve-cas",
+    response_model=CompoundStructureCacheResponse,
+    dependencies=[Depends(require_admin), Depends(ensure_structure_feature_enabled)],
+)
+async def resolve_structure_cas(
+    payload: ResolveCasRequest,
+    db: DBSession,
+) -> CompoundStructureCacheResponse:
+    try:
+        return await resolve_cas_to_cache(
+            db,
+            cas_number=payload.cas_number,
+            force=payload.force,
+            overwrite_manual=payload.overwrite_manual,
+        )
+    except Exception as exc:
+        raise _map_structure_write_error(exc) from exc
+
+
+@router.put(
+    "/structures/cache/{cas_number}/manual",
+    response_model=CompoundStructureCacheResponse,
+    dependencies=[Depends(require_admin), Depends(ensure_structure_feature_enabled)],
+)
+def save_manual_structure(
+    cas_number: str,
+    payload: ManualStructureRequest,
+    db: DBSession,
+) -> CompoundStructureCacheResponse:
+    try:
+        return save_manual_molblock_to_cache(db, cas_number=cas_number, molblock=payload.molblock)
+    except Exception as exc:
+        raise _map_structure_write_error(exc) from exc
+
+
+@router.post(
+    "/structures/cache/{cas_number}/confirm-pubchem",
+    response_model=CompoundStructureCacheResponse,
+    dependencies=[Depends(require_admin), Depends(ensure_structure_feature_enabled)],
+)
+async def confirm_pubchem_candidate(
+    cas_number: str,
+    payload: ConfirmPubChemCidRequest,
+    db: DBSession,
+) -> CompoundStructureCacheResponse:
+    try:
+        return await confirm_pubchem_cid_to_cache(
+            db,
+            cas_number=cas_number,
+            cid=payload.cid,
+            overwrite_manual=payload.overwrite_manual,
+        )
+    except Exception as exc:
+        raise _map_structure_write_error(exc) from exc
 
 
 @router.post(

@@ -9,6 +9,7 @@ import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 // UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import { StructureCachePanel } from '@/components/chem/StructureCachePanel'
 import { StructureSearchResultsPanel } from '@/components/chem/StructureSearchResultsPanel'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/lib/toast'
@@ -439,6 +440,7 @@ function InventoryExpandedRow({ item }: { item: InventoryItem }) {
         <div>入库时间：{formatDate(item.created_at)}</div>
         <div>入库用户：{item.created_by_name || '-'}</div>
         <div>上次借用：{formatInventoryBorrowerDisplay(item)}</div>
+        <StructureCachePanel casNumber={item.cas_number} />
       </div>
     </div>
   )
