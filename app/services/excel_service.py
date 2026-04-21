@@ -390,11 +390,13 @@ def _build_import_result(
     *,
     created: int,
 ) -> dict[str, Any]:
+    cas_numbers = sorted({item.cas_number for item in prepared.created_items if item.cas_number})
     return {
         "success": len(prepared.errors) == 0,
         "total_rows": prepared.total_rows,
         "valid_rows": prepared.valid_rows,
         "created": created,
+        "created_cas_numbers": cas_numbers if created > 0 else [],
         "errors": prepared.errors,
         "preview_items": prepared.preview_items,
     }

@@ -44,6 +44,7 @@ from app.api import (
     chemical_name_map,
     common_shelf,
     consumable_orders,
+    dashboard,
     error_logs,
     events,
     inventory,
@@ -609,6 +610,7 @@ app.include_router(user_logs.router, prefix="/api")
 app.include_router(inventory.router, prefix="/api")
 app.include_router(reagent_orders.router, prefix="/api")
 app.include_router(consumable_orders.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
 app.include_router(user_sessions.router, prefix="/api/users/me")
 app.include_router(cart_sync.router, prefix="/api")
 app.include_router(chemical_info.router, prefix="/api")

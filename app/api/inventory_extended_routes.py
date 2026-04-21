@@ -4,12 +4,12 @@ import os
 import tempfile
 from typing import Any, Annotated, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select, func, update as sql_update
 
-from app.core.auth import CurrentUser, get_current_user
+from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.constants import (
     IMPORT_UPLOAD_RATE_LIMIT,
     IMPORT_UPLOAD_RATE_LIMIT_WINDOW_SECONDS,
@@ -46,6 +46,7 @@ from app.services.inventory_import_preview_sessions import (
     discard_inventory_import_preview_session,
 )
 from app.services.inventory_creation import create_manual_inventory_items
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.inventory_operation_logger import (
     SOURCE_MANUAL_ADD,
     log_inventory_export_operation,
@@ -254,6 +255,7 @@ def _register_manual_and_dashboard_routes(
     async def manual_add_inventory(
         item_data: ManualInventoryCreate,
         request: Request,
+        background_tasks: BackgroundTasks,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
@@ -283,6 +285,12 @@ def _register_manual_and_dashboard_routes(
                 SSEEventType.INVENTORY_CREATED,
                 {"id": ci.id, "item": serialized_item},
                 actor_client_id=actor_client_id,
+            )
+        if created_items:
+            enqueue_structure_cache_resolution(
+                background_tasks,
+                created_items[0].cas_number,
+                reason="inventory.manual_add",
             )
 
         return {
@@ -354,6 +362,46 @@ def _register_manual_and_dashboard_routes(
             "overdue_count": sum(1 for item in items if item.updated_at and (now - item.updated_at).days > OVERDUE_BORROW_DAYS),
         }
 
+    @router.get("/dashboard/admin/borrows", dependencies=[Depends(require_admin)])
+    def get_admin_borrows(db: Annotated[Session, Depends(get_db)]):
+        statement = regular_inventory_query().where(
+            Inventory.status == InventoryStatus.BORROWED,
+        ).order_by(Inventory.updated_at.desc())
+
+        items = db.exec(statement).all()
+        now = get_utc_now()
+        borrower_ids = {item.borrower_id for item in items if item.borrower_id}
+        users_map = batch_get_user_names(db, borrower_ids)
+
+        return {
+            "data": [
+                {
+                    "inventory_id": item.id,
+                    "name": item.name,
+                    "cas_number": item.cas_number,
+                    "remaining_quantity": item.remaining_quantity,
+                    "unit": item.unit,
+                    "notes": item.notes,
+                    "borrow_time": utc_iso_str(item.updated_at),
+                    "borrower_id": item.borrower_id,
+                    "borrower_name": users_map.get(item.borrower_id),
+                    "borrow_days": (now - item.updated_at).days if item.updated_at else 0,
+                    "is_overdue": (
+                        (now - item.updated_at).days > OVERDUE_BORROW_DAYS
+                    )
+                    if item.updated_at
+                    else False,
+                }
+                for item in items
+            ],
+            "total": len(items),
+            "overdue_count": sum(
+                1
+                for item in items
+                if item.updated_at and (now - item.updated_at).days > OVERDUE_BORROW_DAYS
+            ),
+        }
+
     @router.get("/dashboard/pending-stockin")
     def get_pending_stockin(
         current_user: Annotated[User, Depends(get_current_user)],
@@ -384,6 +432,44 @@ def _register_manual_and_dashboard_routes(
                     "unit": item.unit,
                     "is_hazardous": item.is_hazardous,
                     "notes": item.notes,
+                    "stockin_time": utc_iso_str(item.created_at),
+                }
+                for item in items
+            ],
+            "total": len(items),
+        }
+
+    @router.get("/dashboard/admin/pending-stockin", dependencies=[Depends(require_admin)])
+    def get_admin_pending_stockin(db: Annotated[Session, Depends(get_db)]):
+        statement = regular_inventory_query().where(
+            Inventory.storage_location.is_(None),
+            Inventory.temporary_keeper_id.is_not(None),
+        ).order_by(Inventory.created_at.desc())
+
+        items = db.exec(statement).all()
+        keeper_ids = {item.temporary_keeper_id for item in items if item.temporary_keeper_id}
+        users_map = batch_get_user_names(db, keeper_ids)
+
+        return {
+            "data": [
+                {
+                    "inventory_id": item.id,
+                    "order_id": item.source_order_id,
+                    "name": item.name,
+                    "cas_number": item.cas_number,
+                    "english_name": item.english_name,
+                    "alias": item.alias,
+                    "category": item.category,
+                    "brand": item.brand,
+                    "purity": item.purity,
+                    "specification": format_specification(item.initial_quantity, item.unit),
+                    "initial_quantity": item.initial_quantity,
+                    "remaining_quantity": item.remaining_quantity,
+                    "unit": item.unit,
+                    "is_hazardous": item.is_hazardous,
+                    "notes": item.notes,
+                    "temporary_keeper_id": item.temporary_keeper_id,
+                    "temporary_keeper_name": users_map.get(item.temporary_keeper_id),
                     "stockin_time": utc_iso_str(item.created_at),
                 }
                 for item in items
@@ -497,6 +583,7 @@ def _register_import_routes(
     def confirm_inventory_import(
         body: InventoryImportConfirmBody,
         request: Request,
+        background_tasks: BackgroundTasks,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
@@ -520,6 +607,12 @@ def _register_import_routes(
             )
             if result["success"] and result["created"] > 0:
                 clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+                for cas_number in result.get("created_cas_numbers", []):
+                    enqueue_structure_cache_resolution(
+                        background_tasks,
+                        cas_number,
+                        reason="inventory.import",
+                    )
 
             return _format_import_response("Import completed", result)
         except ValueError as exc:

@@ -59,6 +59,8 @@ export interface UseTableStateOptions {
   columnSizingDebounceMs?: number
   // 额外的查询参数
   extraParams?: Record<string, unknown>
+  // 外部结果集已经有业务排序时，禁止把表头排序带进请求。
+  suppressSorting?: boolean
   // 初始化搜索关键词（用于 URL 直达，绕过首次防抖）
   initialSearch?: string
   // 初始化搜索字段
@@ -97,12 +99,15 @@ export interface UseTableStateReturn {
   columnSizing: ColumnSizingState
   setColumnSizing: (updater: ColumnSizingState | ((prev: ColumnSizingState) => ColumnSizingState)) => void
   isAllExpanded: boolean
+  setAllExpanded: (value: boolean) => void
   toggleExpandAll: () => void
   resetExpanded: () => void
   data: unknown[]
   total: number
   // 加载状态
   isLoading: boolean
+  isError: boolean
+  error: unknown
   // 加载更多状态
   isFetchingNextPage: boolean
   // 是否还有更多数据
@@ -149,6 +154,8 @@ type TableQueryState = {
   data: unknown[]
   total: number
   isLoading: boolean
+  isError: boolean
+  error: unknown
   isFetchingNextPage: boolean
   hasNextPage: boolean
   fetchNextPage: TableQueryResult['fetchNextPage']
@@ -266,11 +273,15 @@ function useExpandAllState(expandStorageId: string, defaultExpanded: boolean) {
     setIsAllExpanded((prev) => !prev)
   }, [])
 
+  const setAllExpanded = useCallback((value: boolean) => {
+    setIsAllExpanded(value)
+  }, [])
+
   const resetExpanded = useCallback(() => {
     // 这里故意保留空实现，只是维持返回契约；真正的单行展开重置仍由外层表格实例处理。
   }, [])
 
-  return { isAllExpanded, toggleExpandAll, resetExpanded }
+  return { isAllExpanded, setAllExpanded, toggleExpandAll, resetExpanded }
 }
 
 // 管理筛选、搜索、排序状态，并统一防抖与模糊搜索持久化逻辑。
@@ -419,11 +430,13 @@ function getDisplayCount(args: {
 // 这个 key 顺序必须和 useInfiniteQuery 的无筛选场景完全一致，否则会读不到总数缓存。
 function buildBaseQueryKey(
   queryKey: string[],
+  extraParams: Record<string, unknown>,
   defaultStatus: string,
   defaultSearchField: string
 ): readonly unknown[] {
   return [
     ...queryKey,
+    extraParams,
     defaultStatus,
     '',
     defaultSearchField,
@@ -487,6 +500,8 @@ function useTableQueryData(args: {
     data: allData,
     isLoading,
     isFetchingNextPage,
+    isError,
+    error,
     hasNextPage,
     fetchNextPage,
     refetch,
@@ -494,6 +509,7 @@ function useTableQueryData(args: {
   } = useInfiniteQuery({
     queryKey: [
       ...queryKey,
+      extraParams,
       statusFilter,
       globalFilter,
       searchField,
@@ -514,6 +530,8 @@ function useTableQueryData(args: {
     data,
     total,
     isLoading,
+    isError,
+    error,
     isFetchingNextPage,
     hasNextPage: Boolean(hasNextPage),
     fetchNextPage,
@@ -533,6 +551,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     debounceMs = 200,
     columnSizingDebounceMs = 500,
     extraParams = {},
+    suppressSorting = false,
     initialSearch = '',
     initialSearchField,
     expandStorageKey,
@@ -555,7 +574,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     tableId,
     columnSizingDebounceMs
   )
-  const { isAllExpanded, toggleExpandAll, resetExpanded } = useExpandAllState(
+  const { isAllExpanded, setAllExpanded, toggleExpandAll, resetExpanded } = useExpandAllState(
     expandStorageId,
     defaultExpanded
   )
@@ -567,7 +586,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
       searchField: filterState.searchField,
       fuzzySearch: filterState.fuzzySearch,
       matchMode: filterState.matchMode,
-      sorting: filterState.sorting,
+      sorting: suppressSorting ? [] : filterState.sorting,
     }),
     [
       filterState.statusFilter,
@@ -576,6 +595,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
       filterState.fuzzySearch,
       filterState.matchMode,
       filterState.sorting,
+      suppressSorting,
     ]
   )
   const queryState = useTableQueryData({
@@ -587,8 +607,8 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     filters: queryFilters,
   })
   const baseQueryKey = useMemo(
-    () => buildBaseQueryKey(queryKey, defaultStatus, defaultSearchField),
-    [queryKey, defaultStatus, defaultSearchField]
+    () => buildBaseQueryKey(queryKey, extraParams, defaultStatus, defaultSearchField),
+    [queryKey, extraParams, defaultStatus, defaultSearchField]
   )
   // 表头在筛选态下还要显示总量，所以这里读取“无筛选”缓存的第一页总数，不额外发请求。
   const cachedBaseData = queryClient.getQueryData<InfiniteData<ListResponseData>>(baseQueryKey)
@@ -625,11 +645,14 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     columnSizing,
     setColumnSizing: handleColumnSizingChange,
     isAllExpanded,
+    setAllExpanded,
     toggleExpandAll,
     resetExpanded,
     data: queryState.data,
     total: queryState.total,
     isLoading: queryState.isLoading,
+    isError: queryState.isError,
+    error: queryState.error,
     isFetchingNextPage: queryState.isFetchingNextPage,
     hasNextPage: queryState.hasNextPage,
     fetchNextPage: queryState.fetchNextPage,

@@ -1,13 +1,18 @@
 import { defineConfig } from "vitepress";
 import { MermaidPlugin } from "@leelaa/vitepress-plugin-extended";
 
+const SITE_BASE = "/LabStorageManager/";
+
 export default defineConfig({
   lang: "zh-CN",
   title: "LabStorageManager",
   description: "基于真实代码行为整理的实验室库存管理系统知识库",
-  base: "/LabStorageManager/",
+  base: SITE_BASE,
   head: [
-    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: `${SITE_BASE}favicon.svg` }],
+    ["link", { rel: "preconnect", href: "https://fonts.googleapis.cn" }],
+    ["link", { rel: "preconnect", href: "https://fonts.gstatic.cn", crossorigin: "" }],
+    ["script", {}, "document.documentElement.setAttribute('data-font-state','loading')"],
   ],
   lastUpdated: true,
   cleanUrls: true,

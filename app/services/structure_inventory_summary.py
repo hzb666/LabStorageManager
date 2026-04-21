@@ -60,7 +60,7 @@ def get_inventory_summaries_by_cas(
 def get_visible_inventory_cas_numbers(db: Session) -> set[str]:
     """Return normalized CAS values that currently have visible stock rows."""
     rows = db.exec(
-        select(func.distinct(_normalized_inventory_cas_expr()))
+        select(func.distinct(normalized_inventory_cas_expr()))
         .where(Inventory.cas_number != "")
         .where(Inventory.status.in_(VISIBLE_STOCK_STATUSES))
     ).all()
@@ -84,13 +84,13 @@ def _load_inventory_rows(
     *,
     only_in_stock: bool,
 ) -> list[Inventory]:
-    statement = select(Inventory).where(_normalized_inventory_cas_expr().in_(cas_numbers))
+    statement = select(Inventory).where(normalized_inventory_cas_expr().in_(cas_numbers))
     if only_in_stock:
         statement = statement.where(Inventory.status.in_(VISIBLE_STOCK_STATUSES))
     return list(db.exec(statement.order_by(Inventory.created_at.desc())).all())
 
 
-def _normalized_inventory_cas_expr():
+def normalized_inventory_cas_expr():
     return func.replace(
         func.replace(
             func.replace(func.trim(Inventory.cas_number), "－", "-"),

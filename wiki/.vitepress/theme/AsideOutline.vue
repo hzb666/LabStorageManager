@@ -335,7 +335,7 @@ function getAbsoluteTop(element: HTMLElement) {
   border-left: 1px solid var(--vp-c-divider);
   padding-left: 16px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .outline-marker {
@@ -357,6 +357,6 @@ function getAbsoluteTop(element: HTMLElement) {
 .outline-title {
   line-height: 32px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
 }
 </style>

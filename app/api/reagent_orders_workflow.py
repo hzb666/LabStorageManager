@@ -1,9 +1,11 @@
 # 试剂订单工作流路由：审批、到货、仪表盘、入库。
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select, delete, update as sql_update
 
@@ -47,6 +49,7 @@ from app.services.order_operation_logger import (
     log_reagent_order_update,
     log_reagent_order_reject,
 )
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 
 ORDER_NOT_FOUND = "Order not found"
 LIST_CACHE_PREFIX = "list:"
@@ -60,6 +63,17 @@ REAGENT_ORDER_DELETE_LOCKED_STATUSES = frozenset(
         ReagentOrderStatus.STOCKED,
     }
 )
+DASHBOARD_ACTIVE_REJECTED_DAYS = 7
+DASHBOARD_REAGENT_STATUSES = (
+    ReagentOrderStatus.PENDING,
+    ReagentOrderStatus.APPROVED,
+    ReagentOrderStatus.REJECTED,
+)
+DASHBOARD_REAGENT_STATUS_LABELS = {
+    ReagentOrderStatus.PENDING.value: "已申购",
+    ReagentOrderStatus.APPROVED.value: "已批准",
+    ReagentOrderStatus.REJECTED.value: "未通过",
+}
 
 
 class ReagentWorkflowEditableFields(BaseModel):
@@ -562,6 +576,7 @@ def _register_arrival_routes(
     @router.post("/{order_id}/confirm-arrival")
     async def confirm_reagent_arrival(
         request: Request,
+        background_tasks: BackgroundTasks,
         current_user: CurrentUser,
         db: DBSession,
         order_id: int,
@@ -633,6 +648,11 @@ def _register_arrival_routes(
                 {"id": order_id, "item": _serialize_reagent_order(order, db)},
             )
             await _broadcast_common_shelf_events(db, common_shelf_items, created=True)
+            enqueue_structure_cache_resolution(
+                background_tasks,
+                order.cas_number,
+                reason="reagent_order.confirm_arrival.common_shelf",
+            )
 
             return {
                 "message": message,
@@ -692,6 +712,11 @@ def _register_arrival_routes(
         )
         _clear_inventory_projection_cache()
         await _broadcast_inventory_projection_events(db, inventory_items, created=True)
+        enqueue_structure_cache_resolution(
+            background_tasks,
+            order.cas_number,
+            reason="reagent_order.confirm_arrival.inventory",
+        )
 
         return {
             "message": message,
@@ -700,6 +725,64 @@ def _register_arrival_routes(
             "notes": order.notes,
             "items_created": len(inventory_items),
         }
+
+
+def _build_reagent_dashboard_groups(
+    orders: list[ReagentOrder],
+    users_map: dict[int, str],
+) -> dict[str, dict[str, Any]]:
+    grouped_orders: dict[str, dict[str, Any]] = {
+        status.value: {
+            "orders": [],
+            "count": 0,
+            "label": DASHBOARD_REAGENT_STATUS_LABELS[status.value],
+        }
+        for status in DASHBOARD_REAGENT_STATUSES
+    }
+
+    for order in orders:
+        order_data = {
+            "order_id": order.id,
+            "cas_number": order.cas_number,
+            "name": order.name,
+            "english_name": order.english_name,
+            "alias": order.alias,
+            "category": order.category,
+            "brand": order.brand,
+            "specification": format_specification(order.initial_quantity, order.unit),
+            "initial_quantity": order.initial_quantity,
+            "unit": order.unit,
+            "quantity": order.quantity,
+            "price": order.price,
+            "is_hazardous": order.is_hazardous,
+            "notes": order.notes,
+            "purity": order.purity,
+            "order_reason": order.order_reason,
+            "applicant_id": order.applicant_id,
+            "applicant_name": users_map.get(order.applicant_id) if order.applicant_id else "",
+            "created_at": utc_iso_str(order.created_at),
+            "updated_at": utc_iso_str(order.updated_at),
+        }
+
+        status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
+        if status_key not in grouped_orders:
+            grouped_orders[status_key] = {"orders": [], "count": 0, "label": status_key}
+        grouped_orders[status_key]["orders"].append(order_data)
+
+    for key in grouped_orders:
+        grouped_orders[key]["count"] = len(grouped_orders[key]["orders"])
+
+    return grouped_orders
+
+
+def _admin_reagent_dashboard_clause(cutoff):
+    return or_(
+        ReagentOrder.status.in_([ReagentOrderStatus.PENDING, ReagentOrderStatus.APPROVED]),
+        and_(
+            ReagentOrder.status == ReagentOrderStatus.REJECTED,
+            ReagentOrder.updated_at >= cutoff,
+        ),
+    )
 
 
 def _register_dashboard_routes(router: APIRouter) -> None:
@@ -733,60 +816,34 @@ def _register_dashboard_routes(router: APIRouter) -> None:
 
     @router.get("/dashboard/my-reagent-orders")
     def get_my_reagent_orders(current_user: CurrentUser, db: DBSession):
-        dashboard_statuses = [
-            ReagentOrderStatus.PENDING,
-            ReagentOrderStatus.APPROVED,
-            ReagentOrderStatus.REJECTED,
-        ]
         statement = select(ReagentOrder).where(
             ReagentOrder.applicant_id == current_user.id,
-            ReagentOrder.status.in_(dashboard_statuses),
+            ReagentOrder.status.in_(DASHBOARD_REAGENT_STATUSES),
         ).order_by(ReagentOrder.created_at.desc())
 
         orders = db.exec(statement).all()
-
-        status_labels = {
-            ReagentOrderStatus.PENDING.value: "已申购",
-            ReagentOrderStatus.APPROVED.value: "已批准",
-            ReagentOrderStatus.REJECTED.value: "未通过",
-        }
-        grouped_orders: dict[str, dict[str, Any]] = {
-            status.value: {"orders": [], "count": 0, "label": status_labels[status.value]}
-            for status in dashboard_statuses
-        }
-
-        for order in orders:
-            order_data = {
-                "order_id": order.id,
-                "cas_number": order.cas_number,
-                "name": order.name,
-                "english_name": order.english_name,
-                "alias": order.alias,
-                "category": order.category,
-                "brand": order.brand,
-                "specification": format_specification(order.initial_quantity, order.unit),
-                "initial_quantity": order.initial_quantity,
-                "unit": order.unit,
-                "quantity": order.quantity,
-                "price": order.price,
-                "is_hazardous": order.is_hazardous,
-                "notes": order.notes,
-                "purity": order.purity,
-                "order_reason": order.order_reason,
-                "created_at": utc_iso_str(order.created_at),
-                "updated_at": utc_iso_str(order.updated_at),
-            }
-
-            status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
-            if status_key not in grouped_orders:
-                grouped_orders[status_key] = {"orders": [], "count": 0, "label": status_key}
-            grouped_orders[status_key]["orders"].append(order_data)
-
-        for key in grouped_orders:
-            grouped_orders[key]["count"] = len(grouped_orders[key]["orders"])
+        users_map = {current_user.id: current_user.full_name}
 
         return {
-            "data": grouped_orders,
+            "data": _build_reagent_dashboard_groups(orders, users_map),
+            "total": len(orders),
+        }
+
+    @router.get("/dashboard/admin/reagent-orders", dependencies=[Depends(require_admin)])
+    def get_admin_reagent_orders(db: DBSession):
+        cutoff = get_utc_now() - timedelta(days=DASHBOARD_ACTIVE_REJECTED_DAYS)
+        statement = (
+            select(ReagentOrder)
+            .where(_admin_reagent_dashboard_clause(cutoff))
+            .order_by(ReagentOrder.created_at.desc())
+        )
+
+        orders = db.exec(statement).all()
+        applicant_ids = {order.applicant_id for order in orders if order.applicant_id}
+        users_map = batch_get_user_names(db, applicant_ids)
+
+        return {
+            "data": _build_reagent_dashboard_groups(orders, users_map),
             "total": len(orders),
         }
 
@@ -897,7 +954,10 @@ def _get_arrived_pending_items(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No enough pending stock items found for this order",
         )
-    if any(item.temporary_keeper_id != current_user.id for item in pending_items[: order.quantity]):
+    if current_user.role != UserRole.ADMIN and any(
+        item.temporary_keeper_id != current_user.id
+        for item in pending_items[: order.quantity]
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the temporary keeper can stock in pending items",
@@ -1043,6 +1103,7 @@ def _register_stock_in_route(
         order_id: int,
         payload: StockInRequest,
         request: Request,
+        background_tasks: BackgroundTasks,
         current_user: CurrentUser,
         db: DBSession,
     ):
@@ -1092,6 +1153,11 @@ def _register_stock_in_route(
             await _broadcast_inventory_projection_events(db, inventory_items, created=True)
             for item in inventory_items:
                 db.refresh(item)
+            enqueue_structure_cache_resolution(
+                background_tasks,
+                order.cas_number,
+                reason="reagent_order.stock_in.create",
+            )
             return {
                 "message": "已入库",
                 "order_id": order.id,
@@ -1126,6 +1192,11 @@ def _register_stock_in_route(
         await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
         _clear_inventory_projection_cache()
         await _broadcast_inventory_projection_events(db, target_items, created=False)
+        enqueue_structure_cache_resolution(
+            background_tasks,
+            order.cas_number,
+            reason="reagent_order.stock_in.update",
+        )
         return {
             "message": "已入库",
             "order_id": order.id,

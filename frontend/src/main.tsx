@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 // 1. 引入 TanStack Query 需要的 Provider 和 Client
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import '@/lib/browserProcessShim'
 import './index.css'
 import { bootstrapCacheVersion } from '@/lib/cacheVersionBootstrap'
 

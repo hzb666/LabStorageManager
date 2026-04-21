@@ -5,6 +5,7 @@ import { getApiBaseUrl } from '@/lib/apiConfig'
 import {
   resolveAuthNoticeByCode,
   resolveAuthNoticeByReason,
+  shouldSuppressAuthNoticeByReason,
   triggerSessionInvalidation,
 } from '@/lib/authSession'
 import { registerSSEDisconnect, unregisterSSEDisconnect } from '@/lib/sseRuntime'
@@ -26,6 +27,7 @@ export interface SSEOptions {
   handlers: Record<string, SSEEventHandler>
   autoConnect?: boolean
   withCredentials?: boolean
+  onReconnect?: () => void
   onStreamStale?: () => void
 }
 
@@ -51,6 +53,7 @@ function attachConnectedListener(args: {
   es: EventSource
   incrementReconnectCount: () => void
   markRoomStale: (room: string) => void
+  onReconnect?: () => void
   onStreamStale?: () => void
   openedOnceRef: MutableRefObject<boolean>
   setConnected: (clientId: string) => void
@@ -60,6 +63,7 @@ function attachConnectedListener(args: {
     es,
     incrementReconnectCount,
     markRoomStale,
+    onReconnect,
     onStreamStale,
     openedOnceRef,
     setConnected,
@@ -73,7 +77,11 @@ function attachConnectedListener(args: {
 
       if (openedOnceRef.current) {
         incrementReconnectCount()
-        markCurrentStreamStale({ markRoomStale, onStreamStale, stableRooms })
+        if (onReconnect) {
+          onReconnect()
+        } else {
+          markCurrentStreamStale({ markRoomStale, onStreamStale, stableRooms })
+        }
       }
       openedOnceRef.current = true
     } catch {
@@ -99,8 +107,12 @@ function attachAuthInvalidListener(args: {
       // 保留默认失效原因
     }
 
-    const noticeByReason = resolveAuthNoticeByReason(reason, '登录状态已失效，请重新登录')
-    const notice = resolveAuthNoticeByCode(code || undefined, noticeByReason)
+    const notice = shouldSuppressAuthNoticeByReason(reason)
+      ? ''
+      : resolveAuthNoticeByCode(
+        code || undefined,
+        resolveAuthNoticeByReason(reason, '登录状态已失效，请重新登录'),
+      )
 
     disconnect()
     void triggerSessionInvalidation({ notice, skipApi: true })
@@ -165,16 +177,22 @@ export function useSSE({
   handlers,
   autoConnect = true,
   withCredentials = true,
+  onReconnect,
   onStreamStale,
 }: SSEOptions) {
   const eventSourceRef = useRef<EventSource | null>(null)
   const openedOnceRef = useRef(false)
   const handlersRef = useRef(handlers)
+  const onReconnectRef = useRef(onReconnect)
   const onStreamStaleRef = useRef(onStreamStale)
 
   useEffect(() => {
     handlersRef.current = handlers
   }, [handlers])
+
+  useEffect(() => {
+    onReconnectRef.current = onReconnect
+  }, [onReconnect])
 
   useEffect(() => {
     onStreamStaleRef.current = onStreamStale
@@ -239,6 +257,7 @@ export function useSSE({
       es,
       incrementReconnectCount,
       markRoomStale,
+      onReconnect: onReconnectRef.current,
       onStreamStale: onStreamStaleRef.current,
       openedOnceRef,
       setConnected,
@@ -272,6 +291,7 @@ export function useSSE({
     stableRooms,
     setConnected,
     setDisconnected,
+    onReconnectRef,
     onStreamStaleRef,
   ])
 

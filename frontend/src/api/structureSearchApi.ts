@@ -1,6 +1,7 @@
 import { api } from '@/api/client'
 
 export type StructureQueryFormat = 'smarts' | 'molblock' | 'smiles'
+export type StructureSearchMode = 'substructure' | 'exact'
 
 export interface StructureIndexStatus {
   version: number
@@ -11,8 +12,8 @@ export interface StructureIndexStatus {
 export interface SubstructureSearchRequest {
   query: string
   format: StructureQueryFormat
+  match_mode?: StructureSearchMode
   limit?: number
-  use_chirality?: boolean
   only_in_stock?: boolean
 }
 
@@ -30,10 +31,12 @@ export interface SubstructureSearchResult {
   smiles_canonical: string
   inchikey: string | null
   source: string | null
+  similarity: number
   inventory_summary: InventoryStructureSummary | null
 }
 
 export interface SubstructureSearchResponse {
+  search_id: string
   total: number
   limit: number
   elapsed_ms: number
@@ -78,6 +81,20 @@ export interface CompoundStructureCache {
   updated_at: string
 }
 
+export interface StructureCacheListParams {
+  status_filter?: string
+  search?: string
+  skip?: number
+  limit?: number
+}
+
+export interface StructureCacheListResponse {
+  data: CompoundStructureCache[]
+  total: number
+  skip: number
+  limit: number
+}
+
 export interface ResolveCasPayload {
   cas_number: string
   force?: boolean
@@ -111,6 +128,15 @@ export const structureSearchAPI = {
 
   rebuildIndex: async (): Promise<StructureIndexStatus> => {
     const response = await api.post<StructureIndexStatus>('/chem/index/rebuild')
+    return response.data
+  },
+
+  listCaches: async (
+    params: StructureCacheListParams = {},
+  ): Promise<StructureCacheListResponse> => {
+    const response = await api.get<StructureCacheListResponse>('/chem/structures/cache', {
+      params,
+    })
     return response.data
   },
 

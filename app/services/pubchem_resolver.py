@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -45,6 +46,8 @@ class ResolvedStructure:
 
     def to_cache_write(self) -> StructureCacheWrite:
         return StructureCacheWrite(**asdict(self))
+
+
 class PubChemResolver:
     def __init__(
         self,
@@ -96,11 +99,46 @@ class PubChemResolver:
             return ResolvedStructure(cas, CompoundStructureStatus.ERROR, error_message=_format_error(exc))
 
     async def _resolve_valid_cas(self, cas: str) -> ResolvedStructure:
-        cids = await self._load_candidate_cids(cas)
-        if not cids:
+        cids = await self._load_compound_name_cids(cas)
+        if cids:
+            return await self._resolve_compound_name_candidates(cas, cids)
+
+        substance_candidates = await self._load_substance_cid_candidates(cas)
+        if not substance_candidates:
             return ResolvedStructure(cas_number=cas, status=CompoundStructureStatus.NOT_FOUND)
 
-        exact_cids, candidates = await self._confirm_cas_synonyms(cas, cids[:20])
+        substance_cids = [
+            candidate["cid"]
+            for candidate in substance_candidates
+            if isinstance(candidate.get("cid"), int)
+        ]
+        exact_cids, confirmed_candidates = await self._confirm_cas_synonyms(cas, substance_cids)
+        candidates = _merge_candidate_details(substance_candidates, confirmed_candidates)
+        if not exact_cids:
+            return _ambiguous_result(
+                cas,
+                candidate_count=len(substance_cids),
+                candidates=candidates,
+                confidence=30,
+                message="Substance CID candidates found, but none had exact CAS synonym confirmation",
+            )
+        if len(exact_cids) > 1:
+            return _ambiguous_result(
+                cas,
+                candidate_count=len(exact_cids),
+                candidates=candidates,
+                confidence=50,
+                message="Multiple Substance CIDs have exact CAS synonym confirmation",
+            )
+
+        return await self._resolve_single_cid(cas, exact_cids[0], candidates)
+
+    async def _resolve_compound_name_candidates(
+        self,
+        cas: str,
+        cids: list[int],
+    ) -> ResolvedStructure:
+        exact_cids, candidates = await self._confirm_cas_synonyms(cas, cids)
         if not exact_cids:
             return _ambiguous_result(
                 cas,
@@ -116,7 +154,7 @@ class PubChemResolver:
                 candidates=candidates,
                 confidence=50,
                 message="Multiple PubChem CIDs have exact CAS synonym confirmation",
-            )
+        )
         return await self._resolve_single_cid(cas, exact_cids[0], candidates)
 
     async def _rate_limit(self) -> None:
@@ -159,12 +197,34 @@ class PubChemResolver:
         response.raise_for_status()
         return response.text
 
-    async def _load_candidate_cids(self, cas: str) -> list[int]:
+    async def _load_compound_name_cids(self, cas: str) -> list[int]:
         payload = await self._get_json(f"/compound/name/{quote(cas, safe='')}/cids/JSON")
         if payload.get("_not_found"):
             return []
         cids = payload.get("IdentifierList", {}).get("CID", [])
         return [int(cid) for cid in cids if isinstance(cid, int | str) and str(cid).isdigit()]
+
+    async def _load_substance_cid_candidates(self, cas: str) -> list[dict[str, Any]]:
+        payload = await self._get_json(f"/substance/name/{quote(cas, safe='')}/cids/JSON")
+        if payload.get("_not_found"):
+            return []
+
+        cid_counts: Counter[int] = Counter()
+        for row in payload.get("InformationList", {}).get("Information", []):
+            if not isinstance(row, dict):
+                continue
+            for raw_cid in row.get("CID", []):
+                if isinstance(raw_cid, int | str) and str(raw_cid).isdigit():
+                    cid_counts[int(raw_cid)] += 1
+
+        return [
+            {
+                "cid": cid,
+                "matched_by_substance_name": True,
+                "sid_count": count,
+            }
+            for cid, count in sorted(cid_counts.items(), key=lambda item: (-item[1], item[0]))
+        ]
 
     async def _confirm_cas_synonyms(
         self,
@@ -228,6 +288,26 @@ def _extract_synonyms(payload: Mapping[str, Any]) -> list[str]:
         return []
     synonyms = rows[0].get("Synonym", [])
     return [str(synonym) for synonym in synonyms]
+
+
+def _merge_candidate_details(
+    base_candidates: list[dict[str, Any]],
+    confirmed_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_cid = {
+        candidate["cid"]: dict(candidate)
+        for candidate in base_candidates
+        if isinstance(candidate.get("cid"), int)
+    }
+    for candidate in confirmed_candidates:
+        cid = candidate.get("cid")
+        if not isinstance(cid, int):
+            continue
+        merged = by_cid.setdefault(cid, {"cid": cid})
+        merged.update(candidate)
+    return list(by_cid.values())
+
+
 def _optional_text(row: Mapping[str, Any], key: str) -> str | None:
     value = row.get(key)
     if value is None:

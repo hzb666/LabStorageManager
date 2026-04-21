@@ -18,7 +18,8 @@ import { LIB_ASSETS } from '@/lib/staticAssets'
 import { isSpecialCasValue } from '@/lib/validationSchemas'
 
 type RDKitModule = {
-  get_mol: (smiles: string) => Mol
+  get_mol: (input: string) => Mol | null
+  get_qmol?: (input: string) => Mol | null
   version: string
 }
 
@@ -31,6 +32,9 @@ declare global {
 
 interface Mol {
   get_svg_with_highlights: (details: string) => string
+  get_substruct_match?: (query: Mol) => string
+  get_smarts?: () => string
+  get_smiles?: () => string
   is_valid: () => boolean
   delete?: () => void
 }
@@ -40,7 +44,14 @@ interface MoleculeStructureProps {
   width?: number
   height?: number
   isDark?: boolean
+  smiles?: string | null
+  highlightQuery?: string | null
+  highlightQueryFormat?: StructureHighlightQueryFormat
+  highlightMatchMode?: StructureHighlightMatchMode
 }
+
+type StructureHighlightQueryFormat = 'smarts' | 'molblock' | 'smiles'
+type StructureHighlightMatchMode = 'substructure' | 'exact'
 
 type LoadingState = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -56,11 +67,60 @@ type MoleculeSvgState = {
   canZoom: boolean
 }
 
+type RDKitHighlightDetails = {
+  atoms?: number[]
+  bonds?: number[]
+  [key: string]: unknown
+}
+
 let rdkitLoaderPromise: Promise<RDKitModule> | null = null
 
 // 这里只做内存级缓存，刷新后自然失效，避免把大段 SVG 持久化到存储层。
 const SVG_MAX_CACHE_SIZE = 100
 const svgCache = new Map<string, MoleculeSvgCacheValue>()
+const MOLECULE_RENDER_CONCURRENCY = 3
+const MOLECULE_RENDER_STAGGER_MS = 40
+const DUMMY_ATOM_SMARTS_PATTERN = /\[#0(:\d+)?\]/g
+
+let activeMoleculeRenderCount = 0
+type MoleculeRenderQueueItem<T = unknown> = {
+  task: () => T | Promise<T>
+  resolve: (value: T) => void
+  reject: (reason?: unknown) => void
+}
+const moleculeRenderQueue: MoleculeRenderQueueItem[] = []
+
+function finishMoleculeRenderTask(): void {
+  activeMoleculeRenderCount -= 1
+  runNextMoleculeRenderTask()
+}
+
+function executeMoleculeRenderTask(item: MoleculeRenderQueueItem): void {
+  activeMoleculeRenderCount += 1
+  window.setTimeout(() => {
+    Promise.resolve()
+      .then(item.task)
+      .then(item.resolve, item.reject)
+      .finally(finishMoleculeRenderTask)
+  }, MOLECULE_RENDER_STAGGER_MS)
+}
+
+function runNextMoleculeRenderTask(): void {
+  while (
+    activeMoleculeRenderCount < MOLECULE_RENDER_CONCURRENCY &&
+    moleculeRenderQueue.length > 0
+  ) {
+    const item = moleculeRenderQueue.shift()
+    if (item) executeMoleculeRenderTask(item)
+  }
+}
+
+function enqueueMoleculeRender<T>(task: () => T | Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    moleculeRenderQueue.push({ task, resolve, reject } as MoleculeRenderQueueItem)
+    runNextMoleculeRenderTask()
+  })
+}
 
 function processSvgId(str: string, id: string): string {
   return str
@@ -90,9 +150,36 @@ function getMoleculeRenderDelay(smiles: string): number {
   return 100
 }
 
-// 生成缓存键，确保同一结构在相同尺寸下复用渲染结果。
-function createCacheKey(smiles: string, width: number, height: number): string {
-  return `${smiles}_${width}_${height}`
+function hashString(value: string): string {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0
+  }
+  return Math.abs(hash).toString(36)
+}
+
+// 生成缓存键，确保同一结构、尺寸与高亮查询下复用渲染结果。
+function createCacheKey(args: {
+  smiles: string
+  width: number
+  height: number
+  highlightQuery?: string | null
+  highlightQueryFormat?: StructureHighlightQueryFormat
+  highlightMatchMode?: StructureHighlightMatchMode
+}): string {
+  const {
+    smiles,
+    width,
+    height,
+    highlightQuery,
+    highlightQueryFormat,
+    highlightMatchMode,
+  } = args
+  const normalizedHighlightQuery = highlightQuery?.trim()
+  const highlightKey = normalizedHighlightQuery
+    ? `${highlightMatchMode ?? 'substructure'}_${highlightQueryFormat ?? 'molblock'}_${hashString(normalizedHighlightQuery)}`
+    : 'plain'
+  return `${smiles}_${width}_${height}_${highlightKey}`
 }
 
 // 读取缓存并刷新 LRU 顺序，命中时直接返回可渲染数据。
@@ -179,32 +266,161 @@ async function loadRDKitModule(): Promise<RDKitModule> {
   return rdkitLoaderPromise
 }
 
-// 调用 RDKit 产出基础图与放大图，并返回可复用的尺寸信息。
-function renderMoleculeSvgWithRDKit(
+function parseRDKitHighlightDetails(rawDetails: string): RDKitHighlightDetails | null {
+  if (!rawDetails) return null
+
+  try {
+    const details = JSON.parse(rawDetails) as RDKitHighlightDetails
+    const hasAtoms = Array.isArray(details.atoms) && details.atoms.length > 0
+    const hasBonds = Array.isArray(details.bonds) && details.bonds.length > 0
+    return hasAtoms || hasBonds ? details : null
+  } catch {
+    return null
+  }
+}
+
+function createHighlightQueryMol(
   rdkit: RDKitModule,
-  smiles: string,
+  query: string,
+  queryFormat?: StructureHighlightQueryFormat,
+  matchMode?: StructureHighlightMatchMode,
+): Mol | null {
+  if (queryFormat === 'smarts') {
+    const normalizedQuery = normalizeSmartsHighlightQuery(rdkit, query, matchMode)
+    return rdkit.get_qmol?.(normalizedQuery) ?? rdkit.get_mol(normalizedQuery)
+  }
+
+  return rdkit.get_mol(query)
+}
+
+function normalizeWildcardSmarts(query: string): string {
+  return query.replace(
+    DUMMY_ATOM_SMARTS_PATTERN,
+    (_match, atomMap: string | undefined) => `[*${atomMap ?? ''}]`,
+  )
+}
+
+function createValidQueryMol(rdkit: RDKitModule, query: string): Mol | null {
+  const mol = rdkit.get_qmol?.(query) ?? rdkit.get_mol(query)
+  if (mol?.is_valid()) {
+    return mol
+  }
+  mol?.delete?.()
+  return null
+}
+
+function normalizeExactRGroupSmarts(rdkit: RDKitModule, wildcardQuery: string): string | null {
+  let queryMol: Mol | null = null
+  let normalizedMol: Mol | null = null
+  try {
+    queryMol = createValidQueryMol(rdkit, wildcardQuery)
+    const normalizedSmiles = queryMol?.get_smiles?.()
+    if (!queryMol || !normalizedSmiles) {
+      return null
+    }
+
+    normalizedMol = rdkit.get_mol(normalizedSmiles)
+    const normalizedSmarts = normalizedMol?.get_smarts?.()
+    if (!normalizedMol?.is_valid() || !normalizedSmarts) {
+      return null
+    }
+    return normalizeWildcardSmarts(normalizedSmarts)
+  } catch {
+    return null
+  } finally {
+    queryMol?.delete?.()
+    normalizedMol?.delete?.()
+  }
+}
+
+function normalizeSmartsHighlightQuery(
+  rdkit: RDKitModule,
+  query: string,
+  matchMode?: StructureHighlightMatchMode,
+): string {
+  const wildcardQuery = normalizeWildcardSmarts(query)
+  if (matchMode !== 'exact') {
+    return wildcardQuery
+  }
+  return normalizeExactRGroupSmarts(rdkit, wildcardQuery) ?? wildcardQuery
+}
+
+function getHighlightDetails(
+  rdkit: RDKitModule,
+  mol: Mol,
+  highlightQuery?: string | null,
+  highlightQueryFormat?: StructureHighlightQueryFormat,
+  highlightMatchMode?: StructureHighlightMatchMode,
+): RDKitHighlightDetails | null {
+  const query = highlightQuery?.trim()
+  if (!query || !mol.get_substruct_match) return null
+  let queryMol: Mol | null = null
+  try {
+    queryMol = createHighlightQueryMol(rdkit, query, highlightQueryFormat, highlightMatchMode)
+    if (!queryMol?.is_valid()) {
+      return null
+    }
+
+    return parseRDKitHighlightDetails(mol.get_substruct_match(queryMol))
+  } catch {
+    return null
+  } finally {
+    queryMol?.delete?.()
+  }
+}
+
+function createRDKitRenderOptions(
   width: number,
+  height: number,
+  highlightDetails: RDKitHighlightDetails | null
+) {
+  const baseOptions = {
+    width,
+    height,
+    bondLineWidth: 1.5,
+    addStereoAnnotation: true,
+  }
+
+  if (!highlightDetails) {
+    return baseOptions
+  }
+
+  return {
+    ...highlightDetails,
+    ...baseOptions,
+    highlightColour: [1, 0.68, 0.18],
+    highlightBondWidthMultiplier: 18,
+    highlightRadius: 0.35,
+  }
+}
+
+// 调用 RDKit 产出基础图与放大图，并返回可复用的尺寸信息。
+function renderMoleculeSvgWithRDKit(args: {
+  rdkit: RDKitModule
+  smiles: string
+  width: number
   height: number
-): MoleculeSvgCacheValue {
-  let mol: Mol | undefined
+  highlightQuery?: string | null
+  highlightQueryFormat?: StructureHighlightQueryFormat
+  highlightMatchMode?: StructureHighlightMatchMode
+}): MoleculeSvgCacheValue {
+  const { rdkit, smiles, width, height, highlightQuery, highlightQueryFormat, highlightMatchMode } = args
+  let mol: Mol | null = null
   try {
     mol = rdkit.get_mol(smiles)
     if (!mol?.is_valid()) {
       throw new Error('无效的分子结构')
     }
 
-    const renderOptions = {
-      width,
-      height,
-      bondLineWidth: 1.5,
-      addStereoAnnotation: true,
-    }
-    const zoomOptions = {
-      width: -1,
-      height: -1,
-      bondLineWidth: 1.5,
-      addStereoAnnotation: true,
-    }
+    const highlightDetails = getHighlightDetails(
+      rdkit,
+      mol,
+      highlightQuery,
+      highlightQueryFormat,
+      highlightMatchMode,
+    )
+    const renderOptions = createRDKitRenderOptions(width, height, highlightDetails)
+    const zoomOptions = createRDKitRenderOptions(-1, -1, highlightDetails)
 
     const svg = mol.get_svg_with_highlights(JSON.stringify(renderOptions))
     const zoomSvg = mol.get_svg_with_highlights(JSON.stringify(zoomOptions))
@@ -216,12 +432,26 @@ function renderMoleculeSvgWithRDKit(
 }
 
 // 基于 CAS 查询 SMILES，并同步维护加载态、错误态与渲染前置数据。
-function useMoleculeSourceState(casNumber: string) {
+function useMoleculeSourceState(casNumber: string, smilesOverride?: string | null) {
   const [smiles, setSmiles] = useState('')
   const [loadingState, setLoadingState] = useState<LoadingState>('idle')
   const [error, setError] = useState('')
 
   useEffect(() => {
+    const normalizedSmilesOverride = smilesOverride?.trim()
+    if (normalizedSmilesOverride) {
+      let cancelled = false
+      queueMicrotask(() => {
+        if (cancelled) return
+        setError('')
+        setSmiles(normalizedSmilesOverride)
+        setLoadingState('loading')
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+
     if (!casNumber) return
 
     let cancelled = false
@@ -265,7 +495,7 @@ function useMoleculeSourceState(casNumber: string) {
     return () => {
       cancelled = true
     }
-  }, [casNumber])
+  }, [casNumber, smilesOverride])
 
   return { smiles, loadingState, setLoadingState, error, setError }
 }
@@ -276,10 +506,23 @@ function useMoleculeSvgState(args: {
   width: number
   height: number
   componentId: string
+  highlightQuery?: string | null
+  highlightQueryFormat?: StructureHighlightQueryFormat
+  highlightMatchMode?: StructureHighlightMatchMode
   setLoadingState: (state: LoadingState) => void
   setError: (value: string) => void
 }) {
-  const { smiles, width, height, componentId, setLoadingState, setError } = args
+  const {
+    smiles,
+    width,
+    height,
+    componentId,
+    highlightQuery,
+    highlightQueryFormat,
+    highlightMatchMode,
+    setLoadingState,
+    setError,
+  } = args
   const [svg, setSvg] = useState('')
   const [zoomSvg, setZoomSvg] = useState('')
   const [canZoom, setCanZoom] = useState(false)
@@ -288,7 +531,15 @@ function useMoleculeSvgState(args: {
     if (!smiles) return
 
     let isActive = true
-    const cacheKey = createCacheKey(smiles, width, height)
+    const cacheKey = createCacheKey({
+      smiles,
+      width,
+      height,
+      highlightQuery,
+      highlightQueryFormat,
+      highlightMatchMode,
+    })
+    setError('')
 
     const applySvgState = (state: MoleculeSvgState) => {
       setSvg(state.svg)
@@ -310,7 +561,19 @@ function useMoleculeSvgState(args: {
         await sleep(getMoleculeRenderDelay(smiles))
         if (!isActive) return
 
-        const rendered = renderMoleculeSvgWithRDKit(rdkit, smiles, width, height)
+        const rendered = await enqueueMoleculeRender<MoleculeSvgCacheValue | null>(() => {
+          if (!isActive) return null
+          return renderMoleculeSvgWithRDKit({
+            rdkit,
+            smiles,
+            width,
+            height,
+            highlightQuery,
+            highlightQueryFormat,
+            highlightMatchMode,
+          })
+        })
+        if (!rendered) return
         writeCachedSvgState(cacheKey, rendered)
         if (!isActive) return
 
@@ -330,7 +593,17 @@ function useMoleculeSvgState(args: {
     return () => {
       isActive = false
     }
-  }, [smiles, width, height, componentId, setLoadingState, setError])
+  }, [
+    smiles,
+    width,
+    height,
+    componentId,
+    highlightQuery,
+    highlightQueryFormat,
+    highlightMatchMode,
+    setLoadingState,
+    setError,
+  ])
 
   if (!smiles) {
     // CAS 切换后先清空旧图，避免下一次查询完成前短暂闪出上一条结构。
@@ -410,8 +683,17 @@ function getBaseSurfaceClass(isDark: boolean | undefined): string {
 }
 
 // 渲染加载占位，复用统一背景和尺寸布局。
-function MoleculeLoadingView(props: { width: number; height: number; isDark?: boolean }) {
-  const { width, height, isDark } = props
+function MoleculeLoadingView(props: {
+  width: number
+  height: number
+  isDark?: boolean
+  quiet?: boolean
+}) {
+  const { width, height, isDark, quiet } = props
+  if (quiet) {
+    return <div className={getBaseSurfaceClass(isDark)} style={{ width, height }} />
+  }
+
   return (
     <div className={getBaseSurfaceClass(isDark)} style={{ width, height }}>
       <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -573,16 +855,23 @@ export function MoleculeStructure({
   width = 300,
   height = 200,
   isDark,
+  smiles: smilesOverride,
+  highlightQuery,
+  highlightQueryFormat,
+  highlightMatchMode,
 }: Readonly<MoleculeStructureProps>) {
   const componentId = useId().replaceAll(':', '')
   const { smiles, loadingState, setLoadingState, error, setError } =
-    useMoleculeSourceState(casNumber)
+    useMoleculeSourceState(casNumber, smilesOverride)
   const { svg, zoomSvg, canZoom } =
     useMoleculeSvgState({
       smiles,
       width,
       height,
       componentId,
+      highlightQuery,
+      highlightQueryFormat,
+      highlightMatchMode,
       setLoadingState,
       setError,
     })
@@ -591,7 +880,14 @@ export function MoleculeStructure({
 
   if (!casNumber) return null
   if (loadingState === 'loading') {
-    return <MoleculeLoadingView width={width} height={height} isDark={isDark} />
+    return (
+      <MoleculeLoadingView
+        width={width}
+        height={height}
+        isDark={isDark}
+        quiet={Boolean(smilesOverride)}
+      />
+    )
   }
   if (error || loadingState === 'error') {
     return (

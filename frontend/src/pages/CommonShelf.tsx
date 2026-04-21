@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { useForm, type FieldValues, type UseFormReturn } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { Archive, ArrowUpFromLine, Minus, Plus, Trash2 } from 'lucide-react'
+import { Archive, ArrowUpFromLine, Database, Minus, Plus, Trash2 } from 'lucide-react'
 
 import {
   chemicalNameMapAPI,
@@ -1101,6 +1101,7 @@ function CommonShelfPageHeader({
           手动添加
         </Button>
         <Button variant="modern" size="lg" onClick={onOpenChemicalNameMapManagement}>
+          <Database className="mr-1.5 h-4 w-4" />
           CAS 主数据管理
         </Button>
         <Button variant="modern" size="lg" onClick={onExport}>

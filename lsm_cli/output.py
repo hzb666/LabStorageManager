@@ -5,7 +5,22 @@ import sys
 from typing import Any
 
 
+OUTPUT_ENCODING = "utf-8"
+
+
+def configure_output_encoding() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding=OUTPUT_ENCODING)
+        except (AttributeError, OSError, ValueError):
+            continue
+
+
 def print_json(payload: Any) -> None:
+    configure_output_encoding()
     sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2))
     sys.stdout.write("\n")
 

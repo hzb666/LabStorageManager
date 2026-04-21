@@ -19,6 +19,7 @@ export type AppUIStorage = {
   }
   dashboard: {
     activeTab?: string
+    mode?: string
   }
   announcement: {
     read: TimestampMap
@@ -100,6 +101,10 @@ function normalizeAppUIStorage(raw: unknown): AppUIStorage {
       activeTab:
         typeof dashboard.activeTab === 'string' && dashboard.activeTab.trim()
           ? dashboard.activeTab
+          : undefined,
+      mode:
+        typeof dashboard.mode === 'string' && dashboard.mode.trim()
+          ? dashboard.mode
           : undefined,
     },
     announcement: {
@@ -185,7 +190,24 @@ export function setDashboardActiveTab(activeTab: string): void {
 export function clearDashboardActiveTab(): void {
   updateAppUI((current) => ({
     ...current,
-    dashboard: {},
+    dashboard: {
+      ...current.dashboard,
+      activeTab: undefined,
+    },
+  }))
+}
+
+export function getDashboardModePreference(): string | null {
+  return getAppUI().dashboard.mode ?? null
+}
+
+export function setDashboardModePreference(mode: string): void {
+  updateAppUI((current) => ({
+    ...current,
+    dashboard: {
+      ...current.dashboard,
+      mode,
+    },
   }))
 }
 

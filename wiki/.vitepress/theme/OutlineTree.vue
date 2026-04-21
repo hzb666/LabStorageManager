@@ -157,11 +157,11 @@ function isActive(link: string) {
 }
 
 .outline-link.active {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .nested .outline-link.active {
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .outline-link.nested {

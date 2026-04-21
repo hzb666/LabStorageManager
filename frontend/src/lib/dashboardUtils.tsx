@@ -19,6 +19,7 @@ export interface MyBorrowItem {
   remaining_quantity: number
   unit: string
   borrow_time: string
+  borrower_id?: number | null
   english_name?: string | null
   alias?: string | null
   created_at?: string | null
@@ -44,6 +45,8 @@ export interface PendingStockinItem {
   unit: string
   is_hazardous?: boolean
   notes?: string | null
+  temporary_keeper_id?: number | null
+  temporary_keeper_name?: string | null
   stockin_time: string
 }
 
@@ -136,6 +139,11 @@ export const DASHBOARD_REAGENT_SEARCH_FIELDS = [
   { value: 'created_at', label: '订购时间' },
 ]
 
+export const DASHBOARD_REAGENT_ADMIN_SEARCH_FIELDS = [
+  ...DASHBOARD_REAGENT_SEARCH_FIELDS,
+  { value: 'applicant_name', label: '订购人' },
+]
+
 export const DASHBOARD_CONSUMABLE_SEARCH_FIELDS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
@@ -143,10 +151,25 @@ export const DASHBOARD_CONSUMABLE_SEARCH_FIELDS = [
   { value: 'created_at', label: '订购时间' },
 ]
 
+export const DASHBOARD_CONSUMABLE_ADMIN_SEARCH_FIELDS = [
+  ...DASHBOARD_CONSUMABLE_SEARCH_FIELDS,
+  { value: 'applicant_name', label: '订购人' },
+]
+
 export const BORROW_SEARCH_FIELDS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
   { value: 'cas_number', label: 'CAS号' },
+]
+
+export const ADMIN_BORROW_SEARCH_FIELDS = [
+  ...BORROW_SEARCH_FIELDS,
+  { value: 'borrower_name', label: '借用人' },
+]
+
+export const ADMIN_STOCKIN_SEARCH_FIELDS = [
+  ...BORROW_SEARCH_FIELDS,
+  { value: 'temporary_keeper_name', label: '暂存人' },
 ]
 
 /** 广播仪表盘统计刷新信号。 */
@@ -274,7 +297,7 @@ export function flattenGroupedOrders<T extends DashboardOrderBase>(
       ...raw,
       id: Number(raw.order_id ?? raw.id ?? 0),
       status,
-      applicant_id: currentUserId ?? null,
+      applicant_id: currentUserId ?? raw.applicant_id ?? null,
     })) as T[]
   })
 }

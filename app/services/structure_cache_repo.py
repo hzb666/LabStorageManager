@@ -141,6 +141,8 @@ def upsert_structure_cache(
         raise ValueError("CAS number is required")
 
     existing = db.get(CompoundStructureCache, normalized_cas)
+    if existing is not None and skip_manual:
+        db.refresh(existing)
     if existing and existing.manually_verified and skip_manual:
         return existing
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlmodel import select
 
@@ -19,6 +19,7 @@ from app.models.chemical_name_map import (
 from app.models.common_shelf import CommonShelf, CommonShelfGroup
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.common_shelf_queries import search_name_map_cas_numbers
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.pinyin_utils import to_pinyin_parts
 from app.services.search_matchers import TextMatchMode
 from app.services.sql_utils import order_with_nulls_last
@@ -149,7 +150,11 @@ def list_chemical_name_map(
 
 
 @router.post("", response_model=ChemicalNameMapResponse, dependencies=[Depends(get_current_user)])
-def create_chemical_name_map(payload: ChemicalNameMapCreate, db: DBSession):
+def create_chemical_name_map(
+    payload: ChemicalNameMapCreate,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+):
     cas_number = _validate_cas_number(payload.cas_number)
     existing = db.exec(select(ChemicalNameMap).where(ChemicalNameMap.cas_number == cas_number)).first()
     if existing is not None:
@@ -171,6 +176,11 @@ def create_chemical_name_map(payload: ChemicalNameMapCreate, db: DBSession):
     db.add(row)
     db.commit()
     db.refresh(row)
+    enqueue_structure_cache_resolution(
+        background_tasks,
+        row.cas_number,
+        reason="chemical_name_map.create",
+    )
     return row
 
 

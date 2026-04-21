@@ -471,6 +471,9 @@ export function useListSSE({
     rooms: [room],
     handlers,
     autoConnect: enabled,
+    onReconnect: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
+    },
     onStreamStale: () => {
       markStaleKey(staleKeyRef.current)
     },

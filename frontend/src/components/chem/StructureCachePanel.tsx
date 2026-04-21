@@ -9,6 +9,7 @@ import { UserRoles } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { getApiErrorMessage, isSpecialCasValue } from '@/lib/validationSchemas'
 import { useAuthStore } from '@/store/useStore'
+import { getStructureResolveToastMessage } from './structureCacheMessages'
 
 const StructureManualEditDialog = React.lazy(() => import('./StructureManualEditDialog'))
 
@@ -21,11 +22,11 @@ type PubChemCandidate = {
 const STATUS_LABELS: Record<string, string> = {
   pending: '待解析',
   resolved: '已解析',
-  ambiguous: '候选不唯一',
-  not_found: '公共源未找到',
-  unsupported: '不支持的结构',
-  invalid_cas: 'CAS 无效',
-  error: '解析失败',
+  ambiguous: '多候选',
+  not_found: '未找到',
+  unsupported: '不支持',
+  invalid_cas: '无效',
+  error: '失败',
 }
 
 export interface StructureCachePanelProps {
@@ -125,7 +126,8 @@ function useStructureCachePanelState(casNumber: string) {
         force: cache?.status === 'error',
       })
       setCache(resolved)
-      toast.success('结构解析已更新')
+      const notification = getStructureResolveToastMessage(resolved)
+      toast[notification.variant](notification.message)
     } catch (error) {
       toast.error(getApiErrorMessage(error, '结构解析失败'))
     } finally {

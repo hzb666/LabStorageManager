@@ -10,6 +10,25 @@ from app.services import pinyin_utils
 
 logger = logging.getLogger(__name__)
 
+SQLITE_COMMON_SHELF_GROUP_MISSING_COUNT_SQL = """
+SELECT COUNT(*) AS missing_count
+FROM (
+    SELECT DISTINCT
+        common_shelf.cas_number,
+        common_shelf.brand_normalized,
+        common_shelf.specification_normalized
+    FROM common_shelf
+) AS shelf_groups
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM common_shelf_group AS existing
+    WHERE existing.is_deleted = 0
+      AND existing.cas_number = shelf_groups.cas_number
+      AND existing.brand_normalized = shelf_groups.brand_normalized
+      AND existing.specification_normalized = shelf_groups.specification_normalized
+)
+"""
+
 SQLITE_COMMON_SHELF_GROUP_BACKFILL_SQL = """
 INSERT INTO common_shelf_group (
     cas_number,
@@ -120,9 +139,20 @@ def _quote_sqlite_identifier(identifier: str) -> str:
 
 def ensure_sqlite_common_shelf_groups(connection: Connection) -> None:
     """Backfill persistent group records from existing bottle rows."""
+    missing_count = connection.execute(
+        text(SQLITE_COMMON_SHELF_GROUP_MISSING_COUNT_SQL)
+    ).scalar_one()
+    if int(missing_count) <= 0:
+        logger.debug("Skipped common shelf group backfill; no missing group records.")
+        return
+
     result = connection.execute(text(SQLITE_COMMON_SHELF_GROUP_BACKFILL_SQL))
-    if result.rowcount and result.rowcount > 0:
-        logger.info("Backfilled %d common shelf group records.", result.rowcount)
+    rowcount = result.rowcount if result.rowcount is not None and result.rowcount >= 0 else missing_count
+    logger.info(
+        "Backfilled %d common shelf group records; missing_before=%d.",
+        rowcount,
+        missing_count,
+    )
 
 
 def _get_sqlite_table_columns(connection: Connection, table_name: str) -> set[str]:

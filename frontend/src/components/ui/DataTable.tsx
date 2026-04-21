@@ -17,6 +17,7 @@ interface DataTableProps<TData> {
   expandAllStorageKey?: string
   isAllExpanded?: boolean
   onToggleExpandAll?: () => void
+  disableExpandedRowAnimation?: boolean
   noteField?: string
   hasNextPage?: boolean
   isFetchingNextPage?: boolean
@@ -64,6 +65,7 @@ export function DataTable<TData>({
   expandAllStorageKey,
   isAllExpanded: externalIsAllExpanded,
   onToggleExpandAll,
+  disableExpandedRowAnimation,
   noteField,
   hasNextPage,
   isFetchingNextPage,
@@ -127,7 +129,12 @@ export function DataTable<TData>({
   })
 
   const { isBulkAnimating, bulkExpandedSnapshotRef, setVirtualizer } = useBulkExpand({
-    table, rows, enableExpandAll, isAllExpanded, bodyScrollRef,
+    table,
+    rows,
+    enableExpandAll,
+    isAllExpanded,
+    disableBulkExpandAnimation: disableExpandedRowAnimation,
+    bodyScrollRef,
   })
 
   const { handleContainerScroll, handleRowClick, setVirtualizerForScroll } = useDataTableScroll<TData>({
@@ -144,11 +151,22 @@ export function DataTable<TData>({
     const expandedEstimate = estimatedRowHeight + 124.8
     const snapshot = bulkExpandedSnapshotRef.current
 
+    if (disableExpandedRowAnimation && isAllExpanded) {
+      return expandedEstimate
+    }
+
     if (isBulkAnimating && snapshot) {
       return snapshot.has(row.id) ? expandedEstimate : estimatedRowHeight
     }
     return row.getIsExpanded() ? expandedEstimate : estimatedRowHeight
-  }, [rows, estimatedRowHeight, isBulkAnimating, bulkExpandedSnapshotRef])
+  }, [
+    rows,
+    estimatedRowHeight,
+    isBulkAnimating,
+    bulkExpandedSnapshotRef,
+    disableExpandedRowAnimation,
+    isAllExpanded,
+  ])
 
   // 为虚拟列表提供稳定的 item key，避免展开/折叠时错位复用。
   const getRowItemKey = useCallback((index: number) => rows[index]?.id ?? index, [rows])
@@ -195,6 +213,7 @@ export function DataTable<TData>({
         <DataTableBody
           rows={rows}
           renderExpandedRow={renderExpandedRow}
+          disableExpandedRowAnimation={disableExpandedRowAnimation}
           noteField={noteField}
           shouldUseVirtualization={shouldUseVirtualization}
           rowVirtualizer={rowVirtualizer}

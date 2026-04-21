@@ -350,6 +350,7 @@ export const reagentOrderAPI = {
     params?: { exclude_order_id?: number }
   ) => api.get<CASOverviewResponse>(`/reagent-orders/cas-overview/${casNumber}`, { params }),
   getMyReagentOrders: () => api.get('/reagent-orders/dashboard/my-reagent-orders'),
+  getAdminReagentOrders: () => api.get('/reagent-orders/dashboard/admin/reagent-orders'),
   getArrivedOrders: () => api.get('/reagent-orders/dashboard/arrived-orders'),
   exportOrders: () => api.get('/reagent-orders/export', { responseType: 'blob' }),
 }
@@ -385,6 +386,7 @@ export const consumableOrderAPI = {
     api.post(`/consumable-orders/${id}/reject`, { reason }),
   complete: (id: number) => api.post(`/consumable-orders/${id}/complete`),
   getMyConsumableOrders: () => api.get('/consumable-orders/dashboard/my-consumable-orders'),
+  getAdminConsumableOrders: () => api.get('/consumable-orders/dashboard/admin/consumable-orders'),
   exportOrders: () => api.get('/consumable-orders/export', { responseType: 'blob' as const }),
 }
 
@@ -399,6 +401,10 @@ export const inventoryAPI = {
     status_filter?: string
     cas_filter?: string
     hazardous_only?: boolean
+    structure_search_id?: string
+    structure_match_mode?: string
+    structure_query?: string
+    structure_query_format?: string
     search?: string
     search_field?: string
     fuzzy?: boolean
@@ -416,7 +422,9 @@ export const inventoryAPI = {
   update: (id: number, data: Record<string, unknown>) => api.put(`/inventory/${id}`, data),
   delete: (id: number) => api.delete(`/inventory/${id}`),
   getMyBorrows: () => api.get('/inventory/dashboard/my-borrows'),
+  getAdminBorrows: () => api.get('/inventory/dashboard/admin/borrows'),
   getPendingStockin: () => api.get('/inventory/dashboard/pending-stockin'),
+  getAdminPendingStockin: () => api.get('/inventory/dashboard/admin/pending-stockin'),
   getBorrowHistory: (id: number) => api.get(`/inventory/${id}/borrow-history`),
   getImportTemplate: () => api.get('/inventory/import/template'),
   downloadTemplate: () => api.get('/inventory/import/template', { responseType: 'blob' }),
@@ -441,6 +449,22 @@ export const inventoryAPI = {
     notes?: string
   }) => api.post('/inventory/manual-add', data),
   exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
+}
+
+export interface AdminDashboardSummary {
+  reagent_order_count: number
+  consumable_order_count: number
+  borrowed_inventory_count: number
+  pending_stockin_count: number
+  common_stock_alert_count: number
+  recent_arrival_count: number
+  stock_in_activity_count: number
+  recent_window_days: number
+  generated_at: string
+}
+
+export const dashboardAPI = {
+  getAdminSummary: () => api.get<{ data: AdminDashboardSummary }>('/dashboard/admin/summary'),
 }
 
 export type ChemicalCategory =

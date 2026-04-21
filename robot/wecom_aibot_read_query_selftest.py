@@ -528,11 +528,13 @@ class WecomReadQuerySelfTest(unittest.TestCase):
 
         self.assertEqual("乙醇还有 300ml，在 A-01。CAS 是 64-17-5。", reply)
         self.assertEqual("乙醇在哪里", planner.calls[0]["user_text"])
+        self.assertIn("安全查询事实", planner.calls[0]["facts_text"])
         self.assertIn("库存查询结果", planner.calls[0]["facts_text"])
         self.assertIn("乙醇", planner.calls[0]["facts_text"])
-        self.assertIn("英文名 Ethanol", planner.calls[0]["facts_text"])
-        self.assertIn("别名 酒精", planner.calls[0]["facts_text"])
-        self.assertIn("纯度 AR", planner.calls[0]["facts_text"])
+        self.assertIn('"英文名":"Ethanol"', planner.calls[0]["facts_text"])
+        self.assertIn('"别名":"酒精"', planner.calls[0]["facts_text"])
+        self.assertIn('"纯度":"AR"', planner.calls[0]["facts_text"])
+        self.assertNotIn("英文名 Ethanol", planner.calls[0]["facts_text"])
         self.assertNotIn("LSM-SECRET-001", planner.calls[0]["facts_text"])
 
     def test_read_query_rejects_unsafe_llm_polished_reply(self) -> None:

@@ -1,4 +1,4 @@
 interface:
   display_name: "LabStorageManager CLI"
   short_description: "Use the local CLI to operate LabStorageManager safely."
-  default_prompt: "Use $lab-storage-manager-cli to query inventory, borrows, and orders through the local CLI."
+  default_prompt: "Use $lab-storage-manager-cli to query inventory, borrows, orders, common shelf, and CAS master data through the local CLI."

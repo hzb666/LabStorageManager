@@ -3,11 +3,12 @@
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
+from sqlalchemy import and_, or_
 from sqlmodel import Session, select, func, delete
 
 from app.database import DBSession
@@ -92,6 +93,17 @@ CONSUMABLE_ORDER_REJECTABLE_STATUSES = frozenset(
         ConsumableOrderStatus.APPROVED,
     }
 )
+DASHBOARD_ACTIVE_REJECTED_DAYS = 7
+DASHBOARD_CONSUMABLE_STATUSES = (
+    ConsumableOrderStatus.PENDING,
+    ConsumableOrderStatus.APPROVED,
+    ConsumableOrderStatus.REJECTED,
+)
+DASHBOARD_CONSUMABLE_STATUS_LABELS = {
+    ConsumableOrderStatus.PENDING.value: "已申购",
+    ConsumableOrderStatus.APPROVED.value: "已批准",
+    ConsumableOrderStatus.REJECTED.value: "未通过",
+}
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
 VALID_CONSUMABLE_SORT_FIELDS = {
@@ -883,47 +895,36 @@ async def complete_consumable_order(
     }
 
 
-@router.get("/dashboard/my-consumable-orders")
-def get_my_consumable_orders(
-    current_user: CurrentUser,
-    db: DBSession,
-):
-    # Get current user's consumable order progress
-    dashboard_statuses = [
-        ConsumableOrderStatus.PENDING,
-        ConsumableOrderStatus.APPROVED,
-        ConsumableOrderStatus.REJECTED,
-    ]
-    statement = select(ConsumableOrder).where(
-        ConsumableOrder.applicant_id == current_user.id,
-        ConsumableOrder.status.in_(dashboard_statuses),
-    ).order_by(ConsumableOrder.created_at.desc())
-    
-    orders = db.exec(statement).all()
-    
-    status_labels = {
-        ConsumableOrderStatus.PENDING.value: "已申购",
-        ConsumableOrderStatus.APPROVED.value: "已批准",
-        ConsumableOrderStatus.REJECTED.value: "未通过",
-    }
+def _build_consumable_dashboard_groups(
+    orders: list[ConsumableOrder],
+    users_map: dict[int, str],
+) -> dict[str, dict[str, Any]]:
     grouped_orders: dict[str, dict[str, Any]] = {
-        status.value: {"orders": [], "count": 0, "label": status_labels[status.value]}
-        for status in dashboard_statuses
+        status.value: {
+            "orders": [],
+            "count": 0,
+            "label": DASHBOARD_CONSUMABLE_STATUS_LABELS[status.value],
+        }
+        for status in DASHBOARD_CONSUMABLE_STATUSES
     }
-    
+
     for order in orders:
         order_data = {
             "order_id": order.id,
             "name": order.name,
             "english_name": order.english_name,
             "specification": getattr(order, 'specification', '') or '',
+            "unit": order.unit,
             "quantity": order.quantity,
             "price": order.price,
+            "communication": order.communication,
             "notes": order.notes,
+            "applicant_id": order.applicant_id,
+            "applicant_name": users_map.get(order.applicant_id) if order.applicant_id else "",
             "created_at": utc_iso_str(order.created_at),
-            "updated_at": utc_iso_str(order.updated_at)
+            "updated_at": utc_iso_str(order.updated_at),
         }
-        
+
         status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
         if status_key not in grouped_orders:
             grouped_orders[status_key] = {"orders": [], "count": 0, "label": status_key}
@@ -931,10 +932,58 @@ def get_my_consumable_orders(
 
     for key in grouped_orders:
         grouped_orders[key]["count"] = len(grouped_orders[key]["orders"])
-    
+
+    return grouped_orders
+
+
+def _admin_consumable_dashboard_clause(cutoff):
+    return or_(
+        ConsumableOrder.status.in_(
+            [ConsumableOrderStatus.PENDING, ConsumableOrderStatus.APPROVED]
+        ),
+        and_(
+            ConsumableOrder.status == ConsumableOrderStatus.REJECTED,
+            ConsumableOrder.updated_at >= cutoff,
+        ),
+    )
+
+
+@router.get("/dashboard/my-consumable-orders")
+def get_my_consumable_orders(
+    current_user: CurrentUser,
+    db: DBSession,
+):
+    # Get current user's consumable order progress
+    statement = select(ConsumableOrder).where(
+        ConsumableOrder.applicant_id == current_user.id,
+        ConsumableOrder.status.in_(DASHBOARD_CONSUMABLE_STATUSES),
+    ).order_by(ConsumableOrder.created_at.desc())
+
+    orders = db.exec(statement).all()
+    users_map = {current_user.id: current_user.full_name}
+
     return {
-        "data": grouped_orders,
+        "data": _build_consumable_dashboard_groups(orders, users_map),
         "total": len(orders)
+    }
+
+
+@router.get("/dashboard/admin/consumable-orders", dependencies=[Depends(require_admin)])
+def get_admin_consumable_orders(db: DBSession):
+    cutoff = get_utc_now() - timedelta(days=DASHBOARD_ACTIVE_REJECTED_DAYS)
+    statement = (
+        select(ConsumableOrder)
+        .where(_admin_consumable_dashboard_clause(cutoff))
+        .order_by(ConsumableOrder.created_at.desc())
+    )
+
+    orders = db.exec(statement).all()
+    applicant_ids = {order.applicant_id for order in orders if order.applicant_id}
+    users_map = batch_get_user_names(db, applicant_ids)
+
+    return {
+        "data": _build_consumable_dashboard_groups(orders, users_map),
+        "total": len(orders),
     }
 
 

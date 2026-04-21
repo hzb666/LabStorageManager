@@ -71,5 +71,16 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.1",
     "vite": "^8.0.1"
+  },
+  "overrides": {
+    "ketcher-react": {
+      "draft-js": {
+        "immutable": "3.8.3"
+      },
+      "replace": {
+        ".": "1.2.2",
+        "minimatch": "3.1.5"
+      }
+    }
   }
 }

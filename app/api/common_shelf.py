@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import Optional, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
@@ -72,6 +72,7 @@ from app.services.search_query_log_service import (
     build_search_log_sort,
 )
 from app.services.search_matchers import TextMatchMode
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.xlsx_export import export_common_shelf_xlsx
 
 router = APIRouter(prefix="/common-shelf", tags=["CommonShelf"])
@@ -249,6 +250,7 @@ def get_common_shelf_group_items(group_key: str, db: DBSession):
 async def manual_add_common_shelf(
     payload: CommonShelfManualCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -266,6 +268,12 @@ async def manual_add_common_shelf(
         event_type=SSEEventType.COMMON_SHELF_CREATED,
         items=created_items,
     )
+    if created_items:
+        enqueue_structure_cache_resolution(
+            background_tasks,
+            created_items[0].cas_number,
+            reason="common_shelf.manual_add",
+        )
     return {
         "message": "常用货架新增成功",
         "items_created": len(created_items),
@@ -447,6 +455,7 @@ async def add_common_shelf_bottles(
     group_key: str,
     payload: CommonShelfAddBottlesRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -480,6 +489,11 @@ async def add_common_shelf_bottles(
             if created_items
             else group_key
         },
+    )
+    enqueue_structure_cache_resolution(
+        background_tasks,
+        group.cas_number,
+        reason="common_shelf.add_bottles",
     )
     return {
         "message": "常用货架已加瓶",

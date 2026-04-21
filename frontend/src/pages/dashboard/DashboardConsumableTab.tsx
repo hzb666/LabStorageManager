@@ -49,6 +49,7 @@ import {
   type DashboardParams,
   CONSUMABLE_STATUS_OPTIONS,
   DASHBOARD_CONSUMABLE_SEARCH_FIELDS,
+  DASHBOARD_CONSUMABLE_ADMIN_SEARCH_FIELDS,
   buildLocalListData,
   flattenGroupedOrders,
   removeApplicantColumn,
@@ -58,22 +59,28 @@ import {
 const consumableColumnHelper = createColumnHelper<DashboardConsumableOrder>();
 
 // Dashboard 接口返回分组订单，这里先拍平成 `FilterTable` 可消费的本地列表结构。
-function createConsumableDashboardAPI(currentUserId?: number): FilterAPI {
+function createConsumableDashboardAPI(
+  currentUserId: number | undefined,
+  managementMode: boolean,
+): FilterAPI {
   return {
     list: async (params) => {
-      const response = await consumableOrderAPI.getMyConsumableOrders();
+      const response = managementMode
+        ? await consumableOrderAPI.getAdminConsumableOrders()
+        : await consumableOrderAPI.getMyConsumableOrders();
       const grouped = (response.data?.data ?? {}) as Record<
         string,
         { orders: Record<string, unknown>[] }
       >;
       const rows = flattenGroupedOrders<DashboardConsumableOrder>(
         grouped,
-        currentUserId,
+        managementMode ? undefined : currentUserId,
       );
       const local = buildLocalListData(rows, params as DashboardParams, [
         "name",
         "specification",
         "created_at",
+        ...(managementMode ? ["applicant_name"] : []),
       ]);
       return { data: local };
     },
@@ -118,21 +125,24 @@ function createConsumableColumns({
   currentUserId,
   currentUserRole,
   isAdmin,
+  managementMode,
   refreshTables,
   onEdit,
 }: Readonly<{
   currentUserId: number | undefined;
   currentUserRole: string | undefined;
   isAdmin: boolean;
+  managementMode: boolean;
   refreshTables: () => Promise<void>;
   onEdit: (item: DashboardConsumableOrder) => void;
 }>): ColumnDef<Record<string, unknown>, unknown>[] {
-  const baseColumns = removeApplicantColumn(
-    getConsumableOrderTableColumns() as ColumnDef<
-      Record<string, unknown>,
-      unknown
-    >[],
-  );
+  const orderColumns = getConsumableOrderTableColumns() as ColumnDef<
+    Record<string, unknown>,
+    unknown
+  >[];
+  const baseColumns = managementMode
+    ? orderColumns
+    : removeApplicantColumn(orderColumns);
   const actions = [
     {
       id: "confirm-complete",
@@ -377,7 +387,9 @@ function useDashboardConsumableDialogController({
   };
 }
 
-export function DashboardConsumableTab() {
+export function DashboardConsumableTab({
+  managementMode = false,
+}: Readonly<{ managementMode?: boolean }>) {
   const currentUser = useAuthStore((state) => state.user);
   const clearRoomStale = useSSEStore((state) => state.clearRoomStale);
   const isAdmin = currentUser?.role === UserRoles.ADMIN;
@@ -395,7 +407,7 @@ export function DashboardConsumableTab() {
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["dashboard", "consumables"] }),
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       queryClient.invalidateQueries({ queryKey: ["consumable-orders"] }),
     ]);
     clearRoomStale('consumable_orders');
@@ -403,8 +415,8 @@ export function DashboardConsumableTab() {
   }, [clearRoomStale, queryClient]);
 
   const consumableDashboardAPI = useMemo(
-    () => createConsumableDashboardAPI(currentUser?.id),
-    [currentUser?.id],
+    () => createConsumableDashboardAPI(currentUser?.id, managementMode),
+    [currentUser?.id, managementMode],
   );
   const { handleConsumableEdit, consumableEditDialog } =
     useDashboardConsumableDialogController({
@@ -421,6 +433,7 @@ export function DashboardConsumableTab() {
         currentUserId: currentUser?.id,
         currentUserRole: currentUser?.role,
         isAdmin,
+        managementMode,
         refreshTables,
         onEdit: (item) =>
           handleConsumableEdit(item as unknown as Record<string, unknown>),
@@ -430,6 +443,7 @@ export function DashboardConsumableTab() {
       currentUser?.role,
       handleConsumableEdit,
       isAdmin,
+      managementMode,
       refreshTables,
     ],
   );
@@ -438,8 +452,8 @@ export function DashboardConsumableTab() {
     <>
       <FilterTable
         api={consumableDashboardAPI}
-        queryKey={["dashboard", "consumables"]}
-        tableId="dashboard-consumable-orders"
+        queryKey={managementMode ? ["dashboard", "admin", "consumables"] : ["dashboard", "consumables"]}
+        tableId={managementMode ? "dashboard-admin-consumable-orders" : "dashboard-consumable-orders"}
         realtime={{
           room: 'consumable_orders',
           eventTypes: CONSUMABLE_ORDER_SSE_EVENTS,
@@ -461,6 +475,10 @@ export function DashboardConsumableTab() {
               return true;
             }
 
+            if (managementMode) {
+              return true;
+            }
+
             if (!item || typeof currentUser?.id !== "number") {
               return false;
             }
@@ -470,11 +488,20 @@ export function DashboardConsumableTab() {
         }}
         customColumns={consumableColumns}
         statusOptions={CONSUMABLE_STATUS_OPTIONS}
-        searchFieldOptions={DASHBOARD_CONSUMABLE_SEARCH_FIELDS}
-        searchPlaceholder="搜索名称、规格、订购时间..."
+        searchFieldOptions={
+          managementMode
+            ? DASHBOARD_CONSUMABLE_ADMIN_SEARCH_FIELDS
+            : DASHBOARD_CONSUMABLE_SEARCH_FIELDS
+        }
+        searchPlaceholder={
+          managementMode
+            ? "搜索名称、规格、订购人、订购时间..."
+            : "搜索名称、规格、订购时间..."
+        }
         title={
           <>
-            <ShoppingCart className="w-5 h-5" /> 我的耗材订单
+            <ShoppingCart className="w-5 h-5" />{" "}
+            {managementMode ? "全部耗材订单" : "我的耗材订单"}
           </>
         }
         noteField="notes"

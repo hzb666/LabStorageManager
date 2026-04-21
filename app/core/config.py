@@ -165,7 +165,25 @@ class Settings(BaseSettings):
         default=100,
         ge=1,
         le=1000,
-        description="Default upper bound for structure search results",
+        description="Preview result upper bound returned by structure search APIs",
+    )
+    chem_structure_search_concurrency: int = Field(
+        default=3,
+        ge=1,
+        le=8,
+        description="Maximum concurrent RDKit structure searches per backend process",
+    )
+    chem_structure_search_cache_ttl_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=86_400,
+        description="TTL for cached structure search result tokens",
+    )
+    chem_structure_search_cache_max_entries: int = Field(
+        default=64,
+        ge=1,
+        le=1024,
+        description="Maximum in-memory cached structure search result sets",
     )
     
     # 小牛翻译 API

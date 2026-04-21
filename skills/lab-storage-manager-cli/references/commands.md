@@ -76,13 +76,16 @@ HTTP: `GET /inventory/cas/{cas_number}`
 
 ### name
 
-HTTP: `GET /inventory/`
+HTTP: `GET /inventory/?search=...&search_field=name`
 
-输入：`keyword`
+输入：名称关键词 `keyword`。
 
-等价 query：`search=<keyword>&search_field=name`
+参数模式：
 
-返回按名称匹配的库存列表。
+- `--page <number>`
+- `--page-size <number>`
+- `--summary`
+- `--exact`：使用精确文本匹配。
 
 ### code
 
@@ -195,23 +198,28 @@ HTTP: `GET /reagent-orders/{order_id}`
 
 ### cas
 
-HTTP: `GET /reagent-orders/`
+HTTP: `GET /reagent-orders/?search=...&search_field=cas_number`
 
 输入：`cas_number`
 
-等价 query：`search=<cas_number>&search_field=cas_number`
+参数模式：
 
-返回按 CAS 匹配的试剂订单列表。注意：`cas-overview` 是 CAS 概览，不是订单列表。
+- `--page <number>`
+- `--page-size <number>`
+- `--summary`
 
 ### name
 
-HTTP: `GET /reagent-orders/`
+HTTP: `GET /reagent-orders/?search=...&search_field=name`
 
-输入：`keyword`
+输入：名称关键词 `keyword`。
 
-等价 query：`search=<keyword>&search_field=name`
+参数模式：
 
-返回按名称匹配的试剂订单列表。
+- `--page <number>`
+- `--page-size <number>`
+- `--summary`
+- `--exact`：使用精确文本匹配。
 
 ### my
 
@@ -318,13 +326,16 @@ HTTP: `GET /consumable-orders/{order_id}`
 
 ### name
 
-HTTP: `GET /consumable-orders/`
+HTTP: `GET /consumable-orders/?search=...&search_field=name`
 
-输入：`keyword`
+输入：名称关键词 `keyword`。
 
-等价 query：`search=<keyword>&search_field=name`
+参数模式：
 
-返回按名称匹配的耗材订单列表。
+- `--page <number>`
+- `--page-size <number>`
+- `--summary`
+- `--exact`：使用精确文本匹配。
 
 ### my
 
@@ -382,87 +393,63 @@ HTTP: `GET /common-shelf/groups`
 
 支持 query：`skip`、`limit`、`search`、`search_field`、`fuzzy`、`match_mode`、`sort_by`、`sort_order`
 
-返回分组列表。后续写操作必须使用返回里的 `group.group_key` 作为目标参数。
-
 ### cas
 
-HTTP: `GET /common-shelf/groups`
+HTTP: `GET /common-shelf/groups?search=...&search_field=cas_number&match_mode=exact`
 
 输入：`cas_number`
 
-等价 query：`search=<cas_number>&search_field=cas_number&match_mode=exact`
-
-返回按 CAS 精确匹配的常用货架分组，不访问 CAS 主数据管理接口。
-
 ### alias
 
-HTTP: `GET /common-shelf/groups`
+HTTP: `GET /common-shelf/groups?search=...&search_field=alias`
 
-输入：`keyword`
-
-等价 query：`search=<keyword>&search_field=alias`
-
-返回按别名匹配的常用货架分组，不访问 CAS 主数据管理接口。
+输入：名称、英文名或别名关键词
 
 ### locations
 
 HTTP: `GET /common-shelf/groups/{group_key}/locations`
 
-输入：`group_key`，来自 `common-shelf list` 返回的 `group.group_key`
-
-输出：该分组按位置聚合的瓶数和最早入库时间，用于扣减前确认目标位置。
+输入：`group_key`，来自 `common-shelf list` / `cas` / `alias` 返回的分组键
 
 ### manual-add
 
 HTTP: `POST /common-shelf/manual-add`
 
-输入 body 字段：
-
-- `cas_number`
-- `name_snapshot`
-- `brand` 可选
-- `purity` 可选
-- `specification`
-- `count`
-- `storage_location` 可选
-- `notes` 可选
+输入：JSON object 负载。属于写操作，执行前必须确认。
 
 ### add-bottles
 
 HTTP: `POST /common-shelf/groups/{group_key}/add-bottles`
 
-输入：`group_key`，来自 `common-shelf list` 返回的 `group.group_key`
-
-body 字段：
-
-```json
-{"count": 2, "storage_location": "A-02"}
-```
-
-参数模式：
-
-- `--count <positive-int>` 必填
-- `--storage-location <text>` 可选
-
-只添加瓶数和位置，不允许修改分组品牌、规格、CAS 或 CAS 主数据。
+参数模式：`--count` 必填，可选 `--storage-location`、`--purity`、`--notes`。
+属于写操作，执行前必须确认目标分组、位置和数量。
 
 ### remove-one
 
 HTTP: `POST /common-shelf/groups/{group_key}/remove-one`
 
-输入：`group_key`，来自 `common-shelf list` 返回的 `group.group_key`
+参数模式：可选 `--storage-location`。
+属于写操作，执行前必须确认目标分组和扣减位置。
 
-body 字段：
+## chemical-name-map
 
-```json
-{"storage_location": "A-02"}
-```
+### list
 
-参数模式：
+HTTP: `GET /chemical-name-map`
 
-- `--storage-location <text>` 必填，除非通过 JSON object 提供 `storage_location`
+支持 query：`skip`、`limit`、`search`、`search_field`、`fuzzy`、`match_mode`、`sort_by`、`sort_order`
 
-每次只扣减 1 瓶。执行前应先用 `common-shelf locations <group_key>` 核对位置和瓶数。
+### search
+
+HTTP: `GET /chemical-name-map?search=...&search_field=all`
+
+输入：名称、英文名、别名或 CAS 关键词。
+
+### cas
+
+HTTP: `GET /chemical-name-map?search=...&search_field=cas_number&match_mode=exact`
+
+输入：`cas_number`。用于按 CAS 精确查询主数据分类。
 
 ## 明确禁止的能力
 
@@ -471,20 +458,20 @@ body 字段：
 - 所有文件上传和 `multipart/form-data`
 - 所有用户管理和自助资料修改，除了 `whoami` 与 `logout`
 - 订单审批、拒绝
-- Common Shelf 分组编辑、条目编辑、删除、导出、CAS 主数据管理
 - Announcements、Cart Sync、Events、Error Logs 等非 CLI 域
 
 ## Agent 使用提示词
 
 ```text
-只允许使用 `python -m lsm_cli` 及 skill 明确列出的子命令。
+只允许使用 `lsm` 及 skill 明确列出的子命令。
 禁止 curl、requests/httpx、直接导入后端模块、直接访问数据库、直接改本地 CLI 配置文件。
 如果目标操作没有对应 CLI 子命令，必须明确回复“当前 CLI 不支持该操作”，不能绕过到原始 HTTP。
+技能目录 `.env` 不是 `lsm` 内置配置；Agent 必须先读取 `.env`，再把 `LSM_BASE_URL`、`LSM_USERNAME`、`LSM_PASSWORD` 传给登录命令。
+`lsm auth whoami` 成功时也要核对当前用户名是否等于 `.env` 的 `LSM_USERNAME`；不一致时不能默默沿用当前 token。
 登录时优先使用 `--password-stdin`，不要把密码写进命令行参数。
 对具体库存/试剂/订单执行写操作前，先通过 CLI 查询拿到准确 ID；禁止猜测 ID，禁止在目标不确定时直接修改。
 `inventory_id` / `order_id` 必须是单个正整数；禁止把逗号列表、范围、名称、CAS 或搜索词当作 ID 参数。CLI 没有批量借用或批量修改命令，多目标写操作必须逐个确认后拆成单目标命令。
 库存归还时禁止传单位，`--used-quantity` 不做单位换算；用户单位与库存 `unit` / `specification` 不一致时，必须先查库存并明确换算，不能猜测。
-常用货架写操作必须先通过 `common-shelf list` 拿到准确 `group.group_key`；扣减前优先用 `common-shelf locations <group_key>` 确认位置。
 执行前再次确认目标 ID、操作类型、输入值、单位都与用户意图完全一致；有任何不确定先问用户，不能“先试一下”。
 `create` 命令使用 JSON object 负载，`--data-json` 和 `--data-file` 二选一；非 `create` 写操作优先使用显式命令参数；`consumable-orders complete` 不传 `--data-*`。
 优先按退出码处理失败：2 表示 `401` 认证失败或未认证；已登录命令可重新登录，`auth login` 则检查用户名/密码或账号角色；3 权限不足，4 资源不存在，5 限流，6 文件不存在，7 本地输入错误，8 参数错误，9 网络错误。

@@ -34,6 +34,8 @@ const AUTH_REASON_NOTICE_MAP: Record<string, string> = {
   user_deactivated: '账号已被禁用',
 }
 
+const SILENT_AUTH_INVALID_REASONS = new Set(['logout'])
+
 let invalidationInFlight = false
 
 export const resolveAuthNoticeByCode = (
@@ -56,6 +58,10 @@ export const resolveAuthNoticeByReason = (
   return AUTH_REASON_NOTICE_MAP[reason] ?? fallbackNotice
 }
 
+export const shouldSuppressAuthNoticeByReason = (reason: string | undefined): boolean => {
+  return Boolean(reason && SILENT_AUTH_INVALID_REASONS.has(reason))
+}
+
 export const triggerSessionInvalidation = async ({
   notice,
   skipApi = true,
@@ -66,10 +72,12 @@ export const triggerSessionInvalidation = async ({
   invalidationInFlight = true
 
   try {
-    try {
-      sessionStorage.setItem(AUTH_NOTICE_KEY, notice)
-    } catch {
-      toast.warning(notice)
+    if (notice) {
+      try {
+        sessionStorage.setItem(AUTH_NOTICE_KEY, notice)
+      } catch {
+        toast.warning(notice)
+      }
     }
 
     disconnectAllSSEConnections()

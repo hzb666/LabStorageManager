@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
@@ -78,6 +78,7 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.api.reagent_orders_workflow import register_workflow_routes
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
@@ -434,6 +435,7 @@ def _apply_reagent_order_filters(
 async def create_reagent_order(
     order: ReagentOrderCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -508,6 +510,11 @@ async def create_reagent_order(
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_CREATED,
         {"id": db_order.id, "item": _serialize_reagent_order(db_order, db)},
+    )
+    enqueue_structure_cache_resolution(
+        background_tasks,
+        db_order.cas_number,
+        reason="reagent_order.create",
     )
     
     return db_order
@@ -834,6 +841,7 @@ async def update_reagent_order(
     order_id: int,
     order_update: ReagentOrderUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: DBSession,
     current_user: CurrentUser,
 ):
@@ -872,6 +880,12 @@ async def update_reagent_order(
         SSEEventType.REAGENT_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_reagent_order(order, db)},
     )
+    if "cas_number" in update_data:
+        enqueue_structure_cache_resolution(
+            background_tasks,
+            order.cas_number,
+            reason="reagent_order.update",
+        )
     
     return order
 

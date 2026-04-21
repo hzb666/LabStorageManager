@@ -1,10 +1,10 @@
-import DefaultTheme from 'vitepress/theme'
+import DefaultTheme from 'vitepress/theme-without-fonts'
 import MermaidAuto from './components/MermaidAuto.vue'
 import InlineCodeRef from './components/InlineCodeRef.vue'
 import Layout from './Layout.vue'
-import './fontLoader'
 
 import './custom.css'
+import './fontLoader'
 
 export default {
   extends: DefaultTheme,

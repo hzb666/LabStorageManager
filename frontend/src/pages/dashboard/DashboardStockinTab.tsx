@@ -39,6 +39,7 @@ import {
   type PendingStockinItem,
   type DashboardParams,
   BORROW_SEARCH_FIELDS,
+  ADMIN_STOCKIN_SEARCH_FIELDS,
   DASHBOARD_EMPTY_STATUS_OPTIONS,
   buildLocalListData,
   requestDashboardCountsRefresh,
@@ -47,15 +48,17 @@ import {
 const pendingStockinColumnHelper = createColumnHelper<PendingStockinItem>()
 
 // 待入库列表只请求一次接口，再包装成 `FilterTable` 需要的本地搜索和分页结构。
-function createPendingStockinDashboardAPI(): FilterAPI {
+function createPendingStockinDashboardAPI(managementMode: boolean): FilterAPI {
   return {
     list: async (params) => {
-      const response = await inventoryAPI.getPendingStockin()
+      const response = managementMode
+        ? await inventoryAPI.getAdminPendingStockin()
+        : await inventoryAPI.getPendingStockin()
       const rows = (response.data?.data ?? []) as PendingStockinItem[]
       const local = buildLocalListData(
         rows as unknown as Record<string, unknown>[],
         params as DashboardParams,
-        ['name', 'cas_number']
+        ['name', 'cas_number', ...(managementMode ? ['temporary_keeper_name'] : [])]
       )
       return { data: local as { data: unknown[]; total: number } }
     },
@@ -63,9 +66,10 @@ function createPendingStockinDashboardAPI(): FilterAPI {
 }
 
 function createStockinColumns(
-  openStockinModal: (item: PendingStockinItem) => void
+  openStockinModal: (item: PendingStockinItem) => void,
+  managementMode: boolean
 ): ColumnDef<Record<string, unknown>, unknown>[] {
-  return [
+  const columns: ColumnDef<PendingStockinItem, unknown>[] = [
     pendingStockinColumnHelper.accessor('name', {
       header: '名称',
       size: 180,
@@ -85,6 +89,19 @@ function createStockinColumns(
       size: 180,
       cell: (info) => formatDateTime(info.getValue()),
     }),
+  ]
+
+  if (managementMode) {
+    columns.push(
+      pendingStockinColumnHelper.accessor('temporary_keeper_name', {
+        header: '暂存人',
+        size: 120,
+        cell: (info) => info.getValue() || '-',
+      }),
+    )
+  }
+
+  columns.push(
     pendingStockinColumnHelper.display({
       id: 'actions',
       header: '操作',
@@ -99,7 +116,9 @@ function createStockinColumns(
         </Button>
       ),
     }),
-  ] as ColumnDef<Record<string, unknown>, unknown>[]
+  )
+
+  return columns as ColumnDef<Record<string, unknown>, unknown>[]
 }
 
 function buildPendingStockinFormValues(item: PendingStockinItem): StockInFormInputData {
@@ -192,7 +211,9 @@ function DashboardStockinDialog({
 }
 
 // 负责待入库列表本地筛选、入库弹窗状态，以及入库成功后的库存和统计缓存刷新。
-export function DashboardStockinTab() {
+export function DashboardStockinTab({
+  managementMode = false,
+}: Readonly<{ managementMode?: boolean }>) {
   const currentUser = useAuthStore((state) => state.user)
   const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const queryClient = useQueryClient()
@@ -208,7 +229,7 @@ export function DashboardStockinTab() {
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['dashboard', 'stockin'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
     ])
     clearRoomStale('inventory')
@@ -216,8 +237,8 @@ export function DashboardStockinTab() {
   }, [clearRoomStale, queryClient])
 
   const pendingStockinDashboardAPI = useMemo(
-    () => createPendingStockinDashboardAPI(),
-    []
+    () => createPendingStockinDashboardAPI(managementMode),
+    [managementMode]
   )
 
   // 每次打开待入库弹窗都回填当前暂存记录，避免上一条记录的输入残留到下一次。
@@ -280,8 +301,8 @@ export function DashboardStockinTab() {
   }, [stockinForm, stockinLoading])
 
   const stockinColumns = useMemo(
-    () => createStockinColumns(openStockinModal),
-    [openStockinModal]
+    () => createStockinColumns(openStockinModal, managementMode),
+    [managementMode, openStockinModal]
   )
   const stockinDialog = {
     selectedStockin,
@@ -295,8 +316,8 @@ export function DashboardStockinTab() {
     <>
       <FilterTable
         api={pendingStockinDashboardAPI}
-        queryKey={['dashboard', 'stockin']}
-        tableId="dashboard-stockin"
+        queryKey={managementMode ? ['dashboard', 'admin', 'stockin'] : ['dashboard', 'stockin']}
+        tableId={managementMode ? 'dashboard-admin-stockin' : 'dashboard-stockin'}
         realtime={{
           room: 'inventory',
           eventTypes: INVENTORY_SSE_EVENTS,
@@ -316,6 +337,10 @@ export function DashboardStockinTab() {
               return true
             }
 
+            if (managementMode) {
+              return true
+            }
+
             if (!item || typeof currentUser?.id !== 'number') {
               return false
             }
@@ -325,9 +350,14 @@ export function DashboardStockinTab() {
         }}
         customColumns={stockinColumns}
         statusOptions={DASHBOARD_EMPTY_STATUS_OPTIONS}
-        searchFieldOptions={BORROW_SEARCH_FIELDS}
-        searchPlaceholder="搜索名称、CAS号..."
-        title={<><ArrowRightLeft className="w-5 h-5" /> 待入库（暂存）</>}
+        searchFieldOptions={managementMode ? ADMIN_STOCKIN_SEARCH_FIELDS : BORROW_SEARCH_FIELDS}
+        searchPlaceholder={managementMode ? '搜索名称、CAS号、暂存人...' : '搜索名称、CAS号...'}
+        title={
+          <>
+            <ArrowRightLeft className="w-5 h-5" />{' '}
+            {managementMode ? '全部暂存试剂' : '待入库（暂存）'}
+          </>
+        }
         enableExpandAll={true}
       />
       <DashboardStockinDialog

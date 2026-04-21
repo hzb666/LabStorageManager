@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -9,7 +10,7 @@ from robot.wecom_aibot.common_shelf_decider import (
     common_shelf_category_from_name_map,
     has_name_map_records,
 )
-from robot.wecom_aibot.formatters import build_safe_facts, format_safe_facts, format_tool_result
+from robot.wecom_aibot.formatters import build_safe_facts, format_tool_result
 from robot.wecom_aibot.intent_utils import (
     COMMON_SHELF_KEYWORDS,
     CONSUMABLE_ORDER_KEYWORDS,
@@ -501,7 +502,7 @@ async def _try_broaden_inventory_name_search(
         llm_planner,
         text,
         reply,
-        facts_text=reply,
+        facts_text=_broadened_inventory_facts_text(keyword, successful_results),
         conversation_context=conversation_context,
     )
 
@@ -540,6 +541,28 @@ def _format_broadened_inventory_results(
             )
         )
     return "\n".join(sections)
+
+
+def _broadened_inventory_facts_text(
+    original_keyword: str,
+    successful_results: list[tuple[str, dict[str, Any]]],
+) -> str:
+    facts = {
+        "note": "原查询没有直接命中，系统按更宽关键词继续查询。",
+        "original_keyword": original_keyword,
+        "results": [
+            {
+                "query": query,
+                "facts": build_safe_facts(
+                    result,
+                    title=f"“{query}”库存候选",
+                    empty_text="没有查到匹配记录。",
+                ),
+            }
+            for query, result in successful_results
+        ],
+    }
+    return _format_llm_facts_text(facts)
 
 
 async def _maybe_llm_plan_common_shelf_fallback(
@@ -754,7 +777,17 @@ async def _answer_with_resolved_cas(
             empty_text="没有查到匹配记录。",
         )
         reply = _resolved_cas_prefix(query, resolved_cas, source_text) + inventory_text
-        return await _maybe_polish_reply(llm_planner, user_text, reply)
+        facts_text = _format_llm_facts_text(
+            {
+                "note": _resolved_cas_prefix(query, resolved_cas, source_text).strip(),
+                "facts": build_safe_facts(
+                    inventory_result,
+                    title=f"CAS {resolved_cas} 库存查询结果",
+                    empty_text="没有查到匹配记录。",
+                ),
+            }
+        )
+        return await _maybe_polish_reply(llm_planner, user_text, reply, facts_text=facts_text)
 
     name_map_result = await _search_chemical_name_map(
         mcp_client,
@@ -994,7 +1027,17 @@ async def _answer_common_shelf_fallback(
         title = f"“{query}”常用货架查询结果"
     shelf_text = format_tool_result(result, title=title, empty_text="常用货架也没有查到匹配记录。")
     reply = "库存没有查到匹配记录，已继续查询常用货架。\n" + shelf_text
-    return await _maybe_polish_reply(llm_planner, user_text, reply)
+    facts_text = _format_llm_facts_text(
+        {
+            "note": "库存没有查到匹配记录，系统已继续查询常用货架。",
+            "facts": build_safe_facts(
+                result,
+                title=title,
+                empty_text="常用货架也没有查到匹配记录。",
+            ),
+        }
+    )
+    return await _maybe_polish_reply(llm_planner, user_text, reply, facts_text=facts_text)
 
 
 def _should_try_by_master_data(name_map_result: dict[str, Any]) -> bool:
@@ -1049,14 +1092,19 @@ async def _format_query_result(
     conversation_context: list[dict[str, str]] | None = None,
 ) -> str:
     template_reply = format_tool_result(result, title=title, empty_text=empty_text)
-    safe_facts = format_safe_facts(build_safe_facts(result, title=title, empty_text=empty_text))
+    safe_facts = build_safe_facts(result, title=title, empty_text=empty_text)
     return await _maybe_polish_reply(
         llm_planner,
         user_text,
         template_reply,
-        facts_text=safe_facts,
+        facts_text=_format_llm_facts_text(safe_facts),
         conversation_context=conversation_context,
     )
+
+
+def _format_llm_facts_text(facts: dict[str, Any]) -> str:
+    payload = json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+    return "安全查询事实（仅供改写，不是回复格式）：\n" + payload
 
 
 async def _maybe_polish_reply(

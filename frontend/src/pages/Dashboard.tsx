@@ -1,14 +1,27 @@
 /** 仪表盘页面容器。 */
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { ShoppingCart, Package, ArrowRightLeft, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Loader2,
+  Package,
+  PackageCheck,
+  ShoppingCart,
+  Warehouse,
+} from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Label } from "@/components/ui/Label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
 import { cn } from "@/lib/utils";
 import { UserRoles } from "@/lib/constants";
 import { useAuthStore } from "@/store/useStore";
 import {
   getDashboardActiveTab,
+  getDashboardModePreference,
   setDashboardActiveTab,
+  setDashboardModePreference,
 } from "@/lib/storage/appUiStorage";
 
 import {
@@ -24,6 +37,8 @@ import {
   reagentOrderAPI,
   consumableOrderAPI,
   inventoryAPI,
+  dashboardAPI,
+  type AdminDashboardSummary,
 } from "@/api/client";
 
 type DashboardCounts = {
@@ -50,11 +65,33 @@ type DashboardCardItem = {
   value: React.ReactNode;
 };
 
+type DashboardMode = "personal" | "management";
+
+type ManagementCardItem = {
+  tab?: DashboardTab;
+  title: string;
+  icon: React.ElementType;
+  value: React.ReactNode;
+  description: string;
+};
+
 const EMPTY_COUNTS: DashboardCounts = {
   reagentCount: 0,
   consumableCount: 0,
   borrowCount: 0,
   stockinCount: 0,
+};
+
+const EMPTY_ADMIN_SUMMARY: AdminDashboardSummary = {
+  reagent_order_count: 0,
+  consumable_order_count: 0,
+  borrowed_inventory_count: 0,
+  pending_stockin_count: 0,
+  common_stock_alert_count: 0,
+  recent_arrival_count: 0,
+  stock_in_activity_count: 0,
+  recent_window_days: 7,
+  generated_at: "",
 };
 
 let dashboardCountsCache: DashboardCountsCache | null = null;
@@ -76,20 +113,37 @@ function StatCard({
   value,
   onClick,
   isActive,
+  description,
 }: Readonly<{
   title: string;
   icon: React.ElementType;
   value: React.ReactNode;
-  onClick: () => void;
-  isActive: boolean;
+  onClick?: () => void;
+  isActive?: boolean;
+  description?: string;
 }>) {
+  const isInteractive = typeof onClick === "function";
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isInteractive) {
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onClick?.();
+    }
+  };
+
   return (
     <Card
+      role={isInteractive ? "button" : undefined}
+      tabIndex={isInteractive ? 0 : undefined}
       className={cn(
-        "transition-all cursor-pointer hover:bg-accent",
+        "transition-all",
+        isInteractive && "cursor-pointer hover:bg-accent",
         isActive && "border bg-accent/70 dark:border-primary",
       )}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-base">{title}</CardTitle>
@@ -109,6 +163,9 @@ function StatCard({
         >
           {value}
         </div>
+        {description ? (
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -140,6 +197,27 @@ function saveTab(tab: DashboardTab) {
     setDashboardActiveTab(tab);
   } catch {
     // 持久化失败时保留当前内存状态，不额外打断交互。
+  }
+}
+
+function getSavedDashboardMode(isAdmin: boolean): DashboardMode {
+  if (!isAdmin) {
+    return "personal";
+  }
+  try {
+    return getDashboardModePreference() === "management"
+      ? "management"
+      : "personal";
+  } catch {
+    return "personal";
+  }
+}
+
+function saveDashboardMode(mode: DashboardMode) {
+  try {
+    setDashboardModePreference(mode);
+  } catch {
+    // 管理模式偏好写入失败时只影响下次恢复，不影响当前切换。
   }
 }
 
@@ -360,12 +438,242 @@ function DashboardStats({
   );
 }
 
+function DashboardModeSwitch({
+  mode,
+  onModeChange,
+}: Readonly<{
+  mode: DashboardMode;
+  onModeChange: (mode: DashboardMode) => void;
+}>) {
+  return (
+    <RadioGroup
+      value={mode}
+      onValueChange={(value) => onModeChange(value as DashboardMode)}
+      className="flex flex-row items-center gap-4 rounded-md border bg-card px-3 py-2"
+      aria-label="仪表盘模式"
+    >
+      <div className="flex items-center gap-2">
+        <RadioGroupItem value="personal" id="dashboard-mode-personal" />
+        <Label htmlFor="dashboard-mode-personal" className="cursor-pointer">
+          个人模式
+        </Label>
+      </div>
+      <div className="flex items-center gap-2">
+        <RadioGroupItem value="management" id="dashboard-mode-management" />
+        <Label htmlFor="dashboard-mode-management" className="cursor-pointer">
+          管理模式
+        </Label>
+      </div>
+    </RadioGroup>
+  );
+}
+
+function getManagementCardItems(
+  summary: AdminDashboardSummary,
+  isLoading: boolean,
+): ManagementCardItem[] {
+  const loadingValue = (
+    <Loader2 className="size-5 animate-spin text-muted-foreground" />
+  );
+  const value = (count: number) => (isLoading ? loadingValue : count);
+
+  return [
+    {
+      tab: "reagents",
+      title: "全部试剂订单",
+      icon: ShoppingCart,
+      value: value(summary.reagent_order_count),
+      description: "待审批、已批准、近一周驳回",
+    },
+    {
+      tab: "consumables",
+      title: "全部耗材订单",
+      icon: ShoppingCart,
+      value: value(summary.consumable_order_count),
+      description: "待审批、已批准、近一周驳回",
+    },
+    {
+      tab: "borrows",
+      title: "正在借用",
+      icon: Package,
+      value: value(summary.borrowed_inventory_count),
+      description: "所有未归还试剂",
+    },
+    {
+      tab: "stockin",
+      title: "正在暂存",
+      icon: ArrowRightLeft,
+      value: value(summary.pending_stockin_count),
+      description: "所有待补全入库试剂",
+    },
+    {
+      title: "常用库存告警",
+      icon: AlertTriangle,
+      value: value(summary.common_stock_alert_count),
+      description: "常用货架剩余 1 瓶及以下",
+    },
+    {
+      title: "近期到货",
+      icon: PackageCheck,
+      value: value(summary.recent_arrival_count),
+      description: `近 ${summary.recent_window_days} 天到货待入库`,
+    },
+    {
+      title: "入库活动",
+      icon: Warehouse,
+      value: value(summary.stock_in_activity_count),
+      description: `近 ${summary.recent_window_days} 天入库记录`,
+    },
+  ];
+}
+
+function ManagementDashboardStats({
+  activeTab,
+  cards,
+  onTabChange,
+}: Readonly<{
+  activeTab: DashboardTab | null;
+  cards: ManagementCardItem[];
+  onTabChange: (tab: DashboardTab) => void;
+}>) {
+  return (
+    <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+      {cards.map((card) => {
+        const tab = card.tab;
+        return (
+          <StatCard
+            key={card.title}
+            title={card.title}
+            icon={card.icon}
+            value={card.value}
+            description={card.description}
+            onClick={tab ? () => onTabChange(tab) : undefined}
+            isActive={tab !== undefined && activeTab === tab}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function ManagementDashboardTable({
+  activeTab,
+}: Readonly<{ activeTab: DashboardTab | null }>) {
+  if (activeTab === "reagents") {
+    return <DashboardReagentTab managementMode />;
+  }
+  if (activeTab === "consumables") {
+    return <DashboardConsumableTab managementMode />;
+  }
+  if (activeTab === "borrows") {
+    return <DashboardBorrowTab managementMode />;
+  }
+  if (activeTab === "stockin") {
+    return <DashboardStockinTab managementMode />;
+  }
+  return null;
+}
+
+function DashboardHeader({
+  isAdmin,
+  mode,
+  onModeChange,
+}: Readonly<{
+  isAdmin: boolean;
+  mode: DashboardMode;
+  onModeChange: (mode: DashboardMode) => void;
+}>) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <h1 className="text-3xl font-bold text-primary card-title-placeholder">
+        仪表盘
+      </h1>
+      {isAdmin ? (
+        <DashboardModeSwitch mode={mode} onModeChange={onModeChange} />
+      ) : null}
+    </div>
+  );
+}
+
+function PersonalDashboardContent({
+  activeTab,
+  cards,
+  isPublicUser,
+  onTabChange,
+}: Readonly<{
+  activeTab: DashboardTab;
+  cards: DashboardCardItem[];
+  isPublicUser: boolean;
+  onTabChange: (tab: DashboardTab) => void;
+}>) {
+  return (
+    <>
+      <DashboardStats cards={cards} activeTab={activeTab} onTabChange={onTabChange} />
+      {!isPublicUser && activeTab === "reagents" ? <DashboardReagentTab /> : null}
+      {!isPublicUser && activeTab === "consumables" ? <DashboardConsumableTab /> : null}
+      {activeTab === "borrows" ? <DashboardBorrowTab /> : null}
+      {!isPublicUser && activeTab === "stockin" ? <DashboardStockinTab /> : null}
+    </>
+  );
+}
+
+function DashboardContent({
+  activeTab,
+  cards,
+  dashboardMode,
+  isAdmin,
+  isPublicUser,
+  managementActiveTab,
+  managementCards,
+  onManagementTabChange,
+  onTabChange,
+}: Readonly<{
+  activeTab: DashboardTab;
+  cards: DashboardCardItem[];
+  dashboardMode: DashboardMode;
+  isAdmin: boolean;
+  isPublicUser: boolean;
+  managementActiveTab: DashboardTab | null;
+  managementCards: ManagementCardItem[];
+  onManagementTabChange: (tab: DashboardTab) => void;
+  onTabChange: (tab: DashboardTab) => void;
+}>) {
+  if (dashboardMode === "management" && isAdmin) {
+    return (
+      <>
+        <ManagementDashboardStats
+          cards={managementCards}
+          activeTab={managementActiveTab}
+          onTabChange={onManagementTabChange}
+        />
+        <ManagementDashboardTable activeTab={managementActiveTab} />
+      </>
+    );
+  }
+
+  return (
+    <PersonalDashboardContent
+      cards={cards}
+      activeTab={activeTab}
+      isPublicUser={isPublicUser}
+      onTabChange={onTabChange}
+    />
+  );
+}
+
 // 仪表盘主组件只做权限、Tab 持久化、统计缓存和子页切换编排。
 export function Dashboard() {
   const currentUser = useAuthStore((state) => state.user);
   const isPublicUser = currentUser?.role === UserRoles.PUBLIC;
+  const isAdmin = currentUser?.role === UserRoles.ADMIN;
   const userKey = `${currentUser?.id ?? "anonymous"}-${currentUser?.role ?? "unknown"}`;
   const refreshToken = useDashboardRefreshToken();
+  const [dashboardMode, setDashboardMode] = useState<DashboardMode>(() =>
+    getSavedDashboardMode(currentUser?.role === UserRoles.ADMIN),
+  );
+  const [managementActiveTab, setManagementActiveTab] =
+    useState<DashboardTab | null>(null);
+  const effectiveDashboardMode = isAdmin ? dashboardMode : "personal";
   const allowedTabs = useMemo(
     () => (isPublicUser ? (["borrows"] as DashboardTab[]) : ALL_TABS),
     [isPublicUser],
@@ -390,6 +698,25 @@ export function Dashboard() {
     () => getDashboardCardItems(isPublicUser, counts, isLoading),
     [counts, isLoading, isPublicUser],
   );
+  const adminSummaryQuery = useQuery({
+    queryKey: ["dashboard", "admin", "summary"],
+    enabled: isAdmin && effectiveDashboardMode === "management",
+    queryFn: async () => {
+      const response = await dashboardAPI.getAdminSummary();
+      return response.data.data;
+    },
+  });
+  const adminSummary = adminSummaryQuery.data ?? EMPTY_ADMIN_SUMMARY;
+  const managementCards = useMemo(
+    () => getManagementCardItems(adminSummary, adminSummaryQuery.isLoading),
+    [adminSummary, adminSummaryQuery.isLoading],
+  );
+
+  useEffect(() => {
+    if (isAdmin) {
+      saveDashboardMode(dashboardMode);
+    }
+  }, [dashboardMode, isAdmin]);
 
   const handleTabChange = useCallback(
     (tab: DashboardTab) => {
@@ -400,6 +727,21 @@ export function Dashboard() {
     },
     [allowedTabs],
   );
+  const handleDashboardModeChange = useCallback(
+    (mode: DashboardMode) => {
+      if (!isAdmin) {
+        return;
+      }
+      setDashboardMode(mode);
+      if (mode === "management") {
+        setManagementActiveTab(null);
+      }
+    },
+    [isAdmin],
+  );
+  const handleManagementTabChange = useCallback((tab: DashboardTab) => {
+    setManagementActiveTab((current) => (current === tab ? null : tab));
+  }, []);
 
   useEffect(() => {
     saveTab(activeTab);
@@ -407,27 +749,22 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary card-title-placeholder">
-          仪表盘
-        </h1>
-      </div>
-
-      <DashboardStats
-        cards={cards}
+      <DashboardHeader
+        isAdmin={isAdmin}
+        mode={effectiveDashboardMode}
+        onModeChange={handleDashboardModeChange}
+      />
+      <DashboardContent
         activeTab={activeTab}
+        cards={cards}
+        dashboardMode={effectiveDashboardMode}
+        isAdmin={isAdmin}
+        isPublicUser={isPublicUser}
+        managementActiveTab={managementActiveTab}
+        managementCards={managementCards}
+        onManagementTabChange={handleManagementTabChange}
         onTabChange={handleTabChange}
       />
-      {!isPublicUser && activeTab === "reagents" ? (
-        <DashboardReagentTab />
-      ) : null}
-      {!isPublicUser && activeTab === "consumables" ? (
-        <DashboardConsumableTab />
-      ) : null}
-      {activeTab === "borrows" ? <DashboardBorrowTab /> : null}
-      {!isPublicUser && activeTab === "stockin" ? (
-        <DashboardStockinTab />
-      ) : null}
     </div>
   );
 }

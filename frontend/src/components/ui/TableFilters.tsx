@@ -20,6 +20,10 @@ export interface TableFiltersProps {
   searchInput: string
   onSearchInputChange: (value: string) => void
   searchPlaceholder?: string
+  searchInputDisabled?: boolean
+  searchInputDisabledReason?: string
+  searchInputDisabledValue?: string
+  onSearchInputDisabledClear?: () => void
   searchActions?: React.ReactNode
   
   // 模糊搜索
@@ -49,6 +53,10 @@ export interface TableSearchInputProps {
   onChange: (value: string) => void
   placeholder?: string
   maxLength?: number
+  disabled?: boolean
+  disabledReason?: string
+  disabledValue?: string
+  onDisabledClear?: () => void
   inputClassName?: string
   containerClassName?: string
 }
@@ -134,12 +142,14 @@ function TooltipCheckbox({
 }
 
 export function TooltipSelect({
+  disabled = false,
   onValueChange,
   options,
   placeholder,
   tooltip,
   value,
 }: Readonly<{
+  disabled?: boolean
   onValueChange: (value: string) => void
   options: ReadonlyArray<{ value: string; label: string }>
   placeholder: string
@@ -164,6 +174,7 @@ export function TooltipSelect({
   return (
     <Tooltip open={!isSelectOpen && isTooltipOpen}>
       <Select
+        disabled={disabled}
         value={value}
         onValueChange={handleValueChange}
         onOpenChange={handleSelectOpenChange}
@@ -203,6 +214,7 @@ function TableFilterExtraControls({
   onStatusFilterChange,
   searchField,
   searchFieldOptions,
+  searchControlsDisabled,
   showFuzzySearch,
   showMatchMode,
   statusFilter,
@@ -217,6 +229,7 @@ function TableFilterExtraControls({
   onStatusFilterChange?: (value: string) => void
   searchField: string
   searchFieldOptions: SearchFieldOption[]
+  searchControlsDisabled: boolean
   showFuzzySearch: boolean
   showMatchMode: boolean
   statusFilter: string
@@ -239,12 +252,18 @@ function TableFilterExtraControls({
   }
 
   const handleFuzzySearchChange = (checked: boolean) => {
+    if (searchControlsDisabled) {
+      return
+    }
     startTransition(() => {
       onFuzzySearchChange(checked === true)
     })
   }
 
   const handleMatchModeChange = (value: SearchMatchMode) => {
+    if (searchControlsDisabled) {
+      return
+    }
     startTransition(() => {
       onMatchModeChange?.(value)
     })
@@ -259,9 +278,15 @@ function TableFilterExtraControls({
     <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">
       {showFuzzySearch && (
         <TooltipCheckbox tooltip="忽略空格、连字符、下划线等格式差异">
-          <label className="flex items-center gap-2 text-base cursor-pointer whitespace-nowrap">
+          <label
+            className={cn(
+              'flex items-center gap-2 text-base whitespace-nowrap',
+              searchControlsDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+            )}
+          >
             <Checkbox
               checked={fuzzySearch}
+              disabled={searchControlsDisabled}
               onCheckedChange={handleFuzzySearchChange}
             />
             <span className="text-base pr-2">忽略格式</span>
@@ -278,9 +303,15 @@ function TableFilterExtraControls({
             </div>
           }
         >
-          <label className="flex items-center gap-2 text-base cursor-pointer whitespace-nowrap">
+          <label
+            className={cn(
+              'flex items-center gap-2 text-base whitespace-nowrap',
+              searchControlsDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+            )}
+          >
             <Checkbox
               checked={matchMode === SEARCH_MATCH_MODES.EXACT}
+              disabled={searchControlsDisabled}
               onCheckedChange={handleExactSearchChange}
             />
             <span className="text-base pr-2">完整匹配</span>
@@ -290,6 +321,7 @@ function TableFilterExtraControls({
 
       {showSearchFieldSelect && (
         <TooltipSelect
+          disabled={searchControlsDisabled}
           value={searchField}
           onValueChange={onSearchFieldChange}
           options={searchFieldOptions}
@@ -358,35 +390,109 @@ export function TableEmptyState({
   )
 }
 
+function getSearchDisplayValue({
+  disabled,
+  disabledValue,
+  value,
+}: Readonly<{
+  disabled: boolean
+  disabledValue?: string
+  value: string
+}>) {
+  return disabled ? (disabledValue ?? value) : value
+}
+
+function getSearchInputPaddingClassName({
+  canClear,
+  isSearchTooLong,
+}: Readonly<{
+  canClear: boolean
+  isSearchTooLong: boolean
+}>) {
+  if (isSearchTooLong) {
+    // 错误文案和清空按钮会共占右侧空间，不提前留白就会压住输入文本。
+    return 'pr-45 border-destructive! focus-visible:border-destructive! focus-visible:ring-destructive/20!'
+  }
+  return canClear ? 'pr-8' : 'pr-3'
+}
+
+function getSearchPlaceholder({
+  disabled,
+  disabledReason,
+  placeholder,
+}: Readonly<{
+  disabled: boolean
+  disabledReason?: string
+  placeholder: string
+}>) {
+  return disabled ? (disabledReason ?? placeholder) : placeholder
+}
+
+function canClearSearchInput({
+  disabled,
+  disabledValue,
+  onDisabledClear,
+  value,
+}: Readonly<{
+  disabled: boolean
+  disabledValue?: string
+  onDisabledClear?: () => void
+  value: string
+}>) {
+  return disabled ? Boolean(disabledValue && onDisabledClear) : Boolean(value)
+}
+
 // 渲染表格搜索输入框，并处理超长校验与一键清空交互。
 export function TableSearchInput({
   value,
   onChange,
   placeholder = '搜索名称、CAS号、位置...',
   maxLength = SEARCH_MAX_LENGTH,
+  disabled = false,
+  disabledReason,
+  disabledValue,
+  onDisabledClear,
   inputClassName = '',
   containerClassName = 'relative flex-1 min-w-50',
 }: Readonly<TableSearchInputProps>) {
-  const isSearchTooLong = value.length > maxLength
+  const displayValue = getSearchDisplayValue({ disabled, disabledValue, value })
+  const isSearchTooLong = !disabled && value.length > maxLength
+  const canClear = canClearSearchInput({ disabled, disabledValue, onDisabledClear, value })
   const searchErrorText = `不能超过 ${maxLength} 个字符` // 稍微缩短文案
-  let inputPaddingClassName = 'pr-3'
-  if (isSearchTooLong) {
-    // 错误文案和清空按钮会共占右侧空间，不提前留白就会压住输入文本。
-    inputPaddingClassName =
-      'pr-45 border-destructive! focus-visible:border-destructive! focus-visible:ring-destructive/20!'
-  } else if (value) {
-    inputPaddingClassName = 'pr-8'
+  const inputPaddingClassName = getSearchInputPaddingClassName({ canClear, isSearchTooLong })
+  const resolvedPlaceholder = getSearchPlaceholder({ disabled, disabledReason, placeholder })
+  const showDisabledValueHint = disabled && Boolean(disabledValue)
+  const handleClear = () => {
+    if (disabled) {
+      onDisabledClear?.()
+      return
+    }
+    onChange('')
   }
 
   return (
-    <div className={containerClassName}>
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10 pointer-events-none" />
+    <div className={containerClassName} title={disabled ? disabledReason : undefined}>
+      <Search
+        className={cn(
+          'absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 pointer-events-none',
+          showDisabledValueHint
+            ? 'text-gray-500 dark:text-gray-400'
+            : 'text-muted-foreground',
+        )}
+      />
       <Input
-        placeholder={placeholder}
-        value={value}
+        placeholder={resolvedPlaceholder}
+        value={displayValue}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={isSearchTooLong}
-        className={`pl-9 text-base w-full inline-flex leading-none outline-none ${inputClassName} ${inputPaddingClassName}`}
+        className={cn(
+          'pl-9 text-base w-full inline-flex leading-none outline-none',
+          showDisabledValueHint
+            && 'bg-gray-100! border-gray-300! text-gray-700! disabled:opacity-100! dark:bg-gray-800/60! dark:border-gray-700! dark:text-gray-300!',
+          inputClassName,
+          inputPaddingClassName,
+        )}
       />
       <div className="absolute right-1 top-1 bottom-1 flex items-center bg-transparent z-10 pointer-events-none">
         {isSearchTooLong && (
@@ -394,11 +500,11 @@ export function TableSearchInput({
             {searchErrorText}
           </span>
         )}
-        {value && (
+        {canClear && (
           <button
             type="button"
-            aria-label="清空搜索"
-            onClick={() => onChange('')}
+            aria-label={disabled ? '清除结构筛选' : '清空搜索'}
+            onClick={handleClear}
             className="text-muted-foreground hover:text-foreground shrink-0 p-1 pointer-events-auto flex items-center justify-center mr-0.5"
           >
             <X className="w-4 h-4" />
@@ -413,6 +519,10 @@ export function TableFilters({
   searchInput,
   onSearchInputChange,
   searchPlaceholder = '搜索名称、CAS号、位置...',
+  searchInputDisabled = false,
+  searchInputDisabledReason,
+  searchInputDisabledValue,
+  onSearchInputDisabledClear,
   searchActions,
   fuzzySearch,
   onFuzzySearchChange,
@@ -441,6 +551,10 @@ export function TableFilters({
           value={searchInput}
           onChange={onSearchInputChange}
           placeholder={resolvedSearchPlaceholder}
+          disabled={searchInputDisabled}
+          disabledReason={searchInputDisabledReason}
+          disabledValue={searchInputDisabledValue}
+          onDisabledClear={onSearchInputDisabledClear}
         />
         {searchActions && (
           <div className="flex items-center">
@@ -459,6 +573,7 @@ export function TableFilters({
         onStatusFilterChange={onStatusFilterChange}
         searchField={searchField}
         searchFieldOptions={searchFieldOptions}
+        searchControlsDisabled={searchInputDisabled}
         showFuzzySearch={showFuzzySearch}
         showMatchMode={showMatchMode}
         statusFilter={statusFilter}

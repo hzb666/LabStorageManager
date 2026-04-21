@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import DefaultTheme from 'vitepress/theme'
+import DefaultTheme from 'vitepress/theme-without-fonts'
 import { withBase } from 'vitepress'
 import { nextTick, onBeforeUnmount, onMounted } from 'vue'
 import AsideOutline from './AsideOutline.vue'

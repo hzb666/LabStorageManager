@@ -1,22 +1,71 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
+const LOCKED_SCROLL_OVERFLOW = "hidden"
+const NO_ACTIVE_SCROLL_LOCKS = 0
+
+let activeScrollLocks = NO_ACTIVE_SCROLL_LOCKS
+let previousBodyOverflow = ""
+let previousDocumentOverflow = ""
+
+function lockBackgroundScroll() {
+  if (activeScrollLocks === NO_ACTIVE_SCROLL_LOCKS) {
+    previousBodyOverflow = document.body.style.overflow
+    previousDocumentOverflow = document.documentElement.style.overflow
+    document.body.style.overflow = LOCKED_SCROLL_OVERFLOW
+    document.documentElement.style.overflow = LOCKED_SCROLL_OVERFLOW
+  }
+
+  activeScrollLocks += 1
+  return unlockBackgroundScroll
+}
+
+function unlockBackgroundScroll() {
+  activeScrollLocks = Math.max(NO_ACTIVE_SCROLL_LOCKS, activeScrollLocks - 1)
+  if (activeScrollLocks > NO_ACTIVE_SCROLL_LOCKS) return
+
+  document.body.style.overflow = previousBodyOverflow
+  document.documentElement.style.overflow = previousDocumentOverflow
+  previousBodyOverflow = ""
+  previousDocumentOverflow = ""
+}
+
+function useBackgroundScrollLock(open: boolean) {
+  React.useEffect(() => {
+    if (!open) return undefined
+
+    // 同时锁 body/html，兼容浏览器把页面滚动挂在不同根节点。
+    return lockBackgroundScroll()
+  }, [open])
+}
+
 interface DialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   children: React.ReactNode
+  keepMounted?: boolean
 }
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
-  if (!open) return null
+export function Dialog({ open, onOpenChange, children, keepMounted = false }: DialogProps) {
+  useBackgroundScrollLock(open)
+
+  if (!open && !keepMounted) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="fixed inset-0 bg-black/50"
-        // 维持点击遮罩关闭约定，统一所有调用方的退出行为。
-        onClick={() => onOpenChange(false)}
-      />
+    <div
+      className={cn(
+        "fixed inset-0 z-50 flex items-center justify-center",
+        !open && "invisible pointer-events-none",
+      )}
+      aria-hidden={!open}
+    >
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/50"
+          // 维持点击遮罩关闭约定，统一所有调用方的退出行为。
+          onClick={() => onOpenChange(false)}
+        />
+      )}
       {children}
     </div>
   )

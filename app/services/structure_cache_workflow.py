@@ -20,6 +20,7 @@ from app.services.structure_cache_repo import (
     upsert_structure_cache,
 )
 from app.services.structure_index import structure_index
+from app.services.structure_search_cache import clear_structure_search_cache
 from app.services.structure_normalizer import normalize_structure_from_molblock
 
 
@@ -103,6 +104,7 @@ def _write_cache_result(
     db.commit()
     db.refresh(cache)
     structure_index.mark_dirty()
+    clear_structure_search_cache()
     return cache
 
 

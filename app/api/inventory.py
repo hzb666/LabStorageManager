@@ -5,17 +5,19 @@
 # 避免路径参数误捕获 "export"、"dashboard" 等字符串。
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Optional, Dict, Any, Annotated
+from typing import Optional, Dict, Any, Annotated, Mapping
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
+from sqlalchemy import case
 from sqlmodel import Session, select, func, delete
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
 from app.core.auth import CurrentSession, get_current_user
+from app.core.config import settings
 from app.core.constants import (    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
@@ -78,6 +80,13 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.services.structure_index import StructureQueryFormat, StructureSearchMode, structure_index
+from app.services.structure_inventory_summary import normalized_inventory_cas_expr
+from app.services.structure_search_cache import (
+    StructureSearchCacheEntry,
+    get_structure_search_cache_entry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +135,11 @@ INVENTORY_SEARCH_FTS_FIELD_MAP = {
     'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
     'category': ["category", "category_pinyin", "category_pinyin_initials"],
 }
+VISIBLE_STRUCTURE_STATUSES = (
+    InventoryStatus.IN_STOCK,
+    InventoryStatus.RUN_SHORT,
+    InventoryStatus.BORROWED,
+)
 
 
 @dataclass(frozen=True)
@@ -139,6 +153,12 @@ class InventoryFilterOptions:
     search_field: Optional[str]
     fuzzy: bool
     match_mode: TextMatchMode
+    structure_cas_numbers: tuple[str, ...] | None
+    structure_search_id: Optional[str]
+    structure_match_mode: Optional[StructureSearchMode]
+    structure_query: Optional[str]
+    structure_query_format: Optional[StructureQueryFormat]
+    structure_only_in_stock: bool
 
 
 class InventoryListQuery(BaseModel):
@@ -153,6 +173,11 @@ class InventoryListQuery(BaseModel):
     search_field: Optional[str] = None
     fuzzy: bool = False
     match_mode: TextMatchMode = TextMatchMode.CONTAINS
+    structure_search_id: Optional[str] = Query(default=None, max_length=128)
+    structure_match_mode: Optional[StructureSearchMode] = None
+    structure_query: Optional[str] = Query(default=None, max_length=20_000)
+    structure_query_format: Optional[StructureQueryFormat] = None
+    structure_only_in_stock: bool = False
     sort_by: Optional[str] = None
     sort_order: Optional[str] = "desc"
 
@@ -167,7 +192,120 @@ class InventoryListQuery(BaseModel):
             search_field=self.search_field,
             fuzzy=self.fuzzy,
             match_mode=self.match_mode,
+            structure_cas_numbers=None,
+            structure_search_id=self.structure_search_id,
+            structure_match_mode=self.structure_match_mode,
+            structure_query=self.structure_query,
+            structure_query_format=self.structure_query_format,
+            structure_only_in_stock=self.structure_only_in_stock,
         )
+
+
+def _has_structure_query(options: InventoryFilterOptions) -> bool:
+    return bool(
+        options.structure_query
+        or options.structure_match_mode
+        or options.structure_query_format
+    )
+
+
+def _has_structure_filter_options(options: InventoryFilterOptions) -> bool:
+    return bool(
+        options.structure_cas_numbers is not None
+        or options.structure_search_id
+        or _has_structure_query(options)
+        or options.structure_only_in_stock
+    )
+
+
+def _ensure_structure_filter_enabled(options: InventoryFilterOptions) -> None:
+    if _has_structure_filter_options(options) and not settings.chem_structure_feature_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Structure search feature is disabled",
+        )
+
+
+def _get_structure_search_entry_or_410(search_id: str) -> StructureSearchCacheEntry:
+    snapshot = structure_index.status()
+    entry = get_structure_search_cache_entry(
+        search_id,
+        index_version=-1 if snapshot.dirty else snapshot.version,
+    )
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="结构搜索结果已过期，请重新搜索",
+        )
+    return entry
+
+
+def _resolve_inventory_structure_cas_numbers(
+    db: Session,
+    *,
+    options: InventoryFilterOptions,
+) -> tuple[str, ...] | None:
+    _ensure_structure_filter_enabled(options)
+    if options.structure_cas_numbers is not None:
+        return options.structure_cas_numbers
+    if options.structure_search_id:
+        return _get_structure_search_entry_or_410(options.structure_search_id).cas_numbers
+    if not _has_structure_query(options):
+        return None
+    if not (
+        options.structure_query
+        and options.structure_match_mode
+        and options.structure_query_format
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="结构筛选参数不完整")
+
+    snapshot = structure_index.status()
+    if snapshot.dirty:
+        snapshot = structure_index.rebuild(db)
+    if snapshot.molecule_count <= 0:
+        return ()
+
+    try:
+        hits = _search_inventory_structure_index(
+            options=options,
+            limit=snapshot.molecule_count,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Inventory structure filter unavailable: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Structure index is unavailable",
+        ) from exc
+    return tuple(
+        normalized
+        for hit in hits
+        if (normalized := normalize_cas(hit.cas_number))
+    )
+
+
+def _search_inventory_structure_index(
+    *,
+    options: InventoryFilterOptions,
+    limit: int,
+):
+    search_kwargs = {
+        "query": options.structure_query or "",
+        "query_format": options.structure_query_format or "",
+        "limit": limit,
+    }
+    if options.structure_match_mode == StructureSearchMode.EXACT:
+        return structure_index.exact_search(**search_kwargs)
+    return structure_index.search(**search_kwargs)
+
+
+def _resolve_inventory_structure_smiles_by_cas(
+    options: InventoryFilterOptions,
+) -> Mapping[str, str]:
+    if not options.structure_search_id:
+        return {}
+    return _get_structure_search_entry_or_410(options.structure_search_id).smiles_by_cas
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -211,6 +349,10 @@ def _apply_inventory_static_filters(base, *, options: InventoryFilterOptions):
         base = base.where(Inventory.cas_number == normalize_cas(options.cas_filter))
     if options.hazardous_only:
         base = base.where(Inventory.is_hazardous.is_(True))
+    if options.structure_cas_numbers is not None:
+        base = base.where(normalized_inventory_cas_expr().in_(options.structure_cas_numbers))
+    if options.structure_only_in_stock:
+        base = base.where(Inventory.status.in_(VISIBLE_STRUCTURE_STATUSES))
     return base
 
 
@@ -491,6 +633,14 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
     return order_with_nulls_last(order_column, sort_direction)
 
 
+def _build_structure_order_expr(structure_cas_numbers: tuple[str, ...] | None):
+    # 结构检索结果已按相似度排序；库存列表在无显式表头排序时保持该顺序。
+    if not structure_cas_numbers:
+        return None
+    order_map = {cas_number: index for index, cas_number in enumerate(structure_cas_numbers)}
+    return case(order_map, value=normalized_inventory_cas_expr(), else_=len(order_map)).asc()
+
+
 def _attach_user_names(db: Session, items: list[Inventory]) -> list[dict]:
     # 批量补充借用人等用户名称，避免逐行查询导致额外开销。
 
@@ -516,6 +666,19 @@ def _attach_user_names(db: Session, items: list[Inventory]) -> list[dict]:
         item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
         result_data.append(item_dict)
     return result_data
+
+
+def _attach_structure_matched_smiles(
+    items: list[dict],
+    smiles_by_cas: Mapping[str, str],
+) -> list[dict]:
+    if not smiles_by_cas:
+        return items
+    for item in items:
+        normalized = normalize_cas(str(item.get("cas_number") or ""))
+        if normalized and (smiles := smiles_by_cas.get(normalized)):
+            item["structure_matched_smiles"] = smiles
+    return items
 
 
 def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
@@ -567,24 +730,50 @@ def list_inventory(
     status_filter = query.status_filter
     cas_filter = query.cas_filter
     hazardous_only = query.hazardous_only
+    filter_options = query.to_filter_options()
+    resolved_structure_cas_numbers = _resolve_inventory_structure_cas_numbers(
+        db,
+        options=filter_options,
+    )
+    filter_options = replace(
+        filter_options,
+        structure_cas_numbers=resolved_structure_cas_numbers,
+    )
     search = query.search
     search_field = query.search_field
     fuzzy = query.fuzzy
     match_mode = query.match_mode
+    has_structure_filter = resolved_structure_cas_numbers is not None
+    structure_search_id = query.structure_search_id
+    structure_match_mode = query.structure_match_mode
+    structure_query = query.structure_query
+    structure_query_format = query.structure_query_format
+    structure_only_in_stock = query.structure_only_in_stock
     sort_by = query.sort_by
     sort_order = query.sort_order
 
     cache_key = (
         f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:"
         f"{cas_filter or ''}:{hazardous_only}:{search_field or ''}:{fuzzy}:"
-        f"{match_mode.value}:{sort_by or ''}:{sort_order or ''}"
+        f"{match_mode.value}:{structure_only_in_stock}:"
+        f"{structure_search_id or ''}:{structure_match_mode or ''}:"
+        f"{structure_query or ''}:{structure_query_format or ''}:"
+        f"{sort_by or ''}:{sort_order or ''}"
     )
 
     if sort_by and sort_by not in VALID_INVENTORY_SORT_FIELDS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
 
     is_first_page = skip == 0
-    has_search = bool(search or status_filter or cas_filter or hazardous_only or sort_by)
+    has_search = bool(
+        search
+        or status_filter
+        or cas_filter
+        or hazardous_only
+        or has_structure_filter
+        or structure_only_in_stock
+        or sort_by
+    )
     should_use_cache = is_first_page and not has_search
 
     if should_use_cache:
@@ -603,12 +792,21 @@ def list_inventory(
 
     base = _apply_inventory_filters(
         regular_inventory_query(),
-        options=query.to_filter_options(),
+        options=filter_options,
     )
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
 
-    order_expr = _build_inventory_order_expr(sort_by, sort_order)
+    structure_order_expr = (
+        _build_structure_order_expr(filter_options.structure_cas_numbers)
+        if has_structure_filter and not sort_by
+        else None
+    )
+    order_expr = (
+        (structure_order_expr,)
+        if structure_order_expr is not None
+        else _build_inventory_order_expr(sort_by, sort_order)
+    )
 
     secondary_order = Inventory.created_at.desc()
     tertiary_order = Inventory.id.desc()
@@ -618,7 +816,10 @@ def list_inventory(
     else:
         items = []
 
-    result_data = _attach_user_names(db, items)
+    result_data = _attach_structure_matched_smiles(
+        _attach_user_names(db, items),
+        _resolve_inventory_structure_smiles_by_cas(filter_options),
+    )
 
     result = {
         "data": result_data,
@@ -650,9 +851,20 @@ def list_inventory(
                 "status_filter": status_filter,
                 "cas_filter": cas_filter,
                 "hazardous_only": hazardous_only,
+                "structure_search_id": structure_search_id,
+                "structure_match_mode": structure_match_mode,
+                "structure_query": structure_query,
+                "structure_query_format": structure_query_format,
+                "structure_only_in_stock": structure_only_in_stock,
             },
         ),
-        has_effective_filter=bool(status_filter or cas_filter or hazardous_only),
+        has_effective_filter=bool(
+            status_filter
+            or cas_filter
+            or hazardous_only
+            or has_structure_filter
+            or structure_only_in_stock
+        ),
         sort=build_search_log_sort(sort_by=sort_by, sort_order=sort_order),
         result_count=total,
         latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
@@ -673,6 +885,7 @@ async def update_inventory(
     inventory_id: int,
     update: InventoryUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
@@ -722,6 +935,12 @@ async def update_inventory(
         {"id": inventory_id, "item": response},
         actor_client_id=get_sse_client_id(request),
     )
+    if "cas_number" in update_data:
+        enqueue_structure_cache_resolution(
+            background_tasks,
+            item.cas_number,
+            reason="inventory.update",
+        )
     return response
 
 

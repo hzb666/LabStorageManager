@@ -1,17 +1,16 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Ketcher } from 'ketcher-core'
-import { Editor } from 'ketcher-react'
-import { StandaloneStructServiceProvider } from 'ketcher-standalone'
-import 'ketcher-react/dist/index.css'
+import { Loader2 } from 'lucide-react'
 
 import { structureSearchAPI } from '@/api/structureSearchApi'
 import type { CompoundStructureCache } from '@/api/structureSearchApi'
+import { KetcherEditor } from '@/components/chem/KetcherEditor'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { getApiErrorMessage } from '@/lib/validationSchemas'
 
-const structServiceProvider = new StandaloneStructServiceProvider()
+const EDITOR_MOUNT_DELAY_MS = 80
 
 export interface StructureManualEditDialogProps {
   open: boolean
@@ -25,6 +24,26 @@ function normalizeMolblock(value: string | undefined): string {
   return value?.trim() ?? ''
 }
 
+function useDeferredEditorMount(open: boolean, mountKey: string): boolean {
+  const [mountedKey, setMountedKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    let timeoutId: number | undefined
+    const frameId = window.requestAnimationFrame(() => {
+      timeoutId = window.setTimeout(() => setMountedKey(mountKey), EDITOR_MOUNT_DELAY_MS)
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+    }
+  }, [mountKey, open])
+
+  return open && mountedKey === mountKey
+}
+
 export function StructureManualEditDialog({
   open,
   casNumber,
@@ -36,9 +55,11 @@ export function StructureManualEditDialog({
   const [editorReady, setEditorReady] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const shouldMountEditor = useDeferredEditorMount(open, casNumber)
 
   const handleEditorInit = useCallback((ketcher: Ketcher) => {
     ketcherRef.current = ketcher
+    setError(null)
     setEditorReady(true)
     if (initialMolblock) {
       ketcher.setMolecule(initialMolblock).catch(() => {
@@ -80,15 +101,23 @@ export function StructureManualEditDialog({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="text-sm text-muted-foreground">CAS：{casNumber}</div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="modern" onClick={() => onOpenChange(false)}>
+              <Button
+                type="button"
+                variant="modern"
+                size="lg"
+                className="min-w-24 text-center"
+                onClick={() => onOpenChange(false)}
+              >
                 关闭
               </Button>
               <LoadingButton
                 type="button"
+                size="lg"
+                className="min-w-32 text-center"
                 onClick={handleSave}
                 isLoading={saving}
                 loadingText="保存中..."
-                disabled={!editorReady}
+                disabled={!editorReady || !shouldMountEditor}
               >
                 保存结构
               </LoadingButton>
@@ -99,19 +128,20 @@ export function StructureManualEditDialog({
               {error}
             </div>
           )}
-          {!editorReady && (
-            <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-              结构编辑器加载中...
-            </div>
-          )}
-          <div className="h-[68vh] min-h-[520px] overflow-hidden rounded-md border border-border bg-background">
-            <Editor
-              staticResourcesUrl="/"
-              structServiceProvider={structServiceProvider}
-              disableMacromoleculesEditor
-              errorHandler={handleEditorError}
-              onInit={handleEditorInit}
-            />
+          <div className="relative h-[68vh] min-h-[520px] overflow-hidden rounded-md border border-border bg-background">
+            {(!shouldMountEditor || !editorReady) && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 text-sm text-muted-foreground">
+                <Loader2 className="mr-2 size-5 animate-spin" />
+                结构编辑器加载中...
+              </div>
+            )}
+            {shouldMountEditor && (
+              <KetcherEditor
+                key={`manual-structure-editor-${casNumber}`}
+                onError={handleEditorError}
+                onInit={handleEditorInit}
+              />
+            )}
           </div>
         </div>
       </DialogContent>

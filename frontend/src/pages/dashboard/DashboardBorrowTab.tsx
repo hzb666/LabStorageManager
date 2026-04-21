@@ -39,6 +39,7 @@ import {
   type MyBorrowItem,
   type DashboardParams,
   BORROW_SEARCH_FIELDS,
+  ADMIN_BORROW_SEARCH_FIELDS,
   DASHBOARD_EMPTY_STATUS_OPTIONS,
   buildLocalListData,
   requestDashboardCountsRefresh,
@@ -102,15 +103,17 @@ const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRo
 })
 
 // 这里只请求一次我的借用列表，再交给 `buildLocalListData` 做前端筛选和分页适配 `FilterTable`。
-function createBorrowDashboardAPI(): FilterAPI {
+function createBorrowDashboardAPI(managementMode: boolean): FilterAPI {
   return {
     list: async (params) => {
-      const response = await inventoryAPI.getMyBorrows()
+      const response = managementMode
+        ? await inventoryAPI.getAdminBorrows()
+        : await inventoryAPI.getMyBorrows()
       const rows = (response.data?.data ?? []) as MyBorrowItem[]
       const local = buildLocalListData(
         rows as unknown as Record<string, unknown>[],
         params as DashboardParams,
-        ['name', 'cas_number']
+        ['name', 'cas_number', ...(managementMode ? ['borrower_name'] : [])]
       )
       return { data: local as { data: unknown[]; total: number } }
     },
@@ -287,7 +290,9 @@ function DashboardBorrowReturnDialog({
 
 type ReturnForm = UseFormReturn<ReturnFormInputData, unknown, ReturnFormData>
 
-export function DashboardBorrowTab() {
+export function DashboardBorrowTab({
+  managementMode = false,
+}: Readonly<{ managementMode?: boolean }>) {
   const currentUser = useAuthStore((state) => state.user)
   const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const queryClient = useQueryClient()
@@ -304,14 +309,17 @@ export function DashboardBorrowTab() {
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['dashboard', 'borrows'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
     ])
     clearRoomStale('inventory')
     requestDashboardCountsRefresh()
   }, [clearRoomStale, queryClient])
 
-  const borrowDashboardAPI = useMemo(() => createBorrowDashboardAPI(), [])
+  const borrowDashboardAPI = useMemo(
+    () => createBorrowDashboardAPI(managementMode),
+    [managementMode]
+  )
 
   // 每次打开归还弹窗都强制回到 `used` 模式并清空数量输入，避免沿用上一条记录的表单状态。
   const openReturnModal = useCallback((item: MyBorrowItem) => {
@@ -397,8 +405,8 @@ export function DashboardBorrowTab() {
     <>
       <FilterTable
         api={borrowDashboardAPI}
-        queryKey={['dashboard', 'borrows']}
-        tableId="dashboard-borrows"
+        queryKey={managementMode ? ['dashboard', 'admin', 'borrows'] : ['dashboard', 'borrows']}
+        tableId={managementMode ? 'dashboard-admin-borrows' : 'dashboard-borrows'}
         realtime={{
           room: 'inventory',
           eventTypes: INVENTORY_SSE_EVENTS,
@@ -418,6 +426,10 @@ export function DashboardBorrowTab() {
               return true
             }
 
+            if (managementMode) {
+              return true
+            }
+
             if (!item || typeof currentUser?.id !== 'number') {
               return false
             }
@@ -427,9 +439,9 @@ export function DashboardBorrowTab() {
         }}
         customColumns={borrowColumns}
         statusOptions={DASHBOARD_EMPTY_STATUS_OPTIONS}
-        searchFieldOptions={BORROW_SEARCH_FIELDS}
-        searchPlaceholder="搜索名称、CAS号..."
-        title={<><Package className="w-5 h-5" /> 我的借用记录</>}
+        searchFieldOptions={managementMode ? ADMIN_BORROW_SEARCH_FIELDS : BORROW_SEARCH_FIELDS}
+        searchPlaceholder={managementMode ? '搜索名称、CAS号、借用人...' : '搜索名称、CAS号...'}
+        title={<><Package className="w-5 h-5" /> {managementMode ? '全部借用记录' : '我的借用记录'}</>}
         enableExpandAll={true}
         renderExpandedRow={(itemRaw) => {
           const item = itemRaw as unknown as MyBorrowItem

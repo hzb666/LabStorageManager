@@ -71,6 +71,7 @@ import {
   type DashboardParams,
   REAGENT_STATUS_OPTIONS,
   DASHBOARD_REAGENT_SEARCH_FIELDS,
+  DASHBOARD_REAGENT_ADMIN_SEARCH_FIELDS,
   buildLocalListData,
   flattenGroupedOrders,
   removeApplicantColumn,
@@ -95,17 +96,22 @@ type CommonPublicArrivalFormReturn = ReturnType<
 >;
 
 // Dashboard 接口返回按状态分组的订单，这里先拍平成 `FilterTable` 需要的本地列表。
-function createReagentDashboardAPI(currentUserId?: number): FilterAPI {
+function createReagentDashboardAPI(
+  currentUserId: number | undefined,
+  managementMode: boolean,
+): FilterAPI {
   return {
     list: async (params) => {
-      const response = await reagentOrderAPI.getMyReagentOrders();
+      const response = managementMode
+        ? await reagentOrderAPI.getAdminReagentOrders()
+        : await reagentOrderAPI.getMyReagentOrders();
       const grouped = (response.data?.data ?? {}) as Record<
         string,
         { orders: Record<string, unknown>[] }
       >;
       const rows = flattenGroupedOrders<DashboardReagentOrder>(
         grouped,
-        currentUserId,
+        managementMode ? undefined : currentUserId,
       );
       const local = buildLocalListData(rows, params as DashboardParams, [
         "name",
@@ -113,6 +119,7 @@ function createReagentDashboardAPI(currentUserId?: number): FilterAPI {
         "brand",
         "specification",
         "created_at",
+        ...(managementMode ? ["applicant_name"] : []),
       ]);
       return { data: local };
     },
@@ -330,21 +337,24 @@ function createReagentColumns({
   currentUserId,
   currentUserRole,
   isAdmin,
+  managementMode,
   onEdit,
   openStockinDialog,
 }: Readonly<{
   currentUserId: number | undefined;
   currentUserRole: string | undefined;
   isAdmin: boolean;
+  managementMode: boolean;
   onEdit: (item: DashboardReagentOrder) => void;
   openStockinDialog: (item: DashboardReagentOrder, mode: StockinMode) => void;
 }>): ColumnDef<Record<string, unknown>, unknown>[] {
-  const baseColumns = removeApplicantColumn(
-    getReagentOrderTableColumns() as ColumnDef<
-      Record<string, unknown>,
-      unknown
-    >[],
-  );
+  const orderColumns = getReagentOrderTableColumns() as ColumnDef<
+    Record<string, unknown>,
+    unknown
+  >[];
+  const baseColumns = managementMode
+    ? orderColumns
+    : removeApplicantColumn(orderColumns);
   const actions = createReagentActions(openStockinDialog);
   const actionColumn = reagentColumnHelper.display({
     id: "actions",
@@ -957,7 +967,9 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
 }
 
 // 页面只负责任务列表查询刷新、列配置，以及编辑/入库弹窗编排。
-export function DashboardReagentTab() {
+export function DashboardReagentTab({
+  managementMode = false,
+}: Readonly<{ managementMode?: boolean }>) {
   const currentUser = useAuthStore((state) => state.user);
   const clearRoomStale = useSSEStore((state) => state.clearRoomStale);
   const isAdmin = currentUser?.role === UserRoles.ADMIN;
@@ -965,8 +977,7 @@ export function DashboardReagentTab() {
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["dashboard", "reagents"] }),
-      queryClient.invalidateQueries({ queryKey: ["dashboard", "stockin"] }),
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       queryClient.invalidateQueries({ queryKey: ["reagent-orders"] }),
       queryClient.invalidateQueries({ queryKey: ["inventory"] }),
     ]);
@@ -975,8 +986,8 @@ export function DashboardReagentTab() {
   }, [clearRoomStale, queryClient]);
 
   const reagentDashboardAPI = useMemo(
-    () => createReagentDashboardAPI(currentUser?.id),
-    [currentUser?.id],
+    () => createReagentDashboardAPI(currentUser?.id, managementMode),
+    [currentUser?.id, managementMode],
   );
 
   const reagentEditDialog = useReagentEditDialog({
@@ -996,6 +1007,7 @@ export function DashboardReagentTab() {
         currentUserId: currentUser?.id,
         currentUserRole: currentUser?.role,
         isAdmin,
+        managementMode,
         onEdit: (item) =>
           handleReagentEdit(item as unknown as Record<string, unknown>),
         openStockinDialog,
@@ -1004,6 +1016,7 @@ export function DashboardReagentTab() {
       currentUser?.id,
       currentUser?.role,
       isAdmin,
+      managementMode,
       handleReagentEdit,
       openStockinDialog,
     ],
@@ -1013,8 +1026,8 @@ export function DashboardReagentTab() {
     <>
       <FilterTable
         api={reagentDashboardAPI}
-        queryKey={["dashboard", "reagents"]}
-        tableId="dashboard-reagent-orders"
+        queryKey={managementMode ? ["dashboard", "admin", "reagents"] : ["dashboard", "reagents"]}
+        tableId={managementMode ? "dashboard-admin-reagent-orders" : "dashboard-reagent-orders"}
         realtime={{
           room: 'reagent_orders',
           eventTypes: REAGENT_ORDER_SSE_EVENTS,
@@ -1036,6 +1049,10 @@ export function DashboardReagentTab() {
               return true;
             }
 
+            if (managementMode) {
+              return true;
+            }
+
             if (!item || typeof currentUser?.id !== "number") {
               return false;
             }
@@ -1045,11 +1062,20 @@ export function DashboardReagentTab() {
         }}
         customColumns={reagentColumns}
         statusOptions={REAGENT_STATUS_OPTIONS}
-        searchFieldOptions={DASHBOARD_REAGENT_SEARCH_FIELDS}
-        searchPlaceholder="搜索名称、CAS号、品牌、订购时间..."
+        searchFieldOptions={
+          managementMode
+            ? DASHBOARD_REAGENT_ADMIN_SEARCH_FIELDS
+            : DASHBOARD_REAGENT_SEARCH_FIELDS
+        }
+        searchPlaceholder={
+          managementMode
+            ? "搜索名称、CAS号、品牌、订购人、订购时间..."
+            : "搜索名称、CAS号、品牌、订购时间..."
+        }
         title={
           <>
-            <FlaskConical className="w-5 h-5" /> 我的试剂订单
+            <FlaskConical className="w-5 h-5" />{" "}
+            {managementMode ? "全部试剂订单" : "我的试剂订单"}
           </>
         }
         noteField="notes"

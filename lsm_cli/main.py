@@ -17,7 +17,7 @@ from lsm_cli.client import (
     parse_key_value_pairs,
 )
 from lsm_cli.config import clear_auth_data, load_config, save_config
-from lsm_cli.output import fail, succeed
+from lsm_cli.output import configure_output_encoding, fail, succeed
 
 REAGENT_ORDER_REASON_CHOICES = (
     "running_out",
@@ -1309,6 +1309,7 @@ def _resolve_login_password(args: argparse.Namespace) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    configure_output_encoding()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

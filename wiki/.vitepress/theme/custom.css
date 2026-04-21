@@ -1,10 +1,20 @@
 :root {
-  --wiki-font-family-fallback: Arial, 'Helvetica Neue', Helvetica, 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif;
-  --wiki-font-family-web: Arial, 'Helvetica Neue', Helvetica, 'Noto Sans SC',
-    'SourceHanSansCN-VF-Local', 'Source Han Sans SC', 'SourceHanSansSC-CJK',
-    '思源黑体', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
-    'Segoe UI', sans-serif;
+  --wiki-font-family-latin: Arial, -apple-system, BlinkMacSystemFont,
+    'Helvetica Neue', Helvetica;
+  --wiki-font-family-cjk-fallback: 'Microsoft YaHei', 'PingFang SC',
+    'Hiragino Sans GB', 'Segoe UI';
+  --wiki-font-family-cjk-web: 'Noto Sans SC', 'SourceHanSansCN-VF-Local',
+    'Source Han Sans SC', 'SourceHanSansSC-CJK', '思源黑体';
+  --wiki-font-family-cjk-local: 'SourceHanSansCN-VF-Local',
+    'Source Han Sans SC', 'SourceHanSansSC-CJK', '思源黑体';
+  --wiki-font-family-fallback: var(--wiki-font-family-latin),
+    var(--wiki-font-family-cjk-fallback), sans-serif;
+  --wiki-font-family-google: var(--wiki-font-family-latin),
+    var(--wiki-font-family-cjk-web), var(--wiki-font-family-cjk-fallback),
+    sans-serif;
+  --wiki-font-family-local: var(--wiki-font-family-latin),
+    var(--wiki-font-family-cjk-local), var(--wiki-font-family-cjk-fallback),
+    sans-serif;
   --wiki-table-max-width: 120rem;
   --vp-c-brand-1: #2563eb;
   --vp-c-brand-2: #1d4ed8;
@@ -20,6 +30,12 @@
   --wiki-mermaid-cluster-bg: #f8fafc;
   --wiki-mermaid-cluster-border: #cbd5e1;
   --wiki-mermaid-edge-label-bg: #ffffff;
+}
+
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  font-synthesis-weight: none;
 }
 
 .dark {
@@ -181,17 +197,46 @@ body,
   font-family: var(--wiki-font-family-fallback);
 }
 
-html.web-fonts-ready {
-  --vp-font-family-base: var(--wiki-font-family-web);
+html[data-font-state='loading'] body {
+  visibility: hidden;
 }
 
-html.web-fonts-ready body,
-html.web-fonts-ready .VPNavBar,
-html.web-fonts-ready .VPHome,
-html.web-fonts-ready .VPSidebar,
-html.web-fonts-ready .vp-doc,
-html.web-fonts-ready .VPFooter {
-  font-family: var(--wiki-font-family-web);
+html[data-font-state='google'] {
+  --vp-font-family-base: var(--wiki-font-family-google);
+}
+
+html[data-font-state='local'] {
+  --vp-font-family-base: var(--wiki-font-family-local);
+}
+
+html[data-font-state='google'] body,
+html[data-font-state='google'] .VPNavBar,
+html[data-font-state='google'] .VPHome,
+html[data-font-state='google'] .VPSidebar,
+html[data-font-state='google'] .vp-doc,
+html[data-font-state='google'] .VPFooter {
+  font-family: var(--wiki-font-family-google);
+}
+
+html[data-font-state='local'] body,
+html[data-font-state='local'] .VPNavBar,
+html[data-font-state='local'] .VPHome,
+html[data-font-state='local'] .VPSidebar,
+html[data-font-state='local'] .vp-doc,
+html[data-font-state='local'] .VPFooter {
+  font-family: var(--wiki-font-family-local);
+}
+
+.VPSidebarItem.level-0 > .item .text {
+  font-weight: 700 !important;
+}
+
+.VPSidebarItem.level-1 > .item .text,
+.VPSidebarItem.level-2 > .item .text,
+.VPSidebarItem.level-3 > .item .text,
+.VPSidebarItem.level-4 > .item .text,
+.VPSidebarItem.level-5 > .item .text {
+  font-weight: 400 !important;
 }
 
 .wiki-nav-logo-wrap {
