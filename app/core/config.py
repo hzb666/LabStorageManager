@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     cache_version: str = ""
     debug: bool = False
     env: str = "development"  # 生产部署通过 ENV=production 覆盖
+    display_utc_offset: str = Field(
+        default="+08:00",
+        description="Fixed UTC offset used for exports/downloads/non-browser-rendered time text",
+    )
     
     # 数据库
     database_url: str = "sqlite:///./lab_inventory.db"
@@ -133,7 +137,7 @@ class Settings(BaseSettings):
     # CAS 设置
     cas_pattern: str = CAS_PATTERN
     chem_structure_feature_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable local structure cache and substructure search features",
     )
     chem_resolver_pubchem_enabled: bool = Field(
@@ -174,13 +178,13 @@ class Settings(BaseSettings):
         description="Maximum concurrent RDKit structure searches per backend process",
     )
     chem_structure_search_cache_ttl_seconds: int = Field(
-        default=1800,
+        default=43_200,
         ge=60,
         le=86_400,
         description="TTL for cached structure search result tokens",
     )
     chem_structure_search_cache_max_entries: int = Field(
-        default=64,
+        default=128,
         ge=1,
         le=1024,
         description="Maximum in-memory cached structure search result sets",
@@ -237,6 +241,40 @@ class Settings(BaseSettings):
         if stripped.isdigit():
             return int(stripped)
         raise ValueError("ARCHIVE_RUN_WEEKDAY must use 0-6 or weekday name")
+
+    @field_validator("display_utc_offset", mode="before")
+    @classmethod
+    def parse_display_utc_offset(cls, value: Any) -> str:
+        if value is None:
+            return "+08:00"
+        if not isinstance(value, str):
+            raise ValueError("DISPLAY_UTC_OFFSET must be a string")
+
+        stripped = value.strip()
+        if not stripped:
+            return "+08:00"
+
+        sign = stripped[0]
+        if sign not in {"+", "-"}:
+            raise ValueError("DISPLAY_UTC_OFFSET must start with + or -")
+
+        body = stripped[1:]
+        if ":" in body:
+            hour_text, minute_text = body.split(":", 1)
+        else:
+            hour_text, minute_text = body, "00"
+
+        if not hour_text.isdigit() or not minute_text.isdigit():
+            raise ValueError("DISPLAY_UTC_OFFSET must use digits like +8 or +08:00")
+
+        hours = int(hour_text)
+        minutes = int(minute_text)
+        if hours > 14 or minutes >= 60:
+            raise ValueError("DISPLAY_UTC_OFFSET must be within UTC-14:00 to UTC+14:00")
+        if hours == 14 and minutes != 0:
+            raise ValueError("DISPLAY_UTC_OFFSET must be within UTC-14:00 to UTC+14:00")
+
+        return f"{sign}{hours:02d}:{minutes:02d}"
 
     @field_validator("allowed_image_types", mode="before")
     @classmethod

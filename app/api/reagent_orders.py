@@ -89,6 +89,12 @@ logger = logging.getLogger(__name__)
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 LIST_CACHE_PREFIX = "list:"
 VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
+REAGENT_ORDER_EDITABLE_STATUSES = frozenset(
+    {ReagentOrderStatus.PENDING, ReagentOrderStatus.REJECTED}
+)
+REAGENT_ORDER_ADMIN_EDITABLE_STATUSES = frozenset(
+    {*REAGENT_ORDER_EDITABLE_STATUSES, ReagentOrderStatus.APPROVED}
+)
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
 VALID_REAGENT_SORT_FIELDS = {
@@ -170,6 +176,35 @@ class ReagentOrderListQuery(BaseModel):
     sort_order: Optional[str] = "desc"
 
 
+class CASOverviewOrderResponse(BaseModel):
+    id: int
+    name: str
+    applicant_name: str | None
+    specification: str
+    created_at: datetime
+    status: str
+
+
+class CASOverviewInventoryResponse(BaseModel):
+    id: int
+    remaining_quantity: float | None
+    specification: str
+    storage_location: str | None
+    created_at: datetime
+    status: str
+    borrower_name: str | None
+
+
+class CASOverviewResponseModel(BaseModel):
+    cas_number: str
+    preferred_name: str | None
+    preferred_name_source: str | None
+    display_name: str | None = None
+    has_warning: bool
+    orders: dict[str, int | CASOverviewOrderResponse | None]
+    inventory: dict[str, int | CASOverviewInventoryResponse | None]
+
+
 def _validate_order_reason(reason: Optional[str], required: bool = False) -> Optional[ReagentOrderReason]:
     # Validate order reason in API layer and convert to enum for model persistence.
     if reason is None:
@@ -194,6 +229,14 @@ def _validate_order_reason(reason: Optional[str], required: bool = False) -> Opt
         )
 
     return ReagentOrderReason(normalized_reason)
+
+
+def _ensure_required_brand(brand: Optional[str]) -> str:
+    normalized_brand = brand.strip() if isinstance(brand, str) else ""
+    if not normalized_brand:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
+    return normalized_brand
+
 
 def _add_specification(item_dict: dict) -> dict:
     # Add computed specification field to order response dict
@@ -465,14 +508,15 @@ async def create_reagent_order(
     # order_reason 已在模型层验证（枚举类型），直接使用
 
     # 处理可选字段：空字符串和纯空格转为 None
-    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'purity', 'notes']
+    optional_string_fields = ['english_name', 'alias', 'category', 'purity', 'notes']
     normalized = empty_to_none(order.model_dump(), optional_string_fields)
+    normalized_brand = _ensure_required_brand(order.brand)
 
     # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(
         name=normalized.get('name', order.name),
         category=normalized.get('category'),
-        brand=normalized.get('brand'),
+        brand=normalized_brand,
     )
 
     # Create order
@@ -482,7 +526,7 @@ async def create_reagent_order(
         english_name=normalized.get('english_name'),
         alias=normalized.get('alias'),
         category=normalized.get('category'),
-        brand=normalized.get('brand'),
+        brand=normalized_brand,
         purity=normalized.get('purity'),
         initial_quantity=initial_quantity,
         unit=unit,
@@ -711,7 +755,11 @@ def export_reagent_orders(
     return response
 
 
-@router.get("/cas-overview/{cas_number}", dependencies=[Depends(get_current_user)])
+@router.get(
+    "/cas-overview/{cas_number}",
+    response_model=CASOverviewResponseModel,
+    dependencies=[Depends(get_current_user)],
+)
 def get_cas_overview(
     cas_number: str,
     db: DBSession,
@@ -800,15 +848,20 @@ def get_cas_overview(
             "borrower_name": users_map.get(latest_inventory.borrower_id),
         }
 
-    display_name = None
+    preferred_name = None
+    preferred_name_source = None
     if latest_order and latest_order.name:
-        display_name = latest_order.name
+        preferred_name = latest_order.name
+        preferred_name_source = "latest_order_name"
     elif latest_inventory and latest_inventory.name:
-        display_name = latest_inventory.name
+        preferred_name = latest_inventory.name
+        preferred_name_source = "latest_inventory_name"
 
     return {
         "cas_number": normalized_cas,
-        "display_name": display_name,
+        "preferred_name": preferred_name,
+        "preferred_name_source": preferred_name_source,
+        "display_name": preferred_name,
         "has_warning": orders_count > 0 or inventory_count > 0,
         "orders": {
             "total_count": orders_count,
@@ -857,10 +910,17 @@ async def update_reagent_order(
     _ensure_reagent_order_edit_permission(order, current_user=current_user)
     before_order = ReagentOrder.model_validate(order)
     update_data = _normalize_reagent_order_update_data(order_update)
+    _ensure_required_brand(update_data.get("brand", order.brand))
     _apply_reagent_order_pinyin_updates(order, update_data=update_data)
+    should_resubmit = order.status in {
+        ReagentOrderStatus.APPROVED,
+        ReagentOrderStatus.REJECTED,
+    }
 
     for field, value in update_data.items():
         setattr(order, field, value)
+    if should_resubmit:
+        order.status = ReagentOrderStatus.PENDING
 
     log_reagent_order_update(
         db,
@@ -903,13 +963,15 @@ def _ensure_reagent_order_edit_permission(order: ReagentOrder, *, current_user: 
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the order applicant or admin can edit this order"
         )
-    if current_user.role != UserRole.ADMIN and order.status in (
-        ReagentOrderStatus.APPROVED,
-        ReagentOrderStatus.REJECTED,
-    ):
+    editable_statuses = (
+        REAGENT_ORDER_ADMIN_EDITABLE_STATUSES
+        if current_user.role == UserRole.ADMIN
+        else REAGENT_ORDER_EDITABLE_STATUSES
+    )
+    if order.status not in editable_statuses:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Approved or rejected orders can only be deleted by non-admin users"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending, rejected, or admin-approved orders can be edited"
         )
 
 

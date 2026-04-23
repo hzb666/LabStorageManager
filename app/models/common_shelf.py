@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import Index, text
 from sqlmodel import Field, SQLModel
 
@@ -199,7 +199,17 @@ class CommonShelfGroupDisplay(BaseResponse):
 
     name: str
     english_name: Optional[str]
+    alias_1: Optional[str]
+    alias_2: Optional[str]
+    alias_3: Optional[str]
     category: Optional[ChemicalCategory]
+
+
+class CommonShelfRecentLocationResponse(BaseResponse):
+    """Recent location summary for grouped common-shelf rows."""
+
+    storage_location: Optional[str]
+    bottle_count: int
 
 
 class CommonShelfGroupResponse(BaseResponse):
@@ -209,6 +219,7 @@ class CommonShelfGroupResponse(BaseResponse):
     display: CommonShelfGroupDisplay
     bottle_count: int
     location_count: int
+    recent_locations: list[CommonShelfRecentLocationResponse]
     latest_name_snapshot: str
     created_at: datetime
     updated_at: datetime
@@ -237,12 +248,20 @@ class CommonShelfManualCreate(SQLModel):
 
     cas_number: str = Field(max_length=50)
     name_snapshot: str = Field(min_length=1, max_length=200)
-    brand: Optional[str] = Field(default=None, max_length=100)
+    brand: str = Field(max_length=100)
     purity: Optional[str] = Field(default=None, max_length=20)
     specification: str = Field(max_length=50)
     count: int = Field(default=1, ge=1, le=MAX_BOTTLES_PER_IMPORT)
     storage_location: Optional[str] = Field(default=None, max_length=200)
     notes: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("brand")
+    @classmethod
+    def strip_required_brand(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("brand is required")
+        return stripped
 
 
 class CommonShelfGroupEditRequest(SQLModel):
@@ -250,9 +269,17 @@ class CommonShelfGroupEditRequest(SQLModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    brand: Optional[str] = Field(default=None, max_length=100)
+    brand: str = Field(max_length=100)
     specification: str = Field(max_length=50)
     confirm_merge: bool = False
+
+    @field_validator("brand")
+    @classmethod
+    def strip_required_brand(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("brand is required")
+        return stripped
 
 
 class CommonShelfGroupItemResponse(BaseResponse):

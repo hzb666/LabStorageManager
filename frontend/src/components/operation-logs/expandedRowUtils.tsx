@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { formatDateTimeWithSeconds as formatSharedDateTimeWithSeconds } from '@/lib/utils'
 import { safeString } from '@/lib/validationSchemas'
 
 export type LogRecord = Record<string, unknown>
@@ -54,15 +55,7 @@ export function formatDateTime(value: unknown): string {
   if (!text) return '-'
 
   try {
-    return new Date(text).toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      timeZone: 'Asia/Shanghai',
-    })
+    return formatSharedDateTimeWithSeconds(text)
   } catch {
     return text
   }

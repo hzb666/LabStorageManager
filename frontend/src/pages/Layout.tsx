@@ -36,6 +36,7 @@ import { AuthDeferredShell } from '@/components/AuthDeferredShell'
 type NavGroup = '功能' | '管理'
 type TooltipSide = ComponentProps<typeof TooltipContent>['side']
 const SIDEBAR_TRANSITION_MS = 300
+const ANNOUNCEMENT_ROUTE_REFRESH_THROTTLE_MS = 60 * 1000
 
 interface NavItem {
   title: string
@@ -745,6 +746,7 @@ function LayoutDeferredOutlet({ pathname }: Readonly<{ pathname: string }>) {
 export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean }>) {
   const location = useLocation()
   const { user, logout } = useAuthStore()
+  const userId = user?.id
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
   const { theme, toggleTheme } = useTheme()
   const isMobile = useIsMobile()
@@ -754,11 +756,25 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
   const [showBugButton, setShowBugButton] = useState(
     () => Date.now() >= getBugButtonHiddenUntil()
   )
+  const lastAnnouncementCheckAtRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
+    let requestSettled = false
+    const previousCheckAt = lastAnnouncementCheckAtRef.current
 
-    // 只在布局层拉一次公告；用取消标记兜住卸载场景，避免异步回写已卸载组件。
+    if (!userId) {
+      return undefined
+    }
+
+    const now = Date.now()
+    if (now - previousCheckAt < ANNOUNCEMENT_ROUTE_REFRESH_THROTTLE_MS) {
+      return undefined
+    }
+
+    lastAnnouncementCheckAtRef.current = now
+
+    // 路由切换时按 1 分钟节流检查公告；用取消标记兜住卸载场景。
     const fetchAnnouncements = async () => {
       try {
         const response = await announcementAPI.getPublic()
@@ -769,6 +785,8 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
         if (!cancelled) {
           console.error('Failed to fetch announcements:', error)
         }
+      } finally {
+        requestSettled = true
       }
     }
 
@@ -776,8 +794,11 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
 
     return () => {
       cancelled = true
+      if (!requestSettled) {
+        lastAnnouncementCheckAtRef.current = previousCheckAt
+      }
     }
-  }, [])
+  }, [location.pathname, userId])
 
   const handleBugButtonRightClick = useCallback(() => {
     setShowBugButton(false)

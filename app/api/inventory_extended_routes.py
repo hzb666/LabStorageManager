@@ -2,11 +2,12 @@
 import logging
 import os
 import tempfile
+from datetime import datetime, timedelta
 from typing import Any, Annotated, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select, func, update as sql_update
 
 from app.core.auth import CurrentUser, get_current_user, require_admin
@@ -35,7 +36,7 @@ from app.models.inventory import (
     ManualInventoryCreate,
 )
 from app.models.user import User, UserRole
-from app.services.api_utils import clear_cache_by_prefix
+from app.services.api_utils import clear_cache_by_prefix, empty_to_none
 from app.services.cas_utils import normalize_cas, is_special_cas_value
 from app.services.xlsx_export import export_inventory_xlsx
 from app.services.excel_service import validate_uploaded_file
@@ -50,6 +51,7 @@ from app.services.structure_cache_tasks import enqueue_structure_cache_resolutio
 from app.services.inventory_operation_logger import (
     SOURCE_MANUAL_ADD,
     log_inventory_export_operation,
+    log_inventory_update,
     log_stock_in,
 )
 from app.services.inventory_queries import (
@@ -58,12 +60,26 @@ from app.services.inventory_queries import (
 )
 from app.services.log_timeline_projection import project_borrow_log
 from app.services.rate_limit import enforce_rate_limit
-from app.services.spec_utils import format_specification
+from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.shelf_utils import is_effectively_empty_storage_location, normalize_storage_location
+from app.services.spec_utils import SpecificationError, format_specification, parse_specification
 from app.services.user_utils import batch_get_user_names
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
+PENDING_STOCKIN_OVERDUE_DAYS = 7
 logger = logging.getLogger(__name__)
+
+
+def _is_overdue_borrow(updated_at: datetime | None, now: datetime) -> bool:
+    return updated_at is not None and updated_at < now - timedelta(days=OVERDUE_BORROW_DAYS)
+
+
+def _is_overdue_pending_stockin(created_at: datetime | None, now: datetime) -> bool:
+    return (
+        created_at is not None
+        and created_at < now - timedelta(days=PENDING_STOCKIN_OVERDUE_DAYS)
+    )
 
 
 class InventoryImportQuery(BaseModel):
@@ -75,6 +91,23 @@ class InventoryImportQuery(BaseModel):
 
 class InventoryImportConfirmBody(BaseModel):
     preview_token: str
+
+
+class ManualPendingStockInRequest(BaseModel):
+    # 手动暂存项补全入库请求体，复用订单入库弹窗的可编辑字段。
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(max_length=200)
+    english_name: Optional[str] = Field(default=None, max_length=200)
+    alias: Optional[str] = Field(default=None, max_length=200)
+    category: Optional[str] = Field(default=None, max_length=100)
+    brand: str = Field(max_length=100)
+    purity: Optional[str] = Field(default=None, max_length=20)
+    specification: str = Field(max_length=100)
+    is_hazardous: bool = False
+    notes: Optional[str] = Field(default=None, max_length=500)
+    storage_location: str = Field(max_length=200)
+    remaining_quantity: Optional[float] = None
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -143,6 +176,135 @@ def _serialize_inventory_items(db: Session, items: list[Inventory]) -> list[dict
 
 def _serialize_inventory_item(db: Session, item: Inventory) -> dict[str, Any]:
     return _serialize_inventory_items(db, [item])[0]
+
+
+def _ensure_public_manual_location(item_data: ManualInventoryCreate, current_user: User) -> None:
+    if current_user.role != UserRole.PUBLIC:
+        return
+    if is_effectively_empty_storage_location(item_data.storage_location):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="storage_location is required",
+        )
+
+
+def _ensure_manual_pending_stockin_access(item: Inventory, current_user: User) -> None:
+    is_pending = item.storage_location is None and item.temporary_keeper_id is not None
+    if not is_pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Inventory item is not pending stock-in",
+        )
+    if item.source_order_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order pending stock-in must be completed from order workflow",
+        )
+    if current_user.role != UserRole.ADMIN and item.temporary_keeper_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the temporary keeper can stock in pending items",
+        )
+
+
+def _normalize_manual_pending_stockin_payload(
+    payload: ManualPendingStockInRequest,
+) -> dict[str, Any]:
+    update_data = payload.model_dump(exclude_unset=True)
+    location = normalize_storage_location(update_data.get("storage_location"))
+    if location is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="storage_location is required",
+        )
+
+    name = update_data.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="name is required")
+    brand = update_data.get("brand", "").strip()
+    if not brand:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
+
+    try:
+        initial_quantity, unit = parse_specification(update_data.pop("specification"))
+    except SpecificationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    update_data["name"] = name
+    update_data["brand"] = brand
+    update_data["storage_location"] = location
+    update_data["initial_quantity"] = initial_quantity
+    update_data["unit"] = unit
+    normalized = empty_to_none(
+        update_data,
+        ["english_name", "alias", "category", "purity", "notes"],
+    )
+    for field in ["english_name", "alias", "category", "purity", "notes"]:
+        if field in update_data:
+            update_data[field] = normalized[field]
+    return update_data
+
+
+def _apply_manual_pending_stockin_update(
+    item: Inventory,
+    payload: ManualPendingStockInRequest,
+) -> None:
+    update_data = _normalize_manual_pending_stockin_payload(payload)
+    remaining_quantity = update_data.pop("remaining_quantity", None)
+    initial_quantity = update_data["initial_quantity"]
+    if remaining_quantity is None:
+        remaining_quantity = initial_quantity
+    if remaining_quantity <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="remaining_quantity must be greater than 0",
+        )
+    if remaining_quantity > initial_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Remaining quantity cannot exceed initial quantity",
+        )
+
+    for field, value in update_data.items():
+        setattr(item, field, value)
+    item.remaining_quantity = remaining_quantity
+    item.remaining_percent = _compute_remaining_percent(remaining_quantity, item.initial_quantity)
+    item.temporary_keeper_id = None
+    item.status = InventoryStatus.IN_STOCK
+
+    pinyin_fields = compute_pinyin_fields(
+        name=item.name,
+        category=item.category,
+        brand=item.brand,
+        storage_location=item.storage_location,
+    )
+    for field, value in pinyin_fields.items():
+        setattr(item, field, value)
+
+
+def _claim_manual_pending_stockin_item(
+    db: Session,
+    *,
+    inventory_id: int,
+    current_user: User,
+) -> None:
+    claim_statement = (
+        sql_update(Inventory)
+        .where(Inventory.id == inventory_id)
+        .where(Inventory.storage_location.is_(None))
+        .where(Inventory.temporary_keeper_id.is_not(None))
+        .where(Inventory.source_order_id.is_(None))
+        .values(updated_at=get_utc_now())
+    )
+    if current_user.role != UserRole.ADMIN:
+        claim_statement = claim_statement.where(Inventory.temporary_keeper_id == current_user.id)
+
+    result = db.exec(claim_statement)
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Inventory item changed by another request, please refresh and retry",
+        )
 
 
 def _register_cas_and_export_routes(router: APIRouter) -> None:
@@ -245,11 +407,59 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         return export_inventory_xlsx(items)
 
 
+def _register_manual_pending_stockin_route(
+    router: APIRouter,
+    search_cache: Dict[str, tuple[Any, Any]],
+    list_cache_prefix: str,
+) -> None:
+    @router.post("/{inventory_id}/complete-stockin", response_model=InventoryResponse)
+    async def complete_manual_pending_stockin(
+        inventory_id: int,
+        payload: ManualPendingStockInRequest,
+        request: Request,
+        current_user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[Session, Depends(get_db)],
+    ):
+        item = _get_by_id(db, inventory_id)
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+
+        _ensure_manual_pending_stockin_access(item, current_user)
+        _claim_manual_pending_stockin_item(
+            db,
+            inventory_id=inventory_id,
+            current_user=current_user,
+        )
+        db.refresh(item)
+        before_item = Inventory.model_validate(item)
+        _apply_manual_pending_stockin_update(item, payload)
+        log_inventory_update(
+            db,
+            before_inventory=before_item,
+            after_inventory=item,
+            operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
+        )
+        db.commit()
+        db.refresh(item)
+
+        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        serialized_item = _serialize_inventory_item(db, item)
+        await sse_manager.broadcast(
+            SSERoom.INVENTORY,
+            SSEEventType.INVENTORY_UPDATED,
+            {"id": item.id, "item": serialized_item},
+            actor_client_id=get_sse_client_id(request),
+        )
+        return serialized_item
+
+
 def _register_manual_and_dashboard_routes(
     router: APIRouter,
     search_cache: Dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
+    _register_manual_pending_stockin_route(router, search_cache, list_cache_prefix)
 
     @router.post("/manual-add", response_model=dict)
     async def manual_add_inventory(
@@ -259,6 +469,7 @@ def _register_manual_and_dashboard_routes(
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
     ):
+        _ensure_public_manual_location(item_data, current_user)
         created_items = create_manual_inventory_items(
             db,
             item_data,
@@ -354,12 +565,14 @@ def _register_manual_and_dashboard_routes(
                         else None
                     ) or current_user.full_name,
                     "borrow_days": (now - item.updated_at).days if item.updated_at else 0,
-                    "is_overdue": ((now - item.updated_at).days > OVERDUE_BORROW_DAYS) if item.updated_at else False,
+                    "is_overdue": _is_overdue_borrow(item.updated_at, now),
                 }
                 for item in items
             ],
             "total": len(items),
-            "overdue_count": sum(1 for item in items if item.updated_at and (now - item.updated_at).days > OVERDUE_BORROW_DAYS),
+            "overdue_count": sum(
+                1 for item in items if _is_overdue_borrow(item.updated_at, now)
+            ),
         }
 
     @router.get("/dashboard/admin/borrows", dependencies=[Depends(require_admin)])
@@ -386,19 +599,13 @@ def _register_manual_and_dashboard_routes(
                     "borrower_id": item.borrower_id,
                     "borrower_name": users_map.get(item.borrower_id),
                     "borrow_days": (now - item.updated_at).days if item.updated_at else 0,
-                    "is_overdue": (
-                        (now - item.updated_at).days > OVERDUE_BORROW_DAYS
-                    )
-                    if item.updated_at
-                    else False,
+                    "is_overdue": _is_overdue_borrow(item.updated_at, now),
                 }
                 for item in items
             ],
             "total": len(items),
             "overdue_count": sum(
-                1
-                for item in items
-                if item.updated_at and (now - item.updated_at).days > OVERDUE_BORROW_DAYS
+                1 for item in items if _is_overdue_borrow(item.updated_at, now)
             ),
         }
 
@@ -413,6 +620,7 @@ def _register_manual_and_dashboard_routes(
         ).order_by(Inventory.created_at.desc())
 
         items = db.exec(statement).all()
+        now = get_utc_now()
 
         return {
             "data": [
@@ -433,10 +641,15 @@ def _register_manual_and_dashboard_routes(
                     "is_hazardous": item.is_hazardous,
                     "notes": item.notes,
                     "stockin_time": utc_iso_str(item.created_at),
+                    "stockin_days": (now - item.created_at).days if item.created_at else 0,
+                    "is_overdue": _is_overdue_pending_stockin(item.created_at, now),
                 }
                 for item in items
             ],
             "total": len(items),
+            "overdue_count": sum(
+                1 for item in items if _is_overdue_pending_stockin(item.created_at, now)
+            ),
         }
 
     @router.get("/dashboard/admin/pending-stockin", dependencies=[Depends(require_admin)])
@@ -447,6 +660,7 @@ def _register_manual_and_dashboard_routes(
         ).order_by(Inventory.created_at.desc())
 
         items = db.exec(statement).all()
+        now = get_utc_now()
         keeper_ids = {item.temporary_keeper_id for item in items if item.temporary_keeper_id}
         users_map = batch_get_user_names(db, keeper_ids)
 
@@ -471,10 +685,15 @@ def _register_manual_and_dashboard_routes(
                     "temporary_keeper_id": item.temporary_keeper_id,
                     "temporary_keeper_name": users_map.get(item.temporary_keeper_id),
                     "stockin_time": utc_iso_str(item.created_at),
+                    "stockin_days": (now - item.created_at).days if item.created_at else 0,
+                    "is_overdue": _is_overdue_pending_stockin(item.created_at, now),
                 }
                 for item in items
             ],
             "total": len(items),
+            "overdue_count": sum(
+                1 for item in items if _is_overdue_pending_stockin(item.created_at, now)
+            ),
         }
 
 

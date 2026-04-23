@@ -204,6 +204,27 @@ export interface SessionInfo {
   expires_at: string
 }
 
+export interface UserAdminListItem {
+  id: number
+  username: string
+  full_name: string | null
+  full_name_pinyin?: string | null
+  full_name_pinyin_initials?: string | null
+  role: 'admin' | 'user' | 'public'
+  is_active: boolean
+  created_at: string
+  avatar_url?: string
+  last_active_at?: string | null
+}
+
+export interface UserAdminListResponse {
+  data: UserAdminListItem[]
+  total: number
+  total_without_filter: number
+  skip: number
+  limit: number
+}
+
 // Auth APIs
 export const authAPI = {
   login: (username: string, password: string) =>
@@ -239,7 +260,7 @@ export const userAdminAPI = {
     role?: string
     is_active?: boolean
   }) =>
-    api.get('/users/', { params }),
+    api.get<UserAdminListResponse>('/users/', { params }),
   create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' | 'public' }) =>
     api.post('/users', data),
   update: (id: number, data: { username?: string; full_name?: string; role?: string; is_active?: boolean }) =>
@@ -298,7 +319,9 @@ export interface CASOverviewInventory {
 
 export interface CASOverviewResponse {
   cas_number: string
-  display_name: string | null
+  preferred_name: string | null
+  preferred_name_source?: string | null
+  display_name?: string | null
   has_warning: boolean
   orders: {
     total_count: number
@@ -308,6 +331,34 @@ export interface CASOverviewResponse {
     total_count: number
     latest: CASOverviewInventory | null
   }
+}
+
+export interface DashboardPanelCodes {
+  label_code?: string | null
+  impact_code?: string | null
+}
+
+export interface DashboardPanelEntity {
+  entity_type?: string | null
+  entity_id?: number | string | null
+  name?: string | null
+  preferred_name?: string | null
+  preferred_name_source?: string | null
+  cas_number?: string | null
+  brand?: string | null
+  specification?: string | null
+  quantity?: number | null
+  unit?: string | null
+  actor_name?: string | null
+}
+
+export interface DashboardPanelMetrics {
+  count?: number | null
+  value?: number | null
+  remaining_quantity?: number | null
+  initial_quantity?: number | null
+  remaining_percent?: number | null
+  threshold_days?: number | null
 }
 
 export const reagentOrderAPI = {
@@ -327,13 +378,13 @@ export const reagentOrderAPI = {
     english_name?: string
     alias?: string
     category?: string
-    brand?: string
+    brand: string
     purity?: string
     specification: string
     quantity: number
     price: number
     order_reason: ReagentOrderReason
-    is_hazardous: boolean
+    is_hazardous?: boolean
     notes?: string
   }) => api.post('/reagent-orders', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/reagent-orders/${id}`, data),
@@ -425,6 +476,8 @@ export const inventoryAPI = {
   getAdminBorrows: () => api.get('/inventory/dashboard/admin/borrows'),
   getPendingStockin: () => api.get('/inventory/dashboard/pending-stockin'),
   getAdminPendingStockin: () => api.get('/inventory/dashboard/admin/pending-stockin'),
+  completePendingStockin: (id: number, data: StockInPayload) =>
+    api.post(`/inventory/${id}/complete-stockin`, data),
   getBorrowHistory: (id: number) => api.get(`/inventory/${id}/borrow-history`),
   getImportTemplate: () => api.get('/inventory/import/template'),
   downloadTemplate: () => api.get('/inventory/import/template', { responseType: 'blob' }),
@@ -441,7 +494,7 @@ export const inventoryAPI = {
     alias?: string
     specification: string
     quantity_bottles: number
-    brand?: string
+    brand: string
     category?: string
     purity?: string
     storage_location?: string
@@ -451,20 +504,96 @@ export const inventoryAPI = {
   exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
 }
 
+export interface AdminDashboardPanelItem {
+  label: string
+  detail: string
+  submitter_name?: string
+  count?: number
+  impact?: string
+  value?: number
+  alert_kind?: 'inventory' | 'common_shelf'
+  remaining_quantity?: number | null
+  initial_quantity?: number | null
+  unit?: string | null
+  specification?: string | null
+  remaining_percent?: number | null
+  severity?: 'high' | 'medium' | 'low' | 'neutral' | 'success' | 'warning'
+  tone?: 'neutral' | 'success' | 'warning' | 'high'
+  tab?: 'reagents' | 'consumables' | 'borrows' | 'stockin'
+  created_at?: string
+  is_overdue?: boolean
+  codes?: DashboardPanelCodes
+  entity?: DashboardPanelEntity
+  metrics?: DashboardPanelMetrics
+}
+
 export interface AdminDashboardSummary {
   reagent_order_count: number
   consumable_order_count: number
   borrowed_inventory_count: number
   pending_stockin_count: number
+  reagent_order_delta: number
+  consumable_order_delta: number
+  borrowed_inventory_delta: number
+  pending_stockin_delta: number
+  pending_reagent_count: number
+  pending_consumable_count: number
+  approved_reagent_count: number
+  overdue_borrow_count: number
+  pending_reagent_overdue_count: number
+  pending_consumable_overdue_count: number
+  pending_stockin_overdue_count: number
+  long_pending_order_count: number
   common_stock_alert_count: number
   recent_arrival_count: number
+  recent_reagent_order_count?: number
+  recent_consumable_order_count?: number
   stock_in_activity_count: number
+  order_total_value?: number
+  is_all_time?: boolean
+  todo_items: AdminDashboardPanelItem[]
+  risk_items: AdminDashboardPanelItem[]
+  recent_actions: AdminDashboardPanelItem[]
+  stock_alert_items: AdminDashboardPanelItem[]
+  system_status: AdminDashboardPanelItem[]
   recent_window_days: number
+  system_version?: string
+  generated_at: string
+}
+
+export interface AdminDashboardWindowStats {
+  recent_window_days: number
+  is_all_time: boolean
+  recent_arrival_count: number
+  recent_reagent_order_count: number
+  recent_consumable_order_count: number
+  stock_in_activity_count: number
+  order_total_value: number
+}
+
+export interface DashboardBoardSummary {
+  action_items: AdminDashboardPanelItem[]
+  order_overview_items: AdminDashboardPanelItem[]
+  recent_items: AdminDashboardPanelItem[]
+  stock_alert_items: AdminDashboardPanelItem[]
+  announcement_items: AdminDashboardPanelItem[]
+  system_status: AdminDashboardPanelItem[]
+  recent_window_days: number
+  system_version?: string
   generated_at: string
 }
 
 export const dashboardAPI = {
+  getBoardSummary: () => api.get<{ data: DashboardBoardSummary }>('/dashboard/board/summary'),
+  getBoardWindowStats: (windowDays = 7, allTime = false) =>
+    api.get<{ data: AdminDashboardWindowStats }>('/dashboard/board/summary/window-stats', {
+      params: { window_days: windowDays, all_time: allTime },
+    }),
   getAdminSummary: () => api.get<{ data: AdminDashboardSummary }>('/dashboard/admin/summary'),
+  getAdminWindowStats: (windowDays = 7, allTime = false) =>
+    api.get<{ data: AdminDashboardWindowStats }>('/dashboard/admin/summary/window-stats', {
+      params: { window_days: windowDays, all_time: allTime },
+    }),
 }
 
 export type ChemicalCategory =
@@ -486,7 +615,15 @@ export interface CommonShelfGroupIdentity {
 export interface CommonShelfGroupDisplay {
   name: string
   english_name: string | null
+  alias_1: string | null
+  alias_2: string | null
+  alias_3: string | null
   category: ChemicalCategory | null
+}
+
+export interface CommonShelfRecentLocation {
+  storage_location: string | null
+  bottle_count: number
 }
 
 export interface CommonShelfGroup {
@@ -495,10 +632,34 @@ export interface CommonShelfGroup {
   display: CommonShelfGroupDisplay
   bottle_count: number
   location_count: number
+  recent_locations: CommonShelfRecentLocation[]
   latest_name_snapshot: string
   created_at: string
   updated_at: string
+  cas_number: string
+  name: string
+  alias_1: string | null
+  alias_2: string | null
+  alias_3: string | null
+  brand: string | null
+  specification: string
+  storage_location: string | null
+  category: ChemicalCategory | null
 }
+
+type CommonShelfGroupApiRow = Omit<
+  CommonShelfGroup,
+  'id'
+  | 'cas_number'
+  | 'name'
+  | 'alias_1'
+  | 'alias_2'
+  | 'alias_3'
+  | 'brand'
+  | 'specification'
+  | 'storage_location'
+  | 'category'
+>
 
 export interface CommonShelfLocationSummary {
   storage_location: string | null
@@ -529,6 +690,35 @@ export interface ChemicalNameMapItem {
   updated_at: string
 }
 
+export interface ReagentBrandItem {
+  id: number
+  name: string
+  name_normalized: string
+  name_pinyin: string | null
+  name_pinyin_initials: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+function normalizeCommonShelfGroupRow(
+  item: CommonShelfGroupApiRow,
+): CommonShelfGroup {
+  return {
+    ...item,
+    id: item.group.group_key,
+    cas_number: item.group.cas_number,
+    name: item.display.name,
+    alias_1: item.display.alias_1,
+    alias_2: item.display.alias_2,
+    alias_3: item.display.alias_3,
+    brand: item.group.brand,
+    specification: item.group.specification_text,
+    storage_location: item.recent_locations.find((location) => location.storage_location)?.storage_location ?? null,
+    category: item.display.category,
+  }
+}
+
 export const commonShelfAPI = {
   list: async (params?: PaginationParams & {
     search?: string
@@ -538,22 +728,19 @@ export const commonShelfAPI = {
     sort_by?: string
     sort_order?: string
   }) => {
-    const response = await api.get<PaginatedResponse<Omit<CommonShelfGroup, 'id'>>>('/common-shelf/groups', { params })
+    const response = await api.get<PaginatedResponse<CommonShelfGroupApiRow>>('/common-shelf/groups', { params })
     return {
       ...response,
       data: {
         ...response.data,
-        data: response.data.data.map((item) => ({
-          ...item,
-          id: item.group.group_key,
-        })),
+        data: response.data.data.map((item) => normalizeCommonShelfGroupRow(item)),
       },
     }
   },
   manualAdd: (data: {
     cas_number: string
     name_snapshot: string
-    brand?: string
+    brand: string
     purity?: string
     specification: string
     count: number
@@ -572,7 +759,7 @@ export const commonShelfAPI = {
   getGroupItems: (groupKey: string) =>
     api.get<CommonShelfGroupItem[]>(`/common-shelf/groups/${groupKey}/items`),
   updateGroup: (groupKey: string, data: {
-    brand?: string
+    brand: string
     specification: string
     confirm_merge?: boolean
   }) => api.put(`/common-shelf/groups/${groupKey}`, data),
@@ -622,6 +809,19 @@ export const chemicalNameMapAPI = {
     category?: ChemicalCategory | null
   }) => api.put(`/chemical-name-map/${id}`, data),
   delete: (id: number) => api.delete(`/chemical-name-map/${id}`),
+}
+
+export const reagentBrandAPI = {
+  list: (params?: PaginationParams & {
+    search?: string
+    sort_by?: string
+    sort_order?: string
+    include_inactive?: boolean
+  }) => api.get<PaginatedResponse<ReagentBrandItem>>('/reagent-brands', { params }),
+  create: (data: { name: string }) => api.post<ReagentBrandItem>('/reagent-brands', data),
+  update: (id: number, data: { name: string }) =>
+    api.put<ReagentBrandItem>(`/reagent-brands/${id}`, data),
+  delete: (id: number) => api.delete(`/reagent-brands/${id}`),
 }
 
 // Chemical Info APIs
@@ -705,6 +905,38 @@ export interface LogItem {
   time: string | null
   type: string
   detail: string
+  summary?: {
+    kind: string
+    action_code?: string | null
+    actor_name?: string | null
+    actor_is_external?: boolean | null
+    targets_viewer?: boolean | null
+    target?: {
+      target_type?: string | null
+      target_id?: number | string | null
+      target_name?: string | null
+      cas_number?: string | null
+      specification?: string | null
+      quantity?: number | null
+      unit?: string | null
+    }
+    metrics?: {
+      count?: number | null
+      result_count?: number | null
+      quantity_borrowed?: number | null
+      quantity_returned?: number | null
+    }
+    source_meta?: {
+      source?: string | null
+      endpoint?: string | null
+      query_text?: string | null
+      device_name?: string | null
+      ip_address?: string | null
+      export_scope?: string | null
+    }
+    extra_detail?: string | null
+    is_returned?: boolean | null
+  }
   // 展开后显示的完整数据（所有数据库字段）
   full_data?: Record<string, unknown>
 }

@@ -15,13 +15,12 @@ import { BaseForm } from '@/components/BaseForm'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
-import { useSSEStore } from '@/store/sseStore'
 import { UserRoles } from '@/lib/constants'
 import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
-import { consumableOrderAPI } from '@/api/client'
-import { downloadBlobResponse, processNotes } from '@/lib/utils'
+import { consumableOrderAPI, ConsumableOrderStatus } from '@/api/client'
+import { downloadBlobResponse, formatChinaDateForFilename, processNotes } from '@/lib/utils'
 import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import {
   ConsumableOrderSchema,
@@ -39,6 +38,11 @@ import {
   defaultConsumableOrderValues
 } from '@/lib/formConfigs'
 import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderSubmitHelpers'
+import {
+  isApprovableOrderStatus,
+  isOrderEditableByRole,
+  isRejectableOrderStatus,
+} from '@/lib/orderEditRules'
 import { CONSUMABLE_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
 
 // 图标
@@ -191,7 +195,11 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
       })
       await Promise.resolve(refreshOrders())
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {
-        edit: '订单信息已更新',
+        edit:
+          editingItem?.status === ConsumableOrderStatus.REJECTED ||
+          editingItem?.status === ConsumableOrderStatus.APPROVED
+            ? '订单已重新提交待审批'
+            : '订单信息已更新',
         add: '耗材订单创建成功',
       })
       if (successMessage) {
@@ -261,14 +269,15 @@ function createConsumableOrderColumns(
   const actionColumn = columnHelper.display({
     id: 'actions',
     header: '操作',
-    size: 100,
-    minSize: 100,
-    maxSize: 100,
+    size: 156,
+    minSize: 156,
+    maxSize: 180,
     cell: (info) => {
       const meta = info.table.options.meta
       return (
         <ActionButtons
           item={info.row.original as unknown as Record<string, unknown>}
+          isAdmin={isAdmin}
           onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
           onRefresh={onRefresh}
         />
@@ -286,7 +295,6 @@ function createConsumableOrderColumns(
 // 直接组合列表、筛选与叶子组件，避免继续保留只转发参数的头部和弹窗壳层。
 export function ConsumableOrdersPage() {
   const currentUser = useAuthStore((state) => state.user)
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
   const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
   const filter = useTableState({
@@ -299,13 +307,12 @@ export function ConsumableOrdersPage() {
   const dialogController = useConsumableOrderDialogController(filter.invalidate)
   const refreshOrders = useCallback(async () => {
     await filter.invalidate()
-    clearRoomStale('consumable_orders')
-  }, [clearRoomStale, filter])
+  }, [filter])
 
   const handleExport = useCallback(async () => {
     try {
       const response = await consumableOrderAPI.exportOrders()
-      downloadBlobResponse(response, `consumable_orders_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      downloadBlobResponse(response, `consumable_orders_export_${formatChinaDateForFilename()}.xlsx`)
     } catch {
       toast.error('导出失败')
     }
@@ -390,10 +397,12 @@ export function ConsumableOrdersPage() {
 // 渲染耗材订单行级操作。 把审批/驳回/完成动作集中在表格行内，避免页面主组件直接处理行级业务按钮。
 const ActionButtons = React.memo(function ActionButtons({
   item,
+  isAdmin,
   onEdit,
   onRefresh,
 }: {
   item: Record<string, unknown>
+  isAdmin: boolean
   onEdit: (item: Record<string, unknown>) => void
   onRefresh: () => void | Promise<void>
 }) {
@@ -411,7 +420,8 @@ const ActionButtons = React.memo(function ActionButtons({
       className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
       confirm: true,
       confirmLabel: '确认审批',
-      disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'rejected',
+      disableWhen: (currItem: Record<string, unknown>) =>
+        !isApprovableOrderStatus(currItem.status),
       onClick: async (currItem: Record<string, unknown>) => {
         await consumableOrderAPI.approve(currItem.id as number)
         await onRefreshRef.current()
@@ -426,7 +436,8 @@ const ActionButtons = React.memo(function ActionButtons({
       className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
       confirm: true,
       confirmLabel: '确认驳回',
-      disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'approved',
+      disableWhen: (currItem: Record<string, unknown>) =>
+        !isRejectableOrderStatus(currItem.status),
       onClick: async (currItem: Record<string, unknown>) => {
         await consumableOrderAPI.reject(currItem.id as number, '管理员驳回')
         await onRefreshRef.current()
@@ -436,7 +447,8 @@ const ActionButtons = React.memo(function ActionButtons({
     {
       id: 'complete',
       label: '确认完成',
-      showWhen: (currItem: Record<string, unknown>) => currItem.status === 'approved',
+      showWhen: (currItem: Record<string, unknown>) =>
+        currItem.status === ConsumableOrderStatus.APPROVED,
       onClick: async (currItem: Record<string, unknown>) => {
         await consumableOrderAPI.complete(currItem.id as number)
         await onRefreshRef.current()
@@ -450,6 +462,7 @@ const ActionButtons = React.memo(function ActionButtons({
       item={item}
       actions={actions}
       showEdit={true}
+      disableEdit={!isOrderEditableByRole(item.status, isAdmin)}
       onEdit={onEdit}
     />
   )

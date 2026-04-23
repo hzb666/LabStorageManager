@@ -240,6 +240,13 @@ export const SPECIAL_CAS_VALUE = '生物试剂'
 export const normalizeCASInputValue = (input: string): string =>
   input.replace(/\s+/g, '').toUpperCase()
 
+const EMPTY_STORAGE_LOCATION_TEXT_PATTERN = /[\s\-‐‑‒–—―−－﹣]+/g
+
+export const isEffectivelyEmptyStorageLocation = (input: string | null | undefined): boolean => {
+  const normalized = (input ?? '').trim()
+  return !normalized || normalized.replace(EMPTY_STORAGE_LOCATION_TEXT_PATTERN, '') === ''
+}
+
 export const isSpecialCasValue = (input: string): boolean => {
   return normalizeCASInputValue(input) === SPECIAL_CAS_VALUE
 }
@@ -314,7 +321,7 @@ export const InventoryFormSchema = v.object({
   english_name: createMaxLengthSchema('英文名称', 200),
   alias: createMaxLengthSchema('别名', 200),
   category: createMaxLengthSchema('分类', 100),
-  brand: createMaxLengthSchema('品牌', 100),
+  brand: createStringLengthSchema('品牌', 1, 100),
   purity: createMaxLengthSchema('纯度', 20),
   specification: SpecificationSchema,
   storage_location: createMaxLengthSchema('存储位置', 200),
@@ -337,11 +344,11 @@ export type InventoryFormInputData = v.InferInput<typeof InventoryFormSchema>
 export const CommonShelfManualAddSchema = v.object({
   cas_number: CasNumberSchema,
   name_snapshot: createStringLengthSchema('名称', 1, 200),
-  brand: createMaxLengthSchema('品牌', 100),
+  brand: createStringLengthSchema('品牌', 1, 100),
   purity: createMaxLengthSchema('纯度', 20),
   specification: SpecificationSchema,
   count: v.pipe(createPositiveNumberSchema('瓶数'), v.maxValue(99, '瓶数不能超过99')),
-  storage_location: createMaxLengthSchema('存放位置', 200),
+  storage_location: createRequiredStringSchema('存放位置'),
   notes: createMaxLengthSchema('备注', 100),
 })
 
@@ -353,20 +360,27 @@ export const CommonShelfItemEditRowSchema = v.object({
 })
 
 export const CommonShelfGroupEditSchema = v.object({
-  brand: createMaxLengthSchema('品牌', 100),
+  brand: createStringLengthSchema('品牌', 1, 100),
   specification: SpecificationSchema,
   confirm_merge: v.optional(v.boolean()),
 })
 
 export const CommonShelfAddBottlesSchema = v.object({
   count: v.pipe(createPositiveNumberSchema('新增瓶数'), v.maxValue(99, '新增瓶数不能超过99')),
-  storage_location: createMaxLengthSchema('存放位置', 200),
+  storage_location: createRequiredStringSchema('存放位置'),
   purity: createMaxLengthSchema('纯度', 20),
   notes: createMaxLengthSchema('备注', 100),
 })
 
+export const CommonShelfQuickOrderSchema = v.object({
+  quantity: v.pipe(createPositiveNumberSchema('数量'), v.maxValue(99, '数量不能超过99')),
+  price: createPriceSchema(0.01),
+  purity: createMaxLengthSchema('纯度', 20),
+  notes: createMaxLengthSchema('备注', 500),
+})
+
 export const CommonShelfRemoveOneSchema = v.object({
-  storage_location: createMaxLengthSchema('存放位置', 200),
+  storage_location: createRequiredStringSchema('存放位置'),
 })
 
 export const ChemicalNameMapSchema = v.object({
@@ -382,6 +396,10 @@ export const ChemicalNameMapSchema = v.object({
   ),
 })
 
+export const ReagentBrandSchema = v.object({
+  name: createStringLengthSchema('品牌名称', 1, 100),
+})
+
 export type CommonShelfManualAddData = v.InferOutput<typeof CommonShelfManualAddSchema>
 export type CommonShelfManualAddInputData = v.InferInput<typeof CommonShelfManualAddSchema>
 export type CommonShelfItemEditRowData = v.InferOutput<typeof CommonShelfItemEditRowSchema>
@@ -390,10 +408,14 @@ export type CommonShelfGroupEditData = v.InferOutput<typeof CommonShelfGroupEdit
 export type CommonShelfGroupEditInputData = v.InferInput<typeof CommonShelfGroupEditSchema>
 export type CommonShelfAddBottlesData = v.InferOutput<typeof CommonShelfAddBottlesSchema>
 export type CommonShelfAddBottlesInputData = v.InferInput<typeof CommonShelfAddBottlesSchema>
+export type CommonShelfQuickOrderData = v.InferOutput<typeof CommonShelfQuickOrderSchema>
+export type CommonShelfQuickOrderInputData = v.InferInput<typeof CommonShelfQuickOrderSchema>
 export type CommonShelfRemoveOneData = v.InferOutput<typeof CommonShelfRemoveOneSchema>
 export type CommonShelfRemoveOneInputData = v.InferInput<typeof CommonShelfRemoveOneSchema>
 export type ChemicalNameMapFormData = v.InferOutput<typeof ChemicalNameMapSchema>
 export type ChemicalNameMapFormInputData = v.InferInput<typeof ChemicalNameMapSchema>
+export type ReagentBrandFormData = v.InferOutput<typeof ReagentBrandSchema>
+export type ReagentBrandFormInputData = v.InferInput<typeof ReagentBrandSchema>
 
 // ==========================================
 // 5. 订单模块 Schema
@@ -406,7 +428,7 @@ export const ReagentOrderSchema = v.object({
   english_name: createMaxLengthSchema('英文名称', 200),
   alias: createMaxLengthSchema('别名', 200),
   category: createMaxLengthSchema('分类', 100),
-  brand: createMaxLengthSchema('品牌', 100),
+  brand: createStringLengthSchema('品牌', 1, 100),
   purity: createMaxLengthSchema('纯度', 20),
   specification: SpecificationSchema, // 后端必填
   quantity: v.pipe(createPositiveNumberSchema('数量'), v.maxValue(99, '数量不能超过99')),
@@ -422,7 +444,7 @@ const ReagentWorkflowEditableFields = {
   english_name: createMaxLengthSchema('英文名称', 200),
   alias: createMaxLengthSchema('别名', 200),
   category: createMaxLengthSchema('分类', 100),
-  brand: createMaxLengthSchema('品牌', 100),
+  brand: createStringLengthSchema('品牌', 1, 100),
   purity: createMaxLengthSchema('纯度', 20),
   specification: SpecificationSchema,
   is_hazardous: v.boolean('危险品必须是布尔值'),
@@ -492,8 +514,15 @@ export const UserUpdateSchema = v.object({
 
 
 // 修改密码 Schema
+const OptionalOldPasswordSchema = v.pipe(
+  v.string('原密码必须是字符串'),
+  v.trim(),
+  v.check((input) => input === '' || input.length >= 6, '原密码至少6个字符'),
+  v.maxLength(50, '原密码最多50个字符')
+)
+
 export const ChangePasswordSchema = v.object({
-  old_password: createStringLengthSchema('原密码', 6, 50),
+  old_password: OptionalOldPasswordSchema,
   new_password: v.pipe(
     v.string('新密码不能为空'),
     v.minLength(6, '新密码至少6个字符'),
@@ -696,6 +725,9 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /CAS master data already exists/i, message: '该 CAS 主数据已存在' },
   { pattern: /CAS master data not found/i, message: '缺少该 CAS 的主数据，请先录入后再加入常用货架' },
   { pattern: /cannot be deleted/i, message: '该 CAS 主数据已被常用货架引用，不能删除' },
+  { pattern: /Brand already exists/i, message: '该品牌已存在' },
+  { pattern: /Brand name is required/i, message: '品牌名称不能为空' },
+  { pattern: /Brand not found/i, message: '品牌不存在' },
   { pattern: /Item changed by another request, please retry/i, message: '该物品状态已变更，请刷新后重试' },
   { pattern: /No available bottle in this group/i, message: '该分组已无可用瓶数' },
   { pattern: /Item is not borrowed, current status/i, message: '该物品未被借用' },
@@ -707,6 +739,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Order not found/i, message: '未找到订单' },
   { pattern: /order_reason is required/i, message: '申购原因不能为空' },
   { pattern: /Invalid order_reason/i, message: '申购原因无效' },
+  { pattern: /brand is required/i, message: '品牌不能为空' },
   { pattern: /Public account cannot create orders/i, message: '公用账户不能创建订单' },
   { pattern: /Public account cannot edit orders/i, message: '公用账户不能编辑订单' },
   { pattern: /Public account must select a borrower/i, message: '公用账户借用时必须选择借用人' },
@@ -714,6 +747,8 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /You are not allowed to view this item's borrow history/i, message: '你无权查看该物品的借用历史' },
   { pattern: /Public account cannot delete orders/i, message: '公用账户不能删除订单' },
   { pattern: /Only the order applicant or admin can/i, message: '只有申请人或管理员才能执行此操作' },
+  { pattern: /Only pending, rejected, or admin-approved orders can be edited/i, message: '仅待审批、已驳回或管理员已批准订单可编辑' },
+  { pattern: /Only pending or rejected orders can be edited/i, message: '仅待审批或已驳回订单可编辑' },
   { pattern: /Approved or rejected orders can only be deleted by non-admin users/i, message: '已批准或已驳回订单不可编辑，仅可删除' },
   { pattern: /Status must be changed via workflow endpoints/i, message: '状态必须通过工作流接口变更' },
   { pattern: /Cannot approve order with status/i, message: '当前状态不允许审批订单' },

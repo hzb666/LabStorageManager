@@ -13,6 +13,7 @@ import {
   type CommonShelfLocationSummary,
 } from '@/api/client'
 import { BaseForm } from '@/components/BaseForm'
+import type { AutocompleteOption } from '@/components/ui/AutoComplete'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { EditDialogActions } from '@/components/EditDialogActions'
@@ -55,7 +56,7 @@ import {
   CommonShelfItemEditRowSchema,
   createValibotResolver,
 } from '@/lib/validationSchemas'
-import { cn } from '@/lib/utils'
+import { cn, formatDateTime } from '@/lib/utils'
 
 export type CommonShelfDialogMode = 'manual-add' | 'edit' | 'add-bottles' | 'remove-one' | null
 type CommonShelfEditMode = 'group' | 'items'
@@ -146,20 +147,26 @@ function handleDialogSubmit(
 function DialogEntitySummary({
   title,
   details,
+  detailsClassName,
 }: {
   title: ReactNode
   details: ReactNode
+  detailsClassName?: string
 }) {
   return (
     <div className="space-y-1">
       <p className="font-medium">{title}</p>
-      <p className="text-sm text-muted-foreground">{details}</p>
+      <p className={cn("text-sm text-muted-foreground", detailsClassName)}>{details}</p>
     </div>
   )
 }
 
 function DialogHint({ children }: { children: ReactNode }) {
   return <p className="text-base text-muted-foreground">{children}</p>
+}
+
+function renderCommonShelfGroupBrandSpec(group: CommonShelfGroup) {
+  return `${group.group.brand || '无品牌'} / ${group.group.specification_text}`
 }
 
 // 通用的取消/提交按钮区。
@@ -211,14 +218,17 @@ function getCommonShelfDialogContentClassName(mode: CommonShelfDialogMode) {
   return 'max-h-[85vh] w-[92vw] max-w-lg overflow-y-auto'
 }
 
-function renderManualAddDialog(dialog: CommonShelfDialogController) {
+function renderManualAddDialog(
+  dialog: CommonShelfDialogController,
+  brandOptions: AutocompleteOption[],
+) {
   const { actions, forms, state } = dialog
 
   return (
     <form className="space-y-4" onSubmit={handleDialogSubmit(actions.handleSubmitManualAdd)}>
       <BaseForm
         form={forms.manualAddForm}
-        fields={getCommonShelfManualAddFormFields()}
+        fields={getCommonShelfManualAddFormFields({ brandOptions })}
         columns={2}
       />
       <DialogSubmitActions
@@ -274,7 +284,7 @@ function CommonShelfItemEditRow({
     >
       <div className="mb-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>第 {index + 1} 条 · {item.internal_code}</span>
-        <span>{new Date(item.created_at).toLocaleString('zh-CN', { hour12: false })}</span>
+        <span>{formatDateTime(item.created_at)}</span>
       </div>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">
@@ -387,9 +397,11 @@ function buildItemEditContent({
 function CommonShelfEditDialogContent({
   dialog,
   showDelete,
+  brandOptions,
 }: {
   dialog: CommonShelfDialogController
   showDelete: boolean
+  brandOptions: AutocompleteOption[]
 }) {
   const [editModeState, setEditModeState] = useState<CommonShelfEditModeState>({
     groupKey: null,
@@ -426,6 +438,7 @@ function CommonShelfEditDialogContent({
     <div className="space-y-4">
       <DialogEntitySummary
         title={selectedGroup.display.name}
+        detailsClassName="text-base"
         details={(
           <>
             CAS: {selectedGroup.group.cas_number} • 品牌: {selectedGroup.group.brand || '无品牌'} • 规格: {selectedGroup.group.specification_text}
@@ -474,7 +487,7 @@ function CommonShelfEditDialogContent({
           )}
           <BaseForm
             form={forms.editForm}
-            fields={getCommonShelfEditFormFields()}
+            fields={getCommonShelfEditFormFields({ brandOptions })}
             columns={2}
           />
           <EditDialogActions
@@ -528,7 +541,8 @@ function renderAddBottlesDialog(
     <form className="space-y-4" onSubmit={handleDialogSubmit(actions.handleSubmitAddBottles)}>
       <DialogEntitySummary
         title={state.selectedGroup.display.name}
-        details={`${state.selectedGroup.group.brand || '无品牌'} / ${state.selectedGroup.group.specification_text}`}
+        detailsClassName="text-base"
+        details={renderCommonShelfGroupBrandSpec(state.selectedGroup)}
       />
       <BaseForm
         form={forms.addBottlesForm}
@@ -549,9 +563,17 @@ function renderRemoveOneDialog(
   locationOptions: Array<{ value: string; label: string }>,
 ) {
   const { actions, forms, state } = dialog
+  if (!state.selectedGroup) {
+    return null
+  }
 
   return (
     <form className="space-y-4" onSubmit={handleDialogSubmit(actions.handleSubmitRemoveOne)}>
+      <DialogEntitySummary
+        title={state.selectedGroup.display.name}
+        detailsClassName="text-base"
+        details={renderCommonShelfGroupBrandSpec(state.selectedGroup)}
+      />
       <DialogHint>
         将从所选位置删除最早入库的 1 瓶。
       </DialogHint>
@@ -572,9 +594,11 @@ function renderRemoveOneDialog(
 export function CommonShelfDialogs({
   dialog,
   showDelete,
+  brandOptions,
 }: {
   dialog: CommonShelfDialogController
   showDelete: boolean
+  brandOptions: AutocompleteOption[]
 }) {
   const { actions, state } = dialog
   const { mode, selectedGroup } = state
@@ -607,12 +631,13 @@ export function CommonShelfDialogs({
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
-        {mode === 'manual-add' && renderManualAddDialog(dialog)}
+        {mode === 'manual-add' && renderManualAddDialog(dialog, brandOptions)}
         {mode === 'edit' && (
           <CommonShelfEditDialogContent
             key={state.selectedGroup?.group.group_key ?? 'empty'}
             dialog={dialog}
             showDelete={showDelete}
+            brandOptions={brandOptions}
           />
         )}
         {mode === 'add-bottles' && renderAddBottlesDialog(dialog, locationSuggestions)}
@@ -654,11 +679,13 @@ export function ChemicalNameMapEditorDialog({
 
 export function ChemicalNameMapManagementDialog({
   open,
+  canWrite,
   onOpenChange,
   onCreate,
   columns,
 }: {
   open: boolean
+  canWrite: boolean
   onOpenChange: (open: boolean) => void
   onCreate: () => void
   columns: ColumnDef<Record<string, unknown>, unknown>[]
@@ -685,12 +712,14 @@ export function ChemicalNameMapManagementDialog({
               title="CAS 主数据"
               filterClassName="px-1"
               cardClassName="mx-1"
-              toolbarActions={(
-                <Button onClick={onCreate} size="lg">
-                  <Plus className="mr-1.5 h-4 w-4" />
-                  新增 CAS
-                </Button>
-              )}
+              toolbarActions={canWrite
+                ? (
+                  <Button onClick={onCreate} size="lg">
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    新增 CAS
+                  </Button>
+                )
+                : undefined}
             />
           </div>
         </div>

@@ -107,7 +107,7 @@
 - 用途：按绘制结构或结构文本检索库存 CAS。
 - 后端：`app/api/chem.py`、`app/models/compound_structure.py`、`app/services/structure_index.py`
 - 前端：`frontend/src/components/chem/StructureSearchDialog.tsx`、`frontend/src/api/structureSearchApi.ts`
-- 边界：默认关闭，需启用 `CHEM_STRUCTURE_FEATURE_ENABLED`。
+- 边界：默认开启，可通过 `CHEM_STRUCTURE_FEATURE_ENABLED=false` 关闭。
 
 ### Agent skill、CLI 与 MCP
 

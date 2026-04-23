@@ -1,7 +1,7 @@
 /** 统一管理表格列配置。 */
 import { createColumnHelper } from '@tanstack/react-table'
 import { safeString } from '@/lib/validationSchemas'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { CellContext, ColumnDef } from '@tanstack/react-table'
 import type { ReactNode } from 'react'
 import { HighlightText } from '@/components/ui/HighlightText'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -11,6 +11,7 @@ import { formatDate, formatDateTime, getFullImageUrl } from '@/lib/utils'
 import { CHEMICAL_CATEGORY_LABELS, type BadgeColor } from '@/lib/constants'
 import { Laptop } from 'lucide-react'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
+import { cn } from '@/lib/utils'
 
 // 使用 any 类型简化类型复杂性
 type TableRowData = Record<string, unknown>
@@ -19,6 +20,32 @@ type TableRowData = Record<string, unknown>
 export type { TableRowData }
 
 const columnHelper = createColumnHelper<TableRowData>()
+
+function renderHazardousNameCell(
+  info: CellContext<TableRowData, unknown>,
+  className?: string,
+) {
+  const isHazardous = Boolean(info.row.original.is_hazardous)
+
+  return (
+    <div
+      className={cn(
+        'flex min-w-0 items-center gap-1.5 rounded-sm border-l-4 pl-2 transition-colors',
+        isHazardous ? 'border-amber-400 dark:border-amber-600' : 'border-transparent',
+        className,
+      )}
+    >
+      <HazardousIcon isHazardous={isHazardous} />
+      <span className="min-w-0 break-all">
+        <HighlightText
+          text={safeString(info.getValue(), '')}
+          highlight={info.table.getState().globalFilter}
+          fuzzy={info.table.options.meta?.fuzzySearch}
+        />
+      </span>
+    </div>
+  )
+}
 
 /**
  * 库存表格列配置
@@ -46,18 +73,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       size: 250,
       minSize: 200,
       maxSize: 500,
-      cell: info => (
-        <div className="flex items-center gap-1.5 break-all">
-          <HazardousIcon isHazardous={Boolean(info.row.original.is_hazardous)} />
-          <span>
-            <HighlightText
-              text={safeString(info.getValue(), '')}
-              highlight={info.table.getState().globalFilter}
-              fuzzy={info.table.options.meta?.fuzzySearch}
-            />
-          </span>
-        </div>
-      ),
+      cell: info => renderHazardousNameCell(info),
     }),
     columnHelper.accessor('storage_location', {
       id: 'storage_location',
@@ -157,18 +173,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 200,
       minSize: 160,
       maxSize: 300,
-      cell: info => (
-        <div className="flex items-center gap-1.5">
-          <HazardousIcon isHazardous={Boolean(info.row.original.is_hazardous)} />
-          <span>
-            <HighlightText
-              text={safeString(info.getValue(), '')}
-              highlight={info.table.getState().globalFilter}
-              fuzzy={info.table.options.meta?.fuzzySearch}
-            />
-          </span>
-        </div>
-      ),
+      cell: info => renderHazardousNameCell(info),
     }),
     columnHelper.accessor('brand', {
       header: '品牌',
@@ -251,7 +256,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
     columnHelper.accessor('status', {
       header: '状态',
       size: 60,
-      minSize: 50,
+      minSize: 60,
       maxSize: 80,
       cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
     }),
@@ -499,7 +504,15 @@ export function getCommonShelfGroupTableColumns(args: {
     columnHelper.accessor((row) => (row.display as Record<string, unknown>)?.category as string | null, {
       id: 'category',
       header: '分类',
-      cell: (info) => <span>{renderCommonShelfCategory(info.getValue())}</span>,
+      cell: (info) => {
+        const category = info.getValue()
+        return (
+          <StatusBadge
+            status={renderCommonShelfCategory(category)}
+            color={getChemicalCategoryBadgeColor(category)}
+          />
+        )
+      },
     }),
     columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.brand, ''), {
       id: 'brand',
@@ -525,10 +538,10 @@ export function getCommonShelfGroupTableColumns(args: {
 }
 
 export function getChemicalNameMapTableColumns(args: {
-  renderActions: (row: TableRowData) => ReactNode
+  renderActions?: (row: TableRowData) => ReactNode
   renderAliases: (row: TableRowData) => string
 }): ColumnDef<TableRowData, unknown>[] {
-  return [
+  const columns: ColumnDef<TableRowData, unknown>[] = [
     columnHelper.accessor('cas_number', {
       header: 'CAS',
       size: 96,
@@ -606,16 +619,22 @@ export function getChemicalNameMapTableColumns(args: {
         )
       },
     }),
-    columnHelper.display({
+  ]
+
+  const renderActions = args.renderActions
+  if (renderActions) {
+    columns.push(columnHelper.display({
       id: 'actions',
       header: '操作',
       enableSorting: false,
-      size: 84,
-      minSize: 72,
-      maxSize: 96,
-      cell: (info) => <>{args.renderActions(info.row.original)}</>,
-    }),
-  ]
+      size: 120,
+      minSize: 120,
+      maxSize: 132,
+      cell: (info) => <>{renderActions(info.row.original)}</>,
+    }))
+  }
+
+  return columns
 }
 
 /**

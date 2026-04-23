@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@leelaa/vitepress-plugin-extended": "1.0.5",
+    "@lucide/vue": "^1.8.0",
     "vitepress": "1.6.4"
   }
 }

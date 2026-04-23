@@ -23,7 +23,9 @@ import {
   LOG_TYPE_OPTIONS,
   SEARCH_LOG_TYPE_OPTION,
 } from '@/components/operation-logs/logTypeMeta'
+import { getOperationLogDetailText } from '@/components/operation-logs/logSummaryText'
 import type { FilterAPI } from '@/hooks/useTableState'
+import { formatDateTime } from '@/lib/utils'
 
 // 类型定义
 interface LogItemData extends LogItem {
@@ -31,10 +33,7 @@ interface LogItemData extends LogItem {
 }
 
 const getLogSummary = (item: LogItemData) => {
-  const fullData = (item.full_data || item) as Record<string, unknown>
-  const detail = item.detail || ''
-  if (fullData.is_cli !== true) return detail
-  return detail.startsWith('[cli] ') ? detail : `[cli] ${detail}`
+  return getOperationLogDetailText(item)
 }
 
 const LOG_SEARCH_FIELD_OPTIONS = [{ value: 'all', label: '全部' }]
@@ -66,14 +65,7 @@ function SearchLogsToggle({
 const formatTime = (time: string | null) => {
   if (!time) return '-'
   try {
-    return new Date(time).toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Shanghai',
-    })
+    return formatDateTime(time)
   } catch {
     return time
   }

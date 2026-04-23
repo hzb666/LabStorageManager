@@ -54,6 +54,7 @@ services:
       dockerfile: docker/frontend/Dockerfile
       args:
         VITE_API_URL: /api
+        VITE_CHEM_STRUCTURE_FEATURE_ENABLED: ${CHEM_STRUCTURE_FEATURE_ENABLED:-true}
     restart: unless-stopped
     depends_on:
       backend:

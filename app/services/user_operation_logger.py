@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlmodel import Session
 
+from app.core.time_utils import utc_iso_str
 from app.models.user import User
 from app.models.user_operation_log import UserOperationAction, UserOperationLog
 from app.services.log_timeline_projection import project_user_operation_log
@@ -18,6 +19,11 @@ USER_SNAPSHOT_KEY_MAP = {
     "ac": "is_active",
     "av": "avatar_url",
     "uv": "username_version",
+    "bid": "brand_id",
+    "nm": "name",
+    "nn": "name_normalized",
+    "py": "name_pinyin",
+    "pi": "name_pinyin_initials",
     "cr": "created_at",
     "up": "updated_at",
     "bf": "before",
@@ -42,8 +48,8 @@ def build_user_snapshot(user: User | None) -> dict[str, Any]:
         "ac": user.is_active,
         "av": user.avatar_url,
         "uv": user.username_version,
-        "cr": user.created_at.isoformat() if user.created_at else None,
-        "up": user.updated_at.isoformat() if user.updated_at else None,
+        "cr": utc_iso_str(user.created_at),
+        "up": utc_iso_str(user.updated_at),
     }
 
 

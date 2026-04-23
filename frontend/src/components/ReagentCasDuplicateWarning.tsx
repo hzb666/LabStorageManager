@@ -65,7 +65,9 @@ export function ReagentCasDuplicateWarning({
     return null
   }
 
-  const displayName = truncateDisplayName(casWarning.display_name)
+  const displayName = truncateDisplayName(
+    casWarning.preferred_name ?? casWarning.display_name
+  )
   const orderLatest = casWarning.orders.latest
   const inventoryLatest = casWarning.inventory.latest
   const hasOrderRecord = casWarning.orders.total_count > 0 && Boolean(orderLatest)

@@ -14,8 +14,8 @@ import {
 import { useSSEStore } from '@/store/sseStore'
 
 export interface ListSSEContext {
-  loadedIds: Set<number>
-  visibleIds?: Set<number>
+  loadedIds: Set<RecordId>
+  visibleIds?: Set<RecordId>
   searchKeyword: string
   searchFields: string[]
   fuzzySearch: boolean
@@ -34,16 +34,19 @@ export interface UseListSSEOptions {
   getContext: () => ListSSEContext
   onSafePatch?: (event: SSEEventEnvelope) => void
   staleOnly?: boolean
+  moveUpdatedRowToStartWhenUnsorted?: boolean
   shouldHandleEvent?: (event: SSEEventEnvelope, context: ListSSEContext) => boolean
 }
 
 type AnyRecord = Record<string, unknown>
+type RecordId = string | number
 
 type ListMutationResult = {
   matchedRow: boolean
   changed: boolean
   filterMismatch: boolean
   nextData: InfiniteData<ListResponseData> | undefined
+  updatedRow?: AnyRecord
 }
 
 function normalizeText(value: unknown): string {
@@ -56,23 +59,27 @@ function normalizeText(value: unknown): string {
   return ''
 }
 
-function getRecordId(record: AnyRecord | null | undefined): number | null {
+function isRecordId(value: unknown): value is RecordId {
+  return typeof value === 'string' || typeof value === 'number'
+}
+
+function getRecordId(record: AnyRecord | null | undefined): RecordId | null {
   if (!record) {
     return null
   }
 
   const candidates = [record.id, record.inventory_id, record.order_id]
   for (const candidate of candidates) {
-    if (typeof candidate === 'number') {
+    if (isRecordId(candidate)) {
       return candidate
     }
   }
   return null
 }
 
-function toItemId(data: AnyRecord): number | null {
+function toItemId(data: AnyRecord): RecordId | null {
   const candidate = data.item_id ?? data.id
-  return typeof candidate === 'number' ? candidate : null
+  return isRecordId(candidate) ? candidate : null
 }
 
 function containsAnyField(data: AnyRecord, fields: string[]): boolean {
@@ -144,7 +151,7 @@ function withUpdatedTotal(
 
 function patchExistingRow(
   oldData: InfiniteData<ListResponseData> | undefined,
-  itemId: number,
+  itemId: RecordId,
   item: AnyRecord,
   context: ListSSEContext,
 ): ListMutationResult {
@@ -155,6 +162,7 @@ function patchExistingRow(
   let matchedRow = false
   let changed = false
   let filterMismatch = false
+  let updatedRow: AnyRecord | undefined
   const nextPages = oldData.pages.map((page) => ({
     ...page,
     data: page.data.map((row) => {
@@ -171,6 +179,7 @@ function patchExistingRow(
       }
 
       changed = true
+      updatedRow = merged
       return merged
     }),
   }))
@@ -184,7 +193,32 @@ function patchExistingRow(
     changed: true,
     filterMismatch,
     nextData: withUpdatedTotal(oldData, oldData.pages[0]?.total ?? 0, nextPages),
+    updatedRow,
   }
+}
+
+function moveRowToFront(
+  oldData: InfiniteData<ListResponseData> | undefined,
+  rowId: RecordId,
+  rowData: AnyRecord,
+): InfiniteData<ListResponseData> | undefined {
+  if (!oldData || oldData.pages.length === 0) {
+    return oldData
+  }
+
+  const strippedPages = oldData.pages.map((page) => ({
+    ...page,
+    data: page.data.filter((row) => getRecordId(row as AnyRecord) !== rowId),
+  }))
+  const [firstPage, ...restPages] = strippedPages
+
+  return withUpdatedTotal(oldData, oldData.pages[0]?.total ?? 0, [
+    {
+      ...firstPage,
+      data: [rowData, ...firstPage.data],
+    },
+    ...restPages,
+  ])
 }
 
 function prependCreatedRow(
@@ -235,6 +269,7 @@ function touchesSearchFields(item: AnyRecord, context: ListSSEContext): boolean 
 
 type ListEventRuntime = {
   markStale: () => void
+  moveUpdatedRowToStartWhenUnsorted: boolean
   onSafePatchRef: MutableRefObject<((event: SSEEventEnvelope) => void) | undefined>
   queryClient: ReturnType<typeof useQueryClient>
   queryKeyRef: MutableRefObject<readonly unknown[]>
@@ -244,7 +279,7 @@ function handleCreatedListEvent(args: {
   context: ListSSEContext
   event: SSEEventEnvelope
   item: AnyRecord | null
-  itemId: number | null
+  itemId: RecordId | null
   runtime: ListEventRuntime
 }): void {
   const { context, event, item, itemId, runtime } = args
@@ -276,36 +311,77 @@ function handleCreatedListEvent(args: {
 
 function handleDeletedListEvent(args: {
   event: SSEEventEnvelope
-  itemId: number | null
+  itemId: RecordId | null
   runtime: ListEventRuntime
 }): void {
   const { runtime } = args
   runtime.markStale()
 }
 
+function shouldMarkUpdatedListEventStale(args: {
+  context: ListSSEContext
+  item: AnyRecord | null
+  itemId: RecordId | null
+  runtime: ListEventRuntime
+}): boolean {
+  const { context, item, itemId, runtime } = args
+  if (!itemId || !item) {
+    return true
+  }
+  if (!context.loadedIds.has(itemId)) {
+    return true
+  }
+  if (touchesSearchFields(item, context)) {
+    return true
+  }
+  if (touchesCurrentSort(item, context)) {
+    return true
+  }
+  return Boolean(
+    runtime.moveUpdatedRowToStartWhenUnsorted &&
+      !context.sortBy &&
+      !context.isAtListStart,
+  )
+}
+
+function maybeMoveUpdatedRowToFront(args: {
+  context: ListSSEContext
+  nextData: InfiniteData<ListResponseData> | undefined
+  runtime: ListEventRuntime
+  updatedRow?: AnyRecord
+}): InfiniteData<ListResponseData> | undefined {
+  const { context, nextData, runtime, updatedRow } = args
+  if (
+    !runtime.moveUpdatedRowToStartWhenUnsorted ||
+    context.sortBy ||
+    !context.isAtListStart ||
+    !updatedRow
+  ) {
+    return nextData
+  }
+
+  const updatedRowId = getRecordId(updatedRow)
+  if (updatedRowId === null) {
+    return nextData
+  }
+  return moveRowToFront(nextData, updatedRowId, updatedRow)
+}
+
 function handleUpdatedListEvent(args: {
   context: ListSSEContext
   event: SSEEventEnvelope
   item: AnyRecord | null
-  itemId: number | null
+  itemId: RecordId | null
   runtime: ListEventRuntime
 }): void {
   const { context, event, item, itemId, runtime } = args
   const { markStale, onSafePatchRef, queryClient, queryKeyRef } = runtime
 
+  if (shouldMarkUpdatedListEventStale({ context, item, itemId, runtime })) {
+    markStale()
+    return
+  }
   if (!itemId || !item) {
-    markStale()
-    return
-  }
-  if (!context.loadedIds.has(itemId)) {
-    markStale()
-    return
-  }
-  if (touchesSearchFields(item, context)) {
-    markStale()
-    return
-  }
-  if (touchesCurrentSort(item, context)) {
     markStale()
     return
   }
@@ -317,7 +393,13 @@ function handleUpdatedListEvent(args: {
     return
   }
   if (result.changed) {
-    applySafeMutation({ event, nextData: result.nextData, queryClient, queryKeyRef, onSafePatchRef })
+    const nextData = maybeMoveUpdatedRowToFront({
+      context,
+      nextData: result.nextData,
+      runtime,
+      updatedRow: result.updatedRow,
+    })
+    applySafeMutation({ event, nextData, queryClient, queryKeyRef, onSafePatchRef })
     return
   }
   if (!result.matchedRow) {
@@ -379,14 +461,15 @@ export function useListSSE({
   getContext,
   onSafePatch,
   staleOnly = false,
+  moveUpdatedRowToStartWhenUnsorted = false,
   shouldHandleEvent,
 }: UseListSSEOptions) {
   const queryClient = useQueryClient()
+  const activeClientIds = useSSEStore((state) => state.activeClientIds)
   const markStaleKey = useSSEStore((state) => state.markStaleKey)
-  const clientId = useSSEStore((state) => state.clientId)
   const isStale = useSSEStore((state) => state.hasStaleKey(staleKey))
   const staleKeyRef = useRef(staleKey)
-  const clientIdRef = useRef(clientId)
+  const activeClientIdsRef = useRef(activeClientIds)
 
   const { queryKeyRef, getContextRef, onSafePatchRef, shouldHandleEventRef } = useListSSERefs({
     getContext,
@@ -398,8 +481,8 @@ export function useListSSE({
     staleKeyRef.current = staleKey
   }, [staleKey])
   useEffect(() => {
-    clientIdRef.current = clientId
-  }, [clientId])
+    activeClientIdsRef.current = activeClientIds
+  }, [activeClientIds])
 
   const handleEventRef = useRef<SSEEventHandler>(() => {})
   useEffect(() => {
@@ -407,12 +490,16 @@ export function useListSSE({
       markStale: () => {
         markStaleKey(staleKeyRef.current)
       },
+      moveUpdatedRowToStartWhenUnsorted,
       onSafePatchRef,
       queryClient,
       queryKeyRef,
     }
     handleEventRef.current = (event) => {
-      if (event.actor_client_id && event.actor_client_id === clientIdRef.current) {
+      if (
+        event.actor_client_id
+        && activeClientIdsRef.current.includes(event.actor_client_id)
+      ) {
         return
       }
 
@@ -448,6 +535,7 @@ export function useListSSE({
     queryClient,
     queryKeyRef,
     staleOnly,
+    moveUpdatedRowToStartWhenUnsorted,
     shouldHandleEventRef,
   ])
 

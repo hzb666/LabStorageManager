@@ -34,6 +34,14 @@ def normalize_brand_for_group(brand: Optional[str]) -> str:
     return (brand or "").strip().casefold()
 
 
+def require_common_shelf_brand(brand: Optional[str]) -> str:
+    """Return a non-empty brand for common shelf writes."""
+    normalized_brand = (brand or "").strip()
+    if not normalized_brand:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
+    return normalized_brand
+
+
 def normalize_storage_for_group(storage_location: Optional[str]) -> Optional[str]:
     """Normalize storage location for group key comparison."""
     normalized = normalize_storage_location(storage_location)
@@ -147,7 +155,8 @@ def _create_common_shelf_rows(
             detail="CAS master data not found",
         )
 
-    brand_normalized = normalize_brand_for_group(brand)
+    normalized_brand = require_common_shelf_brand(brand)
+    brand_normalized = normalize_brand_for_group(normalized_brand)
     storage_location_normalized = normalize_storage_for_group(storage_location)
     pinyin_fields = compute_pinyin_fields(storage_location=storage_location)
     normalized_purity = (purity or "").strip()[:20] or None
@@ -170,7 +179,7 @@ def _create_common_shelf_rows(
                     db,
                     cas_number=cas_number,
                     name_snapshot=normalized_snapshot,
-                    brand=brand,
+                    brand=normalized_brand,
                     brand_normalized=brand_normalized,
                     specification_text=specification_text,
                     spec_quantity=normalized_quantity,
@@ -183,7 +192,7 @@ def _create_common_shelf_rows(
                         internal_code=internal_code,
                         cas_number=cas_number,
                         name_snapshot=normalized_snapshot,
-                        brand=brand,
+                        brand=normalized_brand,
                         brand_normalized=brand_normalized,
                         purity=normalized_purity,
                         specification_text=specification_text,
@@ -280,7 +289,7 @@ def create_manual_common_shelf_items(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     normalized_storage_location = normalize_storage_location(item_data.storage_location)
-    normalized_brand = (item_data.brand or "").strip() or None
+    normalized_brand = require_common_shelf_brand(item_data.brand)
     normalized_purity = (item_data.purity or "").strip() or None
     normalized_notes = (item_data.notes or "").strip() or None
 

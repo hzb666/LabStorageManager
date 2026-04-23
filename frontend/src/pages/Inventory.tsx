@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 
@@ -19,6 +19,7 @@ import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { FilterTable } from '@/components/ui/FilterTable'
+import type { FilterTableQueryDataReadyContext } from '@/components/ui/FilterTable'
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
 import type { FilterAPI } from '@/hooks/useTableState'
 
@@ -32,7 +33,12 @@ import type {
 } from '@/api/structureSearchApi'
 import type { ManualStructureEditTarget } from '@/components/chem/StructureSearchDialog'
 import { isStructureSearchFeatureEnabled } from '@/lib/apiConfig'
-import { downloadBlobResponse, formatDate, processNotes } from '@/lib/utils'
+import {
+  downloadBlobResponse,
+  formatChinaDateForFilename,
+  formatDate,
+  processNotes,
+} from '@/lib/utils'
 import {
   InventoryFormSchema,
   applyValidationErrors,
@@ -42,13 +48,14 @@ import {
   extractApiErrorDetail,
   getApiErrorMessage,
   isSpecialCasValue,
+  isEffectivelyEmptyStorageLocation,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
 import type { InventoryFormData, InventoryFormInputData } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 import { UserRoles } from '@/lib/constants'
-import { useSSEStore } from '@/store/sseStore'
+import { getReagentBrandOptionsQueryOptions } from '@/lib/reagentBrandOptions'
 import { useAuthStore } from '@/store/useStore'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 
@@ -117,6 +124,11 @@ type StructureManualEditRequestHandler = (
   cache: CompoundStructureCache,
   onSaved: StructureManualSavedHandler,
 ) => void
+type PendingStructureSearchClose = {
+  filterKey: string
+  resolve: () => void
+  timeoutId: number
+}
 
 const columnHelper = createColumnHelper<InventoryItem>()
 const loadStructureSearchDialog = () => import('@/components/chem/StructureSearchDialog')
@@ -125,6 +137,7 @@ const StructureSearchDialog = React.lazy(loadStructureSearchDialog)
 const StructureCacheManagerDialog = React.lazy(loadStructureCacheManagerDialog)
 const structureSearchEnabled = isStructureSearchFeatureEnabled()
 const STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS = 2500
+const STRUCTURE_SEARCH_TABLE_READY_TIMEOUT_MS = 5000
 const STRUCTURE_SEARCH_TEXT_DISABLED_MESSAGE = '请清除结构搜索后再进行文字搜索'
 
 // ============================================================================
@@ -224,7 +237,7 @@ function createInventoryCreatePayload(formData: InventoryFormData) {
     alias: formData.alias || undefined,
     specification: formData.specification || '',
     quantity_bottles: formData.quantity_bottles as number,
-    brand: formData.brand || undefined,
+    brand: formData.brand,
     category: formData.category || undefined,
     purity: formData.purity || undefined,
     storage_location: formData.storage_location || undefined,
@@ -254,11 +267,23 @@ async function submitInventoryRequest(params: {
 function createInventoryFormFields(params: {
   dialogState: InventoryDialogState
   initialQuantity?: number
+  requireManualStorageLocation: boolean
+  brandOptions: { label: string; value: string }[]
   handleCasLookup: () => Promise<void>
   isCasLookupLoading: boolean
 }) {
-  const { dialogState, initialQuantity, handleCasLookup, isCasLookupLoading } = params
-  const fields = getInventoryFormFields(dialogState === 'edit', initialQuantity)
+  const {
+    dialogState,
+    initialQuantity,
+    requireManualStorageLocation,
+    brandOptions,
+    handleCasLookup,
+    isCasLookupLoading,
+  } = params
+  const fields = getInventoryFormFields(dialogState === 'edit', initialQuantity, {
+    brandOptions,
+    requireStorageLocation: dialogState === 'add' && requireManualStorageLocation,
+  })
   if (dialogState !== 'add') {
     return fields
   }
@@ -273,6 +298,23 @@ function createInventoryFormFields(params: {
   })
 }
 
+function validateManualStorageLocation(params: {
+  dialogState: InventoryDialogState
+  formData: InventoryFormData
+  form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>
+  requireManualStorageLocation: boolean
+}): boolean {
+  const { dialogState, formData, form, requireManualStorageLocation } = params
+  if (dialogState !== 'add' || !requireManualStorageLocation) {
+    return true
+  }
+  if (!isEffectivelyEmptyStorageLocation(formData.storage_location)) {
+    return true
+  }
+  form.setError('storage_location', { message: '公用账户手动入库必须填写存放位置' })
+  return false
+}
+
 // 格式化库存展开行里的“上次借用”展示文本。 消除 JSX 中的嵌套三元表达式，同时保持原有文案与状态语义不变。
 function formatInventoryBorrowerDisplay(item: InventoryItem): string {
   if (item.borrower_name) {
@@ -285,7 +327,11 @@ function formatInventoryBorrowerDisplay(item: InventoryItem): string {
 }
 
 // 管理库存弹窗、表单与删除/CAS 联动。 把页面主组件收束成列表编排层，并把库存特有的表单规则集中在一个局部控制器中。
-function useInventoryDialogController(refreshInventory: () => void | Promise<void>) {
+function useInventoryDialogController(
+  refreshInventory: () => void | Promise<void>,
+  requireManualStorageLocation: boolean,
+) {
+  const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
@@ -296,14 +342,12 @@ function useInventoryDialogController(refreshInventory: () => void | Promise<voi
     defaultValues: defaultInventoryValues,
     shouldFocusError: false,
   })
-
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
     setDeleteConfirm(false)
     form.reset(defaultInventoryValues)
     setDialogState('add')
   }, [form, setDialogState])
-
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as InventoryItem
     setEditingItem(item)
@@ -311,7 +355,6 @@ function useInventoryDialogController(refreshInventory: () => void | Promise<voi
     form.reset(createInventoryFormValues(item))
     setDialogState('edit')
   }, [form, setDialogState])
-
   const handleCasLookup = useCallback(async () => {
     const casValue = form.getValues('cas_number')
     const casValidation = validateAndNormalizeCASInput(casValue || '')
@@ -347,9 +390,16 @@ function useInventoryDialogController(refreshInventory: () => void | Promise<voi
       setIsCasLookupLoading(false)
     }
   }, [form])
-
   const handleFormSubmit = form.handleSubmit(async (formData) => {
     if (!validateInventoryRemainingQuantity({ dialogState, editingItem, formData, form })) {
+      return
+    }
+    if (!validateManualStorageLocation({
+      dialogState,
+      formData,
+      form,
+      requireManualStorageLocation,
+    })) {
       return
     }
 
@@ -378,7 +428,6 @@ function useInventoryDialogController(refreshInventory: () => void | Promise<voi
   }, (errors) => {
     ensureInventoryRemainingQuantityError({ dialogState, editingItem, form, errors })
   })
-
   const handleDeleteClick = useCallback(async () => {
     if (!editingItem) return
 
@@ -396,23 +445,27 @@ function useInventoryDialogController(refreshInventory: () => void | Promise<voi
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
   }, [deleteConfirm, editingItem, refreshInventory, setDialogState])
-
   const handleDialogOpenChange = useCallback((open: boolean) => {
-    if (!open) {
-      setDialogState(null)
-      form.reset()
-      setDeleteConfirm(false)
-    }
+    if (open) return
+    setDialogState(null)
+    form.reset()
+    setDeleteConfirm(false)
   }, [form, setDialogState])
-
-  const formFields = useMemo(() => {
-    return createInventoryFormFields({
-      dialogState,
-      initialQuantity: editingItem?.initial_quantity,
-      handleCasLookup,
-      isCasLookupLoading,
-    })
-  }, [dialogState, editingItem?.initial_quantity, handleCasLookup, isCasLookupLoading])
+  const formFields = useMemo(() => createInventoryFormFields({
+    dialogState,
+    initialQuantity: editingItem?.initial_quantity,
+    requireManualStorageLocation,
+    brandOptions,
+    handleCasLookup,
+    isCasLookupLoading,
+  }), [
+    brandOptions,
+    dialogState,
+    editingItem?.initial_quantity,
+    handleCasLookup,
+    isCasLookupLoading,
+    requireManualStorageLocation,
+  ])
 
   return {
     dialogState,
@@ -524,6 +577,13 @@ function createStructureInventoryFilter(
   }
 }
 
+function createStructureExtraParams(filter: StructureInventoryFilter): Record<string, unknown> {
+  return {
+    structure_search_id: filter.searchId,
+    structure_match_mode: filter.matchMode,
+  }
+}
+
 function formatStructureFilterTitle(filter: StructureInventoryFilter): string {
   return `耗时 ${filter.elapsedMs} ms，命中 ${filter.resultCount} 个结构，索引 ${filter.moleculeCount} 个结构；点击右侧按钮清除结构筛选`
 }
@@ -606,6 +666,39 @@ function StructureDialogFallback({
   )
 }
 
+function useDeferredStructureDialogClose() {
+  const pendingCloseRef = useRef<PendingStructureSearchClose | null>(null)
+
+  const resolvePendingStructureSearchClose = useCallback((filterKey?: string) => {
+    const pendingClose = pendingCloseRef.current
+    if (!pendingClose) return
+    if (filterKey && pendingClose.filterKey !== filterKey) return
+
+    window.clearTimeout(pendingClose.timeoutId)
+    pendingCloseRef.current = null
+    pendingClose.resolve()
+  }, [])
+
+  const waitForStructureTableReady = useCallback((filterKey: string) => {
+    resolvePendingStructureSearchClose()
+    return new Promise<void>((resolve) => {
+      const timeoutId = window.setTimeout(() => {
+        resolvePendingStructureSearchClose(filterKey)
+      }, STRUCTURE_SEARCH_TABLE_READY_TIMEOUT_MS)
+      pendingCloseRef.current = { filterKey, resolve, timeoutId }
+    })
+  }, [resolvePendingStructureSearchClose])
+
+  useEffect(() => {
+    return () => resolvePendingStructureSearchClose()
+  }, [resolvePendingStructureSearchClose])
+
+  return {
+    resolvePendingStructureSearchClose,
+    waitForStructureTableReady,
+  }
+}
+
 function useInventoryStructureEditor() {
   const [structureDialogOpen, setStructureDialogOpen] = useState(false)
   const [manualEditTarget, setManualEditTarget] = useState<ManualStructureEditTarget | null>(null)
@@ -614,6 +707,10 @@ function useInventoryStructureEditor() {
   const [structureSearchExpandSignal, setStructureSearchExpandSignal] = useState(0)
   const [structureSearchCollapseSignal, setStructureSearchCollapseSignal] = useState(0)
   const manualSavedHandlerRef = useRef<StructureManualSavedHandler | null>(null)
+  const {
+    resolvePendingStructureSearchClose,
+    waitForStructureTableReady,
+  } = useDeferredStructureDialogClose()
 
   const handleStructureResults = useCallback((
     payload: SubstructureSearchResponse,
@@ -622,23 +719,27 @@ function useInventoryStructureEditor() {
     query: string,
     queryFormat: StructureQueryFormat,
   ) => {
-    setStructureFilter(createStructureInventoryFilter(payload, matchMode, molblock, query, queryFormat))
+    const nextFilter = createStructureInventoryFilter(payload, matchMode, molblock, query, queryFormat)
+    setStructureFilter(nextFilter)
     setStructureDraftMolblock(molblock)
     setStructureSearchExpandSignal((value) => value + 1)
-  }, [])
+    return waitForStructureTableReady(nextFilter.filterKey)
+  }, [waitForStructureTableReady])
 
   const handleClearStructureFilter = useCallback(() => {
+    resolvePendingStructureSearchClose()
     setStructureFilter(null)
     setStructureSearchCollapseSignal((value) => value + 1)
-  }, [])
+  }, [resolvePendingStructureSearchClose])
 
   const handleStructureDialogOpenChange = useCallback((nextOpen: boolean) => {
     setStructureDialogOpen(nextOpen)
     if (!nextOpen) {
+      resolvePendingStructureSearchClose()
       setManualEditTarget(null)
       manualSavedHandlerRef.current = null
     }
-  }, [])
+  }, [resolvePendingStructureSearchClose])
 
   const handleManualStructureEdit = useCallback<StructureManualEditRequestHandler>((
     cache,
@@ -657,10 +758,7 @@ function useInventoryStructureEditor() {
 
   const structureExtraParams = useMemo<Record<string, unknown>>(() => {
     if (!structureFilter) return {}
-    return {
-      structure_search_id: structureFilter.searchId,
-      structure_match_mode: structureFilter.matchMode,
-    }
+    return createStructureExtraParams(structureFilter)
   }, [structureFilter])
 
   const handleManualStructureSaved = useCallback((cache: CompoundStructureCache) => {
@@ -668,11 +766,21 @@ function useInventoryStructureEditor() {
     manualSavedHandlerRef.current = null
   }, [])
 
+  const handleStructureQueryDataReady = useCallback((
+    context: FilterTableQueryDataReadyContext,
+  ) => {
+    if (!structureFilter) return
+    if (context.extraParams.structure_search_id !== structureFilter.searchId) return
+    if (context.globalFilter || context.searchField !== 'all' || context.hasSorting) return
+    resolvePendingStructureSearchClose(structureFilter.filterKey)
+  }, [resolvePendingStructureSearchClose, structureFilter])
+
   return {
     handleClearStructureFilter,
     handleManualStructureEdit,
     handleManualStructureSaved,
     handleOpenStructureDialog,
+    handleStructureQueryDataReady,
     handleStructureDialogOpenChange,
     handleStructureResults,
     manualEditTarget,
@@ -706,16 +814,16 @@ function StructureCacheManagerEntry({
   onManualEdit: StructureManualEditRequestHandler
 }>) {
   const currentUser = useAuthStore((state) => state.user)
+  const isAdmin = currentUser?.role === UserRoles.ADMIN
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
-  const isAdmin = currentUser?.role === UserRoles.ADMIN
 
   const handleOpen = useCallback(() => {
     setMounted(true)
     setOpen(true)
   }, [])
 
-  if (!structureSearchEnabled || !isAdmin) {
+  if (!structureSearchEnabled) {
     return null
   }
 
@@ -723,7 +831,7 @@ function StructureCacheManagerEntry({
     <>
       <Button type="button" variant="modern" size="lg" onClick={handleOpen}>
         <Database className="size-4" />
-        结构缓存管理
+        {isAdmin ? '结构缓存管理' : '结构缓存查看'}
       </Button>
       {mounted && (
         <React.Suspense
@@ -813,7 +921,7 @@ function InventoryFormDialog({
 // 直接组合列表、页头和叶子组件，避免继续保留只转发参数的壳层。
 export function InventoryPage() {
   const queryClient = useQueryClient()
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
+  const currentUser = useAuthStore((state) => state.user)
   const structureEditor = useInventoryStructureEditor()
   const {
     handleClearStructureFilter,
@@ -822,8 +930,7 @@ export function InventoryPage() {
   useStructureDialogPreload(structureSearchEnabled)
   const loadInventory = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['inventory'] })
-    clearRoomStale('inventory')
-  }, [clearRoomStale, queryClient])
+  }, [queryClient])
   const handleInventoryQueryError = useCallback((error: unknown) => {
     if (!structureFilter || getApiErrorStatus(error) !== 410) {
       return
@@ -831,12 +938,15 @@ export function InventoryPage() {
     toast.warning('结构搜索结果已过期，请重新检索')
     handleClearStructureFilter()
   }, [handleClearStructureFilter, structureFilter])
-  const dialogController = useInventoryDialogController(loadInventory)
+  const dialogController = useInventoryDialogController(
+    loadInventory,
+    currentUser?.role === UserRoles.PUBLIC,
+  )
 
   const handleExport = useCallback(async () => {
     try {
       const response = await inventoryAPI.exportInventory()
-      downloadBlobResponse(response, `inventory_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      downloadBlobResponse(response, `inventory_export_${formatChinaDateForFilename()}.xlsx`)
     } catch {
       toast.error('导出失败')
     }
@@ -913,6 +1023,7 @@ export function InventoryPage() {
         }}
         customColumns={columns}
         onQueryError={handleInventoryQueryError}
+        onQueryDataReady={structureEditor.handleStructureQueryDataReady}
         onEdit={dialogController.handleEditClick}
         onBorrowSuccess={loadInventory}
         title={<><Package className="w-5 h-5" /> 库存列表</>}
@@ -1017,7 +1128,8 @@ const ActionButtons = React.memo(function ActionButtons({
         label: '借用',
         confirm: true,
         confirmLabel: '确认',
-        showWhen: (currItem: InventoryItem) => currItem.status === 'in_stock',
+        showWhen: (currItem: InventoryItem) =>
+          currItem.status === 'in_stock' && !currItem.temporary_keeper_id,
         onClick: async (currItem: InventoryItem) => {
           // 借用前校验：检查规格和剩余量是否填写
           if (!currItem.specification || currItem.specification.trim() === '') {

@@ -1,5 +1,9 @@
 /** Dashboard 共享工具、类型和常量。 */
 import type { ColumnDef } from '@tanstack/react-table'
+import {
+  ConsumableOrderStatus,
+  ReagentOrderStatus,
+} from '@/api/client'
 import type { FilterOption } from '@/hooks/useTableState'
 import { clearDashboardActiveTab } from '@/lib/storage/appUiStorage'
 import {
@@ -27,6 +31,8 @@ export interface MyBorrowItem {
   created_by_name?: string | null
   borrower_name?: string | null
   last_borrower_name?: string | null
+  borrow_days?: number
+  is_overdue?: boolean
 }
 
 export interface PendingStockinItem {
@@ -48,6 +54,8 @@ export interface PendingStockinItem {
   temporary_keeper_id?: number | null
   temporary_keeper_name?: string | null
   stockin_time: string
+  stockin_days?: number
+  is_overdue?: boolean
 }
 
 export interface DashboardOrderBase {
@@ -55,6 +63,7 @@ export interface DashboardOrderBase {
   name: string
   status: string
   created_at: string
+  updated_at?: string | null
   applicant_id?: number | null
   applicant_name?: string | null
   [key: string]: unknown
@@ -105,6 +114,47 @@ export type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
 // ============================================================================
 
 const DASHBOARD_COUNTS_REFRESH_EVENT = 'dashboard-counts-refresh'
+const DAY_IN_MS = 24 * 60 * 60 * 1000
+const PENDING_APPROVAL_STATUSES = new Set<string>([
+  ReagentOrderStatus.PENDING,
+  ConsumableOrderStatus.PENDING,
+])
+
+export const PENDING_ORDER_ALERT_DAYS = 2
+export const PENDING_STOCKIN_ALERT_DAYS = 7
+export const APPROVED_ORDER_ALERT_DAYS = 3
+
+function isDateOlderThanDays(dateText: string | null | undefined, days: number): boolean {
+  if (!dateText) {
+    return false
+  }
+  const timestamp = Date.parse(dateText)
+  if (Number.isNaN(timestamp)) {
+    return false
+  }
+  return timestamp < Date.now() - days * DAY_IN_MS
+}
+
+export function isPendingApprovalOverdue(
+  status: unknown,
+  createdAt: string | null | undefined
+): boolean {
+  return typeof status === 'string'
+    && PENDING_APPROVAL_STATUSES.has(status)
+    && isDateOlderThanDays(createdAt, PENDING_ORDER_ALERT_DAYS)
+}
+
+export function isPendingStockinOverdue(stockinTime: string | null | undefined): boolean {
+  return isDateOlderThanDays(stockinTime, PENDING_STOCKIN_ALERT_DAYS)
+}
+
+export function isApprovedOrderOverdue(
+  status: unknown,
+  updatedAt: string | null | undefined
+): boolean {
+  return status === ReagentOrderStatus.APPROVED
+    && isDateOlderThanDays(updatedAt, APPROVED_ORDER_ALERT_DAYS)
+}
 
 /** 清除 Dashboard 页签持久化状态。 */
 export function clearDashboardTab(): void {

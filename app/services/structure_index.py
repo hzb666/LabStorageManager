@@ -17,6 +17,7 @@ from app.models.compound_structure import (
     CompoundStructureSource,
     CompoundStructureStatus,
 )
+from app.services.rdkit_smiles import mol_from_smiles_quiet_h_removal
 
 
 @dataclass(frozen=True)
@@ -183,7 +184,7 @@ def _load_resolved_records(db: Session) -> list[StructureIndexRecord]:
         if not row.smiles_canonical:
             continue
         raw_canonical = str(row.smiles_canonical)
-        mol = Chem.MolFromSmiles(raw_canonical)
+        mol = mol_from_smiles_quiet_h_removal(raw_canonical)
         if mol is None:
             continue
         exact_canonical = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False) or None
@@ -212,11 +213,11 @@ def _load_resolved_records(db: Session) -> list[StructureIndexRecord]:
 def _build_library(
     records: list[StructureIndexRecord],
 ) -> tuple[rdSubstructLibrary.SubstructLibrary, list[StructureIndexRecord]]:
-    mol_holder = rdSubstructLibrary.CachedSmilesMolHolder()
+    mol_holder = rdSubstructLibrary.CachedMolHolder()
     pattern_holder = rdSubstructLibrary.PatternHolder()
     indexed_records: list[StructureIndexRecord] = []
     for record in records:
-        mol_index = mol_holder.AddSmiles(record.smiles_canonical)
+        mol_index = mol_holder.AddMol(record.mol)
         fingerprint_index = pattern_holder.AddFingerprint(pattern_holder.MakeFingerprint(record.mol))
         if mol_index != fingerprint_index:
             raise RuntimeError("RDKit SubstructLibrary holder indexes diverged")
@@ -228,7 +229,7 @@ def _parse_query_molecule(*, query: str, query_format: str):
     if query_format == StructureQueryFormat.SMARTS:
         mol = Chem.MolFromSmarts(_normalize_wildcard_smarts(query))
     elif query_format == StructureQueryFormat.SMILES:
-        mol = Chem.MolFromSmiles(query)
+        mol = mol_from_smiles_quiet_h_removal(query)
     elif query_format == StructureQueryFormat.MOLBLOCK:
         mol = Chem.MolFromMolBlock(query, sanitize=True, removeHs=False)
     else:
@@ -251,7 +252,7 @@ def _normalize_exact_r_group_smarts(query: str) -> str:
     if query_mol is None:
         return wildcard_query
     normalized_smiles = Chem.MolToSmiles(query_mol, canonical=True)
-    normalized_mol = Chem.MolFromSmiles(normalized_smiles)
+    normalized_mol = mol_from_smiles_quiet_h_removal(normalized_smiles)
     if normalized_mol is None:
         return wildcard_query
     return _normalize_wildcard_smarts(Chem.MolToSmarts(normalized_mol))
@@ -306,7 +307,7 @@ def _canonical_query_smiles(mol, *, use_chirality: bool) -> str:
 def _canonical_smiles_from_smiles(smiles: str | None, *, use_chirality: bool) -> str | None:
     if not smiles:
         return None
-    mol = Chem.MolFromSmiles(smiles)
+    mol = mol_from_smiles_quiet_h_removal(smiles)
     if mol is None:
         return None
     return Chem.MolToSmiles(mol, canonical=True, isomericSmiles=use_chirality) or None

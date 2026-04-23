@@ -50,6 +50,10 @@ SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_2_initials ON chemical_name_map (alias_2_initials)",
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_3_pinyin ON chemical_name_map (alias_3_pinyin)",
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_alias_3_initials ON chemical_name_map (alias_3_initials)",
+    # 品牌主数据 autocomplete 与拼音搜索字段。
+    "CREATE INDEX IF NOT EXISTS ix_reagent_brand_active_name_normalized ON reagent_brand (is_active, name_normalized)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_brand_active_name_pinyin ON reagent_brand (is_active, name_pinyin)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_brand_active_name_pinyin_initials ON reagent_brand (is_active, name_pinyin_initials)",
 )
 
 
@@ -127,6 +131,9 @@ SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_group_identity ON common_shelf_group (cas_number, brand_normalized, specification_normalized)",
     # 化学名称映射筛选。
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_category ON chemical_name_map (category)",
+    # 品牌主数据筛选与更新时间排序。
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_reagent_brand_name_normalized ON reagent_brand (name_normalized)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_brand_active_updated_at_id ON reagent_brand (is_active, updated_at DESC, id DESC)",
     # 常用货架操作日志审计查询。
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_operator_created_at ON common_shelf_operation_log (operator_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_common_shelf_operation_log_action_created_at ON common_shelf_operation_log (action, created_at DESC)",

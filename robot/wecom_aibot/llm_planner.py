@@ -365,18 +365,22 @@ class LSMIntentPlanner:
             return None
         return _parse_cas_resolution_decision(_extract_output_text(data))
 
-    async def broaden_name_search_queries(
+    async def filter_inventory_name_candidates(
         self,
         *,
         user_text: str,
-        failed_query: str,
-    ) -> list[str]:
-        payload = _build_name_search_broaden_payload(
+        search_keyword: str,
+        candidates: list[dict[str, Any]],
+    ) -> list[int] | None:
+        if not candidates:
+            return []
+        payload = _build_inventory_name_filter_payload(
             model=self.model,
             api_style=self.api_style,
             user_text=user_text,
-            failed_query=failed_query,
-            max_output_tokens=min(self.max_output_tokens, 180),
+            search_keyword=search_keyword,
+            candidates=candidates,
+            max_output_tokens=min(self.max_output_tokens, 220),
         )
         try:
             data = await asyncio.to_thread(
@@ -387,12 +391,12 @@ class LSMIntentPlanner:
                 payload,
             )
         except requests.Timeout:
-            logger.warning("wecom_aibot_name_search_broaden_timeout")
-            return []
+            logger.warning("wecom_aibot_inventory_name_filter_timeout")
+            return None
         except requests.RequestException as exc:
-            logger.warning("wecom_aibot_name_search_broaden_failed type=%s", type(exc).__name__)
-            return []
-        return _parse_name_search_broaden_queries(_extract_output_text(data), failed_query)
+            logger.warning("wecom_aibot_inventory_name_filter_failed type=%s", type(exc).__name__)
+            return None
+        return _parse_inventory_name_filter_selection(_extract_output_text(data), len(candidates))
 
     async def parse_return_request(
         self,
@@ -762,17 +766,22 @@ def _build_reply_polish_payload(
     }
 
 
-def _build_name_search_broaden_payload(
+def _build_inventory_name_filter_payload(
     *,
     model: str,
     api_style: Literal["responses", "chat_completions"],
     user_text: str,
-    failed_query: str,
+    search_keyword: str,
+    candidates: list[dict[str, Any]],
     max_output_tokens: int,
 ) -> dict[str, Any]:
-    instructions = _name_search_broaden_instructions()
+    instructions = _inventory_name_filter_instructions()
     user_content = json.dumps(
-        {"user_text": user_text, "failed_query": failed_query},
+        {
+            "user_text": user_text,
+            "search_keyword": search_keyword,
+            "candidates": candidates[:100],
+        },
         ensure_ascii=False,
     )
     if api_style == "chat_completions":
@@ -948,6 +957,10 @@ def _instructions(search_limit: int) -> str:
         "个人记录、订单查询或澄清回复；不要被单个关键词固定到某个工具。"
         "用户问个人相关借用、暂存、待入库或订单时，结合完整语义选择个人记录工具；"
         "如果同时给出具体化学品或订单对象，可以查询对应对象而不是只按“我的”固定路由。"
+        "库存名称查询的 keyword 应是用于召回候选的搜索词，而不是必须照抄用户原话；"
+        "用户给出位置、取代、衍生物、类似物、不规范写法或宽泛结构描述时，"
+        "优先选择能召回候选的核心名称、主体名称、通用名、英文名或等价别名，"
+        "候选是否符合用户原始限定由系统在查询后再筛选。"
         "库存、试剂订单、耗材订单的名称搜索默认是包含搜索；"
         "exact=true 只适合用户明确要求名称完整一致、精确匹配或完全等于某名称的情况。"
         "对位、邻位、间位、取代、衍生物、类似物、带某基团等化学修饰描述"
@@ -966,7 +979,8 @@ def _instructions(search_limit: int) -> str:
         '"quantity_mode":"used或remaining","quantity_value":20,"quantity_unit":"毫升"}}；'
         '{"action":"help"}；'
         '{"action":"reply","reply":"简短中文回复"}。'
-        f"列表查询 limit 默认 {search_limit}，最大 10。"
+        "库存名称搜索会由系统拉取较多候选，最终回复再截断展示。"
+        f"其他列表查询 limit 默认 {search_limit}。"
     )
 
 
@@ -1040,6 +1054,19 @@ def _cas_resolution_decision_instructions() -> str:
     )
 
 
+def _inventory_name_filter_instructions() -> str:
+    return (
+        "你只负责根据用户原始问题，从库存名称搜索候选中选择可能符合条件的记录。"
+        "只输出 JSON object，不输出 Markdown。"
+        "只能依据候选里的名称、英文名和别名判断，不要使用 CAS 或库存数量做化学推断。"
+        "如果用户有对位、邻位、间位、取代、衍生物、类似物等限定，"
+        "优先保留名称上可能符合这些限定的候选；明显不符合的候选不要选。"
+        "如果用户只是普通名称查询，没有额外限定，选择最相关的候选。"
+        "最多选择 10 个，按相关性排序；如果没有可能符合的候选，返回空数组。"
+        '输出格式：{"selected_indices":[1,3]}，索引来自候选的 index 字段。'
+    )
+
+
 def _return_quantity_instructions() -> str:
     return (
         "你只负责理解用户归还库存时表达的是用量还是归还后剩余量，并换算到库存单位。"
@@ -1100,21 +1127,6 @@ def _reply_polish_instructions() -> str:
         "让回复更短；如果这些字段能直接回答用户问题或用于区分候选，可以保留。"
         "即使用户追问，也只能使用安全 facts 中已经出现的信息，不能突破安全边界。"
         "回复 1 到 5 行，中文，纯文本，不使用 Markdown 表格。"
-    )
-
-
-def _name_search_broaden_instructions() -> str:
-    return (
-        "你负责在库存名称查询没有结果时，提出更小、更宽的库存名称搜索词。"
-        "只输出 JSON object，不输出 Markdown。"
-        "不要回答库存事实，不要编造系统里有什么；你只决定下一步搜索词。"
-        "搜索词可以来自用户原话中的核心化学品、主体名称、通用名、英文名、别名、"
-        "商品常用名、可能的简称，或你非常确定的等价名称，用于做包含搜索。"
-        "当用户给的是化学修饰、位置、取代模式、类似物、不规范写法或不确定名称时，"
-        "可以去掉限定词、翻译中英文、改用同义名或保留最小主体词，让库存查询先找候选。"
-        "当原查询已经足够短或无法合理宽化时，返回空列表。"
-        "最多返回 3 个，按最可能有用的顺序排列；不要返回完整失败查询本身。"
-        '输出格式：{"queries":["更宽关键词1","更宽关键词2"]}。'
     )
 
 
@@ -1237,32 +1249,33 @@ def _parse_cas_resolution_decision(text: str) -> bool | None:
     return decision if isinstance(decision, bool) else None
 
 
-def _parse_name_search_broaden_queries(text: str, failed_query: str) -> list[str]:
+def _parse_inventory_name_filter_selection(text: str, candidate_count: int) -> list[int] | None:
     raw = _extract_json_object_text(text)
     if not raw:
-        return []
+        return None
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        return []
+        return None
     if not isinstance(payload, dict):
-        return []
-    queries = payload.get("queries")
-    if not isinstance(queries, list):
-        return []
-
-    normalized_failed = failed_query.strip()
-    result: list[str] = []
-    seen: set[str] = set()
-    for item in queries:
-        if not isinstance(item, str):
+        return None
+    indices = payload.get("selected_indices")
+    if not isinstance(indices, list):
+        return None
+    result: list[int] = []
+    seen: set[int] = set()
+    for item in indices:
+        if isinstance(item, bool):
             continue
-        query = item.strip()
-        if not query or query == normalized_failed or query in seen:
+        if isinstance(item, str) and item.strip().isdigit():
+            item = int(item.strip())
+        if not isinstance(item, int):
             continue
-        result.append(query)
-        seen.add(query)
-        if len(result) >= 3:
+        if item < 1 or item > candidate_count or item in seen:
+            continue
+        result.append(item)
+        seen.add(item)
+        if len(result) >= 10:
             break
     return result
 

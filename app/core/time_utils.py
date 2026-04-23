@@ -1,5 +1,6 @@
 from datetime import datetime, timezone, timedelta
 from app.core.constants import CHINA_UTC_OFFSET_HOURS
+from app.core.config import settings
 
 
 def get_utc_now() -> datetime:
@@ -52,3 +53,51 @@ def utc_iso_str(dt: datetime | None) -> str | None:
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt.isoformat() + 'Z'
+
+
+def _get_display_offset_delta() -> timedelta:
+    offset_text = settings.display_utc_offset
+    sign = 1 if offset_text.startswith("+") else -1
+    hours_text, minutes_text = offset_text[1:].split(":", 1)
+    return timedelta(hours=sign * int(hours_text), minutes=sign * int(minutes_text))
+
+
+def get_display_timezone_label() -> str:
+    return f"UTC{settings.display_utc_offset}"
+
+
+def to_display_time(dt: datetime | None) -> datetime | None:
+    """
+    Convert a stored UTC datetime into the configured fixed display offset.
+
+    Non-browser-rendered outputs (downloads/exports/text reports) should use
+    this helper instead of hand-written offset math at call sites.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt + _get_display_offset_delta()
+
+
+def parse_utc_datetime(value: object) -> datetime | None:
+    """
+    Parse a UTC datetime string into the project's naive UTC datetime shape.
+
+    Accepts both the legacy internal form without suffix and the API/cache form
+    with a trailing Z, so old Redis/local metadata remains readable.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed

@@ -27,6 +27,23 @@ class UserOperationAction(str, Enum):
     UPDATE_USER_ROLE = "update_user_role"
     RESET_USER_PASSWORD = "reset_user_password"
     UPDATE_USER_SENSITIVE_FIELDS = "update_user_sensitive_fields"
+    CREATE_REAGENT_BRAND = "create_reagent_brand"
+    UPDATE_REAGENT_BRAND = "update_reagent_brand"
+    DELETE_REAGENT_BRAND = "delete_reagent_brand"
+    CREATE_CHEMICAL_NAME_MAP = "create_chemical_name_map"
+    UPDATE_CHEMICAL_NAME_MAP = "update_chemical_name_map"
+    DELETE_CHEMICAL_NAME_MAP = "delete_chemical_name_map"
+    CREATE_ANNOUNCEMENT = "create_announcement"
+    UPDATE_ANNOUNCEMENT = "update_announcement"
+    DELETE_ANNOUNCEMENT = "delete_announcement"
+    UPDATE_ANNOUNCEMENT_PIN = "update_announcement_pin"
+    UPDATE_ANNOUNCEMENT_VISIBILITY = "update_announcement_visibility"
+    UPLOAD_ANNOUNCEMENT_IMAGE = "upload_announcement_image"
+    DELETE_ANNOUNCEMENT_IMAGE = "delete_announcement_image"
+    DELETE_SESSION = "delete_session"
+    DELETE_OTHER_SESSIONS = "delete_other_sessions"
+    REFRESH_SESSION = "refresh_session"
+    UPDATE_SESSION = "update_session"
 
 
 class UserOperationLog(SQLModel, table=True):

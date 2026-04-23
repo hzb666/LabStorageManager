@@ -256,7 +256,7 @@ npm run dev
 
 | 变量 | 示例值 | 说明 |
 | --- | --- | --- |
-| `CHEM_STRUCTURE_FEATURE_ENABLED` | `false` | 是否启用结构缓存和子结构检索接口 |
+| `CHEM_STRUCTURE_FEATURE_ENABLED` | `true` | 是否启用结构缓存和子结构检索接口 |
 | `CHEM_RESOLVER_PUBCHEM_ENABLED` | `true` | 是否允许通过 PubChem 解析 CAS 结构 |
 | `CHEM_PUBCHEM_RATE_LIMIT_PER_SECOND` | `2` | PubChem 请求速率上限 |
 | `CHEM_PUBCHEM_TIMEOUT_SECONDS` | `20` | PubChem 请求超时 |

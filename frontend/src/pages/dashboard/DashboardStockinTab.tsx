@@ -2,8 +2,8 @@
 import { useMemo, useState, useCallback } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
-import { useQueryClient } from '@tanstack/react-query'
-import { ArrowRightLeft } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, ArrowRightLeft } from 'lucide-react'
 import { useForm, useWatch } from 'react-hook-form'
 import * as v from 'valibot'
 
@@ -19,7 +19,6 @@ import { inventoryAPI, reagentOrderAPI } from '@/api/client'
 import type { StockInPayload } from '@/api/client'
 import type { FilterAPI } from '@/hooks/useTableState'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
-import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from '@/store/useStore'
 import {
   StockInFormSchema,
@@ -34,6 +33,7 @@ import {
   toValidationErrors,
 } from '@/lib/validationSchemas'
 import { defaultStockInValues, getStockInFormFields } from '@/lib/formConfigs'
+import { getReagentBrandOptionsQueryOptions } from '@/lib/reagentBrandOptions'
 
 import {
   type PendingStockinItem,
@@ -42,10 +42,33 @@ import {
   ADMIN_STOCKIN_SEARCH_FIELDS,
   DASHBOARD_EMPTY_STATUS_OPTIONS,
   buildLocalListData,
+  isPendingStockinOverdue,
   requestDashboardCountsRefresh,
 } from '../../lib/dashboardUtils'
 
 const pendingStockinColumnHelper = createColumnHelper<PendingStockinItem>()
+
+function renderPendingStockinBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive"
+      title="已超时"
+      aria-label="已超时"
+    >
+      <AlertTriangle className="size-3" />
+      超时
+    </span>
+  )
+}
+
+function getPendingStockinTableTitle(managementMode: boolean) {
+  return (
+    <>
+      <ArrowRightLeft className="w-5 h-5" />
+      {managementMode ? '全部暂存试剂' : '待入库（暂存）'}
+    </>
+  )
+}
 
 // 待入库列表只请求一次接口，再包装成 `FilterTable` 需要的本地搜索和分页结构。
 function createPendingStockinDashboardAPI(managementMode: boolean): FilterAPI {
@@ -86,8 +109,19 @@ function createStockinColumns(
     }),
     pendingStockinColumnHelper.accessor('stockin_time', {
       header: '暂存时间',
-      size: 180,
-      cell: (info) => formatDateTime(info.getValue()),
+      size: 220,
+      cell: (info) => {
+        const item = info.row.original as PendingStockinItem
+        const showOverdue = (
+          item.is_overdue ?? isPendingStockinOverdue(item.stockin_time)
+        )
+        return (
+          <div className="flex items-center gap-2">
+            <span>{formatDateTime(info.getValue())}</span>
+            {showOverdue ? renderPendingStockinBadge() : null}
+          </div>
+        )
+      },
     }),
   ]
 
@@ -157,6 +191,7 @@ function buildPendingStockinPayload(formData: StockInFormData): StockInPayload {
 // 弹窗展示当前待入库记录名称、CAS、数量，并承载统一的入库表单。
 function DashboardStockinDialog({
   dialog,
+  brandOptions,
 }: Readonly<{
   dialog: {
     selectedStockin: PendingStockinItem | null
@@ -165,6 +200,7 @@ function DashboardStockinDialog({
     onClose: () => void
     onSubmit: () => void
   }
+  brandOptions: { label: string; value: string }[]
 }>) {
   const {
     selectedStockin,
@@ -194,7 +230,7 @@ function DashboardStockinDialog({
         <form className="space-y-4" onSubmit={onSubmit}>
           <BaseForm
             form={stockinForm}
-            fields={getStockInFormFields(stockinUnit)}
+            fields={getStockInFormFields(stockinUnit, undefined, { brandOptions })}
           />
 
           <EditDialogActions
@@ -215,8 +251,8 @@ export function DashboardStockinTab({
   managementMode = false,
 }: Readonly<{ managementMode?: boolean }>) {
   const currentUser = useAuthStore((state) => state.user)
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const queryClient = useQueryClient()
+  const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
 
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
   const [stockinLoading, setStockinLoading] = useState(false)
@@ -229,12 +265,13 @@ export function DashboardStockinTab({
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      queryClient.invalidateQueries({
+        queryKey: managementMode ? ['dashboard', 'admin', 'stockin'] : ['dashboard', 'stockin'],
+      }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
     ])
-    clearRoomStale('inventory')
     requestDashboardCountsRefresh()
-  }, [clearRoomStale, queryClient])
+  }, [managementMode, queryClient])
 
   const pendingStockinDashboardAPI = useMemo(
     () => createPendingStockinDashboardAPI(managementMode),
@@ -250,11 +287,6 @@ export function DashboardStockinTab({
   // 提交前先在前端校验 `remaining_quantity` 上限；成功后失效 `dashboard/stockin`、`inventory` 并刷新统计。
   const handleStockin = stockinForm.handleSubmit(async (formData) => {
     if (!selectedStockin) return
-    if (!selectedStockin.order_id) {
-      toast.error('缺少订单关联信息，无法入库，请联系管理员')
-      return
-    }
-
     const remaining = formData.remaining_quantity
     const maxValue = resolveSpecificationQuantity(
       formData.specification,
@@ -271,7 +303,12 @@ export function DashboardStockinTab({
 
     setStockinLoading(true)
     try {
-      await reagentOrderAPI.stockIn(selectedStockin.order_id, buildPendingStockinPayload(formData))
+      const payload = buildPendingStockinPayload(formData)
+      if (selectedStockin.order_id) {
+        await reagentOrderAPI.stockIn(selectedStockin.order_id, payload)
+      } else {
+        await inventoryAPI.completePendingStockin(selectedStockin.inventory_id, payload)
+      }
       setSelectedStockin(null)
       stockinForm.reset(defaultStockInValues)
       await refreshTables()
@@ -352,16 +389,12 @@ export function DashboardStockinTab({
         statusOptions={DASHBOARD_EMPTY_STATUS_OPTIONS}
         searchFieldOptions={managementMode ? ADMIN_STOCKIN_SEARCH_FIELDS : BORROW_SEARCH_FIELDS}
         searchPlaceholder={managementMode ? '搜索名称、CAS号、暂存人...' : '搜索名称、CAS号...'}
-        title={
-          <>
-            <ArrowRightLeft className="w-5 h-5" />{' '}
-            {managementMode ? '全部暂存试剂' : '待入库（暂存）'}
-          </>
-        }
+        title={getPendingStockinTableTitle(managementMode)}
         enableExpandAll={true}
       />
       <DashboardStockinDialog
         dialog={stockinDialog}
+        brandOptions={brandOptions}
       />
     </>
   )

@@ -9,8 +9,8 @@ from mcp.server.fastmcp import FastMCP
 from lsm_mcp.cli_runner import login_lsm_cli, run_lsm_cli
 from lsm_mcp.help_catalog import build_help_result
 
-MAX_LIMIT = 20
-DEFAULT_LIMIT = 10
+MAX_LIMIT = 100
+DEFAULT_LIMIT = 50
 
 mcp = FastMCP("LabStorageManager", stateless_http=True, json_response=True)
 

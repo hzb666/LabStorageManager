@@ -2,12 +2,12 @@ import type { LogItem } from '@/api/client'
 
 import { cn } from '@/lib/utils'
 import { buildSections } from './operation-logs/expandedRowSections'
+import { getOperationLogDetailText } from './operation-logs/logSummaryText'
 import {
   asRecord,
   type DetailSection,
   formatText,
   hasValue,
-  type LogRecord,
   type Tone,
 } from './operation-logs/expandedRowUtils'
 import { getLogTypeLabel } from './operation-logs/logTypeMeta'
@@ -18,12 +18,6 @@ const TONE_CLASS: Record<Tone, string> = {
   warning: 'text-orange-600',
   danger: 'text-red-600',
   info: 'text-blue-600',
-}
-
-function getDetailText(item: LogItem, fullData: LogRecord): string {
-  const detail = item.detail || ''
-  if (fullData.is_cli !== true) return detail
-  return detail.startsWith('[cli] ') ? detail : `[cli] ${detail}`
 }
 
 function renderSections(sections: DetailSection[]) {
@@ -71,7 +65,7 @@ function renderSections(sections: DetailSection[]) {
 
 export function OperationLogExpandedRow({ item }: Readonly<{ item: LogItem }>) {
   const fullData = asRecord(item.full_data ?? item)
-  const detail = getDetailText(item, fullData)
+  const detail = getOperationLogDetailText(item)
 
   return (
     <div className="border-b border-border bg-muted/20 px-4 py-4">

@@ -875,7 +875,7 @@ class WecomAibotSelfTest(unittest.TestCase):
         )
 
         bind_reply = asyncio.run(orchestrator.answer(text="绑定 alice secret", payload=_payload()))
-        unbind_reply = asyncio.run(orchestrator.answer(text="解绑", payload=_payload()))
+        unbind_reply = asyncio.run(orchestrator.answer(text="帮我退出登录这个账号", payload=_payload()))
 
         self.assertIn("绑定成功", bind_reply)
         self.assertIn("确认解除", unbind_reply)
@@ -885,7 +885,7 @@ class WecomAibotSelfTest(unittest.TestCase):
         self.assertEqual("已取消。", still_bound_reply)
         self.assertEqual("alice", store.get_binding("u1")["username"])
 
-        second_unbind_reply = asyncio.run(orchestrator.answer(text="取消绑定", payload=_payload()))
+        second_unbind_reply = asyncio.run(orchestrator.answer(text="我想解除绑定当前账号", payload=_payload()))
         self.assertIn("确认解除", second_unbind_reply)
 
         confirm_reply = asyncio.run(orchestrator.answer(text="确认", payload=_payload()))
@@ -930,7 +930,7 @@ class WecomAibotSelfTest(unittest.TestCase):
         self.assertIn(
             (
                 "inventory_search_by_name",
-                {"keyword": "乙醇", "limit": 5, "user_token": "user-secret-token"},
+                {"keyword": "乙醇", "limit": 100, "user_token": "user-secret-token"},
             ),
             mcp.calls,
         )
@@ -957,7 +957,7 @@ class WecomAibotSelfTest(unittest.TestCase):
         self.assertIn(
             (
                 "inventory_search_by_name",
-                {"keyword": "乙醇", "limit": 5, "user_token": "expired-token"},
+                {"keyword": "乙醇", "limit": 100, "user_token": "expired-token"},
             ),
             mcp.calls,
         )

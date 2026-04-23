@@ -168,8 +168,10 @@ class SSERoom:
 # SSE runtime tuning
 # 单连接待发送队列上限：超过后触发慢连接治理逻辑
 SSE_CLIENT_QUEUE_MAXSIZE = 200
-# 连续队列满阈值：达到后主动断开慢连接，防止持续丢消息与日志风暴
-SSE_SLOW_CLIENT_QUEUE_FULL_STREAK_LIMIT = 5
+# 单房间 replay 缓冲上限：用于连接恢复时补发最近事件
+SSE_REPLAY_BUFFER_MAX_EVENTS = 200
+# 队列满阈值：一旦丢事件就主动断开，避免连接在静默期继续携带过期快照
+SSE_SLOW_CLIENT_QUEUE_FULL_STREAK_LIMIT = 1
 # SSE 心跳间隔（秒）：用于保活并帮助代理/Nginx识别活跃连接
 SSE_HEARTBEAT_SECONDS = 25
 # Redis pubsub 无法建立订阅时的重试间隔（秒）

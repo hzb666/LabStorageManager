@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlmodel import Session
 
+from app.core.time_utils import utc_iso_str
 from app.models.consumable_order import ConsumableOrder
 from app.models.consumable_order_operation_log import (
     ConsumableOrderOperationAction,
@@ -92,8 +93,8 @@ def build_reagent_order_snapshot(order: ReagentOrder) -> dict[str, Any]:
         "nt": order.notes,
         "ap": order.applicant_id,
         "st": _enum_value(order.status),
-        "cr": order.created_at.isoformat() if order.created_at else None,
-        "up": order.updated_at.isoformat() if order.updated_at else None,
+        "cr": utc_iso_str(order.created_at),
+        "up": utc_iso_str(order.updated_at),
     }
 
 
@@ -113,8 +114,8 @@ def build_consumable_order_snapshot(order: ConsumableOrder) -> dict[str, Any]:
         "nt": order.notes,
         "ap": order.applicant_id,
         "st": _enum_value(order.status),
-        "cr": order.created_at.isoformat() if order.created_at else None,
-        "up": order.updated_at.isoformat() if order.updated_at else None,
+        "cr": utc_iso_str(order.created_at),
+        "up": utc_iso_str(order.updated_at),
     }
 
 

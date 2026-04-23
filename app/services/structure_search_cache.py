@@ -12,8 +12,8 @@ from app.services.cas_utils import normalize_cas
 from app.services.structure_index import StructureSearchHit
 
 
-DEFAULT_STRUCTURE_SEARCH_CACHE_TTL_SECONDS = 30 * 60
-DEFAULT_STRUCTURE_SEARCH_CACHE_MAX_ENTRIES = 64
+DEFAULT_STRUCTURE_SEARCH_CACHE_TTL_SECONDS = 12 * 60 * 60
+DEFAULT_STRUCTURE_SEARCH_CACHE_MAX_ENTRIES = 128
 
 
 @dataclass(frozen=True)

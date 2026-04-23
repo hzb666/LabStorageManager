@@ -67,6 +67,26 @@ const shouldStartSearch = (value: string, minSearchLength: number): boolean => {
   return normalizeSearchKeyword(trimmed).length >= minSearchLength
 }
 
+const shouldShowAutocompleteOptionsOnFocus = (
+  showAllOnFocus: boolean,
+  isInputFocused: boolean,
+  inputValue: string,
+) => showAllOnFocus && isInputFocused && !normalizeSearchKeyword(inputValue)
+
+const shouldOpenAutocompletePopover = (params: {
+  open: boolean
+  canSearch: boolean
+  filteredOptionsLength: number
+  shouldShowAllOptionsOnFocus: boolean
+}) => {
+  const { open, canSearch, filteredOptionsLength, shouldShowAllOptionsOnFocus } = params
+  return (
+    (open || shouldShowAllOptionsOnFocus) &&
+    (canSearch || shouldShowAllOptionsOnFocus) &&
+    filteredOptionsLength > 0
+  )
+}
+
 const getOptionSearchIndex = (label: string): OptionSearchIndex => {
   const now = Date.now()
   const cached = optionSearchIndexCache.get(label)
@@ -125,26 +145,25 @@ export function Autocomplete({
   showAllOnFocus = false,
 }: Readonly<AutocompleteProps>) {
   const [open, setOpen] = React.useState(false)
+  const [isInputFocused, setIsInputFocused] = React.useState(false)
   const [inputValue, setInputValue] = React.useState(value)
   const [debouncedInputValue, setDebouncedInputValue] = React.useState(value)
   const inputRef = React.useRef<HTMLInputElement>(null)
-  // 选中建议项后抑制搜索，防止下拉菜单闪烁
   const justSelectedRef = React.useRef(false)
   const canSearch = React.useMemo(
     () => shouldStartSearch(debouncedInputValue, minSearchLength),
     [debouncedInputValue, minSearchLength]
   )
-  const shouldShowAllOptions = showAllOnFocus && !normalizeSearchKeyword(debouncedInputValue)
-
-  // 监听外部 value 的变化（保证组件内部状态同步更新）
+  const shouldShowAllOptions = shouldShowAutocompleteOptionsOnFocus(
+    showAllOnFocus,
+    isInputFocused,
+    debouncedInputValue
+  )
   React.useEffect(() => {
     setInputValue(value)
     setDebouncedInputValue(value)
   }, [value])
-
-  // 搜索输入防抖，避免每次按键都触发筛选
   React.useEffect(() => {
-    // 选中建议项后跳过防抖更新，避免触发多余的搜索导致闪烁
     if (justSelectedRef.current) {
       justSelectedRef.current = false
       return
@@ -154,70 +173,64 @@ export function Autocomplete({
     }, 100)
     return () => window.clearTimeout(timer)
   }, [inputValue])
-
-  // 过滤建议列表 (忽略大小写)
   const filteredOptions = React.useMemo(() => {
     if (shouldShowAllOptions) return options
     if (!canSearch) return []
     return options.filter((opt) => isOptionMatched(opt, debouncedInputValue))
   }, [options, debouncedInputValue, canSearch, shouldShowAllOptions])
-
-  // 处理输入变化与搜索触发逻辑
   const handleValueChange = (val: string) => {
     setInputValue(val)
     onChange?.(val)
-
-    setOpen(showAllOnFocus || shouldStartSearch(val, minSearchLength))
+    setOpen((showAllOnFocus && isInputFocused) || shouldStartSearch(val, minSearchLength))
   }
-
-  // 直接处理 Input 的 onChange 事件
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     handleValueChange(val)
   }
-
-  // 处理选中建议
   const handleSelect = (option: AutocompleteOption) => {
     justSelectedRef.current = true
     setOpen(false)
     setInputValue(option.label)
     setDebouncedInputValue(option.label)
     onChange?.(option.label)
-    // 选中后将焦点交还给输入框
     inputRef.current?.focus()
+  }
+  const handleInputFocus = () => {
+    setIsInputFocused(true)
+    if (showAllOnFocus || shouldStartSearch(inputValue, minSearchLength)) {
+      setOpen(true)
+    }
+  }
+  const handleInputBlur = () => {
+    setIsInputFocused(false)
+    setOpen(false)
   }
 
   return (
-    <Command
-      // 关闭 cmdk 内置的过滤，因为我们上面使用了自定义的 filteredOptions 逻辑
-      shouldFilter={false}
-      className={cn('relative w-full', className)}
-    >
+    <Command shouldFilter={false} className={cn('relative w-full', className)}>
       <Popover
-        open={open && (canSearch || shouldShowAllOptions) && filteredOptions.length > 0}
+        open={shouldOpenAutocompletePopover({
+          open,
+          canSearch,
+          filteredOptionsLength: filteredOptions.length,
+          shouldShowAllOptionsOnFocus: shouldShowAllOptions,
+        })}
         onOpenChange={setOpen}
       >
         <PopoverTrigger asChild>
-          {/* Command.Input 会接管键盘的上下箭头和回车事件 */}
-          <Command.Input
-            asChild
-            value={inputValue}
-          >
+          <Command.Input asChild value={inputValue}>
             <Input
               ref={inputRef}
               placeholder={placeholder}
               disabled={disabled}
               className="w-full"
               onChange={handleInputChange}
-              // 点击输入框时，满足搜索门槛才展开
               onClick={() => (
                 showAllOnFocus ||
                 shouldStartSearch(inputValue, minSearchLength)
               ) && setOpen(true)}
-              onFocus={() => (
-                showAllOnFocus ||
-                shouldStartSearch(inputValue, minSearchLength)
-              ) && setOpen(true)}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
             />
           </Command.Input>
         </PopoverTrigger>

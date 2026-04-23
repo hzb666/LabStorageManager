@@ -16,7 +16,10 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
       <Button
         ref={ref}
         disabled={isLoading || disabled}
-        className={cn("relative", className)}
+        className={cn(
+          "relative disabled:[&_.loading-button-spinner]:opacity-80",
+          className,
+        )}
         {...props}
       >
         <div className="grid place-items-center w-full h-full">
@@ -37,13 +40,13 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
               isLoading ? "opacity-100" : "opacity-0 pointer-events-none"
             )}
           >
-            <Loader2 
+            <Loader2
               className={cn(
-                "size-[1.2em] animate-spin shrink-0", 
+                "loading-button-spinner size-[1.2em] animate-spin shrink-0 opacity-80",
                 // ✨ 关键：只有当存在 loadingText 时，才加右间距
-                loadingText ? "mr-2" : "mr-0", 
+                loadingText ? "mr-2" : "mr-0",
                 iconClassName
-              )} 
+              )}
             />
             {/* 只有传入文字才渲染，不传则只显示图标 */}
             {loadingText}

@@ -12,6 +12,7 @@ except Exception:  # pragma: no cover
     inchi = None
 
 from app.models.compound_structure import CompoundStructureStatus
+from app.services.rdkit_smiles import mol_from_smiles_quiet_h_removal
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,7 @@ def _mol_from_smiles(smiles: str | None):
     if not smiles:
         return None
     try:
-        return Chem.MolFromSmiles(smiles)
+        return mol_from_smiles_quiet_h_removal(smiles)
     except Exception:
         return None
 

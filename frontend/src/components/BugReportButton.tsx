@@ -10,9 +10,21 @@
 import { useState, useCallback } from 'react'
 import { Bug, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { useErrorLogger, fetchBackendErrorLogs } from '@/hooks/useErrorLogger'
+import {
+  BACKEND_LOG_PLACEHOLDER,
+  fetchBugReportTimeConfig,
+  fetchBackendErrorLogs,
+  useErrorLogger,
+} from '@/hooks/useErrorLogger'
 import { useAuthStore } from '@/store/useStore'
 import { setBugButtonHiddenUntil } from '@/lib/storage/appUiStorage'
+import {
+  formatLocalDateTimeForFilename,
+  formatLocalDateTimeWithSeconds,
+  formatUtcOffsetDateTimeForFilename,
+  formatUtcOffsetDateTimeWithSeconds,
+  getLocalTimeZoneLabel,
+} from '@/lib/utils'
 import {
   Tooltip,
   TooltipContent,
@@ -44,23 +56,12 @@ export function BugReportButton({
   const { getLogsContent } = useErrorLogger()
   const user = useAuthStore((state) => state.user)
   
-  // 格式化时间
-  const formatTime = (date: Date): string => {
-    return date.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  }
-  
   // 生成文件名
-  const generateFileName = (): string => {
-    const now = new Date()
-    const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    return `bug_report_${timestamp}.txt`
+  const generateFileName = (reportTime: Date, displayUtcOffset?: string): string => {
+    if (displayUtcOffset) {
+      return `bug_report_${formatUtcOffsetDateTimeForFilename(reportTime, displayUtcOffset)}.txt`
+    }
+    return `bug_report_${formatLocalDateTimeForFilename(reportTime)}.txt`
   }
   
   // 下载日志文件
@@ -102,45 +103,55 @@ export function BugReportButton({
     setIsLoading(true)
     
     try {
-      // 1. 获取前端错误日志内容
-      let logContent = getLogsContent()
-      
-      // 2. 尝试获取后端错误日志
-      let backendLogs: string[] = []
-      try {
-        backendLogs = await fetchBackendErrorLogs(24) // 获取最近24小时的日志
-      } catch (error) {
-        console.warn('无法获取后端日志:', error)
-      }
-      
-      // 3. 添加后端日志到内容
-      if (backendLogs.length > 0) {
+      // 1. 统一当前报告时间，避免文件名与正文跨秒
+      const reportTime = new Date()
+
+      // 2. 拉取按钮依赖的运行时配置和后端日志
+      const [timeConfig, backendLogResponse] = await Promise.all([
+        fetchBugReportTimeConfig(),
+        fetchBackendErrorLogs(24),
+      ])
+
+      const reportTimeText = timeConfig
+        ? formatUtcOffsetDateTimeWithSeconds(reportTime, timeConfig.displayUtcOffset)
+        : formatLocalDateTimeWithSeconds(reportTime)
+      const reportTimeZone = timeConfig?.displayTimeZone ?? getLocalTimeZoneLabel(reportTime)
+
+      // 3. 生成前端日志主体
+      let logContent = getLogsContent({
+        reportTime,
+        timeConfig: timeConfig ?? undefined,
+      })
+
+      // 4. 添加后端日志到内容
+      const backendSectionHeader = `\n--- 后端错误日志（共 ${backendLogResponse.count} 条） ---\n`
+      if (backendLogResponse.logs.length > 0) {
         logContent = logContent.replace(
-          '\n--- 后端错误日志 ---\n',
-          `\n--- 后端错误日志 (共 ${backendLogs.length} 条) ---\n\n` +
-          backendLogs.join('\n')
+          BACKEND_LOG_PLACEHOLDER,
+          `${backendSectionHeader}\n${backendLogResponse.logs.join('\n')}\n`,
         )
       } else {
         logContent = logContent.replace(
-          '\n--- 后端错误日志 ---\n',
-          '\n--- 后端错误日志 ---\n(无后端错误记录，或权限不足)'
+          BACKEND_LOG_PLACEHOLDER,
+          `${backendSectionHeader}(无后端错误记录，或权限不足)\n`,
         )
       }
-      
-      // 4. 添加用户说明
+
+      // 5. 添加用户说明
       const userNote = `\n\n--- 用户说明 ---\n请在此处描述您遇到的问题:\n\n\n\n` +
         `---------------\n` +
         `此邮件由实验室库存管理系统自动生成\n` +
-        `生成时间: ${formatTime(new Date())}\n` +
+        `生成时间: ${reportTimeText}\n` +
+        `时区: ${reportTimeZone}\n` +
         `用户: ${user?.username || '未登录'}\n`
       
       logContent += userNote
       
-      // 5. 下载日志文件
-      const fileName = generateFileName()
+      // 6. 下载日志文件
+      const fileName = generateFileName(reportTime, timeConfig?.displayUtcOffset)
       downloadLogFile(logContent, fileName)
       
-      // 6. 打开mailto链接
+      // 7. 打开mailto链接
       const mailtoBody = `${EMAIL_SUBJECT}\n\n` +
         `***提示: 错误日志文件已自动下载，请作为附件添加到此邮件中。***\n\n` +
         `您好，\n\n` +
@@ -148,11 +159,11 @@ export function BugReportButton({
         `文件名: ${fileName}\n\n` +
         `--- 问题描述 ---\n请在此处描述问题...\n\n\n` +
         `此邮件由系统自动生成\n` +
-        `生成时间: ${formatTime(new Date())}`
+        `生成时间: ${reportTimeText}\n` +
+        `时区: ${reportTimeZone}`
       
       const mailtoLink = createMailtoLink(mailtoBody)
       window.open(mailtoLink, '_blank')
-      
     } catch (error) {
       console.error('生成反馈失败:', error)
       alert('生成反馈失败，请重试')

@@ -1,6 +1,11 @@
 /** 前端错误日志收集 Hook。 */
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from '@/api/client'
+import {
+  formatLocalDateTimeWithSeconds,
+  formatUtcOffsetDateTimeWithSeconds,
+  getLocalTimeZoneLabel,
+} from '@/lib/utils'
 import { useAuthStore } from '@/store/useStore'
 
 // 错误日志条目类型
@@ -21,10 +26,28 @@ export interface UserEnvironment {
   userAgent: string
   currentUrl: string
   timestamp: string
+  timeZone: string
 }
 
 // 最大保存的错误日志数量
 const MAX_ERROR_LOGS = 50
+
+export const BACKEND_LOG_PLACEHOLDER = '\n--- 后端错误日志 ---\n(点击反馈按钮后自动获取)\n'
+
+export interface BackendErrorLogsResponse {
+  logs: string[]
+  count: number
+}
+
+export interface BugReportTimeConfig {
+  displayUtcOffset: string
+  displayTimeZone: string
+}
+
+interface GetLogsContentOptions {
+  reportTime?: Date
+  timeConfig?: BugReportTimeConfig
+}
 
 // 获取浏览器信息
 function getBrowserInfo(): string {
@@ -49,13 +72,16 @@ function getOSInfo(): string {
 
 // 获取用户环境信息
 export function getUserEnvironment(): UserEnvironment {
+  const now = new Date()
+
   return {
     browser: getBrowserInfo(),
     os: getOSInfo(),
     screen: `${window.screen.width}x${window.screen.height}`,
     userAgent: navigator.userAgent,
     currentUrl: window.location.href,
-    timestamp: new Date().toISOString(),
+    timestamp: formatLocalDateTimeWithSeconds(now),
+    timeZone: getLocalTimeZoneLabel(now),
   }
 }
 
@@ -63,7 +89,7 @@ export function getUserEnvironment(): UserEnvironment {
 interface UseErrorLoggerReturn {
   errorLogs: ErrorLogEntry[]
   clearLogs: () => void
-  getLogsContent: () => string
+  getLogsContent: (options?: GetLogsContentOptions) => string
 }
 
 function useMountedRef() {
@@ -83,18 +109,6 @@ export function useErrorLogger(): UseErrorLoggerReturn {
   const isMountedRef = useMountedRef()
   const user = useAuthStore((state) => state.user)
   
-  // 格式化时间
-  const formatTime = (date: Date): string => {
-    return date.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  }
-  
   // 添加错误日志
   const addErrorLog = useCallback((entry: Omit<ErrorLogEntry, 'timestamp'>) => {
     if (!isMountedRef.current) {
@@ -103,7 +117,7 @@ export function useErrorLogger(): UseErrorLoggerReturn {
 
     const newEntry: ErrorLogEntry = {
       ...entry,
-      timestamp: formatTime(new Date()),
+      timestamp: new Date().toISOString(),
     }
     
     setErrorLogs(prev => {
@@ -225,12 +239,22 @@ export function useErrorLogger(): UseErrorLoggerReturn {
   }, [])
   
   // 获取日志内容
-  const getLogsContent = useCallback((): string => {
+  const getLogsContent = useCallback((options?: GetLogsContentOptions): string => {
     const env = getUserEnvironment()
     const userInfo = user ? `${user.username} (${user.full_name || user.username})` : '未登录'
-    
+    const reportTime = options?.reportTime ?? new Date()
+    const reportTimeZone = options?.timeConfig?.displayTimeZone ?? getLocalTimeZoneLabel(reportTime)
+    const formatReportTime = (value: string | Date): string => {
+      if (!options?.timeConfig) {
+        return formatLocalDateTimeWithSeconds(value)
+      }
+      return formatUtcOffsetDateTimeWithSeconds(value, options.timeConfig.displayUtcOffset)
+    }
+
     let content = `=== 实验室库存管理系统 Bug反馈日志 ===\n`
-    content += `提交时间: ${formatTime(new Date())}\n`
+    content += `提交时间: ${formatReportTime(reportTime)}\n`
+    content += `报告时区: ${reportTimeZone}\n`
+    content += `浏览器时区: ${env.timeZone}\n`
     content += `用户: ${userInfo}\n`
     content += `浏览器: ${env.browser}\n`
     content += `操作系统: ${env.os}\n`
@@ -243,7 +267,7 @@ export function useErrorLogger(): UseErrorLoggerReturn {
       content += '(无前端错误记录)\n\n'
     } else {
       errorLogs.forEach((log, index) => {
-        content += `[${index + 1}] ${log.timestamp} [${log.type.toUpperCase()}]\n`
+        content += `[${index + 1}] ${formatReportTime(log.timestamp)} [${log.type.toUpperCase()}]\n`
         content += `    消息: ${log.message}\n`
         if (log.url) content += `    URL: ${log.url}\n`
         if (log.status) content += `    状态码: ${log.status}\n`
@@ -254,8 +278,7 @@ export function useErrorLogger(): UseErrorLoggerReturn {
       })
     }
     
-    content += `\n--- 后端错误日志 ---\n`
-    content += `(点击反馈按钮后自动获取)\n`
+    content += BACKEND_LOG_PLACEHOLDER
     
     return content
   }, [errorLogs, user])
@@ -267,16 +290,45 @@ export function useErrorLogger(): UseErrorLoggerReturn {
   }
 }
 
-// 获取后端错误日志
-export async function fetchBackendErrorLogs(hours: number = 24): Promise<string[]> {
+interface BugReportTimeConfigResponse {
+  display_utc_offset?: unknown
+  display_timezone?: unknown
+}
+
+export async function fetchBugReportTimeConfig(): Promise<BugReportTimeConfig | null> {
   try {
-    const response = await api.get<{ logs: string[]; count: number }>('/error-logs', {
+    const response = await api.get<BugReportTimeConfigResponse>('/runtime/cache-version')
+    const displayUtcOffset =
+      typeof response.data.display_utc_offset === 'string'
+        ? response.data.display_utc_offset.trim()
+        : ''
+    const displayTimeZone =
+      typeof response.data.display_timezone === 'string'
+        ? response.data.display_timezone.trim()
+        : ''
+    if (!displayUtcOffset || !displayTimeZone) {
+      return null
+    }
+    return { displayUtcOffset, displayTimeZone }
+  } catch (error) {
+    console.warn('无法获取 bug report 展示时区配置:', error)
+    return null
+  }
+}
+
+// 获取后端错误日志
+export async function fetchBackendErrorLogs(hours: number = 24): Promise<BackendErrorLogsResponse> {
+  try {
+    const response = await api.get<BackendErrorLogsResponse>('/error-logs', {
       params: { hours },
     })
-    return response.data.logs
+    return response.data
   } catch (error) {
     // 如果不是管理员，可能无法获取后端日志
     console.warn('无法获取后端日志:', error)
-    return []
+    return {
+      logs: [],
+      count: 0,
+    }
   }
 }

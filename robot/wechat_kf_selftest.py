@@ -321,6 +321,19 @@ class WechatKfSelfTest(unittest.TestCase):
         self.assertEqual([], orchestrator.calls)
         _remove_sqlite_files(database_path)
 
+    def test_unbound_logout_request_does_not_force_web_bind_link(self) -> None:
+        database_path = Path("tmp") / "wechat-kf-logout-no-bind-link.db"
+        _remove_sqlite_files(database_path)
+        _, processor, client, orchestrator, _ = _processor(database_path)
+        client.messages = [_customer_text("m1", "我想退出登录")]
+
+        sent_count = asyncio.run(processor.process_event({"Token": "sync-token"}, "https://host"))
+
+        self.assertEqual(1, sent_count)
+        self.assertEqual("已查询：我想退出登录", client.sent[0]["content"])
+        self.assertEqual(["我想退出登录"], [call["text"] for call in orchestrator.calls])
+        _remove_sqlite_files(database_path)
+
     def test_bind_store_token_expires_and_can_be_used(self) -> None:
         database_path = Path("tmp") / "wechat-kf-token.db"
         _remove_sqlite_files(database_path)

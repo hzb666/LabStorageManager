@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react'
-import type { Table as TableType } from '@tanstack/react-table'
+import type { SortingState, Table as TableType } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { getExpandAllState, setExpandAllState } from '@/lib/storage/appTableStorage'
 import { useColumnResize } from '@/hooks/useColumnResize'
@@ -55,6 +55,35 @@ function computeCssVariables<TData>(
   return styles
 }
 
+// 表体滚动条会影响表头对齐；排序切换后也需要回到新的结果顶部。
+function useDataTableViewportEffects(
+  bodyScrollRef: React.RefObject<HTMLDivElement | null>,
+  sortingState: SortingState,
+) {
+  const [scrollbarWidth, setScrollbarWidth] = useState(0)
+
+  useEffect(() => {
+    const el = bodyScrollRef.current
+    if (!el) return
+
+    const updateScrollbar = () => {
+      const width = el.offsetWidth - el.clientWidth
+      setScrollbarWidth((prev) => (prev === width ? prev : width))
+    }
+
+    updateScrollbar()
+    const observer = new ResizeObserver(() => requestAnimationFrame(updateScrollbar))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [bodyScrollRef])
+
+  useEffect(() => {
+    if (bodyScrollRef.current) bodyScrollRef.current.scrollTop = 0
+  }, [bodyScrollRef, sortingState])
+
+  return scrollbarWidth
+}
+
 // 组合表头、表体和行为 hooks，负责渲染完整的数据表格容器。
 export function DataTable<TData>({
   table,
@@ -74,11 +103,8 @@ export function DataTable<TData>({
   searchKeyword,
   onIsAtTopChange,
 }: Readonly<DataTableProps<TData>>) {
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
   const bodyScrollRef = useRef<HTMLDivElement>(null)
-
-  const [scrollbarWidth, setScrollbarWidth] = useState(0)
 
   const isControlled = externalIsAllExpanded !== undefined && onToggleExpandAll !== undefined
   const [internalIsAllExpanded] = useState<boolean>(() => {
@@ -88,6 +114,7 @@ export function DataTable<TData>({
 
   const isAllExpanded = isControlled ? externalIsAllExpanded : internalIsAllExpanded
   const sortingState = table.getState().sorting
+  const scrollbarWidth = useDataTableViewportEffects(bodyScrollRef, sortingState)
 
   useEffect(() => {
     // 受控展开态由外层驱动；这里只回写非受控场景，避免本地存储与父级双写冲突。
@@ -95,28 +122,6 @@ export function DataTable<TData>({
       setExpandAllState(expandAllStorageKey, isAllExpanded)
     }
   }, [isAllExpanded, enableExpandAll, expandAllStorageKey, isControlled])
-
-  // 滚动条宽度检测
-  useEffect(() => {
-    const el = bodyScrollRef.current
-    if (!el) return
-
-    // 计算原生滚动条宽度，给表头预留对齐空间。
-    const updateScrollbar = () => {
-      const width = el.offsetWidth - el.clientWidth
-      setScrollbarWidth((prev) => (prev === width ? prev : width))
-    }
-
-    updateScrollbar()
-    const observer = new ResizeObserver(() => requestAnimationFrame(updateScrollbar))
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
-  // 排序后回到顶部，避免用户停在旧滚动位置看到重排后的中段内容。
-  useEffect(() => {
-    if (bodyScrollRef.current) bodyScrollRef.current.scrollTop = 0
-  }, [sortingState])
 
   const { rows } = table.getRowModel()
   const visibleColumns = table.getVisibleLeafColumns()
@@ -188,7 +193,6 @@ export function DataTable<TData>({
 
   return (
     <div
-      ref={scrollContainerRef}
       className="w-full bg-card rounded-md flex flex-col overflow-hidden"
       style={{
         height: typeof scrollHeight === 'number' ? `${scrollHeight}px` : scrollHeight,

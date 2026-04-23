@@ -26,6 +26,7 @@ from robot.wecom_aibot.intent_utils import (
     is_help_request,
     is_borrow_intent,
     is_return_intent,
+    is_unbind_request,
     need_bind_text,
     payload_data,
     result_ok,
@@ -236,7 +237,7 @@ class LSMRobotOrchestrator:
     async def _handle_binding_command(self, actor: ActorContext, text: str) -> str:
         if text in {"绑定状态", "我的绑定"}:
             return binding_status_text(self._get_binding(actor.userid))
-        if text in {"解绑", "取消绑定"}:
+        if is_unbind_request(text):
             if not self._get_binding(actor.userid):
                 return "当前没有绑定 LabStorageManager 账号。"
             self._save_unbind_confirm_state(actor.chat_key)
@@ -688,7 +689,7 @@ def _should_remember_context(user_text: str, assistant_text: str) -> bool:
         return False
     if BIND_PATTERN.match(user_text):
         return False
-    return user_text not in {"绑定状态", "我的绑定", "解绑", "取消绑定"}
+    return user_text not in {"绑定状态", "我的绑定"} and not is_unbind_request(user_text)
 
 
 def _state_conversation_context(state: dict[str, Any]) -> list[dict[str, str]]:

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, Edit3, RefreshCw, ShieldCheck } from 'lucide-react'
+import { Edit3, RefreshCw, ShieldCheck } from 'lucide-react'
 
 import { structureSearchAPI } from '@/api/structureSearchApi'
 import type { CompoundStructureCache } from '@/api/structureSearchApi'
@@ -10,14 +10,10 @@ import { toast } from '@/lib/toast'
 import { getApiErrorMessage, isSpecialCasValue } from '@/lib/validationSchemas'
 import { useAuthStore } from '@/store/useStore'
 import { getStructureResolveToastMessage } from './structureCacheMessages'
+import { StructureCandidateList } from './StructureCandidateList'
+import { parseStructureCandidates } from './structureCandidateUtils'
 
 const StructureManualEditDialog = React.lazy(() => import('./StructureManualEditDialog'))
-
-type PubChemCandidate = {
-  cid?: number
-  has_exact_cas_synonym?: boolean
-  selected_manually?: boolean
-}
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '待解析',
@@ -33,17 +29,6 @@ export interface StructureCachePanelProps {
   casNumber: string
 }
 
-function parseCandidates(value: string | null): PubChemCandidate[] {
-  if (!value) return []
-  try {
-    const parsed = JSON.parse(value)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((item): item is PubChemCandidate => typeof item === 'object' && item !== null)
-  } catch {
-    return []
-  }
-}
-
 function getStatusLabel(cache: CompoundStructureCache | null): string {
   if (!cache) return '未解析'
   return STATUS_LABELS[cache.status] ?? cache.status
@@ -57,37 +42,6 @@ function getSourceLabel(source: string | null): string {
   return '-'
 }
 
-function CandidateActions({
-  candidates,
-  disabled,
-  onConfirm,
-}: Readonly<{
-  candidates: PubChemCandidate[]
-  disabled: boolean
-  onConfirm: (cid: number) => void
-}>) {
-  const visibleCandidates = candidates.filter((candidate) => typeof candidate.cid === 'number')
-  if (visibleCandidates.length === 0) return null
-  return (
-    <div className="flex flex-wrap gap-2">
-      {visibleCandidates.map((candidate) => (
-        <Button
-          key={candidate.cid}
-          type="button"
-          size="sm"
-          variant="modern"
-          disabled={disabled}
-          onClick={() => onConfirm(candidate.cid as number)}
-        >
-          <CheckCircle2 className="size-4" />
-          确认 CID {candidate.cid}
-          {candidate.has_exact_cas_synonym ? '（CAS 匹配）' : ''}
-        </Button>
-      ))}
-    </div>
-  )
-}
-
 function useStructureCachePanelState(casNumber: string) {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
@@ -96,7 +50,7 @@ function useStructureCachePanelState(casNumber: string) {
   const [resolving, setResolving] = useState(false)
   const [confirmingCid, setConfirmingCid] = useState<number | null>(null)
   const [manualDialogOpen, setManualDialogOpen] = useState(false)
-  const candidates = useMemo(() => parseCandidates(cache?.candidates_json ?? null), [cache])
+  const candidates = useMemo(() => parseStructureCandidates(cache?.candidates_json ?? null), [cache])
 
   const refreshCache = useCallback(async () => {
     if (!casNumber || isSpecialCasValue(casNumber)) {
@@ -170,6 +124,7 @@ function StructureCacheMeta({
   cache: CompoundStructureCache | null
   loading: boolean
 }>) {
+  const showErrorMessage = Boolean(cache?.error_message && cache.status !== 'ambiguous')
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -186,8 +141,8 @@ function StructureCacheMeta({
         {cache?.source_id ? ` / ${cache.source_id}` : ''}
         {cache?.inchikey ? ` / ${cache.inchikey}` : ''}
       </div>
-      {cache?.error_message && (
-        <div className="text-xs text-destructive">{cache.error_message}</div>
+      {showErrorMessage && (
+        <div className="text-xs text-destructive">{cache?.error_message}</div>
       )}
     </div>
   )
@@ -278,7 +233,7 @@ export function StructureCachePanel({ casNumber }: Readonly<StructureCachePanelP
           )}
         </div>
         {state.isAdmin && state.cache?.status === 'ambiguous' && (
-          <CandidateActions
+          <StructureCandidateList
             candidates={state.candidates}
             disabled={state.confirmingCid !== null}
             onConfirm={state.handleConfirmCandidate}

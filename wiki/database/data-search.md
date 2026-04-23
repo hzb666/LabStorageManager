@@ -57,7 +57,7 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 ## 结构检索
 
-结构检索是可选能力。启用 `CHEM_STRUCTURE_FEATURE_ENABLED` 后，`app/api/chem.py` 提供结构缓存、PubChem 解析、人工 MolBlock 写入、索引重建和子结构检索接口。`CompoundStructureCache` 以 CAS 为主键保存结构数据，`structure_index` 在启动或搜索前把已解析结构加载到 RDKit 索引，再按库存可见 CAS 汇总结果。
+结构检索默认开启。保留 `CHEM_STRUCTURE_FEATURE_ENABLED` 作为部署开关；启用后，`app/api/chem.py` 提供结构缓存、PubChem 解析、人工 MolBlock 写入、索引重建和子结构检索接口。`CompoundStructureCache` 以 CAS 为主键保存结构数据，`structure_index` 在启动或搜索前把已解析结构加载到 RDKit 索引，再按库存可见 CAS 汇总结果。
 
 ## 已落地的优化点
 

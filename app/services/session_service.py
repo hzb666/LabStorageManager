@@ -12,10 +12,11 @@ from app.core.config import settings
 from app.core.constants import (
     ANONYMOUS_DEVICE_PREFIX,
     ANONYMOUS_DEVICE_TOKEN_HEX_LENGTH,
+    SECONDS_PER_HOUR,
     UNKNOWN_DEVICE,
 )
-from app.core.redis import cache_session, delete_cached_session, delete_cached_sessions
-from app.core.time_utils import get_utc_now
+from app.core.redis import cache_session, delete_cached_session, delete_cached_sessions, mark_revoked_sessions
+from app.core.time_utils import get_utc_now, utc_iso_str
 from app.models.user_session import UserSession
 from app.services.sse_manager import sse_manager
 
@@ -36,6 +37,13 @@ class SessionCreationRequest:
     ip_address: str
     user_agent: str
     token: str
+
+
+@dataclass(frozen=True)
+class StagedSessionRefresh:
+    session: UserSession
+    rotated_token_hashes: tuple[str, ...]
+    now_utc: datetime
 
 # ==================== Memory Fallback Rate Limiting ====================
 # 内存后备速率限制（Redis 不可用时使用）
@@ -105,8 +113,8 @@ def build_session_cache_payload(
         "ip_address": session.ip_address,
         "last_ip_address": session.last_ip_address,
         "user_agent": session.user_agent,
-        "expires_at": session.expires_at.isoformat(),
-        "last_active_at": session.last_active_at.isoformat() if session.last_active_at else None,
+        "expires_at": utc_iso_str(session.expires_at),
+        "last_active_at": utc_iso_str(session.last_active_at),
     }
 
 
@@ -219,7 +227,11 @@ def finalize_revoked_sessions(token_hashes: list[str], *, reason: str) -> None:
     if not token_hashes:
         return
 
-    # 缓存删除和 SSE 失效通知都属于“提交成功后的副作用”，集中放在这里统一收口。
+    # 先写撤销标记，再删旧缓存；即使缓存删除失败，后续鉴权也会优先被 tombstone 拦住。
+    mark_revoked_sessions(
+        token_hashes,
+        ttl_seconds=max(1, settings.session_expire_hours * SECONDS_PER_HOUR),
+    )
     delete_cached_sessions(token_hashes)
     for token_hash in token_hashes:
         sse_manager.notify_session_revoked(token_hash=token_hash, reason=reason)
@@ -228,29 +240,38 @@ def finalize_revoked_sessions(token_hashes: list[str], *, reason: str) -> None:
 def refresh_session_expiry(
     db: Session,
     *,
-    identity: SessionCacheIdentity,
     session: UserSession,
     new_token: str | None = None,
-) -> UserSession:
+) -> StagedSessionRefresh:
     now_utc = get_utc_now()
     old_token_hash = session.token_hash
     session.expires_at = now_utc + timedelta(hours=settings.session_expire_hours)
     if new_token:
         session.token_hash = hashlib.sha256(new_token.encode()).hexdigest()
     db.add(session)
-    db.commit()
-    db.refresh(session)
-
-    if session.token_hash != old_token_hash:
-        delete_cached_session(old_token_hash)
-        sse_manager.notify_session_revoked(token_hash=old_token_hash, reason="session_refreshed")
-
-    sync_session_cache(
+    return StagedSessionRefresh(
         session=session,
-        identity=identity,
+        rotated_token_hashes=((old_token_hash,) if session.token_hash != old_token_hash else ()),
         now_utc=now_utc,
     )
-    return session
+
+
+def finalize_session_refresh(
+    db: Session,
+    *,
+    staged: StagedSessionRefresh,
+    identity: SessionCacheIdentity,
+) -> UserSession:
+    db.refresh(staged.session)
+    if staged.rotated_token_hashes:
+        finalize_revoked_sessions(list(staged.rotated_token_hashes), reason="session_refreshed")
+
+    sync_session_cache(
+        session=staged.session,
+        identity=identity,
+        now_utc=staged.now_utc,
+    )
+    return staged.session
 
 
 def _check_device_limit(db: Session, user_id: int, device_id: str) -> bool:

@@ -20,7 +20,8 @@ VISIBLE_STOCK_STATUSES = {
 class InventoryCasSummary:
     cas_number: str
     item_count: int = 0
-    display_name: str | None = None
+    preferred_name: str | None = None
+    preferred_name_source: str | None = None
     english_name: str | None = None
     locations: list[str] = field(default_factory=list)
     total_by_unit: dict[str, float] = field(default_factory=dict)
@@ -29,7 +30,9 @@ class InventoryCasSummary:
         return {
             "cas_number": self.cas_number,
             "item_count": self.item_count,
-            "display_name": self.display_name,
+            "preferred_name": self.preferred_name,
+            "preferred_name_source": self.preferred_name_source,
+            "display_name": self.preferred_name,
             "english_name": self.english_name,
             "locations": self.locations,
             "total_by_unit": self.total_by_unit,
@@ -104,8 +107,9 @@ def normalized_inventory_cas_expr():
 
 def _add_inventory_row(summary: InventoryCasSummary, row: Inventory) -> None:
     summary.item_count += 1
-    if summary.display_name is None and row.name:
-        summary.display_name = row.name
+    if summary.preferred_name is None and row.name:
+        summary.preferred_name = row.name
+        summary.preferred_name_source = "inventory_name"
     if summary.english_name is None and row.english_name:
         summary.english_name = row.english_name
     if row.storage_location and row.storage_location not in summary.locations:

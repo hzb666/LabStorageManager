@@ -9,7 +9,7 @@ from typing import Any, Optional
 from fastapi import HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.core.time_utils import get_utc_now, to_china_time
+from app.core.time_utils import get_china_now, to_china_time
 from app.services.spec_utils import format_specification
 
 _DANGEROUS_SPREADSHEET_PREFIXES = ("=", "+", "-", "@")
@@ -93,7 +93,7 @@ def _export_to_xlsx(
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    filename = f"{filename_prefix}_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"{filename_prefix}_{get_china_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
     return StreamingResponse(
         iter([output.getvalue()]),

@@ -124,7 +124,7 @@ export function TableActionButtons<T>({
   });
 
   return (
-    <div className="flex items-center gap-1 flex-wrap">
+    <div className="flex items-center gap-1 flex-wrap md:flex-nowrap">
       {showEdit && onEdit && (
         <Tooltip>
           <TooltipTrigger asChild>

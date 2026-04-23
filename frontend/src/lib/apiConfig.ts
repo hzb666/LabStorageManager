@@ -47,7 +47,7 @@ export function buildBackendUrl(path: string): string {
 export function isStructureSearchFeatureEnabled(): boolean {
   const configured = import.meta.env.VITE_CHEM_STRUCTURE_FEATURE_ENABLED?.trim().toLowerCase()
   if (!configured) {
-    return false
+    return true
   }
   return ['1', 'true', 'yes', 'on'].includes(configured)
 }

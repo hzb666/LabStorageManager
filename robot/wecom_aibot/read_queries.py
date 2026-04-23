@@ -40,6 +40,7 @@ from robot.wecom_aibot.mcp_client import LSMMcpClient
 from robot.wecom_aibot.minimax_web_search import MiniMaxWebSearchClient
 
 CAS_CANDIDATE_PATTERN = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
+INVENTORY_NAME_CANDIDATE_LIMIT = 100
 GENERAL_WEB_SEARCH_KEYWORDS = (
     "联网",
     "网络",
@@ -115,21 +116,44 @@ async def answer_with_llm_plan(
         return ""
     if plan.tool_name == "web_search":
         return "联网搜索只用于辅助识别化学名称或别名对应的 CAS（系统内部），不能干别的。"
-    result = await mcp_client.call_tool(plan.tool_name, _with_user_token(plan.arguments, user_token))
     if plan.tool_name == "inventory_search_by_name":
+        plan_arguments = _inventory_name_search_arguments(plan.arguments)
+        result = await mcp_client.call_tool(plan.tool_name, _with_user_token(plan_arguments, user_token))
         keyword = str(plan.arguments.get("keyword") or "").strip()
-        broadened_reply = await _try_broaden_inventory_name_search(
-            mcp_client=mcp_client,
+        if _is_empty_success_result(result):
+            fallback = await _maybe_llm_plan_common_shelf_fallback(
+                mcp_client=mcp_client,
+                llm_planner=llm_planner,
+                web_search_client=web_search_client,
+                search_limit=search_limit,
+                text=text,
+                user_token=user_token,
+                tool_name=plan.tool_name,
+                arguments=plan_arguments,
+                inventory_result=result,
+            )
+            if fallback:
+                return await _maybe_polish_reply(
+                    llm_planner,
+                    text,
+                    fallback,
+                    conversation_context=conversation_context,
+                )
+        filtered_result = await _filter_inventory_name_result(
             llm_planner=llm_planner,
-            search_limit=search_limit,
-            text=text,
-            keyword=keyword,
-            user_token=user_token,
-            inventory_result=result,
+            user_text=text,
+            search_keyword=keyword,
+            result=result,
+        )
+        return await _format_query_result(
+            filtered_result,
+            title=plan.title,
+            empty_text=plan.empty_text,
+            llm_planner=llm_planner,
+            user_text=text,
             conversation_context=conversation_context,
         )
-        if broadened_reply:
-            return broadened_reply
+    result = await mcp_client.call_tool(plan.tool_name, _with_user_token(plan.arguments, user_token))
     fallback = await _maybe_llm_plan_common_shelf_fallback(
         mcp_client=mcp_client,
         llm_planner=llm_planner,
@@ -156,6 +180,105 @@ async def answer_with_llm_plan(
         user_text=text,
         conversation_context=conversation_context,
     )
+
+
+def _inventory_name_search_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    search_arguments = dict(arguments)
+    search_arguments["limit"] = INVENTORY_NAME_CANDIDATE_LIMIT
+    return search_arguments
+
+
+async def _filter_inventory_name_result(
+    *,
+    llm_planner: LSMIntentPlanner | None,
+    user_text: str,
+    search_keyword: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    candidates, items_by_index = _inventory_name_filter_candidates(result)
+    if not candidates:
+        return result
+    selector = getattr(llm_planner, "filter_inventory_name_candidates", None)
+    if selector is None:
+        return result
+    selected_indices = await selector(
+        user_text=user_text,
+        search_keyword=search_keyword,
+        candidates=candidates,
+    )
+    if selected_indices is None:
+        return result
+    selected_items = [items_by_index[index] for index in selected_indices if index in items_by_index]
+    return _replace_result_items(result, selected_items)
+
+
+def _inventory_name_filter_candidates(
+    result: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[int, Any]]:
+    data = _result_data(result)
+    if not isinstance(data, dict):
+        return [], {}
+    items = _collection_items(data)
+    candidates: list[dict[str, Any]] = []
+    items_by_index: dict[int, Any] = {}
+    for index, item in enumerate(items[:INVENTORY_NAME_CANDIDATE_LIMIT], 1):
+        if not isinstance(item, dict):
+            continue
+        names = _candidate_names(item)
+        if names:
+            candidate_index = len(candidates) + 1
+            candidates.append({"index": candidate_index, **names})
+            items_by_index[candidate_index] = item
+    return candidates, items_by_index
+
+
+def _candidate_names(item: dict[str, Any]) -> dict[str, Any]:
+    names: dict[str, Any] = {}
+    for key in ("name", "english_name", "alias"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            names[key] = value.strip()
+    return names
+
+
+def _replace_result_items(result: dict[str, Any], items: list[Any]) -> dict[str, Any]:
+    payload = result.get("payload")
+    if not isinstance(payload, dict):
+        return result
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return result
+    collection_key = _collection_key(data)
+    if collection_key is None:
+        return result
+    new_data = dict(data)
+    new_data[collection_key] = items
+    new_data["total"] = len(items)
+    new_payload = dict(payload)
+    new_payload["data"] = new_data
+    return {**result, "payload": new_payload}
+
+
+def _result_data(result: dict[str, Any]) -> Any:
+    payload = result.get("payload")
+    if isinstance(payload, dict):
+        return payload.get("data")
+    return None
+
+
+def _collection_items(data: dict[str, Any]) -> list[Any]:
+    key = _collection_key(data)
+    if key is None:
+        return []
+    value = data.get(key)
+    return value if isinstance(value, list) else []
+
+
+def _collection_key(data: dict[str, Any]) -> str | None:
+    for key in ("items", "data", "records", "results", "inventories"):
+        if isinstance(data.get(key), list):
+            return key
+    return None
 
 
 async def answer_read_query(
@@ -421,21 +544,24 @@ async def _answer_inventory_by_name(
     result = await _raw_call(
         mcp_client,
         "inventory_search_by_name",
-        {"keyword": keyword, "limit": search_limit},
+        {"keyword": keyword, "limit": INVENTORY_NAME_CANDIDATE_LIMIT},
         user_token,
     )
-    broadened_reply = await _try_broaden_inventory_name_search(
-        mcp_client=mcp_client,
-        llm_planner=llm_planner,
-        search_limit=search_limit,
-        text=text,
-        keyword=keyword,
-        user_token=user_token,
-        inventory_result=result,
-        conversation_context=conversation_context,
-    )
-    if broadened_reply:
-        return broadened_reply
+    if not _is_empty_success_result(result):
+        filtered_result = await _filter_inventory_name_result(
+            llm_planner=llm_planner,
+            user_text=text,
+            search_keyword=keyword,
+            result=result,
+        )
+        return await _format_query_result(
+            filtered_result,
+            title=f"“{keyword}”库存查询结果",
+            empty_text="没有查到匹配记录。",
+            llm_planner=llm_planner,
+            user_text=text,
+            conversation_context=conversation_context,
+        )
     fallback = await _maybe_common_shelf_fallback(
         mcp_client=mcp_client,
         llm_planner=llm_planner,
@@ -462,107 +588,6 @@ async def _answer_inventory_by_name(
         user_text=text,
         conversation_context=conversation_context,
     )
-
-
-async def _try_broaden_inventory_name_search(
-    *,
-    mcp_client: LSMMcpClient,
-    llm_planner: LSMIntentPlanner | None,
-    search_limit: int,
-    text: str,
-    keyword: str,
-    user_token: str,
-    inventory_result: dict[str, Any],
-    conversation_context: list[dict[str, str]] | None = None,
-) -> str:
-    if not _is_empty_success_result(inventory_result):
-        return ""
-    broadener = getattr(llm_planner, "broaden_name_search_queries", None)
-    if broadener is None:
-        return ""
-    broadened_queries = await broadener(user_text=text, failed_query=keyword)
-    if not isinstance(broadened_queries, list):
-        return ""
-
-    successful_results: list[tuple[str, dict[str, Any]]] = []
-    for query in _clean_broadened_queries(broadened_queries, keyword):
-        result = await _raw_call(
-            mcp_client,
-            "inventory_search_by_name",
-            {"keyword": query, "limit": search_limit},
-            user_token,
-        )
-        if not _is_empty_success_result(result):
-            successful_results.append((query, result))
-
-    if not successful_results:
-        return ""
-    reply = _format_broadened_inventory_results(keyword, successful_results)
-    return await _maybe_polish_reply(
-        llm_planner,
-        text,
-        reply,
-        facts_text=_broadened_inventory_facts_text(keyword, successful_results),
-        conversation_context=conversation_context,
-    )
-
-
-def _clean_broadened_queries(queries: list[Any], original_keyword: str) -> list[str]:
-    normalized_original = original_keyword.strip()
-    result: list[str] = []
-    seen: set[str] = set()
-    for item in queries:
-        if not isinstance(item, str):
-            continue
-        query = item.strip()
-        if not query or query == normalized_original or query in seen:
-            continue
-        result.append(query)
-        seen.add(query)
-        if len(result) >= 3:
-            break
-    return result
-
-
-def _format_broadened_inventory_results(
-    original_keyword: str,
-    successful_results: list[tuple[str, dict[str, Any]]],
-) -> str:
-    queries = "、".join(query for query, _ in successful_results)
-    sections = [
-        f"“{original_keyword}”没有直接查到库存；已按更宽关键词“{queries}”继续查询："
-    ]
-    for query, result in successful_results:
-        sections.append(
-            format_tool_result(
-                result,
-                title=f"“{query}”库存候选",
-                empty_text="没有查到匹配记录。",
-            )
-        )
-    return "\n".join(sections)
-
-
-def _broadened_inventory_facts_text(
-    original_keyword: str,
-    successful_results: list[tuple[str, dict[str, Any]]],
-) -> str:
-    facts = {
-        "note": "原查询没有直接命中，系统按更宽关键词继续查询。",
-        "original_keyword": original_keyword,
-        "results": [
-            {
-                "query": query,
-                "facts": build_safe_facts(
-                    result,
-                    title=f"“{query}”库存候选",
-                    empty_text="没有查到匹配记录。",
-                ),
-            }
-            for query, result in successful_results
-        ],
-    }
-    return _format_llm_facts_text(facts)
 
 
 async def _maybe_llm_plan_common_shelf_fallback(

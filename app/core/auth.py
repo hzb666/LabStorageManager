@@ -13,8 +13,8 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.constants import ACTIVITY_DEBOUNCE_SECONDS, BEARER_PREFIX_LEN
 from app.core.request_utils import get_client_ip
-from app.core.time_utils import get_utc_now
-from app.core.redis import delete_cached_session, get_cached_session
+from app.core.time_utils import get_utc_now, parse_utc_datetime
+from app.core.redis import delete_cached_session, get_cached_session_state
 from app.database import get_db, engine
 from app.models.user import User, UserRole
 from app.models.user_session import UserSession
@@ -54,6 +54,15 @@ def _auth_exception(
     return HTTPException(status_code=status_code, detail=detail, headers=headers)
 
 
+def _raise_session_revoked() -> None:
+    raise _auth_exception(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Session has been revoked, please login again",
+        code=AuthErrorCode.SESSION_REVOKED,
+        include_www_authenticate=True,
+    )
+
+
 def extract_access_token(request: Request) -> str | None:
     # 先取 cookie，保持浏览器端和 API 客户端共用一套鉴权入口。
     cookie_token = request.cookies.get("access_token")
@@ -72,12 +81,7 @@ def _compute_token_hash(token: str) -> str:
 
 
 def _parse_cached_datetime(raw_value: object) -> datetime | None:
-    if not isinstance(raw_value, str) or not raw_value:
-        return None
-    try:
-        return datetime.fromisoformat(raw_value)
-    except ValueError:
-        return None
+    return parse_utc_datetime(raw_value)
 
 
 def _build_cached_session(token_hash: str, cached_data: dict) -> UserSession | None:
@@ -334,12 +338,7 @@ def _load_current_session_from_db(
     loaded = _load_user_and_session_by_token_hash(db, token_hash)
     if loaded is None:
         delete_cached_session(token_hash)
-        raise _auth_exception(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has been revoked, please login again",
-            code=AuthErrorCode.SESSION_REVOKED,
-            include_www_authenticate=True,
-        )
+        _raise_session_revoked()
 
     user, session = loaded
     if user.id != user_id or session.user_id != user_id:
@@ -470,9 +469,14 @@ def resolve_current_session(
     token_hash = _compute_token_hash(token)
     now_utc = get_utc_now()
     client_ip = get_client_ip(request)
+    cache_state = get_cached_session_state(token_hash)
+    if cache_state.is_revoked:
+        delete_cached_session(token_hash)
+        _raise_session_revoked()
+
     cached_session = _load_cached_session_candidate(
         token_hash,
-        get_cached_session(token_hash),
+        cache_state.session_data,
         user_id=user_id,
         client_ip=client_ip,
         now_utc=now_utc,
@@ -535,7 +539,12 @@ def get_current_session(
 def is_token_session_active(token_hash: str, *, client_ip: str | None = None) -> bool:
     # SSE 周期复检只关心 session 是否仍可用，不需要完整 user 对象。
     now_utc = get_utc_now()
-    cached_data = get_cached_session(token_hash)
+    cache_state = get_cached_session_state(token_hash)
+    if cache_state.is_revoked:
+        delete_cached_session(token_hash)
+        return False
+
+    cached_data = cache_state.session_data
     if cached_data:
         cached_session = _build_cached_session(token_hash, cached_data)
         if cached_session is None:
@@ -608,7 +617,18 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def require_non_public(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role == UserRole.PUBLIC:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public account is read-only"
+        )
+
+    return current_user
+
+
 # 常用依赖类型别名，避免在路由里重复写 Depends。
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_admin)]
+NonPublicUser = Annotated[User, Depends(require_non_public)]
 CurrentSession = Annotated[tuple[User, UserSession], Depends(get_current_session)]

@@ -12,6 +12,7 @@ import type {
   CommonShelfManualAddInputData,
   CommonShelfGroupEditInputData,
   CommonShelfAddBottlesInputData,
+  CommonShelfQuickOrderInputData,
   CommonShelfRemoveOneInputData,
   ChemicalNameMapFormInputData,
   ConfirmArrivalFormInputData,
@@ -19,13 +20,21 @@ import type {
   UserUpdateFormData,
   StockInFormInputData,
   ReturnFormInputData,
+  ReagentBrandFormInputData,
 } from './validationSchemas'
 import {
   ORDER_REASON_OPTIONS,
   REAGENT_CATEGORY_OPTIONS,
-  REAGENT_BRAND_OPTIONS,
 } from './options'
 import { CHEMICAL_CATEGORY_LABELS } from './constants'
+
+type BrandAutocompleteOption = { label: string; value: string }
+
+const EMPTY_BRAND_OPTIONS: BrandAutocompleteOption[] = []
+
+function resolveBrandOptions(brandOptions?: BrandAutocompleteOption[]): BrandAutocompleteOption[] {
+  return brandOptions ?? EMPTY_BRAND_OPTIONS
+}
 
 // 为 `cas_number` 字段统一挂载识别按钮与可选 blur 检查，避免页面重复 map 字段。
 export function enhanceCasLookupField<T extends FieldValues>(
@@ -89,11 +98,14 @@ export function getInventoryFormFields(
   initialQuantity?: number,
   config?: {
     categoryOptions?: { label: string; value: string }[]
-    brandOptions?: { label: string; value: string }[]
+    brandOptions?: BrandAutocompleteOption[]
+    requireStorageLocation?: boolean
   }
 ): FieldSchema<InventoryFormInputData>[] {
   const categoryOptions = config?.categoryOptions ?? REAGENT_CATEGORY_OPTIONS
-  const brandOptions = config?.brandOptions ?? REAGENT_BRAND_OPTIONS
+  const brandOptions = resolveBrandOptions(config?.brandOptions)
+  const storageLocationRequired = config?.requireStorageLocation ?? false
+  const storageLocationPlaceholder = '如：6-6-6-X'
 
   // 编辑模式下显示：剩余量 + 规格；添加模式下显示：瓶数 + 规格
   const quantityFields = isEdit && initialQuantity !== undefined
@@ -124,9 +136,15 @@ export function getInventoryFormFields(
     { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
-    { name: 'storage_location' as const, label: '存放位置', type: 'input' as const, placeholder: '如: A-1-1 柜' },
+    {
+      name: 'storage_location' as const,
+      label: '存放位置',
+      type: 'input' as const,
+      required: storageLocationRequired,
+      placeholder: storageLocationPlaceholder,
+    },
     ...quantityFields,
-    { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: brandOptions, placeholder: '输入品牌名称' },
+    { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: brandOptions, required: true, placeholder: '输入品牌名称' },
     { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如: 95%、AR、HPLC' },
     { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: categoryOptions, placeholder: '输入分类名称' },
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
@@ -168,7 +186,11 @@ export const defaultConsumableOrderValues: ConsumableOrderFormInputData = {
 }
 
 // 获取试剂订单表单字段配置
-export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormInputData>[] {
+export function getReagentOrderFormFields(config?: {
+  brandOptions?: BrandAutocompleteOption[]
+}): FieldSchema<ReagentOrderFormInputData>[] {
+  const brandOptions = resolveBrandOptions(config?.brandOptions)
+
   return [
     {
       name: 'name' as const,
@@ -187,8 +209,8 @@ export function getReagentOrderFormFields(): FieldSchema<ReagentOrderFormInputDa
     { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
     { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
     { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
-    { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称' },
     { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如: 95%、AR、HPLC' },
+    { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: brandOptions, required: true, placeholder: '输入品牌名称' },
     { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' },
     {
       name: 'quantity' as const,
@@ -350,20 +372,22 @@ const reagentWorkflowBaseFields = [
   { name: 'alias', label: '别名', type: 'input', placeholder: '如: 酒精' },
 ]
 
-const reagentWorkflowTrailingFields = [
-  { name: 'specification', label: '规格', type: 'input', required: true, placeholder: '如: 500ml' },
-  { name: 'brand', label: '品牌', type: 'autocomplete', options: REAGENT_BRAND_OPTIONS, placeholder: '输入品牌名称' },
-  { name: 'purity', label: '纯度', type: 'input', placeholder: '如: 95%、AR、HPLC' },
-  { name: 'category', label: '分类', type: 'autocomplete', options: REAGENT_CATEGORY_OPTIONS, placeholder: '输入分类名称' },
-  { name: 'notes', label: '备注', type: 'input', colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
-]
-
 function getReagentWorkflowBaseFields<T extends StockInFormInputData | ConfirmArrivalFormInputData | CommonPublicArrivalFormInputData>(): FieldSchema<T>[] {
   return reagentWorkflowBaseFields as unknown as FieldSchema<T>[]
 }
 
-function getReagentWorkflowTrailingFields<T extends StockInFormInputData | ConfirmArrivalFormInputData | CommonPublicArrivalFormInputData>(): FieldSchema<T>[] {
-  return reagentWorkflowTrailingFields as unknown as FieldSchema<T>[]
+function getReagentWorkflowTrailingFields<T extends StockInFormInputData | ConfirmArrivalFormInputData | CommonPublicArrivalFormInputData>(
+  brandOptions?: BrandAutocompleteOption[],
+): FieldSchema<T>[] {
+  const fields = [
+    { name: 'specification', label: '规格', type: 'input', required: true, placeholder: '如: 500ml' },
+    { name: 'brand', label: '品牌', type: 'autocomplete', options: resolveBrandOptions(brandOptions), required: true, placeholder: '输入品牌名称' },
+    { name: 'purity', label: '纯度', type: 'input', placeholder: '如: 95%、AR、HPLC' },
+    { name: 'category', label: '分类', type: 'autocomplete', options: REAGENT_CATEGORY_OPTIONS, placeholder: '输入分类名称' },
+    { name: 'notes', label: '备注', type: 'input', colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
+  ]
+
+  return fields as unknown as FieldSchema<T>[]
 }
 
 // 入库表单默认值
@@ -388,6 +412,9 @@ export const defaultCommonPublicArrivalValues: CommonPublicArrivalFormInputData 
 export function getStockInFormFields(
   unit?: string,
   locationOptions?: { label: string; value: string }[],
+  config?: {
+    brandOptions?: BrandAutocompleteOption[]
+  },
 ): FieldSchema<StockInFormInputData>[] {
   return [
     ...getReagentWorkflowBaseFields<StockInFormInputData>(),
@@ -407,12 +434,15 @@ export function getStockInFormFields(
       required: true,
       placeholder: '如: 100',
     },
-    ...getReagentWorkflowTrailingFields<StockInFormInputData>(),
+    ...getReagentWorkflowTrailingFields<StockInFormInputData>(config?.brandOptions),
   ]
 }
 
 export function getConfirmArrivalFormFields(
   unit?: string,
+  config?: {
+    brandOptions?: BrandAutocompleteOption[]
+  },
 ): FieldSchema<ConfirmArrivalFormInputData>[] {
   return [
     ...getReagentWorkflowBaseFields<ConfirmArrivalFormInputData>(),
@@ -430,7 +460,7 @@ export function getConfirmArrivalFormFields(
       required: true,
       placeholder: '如: 100',
     },
-    ...getReagentWorkflowTrailingFields<ConfirmArrivalFormInputData>(),
+    ...getReagentWorkflowTrailingFields<ConfirmArrivalFormInputData>(config?.brandOptions),
   ]
 }
 
@@ -443,11 +473,22 @@ const CHEMICAL_CATEGORY_FORM_OPTIONS = Object.entries(CHEMICAL_CATEGORY_LABELS).
   label,
 }))
 
-export function getCommonShelfManualAddFormFields(): FieldSchema<CommonShelfManualAddInputData>[] {
+export function getCommonShelfManualAddFormFields(config?: {
+  brandOptions?: BrandAutocompleteOption[]
+}): FieldSchema<CommonShelfManualAddInputData>[] {
+  const brandOptions = resolveBrandOptions(config?.brandOptions)
+
   return [
     { name: 'name_snapshot' as const, label: '名称', type: 'input' as const, required: true, colSpan: 2 },
     { name: 'cas_number' as const, label: 'CAS', type: 'input' as const, required: true },
-    { name: 'brand' as const, label: '品牌', type: 'input' as const },
+    {
+      name: 'brand' as const,
+      label: '品牌',
+      type: 'autocomplete' as const,
+      options: brandOptions,
+      required: true,
+      placeholder: '输入品牌名称',
+    },
     {
       name: 'purity' as const,
       label: '纯度',
@@ -456,14 +497,25 @@ export function getCommonShelfManualAddFormFields(): FieldSchema<CommonShelfManu
     },
     { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如 500mL' },
     { name: 'count' as const, label: '瓶数', type: 'number' as const, required: true },
-    { name: 'storage_location' as const, label: '位置', type: 'input' as const },
+    { name: 'storage_location' as const, label: '位置', type: 'input' as const, required: true },
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 2 },
   ]
 }
 
-export function getCommonShelfEditFormFields(): FieldSchema<CommonShelfGroupEditInputData>[] {
+export function getCommonShelfEditFormFields(config?: {
+  brandOptions?: BrandAutocompleteOption[]
+}): FieldSchema<CommonShelfGroupEditInputData>[] {
+  const brandOptions = resolveBrandOptions(config?.brandOptions)
+
   return [
-    { name: 'brand' as const, label: '品牌', type: 'input' as const },
+    {
+      name: 'brand' as const,
+      label: '品牌',
+      type: 'autocomplete' as const,
+      options: brandOptions,
+      required: true,
+      placeholder: '输入品牌名称',
+    },
     { name: 'specification' as const, label: '规格', type: 'input' as const, required: true },
   ]
 }
@@ -496,8 +548,39 @@ export function getCommonShelfItemEditFormFields(
   ]
 }
 
+export function getCommonShelfQuickOrderFormFields(): FieldSchema<CommonShelfQuickOrderInputData>[] {
+  return [
+    { name: 'quantity' as const, label: '数量', type: 'number' as const, required: true },
+    {
+      name: 'price' as const,
+      label: '单价(元)',
+      type: 'input' as const,
+      inputType: 'number' as const,
+      required: true,
+      placeholder: '如 100',
+    },
+    {
+      name: 'purity' as const,
+      label: '纯度',
+      type: 'input' as const,
+      placeholder: '如 95%、AR、HPLC',
+    },
+    {
+      name: 'notes' as const,
+      label: '备注',
+      type: 'input' as const,
+      colSpan: 2,
+      enableTagToggle: true,
+      placeholder: '选填',
+    },
+  ]
+}
+
 export function getCommonPublicArrivalFormFields(
   locationSuggestions: string[],
+  config?: {
+    brandOptions?: BrandAutocompleteOption[]
+  },
 ): FieldSchema<CommonPublicArrivalFormInputData>[] {
   return [
     ...getReagentWorkflowBaseFields<CommonPublicArrivalFormInputData>(),
@@ -511,7 +594,7 @@ export function getCommonPublicArrivalFormFields(
       required: true,
       placeholder: '如: A-1-1 柜',
     },
-    ...getReagentWorkflowTrailingFields<CommonPublicArrivalFormInputData>(),
+    ...getReagentWorkflowTrailingFields<CommonPublicArrivalFormInputData>(config?.brandOptions),
   ]
 }
 
@@ -527,6 +610,7 @@ export function getCommonShelfAddBottlesFormFields(
       options: locationSuggestions.map((item) => ({ label: item, value: item })),
       autocompleteMinSearchLength: 1,
       autocompleteShowAllOnFocus: true,
+      required: true,
       placeholder: '输入或选择当前位置',
     },
     {
@@ -548,6 +632,7 @@ export function getCommonShelfRemoveOneFormFields(
       label: '位置',
       type: 'select' as const,
       options: locationOptions,
+      required: true,
       placeholder: '请选择位置',
     },
   ]
@@ -585,6 +670,18 @@ export function getChemicalNameMapFormFields(
     { name: 'alias_1' as const, label: '别名1', type: 'input' as const, placeholder: '如 酒精' },
     { name: 'alias_2' as const, label: '别名2', type: 'input' as const, placeholder: '选填' },
     { name: 'alias_3' as const, label: '别名3', type: 'input' as const, placeholder: '选填' },
+  ]
+}
+
+export function getReagentBrandFormFields(): FieldSchema<ReagentBrandFormInputData>[] {
+  return [
+    {
+      name: 'name' as const,
+      label: '品牌名称',
+      type: 'input' as const,
+      required: true,
+      placeholder: '如: 阿拉丁、Sigma',
+    },
   ]
 }
 

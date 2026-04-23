@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import type { UseFormReturn } from 'react-hook-form'
 import * as v from 'valibot'
-import { Package } from 'lucide-react'
+import { AlertTriangle, Package } from 'lucide-react'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
@@ -23,7 +23,6 @@ import { formatDate, formatDateTime, toText } from '@/lib/utils'
 import { inventoryAPI } from '@/api/client'
 import type { FilterAPI } from '@/hooks/useTableState'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
-import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from '@/store/useStore'
 import {
   ReturnFormSchema,
@@ -47,6 +46,19 @@ import {
 
 const borrowColumnHelper = createColumnHelper<MyBorrowItem>()
 type BorrowReturnMode = 'used' | 'remaining'
+type BorrowDashboardResponse = {
+  data?: MyBorrowItem[]
+  overdue_count?: number
+}
+
+function getBorrowTableTitle(managementMode: boolean) {
+  return (
+    <>
+      <Package className="w-5 h-5" />
+      {managementMode ? '全部借用记录' : '我的借用记录'}
+    </>
+  )
+}
 
 // 展开行会补拉 inventory 详情，并把列表行数据与详情合并后展示分子结构、入库信息和最近借用人。
 const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRow({
@@ -102,14 +114,17 @@ const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRo
   )
 })
 
-// 这里只请求一次我的借用列表，再交给 `buildLocalListData` 做前端筛选和分页适配 `FilterTable`。
-function createBorrowDashboardAPI(managementMode: boolean): FilterAPI {
+// 这里只请求一次借用列表，再交给 `buildLocalListData` 做前端筛选和分页适配 `FilterTable`。
+function createBorrowDashboardAPI(
+  managementMode: boolean
+): FilterAPI {
   return {
     list: async (params) => {
       const response = managementMode
         ? await inventoryAPI.getAdminBorrows()
         : await inventoryAPI.getMyBorrows()
-      const rows = (response.data?.data ?? []) as MyBorrowItem[]
+      const payload = response.data as BorrowDashboardResponse | undefined
+      const rows = payload?.data ?? []
       const local = buildLocalListData(
         rows as unknown as Record<string, unknown>[],
         params as DashboardParams,
@@ -140,8 +155,25 @@ function createBorrowColumns(
     }),
     borrowColumnHelper.accessor('borrow_time', {
       header: '借用时间',
-      size: 180,
-      cell: (info) => formatDateTime(info.getValue()),
+      size: 230,
+      cell: (info) => {
+        const item = info.row.original as MyBorrowItem
+        return (
+          <div className="flex items-center gap-2">
+            <span>{formatDateTime(info.getValue())}</span>
+            {item.is_overdue ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive"
+                title="已超期"
+                aria-label="已超期"
+              >
+                <AlertTriangle className="size-3" />
+                超期
+              </span>
+            ) : null}
+          </div>
+        )
+      },
     }),
     borrowColumnHelper.accessor('borrower_name', {
       header: '借用人',
@@ -294,7 +326,6 @@ export function DashboardBorrowTab({
   managementMode = false,
 }: Readonly<{ managementMode?: boolean }>) {
   const currentUser = useAuthStore((state) => state.user)
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const queryClient = useQueryClient()
 
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
@@ -309,12 +340,13 @@ export function DashboardBorrowTab({
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      queryClient.invalidateQueries({
+        queryKey: managementMode ? ['dashboard', 'admin', 'borrows'] : ['dashboard', 'borrows'],
+      }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
     ])
-    clearRoomStale('inventory')
     requestDashboardCountsRefresh()
-  }, [clearRoomStale, queryClient])
+  }, [managementMode, queryClient])
 
   const borrowDashboardAPI = useMemo(
     () => createBorrowDashboardAPI(managementMode),
@@ -441,7 +473,7 @@ export function DashboardBorrowTab({
         statusOptions={DASHBOARD_EMPTY_STATUS_OPTIONS}
         searchFieldOptions={managementMode ? ADMIN_BORROW_SEARCH_FIELDS : BORROW_SEARCH_FIELDS}
         searchPlaceholder={managementMode ? '搜索名称、CAS号、借用人...' : '搜索名称、CAS号...'}
-        title={<><Package className="w-5 h-5" /> {managementMode ? '全部借用记录' : '我的借用记录'}</>}
+        title={getBorrowTableTitle(managementMode)}
         enableExpandAll={true}
         renderExpandedRow={(itemRaw) => {
           const item = itemRaw as unknown as MyBorrowItem

@@ -148,7 +148,6 @@
 
 ```text
 robot/
-├── legacy_wechat_public_account/
 ├── wecom_aibot/
 ├── run_wecom_webhook.py
 └── run_wecom_worker.py
@@ -489,9 +488,9 @@ mcp = FastMCP("LabStorageManager", stateless_http=True, json_response=True)
 
 
 @mcp.tool()
-def inventory_search_by_name(keyword: str, limit: int = 10) -> dict[str, Any]:
+def inventory_search_by_name(keyword: str, limit: int = 50) -> dict[str, Any]:
     """按名称搜索库存。"""
-    limit = max(1, min(limit, 20))
+    limit = max(1, min(limit, 100))
     return run_lsm_cli([
         "inventory",
         "list",
@@ -523,9 +522,9 @@ def inventory_get_by_code(internal_code: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def inventory_list_low_stock(limit: int = 10) -> dict[str, Any]:
+def inventory_list_low_stock(limit: int = 50) -> dict[str, Any]:
     """查询低库存。"""
-    limit = max(1, min(limit, 20))
+    limit = max(1, min(limit, 100))
     return run_lsm_cli([
         "inventory",
         "list",
@@ -537,9 +536,9 @@ def inventory_list_low_stock(limit: int = 10) -> dict[str, Any]:
 
 
 @mcp.tool()
-def reagent_orders_search_by_name(keyword: str, limit: int = 10) -> dict[str, Any]:
+def reagent_orders_search_by_name(keyword: str, limit: int = 50) -> dict[str, Any]:
     """按名称搜索试剂订单。"""
-    limit = max(1, min(limit, 20))
+    limit = max(1, min(limit, 100))
     return run_lsm_cli([
         "reagent-orders",
         "list",
@@ -565,9 +564,9 @@ def reagent_orders_get_cas_overview(cas_number: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def consumable_orders_search_by_name(keyword: str, limit: int = 10) -> dict[str, Any]:
+def consumable_orders_search_by_name(keyword: str, limit: int = 50) -> dict[str, Any]:
     """按名称搜索耗材订单。"""
-    limit = max(1, min(limit, 20))
+    limit = max(1, min(limit, 100))
     return run_lsm_cli([
         "consumable-orders",
         "list",
@@ -581,9 +580,9 @@ def consumable_orders_search_by_name(keyword: str, limit: int = 10) -> dict[str,
 
 
 @mcp.tool()
-def common_shelf_search_by_alias(keyword: str, limit: int = 10) -> dict[str, Any]:
+def common_shelf_search_by_alias(keyword: str, limit: int = 50) -> dict[str, Any]:
     """按别名搜索常用货架分组。"""
-    limit = max(1, min(limit, 20))
+    limit = max(1, min(limit, 100))
     return run_lsm_cli([
         "common-shelf",
         "list",
@@ -821,7 +820,7 @@ class LSMRobotOrchestrator:
             return help_text()
 
         if intent.name == "inventory_low_stock":
-            result = await self.mcp.call_tool("inventory_list_low_stock", {"limit": 10})
+            result = await self.mcp.call_tool("inventory_list_low_stock", {"limit": 50})
             return format_inventory_list(result)
 
         if intent.name == "inventory_search_by_cas":
@@ -1074,17 +1073,17 @@ MCP tool 返回的是 CLI 包装后的结构，例如：
 
 | MCP tool | CLI 映射 | 说明 | 是否需要用户绑定 | 是否写操作 |
 |---|---|---|---|---|
-| `inventory_search_by_name` | `inventory list --param search=... --param search_field=name` | 名称搜库存 | 否 | 否 |
-| `inventory_get_by_id` | `inventory get` | 库存详情 | 否 | 否 |
-| `inventory_get_by_cas` | `inventory cas` | CAS 查库存 | 否 | 否 |
-| `inventory_get_by_code` | `inventory code` | 内部编码查库存 | 否 | 否 |
-| `inventory_list_low_stock` | `inventory list --param status_filter=run_short` | 低库存 | 否 | 否 |
-| `reagent_orders_search_by_name` | `reagent-orders list --param search=...` | 搜试剂订单 | 否或按权限 | 否 |
-| `reagent_orders_get_by_id` | `reagent-orders get` | 试剂订单详情 | 否或按权限 | 否 |
-| `reagent_orders_get_cas_overview` | `reagent-orders cas-overview` | CAS 概览 | 否 | 否 |
-| `consumable_orders_search_by_name` | `consumable-orders list --param search=...` | 搜耗材订单 | 否或按权限 | 否 |
-| `common_shelf_search_by_alias` | `common-shelf list --param search=... --param search_field=alias` | 常用货架别名查询 | 否 | 否 |
-| `common_shelf_locations` | `common-shelf locations` | 常用货架位置统计 | 否 | 否 |
+| `inventory_search_by_name` | `inventory list --param search=... --param search_field=name` | 名称搜库存 | 用户绑定 | 否 |
+| `inventory_get_by_id` | `inventory get` | 库存详情 | 用户绑定 | 否 |
+| `inventory_get_by_cas` | `inventory cas` | CAS 查库存 | 用户绑定 | 否 |
+| `inventory_get_by_code` | `inventory code` | 内部编码查库存 | 用户绑定 | 否 |
+| `inventory_list_low_stock` | `inventory list --param status_filter=run_short` | 低库存 | 用户绑定 | 否 |
+| `reagent_orders_search_by_name` | `reagent-orders list --param search=...` | 搜试剂订单 | 用户绑定 | 否 |
+| `reagent_orders_get_by_id` | `reagent-orders get` | 试剂订单详情 | 用户绑定 | 否 |
+| `reagent_orders_get_cas_overview` | `reagent-orders cas-overview` | CAS 概览 | 用户绑定 | 否 |
+| `consumable_orders_search_by_name` | `consumable-orders list --param search=...` | 搜耗材订单 | 用户绑定 | 否 |
+| `common_shelf_search_by_alias` | `common-shelf list --param search=... --param search_field=alias` | 常用货架别名查询 | 用户绑定 | 否 |
+| `common_shelf_locations` | `common-shelf locations` | 常用货架位置统计 | 用户绑定 | 否 |
 
 用户绑定做好后再开放：
 

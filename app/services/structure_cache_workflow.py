@@ -13,7 +13,7 @@ from app.models.compound_structure import (
     CompoundStructureStatus,
 )
 from app.services.cas_utils import is_valid_cas, normalize_cas
-from app.services.pubchem_resolver import PubChemResolver, create_pubchem_client
+from app.services.pubchem_resolver import PubChemResolver, ResolvedStructure, create_pubchem_client
 from app.services.structure_cache_repo import (
     StructureCacheWrite,
     get_structure_cache,
@@ -87,7 +87,11 @@ def _stored_candidate_cids(existing: CompoundStructureCache | None) -> set[int]:
 def _ensure_cid_is_stored_candidate(
     existing: CompoundStructureCache | None,
     cid: int,
+    *,
+    allow_manual_reselect: bool = False,
 ) -> None:
+    if allow_manual_reselect and existing and existing.manually_verified:
+        return
     if existing is None or existing.status != CompoundStructureStatus.AMBIGUOUS:
         raise StructureValidationError("Resolve CAS before confirming a PubChem candidate")
     if cid not in _stored_candidate_cids(existing):
@@ -139,6 +143,22 @@ async def resolve_cas_to_cache(
     )
 
 
+async def preview_pubchem_candidates(cas_number: str) -> ResolvedStructure:
+    """Resolve PubChem candidates without mutating the structure cache."""
+    _ensure_pubchem_enabled()
+    normalized_cas = _normalize_valid_cas(cas_number)
+    async with create_pubchem_client(
+        timeout_seconds=settings.chem_pubchem_timeout_seconds,
+        user_agent=settings.chem_pubchem_user_agent,
+    ) as client:
+        resolver = PubChemResolver(
+            client,
+            min_interval_seconds=_min_interval_seconds(settings.chem_pubchem_rate_limit_per_second),
+            max_retries=settings.chem_pubchem_max_retries,
+        )
+        return await resolver.resolve_cas(normalized_cas)
+
+
 async def confirm_pubchem_cid_to_cache(
     db: Session,
     *,
@@ -151,7 +171,11 @@ async def confirm_pubchem_cid_to_cache(
     normalized_cas = _normalize_valid_cas(cas_number)
     existing = get_structure_cache(db, normalized_cas)
     _ensure_manual_can_be_overwritten(existing, overwrite_manual=overwrite_manual)
-    _ensure_cid_is_stored_candidate(existing, cid)
+    _ensure_cid_is_stored_candidate(
+        existing,
+        cid,
+        allow_manual_reselect=overwrite_manual,
+    )
 
     async with create_pubchem_client(
         timeout_seconds=settings.chem_pubchem_timeout_seconds,

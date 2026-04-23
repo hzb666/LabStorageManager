@@ -14,7 +14,7 @@ import redis
 
 from app.core.constants import EXCEL_FILE_MAX_BYTES, IMPORT_PREVIEW_SESSION_TTL_SECONDS
 from app.core.redis import get_redis, redis_key
-from app.core.time_utils import get_utc_now
+from app.core.time_utils import get_utc_now, parse_utc_datetime, utc_iso_str
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def _write_preview_metadata(session: InventoryImportPreviewSession) -> None:
         "user_id": session.user_id,
         "default_storage_location": session.default_storage_location,
         "default_is_hazardous": session.default_is_hazardous,
-        "expires_at": session.expires_at.isoformat(),
+        "expires_at": utc_iso_str(session.expires_at),
     }
     metadata_path = _preview_session_metadata_path(session.token)
     metadata_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -124,9 +124,8 @@ def cleanup_expired_inventory_import_preview_artifacts(*, now_utc: datetime | No
         token = str(payload.get("token") or metadata_path.stem.removeprefix(PREVIEW_SESSION_METADATA_PREFIX))
         file_path = payload.get("file_path")
         expires_at_raw = payload.get("expires_at")
-        try:
-            expires_at = datetime.fromisoformat(str(expires_at_raw))
-        except (TypeError, ValueError):
+        expires_at = parse_utc_datetime(expires_at_raw)
+        if expires_at is None:
             _delete_preview_file(str(file_path) if file_path else None)
             _delete_preview_metadata(token)
             continue
@@ -175,9 +174,12 @@ def _parse_preview_session(
         if default_storage_location is not None:
             default_storage_location = str(default_storage_location)
         default_is_hazardous = bool(payload["default_is_hazardous"])
-        expires_at = datetime.fromisoformat(str(payload["expires_at"]))
-    except (KeyError, TypeError, ValueError) as exc:
+        expires_at = parse_utc_datetime(payload["expires_at"])
+    except (KeyError, TypeError) as exc:
         raise ValueError("Preview token is invalid or expired") from exc
+
+    if expires_at is None:
+        raise ValueError("Preview token is invalid or expired")
 
     if expires_at <= get_utc_now():
         _delete_preview_file(file_path)
@@ -236,7 +238,7 @@ def create_inventory_import_preview_session(
         "file_suffix": file_suffix,
         "default_storage_location": default_storage_location,
         "default_is_hazardous": default_is_hazardous,
-        "expires_at": expires_at.isoformat(),
+        "expires_at": utc_iso_str(expires_at),
     }
     redis_client = get_redis()
     if redis_client is not None:

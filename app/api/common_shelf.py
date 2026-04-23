@@ -7,7 +7,7 @@ from typing import Optional, Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
+from app.core.auth import CurrentSession, CurrentUser, get_current_user
 from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SSEEventType, SSERoom
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.core.time_utils import get_utc_now
@@ -30,6 +30,7 @@ from app.services.common_shelf_creation import (
     normalize_brand_for_group,
     normalize_specification_for_group,
 )
+from app.services.cas_utils import normalize_cas
 from app.services.common_shelf_group_records import (
     get_active_common_shelf_group,
     mark_common_shelf_group_deleted,
@@ -49,7 +50,7 @@ from app.services.common_shelf_queries import (
     CommonShelfGroupFields,
     CommonShelfGroupListOptions,
     build_group_key,
-    delete_group_items_returning,
+    get_common_shelf_group_row_payload,
     get_group_identity_from_item,
     get_group_identity_from_group,
     get_group_items,
@@ -90,12 +91,51 @@ async def _broadcast_common_shelf_change(
     await sse_manager.broadcast(SSERoom.COMMON_SHELF, event_type, payload)
 
 
+def _build_group_row_event_extra(
+    db: DBSession,
+    *,
+    match_group_key: str,
+    group_fields: CommonShelfGroupFields,
+    extra: Optional[dict] = None,
+) -> dict:
+    payload = {"id": match_group_key}
+    group_row = get_common_shelf_group_row_payload(db, group_fields=group_fields)
+    if group_row is not None:
+        payload["item"] = group_row
+        payload["group_key"] = str(group_row["id"])
+    else:
+        payload["group_key"] = build_group_key(
+            cas_number=group_fields.cas_number,
+            brand_normalized=group_fields.brand_normalized,
+            specification_normalized=group_fields.specification_normalized,
+        )
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _build_manual_create_group_fields(payload: CommonShelfManualCreate) -> CommonShelfGroupFields:
+    _, _, specification_normalized, _ = _parse_group_specification_or_400(payload.specification)
+    return CommonShelfGroupFields(
+        cas_number=normalize_cas(payload.cas_number),
+        brand_normalized=normalize_brand_for_group(payload.brand),
+        specification_normalized=specification_normalized,
+    )
+
+
 def _resolve_pagination(skip: int, limit: int) -> tuple[int, int]:
     return max(skip, 0), max(0, min(limit, MAX_PAGE_SIZE))
 
 
 def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
     return (value or "").strip() or None
+
+
+def _normalize_required_brand(value: Optional[str]) -> str:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
+    return normalized
 
 
 def _parse_group_specification_or_400(specification: str) -> tuple[float, str, str, str]:
@@ -254,6 +294,16 @@ async def manual_add_common_shelf(
     current_user: CurrentUser,
     db: DBSession,
 ):
+    target_group_fields = _build_manual_create_group_fields(payload)
+    group_existed_before = (
+        get_active_common_shelf_group(
+            db,
+            cas_number=target_group_fields.cas_number,
+            brand_normalized=target_group_fields.brand_normalized,
+            specification_normalized=target_group_fields.specification_normalized,
+        )
+        is not None
+    )
     created_items = create_manual_common_shelf_items(db, payload, created_by_id=current_user.id)
     for item in created_items:
         log_common_shelf_stock_in(
@@ -265,8 +315,21 @@ async def manual_add_common_shelf(
     _commit_and_refresh_items(db, created_items)
 
     await _broadcast_common_shelf_change(
-        event_type=SSEEventType.COMMON_SHELF_CREATED,
+        event_type=(
+            SSEEventType.COMMON_SHELF_UPDATED
+            if group_existed_before
+            else SSEEventType.COMMON_SHELF_CREATED
+        ),
         items=created_items,
+        extra=_build_group_row_event_extra(
+            db,
+            match_group_key=build_group_key(
+                cas_number=target_group_fields.cas_number,
+                brand_normalized=target_group_fields.brand_normalized,
+                specification_normalized=target_group_fields.specification_normalized,
+            ),
+            group_fields=target_group_fields,
+        ),
     )
     if created_items:
         enqueue_structure_cache_resolution(
@@ -295,9 +358,10 @@ async def update_common_shelf_group(
     normalized_quantity, normalized_unit, specification_normalized, specification_text = (
         _parse_group_specification_or_400(payload.specification)
     )
+    target_brand = _normalize_required_brand(payload.brand)
     target_group_fields = CommonShelfGroupFields(
         cas_number=current_group_fields.cas_number,
-        brand_normalized=normalize_brand_for_group(payload.brand),
+        brand_normalized=normalize_brand_for_group(target_brand),
         specification_normalized=specification_normalized,
     )
     merge_target = locate_merge_target(
@@ -320,7 +384,7 @@ async def update_common_shelf_group(
 
     before_group = CommonShelfGroup.model_validate(current_group)
     before_items = [CommonShelf.model_validate(item) for item in items]
-    brand = merge_target.brand if merge_target is not None else _normalize_optional_text(payload.brand)
+    brand = merge_target.brand if merge_target is not None else target_brand
     target_group = merge_target or current_group
 
     if merge_target is None:
@@ -375,10 +439,18 @@ async def update_common_shelf_group(
             db.refresh(item)
     db.refresh(target_group)
     next_group_key = get_group_identity_from_group(target_group).group_key
+    event_extra = {"group_key": next_group_key, "merged": merge_target is not None}
+    if merge_target is None:
+        event_extra = _build_group_row_event_extra(
+            db,
+            match_group_key=group_key,
+            group_fields=target_group_fields,
+            extra=event_extra,
+        )
     await _broadcast_common_shelf_change(
         event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=items,
-        extra={"group_key": next_group_key, "merged": merge_target is not None},
+        extra=event_extra,
     )
     return {
         "message": "常用货架分组已更新",
@@ -437,11 +509,11 @@ async def update_common_shelf_item(
     await _broadcast_common_shelf_change(
         event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=[item],
-        extra={"group_key": build_group_key(
-            cas_number=group_fields.cas_number,
-            brand_normalized=group_fields.brand_normalized,
-            specification_normalized=group_fields.specification_normalized,
-        )},
+        extra=_build_group_row_event_extra(
+            db,
+            match_group_key=group_key,
+            group_fields=group_fields,
+        ),
     )
     return {
         "message": "常用货架条目已更新",
@@ -482,13 +554,13 @@ async def add_common_shelf_bottles(
     _commit_and_refresh_items(db, created_items)
 
     await _broadcast_common_shelf_change(
-        event_type=SSEEventType.COMMON_SHELF_CREATED,
+        event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=created_items,
-        extra={
-            "group_key": get_group_identity_from_item(created_items[0]).group_key
-            if created_items
-            else group_key
-        },
+        extra=_build_group_row_event_extra(
+            db,
+            match_group_key=group_key,
+            group_fields=group_fields,
+        ),
     )
     enqueue_structure_cache_resolution(
         background_tasks,
@@ -535,21 +607,28 @@ async def remove_one_common_shelf(
     fallback_name = removed_item.name_snapshot
     db.commit()
 
-    # 先推送删除事件，再查询剩余瓶数；前端列表收到 SSE 后会主动刷新，不依赖这个接口再携带完整组快照。
     await _broadcast_common_shelf_change(
-        event_type=SSEEventType.COMMON_SHELF_DELETED,
+        event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=[removed_item],
-        extra={"group_key": group_key, "removed_item_id": removed_item_id},
+        extra=_build_group_row_event_extra(
+            db,
+            match_group_key=group_key,
+            group_fields=group_fields,
+            extra={"removed_item_id": removed_item_id},
+        ),
     )
 
     remaining_items = get_group_items(db, group_fields=group_fields)
     name_map = get_group_name_map(db, cas_number=group_fields.cas_number)
+    preferred_name = name_map.name if name_map and name_map.name else fallback_name
     return {
         "message": "已扣减 1 瓶",
         "removed_item_id": removed_item_id,
         "remaining_bottle_count": len(remaining_items),
         "group_exists": True,
-        "display_name": name_map.name if name_map and name_map.name else fallback_name,
+        "preferred_name": preferred_name,
+        "preferred_name_source": "chemical_name_map" if name_map and name_map.name else "name_snapshot",
+        "display_name": preferred_name,
     }
 
 
@@ -588,9 +667,14 @@ async def delete_common_shelf_item(
     db.commit()
 
     await _broadcast_common_shelf_change(
-        event_type=SSEEventType.COMMON_SHELF_DELETED,
+        event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=[removed_snapshot],
-        extra={"group_key": group_key, "removed_item_id": removed_item_id},
+        extra=_build_group_row_event_extra(
+            db,
+            match_group_key=group_key,
+            group_fields=group_fields,
+            extra={"removed_item_id": removed_item_id},
+        ),
     )
 
     remaining_items = get_group_items(db, group_fields=group_fields)
@@ -603,7 +687,7 @@ async def delete_common_shelf_item(
     }
 
 
-@router.delete("/groups/{group_key}", response_model=dict, dependencies=[Depends(require_admin)])
+@router.delete("/groups/{group_key}", response_model=dict)
 async def delete_common_shelf_group(
     group_key: str,
     request: Request,
@@ -611,16 +695,18 @@ async def delete_common_shelf_group(
     db: DBSession,
 ):
     group_fields, group = _get_group_or_404(db, group_key)
-    deleted_items = delete_group_items_returning(db, group_fields=group_fields)
+    existing_items = get_group_items(db, group_fields=group_fields)
+    if existing_items:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only empty common shelf groups can be deleted",
+        )
 
-    sample_item = deleted_items[-1] if deleted_items else None
-    deleted_ids = [item.id for item in deleted_items if item.id is not None]
     mark_common_shelf_group_deleted(db, group)
     log_common_shelf_group_delete(
         db,
-        item=sample_item,
         group=group,
-        deleted_count=len(deleted_ids),
+        deleted_count=0,
         operator_id=current_user.id,
         is_cli=get_request_is_cli(request),
     )
@@ -628,14 +714,14 @@ async def delete_common_shelf_group(
 
     await _broadcast_common_shelf_change(
         event_type=SSEEventType.COMMON_SHELF_DELETED,
-        items=deleted_items,
-        extra={"group_key": group_key, "deleted_ids": deleted_ids},
+        items=[],
+        extra={"group_key": group_key, "deleted_ids": []},
     )
     return {
         "message": "常用货架分组已删除",
         "group_key": group_key,
-        "deleted_count": len(deleted_ids),
-        "deleted_ids": deleted_ids,
+        "deleted_count": 0,
+        "deleted_ids": [],
     }
 
 

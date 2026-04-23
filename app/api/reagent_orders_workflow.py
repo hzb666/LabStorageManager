@@ -21,12 +21,23 @@ from app.models.reagent_order import (
     ReagentOrderResponse,
     ReagentOrderStatus,
 )
-from app.models.common_shelf import CommonShelf, CommonShelfResponse
+from app.models.common_shelf import CommonShelf
 from app.models.inventory import Inventory, InventoryResponse, InventoryStatus
 from app.core.constants import SSEEventType, SSERoom
 from app.services.api_utils import clear_cache_by_prefix, empty_to_none
-from app.services.common_shelf_creation import create_common_shelf_items_from_order
+from app.services.cas_utils import normalize_cas
+from app.services.common_shelf_creation import (
+    create_common_shelf_items_from_order,
+    normalize_brand_for_group,
+    normalize_specification_for_group,
+)
+from app.services.common_shelf_group_records import get_active_common_shelf_group
 from app.services.common_shelf_operation_logger import log_common_shelf_stock_in
+from app.services.common_shelf_queries import (
+    CommonShelfGroupFields,
+    get_common_shelf_group_row_payload,
+    get_group_identity_from_item,
+)
 from app.services.internal_code import (
     INTERNAL_CODE_CONFLICT_MAX_RETRIES,
     generate_internal_code,
@@ -63,17 +74,24 @@ REAGENT_ORDER_DELETE_LOCKED_STATUSES = frozenset(
         ReagentOrderStatus.STOCKED,
     }
 )
+REAGENT_ORDER_APPROVABLE_STATUSES = frozenset(
+    {
+        ReagentOrderStatus.PENDING,
+        ReagentOrderStatus.REJECTED,
+    }
+)
+REAGENT_ORDER_REJECTABLE_STATUSES = frozenset(
+    {
+        ReagentOrderStatus.PENDING,
+        ReagentOrderStatus.APPROVED,
+    }
+)
 DASHBOARD_ACTIVE_REJECTED_DAYS = 7
 DASHBOARD_REAGENT_STATUSES = (
     ReagentOrderStatus.PENDING,
     ReagentOrderStatus.APPROVED,
     ReagentOrderStatus.REJECTED,
 )
-DASHBOARD_REAGENT_STATUS_LABELS = {
-    ReagentOrderStatus.PENDING.value: "已申购",
-    ReagentOrderStatus.APPROVED.value: "已批准",
-    ReagentOrderStatus.REJECTED.value: "未通过",
-}
 
 
 class ReagentWorkflowEditableFields(BaseModel):
@@ -222,19 +240,6 @@ def _serialize_inventory_items(db: Session, items: list[Inventory]) -> list[dict
     return serialized_items
 
 
-def _serialize_common_shelf_items(db: Session, items: list[CommonShelf]) -> list[dict[str, Any]]:
-    users_map = batch_get_user_names(
-        db,
-        {item.created_by_id for item in items if item.created_by_id},
-    )
-    serialized_items: list[dict[str, Any]] = []
-    for item in items:
-        item_dict = CommonShelfResponse.model_validate(item).model_dump(mode="json")
-        item_dict["created_by_name"] = users_map.get(item.created_by_id)
-        serialized_items.append(item_dict)
-    return serialized_items
-
-
 def _normalize_workflow_order_updates(payload: ReagentWorkflowEditableFields) -> dict[str, Any]:
     # 将到货/入库弹窗里的可编辑试剂信息标准化为订单字段更新。
     update_data = payload.model_dump(exclude_unset=True)
@@ -251,6 +256,12 @@ def _normalize_workflow_order_updates(payload: ReagentWorkflowEditableFields) ->
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="name is required")
         update_data["name"] = normalized_name
 
+    if "brand" in update_data:
+        normalized_brand = update_data["brand"].strip() if update_data["brand"] else ""
+        if not normalized_brand:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
+        update_data["brand"] = normalized_brand
+
     if "specification" in update_data:
         specification = update_data.pop("specification")
         if specification is not None:
@@ -261,13 +272,28 @@ def _normalize_workflow_order_updates(payload: ReagentWorkflowEditableFields) ->
             update_data["initial_quantity"] = initial_quantity
             update_data["unit"] = unit
 
-    optional_string_fields = ["english_name", "alias", "category", "brand", "purity", "unit", "notes"]
+    optional_string_fields = ["english_name", "alias", "category", "purity", "unit", "notes"]
     normalized_strings = empty_to_none(update_data, optional_string_fields)
     for field in optional_string_fields:
         if field in update_data:
             update_data[field] = normalized_strings[field]
 
     return update_data
+
+
+def _ensure_workflow_order_brand(order: ReagentOrder) -> None:
+    if not (order.brand and order.brand.strip()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
+
+
+def _normalize_required_storage_location(storage_location: Optional[str]) -> str:
+    normalized = normalize_storage_location(storage_location)
+    if normalized is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="storage_location is required",
+        )
+    return normalized
 
 
 def _apply_order_pinyin_updates(order: ReagentOrder, *, update_data: dict[str, Any]) -> None:
@@ -469,23 +495,32 @@ async def _broadcast_common_shelf_events(
     db: Session,
     items: list[CommonShelf],
     *,
-    created: bool,
+    group_existed_before: bool,
 ) -> None:
     if not items:
         return
 
-    serialized_items = _serialize_common_shelf_items(db, items)
-    event_type = (
-        SSEEventType.COMMON_SHELF_CREATED
-        if created
-        else SSEEventType.COMMON_SHELF_UPDATED
+    group_identity = get_group_identity_from_item(items[0])
+    group_fields = CommonShelfGroupFields(
+        cas_number=group_identity.cas_number,
+        brand_normalized=group_identity.brand_normalized,
+        specification_normalized=group_identity.specification_normalized,
     )
-    for item, serialized_item in zip(items, serialized_items):
-        await sse_manager.broadcast(
-            SSERoom.COMMON_SHELF,
-            event_type,
-            {"id": item.id, "item": serialized_item},
-        )
+    group_row = get_common_shelf_group_row_payload(db, group_fields=group_fields)
+    payload: dict[str, Any] = {"id": group_identity.group_key, "group_key": group_identity.group_key}
+    if group_row is not None:
+        payload["item"] = group_row
+        payload["group_key"] = str(group_row["id"])
+
+    await sse_manager.broadcast(
+        SSERoom.COMMON_SHELF,
+        (
+            SSEEventType.COMMON_SHELF_UPDATED
+            if group_existed_before
+            else SSEEventType.COMMON_SHELF_CREATED
+        ),
+        payload,
+    )
 
 
 def _register_approval_routes(
@@ -503,7 +538,7 @@ def _register_approval_routes(
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
 
-        if order.status not in (ReagentOrderStatus.PENDING, ReagentOrderStatus.REJECTED):
+        if order.status not in REAGENT_ORDER_APPROVABLE_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot approve order with status: {order.status}",
@@ -541,7 +576,7 @@ def _register_approval_routes(
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
 
-        if order.status not in (ReagentOrderStatus.PENDING, ReagentOrderStatus.APPROVED):
+        if order.status not in REAGENT_ORDER_REJECTABLE_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot reject order with status: {order.status}",
@@ -599,12 +634,13 @@ def _register_arrival_routes(
             )
 
         before_order = _apply_workflow_order_updates(order, body)
+        _ensure_workflow_order_brand(order)
         _validate_positive_remaining_quantity(
             body.remaining_quantity,
             initial_quantity=order.initial_quantity,
         )
 
-        direct_storage_location = body.storage_location.strip() if body.storage_location else None
+        direct_storage_location = normalize_storage_location(body.storage_location)
         target_status = (
             ReagentOrderStatus.STOCKED
             if order.order_reason == ReagentOrderReason.COMMON_PUBLIC or direct_storage_location
@@ -619,6 +655,24 @@ def _register_arrival_routes(
         order.status = target_status
 
         if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
+            _, _, specification_normalized, _ = normalize_specification_for_group(
+                order.initial_quantity,
+                order.unit,
+            )
+            target_group_fields = CommonShelfGroupFields(
+                cas_number=normalize_cas(order.cas_number),
+                brand_normalized=normalize_brand_for_group(order.brand),
+                specification_normalized=specification_normalized,
+            )
+            group_existed_before = (
+                get_active_common_shelf_group(
+                    db,
+                    cas_number=target_group_fields.cas_number,
+                    brand_normalized=target_group_fields.brand_normalized,
+                    specification_normalized=target_group_fields.specification_normalized,
+                )
+                is not None
+            )
             common_shelf_items = create_common_shelf_items_from_order(
                 db,
                 order,
@@ -647,7 +701,11 @@ def _register_arrival_routes(
                 SSEEventType.REAGENT_ORDER_UPDATED,
                 {"id": order_id, "item": _serialize_reagent_order(order, db)},
             )
-            await _broadcast_common_shelf_events(db, common_shelf_items, created=True)
+            await _broadcast_common_shelf_events(
+                db,
+                common_shelf_items,
+                group_existed_before=group_existed_before,
+            )
             enqueue_structure_cache_resolution(
                 background_tasks,
                 order.cas_number,
@@ -662,14 +720,13 @@ def _register_arrival_routes(
                 "items_created": len(common_shelf_items),
             }
         elif direct_storage_location:
-            target_location = normalize_storage_location(direct_storage_location)
             inventory_items = _create_inventory_items_from_order(
                 db,
                 order,
                 options=InventoryCreateOptions(
                     created_by_id=current_user.id,
                     temporary_keeper_id=None,
-                    storage_location=target_location,
+                    storage_location=direct_storage_location,
                     inventory_status=InventoryStatus.IN_STOCK,
                     remaining_quantity=body.remaining_quantity,
                 ),
@@ -733,9 +790,9 @@ def _build_reagent_dashboard_groups(
 ) -> dict[str, dict[str, Any]]:
     grouped_orders: dict[str, dict[str, Any]] = {
         status.value: {
+            "status": status.value,
             "orders": [],
             "count": 0,
-            "label": DASHBOARD_REAGENT_STATUS_LABELS[status.value],
         }
         for status in DASHBOARD_REAGENT_STATUSES
     }
@@ -766,7 +823,7 @@ def _build_reagent_dashboard_groups(
 
         status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
         if status_key not in grouped_orders:
-            grouped_orders[status_key] = {"orders": [], "count": 0, "label": status_key}
+            grouped_orders[status_key] = {"status": status_key, "orders": [], "count": 0}
         grouped_orders[status_key]["orders"].append(order_data)
 
     for key in grouped_orders:
@@ -894,8 +951,6 @@ def _validate_stock_in_order(
             detail="Order missing initial_quantity or unit. Please update the order.",
         )
 
-    if not payload.storage_location.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="storage_location is required")
     _validate_positive_remaining_quantity(payload.remaining_quantity, initial_quantity=order.initial_quantity)
     if order.status == ReagentOrderStatus.ARRIVED and payload.remaining_quantity is None:
         raise HTTPException(
@@ -906,7 +961,7 @@ def _validate_stock_in_order(
 
 # 计算 stock-in 的目标库存属性，复用 APPROVED/ARRIVED 两条路径。
 def _build_stock_in_context(order: ReagentOrder, payload: StockInRequest) -> tuple[Optional[str], float]:
-    target_location = normalize_storage_location(payload.storage_location)
+    target_location = _normalize_required_storage_location(payload.storage_location)
     effective_remaining = order.initial_quantity if payload.remaining_quantity is None else payload.remaining_quantity
     return target_location, effective_remaining
 
@@ -1115,6 +1170,7 @@ def _register_stock_in_route(
 
         _validate_stock_in_order_access(order, current_user=current_user)
         before_order = _apply_workflow_order_updates(order, payload)
+        _ensure_workflow_order_brand(order)
         _validate_stock_in_order(order, payload=payload)
         stock_context = _build_stock_in_context(order, payload)
         target_location, effective_remaining = stock_context

@@ -54,6 +54,47 @@ def _filter_rooms_by_user_access(current_user: User, rooms: list[str]) -> list[s
     return rooms
 
 
+def _parse_last_seq_by_room(rooms: list[str], raw_value: str) -> dict[str, int]:
+    if not raw_value.strip():
+        return {}
+
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid SSE last_seq_by_room payload",
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid SSE last_seq_by_room payload",
+        )
+
+    normalized: dict[str, int] = {}
+    for room in rooms:
+        raw_seq = parsed.get(room)
+        if raw_seq is None or raw_seq == "":
+            continue
+        try:
+            seq = int(raw_seq)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid SSE last sequence for room: {room}",
+            ) from exc
+        if seq < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid SSE last sequence for room: {room}",
+            )
+        if seq > 0:
+            normalized[room] = seq
+
+    return normalized
+
+
 @router.get("/events")
 async def sse_events(
     request: Request,
@@ -71,15 +112,17 @@ async def sse_events(
             detail="No SSE rooms are accessible for current user",
         )
 
-    # 当前项目不做服务端 replay，重连后由前端整页刷新兜底。
-    last_seq = 0
+    last_seq_by_room = _parse_last_seq_by_room(
+        rooms,
+        request.query_params.get("last_seq_by_room", ""),
+    )
 
     client_id = sse_manager.new_client_id()
     client = await sse_manager.subscribe(
         SSESubscriptionRequest(
             client_id=client_id,
             rooms=rooms,
-            last_seq=last_seq,
+            last_seq_by_room=last_seq_by_room,
             user_id=current_user.id,
             session_id=current_session.id,
             token_hash=current_session.token_hash,
@@ -91,9 +134,13 @@ async def sse_events(
         connected_payload = {
             "client_id": client_id,
             "rooms": rooms,
-            "last_seq": last_seq,
+            "last_seq_by_room": last_seq_by_room,
         }
         yield f"event: connected\ndata: {json.dumps(connected_payload, ensure_ascii=False)}\n\n"
+        for replay_message in await sse_manager.collect_replay_messages(client):
+            if await request.is_disconnected():
+                break
+            yield replay_message
         # 建连后周期复检，防止“建连时有效，后续被踢后仍长期收流”。
         next_revalidate_at = get_utc_now() + timedelta(seconds=SSE_SESSION_REVALIDATE_SECONDS)
 

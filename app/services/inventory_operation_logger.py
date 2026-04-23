@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlmodel import Session
 
+from app.core.time_utils import utc_iso_str
 from app.models.inventory import Inventory
 from app.models.inventory_operation_log import (
     InventoryOperationAction,
@@ -78,8 +79,8 @@ def build_inventory_snapshot(
         "tk": inventory.temporary_keeper_id,
         "oi": inventory.source_order_id,
         "cb": inventory.created_by_id,
-        "cr": inventory.created_at.isoformat() if inventory.created_at else None,
-        "up": inventory.updated_at.isoformat() if inventory.updated_at else None,
+        "cr": utc_iso_str(inventory.created_at),
+        "up": utc_iso_str(inventory.updated_at),
     }
     if source:
         snapshot["sc"] = source

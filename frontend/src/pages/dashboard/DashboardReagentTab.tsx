@@ -5,7 +5,14 @@ import { createColumnHelper } from "@tanstack/react-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
-import { FlaskConical, PackageCheck, Warehouse } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  FlaskConical,
+  PackageCheck,
+  Warehouse,
+  X,
+} from "lucide-react";
 
 import {
   Dialog,
@@ -14,20 +21,25 @@ import {
   DialogTitle,
 } from "@/components/ui/Dialog";
 import { FilterTable } from "@/components/ui/FilterTable";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { TableActionButtonsMemo } from "@/components/TableActionButtons";
 import { BaseForm } from "@/components/BaseForm";
 import { EditDialogActions } from "@/components/EditDialogActions";
 import { ReagentOrderExpandedRow } from "@/components/ReagentOrderExpandedRow";
 import { toast } from "@/lib/toast";
-import { processNotes } from "@/lib/utils";
+import { formatDate, processNotes } from "@/lib/utils";
 import { UserRoles } from "@/lib/constants";
-import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from "@/store/useStore";
 
-import { commonShelfAPI, reagentOrderAPI } from "@/api/client";
+import { commonShelfAPI, reagentOrderAPI, ReagentOrderStatus } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
 import { getReagentOrderTableColumns } from "@/lib/tableConfigs";
 import { REAGENT_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
+import {
+  isApprovableOrderStatus,
+  isOrderEditableByRole,
+  isRejectableOrderStatus,
+} from "@/lib/orderEditRules";
 import {
   ReagentOrderSchema,
   ConfirmArrivalFormSchema,
@@ -74,11 +86,27 @@ import {
   DASHBOARD_REAGENT_ADMIN_SEARCH_FIELDS,
   buildLocalListData,
   flattenGroupedOrders,
+  isApprovedOrderOverdue,
+  isPendingApprovalOverdue,
   removeApplicantColumn,
   requestDashboardCountsRefresh,
 } from "../../lib/dashboardUtils";
+import { getReagentBrandOptionsQueryOptions } from "@/lib/reagentBrandOptions";
 
 const reagentColumnHelper = createColumnHelper<DashboardReagentOrder>();
+
+function renderAlertBadge(label: string, title: string) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive"
+      title={title}
+      aria-label={title}
+    >
+      <AlertTriangle className="size-3" />
+      {label}
+    </span>
+  );
+}
 
 type StockinMode = "arrival" | "quick" | "common-public-arrival";
 type ArrivalFormReturn = ReturnType<
@@ -138,6 +166,9 @@ function getReagentEditBlockMessage(
   }
   if (!isAdmin && item.applicant_id !== currentUserId) {
     return "只能编辑自己创建的订单";
+  }
+  if (!isOrderEditableByRole(item.status, isAdmin)) {
+    return "仅待审批、已驳回或管理员已批准订单可编辑";
   }
   return null;
 }
@@ -332,6 +363,45 @@ function createReagentActions(
   ];
 }
 
+function createReagentApprovalActions(refreshTables: () => Promise<void>) {
+  return [
+    {
+      id: "approve",
+      label: "审批",
+      icon: <Check className="size-4.5" />,
+      variant: "modern" as const,
+      className:
+        "text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950",
+      confirm: true,
+      confirmLabel: "确认审批",
+      disableWhen: (currItem: DashboardReagentOrder) =>
+        !isApprovableOrderStatus(currItem.status),
+      onClick: async (currItem: DashboardReagentOrder) => {
+        await reagentOrderAPI.approve(currItem.id);
+        await refreshTables();
+        toast.success("审批通过");
+      },
+    },
+    {
+      id: "reject",
+      label: "驳回",
+      icon: <X className="size-4.5" />,
+      variant: "modern" as const,
+      className:
+        "text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20",
+      confirm: true,
+      confirmLabel: "确认驳回",
+      disableWhen: (currItem: DashboardReagentOrder) =>
+        !isRejectableOrderStatus(currItem.status),
+      onClick: async (currItem: DashboardReagentOrder) => {
+        await reagentOrderAPI.reject(currItem.id, "管理员驳回");
+        await refreshTables();
+        toast.success("已驳回");
+      },
+    },
+  ];
+}
+
 // 复用通用列、移除申请人列，并按角色和申请人归属决定编辑按钮是否禁用。
 function createReagentColumns({
   currentUserId,
@@ -340,6 +410,7 @@ function createReagentColumns({
   managementMode,
   onEdit,
   openStockinDialog,
+  refreshTables,
 }: Readonly<{
   currentUserId: number | undefined;
   currentUserRole: string | undefined;
@@ -347,6 +418,7 @@ function createReagentColumns({
   managementMode: boolean;
   onEdit: (item: DashboardReagentOrder) => void;
   openStockinDialog: (item: DashboardReagentOrder, mode: StockinMode) => void;
+  refreshTables: () => Promise<void>;
 }>): ColumnDef<Record<string, unknown>, unknown>[] {
   const orderColumns = getReagentOrderTableColumns() as ColumnDef<
     Record<string, unknown>,
@@ -355,16 +427,61 @@ function createReagentColumns({
   const baseColumns = managementMode
     ? orderColumns
     : removeApplicantColumn(orderColumns);
-  const actions = createReagentActions(openStockinDialog);
+  const columns = [...baseColumns];
+  const createdAtColumnIndex = columns.findIndex((column) => column.id === "created_at");
+  if (managementMode && createdAtColumnIndex >= 0) {
+    columns[createdAtColumnIndex] = reagentColumnHelper.accessor("created_at", {
+      header: "时间",
+      size: 160,
+      minSize: 140,
+      maxSize: 220,
+      cell: (info) => {
+        const item = info.row.original as DashboardReagentOrder;
+        return (
+          <div className="flex items-center gap-2">
+            <span>{formatDate(info.getValue() as string)}</span>
+            {isPendingApprovalOverdue(item.status, item.created_at)
+              ? renderAlertBadge("超时", "已超时")
+              : null}
+          </div>
+        );
+      },
+    }) as ColumnDef<Record<string, unknown>, unknown>;
+  }
+  const statusColumnIndex = columns.findIndex((column) => column.id === "status");
+  if (!managementMode && statusColumnIndex >= 0) {
+    columns[statusColumnIndex] = reagentColumnHelper.accessor("status", {
+      header: "状态",
+      size: 150,
+      minSize: 120,
+      maxSize: 180,
+      cell: (info) => {
+        const item = info.row.original as DashboardReagentOrder;
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={String(info.getValue() ?? "")} />
+            {isApprovedOrderOverdue(item.status, item.updated_at)
+              ? renderAlertBadge("超期", "到货超期")
+              : null}
+          </div>
+        );
+      },
+    }) as ColumnDef<Record<string, unknown>, unknown>;
+  }
+  const actions = managementMode
+    ? createReagentApprovalActions(refreshTables)
+    : createReagentActions(openStockinDialog);
   const actionColumn = reagentColumnHelper.display({
     id: "actions",
     header: "操作",
-    size: 100,
+    size: 132,
+    minSize: 132,
     cell: (info) => {
       const item = info.row.original;
       const disableEdit =
         currentUserRole === UserRoles.PUBLIC ||
-        (!isAdmin && item.applicant_id !== currentUserId);
+        (!isAdmin && item.applicant_id !== currentUserId) ||
+        !isOrderEditableByRole(item.status, isAdmin);
 
       return (
         <TableActionButtonsMemo
@@ -379,17 +496,21 @@ function createReagentColumns({
     },
   });
 
-  return [...baseColumns, actionColumn] as ColumnDef<
+  return [...columns, actionColumn] as ColumnDef<
     Record<string, unknown>,
     unknown
   >[];
 }
 
-// `approved` / `rejected` 状态只允许删除，不允许保存编辑。
+// 仅待审批和已驳回状态允许保存编辑。
 function DashboardReagentEditDialog({
   dialog,
+  isAdmin,
+  brandOptions,
 }: Readonly<{
   dialog: ReturnType<typeof useReagentEditDialog>;
+  isAdmin: boolean;
+  brandOptions: { label: string; value: string }[];
 }>) {
   const {
     editingReagent,
@@ -401,8 +522,7 @@ function DashboardReagentEditDialog({
     submitReagentEdit,
   } = dialog;
   const isReagentEditLocked =
-    editingReagent?.status === "approved" ||
-    editingReagent?.status === "rejected";
+    editingReagent !== null && !isOrderEditableByRole(editingReagent.status, isAdmin);
 
   return (
     <Dialog
@@ -417,7 +537,7 @@ function DashboardReagentEditDialog({
             <span>编辑试剂订单</span>
             {isReagentEditLocked ? (
               <span className="text-base text-muted-foreground">
-                当前状态仅支持删除
+                当前状态不可编辑
               </span>
             ) : null}
           </DialogTitle>
@@ -425,7 +545,7 @@ function DashboardReagentEditDialog({
         <form onSubmit={submitReagentEdit}>
           <BaseForm
             form={reagentForm}
-            fields={getReagentOrderFormFields()}
+            fields={getReagentOrderFormFields({ brandOptions })}
             disabled={isReagentEditLocked}
           />
           <EditDialogActions
@@ -467,6 +587,7 @@ function getActiveStockinSpecification(params: {
 function ReagentWorkflowFormContent({
   mode,
   unit,
+  brandOptions,
   arrivalForm,
   stockinForm,
   commonPublicArrivalForm,
@@ -474,6 +595,7 @@ function ReagentWorkflowFormContent({
 }: Readonly<{
   mode: StockinMode;
   unit?: string | null;
+  brandOptions: { label: string; value: string }[];
   arrivalForm: ArrivalFormReturn;
   stockinForm: StockInFormReturn;
   commonPublicArrivalForm: CommonPublicArrivalFormReturn;
@@ -483,7 +605,7 @@ function ReagentWorkflowFormContent({
     return (
       <BaseForm
         form={arrivalForm}
-        fields={getConfirmArrivalFormFields(unit ?? undefined)}
+        fields={getConfirmArrivalFormFields(unit ?? undefined, { brandOptions })}
       />
     );
   }
@@ -498,7 +620,7 @@ function ReagentWorkflowFormContent({
   return (
     <BaseForm
       form={stockinForm}
-      fields={getStockInFormFields(unit ?? undefined)}
+      fields={getStockInFormFields(unit ?? undefined, undefined, { brandOptions })}
     />
   );
 }
@@ -506,8 +628,10 @@ function ReagentWorkflowFormContent({
 // 同一弹窗承载到货、一键入库和常用货架到货流程，标题与默认值随 `stockinMode` 变化。
 function DashboardReagentStockinDialog({
   dialog,
+  brandOptions,
 }: Readonly<{
   dialog: ReturnType<typeof useReagentStockinDialog>;
+  brandOptions: { label: string; value: string }[];
 }>) {
   const {
     stockinTarget,
@@ -575,6 +699,7 @@ function DashboardReagentStockinDialog({
   });
   const commonPublicArrivalFields = getCommonPublicArrivalFormFields(
     commonShelfLocationSuggestionsQuery.data ?? [],
+    { brandOptions },
   );
   const dialogTitle = getStockinDialogTitle(stockinMode);
 
@@ -594,6 +719,7 @@ function DashboardReagentStockinDialog({
           <ReagentWorkflowFormContent
             mode={stockinMode}
             unit={activeUnit}
+            brandOptions={brandOptions}
             arrivalForm={arrivalForm}
             stockinForm={stockinForm}
             commonPublicArrivalForm={commonPublicArrivalForm}
@@ -684,7 +810,12 @@ function useReagentEditDialog({
       setDeleteConfirm(false);
       setEditingReagent(null);
       await refreshTables();
-      toast.success("试剂订单已更新");
+      toast.success(
+        editingReagent.status === ReagentOrderStatus.REJECTED ||
+          editingReagent.status === ReagentOrderStatus.APPROVED
+          ? "试剂订单已重新提交待审批"
+          : "试剂订单已更新",
+      );
     } catch (err) {
       const detail = extractApiErrorDetail(err);
       const validationErrors = toValidationErrors(detail);
@@ -971,19 +1102,22 @@ export function DashboardReagentTab({
   managementMode = false,
 }: Readonly<{ managementMode?: boolean }>) {
   const currentUser = useAuthStore((state) => state.user);
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale);
   const isAdmin = currentUser?.role === UserRoles.ADMIN;
   const queryClient = useQueryClient();
+  const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions());
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+      queryClient.invalidateQueries({
+        queryKey: managementMode
+          ? ["dashboard", "admin", "reagents"]
+          : ["dashboard", "reagents"],
+      }),
       queryClient.invalidateQueries({ queryKey: ["reagent-orders"] }),
       queryClient.invalidateQueries({ queryKey: ["inventory"] }),
     ]);
-    clearRoomStale('reagent_orders');
     requestDashboardCountsRefresh();
-  }, [clearRoomStale, queryClient]);
+  }, [managementMode, queryClient]);
 
   const reagentDashboardAPI = useMemo(
     () => createReagentDashboardAPI(currentUser?.id, managementMode),
@@ -1011,6 +1145,7 @@ export function DashboardReagentTab({
         onEdit: (item) =>
           handleReagentEdit(item as unknown as Record<string, unknown>),
         openStockinDialog,
+        refreshTables,
       }),
     [
       currentUser?.id,
@@ -1019,6 +1154,7 @@ export function DashboardReagentTab({
       managementMode,
       handleReagentEdit,
       openStockinDialog,
+      refreshTables,
     ],
   );
 
@@ -1074,8 +1210,8 @@ export function DashboardReagentTab({
         }
         title={
           <>
-            <FlaskConical className="w-5 h-5" />{" "}
-            {managementMode ? "全部试剂订单" : "我的试剂订单"}
+            <FlaskConical className="w-5 h-5" />
+            {managementMode ? "活跃试剂订单" : "我的试剂订单"}
           </>
         }
         noteField="notes"
@@ -1085,8 +1221,8 @@ export function DashboardReagentTab({
           return <ReagentOrderExpandedRow item={item} />;
         }}
       />
-      <DashboardReagentEditDialog dialog={reagentEditDialog} />
-      <DashboardReagentStockinDialog dialog={stockinDialog} />
+      <DashboardReagentEditDialog dialog={reagentEditDialog} isAdmin={isAdmin} brandOptions={brandOptions} />
+      <DashboardReagentStockinDialog dialog={stockinDialog} brandOptions={brandOptions} />
     </>
   );
 }

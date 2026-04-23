@@ -42,7 +42,12 @@ function formatTotals(summary: InventoryStructureSummary | null): string {
 
 function getResultDisplayName(result: SubstructureSearchResult): string {
   const summary = result.inventory_summary
-  return summary?.display_name || summary?.english_name || result.cas_number
+  return (
+    summary?.preferred_name ||
+    summary?.display_name ||
+    summary?.english_name ||
+    result.cas_number
+  )
 }
 
 function StructureResultRow({ result }: Readonly<{ result: SubstructureSearchResult }>) {

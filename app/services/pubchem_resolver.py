@@ -23,6 +23,7 @@ PUBCHEM_PROPERTIES = (
     "SMILES,ConnectivitySMILES,CanonicalSMILES,IsomericSMILES,"
     "InChIKey,MolecularFormula,MolecularWeight,IUPACName"
 )
+CANDIDATE_DETAIL_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ class PubChemResolver:
         ]
         exact_cids, confirmed_candidates = await self._confirm_cas_synonyms(cas, substance_cids)
         candidates = _merge_candidate_details(substance_candidates, confirmed_candidates)
+        candidates = await self._attach_candidate_structure_details(candidates)
         if not exact_cids:
             return _ambiguous_result(
                 cas,
@@ -139,6 +141,7 @@ class PubChemResolver:
         cids: list[int],
     ) -> ResolvedStructure:
         exact_cids, candidates = await self._confirm_cas_synonyms(cas, cids)
+        candidates = await self._attach_candidate_structure_details(candidates)
         if not exact_cids:
             return _ambiguous_result(
                 cas,
@@ -249,6 +252,7 @@ class PubChemResolver:
         candidates: list[dict[str, Any]],
     ) -> ResolvedStructure:
         row = await self._load_property_row(cid)
+        candidates = _merge_candidate_details(candidates, [_candidate_property_details(cid, row)])
         normalized = normalize_structure_from_pubchem(
             canonical_smiles=_read_canonical_smiles(row),
             isomeric_smiles=_read_isomeric_smiles(row),
@@ -273,6 +277,46 @@ class PubChemResolver:
         if not rows:
             raise RuntimeError(f"PubChem CID {cid} returned no property row")
         return rows[0]
+
+    async def _load_candidate_property_rows(self, cids: list[int]) -> dict[int, Mapping[str, Any]]:
+        if not cids:
+            return {}
+        selected_cids = cids[:CANDIDATE_DETAIL_LIMIT]
+        cid_list = ",".join(str(cid) for cid in selected_cids)
+        payload = await self._get_json(f"/compound/cid/{cid_list}/property/{PUBCHEM_PROPERTIES}/JSON")
+        if payload.get("_not_found"):
+            return {}
+        rows = payload.get("PropertyTable", {}).get("Properties", [])
+        result: dict[int, Mapping[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            raw_cid = row.get("CID")
+            if isinstance(raw_cid, int | str) and str(raw_cid).isdigit():
+                result[int(raw_cid)] = row
+        return result
+
+    async def _attach_candidate_structure_details(
+        self,
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        cids = [
+            cid
+            for candidate in candidates
+            if isinstance((cid := candidate.get("cid")), int)
+        ]
+        try:
+            property_rows = await self._load_candidate_property_rows(cids)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PubChem candidate detail load failed: %s", exc)
+            return candidates
+        return [
+            _merge_candidate_property(
+                candidate,
+                property_rows.get(cid) if isinstance((cid := candidate.get("cid")), int) else None,
+            )
+            for candidate in candidates
+        ]
 
 
 def create_pubchem_client(*, timeout_seconds: float, user_agent: str) -> httpx.AsyncClient:
@@ -306,6 +350,27 @@ def _merge_candidate_details(
         merged = by_cid.setdefault(cid, {"cid": cid})
         merged.update(candidate)
     return list(by_cid.values())
+
+
+def _candidate_property_details(cid: int, row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "cid": cid,
+        "smiles_canonical": _read_canonical_smiles(row),
+        "smiles_isomeric": _read_isomeric_smiles(row),
+        "inchikey": _optional_text(row, "InChIKey"),
+        "molecular_formula": _optional_text(row, "MolecularFormula"),
+        "molecular_weight": _optional_float(row, "MolecularWeight"),
+        "iupac_name": _optional_text(row, "IUPACName"),
+    }
+
+
+def _merge_candidate_property(
+    candidate: dict[str, Any],
+    row: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if row is None:
+        return dict(candidate)
+    return {**candidate, **_candidate_property_details(int(candidate["cid"]), row)}
 
 
 def _optional_text(row: Mapping[str, Any], key: str) -> str | None:

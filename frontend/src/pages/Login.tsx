@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type BaseSyntheticEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { valibotResolver } from '@hookform/resolvers/valibot'
-import { Loader2, LogIn, Sun, Moon, ArrowLeft } from 'lucide-react'
+import { LogIn, Sun, Moon, ArrowLeft } from 'lucide-react'
 import { authAPI } from '@/api/client'
 import { useAuthStore } from '@/store/useStore'
 import { useTheme } from '@/hooks/useTheme'
 import { useRememberedUser, type RememberedUser } from '@/hooks/useRememberedUser'
 import { Button } from '@/components/ui/Button'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import {
@@ -225,19 +226,16 @@ function LockScreenFormView({
             <p>切换用户</p>
           </TooltipContent>
         </Tooltip>
-        <Button type="submit" className="flex-1" size="lg" disabled={loading}>
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              登录中...
-            </>
-          ) : (
-            <>
-              <LogIn className="mr-2 h-4 w-4" />
-              登录
-            </>
-          )}
-        </Button>
+        <LoadingButton
+          type="submit"
+          className="flex-1"
+          size="lg"
+          isLoading={loading}
+          loadingText="登录中..."
+        >
+          <LogIn className="mr-2 h-4 w-4" />
+          登录
+        </LoadingButton>
       </div>
     </form>
   )
@@ -263,19 +261,16 @@ function NormalLoginFormView({
         fields={normalLoginFields}
         layout="stack"
       />
-      <Button type="submit" className="w-full mt-2" size="lg" disabled={loading}>
-        {loading ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            登录中...
-          </>
-        ) : (
-          <>
-            <LogIn className="mr-2 h-4 w-4" />
-            登录
-          </>
-        )}
-      </Button>
+      <LoadingButton
+        type="submit"
+        className="w-full mt-2"
+        size="lg"
+        isLoading={loading}
+        loadingText="登录中..."
+      >
+        <LogIn className="mr-2 h-4 w-4" />
+        登录
+      </LoadingButton>
     </form>
   )
 }

@@ -96,6 +96,18 @@ class UserListQuery:
     is_active: Optional[bool] = None
 
 
+class UserListItemResponse(UserResponse):
+    last_active_at: str | None = None
+
+
+class UserListResponse(BaseModel):
+    data: list[UserListItemResponse]
+    total: int
+    total_without_filter: int
+    skip: int
+    limit: int
+
+
 def _resolve_request_token_is_cli(request: Request) -> bool:
     token = extract_access_token(request)
     if not token:
@@ -156,7 +168,10 @@ def _load_user_last_active_map(db: Session, user_ids: list[int]) -> dict[int, ob
     }
 
 
-def _serialize_user_list(users: list[User], last_active_map: dict[int, object]) -> list[dict]:
+def _serialize_user_list(
+    users: list[User],
+    last_active_map: dict[int, object],
+) -> list[dict[str, object]]:
     user_responses = []
     for user in users:
         user_dict = UserResponse.model_validate(user).model_dump(mode='json')
@@ -950,7 +965,7 @@ def create_user(
     return db_user
 
 
-@router.get("/", response_model=dict)
+@router.get("/", response_model=UserListResponse)
 def list_users(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)],

@@ -93,17 +93,24 @@ CONSUMABLE_ORDER_REJECTABLE_STATUSES = frozenset(
         ConsumableOrderStatus.APPROVED,
     }
 )
+CONSUMABLE_ORDER_APPROVABLE_STATUSES = frozenset(
+    {
+        ConsumableOrderStatus.PENDING,
+        ConsumableOrderStatus.REJECTED,
+    }
+)
+CONSUMABLE_ORDER_EDITABLE_STATUSES = frozenset(
+    {ConsumableOrderStatus.PENDING, ConsumableOrderStatus.REJECTED}
+)
+CONSUMABLE_ORDER_ADMIN_EDITABLE_STATUSES = frozenset(
+    {*CONSUMABLE_ORDER_EDITABLE_STATUSES, ConsumableOrderStatus.APPROVED}
+)
 DASHBOARD_ACTIVE_REJECTED_DAYS = 7
 DASHBOARD_CONSUMABLE_STATUSES = (
     ConsumableOrderStatus.PENDING,
     ConsumableOrderStatus.APPROVED,
     ConsumableOrderStatus.REJECTED,
 )
-DASHBOARD_CONSUMABLE_STATUS_LABELS = {
-    ConsumableOrderStatus.PENDING.value: "已申购",
-    ConsumableOrderStatus.APPROVED.value: "已批准",
-    ConsumableOrderStatus.REJECTED.value: "未通过",
-}
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
 VALID_CONSUMABLE_SORT_FIELDS = {
@@ -701,13 +708,15 @@ async def update_consumable_order(
             detail="Only the order applicant or admin can update this order"
         )
 
-    if current_user.role != UserRole.ADMIN and order.status in (
-        ConsumableOrderStatus.APPROVED,
-        ConsumableOrderStatus.REJECTED,
-    ):
+    editable_statuses = (
+        CONSUMABLE_ORDER_ADMIN_EDITABLE_STATUSES
+        if current_user.role == UserRole.ADMIN
+        else CONSUMABLE_ORDER_EDITABLE_STATUSES
+    )
+    if order.status not in editable_statuses:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Approved or rejected orders can only be deleted by non-admin users"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending, rejected, or admin-approved orders can be edited"
         )
 
     before_order = ConsumableOrder.model_validate(order)
@@ -733,9 +742,15 @@ async def update_consumable_order(
         # ConsumableOrder 保留名称的拼音搜索字段
         update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
         update_data['name_pinyin_initials'] = pinyin_fields.get('name_pinyin_initials')
-    
+    should_resubmit = order.status in {
+        ConsumableOrderStatus.APPROVED,
+        ConsumableOrderStatus.REJECTED,
+    }
+
     for field, value in update_data.items():
         setattr(order, field, value)
+    if should_resubmit:
+        order.status = ConsumableOrderStatus.PENDING
 
     log_consumable_order_update(
         db,
@@ -773,7 +788,7 @@ async def approve_consumable_order(
             detail=ORDER_NOT_FOUND
         )
     
-    if order.status != ConsumableOrderStatus.PENDING:
+    if order.status not in CONSUMABLE_ORDER_APPROVABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot approve order with status: {order.status}"
@@ -901,9 +916,9 @@ def _build_consumable_dashboard_groups(
 ) -> dict[str, dict[str, Any]]:
     grouped_orders: dict[str, dict[str, Any]] = {
         status.value: {
+            "status": status.value,
             "orders": [],
             "count": 0,
-            "label": DASHBOARD_CONSUMABLE_STATUS_LABELS[status.value],
         }
         for status in DASHBOARD_CONSUMABLE_STATUSES
     }
@@ -927,7 +942,7 @@ def _build_consumable_dashboard_groups(
 
         status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
         if status_key not in grouped_orders:
-            grouped_orders[status_key] = {"orders": [], "count": 0, "label": status_key}
+            grouped_orders[status_key] = {"status": status_key, "orders": [], "count": 0}
         grouped_orders[status_key]["orders"].append(order_data)
 
     for key in grouped_orders:

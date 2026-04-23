@@ -35,6 +35,23 @@ USER_OPERATION_ACTION_LABELS: dict[str, str] = {
     "update_user_role": "修改用户角色",
     "reset_user_password": "重置用户密码",
     "update_user_sensitive_fields": "修改用户敏感信息",
+    "create_reagent_brand": "新增品牌",
+    "update_reagent_brand": "修改品牌",
+    "delete_reagent_brand": "删除品牌",
+    "create_chemical_name_map": "新增 CAS 主数据",
+    "update_chemical_name_map": "修改 CAS 主数据",
+    "delete_chemical_name_map": "删除 CAS 主数据",
+    "create_announcement": "新增公告",
+    "update_announcement": "修改公告",
+    "delete_announcement": "删除公告",
+    "update_announcement_pin": "切换公告置顶",
+    "update_announcement_visibility": "切换公告可见性",
+    "upload_announcement_image": "上传公告图片",
+    "delete_announcement_image": "删除公告图片",
+    "delete_session": "删除设备会话",
+    "delete_other_sessions": "删除其他设备会话",
+    "refresh_session": "刷新设备会话",
+    "update_session": "修改设备会话",
 }
 
 COMMON_SHELF_ACTION_LABELS: dict[str, str] = {

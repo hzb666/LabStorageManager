@@ -685,7 +685,7 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
     # 规范化库存更新载荷并处理规格字段，返回是否更新了规格。
 
     specification_updated = False
-    optional_string_fields = ['storage_location', 'category', 'brand', 'english_name', 'alias', 'purity', 'notes']
+    optional_string_fields = ['storage_location', 'category', 'english_name', 'alias', 'purity', 'notes']
     for field in optional_string_fields:
         if field in update_data and update_data[field] == '':
             update_data[field] = None
@@ -709,6 +709,16 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
         update_data.pop('specification')
 
     return specification_updated
+
+
+def _ensure_inventory_required_brand(item: Inventory, update_data: dict) -> None:
+    # 库存列表编辑后必须保留有效品牌，兼容旧数据但阻止继续保存空品牌。
+
+    effective_brand = update_data.get('brand', item.brand)
+    if not isinstance(effective_brand, str) or not effective_brand.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
+    if 'brand' in update_data:
+        update_data['brand'] = effective_brand.strip()
 
 
 # Register named/extended routes first to keep path precedence semantics.
@@ -905,6 +915,8 @@ async def update_inventory(
         specification_updated = _normalize_update_payload(item, update_data)
     except SpecificationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    _ensure_inventory_required_brand(item, update_data)
 
     _apply_inventory_remaining_quantity_update(
         item,

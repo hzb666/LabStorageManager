@@ -41,7 +41,7 @@ export interface StructureSearchDialogProps {
     molblock: string,
     query: string,
     queryFormat: StructureQueryFormat,
-  ) => void
+  ) => void | Promise<void>
 }
 
 function normalizeExportedQuery(query: string | undefined): string {
@@ -372,7 +372,7 @@ export function StructureSearchDialog({
         limit: DEFAULT_SEARCH_LIMIT,
         only_in_stock: false,
       })
-      onResults(payload, matchMode, exported.molblock, exported.query, exported.format)
+      await onResults(payload, matchMode, exported.molblock, exported.query, exported.format)
       onOpenChange(false)
     } catch (searchError) {
       setError(getApiErrorMessage(searchError, '结构检索失败'))

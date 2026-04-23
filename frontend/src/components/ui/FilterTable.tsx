@@ -25,6 +25,7 @@ import type {
   SearchFieldOption,
 } from "@/hooks/useTableState";
 import { getInventoryTableColumns } from "@/lib/tableConfigs";
+import { useSSEStore } from "@/store/sseStore";
 import { cn } from "@/lib/utils";
 
 declare module "@tanstack/react-table" {
@@ -43,6 +44,7 @@ export interface FilterTableProps {
   onEdit?: (item: Record<string, unknown>) => void;
   onBorrowSuccess?: () => void;
   onQueryError?: (error: unknown) => void;
+  onQueryDataReady?: (context: FilterTableQueryDataReadyContext) => void;
   statusOptions?: FilterOption[];
   searchFieldOptions?: SearchFieldOption[];
   showFuzzySearch?: boolean;
@@ -78,6 +80,7 @@ export interface FilterTableProps {
     room: string;
     eventTypes: readonly string[];
     staleOnly?: boolean;
+    moveUpdatedRowToStartWhenUnsorted?: boolean;
     onRefresh?: () => void | Promise<void>;
     searchFieldMap?: Partial<Record<string, string[]>>;
     onSafePatch?: (event: import("@/hooks/useSSE").SSEEventEnvelope) => void;
@@ -86,6 +89,14 @@ export interface FilterTableProps {
       context: import("@/hooks/useListSSE").ListSSEContext,
     ) => boolean;
   };
+}
+
+export interface FilterTableQueryDataReadyContext {
+  extraParams: Record<string, unknown>;
+  globalFilter: string;
+  hasSorting: boolean;
+  searchField: string;
+  total: number;
 }
 
 // 从地址栏解析初始搜索词与搜索字段，作为表格首屏状态来源。
@@ -439,6 +450,60 @@ function useQueryErrorEffect({
   }, [filter.error, filter.isError, onQueryError]);
 }
 
+function useQueryDataReadyEffect({
+  extraParams,
+  filter,
+  onQueryDataReady,
+}: Readonly<{
+  extraParams: Record<string, unknown>;
+  filter: ReturnType<typeof useTableState>;
+  onQueryDataReady?: (context: FilterTableQueryDataReadyContext) => void;
+}>) {
+  useEffect(() => {
+    if (!onQueryDataReady || filter.isLoading || filter.isFetching) {
+      return;
+    }
+
+    if (filter.isPlaceholderData || filter.isError) {
+      return;
+    }
+
+    onQueryDataReady({
+      extraParams,
+      globalFilter: filter.globalFilter,
+      hasSorting: filter.sorting.length > 0,
+      searchField: filter.searchField,
+      total: filter.total,
+    });
+  }, [
+    extraParams,
+    filter.globalFilter,
+    filter.isError,
+    filter.isFetching,
+    filter.isLoading,
+    filter.isPlaceholderData,
+    filter.searchField,
+    filter.sorting,
+    filter.total,
+    onQueryDataReady,
+  ]);
+}
+
+function useFilterTableQueryEffects({
+  extraParams,
+  filter,
+  onQueryDataReady,
+  onQueryError,
+}: Readonly<{
+  extraParams: Record<string, unknown>;
+  filter: ReturnType<typeof useTableState>;
+  onQueryDataReady?: (context: FilterTableQueryDataReadyContext) => void;
+  onQueryError?: (error: unknown) => void;
+}>) {
+  useQueryErrorEffect({ filter, onQueryError });
+  useQueryDataReadyEffect({ extraParams, filter, onQueryDataReady });
+}
+
 interface FilterTableHeaderProps {
   disableExpandAll: boolean;
   displayCount: string | number;
@@ -513,6 +578,7 @@ function useFilterTableRealtime({
   realtime?: FilterTableProps["realtime"];
   searchFieldOptions: SearchFieldOption[];
 }>) {
+  const clearStaleKey = useSSEStore((state) => state.clearStaleKey);
   const activeQueryKey = useMemo<readonly unknown[]>(() => {
     const baseKey = queryKey ?? [];
     return [
@@ -544,11 +610,12 @@ function useFilterTableRealtime({
           const candidates = [record.id, record.inventory_id, record.order_id];
           return (
             candidates.find(
-              (candidate): candidate is number => typeof candidate === "number",
+              (candidate): candidate is string | number =>
+                typeof candidate === "string" || typeof candidate === "number",
             ) ?? null
           );
         })
-        .filter((id): id is number => id !== null),
+        .filter((id): id is string | number => id !== null),
     );
   }, [filter.data]);
 
@@ -564,6 +631,25 @@ function useFilterTableRealtime({
   const staleKey = useMemo(() => {
     return `${realtime?.room ?? "__disabled__"}::${JSON.stringify(activeQueryKey)}`;
   }, [activeQueryKey, realtime?.room]);
+  const isStale = useSSEStore((state) => state.hasStaleKey(staleKey));
+  const staleRefreshSeenRef = useRef(false);
+
+  useEffect(() => {
+    if (!isStale) {
+      staleRefreshSeenRef.current = false;
+      return;
+    }
+
+    if (filter.isFetching) {
+      staleRefreshSeenRef.current = true;
+      return;
+    }
+
+    if (staleRefreshSeenRef.current && !filter.isError) {
+      clearStaleKey(staleKey);
+      staleRefreshSeenRef.current = false;
+    }
+  }, [clearStaleKey, filter.isError, filter.isFetching, isStale, staleKey]);
 
   const handleRealtimeRefresh = React.useCallback(async () => {
     if (realtime?.onRefresh) {
@@ -591,6 +677,8 @@ function useFilterTableRealtime({
     }),
     onSafePatch: realtime?.onSafePatch,
     staleOnly: realtime?.staleOnly ?? false,
+    moveUpdatedRowToStartWhenUnsorted:
+      realtime?.moveUpdatedRowToStartWhenUnsorted ?? false,
     shouldHandleEvent: realtime?.shouldHandleEvent,
   });
 
@@ -830,6 +918,7 @@ export function FilterTable({
   onEdit,
   onBorrowSuccess,
   onQueryError,
+  onQueryDataReady,
   statusOptions = DEFAULT_STATUS_OPTIONS,
   searchFieldOptions = DEFAULT_SEARCH_FIELD_OPTIONS,
   showFuzzySearch = true,
@@ -888,7 +977,7 @@ export function FilterTable({
     enableFuzzySearch: showFuzzySearch,
   });
 
-  useQueryErrorEffect({ filter, onQueryError });
+  useFilterTableQueryEffects({ extraParams, filter, onQueryDataReady, onQueryError });
 
   useValidStatusFilter({
     defaultStatus,

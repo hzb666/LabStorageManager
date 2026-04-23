@@ -17,6 +17,12 @@ from .chemical_name_map import (
     ChemicalNameMapResponse,
     ChemicalNameMapUpdate,
 )
+from .reagent_brand import (
+    ReagentBrand,
+    ReagentBrandCreate,
+    ReagentBrandResponse,
+    ReagentBrandUpdate,
+)
 from .compound_structure import (
     CompoundStructureCache,
     CompoundStructureCacheResponse,
@@ -101,6 +107,10 @@ __all__ = [
     "ChemicalNameMapCreate",
     "ChemicalNameMapUpdate",
     "ChemicalNameMapResponse",
+    "ReagentBrand",
+    "ReagentBrandCreate",
+    "ReagentBrandUpdate",
+    "ReagentBrandResponse",
     "CompoundStructureCache",
     "CompoundStructureCacheResponse",
     "CompoundStructureSource",

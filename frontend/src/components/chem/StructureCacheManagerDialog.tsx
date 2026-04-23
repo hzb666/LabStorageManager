@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, Edit3, RefreshCw, Search, X } from 'lucide-react'
+import { Edit3, Eye, RefreshCw, Search, X } from 'lucide-react'
 
 import { structureSearchAPI } from '@/api/structureSearchApi'
 import type {
   CompoundStructureCache,
   CompoundStructureStatus,
+  PubChemCandidate,
+  PubChemCandidatePreviewResponse,
   StructureCacheListResponse,
 } from '@/api/structureSearchApi'
 import { Button } from '@/components/ui/Button'
@@ -12,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { LoadingButton } from '@/components/ui/LoadingButton'
+import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import {
   Select,
   SelectContent,
@@ -20,23 +23,22 @@ import {
   SelectValue,
 } from '@/components/ui/Select'
 import { TableEmptyState, TableLoadingState } from '@/components/ui/TableFilters'
+import { UserRoles } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { formatDateTime } from '@/lib/utils'
 import { getApiErrorMessage } from '@/lib/validationSchemas'
+import { useAuthStore } from '@/store/useStore'
 import { getStructureResolveToastMessage } from './structureCacheMessages'
+import { StructureCandidateList } from './StructureCandidateList'
+import { parseStructureCandidates } from './structureCandidateUtils'
 
 const PAGE_SIZE = 20
+const ADMIN_DEFAULT_STATUS_FILTER = 'needs_action'
+const VIEWER_DEFAULT_STATUS_FILTER = 'resolved'
 
 type StatusFilterOption = {
   value: string
   label: string
-}
-
-type PubChemCandidate = {
-  cid?: number
-  has_exact_cas_synonym?: boolean
-  matched_by_substance_name?: boolean
-  sid_count?: number
 }
 
 const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
@@ -79,17 +81,12 @@ export interface StructureCacheManagerDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-function parseCandidates(value: string | null): PubChemCandidate[] {
-  if (!value) return []
-  try {
-    const parsed = JSON.parse(value)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(
-      (item): item is PubChemCandidate => typeof item === 'object' && item !== null,
-    )
-  } catch {
-    return []
-  }
+// 表格行操作在卡片、表体、行组件间整体传递，避免同一组行为被拆成多组扁平 props。
+type CacheActionHandlers = {
+  onManualEdit: (cache: CompoundStructureCache) => void
+  onOpenCandidates: (cache: CompoundStructureCache) => void
+  onOpenStructure: (cache: CompoundStructureCache) => void
+  onResolve: (cache: CompoundStructureCache) => void
 }
 
 function getSourceLabel(source: string | null): string {
@@ -141,80 +138,117 @@ function SourceMeta({ cache }: Readonly<{ cache: CompoundStructureCache }>) {
   )
 }
 
-function CacheIssue({
-  cache,
-  disabled,
-  onConfirm,
-}: Readonly<{
-  cache: CompoundStructureCache
-  disabled: boolean
-  onConfirm: (cache: CompoundStructureCache, cid: number) => void
-}>) {
-  const candidates = parseCandidates(cache.candidates_json)
-  if (cache.error_message) {
-    return <span className="text-destructive">{cache.error_message}</span>
-  }
-  if (candidates.length > 0) {
-    const substanceCount = candidates.reduce((sum, candidate) => (
-      sum + (candidate.sid_count ?? 0)
-    ), 0)
-    return (
-      <div className="space-y-2">
-        <span>
-          {candidates.length} 个 PubChem 候选
-          {substanceCount > 0 ? `，${substanceCount} 条 Substance 映射` : ''}
-        </span>
-        <CandidateButtons cache={cache} disabled={disabled} onConfirm={onConfirm} />
-      </div>
-    )
-  }
-  return <span className="text-muted-foreground">-</span>
+function countSubstanceMappings(candidates: PubChemCandidate[]): number {
+  return candidates.reduce((sum, candidate) => sum + (candidate.sid_count ?? 0), 0)
 }
 
-function CandidateButtons({
+function CandidateSummary({ candidates }: Readonly<{ candidates: PubChemCandidate[] }>) {
+  const substanceCount = countSubstanceMappings(candidates)
+  return (
+    <span>
+      {candidates.length} 个 PubChem 候选
+      {substanceCount > 0 ? `，${substanceCount} 条 Substance 映射` : ''}
+    </span>
+  )
+}
+
+function getCacheStructureInput(cache: CompoundStructureCache): string | null {
+  return (
+    cache.smiles_canonical?.trim()
+    || cache.smiles_isomeric?.trim()
+    || cache.molblock?.trim()
+    || null
+  )
+}
+
+function createCandidatePreviewCache(
+  cache: CompoundStructureCache,
+  preview: PubChemCandidatePreviewResponse,
+): CompoundStructureCache {
+  return {
+    ...cache,
+    status: preview.status,
+    confidence: preview.confidence,
+    candidate_count: preview.candidate_count,
+    candidates_json: JSON.stringify(preview.candidates),
+    error_message: preview.error_message,
+  }
+}
+
+function CacheIssue({
   cache,
+  canManage,
   disabled,
-  onConfirm,
+  onOpenCandidates,
+  onOpenStructure,
 }: Readonly<{
   cache: CompoundStructureCache
+  canManage: boolean
   disabled: boolean
-  onConfirm: (cache: CompoundStructureCache, cid: number) => void
+  onOpenCandidates: (cache: CompoundStructureCache) => void
+  onOpenStructure: (cache: CompoundStructureCache) => void
 }>) {
-  const candidates = parseCandidates(cache.candidates_json)
-    .filter((candidate) => typeof candidate.cid === 'number')
-  if (cache.status !== 'ambiguous' || candidates.length === 0) return null
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {candidates.map((candidate) => (
+  const candidates = parseStructureCandidates(cache.candidates_json)
+  if (cache.status === 'resolved' && getCacheStructureInput(cache)) {
+    return (
+      <div className="space-y-2">
+        <span className="text-muted-foreground">已解析结构</span>
         <Button
-          key={candidate.cid}
           type="button"
           variant="modern"
           size="sm"
-          disabled={disabled}
-          onClick={() => onConfirm(cache, candidate.cid as number)}
+          className="ml-1"
+          onClick={() => onOpenStructure(cache)}
         >
-          <CheckCircle2 className="size-4" />
-          CID {candidate.cid}
-          {candidate.sid_count ? `（SID ${candidate.sid_count}）` : ''}
+          <Eye className="size-4" />
+          查看结构
         </Button>
-      ))}
-    </div>
-  )
+      </div>
+    )
+  }
+  if (candidates.length > 0) {
+    return (
+      <div className="space-y-2">
+        <CandidateSummary candidates={candidates} />
+        {canManage && cache.status === 'ambiguous' && (
+          <Button
+            type="button"
+            variant="modern"
+            size="sm"
+            disabled={disabled}
+            onClick={() => onOpenCandidates(cache)}
+          >
+            <Search className="size-4" />
+            查看候选
+          </Button>
+        )}
+      </div>
+    )
+  }
+  if (cache.error_message) {
+    return <span className="text-destructive">{cache.error_message}</span>
+  }
+  return <span className="text-muted-foreground">-</span>
 }
 
 function RowActions({
   activeAction,
   cache,
+  canManage,
   onManualEdit,
   onResolve,
 }: Readonly<{
   activeAction: string | null
   cache: CompoundStructureCache
+  canManage: boolean
   onManualEdit: (cache: CompoundStructureCache) => void
   onResolve: (cache: CompoundStructureCache) => void
 }>) {
   const resolveAction = `resolve:${cache.cas_number}`
+  if (!canManage) {
+    return <span className="text-sm text-muted-foreground">-</span>
+  }
+
   return (
     <div className="flex items-center gap-1.5">
       <LoadingButton
@@ -240,18 +274,20 @@ function RowActions({
   )
 }
 
+function getCacheTableColumnCount(canManage: boolean): number {
+  return canManage ? 6 : 5
+}
+
 function CacheRow({
   activeAction,
+  actions,
   cache,
-  onConfirm,
-  onManualEdit,
-  onResolve,
+  canManage,
 }: Readonly<{
   activeAction: string | null
+  actions: CacheActionHandlers
   cache: CompoundStructureCache
-  onConfirm: (cache: CompoundStructureCache, cid: number) => void
-  onManualEdit: (cache: CompoundStructureCache) => void
-  onResolve: (cache: CompoundStructureCache) => void
+  canManage: boolean
 }>) {
   const confirming = activeAction?.startsWith(`confirm:${cache.cas_number}:`) ?? false
   return (
@@ -261,16 +297,25 @@ function CacheRow({
       <td className="px-3 py-3 align-top"><SourceMeta cache={cache} /></td>
       <td className="px-3 py-3 align-top text-muted-foreground">{getUpdatedAtLabel(cache)}</td>
       <td className="px-3 py-3 align-top">
-        <CacheIssue cache={cache} disabled={confirming} onConfirm={onConfirm} />
-      </td>
-      <td className="px-3 py-3 align-top">
-        <RowActions
-          activeAction={activeAction}
+        <CacheIssue
           cache={cache}
-          onManualEdit={onManualEdit}
-          onResolve={onResolve}
+          canManage={canManage}
+          disabled={confirming}
+          onOpenCandidates={actions.onOpenCandidates}
+          onOpenStructure={actions.onOpenStructure}
         />
       </td>
+      {canManage ? (
+        <td className="px-3 py-3 align-top">
+          <RowActions
+            activeAction={activeAction}
+            cache={cache}
+            canManage={canManage}
+            onManualEdit={actions.onManualEdit}
+            onResolve={actions.onResolve}
+          />
+        </td>
+      ) : null}
     </tr>
   )
 }
@@ -331,29 +376,26 @@ function ManagerToolbar({
 
 function CacheTableCard({
   activeAction,
+  actions,
+  canManage,
   loading,
   page,
   response,
   search,
   statusFilter,
-  onConfirm,
-  onManualEdit,
   onPageChange,
-  onResolve,
 }: Readonly<{
   activeAction: string | null
+  actions: CacheActionHandlers
+  canManage: boolean
   loading: boolean
   page: number
   response: StructureCacheListResponse | null
   search: string
   statusFilter: string
-  onConfirm: (cache: CompoundStructureCache, cid: number) => void
-  onManualEdit: (cache: CompoundStructureCache) => void
   onPageChange: (page: number) => void
-  onResolve: (cache: CompoundStructureCache) => void
 }>) {
   const rows = response?.data ?? []
-  const rowCount = rows.length
   const total = response?.total ?? 0
   return (
     <Card className="overflow-hidden">
@@ -365,8 +407,104 @@ function CacheTableCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        {loading && rowCount === 0 && <TableLoadingState className="mx-6" />}
-        {!loading && rowCount === 0 && (
+        <div className="px-6 rounded-md overflow-auto">
+          <table className="w-full min-w-[1040px]" style={{ tableLayout: 'fixed' }}>
+            <CacheTableColumns canManage={canManage} />
+            <CacheTableHeader canManage={canManage} />
+            <CacheTableBody
+              activeAction={activeAction}
+              actions={actions}
+              canManage={canManage}
+              loading={loading}
+              rows={rows}
+              search={search}
+              statusFilter={statusFilter}
+            />
+          </table>
+        </div>
+      </CardContent>
+      <ManagerFooter page={page} response={response} onPageChange={onPageChange} />
+    </Card>
+  )
+}
+
+function CacheTableColumns({ canManage }: Readonly<{ canManage: boolean }>) {
+  return (
+    <colgroup>
+      <col className="w-[120px]" />
+      <col className="w-[120px]" />
+      <col className="w-[260px]" />
+      <col className="w-[160px]" />
+      <col />
+      {canManage ? <col className="w-[96px]" /> : null}
+    </colgroup>
+  )
+}
+
+function CacheTableHeader({ canManage }: Readonly<{ canManage: boolean }>) {
+  return (
+    <thead>
+      <tr className="border-b-2 border-border">
+        <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">CAS</th>
+        <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">状态</th>
+        <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">结构来源</th>
+        <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">更新时间</th>
+        <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">详情</th>
+        {canManage ? (
+          <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">操作</th>
+        ) : null}
+      </tr>
+    </thead>
+  )
+}
+
+function CacheTablePlaceholderRow({
+  canManage,
+  children,
+}: Readonly<{
+  canManage: boolean
+  children: React.ReactNode
+}>) {
+  return (
+    <tr>
+      <td colSpan={getCacheTableColumnCount(canManage)} className="p-0">
+        {children}
+      </td>
+    </tr>
+  )
+}
+
+function CacheTableBody({
+  activeAction,
+  actions,
+  canManage,
+  loading,
+  rows,
+  search,
+  statusFilter,
+}: Readonly<{
+  activeAction: string | null
+  actions: CacheActionHandlers
+  canManage: boolean
+  loading: boolean
+  rows: CompoundStructureCache[]
+  search: string
+  statusFilter: string
+}>) {
+  if (loading && rows.length === 0) {
+    return (
+      <tbody>
+        <CacheTablePlaceholderRow canManage={canManage}>
+          <TableLoadingState className="min-h-[16rem]" />
+        </CacheTablePlaceholderRow>
+      </tbody>
+    )
+  }
+
+  if (rows.length === 0) {
+    return (
+      <tbody>
+        <CacheTablePlaceholderRow canManage={canManage}>
           <TableEmptyState
             searchKeyword={search}
             statusFilter={statusFilter}
@@ -374,46 +512,23 @@ function CacheTableCard({
             emptyText="没有符合条件的结构缓存"
             statusOptions={STATUS_FILTER_OPTIONS}
           />
-        )}
-        {rowCount > 0 && (
-          <div className="px-6 rounded-md overflow-auto">
-            <table className="w-full min-w-[1040px]" style={{ tableLayout: 'fixed' }}>
-              <colgroup>
-                <col className="w-[120px]" />
-                <col className="w-[120px]" />
-                <col className="w-[260px]" />
-                <col className="w-[160px]" />
-                <col />
-                <col className="w-[96px]" />
-              </colgroup>
-              <thead>
-                <tr className="border-b-2 border-border">
-                  <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">CAS</th>
-                  <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">状态</th>
-                  <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">结构来源</th>
-                  <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">更新时间</th>
-                  <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">问题</th>
-                  <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((cache) => (
-                  <CacheRow
-                    key={cache.cas_number}
-                    activeAction={activeAction}
-                    cache={cache}
-                    onConfirm={onConfirm}
-                    onManualEdit={onManualEdit}
-                    onResolve={onResolve}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
-      <ManagerFooter page={page} response={response} onPageChange={onPageChange} />
-    </Card>
+        </CacheTablePlaceholderRow>
+      </tbody>
+    )
+  }
+
+  return (
+    <tbody>
+      {rows.map((cache) => (
+        <CacheRow
+          key={cache.cas_number}
+          activeAction={activeAction}
+          actions={actions}
+          cache={cache}
+          canManage={canManage}
+        />
+      ))}
+    </tbody>
   )
 }
 
@@ -455,18 +570,124 @@ function ManagerFooter({
   )
 }
 
-export function StructureCacheManagerDialog({
-  open,
-  onManualEdit,
+function CandidateReviewDialog({
+  activeAction,
+  cache,
+  onConfirm,
   onOpenChange,
-}: Readonly<StructureCacheManagerDialogProps>) {
-  const [statusFilter, setStatusFilter] = useState('needs_action')
+}: Readonly<{
+  activeAction: string | null
+  cache: CompoundStructureCache | null
+  onConfirm: (cache: CompoundStructureCache, cid: number) => void
+  onOpenChange: (open: boolean) => void
+}>) {
+  const candidates = useMemo(
+    () => parseStructureCandidates(cache?.candidates_json ?? null),
+    [cache?.candidates_json],
+  )
+  if (!cache) return null
+
+  const confirming = activeAction?.startsWith(`confirm:${cache.cas_number}:`) ?? false
+  return (
+    <Dialog open={Boolean(cache)} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[96vw] max-w-5xl p-4 md:p-6">
+        <DialogHeader className="mb-4">
+          <DialogTitle className="mb-0">PubChem 候选确认</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="font-medium">CAS {cache.cas_number}</span>
+              <StatusBadge status={cache.status} />
+              <CandidateSummary candidates={candidates} />
+            </div>
+          </div>
+          <StructureCandidateList
+            candidates={candidates}
+            disabled={confirming}
+            onConfirm={(cid) => onConfirm(cache, cid)}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function StructurePreviewDialog({
+  activeAction,
+  cache,
+  canManage,
+  onReselectPubChem,
+  onOpenChange,
+}: Readonly<{
+  activeAction: string | null
+  cache: CompoundStructureCache | null
+  canManage: boolean
+  onReselectPubChem: (cache: CompoundStructureCache) => void
+  onOpenChange: (open: boolean) => void
+}>) {
+  const structureInput = cache ? getCacheStructureInput(cache) : null
+  if (!cache || !structureInput) return null
+
+  const previewAction = `preview:${cache.cas_number}`
+  return (
+    <Dialog open={Boolean(cache)} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[96vw] max-w-3xl p-4 md:p-6">
+        <DialogHeader className="mb-4">
+          <DialogTitle className="mb-0">结构详情</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="font-medium">CAS {cache.cas_number}</span>
+              <StatusBadge status={cache.status} />
+              {cache.source_id && (
+                <span className="text-muted-foreground">CID {cache.source_id}</span>
+              )}
+            </div>
+            <div className="text-muted-foreground">
+              来源：{getSourceLabel(cache.source)}
+              {cache.inchikey ? ` / ${cache.inchikey}` : ''}
+            </div>
+            {canManage && cache.manually_verified && (
+              <LoadingButton
+                type="button"
+                variant="modern"
+                size="sm"
+                className="mt-3"
+                isLoading={activeAction === previewAction}
+                loadingText="获取候选中..."
+                onClick={() => onReselectPubChem(cache)}
+              >
+                <Search className="size-4" />
+                重新选择 PubChem 候选
+              </LoadingButton>
+            )}
+          </div>
+          <div className="flex justify-center rounded-md border border-border bg-background p-4">
+            <MoleculeStructure
+              casNumber={cache.cas_number}
+              smiles={structureInput}
+              width={520}
+              height={340}
+            />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function useStructureCacheListState(open: boolean, canManage: boolean) {
+  const defaultStatusFilter = canManage
+    ? ADMIN_DEFAULT_STATUS_FILTER
+    : VIEWER_DEFAULT_STATUS_FILTER
+  const [statusFilter, setStatusFilter] = useState(defaultStatusFilter)
   const [searchDraft, setSearchDraft] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [response, setResponse] = useState<StructureCacheListResponse | null>(null)
   const [loading, setLoading] = useState(false)
-  const [activeAction, setActiveAction] = useState<string | null>(null)
   const skip = useMemo(() => (page - 1) * PAGE_SIZE, [page])
 
   const loadCaches = useCallback(async () => {
@@ -506,14 +727,52 @@ export function StructureCacheManagerDialog({
     setPage(1)
   }, [])
 
+  const replaceCache = useCallback((cache: CompoundStructureCache) => {
+    setResponse((current) => replaceCacheRow(current, cache))
+  }, [])
+
+  return {
+    filters: {
+      searchDraft,
+      statusFilter,
+      onApplySearch: handleApplySearch,
+      onClearSearch: handleClearSearch,
+      onSearchDraftChange: setSearchDraft,
+      onStatusFilterChange: handleStatusFilterChange,
+    },
+    loading,
+    page,
+    replaceCache,
+    response,
+    search,
+    setPage,
+    statusFilter,
+  }
+}
+
+function useStructureCacheManagerController({
+  open,
+  onManualEdit,
+  onOpenChange,
+}: Readonly<StructureCacheManagerDialogProps>) {
+  const currentUser = useAuthStore((state) => state.user)
+  const isAdmin = currentUser?.role === UserRoles.ADMIN
+  const cacheList = useStructureCacheListState(open, isAdmin)
+  const { replaceCache } = cacheList
+  const [activeAction, setActiveAction] = useState<string | null>(null)
+  const [candidateDialogCache, setCandidateDialogCache] = useState<CompoundStructureCache | null>(null)
+  const [candidateOverwriteManual, setCandidateOverwriteManual] = useState(false)
+  const [structureDialogCache, setStructureDialogCache] = useState<CompoundStructureCache | null>(null)
+
   const handleResolve = useCallback(async (cache: CompoundStructureCache) => {
+    if (!isAdmin) return
     setActiveAction(`resolve:${cache.cas_number}`)
     try {
       const resolved = await structureSearchAPI.resolveCas({
         cas_number: cache.cas_number,
         force: cache.status === 'error' || cache.status === 'not_found',
       })
-      setResponse((current) => replaceCacheRow(current, resolved))
+      replaceCache(resolved)
       const notification = getStructureResolveToastMessage(resolved)
       toast[notification.variant](notification.message)
     } catch (error) {
@@ -521,60 +780,144 @@ export function StructureCacheManagerDialog({
     } finally {
       setActiveAction(null)
     }
-  }, [])
+  }, [isAdmin, replaceCache])
 
   const handleConfirm = useCallback(async (cache: CompoundStructureCache, cid: number) => {
+    if (!isAdmin) return
     setActiveAction(`confirm:${cache.cas_number}:${cid}`)
     try {
-      const confirmed = await structureSearchAPI.confirmPubChemCandidate(cache.cas_number, { cid })
-      setResponse((current) => replaceCacheRow(current, confirmed))
+      const confirmed = await structureSearchAPI.confirmPubChemCandidate(cache.cas_number, {
+        cid,
+        overwrite_manual: candidateOverwriteManual,
+      })
+      replaceCache(confirmed)
+      setCandidateDialogCache(null)
+      setCandidateOverwriteManual(false)
+      setStructureDialogCache(null)
       toast.success('候选结构已确认')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '候选确认失败'))
     } finally {
       setActiveAction(null)
     }
-  }, [])
+  }, [candidateOverwriteManual, isAdmin, replaceCache])
+
+  const handlePreviewPubChemCandidates = useCallback(async (cache: CompoundStructureCache) => {
+    if (!isAdmin) return
+    setActiveAction(`preview:${cache.cas_number}`)
+    try {
+      const preview = await structureSearchAPI.previewPubChemCandidates(cache.cas_number)
+      if (preview.candidates.length === 0) {
+        toast.warning('未找到可重新选择的 PubChem 候选')
+        return
+      }
+      setCandidateDialogCache(createCandidatePreviewCache(cache, preview))
+      setCandidateOverwriteManual(true)
+      setStructureDialogCache(null)
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'PubChem 候选读取失败'))
+    } finally {
+      setActiveAction(null)
+    }
+  }, [isAdmin])
 
   const handleManualSaved = useCallback((cache: CompoundStructureCache) => {
-    setResponse((current) => replaceCacheRow(current, cache))
+    replaceCache(cache)
     toast.success('手工结构已保存')
-  }, [])
+  }, [replaceCache])
 
   const handleManualEdit = useCallback((cache: CompoundStructureCache) => {
+    if (!isAdmin) return
     onManualEdit(cache, handleManualSaved)
-  }, [handleManualSaved, onManualEdit])
+  }, [handleManualSaved, isAdmin, onManualEdit])
+
+  const handleOpenStoredCandidates = useCallback((cache: CompoundStructureCache) => {
+    setCandidateOverwriteManual(false)
+    setCandidateDialogCache(cache)
+  }, [])
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setCandidateDialogCache(null)
+      setCandidateOverwriteManual(false)
+      setStructureDialogCache(null)
+    }
+    onOpenChange(nextOpen)
+  }, [onOpenChange])
+
+  const handleCandidateDialogOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setCandidateDialogCache(null)
+      setCandidateOverwriteManual(false)
+    }
+  }, [])
+
+  const handleStructureDialogOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) setStructureDialogCache(null)
+  }, [])
+
+  return {
+    canManage: isAdmin,
+    dialogs: {
+      activeAction,
+      candidateCache: candidateDialogCache,
+      structureCache: structureDialogCache,
+      onCandidateOpenChange: handleCandidateDialogOpenChange,
+      onConfirm: handleConfirm,
+      onReselectPubChem: handlePreviewPubChemCandidates,
+      onStructureOpenChange: handleStructureDialogOpenChange,
+    },
+    filters: cacheList.filters,
+    onDialogOpenChange: handleOpenChange,
+    table: {
+      activeAction,
+      actions: {
+        onManualEdit: handleManualEdit,
+        onOpenCandidates: handleOpenStoredCandidates,
+        onOpenStructure: setStructureDialogCache,
+        onResolve: handleResolve,
+      },
+      loading: cacheList.loading,
+      page: cacheList.page,
+      response: cacheList.response,
+      search: cacheList.search,
+      statusFilter: cacheList.statusFilter,
+      onPageChange: cacheList.setPage,
+    },
+  }
+}
+
+export function StructureCacheManagerDialog(props: Readonly<StructureCacheManagerDialogProps>) {
+  const { open } = props
+  const manager = useStructureCacheManagerController(props)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[96vw] max-w-7xl p-4 md:p-6">
-        <DialogHeader>
-          <DialogTitle className="mb-4 text-xl">结构缓存管理</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <ManagerToolbar
-            searchDraft={searchDraft}
-            statusFilter={statusFilter}
-            onApplySearch={handleApplySearch}
-            onClearSearch={handleClearSearch}
-            onSearchDraftChange={setSearchDraft}
-            onStatusFilterChange={handleStatusFilterChange}
-          />
-          <CacheTableCard
-            activeAction={activeAction}
-            loading={loading}
-            page={page}
-            response={response}
-            search={search}
-            statusFilter={statusFilter}
-            onConfirm={handleConfirm}
-            onManualEdit={handleManualEdit}
-            onPageChange={setPage}
-            onResolve={handleResolve}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={manager.onDialogOpenChange}>
+        <DialogContent className="w-[96vw] max-w-7xl p-4 md:p-6">
+          <div className="flex flex-col gap-4">
+            <DialogHeader className="shrink-0">
+              <DialogTitle className="mb-0">结构缓存管理</DialogTitle>
+            </DialogHeader>
+            <ManagerToolbar {...manager.filters} />
+            <CacheTableCard canManage={manager.canManage} {...manager.table} />
+          </div>
+        </DialogContent>
+      </Dialog>
+      <CandidateReviewDialog
+        activeAction={manager.dialogs.activeAction}
+        cache={manager.dialogs.candidateCache}
+        onConfirm={manager.dialogs.onConfirm}
+        onOpenChange={manager.dialogs.onCandidateOpenChange}
+      />
+      <StructurePreviewDialog
+        activeAction={manager.dialogs.activeAction}
+        cache={manager.dialogs.structureCache}
+        canManage={manager.canManage}
+        onReselectPubChem={manager.dialogs.onReselectPubChem}
+        onOpenChange={manager.dialogs.onStructureOpenChange}
+      />
+    </>
   )
 }
 

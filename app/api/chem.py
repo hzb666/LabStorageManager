@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from time import perf_counter
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,6 +27,7 @@ from app.services.structure_cache_workflow import (
     StructureManualProtectedError,
     StructureValidationError,
     confirm_pubchem_cid_to_cache,
+    preview_pubchem_candidates,
     resolve_cas_to_cache,
     save_manual_molblock_to_cache,
 )
@@ -85,10 +87,21 @@ class ConfirmPubChemCidRequest(BaseModel):
     overwrite_manual: bool = False
 
 
+class PubChemCandidatePreviewResponse(BaseModel):
+    cas_number: str
+    status: CompoundStructureStatus
+    confidence: int
+    candidate_count: int
+    candidates: list[dict[str, Any]]
+    error_message: str | None
+
+
 class InventorySummaryResponse(BaseModel):
     cas_number: str
     item_count: int
-    display_name: str | None
+    preferred_name: str | None
+    preferred_name_source: str | None
+    display_name: str | None = None
     english_name: str | None
     locations: list[str]
     total_by_unit: dict[str, float]
@@ -224,6 +237,17 @@ def _apply_cache_search_filter(statement, search_text: str | None):
     )
 
 
+def _serialize_candidate_preview(result: Any) -> PubChemCandidatePreviewResponse:
+    return PubChemCandidatePreviewResponse(
+        cas_number=result.cas_number,
+        status=result.status,
+        confidence=result.confidence,
+        candidate_count=result.candidate_count,
+        candidates=result.candidates or [],
+        error_message=result.error_message,
+    )
+
+
 @router.get(
     "/index/status",
     response_model=StructureIndexStatusResponse,
@@ -247,7 +271,7 @@ def rebuild_structure_index(db: DBSession) -> StructureIndexStatusResponse:
 @router.get(
     "/structures/cache",
     response_model=StructureCacheListResponse,
-    dependencies=[Depends(require_admin), Depends(ensure_structure_feature_enabled)],
+    dependencies=[Depends(get_current_user), Depends(ensure_structure_feature_enabled)],
 )
 def list_structure_cache(
     db: DBSession,
@@ -276,6 +300,21 @@ def list_structure_cache(
         skip=skip,
         limit=limit,
     )
+
+
+@router.post(
+    "/structures/cache/{cas_number}/pubchem-candidates",
+    response_model=PubChemCandidatePreviewResponse,
+    dependencies=[Depends(require_admin), Depends(ensure_structure_feature_enabled)],
+)
+async def preview_structure_pubchem_candidates(
+    cas_number: str,
+) -> PubChemCandidatePreviewResponse:
+    try:
+        result = await preview_pubchem_candidates(cas_number)
+        return _serialize_candidate_preview(result)
+    except Exception as exc:
+        raise _map_structure_write_error(exc) from exc
 
 
 @router.get(

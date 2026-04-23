@@ -8,12 +8,117 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export const CHINA_TIME_ZONE = 'Asia/Shanghai'
+
+const localFilenameDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
+
+const chinaFilenameDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+  timeZone: CHINA_TIME_ZONE,
+})
+
+function getDateTimeParts(date: Date, formatter: Intl.DateTimeFormat) {
+  const parts = formatter.formatToParts(date)
+  const getPart = (type: Intl.DateTimeFormatPartTypes) => (
+    parts.find(part => part.type === type)?.value ?? ''
+  )
+
+  return {
+    year: getPart('year'),
+    month: getPart('month'),
+    day: getPart('day'),
+    hour: getPart('hour'),
+    minute: getPart('minute'),
+    second: getPart('second'),
+  }
+}
+
+function getUtcOffsetLabel(date: Date): string {
+  const offsetMinutes = -date.getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const absoluteMinutes = Math.abs(offsetMinutes)
+  const hours = String(Math.floor(absoluteMinutes / 60)).padStart(2, '0')
+  const minutes = String(absoluteMinutes % 60).padStart(2, '0')
+
+  return `UTC${sign}${hours}:${minutes}`
+}
+
+function normalizeUtcOffset(offsetText: string): string {
+  const trimmed = offsetText.trim()
+  if (!trimmed) {
+    throw new Error('UTC offset is required')
+  }
+
+  const sign = trimmed[0]
+  if (sign !== '+' && sign !== '-') {
+    throw new Error('UTC offset must start with + or -')
+  }
+
+  const body = trimmed.slice(1)
+  const [hoursRaw, minutesRaw = '00'] = body.includes(':')
+    ? body.split(':', 2)
+    : [body, '00']
+
+  if (!/^\d{1,2}$/.test(hoursRaw) || !/^\d{1,2}$/.test(minutesRaw)) {
+    throw new Error('UTC offset must use digits like +8 or +08:00')
+  }
+
+  const hours = Number(hoursRaw)
+  const minutes = Number(minutesRaw)
+  if (hours > 14 || minutes >= 60 || (hours === 14 && minutes !== 0)) {
+    throw new Error('UTC offset must be within UTC-14:00 to UTC+14:00')
+  }
+
+  return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+export function formatUtcOffsetLabel(offsetText: string): string {
+  return `UTC${normalizeUtcOffset(offsetText)}`
+}
+
+function getUtcOffsetMinutes(offsetText: string): number {
+  const normalized = normalizeUtcOffset(offsetText)
+  const sign = normalized.startsWith('+') ? 1 : -1
+  const [hoursText, minutesText] = normalized.slice(1).split(':', 2)
+  return sign * (Number(hoursText) * 60 + Number(minutesText))
+}
+
+function getUtcShiftedDate(date: string | Date, offsetText: string): Date {
+  const sourceDate = new Date(date)
+  return new Date(sourceDate.getTime() + getUtcOffsetMinutes(offsetText) * 60_000)
+}
+
+function getUtcDateParts(date: Date) {
+  return {
+    year: String(date.getUTCFullYear()),
+    month: String(date.getUTCMonth() + 1).padStart(2, '0'),
+    day: String(date.getUTCDate()).padStart(2, '0'),
+    hour: String(date.getUTCHours()).padStart(2, '0'),
+    minute: String(date.getUTCMinutes()).padStart(2, '0'),
+    second: String(date.getUTCSeconds()).padStart(2, '0'),
+  }
+}
+
 export function formatDate(date: string | Date): string {
   return new Date(date).toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    timeZone: 'Asia/Shanghai',
+    timeZone: CHINA_TIME_ZONE,
   })
 }
 
@@ -24,8 +129,80 @@ export function formatDateTime(date: string | Date): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: 'Asia/Shanghai',
+    hour12: false,
+    timeZone: CHINA_TIME_ZONE,
   })
+}
+
+export function formatDateTimeWithSeconds(date: string | Date): string {
+  return new Date(date).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: CHINA_TIME_ZONE,
+  })
+}
+
+export function formatLocalDateTimeWithSeconds(date: string | Date): string {
+  return new Date(date).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+export function getLocalTimeZoneLabel(date: string | Date = new Date()): string {
+  const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const offsetLabel = getUtcOffsetLabel(new Date(date))
+
+  return resolvedTimeZone ? `${resolvedTimeZone} (${offsetLabel})` : offsetLabel
+}
+
+export function formatLocalDateTimeForFilename(date = new Date()): string {
+  const { year, month, day, hour, minute, second } = getDateTimeParts(
+    date,
+    localFilenameDateTimeFormatter,
+  )
+  return `${year}-${month}-${day}_${hour}-${minute}-${second}`
+}
+
+export function formatUtcOffsetDateTimeWithSeconds(
+  date: string | Date,
+  offsetText: string,
+): string {
+  const shiftedDate = getUtcShiftedDate(date, offsetText)
+  const { year, month, day, hour, minute, second } = getUtcDateParts(shiftedDate)
+  return `${year}/${month}/${day} ${hour}:${minute}:${second}`
+}
+
+export function formatUtcOffsetDateTimeForFilename(
+  date: string | Date,
+  offsetText: string,
+): string {
+  const shiftedDate = getUtcShiftedDate(date, offsetText)
+  const { year, month, day, hour, minute, second } = getUtcDateParts(shiftedDate)
+  return `${year}-${month}-${day}_${hour}-${minute}-${second}`
+}
+
+export function formatChinaDateForFilename(date = new Date()): string {
+  const { year, month, day } = getDateTimeParts(date, chinaFilenameDateTimeFormatter)
+  return `${year}-${month}-${day}`
+}
+
+export function formatChinaDateTimeForFilename(date = new Date()): string {
+  const { year, month, day, hour, minute, second } = getDateTimeParts(
+    date,
+    chinaFilenameDateTimeFormatter,
+  )
+  return `${year}-${month}-${day}_${hour}-${minute}-${second}`
 }
 
 export function truncate(str: string, length: number): string {

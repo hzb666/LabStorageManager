@@ -20,7 +20,9 @@ export interface SubstructureSearchRequest {
 export interface InventoryStructureSummary {
   cas_number: string
   item_count: number
-  display_name: string | null
+  preferred_name: string | null
+  preferred_name_source?: string | null
+  display_name?: string | null
   english_name: string | null
   locations: string[]
   total_by_unit: Record<string, number>
@@ -42,6 +44,20 @@ export interface SubstructureSearchResponse {
   elapsed_ms: number
   index: StructureIndexStatus
   results: SubstructureSearchResult[]
+}
+
+export interface PubChemCandidate {
+  cid?: number
+  has_exact_cas_synonym?: boolean
+  matched_by_substance_name?: boolean
+  selected_manually?: boolean
+  sid_count?: number
+  smiles_canonical?: string | null
+  smiles_isomeric?: string | null
+  inchikey?: string | null
+  molecular_formula?: string | null
+  molecular_weight?: number | null
+  iupac_name?: string | null
 }
 
 export type CompoundStructureStatus =
@@ -110,6 +126,15 @@ export interface ConfirmPubChemPayload {
   overwrite_manual?: boolean
 }
 
+export interface PubChemCandidatePreviewResponse {
+  cas_number: string
+  status: CompoundStructureStatus
+  confidence: number
+  candidate_count: number
+  candidates: PubChemCandidate[]
+  error_message: string | null
+}
+
 export const structureSearchAPI = {
   searchSubstructure: async (
     payload: SubstructureSearchRequest,
@@ -173,6 +198,15 @@ export const structureSearchAPI = {
     const response = await api.post<CompoundStructureCache>(
       `/chem/structures/cache/${encodeURIComponent(casNumber)}/confirm-pubchem`,
       payload,
+    )
+    return response.data
+  },
+
+  previewPubChemCandidates: async (
+    casNumber: string,
+  ): Promise<PubChemCandidatePreviewResponse> => {
+    const response = await api.post<PubChemCandidatePreviewResponse>(
+      `/chem/structures/cache/${encodeURIComponent(casNumber)}/pubchem-candidates`,
     )
     return response.data
   },

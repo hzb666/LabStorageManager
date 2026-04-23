@@ -180,7 +180,7 @@ class InventoryUpdate(SQLModel):
     # 规格字段：前端传入规格字符串（如 "500ml"），后端用 parse_specification 解析
     specification: Optional[str] = Field(default=None, max_length=50)
 
-    @field_validator("name", "cas_number", "specification", mode="before")
+    @field_validator("name", "cas_number", "brand", "specification", mode="before")
     @classmethod
     def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
@@ -294,11 +294,11 @@ class ManualInventoryCreate(SQLModel):
     storage_location: Optional[str] = None
     is_hazardous: bool = False
     category: Optional[str] = None
-    brand: Optional[str] = None
+    brand: str = Field(max_length=100)
     purity: Optional[str] = Field(default=None, max_length=20)
     notes: Optional[str] = None
 
-    @field_validator("cas_number", "name", "specification")
+    @field_validator("cas_number", "name", "brand", "specification")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         stripped = value.strip()

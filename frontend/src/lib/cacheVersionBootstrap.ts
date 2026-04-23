@@ -17,7 +17,20 @@ type CacheVersionBootstrapResult = {
   redirected: boolean
 }
 
-const CACHE_VERSION_FETCH_TIMEOUT_MS = 500
+const CACHE_VERSION_FETCH_TIMEOUT_MS = 2000
+
+function getErrorName(error: unknown): string {
+  if (!error || typeof error !== 'object' || !('name' in error)) {
+    return ''
+  }
+  const name = (error as { name?: unknown }).name
+  return typeof name === 'string' ? name : ''
+}
+
+function isExpectedCacheVersionAbort(error: unknown): boolean {
+  const errorName = getErrorName(error)
+  return errorName === 'AbortError' || errorName === 'TimeoutError'
+}
 
 function readStoredCacheVersion(): string | null {
   try {
@@ -170,6 +183,12 @@ export async function bootstrapCacheVersion(queryClient: QueryClient): Promise<C
   try {
     currentCacheVersion = await fetchRuntimeCacheVersion()
   } catch (error) {
+    if (isExpectedCacheVersionAbort(error)) {
+      if (import.meta.env.DEV) {
+        console.debug('Cache version bootstrap skipped:', error)
+      }
+      return { redirected: false }
+    }
     console.error('Cache version bootstrap failed:', error)
     return { redirected: false }
   }

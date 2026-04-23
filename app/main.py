@@ -36,6 +36,7 @@ from app.core.request_utils import (
     reset_current_sse_client_id,
     set_current_sse_client_id,
 )
+from app.core.time_utils import get_display_timezone_label
 from app.database import engine, init_db
 from app.api import (
     announcements,
@@ -48,6 +49,7 @@ from app.api import (
     error_logs,
     events,
     inventory,
+    reagent_brands,
     reagent_orders,
     user_logs,
     user_sessions,
@@ -619,6 +621,7 @@ app.include_router(error_logs.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(common_shelf.router, prefix="/api")
 app.include_router(chemical_name_map.router, prefix="/api")
+app.include_router(reagent_brands.router, prefix="/api")
 app.include_router(chem.router, prefix="/api")
 
 
@@ -655,7 +658,11 @@ def robots_txt() -> PlainTextResponse:
 def get_runtime_cache_version(response: Response) -> dict[str, str]:
     """Expose current cache invalidation version for frontend startup checks."""
     response.headers["Cache-Control"] = "no-store"
-    return {"cache_version": settings.cache_version}
+    return {
+        "cache_version": settings.cache_version,
+        "display_utc_offset": settings.display_utc_offset,
+        "display_timezone": get_display_timezone_label(),
+    }
 
 # Import models to ensure tables are created
 # This is needed for SQLModel to register all models
@@ -668,6 +675,7 @@ from app.models import (  # noqa: E402, F401
     CommonShelfOperationLog,
     ConsumableOrder,
     Inventory,
+    ReagentBrand,
     ReagentOrder,
     RuntimeState,
     User,

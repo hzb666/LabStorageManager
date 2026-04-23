@@ -1,25 +1,16 @@
 /** SSE 运行时状态仓库。 */
 import { create } from 'zustand'
 
-export type SeqProcessResult = {
-  isDuplicateOrOld: boolean
-  hasGap: boolean
-  previousSeq: number
-}
-
 export interface SSEState {
-  isConnected: boolean
   clientId: string | null
-  reconnectCount: number
-  lastConnectedAt: number | null
+  activeClientIds: string[]
+  connectionsByKey: Record<string, string>
 
-  // 按房间记录序号，便于检查事件连续性。
-  lastSeqByRoom: Record<string, number>
   staleRooms: Set<string>
 
-  setConnected: (clientId: string) => void
-  setDisconnected: () => void
-  incrementReconnectCount: () => void
+  registerConnection: (connectionKey: string, clientId: string) => void
+  unregisterConnection: (connectionKey: string) => void
+  hasActiveClientId: (clientId: string) => boolean
 
   markRoomStale: (room: string) => void
   clearRoomStale: (room: string) => void
@@ -28,38 +19,57 @@ export interface SSEState {
   hasStaleKey: (key: string) => boolean
   clearAllStale: () => void
 
-  processSeq: (room: string, seq: number) => SeqProcessResult
   reset: () => void
 }
 
+type SSEConnectionsState = {
+  activeClientIds: string[]
+  clientId: string | null
+  connectionsByKey: Record<string, string>
+}
+
 const initialState = {
-  isConnected: false,
   clientId: null,
-  reconnectCount: 0,
-  lastConnectedAt: null,
-  lastSeqByRoom: {},
+  activeClientIds: [],
+  connectionsByKey: {},
   staleRooms: new Set<string>(),
+}
+
+function deriveConnectionsState(
+  connectionsByKey: Record<string, string>
+): SSEConnectionsState {
+  const orderedClientIds = Object.values(connectionsByKey)
+  const activeClientIds = Array.from(new Set(orderedClientIds))
+
+  return {
+    activeClientIds,
+    clientId: activeClientIds.length > 0 ? activeClientIds[activeClientIds.length - 1] : null,
+    connectionsByKey,
+  }
 }
 
 export const useSSEStore = create<SSEState>((set, get) => ({
   ...initialState,
 
-  setConnected: (clientId) =>
-    set(() => ({
-      isConnected: true,
-      clientId,
-      lastConnectedAt: Date.now(),
-    })),
+  registerConnection: (connectionKey, clientId) =>
+    set((state) => {
+      const nextConnections = { ...state.connectionsByKey }
+      delete nextConnections[connectionKey]
+      nextConnections[connectionKey] = clientId
+      return deriveConnectionsState(nextConnections)
+    }),
 
-  setDisconnected: () =>
-    set(() => ({
-      isConnected: false,
-    })),
+  unregisterConnection: (connectionKey) =>
+    set((state) => {
+      if (!(connectionKey in state.connectionsByKey)) {
+        return {}
+      }
+      const nextConnections = { ...state.connectionsByKey }
+      delete nextConnections[connectionKey]
+      return deriveConnectionsState(nextConnections)
+    }),
 
-  incrementReconnectCount: () =>
-    set((state) => ({
-      reconnectCount: state.reconnectCount + 1,
-    })),
+  hasActiveClientId: (clientId) => get().activeClientIds.includes(clientId),
 
   markRoomStale: (room) =>
     set((state) => ({
@@ -95,33 +105,6 @@ export const useSSEStore = create<SSEState>((set, get) => ({
     set(() => ({
       staleRooms: new Set<string>(),
     })),
-
-  processSeq: (room, seq) => {
-    const prev = get().lastSeqByRoom[room] ?? 0
-
-    // 忽略重复事件和旧事件。
-    if (seq <= prev) {
-      return {
-        isDuplicateOrOld: true,
-        hasGap: false,
-        previousSeq: prev,
-      }
-    }
-
-    const hasGap = prev > 0 && seq > prev + 1
-    set((state) => ({
-      lastSeqByRoom: {
-        ...state.lastSeqByRoom,
-        [room]: seq,
-      },
-    }))
-
-    return {
-      isDuplicateOrOld: false,
-      hasGap,
-      previousSeq: prev,
-    }
-  },
 
   reset: () => set(() => ({ ...initialState })),
 }))

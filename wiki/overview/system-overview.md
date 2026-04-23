@@ -77,7 +77,7 @@ flowchart TD
 - 本地联调由前端 `VITE_API_URL` 指向后端 API，不依赖 Vite dev proxy。
 - 常用货架前端路径是 `/common-shelf`，接口路径是 `/api/common-shelf*`。
 - 数据库 FTS 覆盖 `inventory`、`reagent_order`、`consumable_order`、`users`、`chemical_name_map` 和 `log_timeline`。
-- 结构检索默认关闭，启用后由 `chem` API、结构缓存表和 RDKit 索引共同工作。
+- 结构检索默认开启，可关闭；启用后由 `chem` API、结构缓存表和 RDKit 索引共同工作。
 - Redis 是增强层，不是唯一事实源；不可用时系统仍保持 SQLite 可用。
 
 ## 参考代码

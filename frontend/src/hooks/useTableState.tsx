@@ -106,10 +106,12 @@ export interface UseTableStateReturn {
   total: number
   // 加载状态
   isLoading: boolean
+  isFetching: boolean
   isError: boolean
   error: unknown
   // 加载更多状态
   isFetchingNextPage: boolean
+  isPlaceholderData: boolean
   // 是否还有更多数据
   hasNextPage: boolean
   // 加载更多数据
@@ -154,6 +156,7 @@ type TableQueryState = {
   data: unknown[]
   total: number
   isLoading: boolean
+  isFetching: boolean
   isError: boolean
   error: unknown
   isFetchingNextPage: boolean
@@ -499,6 +502,7 @@ function useTableQueryData(args: {
   const {
     data: allData,
     isLoading,
+    isFetching,
     isFetchingNextPage,
     isError,
     error,
@@ -530,13 +534,14 @@ function useTableQueryData(args: {
     data,
     total,
     isLoading,
+    isFetching,
     isError,
     error,
     isFetchingNextPage,
+    isPlaceholderData,
     hasNextPage: Boolean(hasNextPage),
     fetchNextPage,
     refetch,
-    isPlaceholderData,
   }
 }
 
@@ -651,9 +656,11 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     data: queryState.data,
     total: queryState.total,
     isLoading: queryState.isLoading,
+    isFetching: queryState.isFetching,
     isError: queryState.isError,
     error: queryState.error,
     isFetchingNextPage: queryState.isFetchingNextPage,
+    isPlaceholderData: queryState.isPlaceholderData,
     hasNextPage: queryState.hasNextPage,
     fetchNextPage: queryState.fetchNextPage,
     refetch: queryState.refetch,
