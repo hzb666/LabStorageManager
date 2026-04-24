@@ -37,27 +37,16 @@ export interface SearchFieldOption {
 }
 
 export interface UseTableStateOptions {
-  // API 客户端（必传）
   api: FilterAPI
-  // 查询 Key 前缀
   queryKey?: string[]
-  // 表格唯一标识（用于 localStorage）
   tableId: string
-  // 状态筛选选项
   statusOptions?: FilterOption[]
-  // 搜索字段选项
   searchFieldOptions?: SearchFieldOption[]
-  // 默认状态筛选值
   defaultStatus?: string
-  // 默认搜索字段值
   defaultSearchField?: string
-  // 每页数据条数
   pageSize?: number
-  // 搜索防抖时间（毫秒）
   debounceMs?: number
-  // 列宽缓存防抖时间（毫秒）
   columnSizingDebounceMs?: number
-  // 额外的查询参数
   extraParams?: Record<string, unknown>
   // 外部结果集已经有业务排序时，禁止把表头排序带进请求。
   suppressSorting?: boolean
@@ -80,9 +69,7 @@ type TableQueryResult = UseInfiniteQueryResult<InfiniteData<ListResponseData>, u
 export interface UseTableStateReturn {
   searchInput: string
   setSearchInput: (value: string) => void
-  // 立即应用搜索（同步更新输入框和查询条件）
   applySearchImmediate: (value: string, field?: string) => void
-  // 防抖后的搜索关键词
   globalFilter: string
   statusFilter: string
   setStatusFilter: (value: string) => void
@@ -104,22 +91,16 @@ export interface UseTableStateReturn {
   resetExpanded: () => void
   data: unknown[]
   total: number
-  // 加载状态
   isLoading: boolean
   isFetching: boolean
   isError: boolean
   error: unknown
-  // 加载更多状态
   isFetchingNextPage: boolean
   isPlaceholderData: boolean
-  // 是否还有更多数据
   hasNextPage: boolean
-  // 加载更多数据
   fetchNextPage: TableQueryResult['fetchNextPage']
   refetch: TableQueryResult['refetch']
-  // 手动使缓存失效
   invalidate: () => void
-  // 重置筛选状态
   resetFilters: () => void
 }
 
@@ -430,22 +411,22 @@ function getDisplayCount(args: {
   return shouldShowGrandTotal ? `${total}/${grandTotal}` : `${total}`
 }
 
-// 这个 key 顺序必须和 useInfiniteQuery 的无筛选场景完全一致，否则会读不到总数缓存。
-function buildBaseQueryKey(
+// 这个 key 顺序必须和列表查询保持一致，否则会读不到同一组缓存。
+function buildTableQueryKey(
   queryKey: string[],
   extraParams: Record<string, unknown>,
-  defaultStatus: string,
-  defaultSearchField: string
+  filters: TableQueryFilters
 ): readonly unknown[] {
+  const { statusFilter, globalFilter, searchField, fuzzySearch, matchMode, sorting } = filters
   return [
     ...queryKey,
     extraParams,
-    defaultStatus,
-    '',
-    defaultSearchField,
-    false,
-    DEFAULT_SEARCH_MATCH_MODE,
-    [],
+    statusFilter,
+    globalFilter,
+    searchField,
+    fuzzySearch,
+    matchMode,
+    sorting,
   ]
 }
 
@@ -476,7 +457,6 @@ function useTableQueryData(args: {
     defaultStatus,
     filters,
   } = args
-  const { statusFilter, globalFilter, searchField, fuzzySearch, matchMode, sorting } = filters
 
   const queryFn = useCallback(
     async ({ pageParam = 0 }: { pageParam?: number }) => {
@@ -511,16 +491,7 @@ function useTableQueryData(args: {
     refetch,
     isPlaceholderData,
   } = useInfiniteQuery({
-    queryKey: [
-      ...queryKey,
-      extraParams,
-      statusFilter,
-      globalFilter,
-      searchField,
-      fuzzySearch,
-      matchMode,
-      sorting,
-    ],
+    queryKey: buildTableQueryKey(queryKey, extraParams, filters),
     queryFn,
     initialPageParam: 0,
     getNextPageParam: getNextPageOffset,
@@ -612,7 +583,15 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     filters: queryFilters,
   })
   const baseQueryKey = useMemo(
-    () => buildBaseQueryKey(queryKey, extraParams, defaultStatus, defaultSearchField),
+    () =>
+      buildTableQueryKey(queryKey, extraParams, {
+        statusFilter: defaultStatus,
+        globalFilter: '',
+        searchField: defaultSearchField,
+        fuzzySearch: false,
+        matchMode: DEFAULT_SEARCH_MATCH_MODE,
+        sorting: [],
+      }),
     [queryKey, extraParams, defaultStatus, defaultSearchField]
   )
   // 表头在筛选态下还要显示总量，所以这里读取“无筛选”缓存的第一页总数，不额外发请求。
