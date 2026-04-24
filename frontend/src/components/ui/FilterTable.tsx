@@ -116,6 +116,30 @@ const DEFAULT_FILTER_TABLE_PROPS = {
   statusOptions: DEFAULT_STATUS_OPTIONS,
 } satisfies Partial<FilterTableProps>;
 
+function resolveFilterTableProps(props: Readonly<FilterTableProps>) {
+  return {
+    ...props,
+    className: props.className ?? DEFAULT_FILTER_TABLE_PROPS.className,
+    debounceMs: props.debounceMs ?? DEFAULT_FILTER_TABLE_PROPS.debounceMs,
+    defaultSearchField:
+      props.defaultSearchField ?? DEFAULT_FILTER_TABLE_PROPS.defaultSearchField,
+    defaultStatus: props.defaultStatus ?? DEFAULT_FILTER_TABLE_PROPS.defaultStatus,
+    emptyText: props.emptyText ?? DEFAULT_FILTER_TABLE_PROPS.emptyText,
+    enableExpandAll: props.enableExpandAll ?? DEFAULT_FILTER_TABLE_PROPS.enableExpandAll,
+    extraParams: props.extraParams ?? DEFAULT_FILTER_TABLE_PROPS.extraParams,
+    pageSize: props.pageSize ?? DEFAULT_FILTER_TABLE_PROPS.pageSize,
+    queryKey: props.queryKey ?? DEFAULT_FILTER_TABLE_PROPS.queryKey,
+    searchFieldOptions:
+      props.searchFieldOptions ?? DEFAULT_FILTER_TABLE_PROPS.searchFieldOptions,
+    searchInputDisabled:
+      props.searchInputDisabled ?? DEFAULT_FILTER_TABLE_PROPS.searchInputDisabled,
+    searchPlaceholder:
+      props.searchPlaceholder ?? DEFAULT_FILTER_TABLE_PROPS.searchPlaceholder,
+    showFuzzySearch: props.showFuzzySearch ?? DEFAULT_FILTER_TABLE_PROPS.showFuzzySearch,
+    statusOptions: props.statusOptions ?? DEFAULT_FILTER_TABLE_PROPS.statusOptions,
+  };
+}
+
 // 从地址栏解析初始搜索词与搜索字段，作为表格首屏状态来源。
 function getInitialUrlSearchState({
   defaultSearchField,
@@ -935,7 +959,7 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
     emptyText,
     toolbarActions,
     realtime,
-  } = { ...DEFAULT_FILTER_TABLE_PROPS, ...props };
+  } = resolveFilterTableProps(props);
   const location = useLocation();
   const actionRefs = useActionRefs({ onEdit, onBorrowSuccess });
   const [isTableAtTop, setIsTableAtTop] = useState(true);

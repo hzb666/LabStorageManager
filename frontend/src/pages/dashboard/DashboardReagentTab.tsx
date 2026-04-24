@@ -59,6 +59,7 @@ import {
   getApiErrorMessage,
   resolveSpecificationQuantity,
   resolveSpecificationUnit,
+  applyValidationErrors,
   toValidationErrors,
   normalizeApiErrorMessage,
 } from "@/lib/validationSchemas";
@@ -278,7 +279,7 @@ function validateWorkflowRemainingQuantity(
   return false;
 }
 
-function applyValidationErrorsToForm<T extends Record<string, unknown>>(
+function applyFormValidationErrors<T extends Record<string, unknown>>(
   detail: unknown,
   setError: (
     field: keyof T,
@@ -287,20 +288,12 @@ function applyValidationErrorsToForm<T extends Record<string, unknown>>(
     },
   ) => void,
 ): boolean {
-  const validationErrors = toValidationErrors(detail);
-  if (validationErrors.length === 0) {
-    return false;
-  }
-
-  validationErrors.forEach((issue) => {
-    if (!issue.loc?.[1]) {
-      return;
-    }
-    setError(issue.loc[1] as keyof T, {
-      message: issue.msg || "输入不合法",
-    });
-  });
-  return true;
+  return applyValidationErrors(
+    toValidationErrors(detail),
+    (fieldName, message) => {
+      setError(fieldName as keyof T, { message });
+    },
+  );
 }
 
 async function finishWorkflowSubmit(
@@ -850,7 +843,7 @@ function useReagentEditDialog({
       );
     } catch (err) {
       const detail = extractApiErrorDetail(err);
-      if (applyValidationErrorsToForm<ReagentOrderFormData>(detail, reagentForm.setError)) {
+      if (applyFormValidationErrors<ReagentOrderFormData>(detail, reagentForm.setError)) {
         return;
       }
       toast.error(normalizeApiErrorMessage(detail, "更新失败"));
@@ -929,7 +922,7 @@ function useReagentWorkflowSubmitHandlers({
       await finishWorkflowSubmit(resetStockinDialog, refreshTables, "入库成功");
     } catch (err) {
       const detail = extractApiErrorDetail(err);
-      if (applyValidationErrorsToForm<StockInFormInputData>(detail, stockinForm.setError)) {
+      if (applyFormValidationErrors<StockInFormInputData>(detail, stockinForm.setError)) {
         return;
       }
       toast.error(normalizeApiErrorMessage(detail, "入库失败"));
@@ -960,7 +953,7 @@ function useReagentWorkflowSubmitHandlers({
       );
     } catch (err) {
       const detail = extractApiErrorDetail(err);
-      if (applyValidationErrorsToForm<ConfirmArrivalFormData>(detail, arrivalForm.setError)) {
+      if (applyFormValidationErrors<ConfirmArrivalFormData>(detail, arrivalForm.setError)) {
         return;
       }
       toast.error(normalizeApiErrorMessage(detail, "确认到货失败"));
@@ -987,7 +980,7 @@ function useReagentWorkflowSubmitHandlers({
       } catch (err) {
         const detail = extractApiErrorDetail(err);
         if (
-          applyValidationErrorsToForm<CommonPublicArrivalFormData>(
+          applyFormValidationErrors<CommonPublicArrivalFormData>(
             detail,
             commonPublicArrivalForm.setError,
           )
