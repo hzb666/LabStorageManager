@@ -119,18 +119,10 @@ export interface ChemicalNameMapEditorController {
   onSubmit: () => Promise<void>
 }
 
-function renderLocation(location: string | null) {
-  return location?.trim() ? location : '未填写位置'
-}
-
-function buildLocationOptionValue(location: string | null) {
-  return location?.trim() ? location : COMMON_SHELF_EMPTY_LOCATION_VALUE
-}
-
 function buildLocationOptions(locations: CommonShelfLocationSummary[] = []) {
   return locations.map((item) => ({
-    value: buildLocationOptionValue(item.storage_location),
-    label: `${renderLocation(item.storage_location)} (${item.bottle_count} 瓶)`,
+    value: item.storage_location?.trim() ? item.storage_location : COMMON_SHELF_EMPTY_LOCATION_VALUE,
+    label: `${item.storage_location?.trim() ? item.storage_location : '未填写位置'} (${item.bottle_count} 瓶)`,
   }))
 }
 
@@ -159,10 +151,6 @@ function DialogEntitySummary({
       <p className={cn("text-sm text-muted-foreground", detailsClassName)}>{details}</p>
     </div>
   )
-}
-
-function DialogHint({ children }: { children: ReactNode }) {
-  return <p className="text-base text-muted-foreground">{children}</p>
 }
 
 function renderCommonShelfGroupBrandSpec(group: CommonShelfGroup) {
@@ -574,9 +562,9 @@ function renderRemoveOneDialog(
         detailsClassName="text-base"
         details={renderCommonShelfGroupBrandSpec(state.selectedGroup)}
       />
-      <DialogHint>
+      <p className="text-base text-muted-foreground">
         将从所选位置删除最早入库的 1 瓶。
-      </DialogHint>
+      </p>
       <BaseForm
         form={forms.removeOneForm}
         fields={getCommonShelfRemoveOneFormFields(locationOptions)}
