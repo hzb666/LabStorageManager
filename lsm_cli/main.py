@@ -5,7 +5,7 @@ import getpass
 import math
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from lsm_cli.client import (
     APIClient,
@@ -779,6 +779,101 @@ def _handle_consumable_order_update(args: argparse.Namespace) -> None:
     )
 
 
+def _register_list_command(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    name: str,
+    help_text: str,
+    path: str,
+    allowed_params: frozenset[str],
+    command_label: str,
+    known_id_hint: str | None = None,
+) -> None:
+    parser = subparsers.add_parser(name, help=help_text, formatter_class=argparse.RawTextHelpFormatter)
+    _add_connection_arguments(parser)
+    _add_list_arguments(parser)
+    _set_list_command_help(
+        parser,
+        command_label=command_label,
+        allowed_params=allowed_params,
+        known_id_hint=known_id_hint,
+    )
+    parser.set_defaults(
+        handler=lambda args: _handle_list_command(args, path),
+        allowed_params=allowed_params,
+        list_command_label=command_label,
+    )
+
+
+def _register_get_command(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    name: str,
+    help_text: str,
+    path: str,
+    add_target_argument: Callable[[argparse.ArgumentParser], None] | None = None,
+) -> None:
+    parser = subparsers.add_parser(name, help=help_text)
+    _add_connection_arguments(parser)
+    if add_target_argument is not None:
+        add_target_argument(parser)
+    parser.set_defaults(handler=lambda args: _handle_get_command(args, path))
+
+
+def _register_field_search_command(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    name: str,
+    help_text: str,
+    path: str,
+    argument_name: str,
+    search_attr: str,
+    search_field: str,
+    allowed_params: frozenset[str],
+    command_label: str,
+    exact: bool = False,
+    match_mode: str | None = None,
+) -> None:
+    parser = subparsers.add_parser(name, help=help_text)
+    _add_connection_arguments(parser)
+    parser.add_argument(argument_name)
+    _add_pagination_arguments(parser)
+    if exact:
+        _add_exact_search_argument(parser)
+    parser.set_defaults(
+        handler=lambda args: _handle_field_search(
+            args,
+            path=path,
+            search_attr=search_attr,
+            search_field=search_field,
+            allowed_params=allowed_params,
+            command_label=command_label,
+            match_mode=match_mode,
+        )
+    )
+
+
+def _register_post_command(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    *,
+    name: str,
+    help_text: str,
+    path: str,
+    payload_required: bool = False,
+    add_target_argument: Callable[[argparse.ArgumentParser], None] | None = None,
+    add_payload_arguments: bool = False,
+) -> None:
+    parser = subparsers.add_parser(name, help=help_text)
+    _add_connection_arguments(parser)
+    if add_target_argument is not None:
+        add_target_argument(parser)
+    if add_payload_arguments:
+        _add_payload_arguments(parser)
+    parser.set_defaults(
+        handler=lambda args: _handle_post_command(args, path, payload_required=payload_required)
+    )
+
+
 def _register_auth_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     auth = subparsers.add_parser("auth", help="Authentication commands")
     auth_sub = auth.add_subparsers(dest="auth_command", required=True)
@@ -805,65 +900,40 @@ def _register_auth_commands(subparsers: argparse._SubParsersAction[argparse.Argu
 def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     inventory = subparsers.add_parser("inventory", help="Inventory commands")
     inventory_sub = inventory.add_subparsers(dest="inventory_command", required=True)
-
-    list_cmd = inventory_sub.add_parser(
-        "list",
-        help="List inventory",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    _add_connection_arguments(list_cmd)
-    _add_list_arguments(list_cmd)
-    _set_list_command_help(
-        list_cmd,
-        command_label="inventory list",
-        allowed_params=INVENTORY_LIST_PARAM_KEYS,
+    _register_list_command(
+        inventory_sub, name="list", help_text="List inventory", path="/inventory/",
+        allowed_params=INVENTORY_LIST_PARAM_KEYS, command_label="inventory list",
         known_id_hint="Known inventory ID? Use `lsm inventory get <inventory_id>` instead of `--param id=...`.",
     )
-    list_cmd.set_defaults(
-        handler=lambda args: _handle_list_command(args, "/inventory/"),
-        allowed_params=INVENTORY_LIST_PARAM_KEYS,
-        list_command_label="inventory list",
+    _register_get_command(
+        inventory_sub, name="get", help_text="Get inventory by id",
+        path="/inventory/{inventory_id}",
+        add_target_argument=_add_inventory_id_argument,
     )
-
-    get_cmd = inventory_sub.add_parser("get", help="Get inventory by id")
-    _add_connection_arguments(get_cmd)
-    _add_inventory_id_argument(get_cmd)
-    get_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/inventory/{inventory_id}"))
-
-    cas_cmd = inventory_sub.add_parser("cas", help="Get inventory summary by CAS")
-    _add_connection_arguments(cas_cmd)
-    cas_cmd.add_argument("cas_number")
-    cas_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/inventory/cas/{cas_number}"))
-
-    name_cmd = inventory_sub.add_parser("name", help="Search inventory by name")
-    _add_connection_arguments(name_cmd)
-    name_cmd.add_argument("keyword")
-    _add_pagination_arguments(name_cmd)
-    _add_exact_search_argument(name_cmd)
-    name_cmd.set_defaults(
-        handler=lambda args: _handle_field_search(
-            args,
-            path="/inventory/",
-            search_attr="keyword",
-            search_field="name",
-            allowed_params=INVENTORY_NAME_SEARCH_PARAM_KEYS,
-            command_label="inventory name",
-        )
+    _register_get_command(
+        inventory_sub, name="cas", help_text="Get inventory summary by CAS",
+        path="/inventory/cas/{cas_number}",
+        add_target_argument=lambda parser: parser.add_argument("cas_number"),
     )
-
-    code_cmd = inventory_sub.add_parser("code", help="Get inventory by internal code")
-    _add_connection_arguments(code_cmd)
-    code_cmd.add_argument("internal_code")
-    code_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/inventory/code/{internal_code}"))
-
-    my_borrows = inventory_sub.add_parser("my-borrows", help="Get current user's borrows")
-    _add_connection_arguments(my_borrows)
-    my_borrows.set_defaults(handler=lambda args: _handle_get_command(args, "/inventory/dashboard/my-borrows"))
-
-    pending = inventory_sub.add_parser("pending-stockin", help="Get current user's pending stock-in items")
-    _add_connection_arguments(pending)
-    pending.set_defaults(handler=lambda args: _handle_get_command(args, "/inventory/dashboard/pending-stockin"))
-
+    _register_field_search_command(
+        inventory_sub, name="name", help_text="Search inventory by name", path="/inventory/",
+        argument_name="keyword", search_attr="keyword", search_field="name",
+        allowed_params=INVENTORY_NAME_SEARCH_PARAM_KEYS, command_label="inventory name",
+        exact=True,
+    )
+    _register_get_command(
+        inventory_sub, name="code", help_text="Get inventory by internal code",
+        path="/inventory/code/{internal_code}",
+        add_target_argument=lambda parser: parser.add_argument("internal_code"),
+    )
+    _register_get_command(
+        inventory_sub, name="my-borrows", help_text="Get current user's borrows",
+        path="/inventory/dashboard/my-borrows",
+    )
+    _register_get_command(
+        inventory_sub, name="pending-stockin", help_text="Get current user's pending stock-in items",
+        path="/inventory/dashboard/pending-stockin",
+    )
     borrow = inventory_sub.add_parser("borrow", help="Borrow an inventory item")
     _add_connection_arguments(borrow)
     _add_inventory_id_argument(borrow)
@@ -884,16 +954,9 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
         help="Interpret input as used quantity; CLI converts it to remaining_quantity before submit",
     )
     return_cmd.set_defaults(handler=_handle_inventory_return)
-
-    manual_add = inventory_sub.add_parser("manual-add", help="Create inventory manually")
-    _add_connection_arguments(manual_add)
-    _add_payload_arguments(manual_add)
-    manual_add.set_defaults(
-        handler=lambda args: _handle_post_command(
-            args,
-            "/inventory/manual-add",
-            payload_required=True,
-        )
+    _register_post_command(
+        inventory_sub, name="manual-add", help_text="Create inventory manually",
+        path="/inventory/manual-add", payload_required=True, add_payload_arguments=True,
     )
 
     update = inventory_sub.add_parser("update", help="Update inventory")
@@ -918,75 +981,34 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
 def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     reagent = subparsers.add_parser("reagent-orders", help="Reagent order commands")
     reagent_sub = reagent.add_subparsers(dest="reagent_command", required=True)
-
-    list_cmd = reagent_sub.add_parser(
-        "list",
-        help="List reagent orders",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    _add_connection_arguments(list_cmd)
-    _add_list_arguments(list_cmd)
-    _set_list_command_help(
-        list_cmd,
-        command_label="reagent-orders list",
-        allowed_params=ORDER_LIST_PARAM_KEYS,
+    _register_list_command(
+        reagent_sub, name="list", help_text="List reagent orders", path="/reagent-orders/",
+        allowed_params=ORDER_LIST_PARAM_KEYS, command_label="reagent-orders list",
         known_id_hint="Known order ID? Use `lsm reagent-orders get <order_id>` instead of `--param id=...`.",
     )
-    list_cmd.set_defaults(
-        handler=lambda args: _handle_list_command(args, "/reagent-orders/"),
-        allowed_params=ORDER_LIST_PARAM_KEYS,
-        list_command_label="reagent-orders list",
+    _register_get_command(
+        reagent_sub, name="get", help_text="Get reagent order by id",
+        path="/reagent-orders/{order_id}",
+        add_target_argument=_add_order_id_argument,
     )
-
-    get_cmd = reagent_sub.add_parser("get", help="Get reagent order by id")
-    _add_connection_arguments(get_cmd)
-    _add_order_id_argument(get_cmd)
-    get_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/reagent-orders/{order_id}"))
-
-    cas_cmd = reagent_sub.add_parser("cas", help="List reagent orders by CAS")
-    _add_connection_arguments(cas_cmd)
-    cas_cmd.add_argument("cas_number")
-    _add_pagination_arguments(cas_cmd)
-    cas_cmd.set_defaults(
-        handler=lambda args: _handle_field_search(
-            args,
-            path="/reagent-orders/",
-            search_attr="cas_number",
-            search_field="cas_number",
-            allowed_params=ORDER_LIST_PARAM_KEYS,
-            command_label="reagent-orders cas",
-        )
+    _register_field_search_command(
+        reagent_sub, name="cas", help_text="List reagent orders by CAS", path="/reagent-orders/",
+        argument_name="cas_number", search_attr="cas_number", search_field="cas_number",
+        allowed_params=ORDER_LIST_PARAM_KEYS, command_label="reagent-orders cas",
     )
-
-    name_cmd = reagent_sub.add_parser("name", help="Search reagent orders by name")
-    _add_connection_arguments(name_cmd)
-    name_cmd.add_argument("keyword")
-    _add_pagination_arguments(name_cmd)
-    _add_exact_search_argument(name_cmd)
-    name_cmd.set_defaults(
-        handler=lambda args: _handle_field_search(
-            args,
-            path="/reagent-orders/",
-            search_attr="keyword",
-            search_field="name",
-            allowed_params=ORDER_NAME_SEARCH_PARAM_KEYS,
-            command_label="reagent-orders name",
-        )
+    _register_field_search_command(
+        reagent_sub, name="name", help_text="Search reagent orders by name", path="/reagent-orders/",
+        argument_name="keyword", search_attr="keyword", search_field="name",
+        allowed_params=ORDER_NAME_SEARCH_PARAM_KEYS, command_label="reagent-orders name",
+        exact=True,
     )
-
-    my_cmd = reagent_sub.add_parser("my", help="Get current user's reagent orders")
-    _add_connection_arguments(my_cmd)
-    my_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/reagent-orders/dashboard/my-reagent-orders"))
-
-    create_cmd = reagent_sub.add_parser("create", help="Create reagent order")
-    _add_connection_arguments(create_cmd)
-    _add_payload_arguments(create_cmd)
-    create_cmd.set_defaults(
-        handler=lambda args: _handle_post_command(
-            args,
-            "/reagent-orders/",
-            payload_required=True,
-        )
+    _register_get_command(
+        reagent_sub, name="my", help_text="Get current user's reagent orders",
+        path="/reagent-orders/dashboard/my-reagent-orders",
+    )
+    _register_post_command(
+        reagent_sub, name="create", help_text="Create reagent order",
+        path="/reagent-orders/", payload_required=True, add_payload_arguments=True,
     )
 
     update_cmd = reagent_sub.add_parser("update", help="Update reagent order")
@@ -1009,10 +1031,7 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
     update_cmd.add_argument("--notes")
     update_cmd.set_defaults(handler=_handle_reagent_order_update)
 
-    overview_cmd = reagent_sub.add_parser("cas-overview", help="Get reagent CAS overview")
-    _add_connection_arguments(overview_cmd)
-    overview_cmd.add_argument("cas_number")
-    overview_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/reagent-orders/cas-overview/{cas_number}"))
+    _register_get_command(reagent_sub, name="cas-overview", help_text="Get reagent CAS overview", path="/reagent-orders/cas-overview/{cas_number}", add_target_argument=lambda parser: parser.add_argument("cas_number"))
 
     arrival_cmd = reagent_sub.add_parser("confirm-arrival", help="Confirm reagent order arrival")
     _add_connection_arguments(arrival_cmd)
@@ -1039,82 +1058,30 @@ def _register_common_shelf_commands(
         dest="common_shelf_command",
         required=True,
     )
-
-    list_cmd = common_shelf_sub.add_parser(
-        "list",
-        help="List common shelf groups",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    _add_connection_arguments(list_cmd)
-    _add_list_arguments(list_cmd)
-    _set_list_command_help(
-        list_cmd,
-        command_label="common-shelf list",
-        allowed_params=COMMON_SHELF_LIST_PARAM_KEYS,
+    _register_list_command(
+        common_shelf_sub, name="list", help_text="List common shelf groups", path="/common-shelf/groups",
+        allowed_params=COMMON_SHELF_LIST_PARAM_KEYS, command_label="common-shelf list",
         known_id_hint="Use the returned group.group_key for add-bottles or remove-one.",
     )
-    list_cmd.set_defaults(
-        handler=lambda args: _handle_list_command(args, "/common-shelf/groups"),
-        allowed_params=COMMON_SHELF_LIST_PARAM_KEYS,
-        list_command_label="common-shelf list",
+    _register_field_search_command(
+        common_shelf_sub, name="cas", help_text="Search common shelf groups by CAS", path="/common-shelf/groups",
+        argument_name="cas_number", search_attr="cas_number", search_field="cas_number",
+        allowed_params=COMMON_SHELF_LIST_PARAM_KEYS, command_label="common-shelf cas",
+        match_mode="exact",
     )
-
-    cas_cmd = common_shelf_sub.add_parser("cas", help="Search common shelf groups by CAS")
-    _add_connection_arguments(cas_cmd)
-    cas_cmd.add_argument("cas_number")
-    _add_pagination_arguments(cas_cmd)
-    cas_cmd.set_defaults(
-        handler=lambda args: _handle_field_search(
-            args,
-            path="/common-shelf/groups",
-            search_attr="cas_number",
-            search_field="cas_number",
-            allowed_params=COMMON_SHELF_LIST_PARAM_KEYS,
-            command_label="common-shelf cas",
-            match_mode="exact",
-        )
+    _register_field_search_command(
+        common_shelf_sub, name="alias", help_text="Search common shelf groups by alias", path="/common-shelf/groups",
+        argument_name="keyword", search_attr="keyword", search_field="alias",
+        allowed_params=COMMON_SHELF_LIST_PARAM_KEYS, command_label="common-shelf alias",
     )
-
-    alias_cmd = common_shelf_sub.add_parser("alias", help="Search common shelf groups by alias")
-    _add_connection_arguments(alias_cmd)
-    alias_cmd.add_argument("keyword")
-    _add_pagination_arguments(alias_cmd)
-    alias_cmd.set_defaults(
-        handler=lambda args: _handle_field_search(
-            args,
-            path="/common-shelf/groups",
-            search_attr="keyword",
-            search_field="alias",
-            allowed_params=COMMON_SHELF_LIST_PARAM_KEYS,
-            command_label="common-shelf alias",
-        )
+    _register_get_command(
+        common_shelf_sub, name="locations", help_text="List locations for a common shelf group",
+        path="/common-shelf/groups/{group_key}/locations",
+        add_target_argument=_add_common_shelf_group_key_argument,
     )
-
-    locations_cmd = common_shelf_sub.add_parser(
-        "locations",
-        help="List locations for a common shelf group",
-    )
-    _add_connection_arguments(locations_cmd)
-    _add_common_shelf_group_key_argument(locations_cmd)
-    locations_cmd.set_defaults(
-        handler=lambda args: _handle_get_command(
-            args,
-            "/common-shelf/groups/{group_key}/locations",
-        )
-    )
-
-    manual_add = common_shelf_sub.add_parser(
-        "manual-add",
-        help="Create common shelf bottles manually",
-    )
-    _add_connection_arguments(manual_add)
-    _add_payload_arguments(manual_add)
-    manual_add.set_defaults(
-        handler=lambda args: _handle_post_command(
-            args,
-            "/common-shelf/manual-add",
-            payload_required=True,
-        )
+    _register_post_command(
+        common_shelf_sub, name="manual-add", help_text="Create common shelf bottles manually",
+        path="/common-shelf/manual-add", payload_required=True, add_payload_arguments=True,
     )
 
     add_bottles = common_shelf_sub.add_parser(
@@ -1153,114 +1120,49 @@ def _register_chemical_name_map_commands(
         help="Chemical CAS master data commands",
     )
     name_map_sub = name_map.add_subparsers(dest="chemical_name_map_command", required=True)
-
-    list_cmd = name_map_sub.add_parser(
-        "list",
-        help="List chemical CAS master data",
-        formatter_class=argparse.RawTextHelpFormatter,
+    _register_list_command(
+        name_map_sub, name="list", help_text="List chemical CAS master data", path="/chemical-name-map",
+        allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS, command_label="chemical-name-map list",
     )
-    _add_connection_arguments(list_cmd)
-    _add_list_arguments(list_cmd)
-    _set_list_command_help(
-        list_cmd,
-        command_label="chemical-name-map list",
-        allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS,
+    _register_field_search_command(
+        name_map_sub, name="search", help_text="Search chemical CAS master data", path="/chemical-name-map",
+        argument_name="keyword", search_attr="keyword", search_field="all",
+        allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS, command_label="chemical-name-map search",
     )
-    list_cmd.set_defaults(
-        handler=lambda args: _handle_list_command(args, "/chemical-name-map"),
-        allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS,
-        list_command_label="chemical-name-map list",
-    )
-
-    search_cmd = name_map_sub.add_parser("search", help="Search chemical CAS master data")
-    _add_connection_arguments(search_cmd)
-    search_cmd.add_argument("keyword")
-    _add_pagination_arguments(search_cmd)
-    search_cmd.set_defaults(
-        handler=lambda args: _handle_field_search(
-            args,
-            path="/chemical-name-map",
-            search_attr="keyword",
-            search_field="all",
-            allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS,
-            command_label="chemical-name-map search",
-        )
-    )
-
-    cas_cmd = name_map_sub.add_parser("cas", help="Search chemical CAS master data by CAS")
-    _add_connection_arguments(cas_cmd)
-    cas_cmd.add_argument("cas_number")
-    _add_pagination_arguments(cas_cmd)
-    cas_cmd.set_defaults(
-        handler=lambda args: _handle_field_search(
-            args,
-            path="/chemical-name-map",
-            search_attr="cas_number",
-            search_field="cas_number",
-            allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS,
-            command_label="chemical-name-map cas",
-            match_mode="exact",
-        )
+    _register_field_search_command(
+        name_map_sub, name="cas", help_text="Search chemical CAS master data by CAS", path="/chemical-name-map",
+        argument_name="cas_number", search_attr="cas_number", search_field="cas_number",
+        allowed_params=CHEMICAL_NAME_MAP_LIST_PARAM_KEYS, command_label="chemical-name-map cas",
+        match_mode="exact",
     )
 
 
 def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     consumable = subparsers.add_parser("consumable-orders", help="Consumable order commands")
     consumable_sub = consumable.add_subparsers(dest="consumable_command", required=True)
-
-    list_cmd = consumable_sub.add_parser(
-        "list",
-        help="List consumable orders",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    _add_connection_arguments(list_cmd)
-    _add_list_arguments(list_cmd)
-    _set_list_command_help(
-        list_cmd,
-        command_label="consumable-orders list",
-        allowed_params=ORDER_LIST_PARAM_KEYS,
+    _register_list_command(
+        consumable_sub, name="list", help_text="List consumable orders", path="/consumable-orders/",
+        allowed_params=ORDER_LIST_PARAM_KEYS, command_label="consumable-orders list",
         known_id_hint="Known order ID? Use `lsm consumable-orders get <order_id>` instead of `--param id=...`.",
     )
-    list_cmd.set_defaults(
-        handler=lambda args: _handle_list_command(args, "/consumable-orders/"),
-        allowed_params=ORDER_LIST_PARAM_KEYS,
-        list_command_label="consumable-orders list",
+    _register_get_command(
+        consumable_sub, name="get", help_text="Get consumable order by id",
+        path="/consumable-orders/{order_id}",
+        add_target_argument=_add_order_id_argument,
     )
-
-    get_cmd = consumable_sub.add_parser("get", help="Get consumable order by id")
-    _add_connection_arguments(get_cmd)
-    _add_order_id_argument(get_cmd)
-    get_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/consumable-orders/{order_id}"))
-
-    name_cmd = consumable_sub.add_parser("name", help="Search consumable orders by name")
-    _add_connection_arguments(name_cmd)
-    name_cmd.add_argument("keyword")
-    _add_pagination_arguments(name_cmd)
-    _add_exact_search_argument(name_cmd)
-    name_cmd.set_defaults(
-        handler=lambda args: _handle_field_search(
-            args,
-            path="/consumable-orders/",
-            search_attr="keyword",
-            search_field="name",
-            allowed_params=ORDER_NAME_SEARCH_PARAM_KEYS,
-            command_label="consumable-orders name",
-        )
+    _register_field_search_command(
+        consumable_sub, name="name", help_text="Search consumable orders by name", path="/consumable-orders/",
+        argument_name="keyword", search_attr="keyword", search_field="name",
+        allowed_params=ORDER_NAME_SEARCH_PARAM_KEYS, command_label="consumable-orders name",
+        exact=True,
     )
-
-    my_cmd = consumable_sub.add_parser("my", help="Get current user's consumable orders")
-    _add_connection_arguments(my_cmd)
-    my_cmd.set_defaults(handler=lambda args: _handle_get_command(args, "/consumable-orders/dashboard/my-consumable-orders"))
-
-    create_cmd = consumable_sub.add_parser("create", help="Create consumable order")
-    _add_connection_arguments(create_cmd)
-    _add_payload_arguments(create_cmd)
-    create_cmd.set_defaults(
-        handler=lambda args: _handle_post_command(
-            args,
-            "/consumable-orders/",
-            payload_required=True,
-        )
+    _register_get_command(
+        consumable_sub, name="my", help_text="Get current user's consumable orders",
+        path="/consumable-orders/dashboard/my-consumable-orders",
+    )
+    _register_post_command(
+        consumable_sub, name="create", help_text="Create consumable order",
+        path="/consumable-orders/", payload_required=True, add_payload_arguments=True,
     )
 
     update_cmd = consumable_sub.add_parser("update", help="Update consumable order")
@@ -1278,10 +1180,7 @@ def _register_consumable_order_commands(subparsers: argparse._SubParsersAction[a
     update_cmd.add_argument("--notes")
     update_cmd.set_defaults(handler=_handle_consumable_order_update)
 
-    complete_cmd = consumable_sub.add_parser("complete", help="Complete consumable order")
-    _add_connection_arguments(complete_cmd)
-    _add_order_id_argument(complete_cmd)
-    complete_cmd.set_defaults(handler=lambda args: _handle_post_command(args, "/consumable-orders/{order_id}/complete"))
+    _register_post_command(consumable_sub, name="complete", help_text="Complete consumable order", path="/consumable-orders/{order_id}/complete", add_target_argument=_add_order_id_argument)
 
 
 def build_parser() -> argparse.ArgumentParser:

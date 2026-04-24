@@ -1,4 +1,3 @@
-// 库存管理页面。
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -6,13 +5,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 
-// UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/lib/toast'
 
-// 业务组件
 import { BaseForm } from '@/components/BaseForm'
 import { BorrowDialog } from '@/components/BorrowDialog'
 import { EditDialogActions } from '@/components/EditDialogActions'
@@ -23,7 +20,6 @@ import type { FilterTableQueryDataReadyContext } from '@/components/ui/FilterTab
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
 import type { FilterAPI } from '@/hooks/useTableState'
 
-// 工具与API
 import { inventoryAPI, chemicalAPI } from '@/api/client'
 import type {
   CompoundStructureCache,
@@ -59,10 +55,8 @@ import { getReagentBrandOptionsQueryOptions } from '@/lib/reagentBrandOptions'
 import { useAuthStore } from '@/store/useStore'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 
-// 表单配置
 import { defaultInventoryValues, enhanceCasLookupField, getInventoryFormFields } from '@/lib/formConfigs'
 
-// 图标
 import {
   ArrowUpFromLine,
   Database,
@@ -71,10 +65,6 @@ import {
   Package,
   ScanSearch
 } from 'lucide-react'
-
-// ============================================================================
-// 类型扩展与定义
-// ============================================================================
 
 export interface InventoryItem {
   id: number
@@ -140,11 +130,6 @@ const STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS = 2500
 const STRUCTURE_SEARCH_TABLE_READY_TIMEOUT_MS = 5000
 const STRUCTURE_SEARCH_TEXT_DISABLED_MESSAGE = '请清除结构搜索后再进行文字搜索'
 
-// ============================================================================
-// 页面辅助函数
-// ============================================================================
-
-// 将库存行数据回填到表单中。 让编辑入口复用统一的字段归一化规则，并保留 `null`/`0` 的原始展示语义。
 function createInventoryFormValues(item: InventoryItem): InventoryFormInputData {
   const remainingQty = item.remaining_quantity
   return {
@@ -165,13 +150,11 @@ function createInventoryFormValues(item: InventoryItem): InventoryFormInputData 
   }
 }
 
-// 根据规格文本推导编辑态的初始量上限。 把规格解析和剩余量校验拆开，避免提交处理器内出现嵌套分支。
 function resolveInventoryInitialQuantity(editingItem: InventoryItem, specification: string | undefined): number {
   const parsedValue = specification ? parseSpecification(specification) : null
   return parsedValue ?? editingItem.initial_quantity
 }
 
-// 校验编辑态的剩余量上限。 维持原有业务判断不变，同时让提交逻辑只保留流程编排。
 function validateInventoryRemainingQuantity(params: {
   dialogState: InventoryDialogState
   editingItem: InventoryItem | null
@@ -192,7 +175,7 @@ function validateInventoryRemainingQuantity(params: {
   return true
 }
 
-// 在编辑态校验失败时补上剩余量必填错误。 保持当前“Schema 之外仍补做剩余量必填检查”的行为，而不让提交回调继续膨胀。
+// 编辑态仍需补做一次剩余量必填校验，不能只依赖 Schema。
 function ensureInventoryRemainingQuantityError(params: {
   dialogState: InventoryDialogState
   editingItem: InventoryItem | null
@@ -210,7 +193,6 @@ function ensureInventoryRemainingQuantityError(params: {
   }
 }
 
-// 生成库存编辑请求体。 把字段默认值与备注清洗收口，避免更新逻辑散落在提交流程里。
 function createInventoryUpdatePayload(formData: InventoryFormData) {
   return {
     name: formData.name || '',
@@ -228,7 +210,7 @@ function createInventoryUpdatePayload(formData: InventoryFormData) {
   }
 }
 
-// 生成手动入库请求体。 把新增模式的 `undefined` 语义和瓶数参数收口到单点。
+// 新增接口依赖 `undefined` 表达可选字段缺省，不能改成空字符串。
 function createInventoryCreatePayload(formData: InventoryFormData) {
   return {
     cas_number: formData.cas_number,
@@ -246,7 +228,6 @@ function createInventoryCreatePayload(formData: InventoryFormData) {
   }
 }
 
-// 按当前弹窗模式执行库存新增或编辑请求。 把接口调用分支从提交流程中抽离，让主提交处理器只保留业务编排。
 async function submitInventoryRequest(params: {
   dialogState: InventoryDialogState
   editingItem: InventoryItem | null
@@ -263,7 +244,6 @@ async function submitInventoryRequest(params: {
   }
 }
 
-// 生成库存弹窗的表单字段配置。 把 CAS 自动识别按钮的挂载逻辑从 JSX 中拿开，减少页面渲染分支。
 function createInventoryFormFields(params: {
   dialogState: InventoryDialogState
   initialQuantity?: number
@@ -315,7 +295,6 @@ function validateManualStorageLocation(params: {
   return false
 }
 
-// 格式化库存展开行里的“上次借用”展示文本。 消除 JSX 中的嵌套三元表达式，同时保持原有文案与状态语义不变。
 function formatInventoryBorrowerDisplay(item: InventoryItem): string {
   if (item.borrower_name) {
     return `${item.borrower_name} (未归还)`
@@ -326,7 +305,6 @@ function formatInventoryBorrowerDisplay(item: InventoryItem): string {
   return '-'
 }
 
-// 管理库存弹窗、表单与删除/CAS 联动。 把页面主组件收束成列表编排层，并把库存特有的表单规则集中在一个局部控制器中。
 function useInventoryDialogController(
   refreshInventory: () => void | Promise<void>,
   requireManualStorageLocation: boolean,
@@ -483,7 +461,6 @@ function useInventoryDialogController(
   }
 }
 
-// 创建库存页的表格列。 把操作列拼装从页面主函数中拿开，减少页面承担的表格细节。
 function createInventoryColumns(): ColumnDef<Record<string, unknown>, unknown>[] {
   const baseColumns = getInventoryTableColumns()
   const actionColumn = columnHelper.display({
@@ -507,7 +484,6 @@ function createInventoryColumns(): ColumnDef<Record<string, unknown>, unknown>[]
   return [...baseColumns, actionColumn] as ColumnDef<Record<string, unknown>, unknown>[]
 }
 
-// 渲染库存展开行内容。 把扩展信息展示从页面主组件中拆出，并显式消除嵌套条件表达式。
 function InventoryExpandedRow({
   item,
   matchedSmiles,
@@ -793,21 +769,6 @@ function useInventoryStructureEditor() {
   }
 }
 
-function StructureSearchButton({
-  hasFilter,
-  onOpen,
-}: Readonly<{
-  hasFilter: boolean
-  onOpen: () => void
-}>) {
-  return (
-    <Button type="button" variant="modern" size="lg" onClick={onOpen}>
-      <ScanSearch className="size-4" />
-      {hasFilter ? '重新绘制' : '结构检索'}
-    </Button>
-  )
-}
-
 function StructureCacheManagerEntry({
   onManualEdit,
 }: Readonly<{
@@ -853,31 +814,6 @@ function StructureCacheManagerEntry({
   )
 }
 
-function InventoryPageHeader({
-  onAdd,
-  onExport,
-  structureCacheAction,
-}: Readonly<{
-  onAdd: () => void
-  onExport: () => void
-  structureCacheAction?: React.ReactNode
-}>) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <h1 className="text-3xl font-bold text-primary">库存管理</h1>
-      <div className="flex flex-wrap gap-2">
-        <Button onClick={onAdd} size="lg">
-          <Plus className="w-4 h-4 mr-1.5" /> 手动入库
-        </Button>
-        {structureCacheAction}
-        <Button variant="modern" size="lg" onClick={onExport}>
-          <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
-        </Button>
-      </div>
-    </div>
-  )
-}
-
 function InventoryFormDialog({
   dialogController,
 }: Readonly<{
@@ -914,11 +850,6 @@ function InventoryFormDialog({
   )
 }
 
-// ============================================================================
-// 主组件
-// ============================================================================
-
-// 直接组合列表、页头和叶子组件，避免继续保留只转发参数的壳层。
 export function InventoryPage() {
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
@@ -984,13 +915,18 @@ export function InventoryPage() {
 
   return (
     <div className="space-y-6">
-      <InventoryPageHeader
-        onAdd={dialogController.handleAddClick}
-        onExport={handleExport}
-        structureCacheAction={(
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <h1 className="text-3xl font-bold text-primary">库存管理</h1>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={dialogController.handleAddClick} size="lg">
+            <Plus className="mr-1.5 h-4 w-4" /> 手动入库
+          </Button>
           <StructureCacheManagerEntry onManualEdit={structureEditor.handleManualStructureEdit} />
-        )}
-      />
+          <Button variant="modern" size="lg" onClick={handleExport}>
+            <ArrowUpFromLine className="mr-1.5 h-4 w-4" /> 导出
+          </Button>
+        </div>
+      </div>
       <InventoryFormDialog dialogController={dialogController} />
       {shouldRenderStructureDialog && (
         <React.Suspense
@@ -1042,10 +978,10 @@ export function InventoryPage() {
         disableExpandedRowAnimation={Boolean(structureEditor.structureFilter)}
         searchActions={
           structureSearchEnabled ? (
-            <StructureSearchButton
-              hasFilter={Boolean(structureEditor.structureFilter)}
-              onOpen={structureEditor.handleOpenStructureDialog}
-            />
+            <Button type="button" variant="modern" size="lg" onClick={structureEditor.handleOpenStructureDialog}>
+              <ScanSearch className="size-4" />
+              {structureEditor.structureFilter ? '重新绘制' : '结构检索'}
+            </Button>
           ) : undefined
         }
         emptyText={structureEditor.structureFilter ? '没有匹配结构的库存' : '暂无数据'}
@@ -1056,11 +992,6 @@ export function InventoryPage() {
   )
 }
 
-// ============================================================================
-// 表格操作按钮组件
-// ============================================================================
-
-// 渲染库存行级操作。 把借用、编辑等动作限制在表格单元内，避免页面主组件承担行级业务细节。
 const ActionButtons = React.memo(function ActionButtons({
   item,
   onEdit,

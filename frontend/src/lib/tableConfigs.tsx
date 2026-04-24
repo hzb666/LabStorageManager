@@ -21,6 +21,41 @@ export type { TableRowData }
 
 const columnHelper = createColumnHelper<TableRowData>()
 
+function renderPlainTextCell(
+  text: unknown,
+  { fallback = '', className }: { fallback?: string; className?: string } = {},
+) {
+  return <span className={className}>{safeString(text, fallback)}</span>
+}
+
+function renderHighlightedTextCell(
+  info: CellContext<TableRowData, unknown>,
+  text: unknown = info.getValue(),
+  { fallback = '', className }: { fallback?: string; className?: string } = {},
+) {
+  return (
+    <span className={className}>
+      <HighlightText
+        text={safeString(text, fallback)}
+        highlight={info.table.getState().globalFilter}
+        fuzzy={info.table.options.meta?.fuzzySearch}
+      />
+    </span>
+  )
+}
+
+function renderHighlightedDateCell(
+  info: CellContext<TableRowData, unknown>,
+  { dateOnly = false }: { dateOnly?: boolean } = {},
+) {
+  const dateText = formatDate(info.getValue() as string)
+  return renderHighlightedTextCell(info, dateOnly ? dateText.split(' ')[0] : dateText)
+}
+
+function renderStatusBadgeCell(status: unknown, color?: BadgeColor) {
+  return <StatusBadge status={safeString(status, '')} color={color} />
+}
+
 function renderHazardousNameCell(
   info: CellContext<TableRowData, unknown>,
   className?: string,
@@ -36,13 +71,7 @@ function renderHazardousNameCell(
       )}
     >
       <HazardousIcon isHazardous={isHazardous} />
-      <span className="min-w-0 break-all">
-        <HighlightText
-          text={safeString(info.getValue(), '')}
-          highlight={info.table.getState().globalFilter}
-          fuzzy={info.table.options.meta?.fuzzySearch}
-        />
-      </span>
+      {renderHighlightedTextCell(info, undefined, { className: 'min-w-0 break-all' })}
     </div>
   )
 }
@@ -58,15 +87,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       size: 120,
       minSize: 100,
       maxSize: 200,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('name', {
       header: '名称',
@@ -83,45 +104,25 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       maxSize: 150,
       sortDescFirst: false,
       sortingFn: 'text',
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.row.original.storage_location, '-')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info =>
+        renderHighlightedTextCell(info, info.row.original.storage_location, {
+          fallback: '-',
+          className: 'break-all',
+        }),
     }),
     columnHelper.accessor('category', {
       header: '分类',
       size: 100,
       minSize: 80,
       maxSize: 150,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '-')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('brand', {
       header: '品牌',
       size: 100,
       minSize: 80,
       maxSize: 150,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '-')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('remaining_percent', {
       id: 'remaining_percent',
@@ -142,7 +143,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       size: 80,
       minSize: 80,
       maxSize: 120,
-      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
+      cell: info => renderStatusBadgeCell(info.getValue()),
     }),
   ]
 }
@@ -158,15 +159,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 110,
       minSize: 90,
       maxSize: 180,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('name', {
       header: '名称',
@@ -180,10 +173,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 90,
       minSize: 70,
       maxSize: 150,
-      cell: info => {
-        const value = info.getValue()
-        return <span>{safeString(value, '-')}</span>
-      },
+      cell: info => renderPlainTextCell(info.getValue(), { fallback: '-' }),
     }),
     columnHelper.accessor('specification', {
       header: '规格',
@@ -215,50 +205,28 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 70,
       minSize: 60,
       maxSize: 100,
-      cell: info => (
-        <span>
-          <HighlightText
-            text={safeString(info.getValue(), '-')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-' }),
     }),
     columnHelper.accessor('created_at', {
       header: '时间',
       size: 80,
       minSize: 70,
       maxSize: 120,
-      cell: info => {
-        const dateText = formatDate(info.getValue() as string).split(' ')[0]
-        return (
-          <span>
-            <HighlightText
-              text={dateText}
-              highlight={info.table.getState().globalFilter}
-              fuzzy={info.table.options.meta?.fuzzySearch}
-            />
-          </span>
-        )
-      },
+      cell: info => renderHighlightedDateCell(info, { dateOnly: true }),
     }),
     columnHelper.accessor('order_reason', {
       header: '原因',
       size: 60,
       minSize: 50,
       maxSize: 80,
-      cell: info => {
-        const reason = info.getValue() as string
-        return <StatusBadge status={reason} />
-      },
+      cell: info => renderStatusBadgeCell(info.getValue()),
     }),
     columnHelper.accessor('status', {
       header: '状态',
       size: 60,
       minSize: 60,
       maxSize: 80,
-      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
+      cell: info => renderStatusBadgeCell(info.getValue()),
     }),
   ]
 }
@@ -274,15 +242,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       size: 250,
       minSize: 150,
       maxSize: 300,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('specification', {
       header: '规格',
@@ -290,10 +250,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       minSize: 150,
       maxSize: 300,
       enableSorting: false,
-      cell: info => {
-        const value = info.getValue()
-        return <span className="break-all">{safeString(value, '-')}</span>
-      },
+      cell: info => renderPlainTextCell(info.getValue(), { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('quantity', {
       header: '数量',
@@ -313,15 +270,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       size: 60,
       minSize: 50,
       maxSize: 120,
-      cell: info => (
-        <span>
-          <HighlightText
-            text={safeString(info.getValue(), '-')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-' }),
     }),
     columnHelper.accessor('communication', {
       header: '订购信息',
@@ -329,35 +278,21 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       minSize: 80,
       maxSize: 200,
       enableSorting: false,
-      cell: info => {
-        const value = info.getValue()
-        return <span className="break-all">{safeString(value, '-')}</span>
-      },
+      cell: info => renderPlainTextCell(info.getValue(), { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('created_at', {
       header:'申购时间',
       size: 100,
       minSize: 80,
       maxSize: 120,
-      cell: info => {
-        const dateText = formatDate(info.getValue() as string)
-        return (
-          <span>
-            <HighlightText
-              text={dateText}
-              highlight={info.table.getState().globalFilter}
-              fuzzy={info.table.options.meta?.fuzzySearch}
-            />
-          </span>
-        )
-      }
+      cell: info => renderHighlightedDateCell(info),
     }),
     columnHelper.accessor('status', {
       header: '状态',
       size: 60,
       minSize: 50,
       maxSize: 100,
-      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
+      cell: info => renderStatusBadgeCell(info.getValue()),
     }),
   ]
 }
@@ -386,67 +321,35 @@ export function getCommonShelfTableColumns(): ColumnDef<TableRowData, unknown>[]
       size: 120,
       minSize: 100,
       maxSize: 180,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('name', {
       header: '名称',
       size: 240,
       minSize: 160,
       maxSize: 320,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('storage_location', {
       header: '位置',
       size: 120,
       minSize: 90,
       maxSize: 180,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '-')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('brand', {
       header: '品牌',
       size: 120,
       minSize: 90,
       maxSize: 180,
-      cell: info => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '-')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('status', {
       header: '状态',
       size: 90,
       minSize: 80,
       maxSize: 130,
-      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
+      cell: info => renderStatusBadgeCell(info.getValue()),
     }),
   ]
 }
@@ -494,12 +397,12 @@ export function getCommonShelfGroupTableColumns(args: {
     columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.cas_number, ''), {
       id: 'cas_number',
       header: 'CAS',
-      cell: (info) => <span className="break-all">{safeString(info.getValue(), '')}</span>,
+      cell: info => renderPlainTextCell(info.getValue(), { className: 'break-all' }),
     }),
     columnHelper.accessor((row) => safeString((row.display as Record<string, unknown>)?.name, ''), {
       id: 'name',
       header: '名称',
-      cell: (info) => <span className="break-all">{safeString(info.getValue(), '')}</span>,
+      cell: info => renderPlainTextCell(info.getValue(), { className: 'break-all' }),
     }),
     columnHelper.accessor((row) => (row.display as Record<string, unknown>)?.category as string | null, {
       id: 'category',
@@ -507,22 +410,22 @@ export function getCommonShelfGroupTableColumns(args: {
       cell: (info) => {
         const category = info.getValue()
         return (
-          <StatusBadge
-            status={renderCommonShelfCategory(category)}
-            color={getChemicalCategoryBadgeColor(category)}
-          />
+          renderStatusBadgeCell(
+            renderCommonShelfCategory(category),
+            getChemicalCategoryBadgeColor(category),
+          )
         )
       },
     }),
     columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.brand, ''), {
       id: 'brand',
       header: '品牌',
-      cell: (info) => <span>{safeString(info.getValue(), '-')}</span>,
+      cell: info => renderPlainTextCell(info.getValue(), { fallback: '-' }),
     }),
     columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.specification_text, ''), {
       id: 'specification',
       header: '规格',
-      cell: (info) => <span>{safeString(info.getValue(), '-')}</span>,
+      cell: info => renderPlainTextCell(info.getValue(), { fallback: '-' }),
     }),
     columnHelper.accessor((row) => Number(row.bottle_count ?? 0), {
       id: 'bottle_count',
@@ -547,45 +450,21 @@ export function getChemicalNameMapTableColumns(args: {
       size: 96,
       minSize: 84,
       maxSize: 120,
-      cell: (info) => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('name', {
       header: '中文名称',
       size: 180,
       minSize: 140,
       maxSize: 260,
-      cell: (info) => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('english_name', {
       header: '英文名称',
       size: 240,
       minSize: 180,
       maxSize: 360,
-      cell: (info) => (
-        <span className="break-all">
-          <HighlightText
-            text={safeString(info.getValue(), '-')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.display({
       id: 'aliases',
@@ -594,15 +473,10 @@ export function getChemicalNameMapTableColumns(args: {
       minSize: 160,
       maxSize: 340,
       enableSorting: false,
-      cell: (info) => (
-        <span className="break-all">
-          <HighlightText
-            text={args.renderAliases(info.row.original)}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info =>
+        renderHighlightedTextCell(info, args.renderAliases(info.row.original), {
+          className: 'break-all',
+        }),
     }),
     columnHelper.accessor('category', {
       header: '分类',
@@ -612,10 +486,10 @@ export function getChemicalNameMapTableColumns(args: {
       cell: (info) => {
         const category = info.getValue() as string | null
         return (
-          <StatusBadge
-            status={renderCommonShelfCategory(category)}
-            color={getChemicalCategoryBadgeColor(category)}
-          />
+          renderStatusBadgeCell(
+            renderCommonShelfCategory(category),
+            getChemicalCategoryBadgeColor(category),
+          )
         )
       },
     }),
@@ -660,40 +534,24 @@ export function getAdminUsersTableColumns(): ColumnDef<TableRowData, unknown>[] 
     columnHelper.accessor('username', {
       header: '用户名',
       size: 150,
-      cell: info => (
-        <span>
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info),
     }),
     columnHelper.accessor('full_name', {
       header: '姓名',
       size: 100,
-      cell: info => (
-        <span>
-          <HighlightText
-            text={safeString(info.getValue(), '')}
-            highlight={info.table.getState().globalFilter}
-            fuzzy={info.table.options.meta?.fuzzySearch}
-          />
-        </span>
-      ),
+      cell: info => renderHighlightedTextCell(info),
     }),
     columnHelper.accessor('role', {
       header: '角色',
       size: 80,
-      cell: info => <StatusBadge status={safeString(info.getValue(), '')} />,
+      cell: info => renderStatusBadgeCell(info.getValue()),
     }),
     columnHelper.accessor('is_active', {
       header: '状态',
       size: 80,
       cell: info => {
         const isActive = info.getValue() as boolean
-        return <StatusBadge status={isActive ? 'active' : 'inactive'} />
+        return renderStatusBadgeCell(isActive ? 'active' : 'inactive')
       },
     }),
     columnHelper.accessor('last_active_at', {
@@ -756,7 +614,7 @@ export function getDeviceManagementTableColumns(): ColumnDef<TableRowData, unkno
       cell: info => {
         const session = info.row.original
         const isCurrent = session.id === session.currentDeviceId
-        return <StatusBadge status={isCurrent ? 'current' : 'other'} />
+        return renderStatusBadgeCell(isCurrent ? 'current' : 'other')
       },
     }),
   ]

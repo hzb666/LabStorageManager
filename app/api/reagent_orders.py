@@ -1,8 +1,5 @@
-# 试剂订单 API 路由：试剂申购流程管理。
-# 与耗材订单分离，支持独立工作流。
 import logging
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Optional, Dict, Any
 
@@ -43,15 +40,10 @@ from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
     build_applicant_id_subquery,
-    build_cas_search_clause,
-    build_date_search_clause,
-    build_text_search_clause,
     classify_cas_search,
-    collect_search_fields,
-    combine_or_clauses,
 )
 from app.services.user_utils import batch_get_user_names
-from app.services.sql_utils import normalize_search_term, order_with_nulls_last
+from app.services.sql_utils import order_with_nulls_last
 from app.services.sql_utils import order_with_special_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
@@ -60,11 +52,12 @@ from app.services.api_utils import (
     normalize_pagination,
     set_cached_result,
 )
-from app.services.order_fts import (
-    OrderFTSError,
-    build_order_fts_id_clause,
-    build_order_fts_rowid_subquery,
-    should_use_order_fts,
+from app.services.order_list_search import (
+    OrderListSearchConfig,
+    apply_order_list_single_field_search,
+    build_order_list_all_search_clause,
+    build_order_list_fts_state,
+    normalize_order_list_search_value,
 )
 from app.services.inventory_queries import regular_inventory_query
 from app.services.sse_manager import sse_manager
@@ -98,6 +91,7 @@ REAGENT_ORDER_ADMIN_EDITABLE_STATUSES = frozenset(
 )
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
+REAGENT_ORDER_CAS_SEARCH_KEYS = frozenset({"cas", "cas_number"})
 VALID_REAGENT_SORT_FIELDS = {
     "cas_number",
     "name",
@@ -140,27 +134,16 @@ REAGENT_ORDER_SEARCH_FTS_FIELD_MAP = {
     'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
     'category': ["category", "category_pinyin", "category_pinyin_initials"],
 }
-
-
-@dataclass(frozen=True)
-class ReagentOrderFTSState:
-    # 封装试剂订单 FTS 构建结果，减少主筛选函数的分支和临时变量。
-
-    fts_clause: Any
-    fts_rowid_subquery: Any
-
-
-@dataclass(frozen=True)
-class ReagentOrderSingleFieldSearchOptions:
-    # 封装试剂订单单字段搜索参数，避免 helper 参数过多。
-
-    search_field: Optional[str]
-    search_value: str
-    fuzzy: bool
-    match_mode: TextMatchMode
-    applicant_id_subquery: Any
-    cas_exact_or_prefix: bool
-    fts_clause: Any
+REAGENT_ORDER_SEARCH_CONFIG = OrderListSearchConfig(
+    id_column=ReagentOrder.id,
+    applicant_id_column=ReagentOrder.applicant_id,
+    created_at_column=ReagentOrder.created_at,
+    sql_field_map=REAGENT_ORDER_SEARCH_SQL_FIELD_MAP,
+    fts_field_map=REAGENT_ORDER_SEARCH_FTS_FIELD_MAP,
+    applicant_search_keys=frozenset(APPLICANT_SEARCH_KEYS),
+    cas_search_keys=REAGENT_ORDER_CAS_SEARCH_KEYS,
+    cas_column=ReagentOrder.cas_number,
+)
 
 
 class ReagentOrderListQuery(BaseModel):
@@ -259,162 +242,6 @@ def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder
     return db.get(ReagentOrder, order_id)
 
 
-def _normalize_order_search_value(search: Optional[str], *, fuzzy: bool) -> Optional[str]:
-    # 标准化订单搜索词，统一 fuzzy 与空输入处理。
-
-    if not search:
-        return None
-    raw_search = search.strip()
-    if not raw_search:
-        return None
-    if fuzzy:
-        return normalize_search_term(raw_search)
-    return raw_search
-
-
-def _build_reagent_order_fts_state(
-    *,
-    search_value: str,
-    search_field: Optional[str],
-    fuzzy: bool,
-    match_mode: TextMatchMode,
-    cas_exact_or_prefix: bool,
-) -> ReagentOrderFTSState:
-    # 构建试剂订单 FTS 条件，异常时返回空状态并回退 SQL LIKE。
-
-    use_fts = (
-        match_mode == TextMatchMode.CONTAINS
-        and (not fuzzy)
-        and should_use_order_fts(search_value)
-        and not cas_exact_or_prefix
-    )
-    if not use_fts:
-        return ReagentOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-    try:
-        return ReagentOrderFTSState(
-            fts_clause=build_order_fts_id_clause(
-                ReagentOrder.id,
-                fts_table="reagent_order_fts",
-                search_value=search_value,
-                search_field=search_field,
-                field_map=REAGENT_ORDER_SEARCH_FTS_FIELD_MAP,
-            ),
-            fts_rowid_subquery=build_order_fts_rowid_subquery(
-                fts_table="reagent_order_fts",
-                search_value=search_value,
-                search_field='all',
-                field_map=REAGENT_ORDER_SEARCH_FTS_FIELD_MAP,
-            ),
-        )
-    except OrderFTSError:
-        return ReagentOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Reagent order FTS fallback to SQL LIKE due to runtime error: %s",
-            exc,
-        )
-        return ReagentOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-
-
-def _apply_reagent_order_single_field_search(
-    base,
-    *,
-    options: ReagentOrderSingleFieldSearchOptions,
-):
-    # 处理试剂订单单字段搜索，按字段特性选择 applicant/date/cas/fts/like 分支。
-
-    filtered = base
-    matched = True
-    search_field = options.search_field
-    if search_field in APPLICANT_SEARCH_KEYS:
-        filtered = base.where(ReagentOrder.applicant_id.in_(options.applicant_id_subquery))
-    elif search_field == 'created_at':
-        filtered = base.where(build_date_search_clause(ReagentOrder.created_at, options.search_value))
-    elif search_field in {'cas', 'cas_number'} and options.cas_exact_or_prefix:
-        filtered = base.where(
-            build_cas_search_clause(
-                ReagentOrder.cas_number,
-                options.search_value,
-                fuzzy=options.fuzzy,
-                match_mode=options.match_mode,
-            )
-        )
-    elif options.fts_clause is not None and search_field in REAGENT_ORDER_SEARCH_FTS_FIELD_MAP:
-        filtered = base.where(options.fts_clause)
-    elif search_field in REAGENT_ORDER_SEARCH_SQL_FIELD_MAP:
-        if search_field in {'cas', 'cas_number'}:
-            filtered = base.where(
-                build_cas_search_clause(
-                    ReagentOrder.cas_number,
-                    options.search_value,
-                    fuzzy=options.fuzzy,
-                    match_mode=options.match_mode,
-                )
-            )
-        else:
-            filtered = base.where(
-                combine_or_clauses(
-                    build_text_search_clause(
-                        field,
-                        options.search_value,
-                        fuzzy=options.fuzzy,
-                        match_mode=options.match_mode,
-                    )
-                    for field in REAGENT_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
-                )
-            )
-    else:
-        matched = False
-    return filtered, matched
-
-
-def _build_reagent_order_all_search_clause(
-    *,
-    search_value: str,
-    fuzzy: bool,
-    match_mode: TextMatchMode,
-    applicant_id_subquery,
-    fts_rowid_subquery,
-):
-    # 构建试剂订单 ALL 搜索条件，保留 applicant/date/fts/like 召回但避免多路 UNION。
-
-    all_clauses = [
-        ReagentOrder.applicant_id.in_(applicant_id_subquery),
-        build_date_search_clause(ReagentOrder.created_at, search_value),
-    ]
-
-    if fts_rowid_subquery is not None:
-        all_clauses.append(
-            ReagentOrder.id.in_(fts_rowid_subquery)
-        )
-    else:
-        all_clauses.append(
-            build_cas_search_clause(
-                ReagentOrder.cas_number,
-                search_value,
-                fuzzy=fuzzy,
-                match_mode=match_mode,
-            )
-        )
-        text_fields = collect_search_fields(
-            REAGENT_ORDER_SEARCH_SQL_FIELD_MAP,
-            exclude_keys={'cas', 'cas_number', 'created_at'},
-        )
-        if text_fields:
-            all_clauses.append(
-                combine_or_clauses(
-                    build_text_search_clause(
-                        field,
-                        search_value,
-                        fuzzy=fuzzy,
-                        match_mode=match_mode,
-                    )
-                    for field in text_fields
-                )
-            )
-    return combine_or_clauses(all_clauses)
-
-
 def _apply_reagent_order_filters(
     base,
     status_filter: Optional[ReagentOrderStatus],
@@ -428,7 +255,7 @@ def _apply_reagent_order_filters(
     if status_filter:
         base = base.where(ReagentOrder.status == status_filter)
 
-    search_value = _normalize_order_search_value(search, fuzzy=fuzzy)
+    search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
     if not search_value:
         return base
 
@@ -439,31 +266,35 @@ def _apply_reagent_order_filters(
     )
     cas_mode, _ = classify_cas_search(search_value, fuzzy=fuzzy)
     cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
-    fts_state = _build_reagent_order_fts_state(
+    fts_state = build_order_list_fts_state(
+        config=REAGENT_ORDER_SEARCH_CONFIG,
+        fts_table="reagent_order_fts",
         search_value=search_value,
         search_field=search_field,
         fuzzy=fuzzy,
         match_mode=match_mode,
-        cas_exact_or_prefix=cas_exact_or_prefix,
+        allow_fts=not cas_exact_or_prefix,
+        logger=logger,
+        log_label="Reagent order",
     )
 
     if search_field and search_field != 'all':
-        single_field_filtered, matched = _apply_reagent_order_single_field_search(
+        single_field_filtered, matched = apply_order_list_single_field_search(
             base,
-            options=ReagentOrderSingleFieldSearchOptions(
-                search_field=search_field,
-                search_value=search_value,
-                fuzzy=fuzzy,
-                match_mode=match_mode,
-                applicant_id_subquery=applicant_id_subquery,
-                cas_exact_or_prefix=cas_exact_or_prefix,
-                fts_clause=fts_state.fts_clause,
-            ),
+            config=REAGENT_ORDER_SEARCH_CONFIG,
+            search_field=search_field,
+            search_value=search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+            applicant_id_subquery=applicant_id_subquery,
+            cas_exact_or_prefix=cas_exact_or_prefix,
+            fts_clause=fts_state.fts_clause,
         )
         if matched:
             return single_field_filtered
 
-    all_search_clause = _build_reagent_order_all_search_clause(
+    all_search_clause = build_order_list_all_search_clause(
+        config=REAGENT_ORDER_SEARCH_CONFIG,
         search_value=search_value,
         fuzzy=fuzzy,
         match_mode=match_mode,
