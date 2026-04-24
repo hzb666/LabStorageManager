@@ -177,6 +177,29 @@ class LSMIntentPlanner:
     max_output_tokens: int
     search_limit: int
 
+    async def _request_output_text(
+        self,
+        *,
+        payload: dict[str, Any],
+        timeout_event: str,
+        failure_event: str,
+    ) -> str | None:
+        try:
+            data = await asyncio.to_thread(
+                _post_llm_api,
+                self.api_url,
+                self.api_key,
+                self.timeout_seconds,
+                payload,
+            )
+        except requests.Timeout:
+            logger.warning(timeout_event)
+            return None
+        except requests.RequestException as exc:
+            logger.warning("%s type=%s", failure_event, type(exc).__name__)
+            return None
+        return _extract_output_text(data)
+
     async def plan(
         self,
         user_text: str,
@@ -191,21 +214,12 @@ class LSMIntentPlanner:
             search_limit=self.search_limit,
             max_output_tokens=self.max_output_tokens,
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_llm_plan_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_llm_plan_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_plan(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_llm_plan_timeout",
+            failure_event="wecom_aibot_llm_plan_failed",
+        )
+        return _parse_plan(output_text) if output_text else None
 
     async def detect_context_reset(
         self,
@@ -222,21 +236,12 @@ class LSMIntentPlanner:
             conversation_context=conversation_context,
             max_output_tokens=min(self.max_output_tokens, 120),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_context_reset_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_context_reset_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_context_reset(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_context_reset_timeout",
+            failure_event="wecom_aibot_context_reset_failed",
+        )
+        return _parse_context_reset(output_text) if output_text else None
 
     async def should_try_common_shelf(
         self,
@@ -253,21 +258,12 @@ class LSMIntentPlanner:
             cas_number=cas_number,
             max_output_tokens=min(self.max_output_tokens, 160),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_common_shelf_decision_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_common_shelf_decision_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_common_shelf_decision(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_common_shelf_decision_timeout",
+            failure_event="wecom_aibot_common_shelf_decision_failed",
+        )
+        return _parse_common_shelf_decision(output_text) if output_text else None
 
     async def resolve_cas_from_search(
         self,
@@ -288,21 +284,12 @@ class LSMIntentPlanner:
             search_summary=search_summary,
             max_output_tokens=min(self.max_output_tokens, 240),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_cas_resolution_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_cas_resolution_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_cas_resolution(_extract_output_text(data), candidates)
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_cas_resolution_timeout",
+            failure_event="wecom_aibot_cas_resolution_failed",
+        )
+        return _parse_cas_resolution(output_text, candidates) if output_text else None
 
     async def resolve_cas_from_knowledge(
         self,
@@ -317,21 +304,12 @@ class LSMIntentPlanner:
             query=query,
             max_output_tokens=min(self.max_output_tokens, 160),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_cas_knowledge_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_cas_knowledge_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_cas_knowledge_resolution(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_cas_knowledge_timeout",
+            failure_event="wecom_aibot_cas_knowledge_failed",
+        )
+        return _parse_cas_knowledge_resolution(output_text) if output_text else None
 
     async def should_try_cas_resolution(
         self,
@@ -346,24 +324,12 @@ class LSMIntentPlanner:
             query=query,
             max_output_tokens=min(self.max_output_tokens, 120),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_cas_resolution_decision_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning(
-                "wecom_aibot_cas_resolution_decision_failed type=%s",
-                type(exc).__name__,
-            )
-            return None
-        return _parse_cas_resolution_decision(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_cas_resolution_decision_timeout",
+            failure_event="wecom_aibot_cas_resolution_decision_failed",
+        )
+        return _parse_cas_resolution_decision(output_text) if output_text else None
 
     async def filter_inventory_name_candidates(
         self,
@@ -382,21 +348,12 @@ class LSMIntentPlanner:
             candidates=candidates,
             max_output_tokens=min(self.max_output_tokens, 220),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_inventory_name_filter_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_inventory_name_filter_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_inventory_name_filter_selection(_extract_output_text(data), len(candidates))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_inventory_name_filter_timeout",
+            failure_event="wecom_aibot_inventory_name_filter_failed",
+        )
+        return _parse_inventory_name_filter_selection(output_text, len(candidates)) if output_text else None
 
     async def parse_return_request(
         self,
@@ -411,21 +368,12 @@ class LSMIntentPlanner:
             conversation_context=conversation_context,
             max_output_tokens=min(self.max_output_tokens, 180),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_return_request_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_return_request_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_return_request_resolution(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_return_request_timeout",
+            failure_event="wecom_aibot_return_request_failed",
+        )
+        return _parse_return_request_resolution(output_text) if output_text else None
 
     async def resolve_return_quantity(
         self,
@@ -450,21 +398,12 @@ class LSMIntentPlanner:
             conversation_context=conversation_context,
             max_output_tokens=min(self.max_output_tokens, 180),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_return_quantity_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_return_quantity_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_return_quantity_resolution(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_return_quantity_timeout",
+            failure_event="wecom_aibot_return_quantity_failed",
+        )
+        return _parse_return_quantity_resolution(output_text) if output_text else None
 
     async def polish_reply(
         self,
@@ -483,21 +422,14 @@ class LSMIntentPlanner:
             conversation_context=conversation_context,
             max_output_tokens=min(self.max_output_tokens, 600),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_reply_polish_timeout")
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_reply_polish_timeout",
+            failure_event="wecom_aibot_reply_polish_failed",
+        )
+        if output_text is None:
             return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_reply_polish_failed type=%s", type(exc).__name__)
-            return None
-        reply = _extract_output_text(data).strip()
+        reply = output_text.strip()
         return reply if is_safe_llm_reply(reply) else None
 
 
