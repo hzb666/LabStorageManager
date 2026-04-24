@@ -1,8 +1,5 @@
-# 耗材订单 API 路由：耗材申购流程管理。
-# 与试剂订单分离（耗材无需入库流程）。
 import logging
 import time
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated, Optional, Dict, Any
 
@@ -35,12 +32,8 @@ from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     TextMatchMode,
     build_applicant_id_subquery,
-    build_date_search_clause,
-    build_text_search_clause,
-    collect_search_fields,
-    combine_or_clauses,
 )
-from app.services.sql_utils import normalize_search_term, order_with_nulls_last
+from app.services.sql_utils import order_with_nulls_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
@@ -48,11 +41,12 @@ from app.services.api_utils import (
     normalize_pagination,
     set_cached_result,
 )
-from app.services.order_fts import (
-    OrderFTSError,
-    build_order_fts_id_clause,
-    build_order_fts_rowid_subquery,
-    should_use_order_fts,
+from app.services.order_list_search import (
+    OrderListSearchConfig,
+    apply_order_list_single_field_search,
+    build_order_list_all_search_clause,
+    build_order_list_fts_state,
+    normalize_order_list_search_value,
 )
 from app.services.sse_manager import sse_manager
 from app.services.order_operation_logger import (
@@ -138,26 +132,15 @@ CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP = {
     'specification': ["specification"],
     'communication': ["communication"],
 }
-
-
-@dataclass(frozen=True)
-class ConsumableOrderFTSState:
-    # 封装耗材订单 FTS 构建结果，减少筛选主流程的分支数量。
-
-    fts_clause: Any
-    fts_rowid_subquery: Any
-
-
-@dataclass(frozen=True)
-class ConsumableOrderSingleFieldSearchOptions:
-    # 封装耗材订单单字段搜索参数，避免 helper 参数过多。
-
-    search_field: Optional[str]
-    search_value: str
-    fuzzy: bool
-    match_mode: TextMatchMode
-    applicant_id_subquery: Any
-    fts_clause: Any
+CONSUMABLE_ORDER_SEARCH_CONFIG = OrderListSearchConfig(
+    id_column=ConsumableOrder.id,
+    applicant_id_column=ConsumableOrder.applicant_id,
+    created_at_column=ConsumableOrder.created_at,
+    sql_field_map=CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP,
+    fts_field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
+    applicant_search_keys=frozenset(APPLICANT_SEARCH_KEYS),
+    cas_search_keys=frozenset(),
+)
 
 
 class ConsumableOrderListQuery(BaseModel):
@@ -249,133 +232,6 @@ def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[Consumabl
     return db.get(ConsumableOrder, order_id)
 
 
-def _normalize_order_search_value(search: Optional[str], *, fuzzy: bool) -> Optional[str]:
-    # 标准化耗材订单搜索词，统一 fuzzy 与空输入处理。
-
-    if not search:
-        return None
-    raw_search = search.strip()
-    if not raw_search:
-        return None
-    if fuzzy:
-        return normalize_search_term(raw_search)
-    return raw_search
-
-
-def _build_consumable_order_fts_state(
-    *,
-    search_value: str,
-    search_field: Optional[str],
-    fuzzy: bool,
-    match_mode: TextMatchMode,
-) -> ConsumableOrderFTSState:
-    # 构建耗材订单 FTS 条件，失败时返回空状态并回退 SQL LIKE。
-
-    use_fts = (
-        match_mode == TextMatchMode.CONTAINS
-        and (not fuzzy)
-        and should_use_order_fts(search_value)
-    )
-    if not use_fts:
-        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-    try:
-        return ConsumableOrderFTSState(
-            fts_clause=build_order_fts_id_clause(
-                ConsumableOrder.id,
-                fts_table="consumable_order_fts",
-                search_value=search_value,
-                search_field=search_field,
-                field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
-            ),
-            fts_rowid_subquery=build_order_fts_rowid_subquery(
-                fts_table="consumable_order_fts",
-                search_value=search_value,
-                search_field='all',
-                field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
-            ),
-        )
-    except OrderFTSError:
-        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Consumable order FTS fallback to SQL LIKE due to runtime error: %s",
-            exc,
-        )
-        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-
-
-def _apply_consumable_order_single_field_search(
-    base,
-    *,
-    options: ConsumableOrderSingleFieldSearchOptions,
-):
-    # 处理耗材订单单字段搜索，按 applicant/date/fts/like 分支执行。
-
-    filtered = base
-    matched = True
-    search_field = options.search_field
-    if search_field in APPLICANT_SEARCH_KEYS:
-        filtered = base.where(ConsumableOrder.applicant_id.in_(options.applicant_id_subquery))
-    elif search_field == 'created_at':
-        filtered = base.where(build_date_search_clause(ConsumableOrder.created_at, options.search_value))
-    elif options.fts_clause is not None and search_field in CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP:
-        filtered = base.where(options.fts_clause)
-    elif search_field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP:
-        filtered = base.where(
-            combine_or_clauses(
-                build_text_search_clause(
-                    field,
-                    options.search_value,
-                    fuzzy=options.fuzzy,
-                    match_mode=options.match_mode,
-                )
-                for field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
-            )
-        )
-    else:
-        matched = False
-    return filtered, matched
-
-
-def _build_consumable_order_all_search_clause(
-    *,
-    search_value: str,
-    fuzzy: bool,
-    match_mode: TextMatchMode,
-    applicant_id_subquery,
-    fts_rowid_subquery,
-):
-    # 构建耗材订单 ALL 搜索条件，保留 applicant/date/fts/like 召回但避免多路 UNION。
-
-    all_clauses = [
-        ConsumableOrder.applicant_id.in_(applicant_id_subquery),
-        build_date_search_clause(ConsumableOrder.created_at, search_value),
-    ]
-
-    if fts_rowid_subquery is not None:
-        all_clauses.append(
-            ConsumableOrder.id.in_(fts_rowid_subquery)
-        )
-    else:
-        text_fields = collect_search_fields(
-            CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP,
-            exclude_keys={'created_at'},
-        )
-        if text_fields:
-            all_clauses.append(
-                combine_or_clauses(
-                    build_text_search_clause(
-                        field,
-                        search_value,
-                        fuzzy=fuzzy,
-                        match_mode=match_mode,
-                    )
-                    for field in text_fields
-                )
-            )
-    return combine_or_clauses(all_clauses)
-
-
 def _apply_consumable_order_filters(
     base,
     status_filter: Optional[ConsumableOrderStatus],
@@ -389,7 +245,7 @@ def _apply_consumable_order_filters(
     if status_filter:
         base = base.where(ConsumableOrder.status == status_filter)
 
-    search_value = _normalize_order_search_value(search, fuzzy=fuzzy)
+    search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
     if not search_value:
         return base
 
@@ -398,29 +254,34 @@ def _apply_consumable_order_filters(
         fuzzy=fuzzy,
         match_mode=match_mode,
     )
-    fts_state = _build_consumable_order_fts_state(
+    fts_state = build_order_list_fts_state(
+        config=CONSUMABLE_ORDER_SEARCH_CONFIG,
+        fts_table="consumable_order_fts",
         search_value=search_value,
         search_field=search_field,
         fuzzy=fuzzy,
         match_mode=match_mode,
+        allow_fts=True,
+        logger=logger,
+        log_label="Consumable order",
     )
 
     if search_field and search_field != 'all':
-        single_field_filtered, matched = _apply_consumable_order_single_field_search(
+        single_field_filtered, matched = apply_order_list_single_field_search(
             base,
-            options=ConsumableOrderSingleFieldSearchOptions(
-                search_field=search_field,
-                search_value=search_value,
-                fuzzy=fuzzy,
-                match_mode=match_mode,
-                applicant_id_subquery=applicant_id_subquery,
-                fts_clause=fts_state.fts_clause,
-            ),
+            config=CONSUMABLE_ORDER_SEARCH_CONFIG,
+            search_field=search_field,
+            search_value=search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+            applicant_id_subquery=applicant_id_subquery,
+            fts_clause=fts_state.fts_clause,
         )
         if matched:
             return single_field_filtered
 
-    all_search_clause = _build_consumable_order_all_search_clause(
+    all_search_clause = build_order_list_all_search_clause(
+        config=CONSUMABLE_ORDER_SEARCH_CONFIG,
         search_value=search_value,
         fuzzy=fuzzy,
         match_mode=match_mode,
