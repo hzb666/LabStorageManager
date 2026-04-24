@@ -30,7 +30,7 @@ from app.core.constants import (
     EXCEL_RED_FONT_COLOR,
     INTERNAL_CODE_MAX_SEQUENCE,
 )
-from app.core.time_utils import get_utc_now
+from app.core.time_utils import get_utc_now, normalize_to_utc_naive
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -335,12 +335,13 @@ def _build_inventory_from_import_row(
     initial_quantity = spec_value
     remaining_qty = _parse_remaining_quantity(row, initial_quantity)
     optional_fields = _normalize_import_optional_fields(row, context.default_storage_location)
-    created_at = _parse_import_created_at(row.get('created_at'))
+    imported_created_at = _parse_import_created_at(row.get('created_at'))
+    stored_created_at = normalize_to_utc_naive(imported_created_at)
     internal_code = _generate_internal_code_with_tracking(
         context.db,
         normalized_cas,
         context.sequence_tracker,
-        created_at,
+        imported_created_at,
     )
     name = str(row['name']).strip()
     pinyin_fields = compute_pinyin_fields(
@@ -366,7 +367,7 @@ def _build_inventory_from_import_row(
         is_hazardous=_parse_boolean(row.get('is_hazardous'), context.default_is_hazardous),
         status=InventoryStatus.IN_STOCK,
         notes=optional_fields['notes'],
-        created_at=created_at,
+        created_at=stored_created_at,
         created_by_id=context.user_id,
         **pinyin_fields,
     )

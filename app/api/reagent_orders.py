@@ -20,6 +20,7 @@ from app.core.constants import (
     SSERoom,
 )
 from app.core.time_utils import get_utc_now
+from app.models import BaseResponse
 from app.models.user import User, UserRole
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import (
@@ -176,7 +177,7 @@ class ReagentOrderListQuery(BaseModel):
     sort_order: Optional[str] = "desc"
 
 
-class CASOverviewOrderResponse(BaseModel):
+class CASOverviewOrderResponse(BaseResponse):
     id: int
     name: str
     applicant_name: str | None
@@ -185,7 +186,7 @@ class CASOverviewOrderResponse(BaseModel):
     status: str
 
 
-class CASOverviewInventoryResponse(BaseModel):
+class CASOverviewInventoryResponse(BaseResponse):
     id: int
     remaining_quantity: float | None
     specification: str
@@ -195,7 +196,7 @@ class CASOverviewInventoryResponse(BaseModel):
     borrower_name: str | None
 
 
-class CASOverviewResponseModel(BaseModel):
+class CASOverviewResponseModel(BaseResponse):
     cas_number: str
     preferred_name: str | None
     preferred_name_source: str | None

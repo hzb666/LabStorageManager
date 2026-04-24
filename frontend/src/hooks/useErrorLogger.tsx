@@ -6,6 +6,7 @@ import {
   formatUtcOffsetDateTimeWithSeconds,
   getLocalTimeZoneLabel,
 } from '@/lib/utils'
+import { persistRuntimeTimeConfig, readRuntimeTimeConfig } from '@/lib/runtimeTimeConfig'
 import { useAuthStore } from '@/store/useStore'
 
 // 错误日志条目类型
@@ -296,6 +297,8 @@ interface BugReportTimeConfigResponse {
 }
 
 export async function fetchBugReportTimeConfig(): Promise<BugReportTimeConfig | null> {
+  const storedConfig = readRuntimeTimeConfig()
+
   try {
     const response = await api.get<BugReportTimeConfigResponse>('/runtime/cache-version')
     const displayUtcOffset =
@@ -307,12 +310,14 @@ export async function fetchBugReportTimeConfig(): Promise<BugReportTimeConfig | 
         ? response.data.display_timezone.trim()
         : ''
     if (!displayUtcOffset || !displayTimeZone) {
-      return null
+      return storedConfig
     }
-    return { displayUtcOffset, displayTimeZone }
+    const config = { displayUtcOffset, displayTimeZone }
+    persistRuntimeTimeConfig(config)
+    return config
   } catch (error) {
     console.warn('无法获取 bug report 展示时区配置:', error)
-    return null
+    return storedConfig
   }
 }
 

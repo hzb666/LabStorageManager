@@ -48,6 +48,11 @@ class SessionResponse(BaseResponse):
     expires_at: datetime
 
 
+class SessionRefreshResponse(BaseResponse):
+    message: str
+    expires_at: datetime
+
+
 def _build_session_snapshot(session: UserSession | None) -> dict[str, object]:
     if session is None:
         return {}
@@ -193,7 +198,7 @@ def delete_all_sessions(
     return {"message": f"Deleted {deleted_count} sessions"}
 
 
-@router.post("/refresh")
+@router.post("/refresh", response_model=SessionRefreshResponse)
 def refresh_session(
     request: Request,
     response: Response,
@@ -261,7 +266,10 @@ def refresh_session(
         path="/",
     )
 
-    return {"message": "Session refreshed", "expires_at": refreshed.expires_at}
+    return SessionRefreshResponse(
+        message="Session refreshed",
+        expires_at=refreshed.expires_at,
+    )
 
 
 class SessionUpdateRequest(BaseModel):

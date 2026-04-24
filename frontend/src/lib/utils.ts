@@ -3,12 +3,11 @@ import type { AxiosResponse } from 'axios'
 import { twMerge } from "tailwind-merge"
 import { buildBackendUrl } from "./apiConfig"
 import { inputConfigs } from "./inputConfigs"
+import { getStoredDisplayUtcOffset } from './runtimeTimeConfig'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
-
-export const CHINA_TIME_ZONE = 'Asia/Shanghai'
 
 const localFilenameDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
   year: 'numeric',
@@ -18,17 +17,6 @@ const localFilenameDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
   minute: '2-digit',
   second: '2-digit',
   hourCycle: 'h23',
-})
-
-const chinaFilenameDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hourCycle: 'h23',
-  timeZone: CHINA_TIME_ZONE,
 })
 
 function getDateTimeParts(date: Date, formatter: Intl.DateTimeFormat) {
@@ -118,7 +106,6 @@ export function formatDate(date: string | Date): string {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    timeZone: CHINA_TIME_ZONE,
   })
 }
 
@@ -130,33 +117,27 @@ export function formatDateTime(date: string | Date): string {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-    timeZone: CHINA_TIME_ZONE,
+  })
+}
+
+function formatLocalDateTimeValue(date: string | Date, withSeconds: boolean): string {
+  return new Date(date).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' as const } : {}),
+    hour12: false,
   })
 }
 
 export function formatDateTimeWithSeconds(date: string | Date): string {
-  return new Date(date).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZone: CHINA_TIME_ZONE,
-  })
+  return formatLocalDateTimeValue(date, true)
 }
 
 export function formatLocalDateTimeWithSeconds(date: string | Date): string {
-  return new Date(date).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
+  return formatLocalDateTimeValue(date, true)
 }
 
 export function getLocalTimeZoneLabel(date: string | Date = new Date()): string {
@@ -192,17 +173,31 @@ export function formatUtcOffsetDateTimeForFilename(
   return `${year}-${month}-${day}_${hour}-${minute}-${second}`
 }
 
-export function formatChinaDateForFilename(date = new Date()): string {
-  const { year, month, day } = getDateTimeParts(date, chinaFilenameDateTimeFormatter)
+export function formatDisplayDateForFilename(date = new Date()): string {
+  const displayUtcOffset = getStoredDisplayUtcOffset()
+  if (displayUtcOffset) {
+    return formatUtcOffsetDateTimeForFilename(date, displayUtcOffset).slice(0, 10)
+  }
+
+  const { year, month, day } = getDateTimeParts(date, localFilenameDateTimeFormatter)
   return `${year}-${month}-${day}`
 }
 
+export function formatDisplayDateTimeForFilename(date = new Date()): string {
+  const displayUtcOffset = getStoredDisplayUtcOffset()
+  if (displayUtcOffset) {
+    return formatUtcOffsetDateTimeForFilename(date, displayUtcOffset)
+  }
+
+  return formatLocalDateTimeForFilename(date)
+}
+
+export function formatChinaDateForFilename(date = new Date()): string {
+  return formatDisplayDateForFilename(date)
+}
+
 export function formatChinaDateTimeForFilename(date = new Date()): string {
-  const { year, month, day, hour, minute, second } = getDateTimeParts(
-    date,
-    chinaFilenameDateTimeFormatter,
-  )
-  return `${year}-${month}-${day}_${hour}-${minute}-${second}`
+  return formatDisplayDateTimeForFilename(date)
 }
 
 export function truncate(str: string, length: number): string {
