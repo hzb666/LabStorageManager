@@ -278,6 +278,41 @@ function validateWorkflowRemainingQuantity(
   return false;
 }
 
+function applyValidationErrorsToForm<T extends Record<string, unknown>>(
+  detail: unknown,
+  setError: (
+    field: keyof T,
+    error: {
+      message: string;
+    },
+  ) => void,
+): boolean {
+  const validationErrors = toValidationErrors(detail);
+  if (validationErrors.length === 0) {
+    return false;
+  }
+
+  validationErrors.forEach((issue) => {
+    if (!issue.loc?.[1]) {
+      return;
+    }
+    setError(issue.loc[1] as keyof T, {
+      message: issue.msg || "输入不合法",
+    });
+  });
+  return true;
+}
+
+async function finishWorkflowSubmit(
+  resetStockinDialog: () => void,
+  refreshTables: () => Promise<void>,
+  successMessage: string,
+) {
+  resetStockinDialog();
+  await refreshTables();
+  toast.success(successMessage);
+}
+
 function buildConfirmArrivalFormValues(item: DashboardReagentOrder): ConfirmArrivalFormInputData {
   return {
     ...buildWorkflowBaseValues(item),
@@ -295,7 +330,6 @@ function buildCommonPublicArrivalFormValues(
   };
 }
 
-// 一键入库默认带出订单数量；到货暂存后的补全入库由“待入库”页签承载。
 function buildStockinFormValues(
   item: DashboardReagentOrder,
   mode: StockinMode,
@@ -323,7 +357,6 @@ function getStockinDialogTitle(mode: StockinMode): string {
   return "入库";
 }
 
-// `approved` 状态显示“到货 / 一键入库”（common_public 不显示一键入库）。
 function createReagentActions(
   openStockinDialog: (item: DashboardReagentOrder, mode: StockinMode) => void,
 ) {
@@ -788,7 +821,6 @@ function useReagentEditDialog({
     [currentUserId, currentUserRole, isAdmin, reagentForm],
   );
 
-  // 编辑成功后同时刷新 Dashboard、订单列表和库存缓存；字段级错误回填表单而不是 toast。
   const submitReagentEdit = reagentForm.handleSubmit(async (formData) => {
     if (!editingReagent) return;
     setIsSubmittingReagent(true);
@@ -818,15 +850,7 @@ function useReagentEditDialog({
       );
     } catch (err) {
       const detail = extractApiErrorDetail(err);
-      const validationErrors = toValidationErrors(detail);
-      if (validationErrors.length > 0) {
-        validationErrors.forEach((e) => {
-          if (e.loc?.[1]) {
-            reagentForm.setError(e.loc[1] as keyof ReagentOrderFormData, {
-              message: e.msg || "输入不合法",
-            });
-          }
-        });
+      if (applyValidationErrorsToForm<ReagentOrderFormData>(detail, reagentForm.setError)) {
         return;
       }
       toast.error(normalizeApiErrorMessage(detail, "更新失败"));
@@ -835,7 +859,6 @@ function useReagentEditDialog({
     }
   });
 
-  // 删除走二次确认：第一次只切换确认态，第二次才真正调用删除接口。
   const handleDeleteReagent = useCallback(async () => {
     if (!editingReagent) return;
 
@@ -856,7 +879,6 @@ function useReagentEditDialog({
     }
   }, [deleteConfirm, editingReagent, reagentForm, refreshTables]);
 
-  // 关闭编辑弹窗时统一清空当前记录、删除确认和表单默认值。
   const closeReagentDialog = useCallback(() => {
     setEditingReagent(null);
     setDeleteConfirm(false);
@@ -904,20 +926,10 @@ function useReagentWorkflowSubmitHandlers({
     setIsSubmittingStockin(true);
     try {
       await reagentOrderAPI.stockIn(stockinTarget.id, buildStockInPayload(formData));
-      resetStockinDialog();
-      await refreshTables();
-      toast.success("入库成功");
+      await finishWorkflowSubmit(resetStockinDialog, refreshTables, "入库成功");
     } catch (err) {
       const detail = extractApiErrorDetail(err);
-      const validationErrors = toValidationErrors(detail);
-      if (validationErrors.length > 0) {
-        validationErrors.forEach((e) => {
-          if (e.loc?.[1]) {
-            stockinForm.setError(e.loc[1] as keyof StockInFormInputData, {
-              message: e.msg || "输入不合法",
-            });
-          }
-        });
+      if (applyValidationErrorsToForm<StockInFormInputData>(detail, stockinForm.setError)) {
         return;
       }
       toast.error(normalizeApiErrorMessage(detail, "入库失败"));
@@ -941,20 +953,14 @@ function useReagentWorkflowSubmitHandlers({
         stockinTarget.id,
         buildConfirmArrivalPayload(formData),
       );
-      resetStockinDialog();
-      await refreshTables();
-      toast.success("确认到货成功");
+      await finishWorkflowSubmit(
+        resetStockinDialog,
+        refreshTables,
+        "确认到货成功",
+      );
     } catch (err) {
       const detail = extractApiErrorDetail(err);
-      const validationErrors = toValidationErrors(detail);
-      if (validationErrors.length > 0) {
-        validationErrors.forEach((e) => {
-          if (e.loc?.[1]) {
-            arrivalForm.setError(e.loc[1] as keyof ConfirmArrivalFormData, {
-              message: e.msg || "输入不合法",
-            });
-          }
-        });
+      if (applyValidationErrorsToForm<ConfirmArrivalFormData>(detail, arrivalForm.setError)) {
         return;
       }
       toast.error(normalizeApiErrorMessage(detail, "确认到货失败"));
@@ -973,23 +979,19 @@ function useReagentWorkflowSubmitHandlers({
           stockinTarget.id,
           buildCommonPublicArrivalPayload(formData),
         );
-        resetStockinDialog();
-        await refreshTables();
-        toast.success("确认到货成功");
+        await finishWorkflowSubmit(
+          resetStockinDialog,
+          refreshTables,
+          "确认到货成功",
+        );
       } catch (err) {
         const detail = extractApiErrorDetail(err);
-        const validationErrors = toValidationErrors(detail);
-        if (validationErrors.length > 0) {
-          validationErrors.forEach((e) => {
-            if (e.loc?.[1]) {
-              commonPublicArrivalForm.setError(
-                e.loc[1] as keyof CommonPublicArrivalFormData,
-                {
-                  message: e.msg || "输入不合法",
-                },
-              );
-            }
-          });
+        if (
+          applyValidationErrorsToForm<CommonPublicArrivalFormData>(
+            detail,
+            commonPublicArrivalForm.setError,
+          )
+        ) {
           return;
         }
         toast.error(normalizeApiErrorMessage(detail, "确认到货失败"));
@@ -1033,7 +1035,6 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
     shouldFocusError: false,
   });
 
-  // 提交成功和手动关闭共用同一套入库重置逻辑。
   const resetStockinDialog = useCallback(() => {
     setStockinTarget(null);
     setStockinMode("quick");
@@ -1042,7 +1043,6 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
     commonPublicArrivalForm.reset(defaultCommonPublicArrivalValues);
   }, [arrivalForm, commonPublicArrivalForm, stockinForm]);
 
-  // 打开入库弹窗时按 `mode` 设置默认剩余量。
   const openStockinDialog = useCallback(
     (item: DashboardReagentOrder, mode: StockinMode) => {
       setStockinTarget(item);
@@ -1060,7 +1060,6 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
     [arrivalForm, commonPublicArrivalForm, stockinForm],
   );
 
-  // 提交中禁止关闭；关闭时重置记录和表单，避免上次输入残留到下一次入库。
   const closeStockinDialog = useCallback(() => {
     if (isSubmittingStockin) return;
     resetStockinDialog();
@@ -1097,7 +1096,6 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
   };
 }
 
-// 页面只负责任务列表查询刷新、列配置，以及编辑/入库弹窗编排。
 export function DashboardReagentTab({
   managementMode = false,
 }: Readonly<{ managementMode?: boolean }>) {
