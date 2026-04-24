@@ -1394,35 +1394,6 @@ function CommonShelfQuickOrderDialog({
   )
 }
 
-function CommonShelfPageDialogs({
-  dialogController,
-  chemicalNameMapController,
-  quickOrderController,
-  brandOptions,
-}: Pick<CommonShelfPageController, 'dialogController' | 'chemicalNameMapController' | 'quickOrderController' | 'brandOptions'>) {
-  return (
-    <>
-      <CommonShelfDialogs
-        dialog={dialogController}
-        showDelete={canDeleteCommonShelfGroup(dialogController.state.selectedGroup)}
-        brandOptions={brandOptions}
-      />
-
-      <CommonShelfQuickOrderDialog controller={quickOrderController} />
-
-      <ChemicalNameMapManagementDialog
-        open={chemicalNameMapController.managementOpen}
-        canWrite={chemicalNameMapController.canWrite}
-        onOpenChange={chemicalNameMapController.setManagementOpen}
-        onCreate={chemicalNameMapController.openCreateDialog}
-        columns={chemicalNameMapController.columns}
-      />
-
-      <ChemicalNameMapEditorDialog dialog={chemicalNameMapController.editorDialog} />
-    </>
-  )
-}
-
 export function CommonShelfPage() {
   const {
     dialogController,
@@ -1446,12 +1417,23 @@ export function CommonShelfPage() {
         }}
       />
 
-      <CommonShelfPageDialogs
-        dialogController={dialogController}
-        chemicalNameMapController={chemicalNameMapController}
-        quickOrderController={quickOrderController}
+      <CommonShelfDialogs
+        dialog={dialogController}
+        showDelete={canDeleteCommonShelfGroup(dialogController.state.selectedGroup)}
         brandOptions={brandOptions}
       />
+
+      <CommonShelfQuickOrderDialog controller={quickOrderController} />
+
+      <ChemicalNameMapManagementDialog
+        open={chemicalNameMapController.managementOpen}
+        canWrite={chemicalNameMapController.canWrite}
+        onOpenChange={chemicalNameMapController.setManagementOpen}
+        onCreate={chemicalNameMapController.openCreateDialog}
+        columns={chemicalNameMapController.columns}
+      />
+
+      <ChemicalNameMapEditorDialog dialog={chemicalNameMapController.editorDialog} />
 
       <FilterTable
         api={commonShelfAPI as FilterAPI}
