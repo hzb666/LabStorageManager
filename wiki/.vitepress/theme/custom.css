@@ -3,15 +3,12 @@
     'Helvetica Neue', Helvetica;
   --wiki-font-family-cjk-fallback: 'Microsoft YaHei', 'PingFang SC',
     'Hiragino Sans GB', 'Segoe UI';
-  --wiki-font-family-cjk-web: 'Noto Sans SC', 'SourceHanSansCN-VF-Local',
+  --wiki-font-family-cjk-web: 'SourceHanSansCN-VF-Local',
     'Source Han Sans SC', 'SourceHanSansSC-CJK', '思源黑体';
   --wiki-font-family-cjk-local: 'SourceHanSansCN-VF-Local',
     'Source Han Sans SC', 'SourceHanSansSC-CJK', '思源黑体';
   --wiki-font-family-fallback: var(--wiki-font-family-latin),
     var(--wiki-font-family-cjk-fallback), sans-serif;
-  --wiki-font-family-google: var(--wiki-font-family-latin),
-    var(--wiki-font-family-cjk-web), var(--wiki-font-family-cjk-fallback),
-    sans-serif;
   --wiki-font-family-local: var(--wiki-font-family-latin),
     var(--wiki-font-family-cjk-local), var(--wiki-font-family-cjk-fallback),
     sans-serif;
@@ -202,42 +199,117 @@ html {
 }
 
 body,
+.VPNav,
 .VPNavBar,
+.VPNavScreen,
+.VPLocalNav,
 .VPHome,
 .VPSidebar,
+.VPDocAside,
+.VPLocalSearchBox,
 .vp-doc,
 .VPFooter {
   font-family: var(--wiki-font-family-fallback);
+  font-weight: 400;
+  font-synthesis-weight: none;
 }
 
 html[data-font-state='loading'] body {
   visibility: hidden;
 }
 
-html[data-font-state='google'] {
-  --vp-font-family-base: var(--wiki-font-family-google);
-}
-
 html[data-font-state='local'] {
   --vp-font-family-base: var(--wiki-font-family-local);
 }
 
-html[data-font-state='google'] body,
-html[data-font-state='google'] .VPNavBar,
-html[data-font-state='google'] .VPHome,
-html[data-font-state='google'] .VPSidebar,
-html[data-font-state='google'] .vp-doc,
-html[data-font-state='google'] .VPFooter {
-  font-family: var(--wiki-font-family-google);
-}
-
 html[data-font-state='local'] body,
+html[data-font-state='local'] .VPNav,
 html[data-font-state='local'] .VPNavBar,
+html[data-font-state='local'] .VPNavScreen,
+html[data-font-state='local'] .VPLocalNav,
 html[data-font-state='local'] .VPHome,
 html[data-font-state='local'] .VPSidebar,
+html[data-font-state='local'] .VPDocAside,
+html[data-font-state='local'] .VPLocalSearchBox,
 html[data-font-state='local'] .vp-doc,
 html[data-font-state='local'] .VPFooter {
   font-family: var(--wiki-font-family-local);
+}
+
+.VPNav,
+.VPNav *,
+.VPNavBar,
+.VPNavBar *,
+.VPNavScreen,
+.VPNavScreen *,
+.VPLocalNav,
+.VPLocalNav *,
+.VPHome,
+.VPHome *,
+.VPSidebar,
+.VPSidebar *,
+.VPDocAside,
+.VPDocAside *,
+.VPLocalSearchBox,
+.VPLocalSearchBox *,
+.VPFooter,
+.VPFooter * {
+  font-family: var(--vp-font-family-base) !important;
+  font-synthesis-weight: none !important;
+}
+
+.VPNav,
+.VPNavBar,
+.VPNavBarMenuLink,
+.VPNavBarMenuGroup .button,
+.VPNavScreenMenuLink,
+.VPNavScreenMenuGroup .button,
+.VPLocalNav,
+.VPLocalNavOutlineDropdown .items,
+.VPSidebar,
+.VPSidebarItem .text,
+.VPDocAside,
+.VPDocAside .outline-link,
+.VPLocalSearchBox,
+.VPLocalSearchBox .title,
+.VPLocalSearchBox .title-icon,
+.VPLocalSearchBox .excerpt,
+.VPLocalSearchBox .search-keyboard-shortcuts,
+.VPLocalSearchBox .no-results,
+.VPFooter {
+  font-weight: 400 !important;
+}
+
+.vp-doc,
+.vp-doc p,
+.vp-doc li,
+.vp-doc td,
+.vp-doc code {
+  font-weight: 400;
+}
+
+.VPNavBarTitle .title,
+.VPNavBarTitle .title *,
+.VPNavBarMenuLink.active,
+.VPSidebarItem.level-0 > .item .text,
+.VPDocAside .outline-title,
+.VPDocAside .outline-link.active,
+.VPLocalSearchBox .title.main,
+.VPLocalSearchBox .title.main *,
+.VPDocFooter .pager-link .title {
+  font-weight: 700 !important;
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4,
+.vp-doc h5,
+.vp-doc h6,
+.vp-doc strong,
+.vp-doc b,
+.vp-doc th {
+  font-weight: 700 !important;
 }
 
 .VPSidebarItem.level-0 > .item .text {
