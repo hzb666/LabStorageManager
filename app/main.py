@@ -36,16 +36,20 @@ from app.core.request_utils import (
     reset_current_sse_client_id,
     set_current_sse_client_id,
 )
+from app.core.time_utils import get_display_timezone_label
 from app.database import engine, init_db
 from app.api import (
     announcements,
     cart_sync,
+    chem,
     chemical_name_map,
     common_shelf,
     consumable_orders,
+    dashboard,
     error_logs,
     events,
     inventory,
+    reagent_brands,
     reagent_orders,
     user_logs,
     user_sessions,
@@ -60,6 +64,7 @@ from app.services.log_queue import get_request_logger, initialize_async_file_log
 from app.services.rate_limit import enforce_rate_limit
 from app.services.search_query_log_service import stop_search_query_log_worker, start_search_query_log_worker
 from app.services.sse_manager import sse_manager
+from app.services.structure_index import structure_index
 from app.search_query_log_db import init_query_log_db
 from sqlmodel import Session
 
@@ -333,6 +338,10 @@ async def lifespan(app: FastAPI):
     cleanup_expired_inventory_import_preview_artifacts()
     init_db()
     init_query_log_db()
+    if settings.chem_structure_feature_enabled:
+        with Session(engine) as db:
+            structure_index.rebuild(db)
+        logger.info("Structure index rebuilt on startup")
     start_search_query_log_worker()
     start_archive_scheduler()
     logger.info("Database initialized (WAL mode enabled)")
@@ -560,7 +569,7 @@ async def security_headers_middleware(
     _apply_security_headers(response, request.url.path)
     return response
 
-# Global exception handler for logging 500 errors - must be added BEFORE routes
+# 全局异常处理器需先于路由注册，用于记录 500 错误。
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     """Global exception handler to log all unhandled errors"""
@@ -591,18 +600,19 @@ async def global_exception_handler(request, exc):
     _apply_trusted_origin_cors_headers(response, request)
     return response
 
-# Mount static files with caching
+# 挂载带缓存策略的静态文件目录。
 STATIC_DIR = Path(__file__).parent.parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# Include routers
+# 注册业务路由。
 app.include_router(users.router, prefix="/api")
 app.include_router(user_logs.router, prefix="/api")
 app.include_router(inventory.router, prefix="/api")
 app.include_router(reagent_orders.router, prefix="/api")
 app.include_router(consumable_orders.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
 app.include_router(user_sessions.router, prefix="/api/users/me")
 app.include_router(cart_sync.router, prefix="/api")
 app.include_router(chemical_info.router, prefix="/api")
@@ -611,6 +621,8 @@ app.include_router(error_logs.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(common_shelf.router, prefix="/api")
 app.include_router(chemical_name_map.router, prefix="/api")
+app.include_router(reagent_brands.router, prefix="/api")
+app.include_router(chem.router, prefix="/api")
 
 
 @app.get("/")
@@ -646,10 +658,13 @@ def robots_txt() -> PlainTextResponse:
 def get_runtime_cache_version(response: Response) -> dict[str, str]:
     """Expose current cache invalidation version for frontend startup checks."""
     response.headers["Cache-Control"] = "no-store"
-    return {"cache_version": settings.cache_version}
+    return {
+        "cache_version": settings.cache_version,
+        "display_utc_offset": settings.display_utc_offset,
+        "display_timezone": get_display_timezone_label(),
+    }
 
-# Import models to ensure tables are created
-# This is needed for SQLModel to register all models
+# 导入模型并完成 SQLModel 表注册。
 from app.models import (  # noqa: E402, F401
     Announcement,
     BorrowLog,
@@ -659,6 +674,7 @@ from app.models import (  # noqa: E402, F401
     CommonShelfOperationLog,
     ConsumableOrder,
     Inventory,
+    ReagentBrand,
     ReagentOrder,
     RuntimeState,
     User,

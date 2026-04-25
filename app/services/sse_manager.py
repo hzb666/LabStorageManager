@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from contextlib import suppress
 import json
 import logging
 import secrets
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Optional
 
 from app.core.constants import (
@@ -17,6 +17,7 @@ from app.core.constants import (
     SSE_CLIENT_QUEUE_MAXSIZE,
     SSE_HEARTBEAT_SECONDS,
     SSE_ORIGIN_TOKEN_HEX_LENGTH,
+    SSE_REPLAY_BUFFER_MAX_EVENTS,
     SSE_REDIS_GET_MESSAGE_TIMEOUT_SECONDS,
     SSE_REDIS_LISTENER_ERROR_RETRY_SECONDS,
     SSE_REDIS_SUBSCRIBE_RETRY_SECONDS,
@@ -24,6 +25,7 @@ from app.core.constants import (
 )
 from app.core.request_utils import get_current_sse_client_id
 from app.core.redis import redis_key, REDIS_KEY_PREFIX
+from app.core.time_utils import get_utc_now, utc_iso_str
 from app.services.sse_redis import redis_pubsub
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,9 @@ class SSERoom:
     name: str
     clients: set[str] = field(default_factory=set)
     fallback_seq: int = 0
+    replay_buffer: deque[dict[str, Any]] = field(
+        default_factory=lambda: deque(maxlen=SSE_REPLAY_BUFFER_MAX_EVENTS)
+    )
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -56,7 +61,7 @@ class SSERoom:
 class SSESubscriptionRequest:
     client_id: str
     rooms: list[str]
-    last_seq: int = 0
+    last_seq_by_room: dict[str, int] = field(default_factory=dict)
     user_id: int | None = None
     session_id: int | None = None
     token_hash: str | None = None
@@ -95,7 +100,6 @@ class SSEManager:
             return self._rooms[room]
 
     async def subscribe(self, request: SSESubscriptionRequest) -> SSEClient:
-        # 保留 last_seq 参数位，后续要补 replay 时不需要改建连协议。
         normalized_rooms = sorted({room.strip() for room in request.rooms if room.strip()})
         if not normalized_rooms:
             normalized_rooms = ["inventory"]
@@ -108,7 +112,7 @@ class SSEManager:
             token_hash=request.token_hash,
         )
         for room in normalized_rooms:
-            client.last_seq_by_room[room] = request.last_seq
+            client.last_seq_by_room[room] = max(0, int(request.last_seq_by_room.get(room, 0)))
 
         async with self._manager_lock:
             self._clients[request.client_id] = client
@@ -126,7 +130,7 @@ class SSEManager:
             async with local_room.lock:
                 local_room.clients.discard(client.client_id)
 
-            # Reclaim empty rooms to avoid unbounded in-memory room growth.
+            # 无客户端房间及时回收，限制内存占用。
             async with self._manager_lock:
                 current_room = self._rooms.get(room)
                 if current_room is not local_room:
@@ -166,7 +170,7 @@ class SSEManager:
             "seq": seq,
             "event": event_type,
             "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": utc_iso_str(get_utc_now()),
             "origin": self._origin,
             "actor_client_id": actor_client_id,
         }
@@ -183,12 +187,49 @@ class SSEManager:
         )
         return local_delivered
 
+    @staticmethod
+    def _build_sse_message(event_type: str, full_event: dict[str, Any]) -> str:
+        payload = json.dumps(full_event, ensure_ascii=False)
+        return f"event: {event_type}\ndata: {payload}\n\n"
+
+    @staticmethod
+    def _replay_sort_key(event: dict[str, Any]) -> tuple[str, str, int]:
+        return (
+            str(event.get("timestamp") or ""),
+            str(event.get("room") or ""),
+            int(event.get("seq") or 0),
+        )
+
+    async def collect_replay_messages(self, client: SSEClient) -> list[str]:
+        replay_events: list[dict[str, Any]] = []
+
+        for room in sorted(client.rooms):
+            last_seq = client.last_seq_by_room.get(room, 0)
+            if last_seq <= 0:
+                continue
+
+            local_room = await self.get_room(room)
+            async with local_room.lock:
+                room_events = list(local_room.replay_buffer)
+
+            replay_events.extend(
+                event
+                for event in room_events
+                if int(event.get("seq") or 0) > last_seq
+            )
+
+        replay_events.sort(key=self._replay_sort_key)
+        return [
+            self._build_sse_message(str(event.get("event") or "message"), event)
+            for event in replay_events
+        ]
+
     async def _push_local(self, room: str, event_type: str, full_event: dict[str, Any]) -> int:
         local_room = await self.get_room(room)
-        payload = json.dumps(full_event, ensure_ascii=False)
-        sse_message = f"event: {event_type}\ndata: {payload}\n\n"
+        sse_message = self._build_sse_message(event_type, full_event)
 
         async with local_room.lock:
+            local_room.replay_buffer.append(dict(full_event))
             client_ids = list(local_room.clients)
 
         delivered = 0
@@ -206,7 +247,7 @@ class SSEManager:
                     client.queue_full_streak = 0
                 delivered += 1
             except asyncio.QueueFull:
-                # Queue full means client is too slow; drop and eventually disconnect.
+                # 队列已满表示客户端过慢，先丢弃事件并累计断开计数。
                 client.dropped_events += 1
                 client.queue_full_streak += 1
                 logger.warning(
@@ -223,7 +264,7 @@ class SSEManager:
         return delivered
 
     async def _disconnect_slow_client(self, client: SSEClient) -> None:
-        # Client may already be disconnected by another coroutine.
+        # 客户端可能已被其他协程断开。
         if self._clients.get(client.client_id) is not client:
             return
 
@@ -259,8 +300,7 @@ class SSEManager:
         client.revoked = True
         client.revoke_reason = reason
 
-        # Drop already-buffered business events so revocation is the next thing the
-        # client sees. Otherwise a kicked session can still consume stale messages.
+        # 清空已缓存业务事件，确保被踢会话下一条收到失效通知。
         with suppress(asyncio.QueueEmpty):
             while True:
                 client.queue.get_nowait()
@@ -287,7 +327,7 @@ class SSEManager:
             "kind": "session_revoked",
             "token_hash": token_hash,
             "reason": reason,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": utc_iso_str(get_utc_now()),
             "origin": self._origin,
         }
         channel = redis_key("sse:control")
@@ -335,7 +375,7 @@ class SSEManager:
         raw_channel = message.get("channel")
         channel = self._decode_pubsub_value(raw_channel)
 
-        # Extract room from channel with prefix: "lsm:sse:room-123" -> "room-123"
+        # 从 Redis channel 前缀中提取 room 名称。
         prefix_pattern = f"{REDIS_KEY_PREFIX}:sse:"
         if channel.startswith(prefix_pattern):
             room = channel[len(prefix_pattern):]
@@ -357,7 +397,7 @@ class SSEManager:
             return None
 
         if event.get("origin") == self._origin:
-            # Already pushed locally by this process.
+            # 本进程已完成本地推送。
             return None
 
         event_type = str(event.get("event") or "message")
@@ -499,7 +539,7 @@ class SSEManager:
     ) -> AsyncGenerator[str, None]:
         try:
             while True:
-                # Stop stream quickly when client is removed (e.g., slow client governance).
+                # 客户端被移除后尽快停止 stream。
                 if self._clients.get(client.client_id) is not client:
                     break
                 if client.revoked and client.queue.empty():

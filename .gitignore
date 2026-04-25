@@ -15,6 +15,7 @@ browser-extension/manifest.json
 browser-extension/shared/generated-config.js
 browser-extension-dist/
 browser-extension/dist/
+browser-extension.zip
 browser-extension/*.zip
 browser-extension/*.crx
 
@@ -30,7 +31,7 @@ __pycache__/
 dist/
 build/
 *.egg
-requirements.txt
+requirements.server.txt
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -112,6 +113,7 @@ scripts/
 .playwright-cli/
 
 # Others
+output/
 plans/
 static/
 report/

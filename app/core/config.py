@@ -9,7 +9,7 @@ from typing import Annotated, Any, List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode
-from app.core.constants import CAS_PATTERN, RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
+from app.core.constants import RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     cache_version: str = ""
     debug: bool = False
     env: str = "development"  # 生产部署通过 ENV=production 覆盖
+    display_utc_offset: str = Field(
+        default="+08:00",
+        description="Fixed UTC offset used for exports/downloads/non-browser-rendered time text",
+    )
     
     # 数据库
     database_url: str = "sqlite:///./lab_inventory.db"
@@ -83,7 +87,7 @@ class Settings(BaseSettings):
     private_key_path: str = Field(default=".keys/private.pem", description="JWT private key path")
     public_key_path: str = Field(default=".keys/public.pem", description="JWT public key path")
     
-    # CORS
+    # 跨域配置。
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
     trust_proxy_headers: bool = Field(
         default=False,
@@ -130,8 +134,60 @@ class Settings(BaseSettings):
     redis_password: Optional[str] = Field(default=None, description="Redis password")
     redis_key_prefix: str = Field(default="lsm", description="Redis key prefix for app namespace")
     
-    # CAS 设置
-    cas_pattern: str = CAS_PATTERN
+    # 化学结构缓存与检索
+    chem_structure_feature_enabled: bool = Field(
+        default=True,
+        description="Enable local structure cache and substructure search features",
+    )
+    chem_resolver_pubchem_enabled: bool = Field(
+        default=True,
+        description="Enable explicit PubChem CAS structure resolution flows",
+    )
+    chem_pubchem_rate_limit_per_second: float = Field(
+        default=2.0,
+        gt=0,
+        le=5,
+        description="Conservative PubChem PUG-REST request rate limit",
+    )
+    chem_pubchem_timeout_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        description="HTTP timeout for PubChem PUG-REST requests",
+    )
+    chem_pubchem_max_retries: int = Field(
+        default=3,
+        ge=0,
+        le=5,
+        description="Retry count for PubChem 429, 5xx, and timeout failures",
+    )
+    chem_pubchem_user_agent: str = Field(
+        default="LabStorageManager/0.1.0",
+        description="User-Agent sent to PubChem PUG-REST",
+    )
+    chem_structure_search_max_results: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Preview result upper bound returned by structure search APIs",
+    )
+    chem_structure_search_concurrency: int = Field(
+        default=3,
+        ge=1,
+        le=8,
+        description="Maximum concurrent RDKit structure searches per backend process",
+    )
+    chem_structure_search_cache_ttl_seconds: int = Field(
+        default=43_200,
+        ge=60,
+        le=86_400,
+        description="TTL for cached structure search result tokens",
+    )
+    chem_structure_search_cache_max_entries: int = Field(
+        default=128,
+        ge=1,
+        le=1024,
+        description="Maximum in-memory cached structure search result sets",
+    )
     
     # 小牛翻译 API
     niutrans_appid: str = Field(default="", description="Niutrans API appId")
@@ -184,6 +240,40 @@ class Settings(BaseSettings):
         if stripped.isdigit():
             return int(stripped)
         raise ValueError("ARCHIVE_RUN_WEEKDAY must use 0-6 or weekday name")
+
+    @field_validator("display_utc_offset", mode="before")
+    @classmethod
+    def parse_display_utc_offset(cls, value: Any) -> str:
+        if value is None:
+            return "+08:00"
+        if not isinstance(value, str):
+            raise ValueError("DISPLAY_UTC_OFFSET must be a string")
+
+        stripped = value.strip()
+        if not stripped:
+            return "+08:00"
+
+        sign = stripped[0]
+        if sign not in {"+", "-"}:
+            raise ValueError("DISPLAY_UTC_OFFSET must start with + or -")
+
+        body = stripped[1:]
+        if ":" in body:
+            hour_text, minute_text = body.split(":", 1)
+        else:
+            hour_text, minute_text = body, "00"
+
+        if not hour_text.isdigit() or not minute_text.isdigit():
+            raise ValueError("DISPLAY_UTC_OFFSET must use digits like +8 or +08:00")
+
+        hours = int(hour_text)
+        minutes = int(minute_text)
+        if hours > 14 or minutes >= 60:
+            raise ValueError("DISPLAY_UTC_OFFSET must be within UTC-14:00 to UTC+14:00")
+        if hours == 14 and minutes != 0:
+            raise ValueError("DISPLAY_UTC_OFFSET must be within UTC-14:00 to UTC+14:00")
+
+        return f"{sign}{hours:02d}:{minutes:02d}"
 
     @field_validator("allowed_image_types", mode="before")
     @classmethod

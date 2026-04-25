@@ -39,10 +39,11 @@ def create_manual_inventory_items(
     except SpecificationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    optional_string_fields = ["storage_location", "category", "brand", "english_name", "alias", "purity", "notes"]
+    optional_string_fields = ["storage_location", "category", "english_name", "alias", "purity", "notes"]
     string_fields = empty_to_none(item_data, optional_string_fields)
     normalized_storage_location = normalize_storage_location(string_fields["storage_location"])
     string_fields["storage_location"] = normalized_storage_location
+    temporary_keeper_id = created_by_id if normalized_storage_location is None else None
 
     pinyin_fields = compute_pinyin_fields(
         name=item_data.name,
@@ -67,7 +68,7 @@ def create_manual_inventory_items(
                     english_name=string_fields["english_name"],
                     alias=string_fields["alias"],
                     category=string_fields["category"],
-                    brand=string_fields["brand"],
+                    brand=item_data.brand,
                     purity=string_fields["purity"],
                     storage_location=string_fields["storage_location"],
                     initial_quantity=per_bottle_value,
@@ -78,6 +79,7 @@ def create_manual_inventory_items(
                     notes=string_fields["notes"],
                     status=InventoryStatus.IN_STOCK,
                     created_by_id=created_by_id,
+                    temporary_keeper_id=temporary_keeper_id,
                     **pinyin_fields,
                 )
                 db.add(db_inventory)
@@ -86,7 +88,7 @@ def create_manual_inventory_items(
             db.flush()
             return created_items
         except IntegrityError as exc:
-            # Full rollback is required here because this path does not use nested savepoints.
+            # 当前路径没有嵌套 savepoint，冲突后需要回滚整个事务。
             db.rollback()
             if not is_internal_code_unique_violation(exc):
                 raise

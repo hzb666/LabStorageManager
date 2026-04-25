@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useForm } from "react-hook-form";
 import type { UseFormReturn } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { ScanSearch } from "lucide-react";
 
 import {
@@ -14,6 +15,7 @@ import {
 } from "@/api/client";
 import { useReagentCasDuplicateCheck } from "@/hooks/useReagentCasDuplicateCheck";
 import { REAGENT_STATUS_MAP } from "@/lib/constants";
+import { getReagentBrandOptionsQueryOptions } from "@/lib/reagentBrandOptions";
 import {
   defaultConsumableOrderValues,
   defaultReagentOrderValues,
@@ -90,6 +92,7 @@ async function autofillCartImportEnglishName(
 }
 
 function createCartImportReagentFormFields(params: {
+  brandOptions: { label: string; value: string }[];
   checkCASWarning: (
     casNumber: string,
     options?: { force?: boolean },
@@ -97,8 +100,8 @@ function createCartImportReagentFormFields(params: {
   handleCasLookup: () => Promise<void>;
   isCasLookupLoading: boolean;
 }) {
-  const { checkCASWarning, handleCasLookup, isCasLookupLoading } = params;
-  return enhanceCasLookupField(getReagentOrderFormFields(), {
+  const { brandOptions, checkCASWarning, handleCasLookup, isCasLookupLoading } = params;
+  return enhanceCasLookupField(getReagentOrderFormFields({ brandOptions }), {
     onCasBlur: checkCASWarning,
     prefixButton: {
       onClick: handleCasLookup,
@@ -298,6 +301,7 @@ function useCartImportReagentFormState(params: {
   >;
 }) {
   const { currentItem, orderType, reagentForm } = params;
+  const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions());
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false);
   const {
     casWarning,
@@ -391,11 +395,12 @@ function useCartImportReagentFormState(params: {
   const reagentFormFields = useMemo(
     () =>
       createCartImportReagentFormFields({
+        brandOptions,
         checkCASWarning,
         handleCasLookup,
         isCasLookupLoading,
       }),
-    [checkCASWarning, handleCasLookup, isCasLookupLoading],
+    [brandOptions, checkCASWarning, handleCasLookup, isCasLookupLoading],
   );
 
   return {
@@ -423,7 +428,7 @@ async function submitCartImportReagentForm(
         english_name: formData.english_name || undefined,
         alias: formData.alias || undefined,
         category: formData.category || undefined,
-        brand: formData.brand || undefined,
+        brand: formData.brand,
         specification: normalizeReagentSpecification(formData.specification),
         quantity: formData.quantity,
         price: formData.price,

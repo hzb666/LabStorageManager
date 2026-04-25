@@ -12,7 +12,7 @@
 </p>
 
 
-面向实验室场景的试剂与耗材管理系统，覆盖申购、审批、到货、入库、借用、归还、公告、设备会话管理等完整流程。项目采用 FastAPI + React 前后端分离架构，适合单实验室或中小团队快速部署。
+面向实验室场景的试剂与耗材管理系统，覆盖申购、审批、到货、入库、借用、归还、公告、设备会话管理和受控自动化入口。项目采用 FastAPI + React 前后端分离架构，适合单实验室或中小团队快速部署，也适合通过 CLI、Agent skill、MCP、智能机器人和浏览器插件接入日常流程。
 
 ## 目录
 
@@ -54,20 +54,26 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
   试剂支持 CAS 号、到货确认、一键入库；耗材支持独立订单流程与完成态管理。
 - CAS 防重与库存预警
   申购时可按 CAS 查询现有库存和历史订单，降低重复购买概率。
+- 试剂品牌主数据
+  试剂订单、库存和待入库表单共享品牌选项，支持拼音搜索、软删除和操作日志记录。
 - 中文拼音检索与 FTS 搜索
   名称、分类、品牌、位置等字段会预计算拼音，并结合 SQLite FTS5 提供搜索能力。
 - 库存借还闭环
   支持借出、归还、借用历史、当前借用人、临时保管人等字段。
+- 仪表盘与管理看板
+  个人模式展示订单、借用和待入库待办；成员看板展示公告、运行统计、个人待处理、订单概览、近期到货/入库和库存告警；管理员管理模式展示全局待办、风险提醒、库存告警和管理表格；公用账户展示公告和全局窗口统计。
 - 常用货架与常用试剂
   支持常用货架分组、CAS 主数据、位置统计、加瓶和扣减。
 - 用户、设备、会话治理
   支持 HttpOnly Cookie 登录、设备列表、批量注销、IP/设备数量限制。
 - 公告与图片上传
-  公告支持图片，图片文件落地到 `static/`，并受尺寸、类型、上传频率控制。
-- CLI 与脚本入口
-  提供 `python -m lsm_cli` 命令行入口，适合脚本任务和无 UI 场景操作。
-- MCP 与企业微信入口
-  提供受控 MCP 工具面，支持企业微信智能机器人和微信客服查询链路。
+  公告支持图片，文件保存到 `static/` 运行目录，经 `/static/` 访问；数据库只保留 URL，并受尺寸、类型、上传频率控制。
+- 化学结构检索
+  可选启用本地结构缓存、PubChem 解析、Ketcher 绘制和子结构检索。
+- CLI、Agent skill 与脚本入口
+  提供 `python -m lsm_cli` 命令行入口，供脚本、Agent skill 和无 UI 场景在受控命令面内操作。
+- MCP、智能机器人与浏览器插件
+  MCP 通过 CLI 子进程工作；企业微信智能机器人、微信客服和浏览器插件都回到标准 API 与确认流程。
 - 部署简单
   内置 Docker Compose，可快速拉起 `frontend + backend + redis`。
 
@@ -78,9 +84,9 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
 | 后端 | FastAPI, SQLModel, SQLite, Redis, python-jose, bcrypt, Pillow, pypinyin |
 | 前端 | React 19, TypeScript 5.9, Vite 8, React Router 7, Zustand, React Hook Form, Valibot |
 | UI | Radix UI, Tailwind CSS 4, Lucide React, Framer Motion |
-| 表格与数据 | TanStack Table 8, TanStack Virtual, Axios |
-| 化学相关 | RDKit（前端分子结构渲染） |
-| 自动化入口 | `lsm_cli`, `lsm_mcp`, 企业微信智能机器人, 微信客服 |
+| 表格与数据 | TanStack Table 8, TanStack Virtual, TanStack Query 5, Axios |
+| 化学相关 | RDKit, Ketcher, PubChem 解析, 本地结构缓存 |
+| 自动化入口 | `lsm_cli`, Agent skill, `lsm_mcp`, 企业微信智能机器人, 微信客服, 浏览器插件 |
 | 构建与校验 | Poetry, npm, ruff, ESLint, TypeScript build |
 | 部署 | Docker Compose, Nginx, Uvicorn |
 
@@ -88,7 +94,7 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
 
 ### 1. 前置要求
 
-建议本地环境：
+本地环境：
 
 - Python 3.11+
 - Node.js 20+
@@ -120,11 +126,17 @@ cd ..
 
 ### 5. 创建环境变量文件
 
-```bash
-# Windows PowerShell
-Copy-Item .env.example .env
+以 `.env.example` 为模板准备本地运行配置。该配置文件只用于当前环境，不纳入版本库。
 
-# macOS / Linux
+PowerShell：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Bash：
+
+```bash
 cp .env.example .env
 ```
 
@@ -132,23 +144,23 @@ cp .env.example .env
 
 | 变量 | 说明 |
 | --- | --- |
-| `ENV` | 本地开发建议 `development` |
+| `ENV` | 本地开发使用 `development` |
 | `CORS_ORIGINS` | 前端地址白名单，开发时通常为 `http://localhost:5173` |
 | `DEFAULT_ADMIN_PASSWORD` | 必填；后端首次启动会用它初始化管理员 |
 | `ALGORITHM` | 默认 `RS256` |
-| `DATABASE_URL` | 主库 SQLite 连接串 |
+| `DATABASE_URL` | 主库 SQLite 连接串，必须指向文件型 SQLite；本地示例默认 `sqlite:///./lab_inventory.db`，Docker Compose 默认写入 `/data/lab_inventory.db` |
 | `QUERY_LOG_DIR` | 搜索日志库目录 |
 
-开发环境建议：
+开发环境配置：
 
 - 将 `ENV=development`
-- 把 `CORS_ORIGINS` 改成你的前端地址
+- 将 `CORS_ORIGINS` 改为当前前端地址
 - 首次启动前设置 `DEFAULT_ADMIN_PASSWORD`
 
 说明：
 
 - 当 `ENV=development` 且本地还没有 RSA 密钥时，后端可自动生成临时密钥对。
-- 当 `ENV=production` 时，`ALGORITHM` 必须为 `RS256`，并且 `.keys/private.pem` / `.keys/public.pem` 必须可用。
+- 当 `ENV=production` 时，`ALGORITHM` 必须为 `RS256`，并且 RSA 私钥与公钥路径必须可用。
 
 ### 6. 启动后端
 
@@ -193,9 +205,9 @@ npm run dev
 
 | 变量 | 示例值 | 说明 |
 | --- | --- | --- |
-| `DATABASE_URL` | `sqlite:///./lab_inventory.db` | 主库 SQLite 连接串；Compose 生产默认 `/data/lab_inventory.db` |
-| `QUERY_LOG_DIR` | `logs` | 搜索日志库目录；Compose 生产默认 `/data/logs` |
-| `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署建议 true；本地开发或无可信反代时设为 false |
+| `DATABASE_URL` | `sqlite:///./lab_inventory.db` | 主库 SQLite 连接串；本地默认写入项目根目录，Docker Compose 默认覆盖为 `sqlite:////data/lab_inventory.db` |
+| `QUERY_LOG_DIR` | `logs` | 搜索日志库目录；Docker Compose 默认覆盖为 `/data/logs` |
+| `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署设为 true；本地开发或无可信反代时设为 false |
 | `CACHE_VERSION` | `0.1.0` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | 登录态默认 7 天 |
 | `SESSION_EXPIRE_HOURS` | `72` | 会话有效期 |
@@ -244,6 +256,18 @@ npm run dev
 | `NIUTRANS_APPID` | 空 | 牛翻 API AppID；未配置时不启用 |
 | `NIUTRANS_APIKEY` | 空 | 牛翻 API Key；未配置时不启用 |
 
+### 化学结构检索
+
+| 变量 | 示例值 | 说明 |
+| --- | --- | --- |
+| `CHEM_STRUCTURE_FEATURE_ENABLED` | `true` | 是否启用结构缓存和子结构检索接口 |
+| `CHEM_RESOLVER_PUBCHEM_ENABLED` | `true` | 是否允许通过 PubChem 解析 CAS 结构 |
+| `CHEM_PUBCHEM_RATE_LIMIT_PER_SECOND` | `2` | PubChem 请求速率上限 |
+| `CHEM_PUBCHEM_TIMEOUT_SECONDS` | `20` | PubChem 请求超时 |
+| `CHEM_PUBCHEM_MAX_RETRIES` | `3` | PubChem 失败重试次数 |
+| `CHEM_PUBCHEM_USER_AGENT` | `LabStorageManager/0.1.0` | 发送到 PubChem 的 User-Agent |
+| `CHEM_STRUCTURE_SEARCH_MAX_RESULTS` | `100` | 子结构检索默认结果上限 |
+
 ### JWT 与密钥
 
 | 变量 | 说明 |
@@ -272,6 +296,9 @@ cd frontend
 # 开发启动
 npm run dev
 
+# 生成带版本号的 RDKit 和本地字体资源映射
+npm run generate:static-assets
+
 # Lint
 npm run lint
 
@@ -294,9 +321,7 @@ docker compose logs -f frontend
 docker compose logs -f redis
 ```
 
-Compose 默认把主库写入 `/data/lab_inventory.db`，搜索日志库写入 `/data/logs/query_logs.db`，
-两者都在 `app_data` volume 中。备份 SQLite 主库前建议先做 checkpoint，或同时备份
-`lab_inventory.db`、`lab_inventory.db-wal`、`lab_inventory.db-shm`。
+Compose 默认把主库、搜索日志库、上传文件和密钥放在持久化 volume 中。备份 SQLite 主库前先做 checkpoint，并保证主库及其 WAL/SHM 伴随文件处于同一备份批次。
 
 ## CLI 支持
 
@@ -365,6 +390,7 @@ React 19 + Vite + Axios
         v
 FastAPI
   |- Auth / Session
+  |- Dashboard
   |- Inventory
   |- Reagent Orders
   |- Consumable Orders
@@ -372,7 +398,7 @@ FastAPI
   |- Event Stream
         |
         v
-SQLite (WAL) + Redis + static/
+SQLite (WAL) + Redis + /static/
 
 WeCom / WeChat KF
         |
@@ -384,7 +410,7 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
 
 - 使用 `FastAPI` 暴露 API，开发模式下提供 Swagger/ReDoc。
 - `SQLite` 在每个连接上都会显式开启 `PRAGMA journal_mode=WAL`。
-- 数据库初始化时会自动创建表、性能索引、FTS 表与触发器，并检查 schema 一致性。
+- 数据库初始化由 `app/database.py` 编排，`app/db_bootstrap/` 负责 schema 补齐、性能索引、FTS 表、触发器和一致性检查。
 - 全局中间件处理以下问题：
   - 请求日志与 `X-Request-ID`
   - 上传请求体积限制
@@ -403,6 +429,7 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
   - 库存
   - 公共货架
   - 导入页
+  - 结构检索
   - 设备管理
   - 用户管理
   - 公告管理
@@ -419,17 +446,18 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
 
 | Key | 用途 |
 | --- | --- |
-| `app-ui` | 主题、字体来源、Dashboard 页签、公告已读/关闭、Bug 按钮隐藏 |
-| `app-table` | 表格 `expandAll`、`fuzzySearch`、列宽 |
+| `app-ui` | 主题、字体来源、仪表盘页签与模式偏好、公告已读/关闭、Bug 按钮隐藏 |
+| `app-table` | 表格 `expandAll`、`fuzzySearch`、`matchMode`、列宽 |
 | `app-auth-meta` | 设备 `id/name`、remembered user |
+| `runtime-time-config` | 后端返回的展示时区和 UTC 偏移 |
 | `auth-storage` | Zustand 登录态持久化，带 TTL |
 | `sidebar-storage` | Zustand 侧栏状态持久化，带 TTL |
 | `chemical_properties_cache` | 化学属性缓存，独立长 TTL |
-| `cart_import_batch_latest` | 扩展导入桥接批次，2 小时 TTL |
+| `cart_import_batch_latest` | 浏览器插件导入桥接批次，2 小时 TTL |
 
 ### 搜索与性能
 
-- `inventory`、`reagent_order`、`consumable_order`、`users`、`chemical_name_map` 建有 SQLite FTS5 虚表。
+- `inventory`、`reagent_order`、`consumable_order`、`users`、`chemical_name_map`、`log_timeline` 建有 SQLite FTS5 虚表。
 - 名称、拼音、拼音首字母等字段会被索引，便于中文检索。
 - 大量列表查询配套了状态、申请人、时间、公共货架等复合索引。
 
@@ -441,7 +469,7 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
 
 这是并发读写的基础约束，项目在数据库连接层已强制设置。
 
-### 2. 订单到库存是 Copy，不是 Move
+### 2. 订单到库存采用 Copy 语义
 
 试剂一键入库时会根据订单生成库存记录，但订单本身保留，用于审计和回溯。
 
@@ -472,12 +500,12 @@ CAS 号等关键字段会在服务端清洗，避免由于大小写、空格、�
 .
 ├── app/                  # FastAPI 后端
 ├── frontend/             # React 前端
-├── browser-extension/    # 浏览器扩展，用于购物车导入等场景
+├── browser-extension/    # 浏览器插件，用于购物车导入等场景
 ├── docker/               # Dockerfile、Nginx、入口脚本
 ├── lsm_cli/              # 本地命令行客户端
 ├── lsm_mcp/              # 受控 MCP 工具服务
 ├── robot/                # 企业微信智能机器人与微信客服入口
-├── static/               # 图片与静态文件
+├── static/               # 上传图片与静态文件运行目录
 ├── wiki/                 # VitePress 知识库源码
 ├── docker-compose.yml    # 一体化部署编排
 ├── pyproject.toml        # 后端依赖与工具配置
@@ -489,21 +517,26 @@ CAS 号等关键字段会在服务端清洗，避免由于大小写、空格、�
 ```text
 app/
 ├── main.py               # FastAPI 入口、中间件、路由装配
-├── database.py           # SQLModel 引擎、WAL、FTS、索引初始化
+├── database.py           # SQLModel 引擎、WAL 与初始化编排
+├── db_bootstrap/         # SQLite schema、索引、FTS 与一致性检查
 ├── api/                  # 路由层
 ├── core/                 # 配置、认证、常量、请求工具
 ├── models/               # SQLModel 数据模型
 └── services/             # 业务服务
 ```
 
+仪表盘聚合逻辑位于 `app/services/dashboard/`，覆盖汇总分发、item 构造、指标统计和通用 builder。
+
 主要接口模块：
 
 - `users.py`
 - `user_sessions.py`
 - `user_logs.py`
+- `dashboard.py`
 - `inventory.py`
 - `reagent_orders.py`
 - `consumable_orders.py`
+- `reagent_brands.py`
 - `announcements.py`
 - `cart_sync.py`
 - `events.py`
@@ -516,12 +549,14 @@ app/
 ```text
 frontend/src/
 ├── api/                  # Axios API 封装
-├── components/           # UI 组件
+├── components/           # UI 组件、业务组件、结构检索与日志详情组件
 ├── hooks/                # 自定义 hooks
-├── lib/                  # 工具、常量、校验
+├── lib/                  # 工具、常量、校验、品牌选项与本地存储
 ├── pages/                # 页面级组件
 └── store/                # Zustand 状态管理
 ```
+
+仪表盘入口为 `frontend/src/pages/Dashboard.tsx`，辅助文件集中在 `frontend/src/pages/dashboard/`。
 
 ## 部署说明
 
@@ -540,7 +575,7 @@ frontend/src/
 ```bash
 git clone <your-repo-url> LabStorageManager
 cd LabStorageManager
-cp .env.example .env
+Copy-Item .env.example .env
 ```
 
 至少修改：
@@ -551,7 +586,7 @@ cp .env.example .env
 
 如果 Redis 仅监听 `127.0.0.1` 或 Compose 内网，可让 `REDIS_PASSWORD` 为空；Redis 对外监听或跨机器访问时必须设置强密码。
 
-如果保持默认 `ALGORITHM=RS256`，首次启动前需要在 Compose 的持久化卷里生成密钥：
+如果保持默认 `ALGORITHM=RS256`，首次启动前需要在 Compose 的持久化卷里生成 RSA 密钥：
 
 ```bash
 docker compose run --rm --entrypoint sh backend -c \
@@ -560,8 +595,7 @@ docker compose run --rm --entrypoint sh backend -c \
    openssl rsa -in /data/keys/private.pem -pubout -out /data/keys/public.pem'
 ```
 
-后端启动时会把 `/data/keys` 映射到容器内的 `/app/.keys`，与 `.env` 中的
-`PRIVATE_KEY_PATH=.keys/private.pem`、`PUBLIC_KEY_PATH=.keys/public.pem` 对齐。
+后端启动时会把持久化密钥目录映射到应用内路径，并读取 `PRIVATE_KEY_PATH` 与 `PUBLIC_KEY_PATH`。
 
 然后启动：
 
@@ -579,9 +613,10 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 
 说明：
 
-- 前端镜像基于 `node:20-alpine` 构建，运行层是 `nginx:1.27-alpine`。
+- 前端镜像基于 `node:20-alpine` 构建，运行层是安装 Nginx 与 Brotli 模块的 Alpine 镜像。
 - 后端镜像基于 `python:3.11-slim`，使用 `uvicorn` 启动。
 - Compose 会把 Redis 地址注入为容器内部服务名 `redis`。
+- Compose 的 `app_data` volume 挂载到容器 `/data`，默认保存 `/data/lab_inventory.db`、`/data/logs`、`/data/static` 和 `/data/keys`。
 
 ### 方案二：本地前后端分开
 
@@ -604,7 +639,7 @@ npm ci
 npm run build
 ```
 
-将 `frontend/dist` 放到 Nginx 站点根目录。浏览器扩展需要单独设置 `browser-extension/.env` 后执行 `npm run build:extension`。
+将 `frontend/dist` 放到 Nginx 站点根目录。浏览器插件需要单独设置 `browser-extension/.env` 后执行 `npm run build:extension`。
 
 后端安装与启动：
 
@@ -612,31 +647,32 @@ npm run build
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install --only-binary=:all: -r requirements.txt
+poetry install --without dev,scripts --no-root
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-根目录不要执行 `pip install .`；当前仓库根 `pyproject.toml` 使用非包模式，生产依赖应通过本地已导出的 `requirements.txt` 安装。
+当前仓库根 `pyproject.toml` 使用非包模式，生产运行应按 Poetry 依赖清单安装后直接启动 ASGI 应用。
 
 ## 附属模块
 
-### 浏览器扩展
+### 浏览器插件
 
 仓库包含 `browser-extension/`，用于浏览器侧导入或购物车同步相关场景。后端提供了 `/cart-import` 路由，会将入口跳转到前端页面。
 
-`browser-extension/manifest.json` 和 `browser-extension/shared/generated-config.js` 是构建期文件，不提交到 Git。生产部署扩展前，先设置 `browser-extension/.env` 中的系统域名，再运行：
+`browser-extension/manifest.json` 和 `browser-extension/shared/generated-config.js` 是构建期文件，不提交到 Git。生产部署浏览器插件前，先准备插件构建配置，再运行：
 
 ```bash
 npm run build:extension
 ```
 
-### MCP 与机器人
+### Agent skill、MCP 与机器人
 
-`lsm_mcp/` 通过 `python -m lsm_cli` 暴露受控 MCP 工具，不直接访问数据库。企业微信智能机器人和微信客服入口位于 `robot/`，查询和借还流程都通过 MCP、CLI 与后端 API 完成。
+Agent skill、`lsm_mcp/` 和 `robot/` 都应通过 `python -m lsm_cli` 或安装后的 `lsm` 命令进入系统，不直接访问数据库。企业微信智能机器人和微信客服入口位于 `robot/`，查询和借还流程都通过 MCP、CLI 与后端 API 完成。
 
-### 公告图片与静态资源
+### 公告图片与 `/static/`
 
-- 静态资源默认挂载在 `/static`
+- 上传目录是仓库运行时 `static/`，Compose 中对应 `/data/static`
+- 公开访问路径默认挂载在 `/static/`
 - 响应头附带缓存控制
 - 图片安全头由后端统一补齐
 
@@ -644,15 +680,15 @@ npm run build:extension
 
 ### 启动时报 `DEFAULT_ADMIN_PASSWORD must be set`
 
-原因：
+判断：
 未设置默认管理员密码。
 
 处理：
-在 `.env` 中补充 `DEFAULT_ADMIN_PASSWORD` 后重启后端。
+在本地运行配置中补充 `DEFAULT_ADMIN_PASSWORD` 后重启后端。
 
 ### 生产环境访问 `/docs` 为 404
 
-原因：
+判断：
 生产模式默认关闭 API 文档。
 
 处理：
@@ -660,7 +696,7 @@ npm run build:extension
 
 ### 登录后立刻掉线或 Cookie 不生效
 
-原因：
+判断：
 
 - `CORS_ORIGINS` 未正确配置
 - 浏览器与后端地址不匹配
@@ -690,7 +726,7 @@ npm run build:extension
 
 - 文件类型是否在 `ALLOWED_IMAGE_TYPES`
 - 请求体是否超过 `MAX_UPLOAD_REQUEST_SIZE_MB`
-- 单图是否超过限制或服务器目录无写权限
+- 单图是否超过限制，或 `static/`、`/data/static` 目录无写权限
 
 ### 搜索结果异常或性能下降
 
@@ -710,6 +746,7 @@ CLI 面向脚本化操作提供稳定命令面。脚本化操作应通过 `pytho
 - 需要通过 CLI 创建或更新试剂订单、确认到货、一键入库
 - 需要通过 CLI 创建、更新或完成耗材订单
 - 需要通过 CLI 查询常用货架或 CAS 主数据
+- 需要让 Agent skill、MCP 或智能机器人复用稳定命令面
 - 需要避免 raw HTTP、数据库直连、直接导入后端模块
 
 ### 硬限制

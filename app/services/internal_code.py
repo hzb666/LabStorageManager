@@ -16,7 +16,7 @@ from app.core.db_compat import SQLITE_SUPPORTS_RETURNING
 from app.core.time_utils import get_utc_now
 from app.models.inventory import Inventory
 
-# UPDATE ... RETURNING requires SQLite >= 3.35.0
+# UPDATE ... RETURNING 需要 SQLite >= 3.35.0。
 _SQLITE_SUPPORTS_RETURNING = SQLITE_SUPPORTS_RETURNING
 
 INTERNAL_CODE_CONFLICT_MAX_RETRIES = 3
@@ -98,7 +98,7 @@ def _extract_scalar(result_row: object) -> int:
 
 
 def _ensure_internal_code_sequence_table(session: Session) -> None:
-    # Use lazy bootstrap so runtime can upgrade old DBs without a separate migration release.
+    # 懒加载建表让旧库在运行时补齐序列表。
     session.exec(text(_INTERNAL_CODE_SEQUENCE_TABLE_SQL))
 
 
@@ -122,7 +122,7 @@ def _reserve_sequence_range(
     prefix: str,
     quantity: int,
 ) -> int:
-    # Reserve the whole range in one atomic operation to avoid check-then-insert races.
+    # 单次原子更新预留整段序号，消除先查后写竞争。
     _ensure_internal_code_sequence_table(session)
     _seed_sequence_prefix(session, prefix=prefix)
     if _SQLITE_SUPPORTS_RETURNING:
@@ -147,7 +147,7 @@ def _reserve_sequence_range(
             raise ValueError("internal code sequence limit reached")
         return _extract_scalar(reserved_row)
     else:
-        # Fallback for SQLite < 3.35: UPDATE then SELECT within the same transaction.
+        # SQLite < 3.35 在同一事务内先 UPDATE 再 SELECT。
         result = session.exec(
             text(
                 """
@@ -195,8 +195,7 @@ def generate_internal_code(
     Returns:
         List of internal codes (e.g., ["64175-250113-001", "64175-250113-002"])
     """
-    # Validate CAS number to prevent SQL injection
-    # CAS should only contain digits and hyphens
+    # CAS 仅允许数字和连字符，阻断异常 SQL 输入。
     if not re.match(r"^[0-9-]+$", cas_number):
         raise ValueError(f"Invalid CAS number format: {cas_number}")
     if quantity <= 0:

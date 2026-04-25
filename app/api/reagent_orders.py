@@ -1,12 +1,9 @@
-# 试剂订单 API 路由：试剂申购流程管理。
-# 与耗材订单分离，支持独立工作流。
 import logging
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
@@ -20,6 +17,7 @@ from app.core.constants import (
     SSERoom,
 )
 from app.core.time_utils import get_utc_now
+from app.models import BaseResponse
 from app.models.user import User, UserRole
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import (
@@ -42,15 +40,10 @@ from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
     build_applicant_id_subquery,
-    build_cas_search_clause,
-    build_date_search_clause,
-    build_text_search_clause,
     classify_cas_search,
-    collect_search_fields,
-    combine_or_clauses,
 )
 from app.services.user_utils import batch_get_user_names
-from app.services.sql_utils import normalize_search_term, order_with_nulls_last
+from app.services.sql_utils import order_with_nulls_last
 from app.services.sql_utils import order_with_special_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
@@ -59,36 +52,51 @@ from app.services.api_utils import (
     normalize_pagination,
     set_cached_result,
 )
-from app.services.order_fts import (
-    OrderFTSError,
-    build_order_fts_id_clause,
-    build_order_fts_rowid_subquery,
-    should_use_order_fts,
+from app.services.order_list_search import (
+    OrderListSearchConfig,
+    apply_order_list_single_field_search,
+    build_order_list_all_search_clause,
+    build_order_list_fts_state,
+    normalize_order_list_search_value,
 )
 from app.services.inventory_queries import regular_inventory_query
 from app.services.sse_manager import sse_manager
+from app.services.export_rate_limit import EXPORT_SCOPE_REAGENT_ORDERS, enforce_export_rate_limit
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.services.order_operation_logger import (
     log_reagent_order_create,
+    log_reagent_order_export,
     log_reagent_order_update,
+)
+from app.services.order_status_times import (
+    get_order_status_time_fields,
+    get_reagent_order_status_times,
 )
 from app.services.search_query_log_service import (
     buffer_search_log,
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.api.reagent_orders_workflow import register_workflow_routes
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
 logger = logging.getLogger(__name__)
 
-# ==================== Search Cache ====================
+# ==================== 搜索缓存 ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 LIST_CACHE_PREFIX = "list:"
 VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
+REAGENT_ORDER_EDITABLE_STATUSES = frozenset(
+    {ReagentOrderStatus.PENDING, ReagentOrderStatus.REJECTED}
+)
+REAGENT_ORDER_ADMIN_EDITABLE_STATUSES = frozenset(
+    {*REAGENT_ORDER_EDITABLE_STATUSES, ReagentOrderStatus.APPROVED}
+)
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
+REAGENT_ORDER_CAS_SEARCH_KEYS = frozenset({"cas", "cas_number"})
 VALID_REAGENT_SORT_FIELDS = {
     "cas_number",
     "name",
@@ -131,27 +139,16 @@ REAGENT_ORDER_SEARCH_FTS_FIELD_MAP = {
     'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
     'category': ["category", "category_pinyin", "category_pinyin_initials"],
 }
-
-
-@dataclass(frozen=True)
-class ReagentOrderFTSState:
-    # 封装试剂订单 FTS 构建结果，减少主筛选函数的分支和临时变量。
-
-    fts_clause: Any
-    fts_rowid_subquery: Any
-
-
-@dataclass(frozen=True)
-class ReagentOrderSingleFieldSearchOptions:
-    # 封装试剂订单单字段搜索参数，避免 helper 参数过多。
-
-    search_field: Optional[str]
-    search_value: str
-    fuzzy: bool
-    match_mode: TextMatchMode
-    applicant_id_subquery: Any
-    cas_exact_or_prefix: bool
-    fts_clause: Any
+REAGENT_ORDER_SEARCH_CONFIG = OrderListSearchConfig(
+    id_column=ReagentOrder.id,
+    applicant_id_column=ReagentOrder.applicant_id,
+    created_at_column=ReagentOrder.created_at,
+    sql_field_map=REAGENT_ORDER_SEARCH_SQL_FIELD_MAP,
+    fts_field_map=REAGENT_ORDER_SEARCH_FTS_FIELD_MAP,
+    applicant_search_keys=frozenset(APPLICANT_SEARCH_KEYS),
+    cas_search_keys=REAGENT_ORDER_CAS_SEARCH_KEYS,
+    cas_column=ReagentOrder.cas_number,
+)
 
 
 class ReagentOrderListQuery(BaseModel):
@@ -168,8 +165,37 @@ class ReagentOrderListQuery(BaseModel):
     sort_order: Optional[str] = "desc"
 
 
+class CASOverviewOrderResponse(BaseResponse):
+    id: int
+    name: str
+    applicant_name: str | None
+    specification: str
+    created_at: datetime
+    status: str
+
+
+class CASOverviewInventoryResponse(BaseResponse):
+    id: int
+    remaining_quantity: float | None
+    specification: str
+    storage_location: str | None
+    created_at: datetime
+    status: str
+    borrower_name: str | None
+
+
+class CASOverviewResponseModel(BaseResponse):
+    cas_number: str
+    preferred_name: str | None
+    preferred_name_source: str | None
+    display_name: str | None = None
+    has_warning: bool
+    orders: dict[str, int | CASOverviewOrderResponse | None]
+    inventory: dict[str, int | CASOverviewInventoryResponse | None]
+
+
 def _validate_order_reason(reason: Optional[str], required: bool = False) -> Optional[ReagentOrderReason]:
-    # Validate order reason in API layer and convert to enum for model persistence.
+    # API 层校验订购原因，并转换为模型持久化使用的枚举。
     if reason is None:
         if required:
             raise HTTPException(
@@ -193,8 +219,16 @@ def _validate_order_reason(reason: Optional[str], required: bool = False) -> Opt
 
     return ReagentOrderReason(normalized_reason)
 
+
+def _ensure_required_brand(brand: Optional[str]) -> str:
+    normalized_brand = brand.strip() if isinstance(brand, str) else ""
+    if not normalized_brand:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
+    return normalized_brand
+
+
 def _add_specification(item_dict: dict) -> dict:
-    # Add computed specification field to order response dict
+    # 为订单响应补充计算后的规格字段。
     initial = item_dict.get("initial_quantity", 0)
     unit = item_dict.get("unit", "")
     item_dict["specification"] = format_specification(initial, unit)
@@ -203,170 +237,16 @@ def _add_specification(item_dict: dict) -> dict:
 
 def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]:
     users_map = batch_get_user_names(db, {order.applicant_id} if order.applicant_id else set())
+    status_times = get_reagent_order_status_times(db, [order])
     return _add_specification({
         **ReagentOrderResponse.model_validate(order).model_dump(mode="json"),
+        **get_order_status_time_fields(status_times, order),
         "applicant_name": users_map.get(order.applicant_id, ""),
     })
 
 def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
-    # Get reagent order by ID
+    # 按 ID 获取试剂订单。
     return db.get(ReagentOrder, order_id)
-
-
-def _normalize_order_search_value(search: Optional[str], *, fuzzy: bool) -> Optional[str]:
-    # 标准化订单搜索词，统一 fuzzy 与空输入处理。
-
-    if not search:
-        return None
-    raw_search = search.strip()
-    if not raw_search:
-        return None
-    if fuzzy:
-        return normalize_search_term(raw_search)
-    return raw_search
-
-
-def _build_reagent_order_fts_state(
-    *,
-    search_value: str,
-    search_field: Optional[str],
-    fuzzy: bool,
-    match_mode: TextMatchMode,
-    cas_exact_or_prefix: bool,
-) -> ReagentOrderFTSState:
-    # 构建试剂订单 FTS 条件，异常时返回空状态并回退 SQL LIKE。
-
-    use_fts = (
-        match_mode == TextMatchMode.CONTAINS
-        and (not fuzzy)
-        and should_use_order_fts(search_value)
-        and not cas_exact_or_prefix
-    )
-    if not use_fts:
-        return ReagentOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-    try:
-        return ReagentOrderFTSState(
-            fts_clause=build_order_fts_id_clause(
-                ReagentOrder.id,
-                fts_table="reagent_order_fts",
-                search_value=search_value,
-                search_field=search_field,
-                field_map=REAGENT_ORDER_SEARCH_FTS_FIELD_MAP,
-            ),
-            fts_rowid_subquery=build_order_fts_rowid_subquery(
-                fts_table="reagent_order_fts",
-                search_value=search_value,
-                search_field='all',
-                field_map=REAGENT_ORDER_SEARCH_FTS_FIELD_MAP,
-            ),
-        )
-    except OrderFTSError:
-        return ReagentOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Reagent order FTS fallback to SQL LIKE due to runtime error: %s",
-            exc,
-        )
-        return ReagentOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-
-
-def _apply_reagent_order_single_field_search(
-    base,
-    *,
-    options: ReagentOrderSingleFieldSearchOptions,
-):
-    # 处理试剂订单单字段搜索，按字段特性选择 applicant/date/cas/fts/like 分支。
-
-    filtered = base
-    matched = True
-    search_field = options.search_field
-    if search_field in APPLICANT_SEARCH_KEYS:
-        filtered = base.where(ReagentOrder.applicant_id.in_(options.applicant_id_subquery))
-    elif search_field == 'created_at':
-        filtered = base.where(build_date_search_clause(ReagentOrder.created_at, options.search_value))
-    elif search_field in {'cas', 'cas_number'} and options.cas_exact_or_prefix:
-        filtered = base.where(
-            build_cas_search_clause(
-                ReagentOrder.cas_number,
-                options.search_value,
-                fuzzy=options.fuzzy,
-                match_mode=options.match_mode,
-            )
-        )
-    elif options.fts_clause is not None and search_field in REAGENT_ORDER_SEARCH_FTS_FIELD_MAP:
-        filtered = base.where(options.fts_clause)
-    elif search_field in REAGENT_ORDER_SEARCH_SQL_FIELD_MAP:
-        if search_field in {'cas', 'cas_number'}:
-            filtered = base.where(
-                build_cas_search_clause(
-                    ReagentOrder.cas_number,
-                    options.search_value,
-                    fuzzy=options.fuzzy,
-                    match_mode=options.match_mode,
-                )
-            )
-        else:
-            filtered = base.where(
-                combine_or_clauses(
-                    build_text_search_clause(
-                        field,
-                        options.search_value,
-                        fuzzy=options.fuzzy,
-                        match_mode=options.match_mode,
-                    )
-                    for field in REAGENT_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
-                )
-            )
-    else:
-        matched = False
-    return filtered, matched
-
-
-def _build_reagent_order_all_search_clause(
-    *,
-    search_value: str,
-    fuzzy: bool,
-    match_mode: TextMatchMode,
-    applicant_id_subquery,
-    fts_rowid_subquery,
-):
-    # 构建试剂订单 ALL 搜索条件，保留 applicant/date/fts/like 召回但避免多路 UNION。
-
-    all_clauses = [
-        ReagentOrder.applicant_id.in_(applicant_id_subquery),
-        build_date_search_clause(ReagentOrder.created_at, search_value),
-    ]
-
-    if fts_rowid_subquery is not None:
-        all_clauses.append(
-            ReagentOrder.id.in_(fts_rowid_subquery)
-        )
-    else:
-        all_clauses.append(
-            build_cas_search_clause(
-                ReagentOrder.cas_number,
-                search_value,
-                fuzzy=fuzzy,
-                match_mode=match_mode,
-            )
-        )
-        text_fields = collect_search_fields(
-            REAGENT_ORDER_SEARCH_SQL_FIELD_MAP,
-            exclude_keys={'cas', 'cas_number', 'created_at'},
-        )
-        if text_fields:
-            all_clauses.append(
-                combine_or_clauses(
-                    build_text_search_clause(
-                        field,
-                        search_value,
-                        fuzzy=fuzzy,
-                        match_mode=match_mode,
-                    )
-                    for field in text_fields
-                )
-            )
-    return combine_or_clauses(all_clauses)
 
 
 def _apply_reagent_order_filters(
@@ -382,7 +262,7 @@ def _apply_reagent_order_filters(
     if status_filter:
         base = base.where(ReagentOrder.status == status_filter)
 
-    search_value = _normalize_order_search_value(search, fuzzy=fuzzy)
+    search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
     if not search_value:
         return base
 
@@ -393,31 +273,35 @@ def _apply_reagent_order_filters(
     )
     cas_mode, _ = classify_cas_search(search_value, fuzzy=fuzzy)
     cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
-    fts_state = _build_reagent_order_fts_state(
+    fts_state = build_order_list_fts_state(
+        config=REAGENT_ORDER_SEARCH_CONFIG,
+        fts_table="reagent_order_fts",
         search_value=search_value,
         search_field=search_field,
         fuzzy=fuzzy,
         match_mode=match_mode,
-        cas_exact_or_prefix=cas_exact_or_prefix,
+        allow_fts=not cas_exact_or_prefix,
+        logger=logger,
+        log_label="Reagent order",
     )
 
     if search_field and search_field != 'all':
-        single_field_filtered, matched = _apply_reagent_order_single_field_search(
+        single_field_filtered, matched = apply_order_list_single_field_search(
             base,
-            options=ReagentOrderSingleFieldSearchOptions(
-                search_field=search_field,
-                search_value=search_value,
-                fuzzy=fuzzy,
-                match_mode=match_mode,
-                applicant_id_subquery=applicant_id_subquery,
-                cas_exact_or_prefix=cas_exact_or_prefix,
-                fts_clause=fts_state.fts_clause,
-            ),
+            config=REAGENT_ORDER_SEARCH_CONFIG,
+            search_field=search_field,
+            search_value=search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+            applicant_id_subquery=applicant_id_subquery,
+            cas_exact_or_prefix=cas_exact_or_prefix,
+            fts_clause=fts_state.fts_clause,
         )
         if matched:
             return single_field_filtered
 
-    all_search_clause = _build_reagent_order_all_search_clause(
+    all_search_clause = build_order_list_all_search_clause(
+        config=REAGENT_ORDER_SEARCH_CONFIG,
         search_value=search_value,
         fuzzy=fuzzy,
         match_mode=match_mode,
@@ -433,6 +317,7 @@ def _apply_reagent_order_filters(
 async def create_reagent_order(
     order: ReagentOrderCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     db: DBSession,
 ):
@@ -440,7 +325,7 @@ async def create_reagent_order(
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
-    # Normalize CAS Number
+    # 标准化 CAS 号。
     normalized_cas = normalize_cas(order.cas_number)
     is_valid, error = validate_cas_format(normalized_cas)
     
@@ -450,7 +335,7 @@ async def create_reagent_order(
             detail=f"Invalid CAS format: {error}"
         )
     
-    # Parse specification to get initial_quantity and unit
+    # 解析规格得到初始量和单位。
     try:
         initial_quantity, unit = parse_specification(order.specification)
     except SpecificationError as e:
@@ -462,24 +347,25 @@ async def create_reagent_order(
     # order_reason 已在模型层验证（枚举类型），直接使用
 
     # 处理可选字段：空字符串和纯空格转为 None
-    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'purity', 'notes']
+    optional_string_fields = ['english_name', 'alias', 'category', 'purity', 'notes']
     normalized = empty_to_none(order.model_dump(), optional_string_fields)
+    normalized_brand = _ensure_required_brand(order.brand)
 
     # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(
         name=normalized.get('name', order.name),
         category=normalized.get('category'),
-        brand=normalized.get('brand'),
+        brand=normalized_brand,
     )
 
-    # Create order
+    # 创建订单记录。
     db_order = ReagentOrder(
         cas_number=normalized_cas,
         name=normalized.get('name', order.name),
         english_name=normalized.get('english_name'),
         alias=normalized.get('alias'),
         category=normalized.get('category'),
-        brand=normalized.get('brand'),
+        brand=normalized_brand,
         purity=normalized.get('purity'),
         initial_quantity=initial_quantity,
         unit=unit,
@@ -507,6 +393,11 @@ async def create_reagent_order(
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_CREATED,
         {"id": db_order.id, "item": _serialize_reagent_order(db_order, db)},
+    )
+    enqueue_structure_cache_resolution(
+        background_tasks,
+        db_order.cas_number,
+        reason="reagent_order.create",
     )
     
     return db_order
@@ -629,13 +520,18 @@ def list_reagent_orders(
     else:
         orders = []
 
-    # Enrich with applicant names
+    # 补充申请人姓名。
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     users_map = batch_get_user_names(db, applicant_ids)
+    status_times = get_reagent_order_status_times(db, orders)
 
     result = {
         "data": [
-            _add_specification({**ReagentOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")})
+            _add_specification({
+                **ReagentOrderResponse.model_validate(o).model_dump(),
+                **get_order_status_time_fields(status_times, o),
+                "applicant_name": users_map.get(o.applicant_id, ""),
+            })
             for o in orders
         ],
         "total": total,
@@ -674,13 +570,16 @@ def list_reagent_orders(
     return result
 
 
-# --- Export ---
+# 导出接口。
 
 @router.get("/export", dependencies=[Depends(require_admin)])
 def export_reagent_orders(
+    request: Request,
     db: DBSession,
+    current_user: CurrentUser,
 ):
-    # Export reagent orders as a downloadable XLSX file.
+    enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_REAGENT_ORDERS)
+    # 导出试剂订单 XLSX 文件。
     from app.services.xlsx_export import export_reagent_orders_xlsx
 
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
@@ -690,16 +589,28 @@ def export_reagent_orders(
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    return export_reagent_orders_xlsx(orders, all_users_map)
+    response = export_reagent_orders_xlsx(orders, all_users_map)
+    log_reagent_order_export(
+        db,
+        exported_count=len(orders),
+        actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
+    )
+    db.commit()
+    return response
 
 
-@router.get("/cas-overview/{cas_number}", dependencies=[Depends(get_current_user)])
+@router.get(
+    "/cas-overview/{cas_number}",
+    response_model=CASOverviewResponseModel,
+    dependencies=[Depends(get_current_user)],
+)
 def get_cas_overview(
     cas_number: str,
     db: DBSession,
     exclude_order_id: Optional[int] = None,
 ):
-    # Get CAS overview for duplicate-check hints in forms and expanded rows.
+    # 获取 CAS 概览，用于表单查重提示和展开行提示。
     normalized_cas = normalize_cas(cas_number)
 
     if is_special_cas_value(normalized_cas):
@@ -782,15 +693,20 @@ def get_cas_overview(
             "borrower_name": users_map.get(latest_inventory.borrower_id),
         }
 
-    display_name = None
+    preferred_name = None
+    preferred_name_source = None
     if latest_order and latest_order.name:
-        display_name = latest_order.name
+        preferred_name = latest_order.name
+        preferred_name_source = "latest_order_name"
     elif latest_inventory and latest_inventory.name:
-        display_name = latest_inventory.name
+        preferred_name = latest_inventory.name
+        preferred_name_source = "latest_inventory_name"
 
     return {
         "cas_number": normalized_cas,
-        "display_name": display_name,
+        "preferred_name": preferred_name,
+        "preferred_name_source": preferred_name_source,
+        "display_name": preferred_name,
         "has_warning": orders_count > 0 or inventory_count > 0,
         "orders": {
             "total_count": orders_count,
@@ -808,14 +724,14 @@ def get_reagent_order(
     order_id: int,
     db: DBSession,
 ):
-    # Get reagent order by ID
+    # 按 ID 获取试剂订单。
     order = get_reagent_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
-    return order
+    return _serialize_reagent_order(order, db)
 
 
 @router.put("/{order_id}", response_model=ReagentOrderResponse)
@@ -823,6 +739,7 @@ async def update_reagent_order(
     order_id: int,
     order_update: ReagentOrderUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: DBSession,
     current_user: CurrentUser,
 ):
@@ -838,10 +755,17 @@ async def update_reagent_order(
     _ensure_reagent_order_edit_permission(order, current_user=current_user)
     before_order = ReagentOrder.model_validate(order)
     update_data = _normalize_reagent_order_update_data(order_update)
+    _ensure_required_brand(update_data.get("brand", order.brand))
     _apply_reagent_order_pinyin_updates(order, update_data=update_data)
+    should_resubmit = order.status in {
+        ReagentOrderStatus.APPROVED,
+        ReagentOrderStatus.REJECTED,
+    }
 
     for field, value in update_data.items():
         setattr(order, field, value)
+    if should_resubmit:
+        order.status = ReagentOrderStatus.PENDING
 
     log_reagent_order_update(
         db,
@@ -861,8 +785,14 @@ async def update_reagent_order(
         SSEEventType.REAGENT_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_reagent_order(order, db)},
     )
+    if "cas_number" in update_data:
+        enqueue_structure_cache_resolution(
+            background_tasks,
+            order.cas_number,
+            reason="reagent_order.update",
+        )
     
-    return order
+    return _serialize_reagent_order(order, db)
 
 
 def _ensure_reagent_order_edit_permission(order: ReagentOrder, *, current_user: CurrentUser) -> None:
@@ -878,13 +808,15 @@ def _ensure_reagent_order_edit_permission(order: ReagentOrder, *, current_user: 
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the order applicant or admin can edit this order"
         )
-    if current_user.role != UserRole.ADMIN and order.status in (
-        ReagentOrderStatus.APPROVED,
-        ReagentOrderStatus.REJECTED,
-    ):
+    editable_statuses = (
+        REAGENT_ORDER_ADMIN_EDITABLE_STATUSES
+        if current_user.role == UserRole.ADMIN
+        else REAGENT_ORDER_EDITABLE_STATUSES
+    )
+    if order.status not in editable_statuses:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Approved or rejected orders can only be deleted by non-admin users"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending, rejected, or admin-approved orders can be edited"
         )
 
 

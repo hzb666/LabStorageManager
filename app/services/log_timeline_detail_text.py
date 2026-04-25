@@ -9,6 +9,7 @@ REAGENT_ORDER_ACTION_LABELS: dict[str, str] = {
     "delete": "删除试剂申购",
     "approve": "审批通过试剂申购",
     "reject": "审批拒绝试剂申购",
+    "export": "导出试剂订单",
 }
 
 CONSUMABLE_ORDER_ACTION_LABELS: dict[str, str] = {
@@ -18,6 +19,7 @@ CONSUMABLE_ORDER_ACTION_LABELS: dict[str, str] = {
     "approve": "审批通过耗材申购",
     "reject": "审批拒绝耗材申购",
     "arrival_complete": "确认耗材到货",
+    "export": "导出耗材订单",
 }
 
 USER_OPERATION_ACTION_LABELS: dict[str, str] = {
@@ -33,6 +35,23 @@ USER_OPERATION_ACTION_LABELS: dict[str, str] = {
     "update_user_role": "修改用户角色",
     "reset_user_password": "重置用户密码",
     "update_user_sensitive_fields": "修改用户敏感信息",
+    "create_reagent_brand": "新增品牌",
+    "update_reagent_brand": "修改品牌",
+    "delete_reagent_brand": "删除品牌",
+    "create_chemical_name_map": "新增 CAS 主数据",
+    "update_chemical_name_map": "修改 CAS 主数据",
+    "delete_chemical_name_map": "删除 CAS 主数据",
+    "create_announcement": "新增公告",
+    "update_announcement": "修改公告",
+    "delete_announcement": "删除公告",
+    "update_announcement_pin": "切换公告置顶",
+    "update_announcement_visibility": "切换公告可见性",
+    "upload_announcement_image": "上传公告图片",
+    "delete_announcement_image": "删除公告图片",
+    "delete_session": "删除设备会话",
+    "delete_other_sessions": "删除其他设备会话",
+    "refresh_session": "刷新设备会话",
+    "update_session": "修改设备会话",
 }
 
 COMMON_SHELF_ACTION_LABELS: dict[str, str] = {
@@ -95,6 +114,10 @@ def build_reagent_order_detail_text(
     order_name: str | None,
     snapshot: dict[str, Any],
 ) -> str:
+    if detail_prefix.endswith("导出试剂订单"):
+        export_count = read_snapshot_value(snapshot, "count", "ct") or 0
+        return join_detail_parts(detail_prefix, export_count, "条")
+
     display_snapshot = resolve_display_snapshot(snapshot)
     initial_quantity = read_snapshot_value(display_snapshot, "initial_quantity", "iq")
     unit = read_snapshot_value(display_snapshot, "unit", "un")
@@ -113,6 +136,10 @@ def build_consumable_order_detail_text(
     specification: str | None,
     snapshot: dict[str, Any],
 ) -> str:
+    if detail_prefix.endswith("导出耗材订单"):
+        export_count = read_snapshot_value(snapshot, "count", "ct") or 0
+        return join_detail_parts(detail_prefix, export_count, "条")
+
     quantity = read_snapshot_value(snapshot, "quantity", "qt")
     return join_detail_parts(detail_prefix, order_name, specification, f"x{clean_detail_value(quantity)}")
 

@@ -143,7 +143,7 @@ class ReagentOrderCreate(SQLModel):
     english_name: Optional[str] = Field(default=None, max_length=200)
     alias: Optional[str] = Field(default=None, max_length=200)
     category: Optional[str] = Field(default=None, max_length=100)
-    brand: Optional[str] = Field(default=None, max_length=100)
+    brand: str = Field(max_length=100)
     purity: Optional[str] = Field(default=None, max_length=20)
     specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500ml"
     quantity: int = Field(gt=0, le=MAX_ORDER_QUANTITY)  # 数量限制：1-99
@@ -152,7 +152,7 @@ class ReagentOrderCreate(SQLModel):
     is_hazardous: bool = False
     notes: Optional[str] = Field(default=None, max_length=500)
 
-    @field_validator("cas_number", "name", "specification")
+    @field_validator("cas_number", "name", "brand", "specification")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         stripped = value.strip()
@@ -222,3 +222,7 @@ class ReagentOrderResponse(BaseResponse):
     status: ReagentOrderStatus
     created_at: datetime
     updated_at: datetime
+    approved_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    arrived_at: Optional[datetime] = None
+    stocked_at: Optional[datetime] = None

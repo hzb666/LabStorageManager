@@ -43,9 +43,9 @@
 - 管理员用户
 - 设备管理
 
-#### `tableExpandStorage.ts`
+#### `storage/appTableStorage.ts`
 
-负责展开态、模糊搜索等表格偏好的本地持久化。
+负责展开态、模糊搜索、匹配模式和列宽等表格偏好的本地持久化。
 
 ### 常量与选项
 
@@ -68,6 +68,10 @@
 - 品牌
 - 常用货架分类和品牌
 
+#### `reagentBrandOptions.ts`
+
+定义试剂品牌下拉选项的查询配置和响应转换，供试剂订单、库存、待入库和购物车导入表单复用。
+
 #### `dashboardUtils.tsx`
 
 负责仪表盘 tab、筛选选项、本地列表处理和分组拍平逻辑。
@@ -82,9 +86,17 @@
 - `getBackendOrigin`
 - `buildBackendUrl`
 
-#### `deviceId.ts`
+#### `storage/appAuthMetaStorage.ts`
 
-生成和维护设备标识与设备名，用于登录和会话管理。
+生成和维护设备标识、设备名和记住的登录用户，用于登录、会话管理和审计信息。
+
+#### `runtimeTimeConfig.ts`
+
+保存后端运行时返回的展示时区和 UTC 偏移，供错误反馈和下载文件名等非浏览器渲染文本复用。
+
+#### `staticAssets.ts`
+
+由 `npm run generate:static-assets` 生成，记录带版本号的 RDKit 脚本、WASM 和本地字体资源路径。
 
 ### 通用 UI 与数据处理工具
 
@@ -107,8 +119,9 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `bugReportButtonStorage.ts` | 维护 Bug 反馈按钮显隐状态 |
 | `chemicalProperties.ts` | 提供化学性质相关缓存或展示辅助 |
+| `storage/appUiStorage.ts` | 维护主题、字体来源、仪表盘偏好、公告状态和反馈按钮显隐状态 |
+| `storage/localStorageCore.ts` | 提供安全的 localStorage 读写和 JSON 解析基础能力 |
 
 ## 与其他层的关系
 
@@ -124,7 +137,7 @@ flowchart LR
 
 - 表单字段、默认值和组合关系，优先改 `formConfigs.tsx`
 - 输入校验、格式标准化和错误映射，优先改 `validationSchemas.ts`
-- 列定义、展示文案和表格偏好，优先改 `tableConfigs.tsx`、`constants.ts`、`tableExpandStorage.ts`
+- 列定义、展示文案和表格偏好，优先改 `tableConfigs.tsx`、`constants.ts`、`storage/appTableStorage.ts`
 - API 地址和环境拼接，优先改 `apiConfig.ts`
 - 可复用的字符串、日期和数据处理，优先改 `utils.ts`
 
@@ -143,7 +156,7 @@ flowchart LR
 2. 对应页面
 3. 必要时补充 `constants.ts`
 
-## 验证建议
+## 验证要点
 
 - 新表单规则是否都进入 `validationSchemas.ts`
 - 新下拉选项是否集中在 `options.ts` 或 `constants.ts`
@@ -154,11 +167,15 @@ flowchart LR
 - [frontend/src/lib/apiConfig.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/apiConfig.ts)
 - [frontend/src/lib/constants.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/constants.ts)
 - [frontend/src/lib/dashboardUtils.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/dashboardUtils.tsx)
-- [frontend/src/lib/deviceId.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/deviceId.ts)
 - [frontend/src/lib/formConfigs.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/formConfigs.tsx)
 - [frontend/src/lib/options.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/options.ts)
+- [frontend/src/lib/reagentBrandOptions.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/reagentBrandOptions.ts)
+- [frontend/src/lib/runtimeTimeConfig.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/runtimeTimeConfig.ts)
+- [frontend/src/lib/staticAssets.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/staticAssets.ts)
 - [frontend/src/lib/tableConfigs.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/tableConfigs.tsx)
-- [frontend/src/lib/tableExpandStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/tableExpandStorage.ts)
 - [frontend/src/lib/toast.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/toast.ts)
 - [frontend/src/lib/utils.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/utils.ts)
 - [frontend/src/lib/validationSchemas.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/validationSchemas.ts)
+- [frontend/src/lib/storage/appAuthMetaStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appAuthMetaStorage.ts)
+- [frontend/src/lib/storage/appTableStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appTableStorage.ts)
+- [frontend/src/lib/storage/appUiStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appUiStorage.ts)

@@ -1,11 +1,14 @@
-// 仪表盘中的耗材订单页签，承载本地筛选、编辑和确认收货流程。
-import { useMemo, useState, useCallback } from "react";
-import { createColumnHelper } from "@tanstack/react-table";
-import type { ColumnDef } from "@tanstack/react-table";
+import { useCallback, useMemo, useState } from "react";
+import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { ShoppingCart } from "lucide-react";
+import { AlertTriangle, Check, ShoppingCart, X } from "lucide-react";
 
+import { BaseForm } from "@/components/BaseForm";
+import { ConsumableOrderExpandedRow } from "@/components/ConsumableOrderExpandedRow";
+import { EditDialogActions } from "@/components/EditDialogActions";
+import { OrderStatusBadge } from "@/components/OrderStatusBadge";
+import { TableActionButtonsMemo } from "@/components/TableActionButtons";
 import {
   Dialog,
   DialogContent,
@@ -13,74 +16,53 @@ import {
   DialogTitle,
 } from "@/components/ui/Dialog";
 import { FilterTable } from "@/components/ui/FilterTable";
-import { TableActionButtonsMemo } from "@/components/TableActionButtons";
-import { BaseForm } from "@/components/BaseForm";
-import { EditDialogActions } from "@/components/EditDialogActions";
-import { ConsumableOrderExpandedRow } from "@/components/ConsumableOrderExpandedRow";
-import { toast } from "@/lib/toast";
-import { processNotes, toText } from "@/lib/utils";
-import { UserRoles } from "@/lib/constants";
-import { useSSEStore } from '@/store/sseStore'
-import { useAuthStore } from "@/store/useStore";
-
-import { consumableOrderAPI } from "@/api/client";
+import { consumableOrderAPI, ConsumableOrderStatus } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
+import { UserRoles } from "@/lib/constants";
+import { defaultConsumableOrderValues, getConsumableOrderFormFields } from "@/lib/formConfigs";
+import {
+  isApprovableOrderStatus,
+  isOrderEditableByRole,
+  isRejectableOrderStatus,
+} from "@/lib/orderEditRules";
+import { CONSUMABLE_ORDER_SSE_EVENTS } from "@/lib/sseEvents";
 import { getConsumableOrderTableColumns } from "@/lib/tableConfigs";
-import { CONSUMABLE_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
+import { toast } from "@/lib/toast";
+import { formatDate, processNotes, toText } from "@/lib/utils";
 import {
   ConsumableOrderSchema,
   createValibotResolver,
   extractApiErrorDetail,
   getApiErrorMessage,
-  toValidationErrors,
   normalizeApiErrorMessage,
+  toValidationErrors,
+  type ConsumableOrderFormData,
+  type ConsumableOrderFormInputData,
 } from "@/lib/validationSchemas";
-import type {
-  ConsumableOrderFormData,
-  ConsumableOrderFormInputData,
-} from "@/lib/validationSchemas";
+import { useAuthStore } from "@/store/useStore";
 import {
-  getConsumableOrderFormFields,
-  defaultConsumableOrderValues,
-} from "@/lib/formConfigs";
-
-import {
-  type DashboardConsumableOrder,
-  type DashboardParams,
   CONSUMABLE_STATUS_OPTIONS,
+  DASHBOARD_CONSUMABLE_ADMIN_SEARCH_FIELDS,
   DASHBOARD_CONSUMABLE_SEARCH_FIELDS,
   buildLocalListData,
+  findDashboardColumnIndex,
   flattenGroupedOrders,
+  isApprovedOrderOverdue,
+  isPendingApprovalOverdue,
   removeApplicantColumn,
   requestDashboardCountsRefresh,
+  type DashboardConsumableOrder,
+  type DashboardParams,
 } from "../../lib/dashboardUtils";
 
-const consumableColumnHelper = createColumnHelper<DashboardConsumableOrder>();
+type ConsumableForm = ReturnType<
+  typeof useForm<
+    ConsumableOrderFormInputData,
+    unknown,
+    ConsumableOrderFormData
+  >
+>;
 
-// Dashboard 接口返回分组订单，这里先拍平成 `FilterTable` 可消费的本地列表结构。
-function createConsumableDashboardAPI(currentUserId?: number): FilterAPI {
-  return {
-    list: async (params) => {
-      const response = await consumableOrderAPI.getMyConsumableOrders();
-      const grouped = (response.data?.data ?? {}) as Record<
-        string,
-        { orders: Record<string, unknown>[] }
-      >;
-      const rows = flattenGroupedOrders<DashboardConsumableOrder>(
-        grouped,
-        currentUserId,
-      );
-      const local = buildLocalListData(rows, params as DashboardParams, [
-        "name",
-        "specification",
-        "created_at",
-      ]);
-      return { data: local };
-    },
-  };
-}
-
-// `public` 账户永远不能编辑，非管理员只能编辑本人订单；返回值直接复用为提示文案。
 function getConsumableEditBlockMessage(
   item: DashboardConsumableOrder,
   currentUserRole: string | undefined,
@@ -93,10 +75,12 @@ function getConsumableEditBlockMessage(
   if (!isAdmin && item.applicant_id !== currentUserId) {
     return "只能编辑自己创建的订单";
   }
+  if (!isOrderEditableByRole(item.status, isAdmin)) {
+    return "仅待审批、已驳回或管理员已批准订单可编辑";
+  }
   return null;
 }
 
-// 把后端可空字段收口成 RHF 可控输入默认值，避免编辑弹窗拿到 `undefined` 或 `null`。
 function buildConsumableFormValues(
   item: DashboardConsumableOrder,
 ): ConsumableOrderFormInputData {
@@ -113,73 +97,130 @@ function buildConsumableFormValues(
   };
 }
 
-// “我的耗材订单”会移除申请人列；仅 `approved` 状态显示确认收货，编辑按钮按角色和归属禁用。
-function createConsumableColumns({
+function useDashboardConsumableDialogController({
+  consumableForm,
   currentUserId,
   currentUserRole,
   isAdmin,
   refreshTables,
-  onEdit,
 }: Readonly<{
+  consumableForm: ConsumableForm;
   currentUserId: number | undefined;
   currentUserRole: string | undefined;
   isAdmin: boolean;
   refreshTables: () => Promise<void>;
-  onEdit: (item: DashboardConsumableOrder) => void;
-}>): ColumnDef<Record<string, unknown>, unknown>[] {
-  const baseColumns = removeApplicantColumn(
-    getConsumableOrderTableColumns() as ColumnDef<
-      Record<string, unknown>,
-      unknown
-    >[],
-  );
-  const actions = [
-    {
-      id: "confirm-complete",
-      label: "确认收货",
-      confirm: true,
-      confirmLabel: "确认",
-      showWhen: (currItem: DashboardConsumableOrder) =>
-        currItem.status === "approved",
-      onClick: async (currItem: DashboardConsumableOrder) => {
-        await consumableOrderAPI.complete(currItem.id);
-        await refreshTables();
-        toast.success("已确认收货");
-      },
-    },
-  ];
-  const actionColumn = consumableColumnHelper.display({
-    id: "actions",
-    header: "操作",
-    size: 100,
-    cell: (info) => {
-      const item = info.row.original;
-      const disableEdit =
-        currentUserRole === UserRoles.PUBLIC ||
-        (!isAdmin && item.applicant_id !== currentUserId);
+}>) {
+  const [editingConsumable, setEditingConsumable] =
+    useState<DashboardConsumableOrder | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [isSubmittingConsumable, setIsSubmittingConsumable] = useState(false);
 
-      return (
-        <TableActionButtonsMemo
-          item={item}
-          actions={actions}
-          showEdit={true}
-          disableEdit={disableEdit}
-          onEdit={(target) => onEdit(target as DashboardConsumableOrder)}
-          isAdmin={isAdmin}
-        />
+  const handleConsumableEdit = useCallback(
+    (itemRaw: Record<string, unknown>) => {
+      const item = itemRaw as unknown as DashboardConsumableOrder;
+      const blockMessage = getConsumableEditBlockMessage(
+        item,
+        currentUserRole,
+        currentUserId,
+        isAdmin,
       );
+      if (blockMessage) {
+        toast.warning(blockMessage);
+        return;
+      }
+
+      setEditingConsumable(item);
+      setDeleteConfirm(false);
+      consumableForm.reset(buildConsumableFormValues(item));
     },
+    [consumableForm, currentUserId, currentUserRole, isAdmin],
+  );
+
+  const submitConsumableEdit = consumableForm.handleSubmit(async (formData) => {
+    if (!editingConsumable) return;
+    setIsSubmittingConsumable(true);
+    try {
+      await consumableOrderAPI.update(editingConsumable.id, {
+        name: formData.name,
+        english_name: formData.english_name || "",
+        specification: formData.specification || "",
+        unit: formData.unit || "",
+        quantity: formData.quantity,
+        price: formData.price,
+        communication: formData.communication || "",
+        notes: processNotes(formData.notes),
+      });
+      setDeleteConfirm(false);
+      setEditingConsumable(null);
+      await refreshTables();
+      toast.success(
+        editingConsumable.status === ConsumableOrderStatus.REJECTED ||
+          editingConsumable.status === ConsumableOrderStatus.APPROVED
+          ? "耗材订单已重新提交待审批"
+          : "耗材订单已更新",
+      );
+    } catch (err) {
+      const detail = extractApiErrorDetail(err);
+      const validationErrors = toValidationErrors(detail);
+      if (validationErrors.length > 0) {
+        validationErrors.forEach((e) => {
+          if (e.loc?.[1]) {
+            consumableForm.setError(e.loc[1] as keyof ConsumableOrderFormData, {
+              message: e.msg || "输入不合法",
+            });
+          }
+        });
+        return;
+      }
+      toast.error(normalizeApiErrorMessage(detail, "更新失败"));
+    } finally {
+      setIsSubmittingConsumable(false);
+    }
   });
 
-  return [...baseColumns, actionColumn] as ColumnDef<
-    Record<string, unknown>,
-    unknown
-  >[];
+  const handleDeleteConsumable = useCallback(async () => {
+    if (!editingConsumable) return;
+
+    if (!deleteConfirm) {
+      setDeleteConfirm(true);
+      return;
+    }
+
+    try {
+      await consumableOrderAPI.delete(editingConsumable.id);
+      setDeleteConfirm(false);
+      setEditingConsumable(null);
+      consumableForm.reset(defaultConsumableOrderValues);
+      await refreshTables();
+      toast.success("耗材订单已删除");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "删除失败"));
+    }
+  }, [consumableForm, deleteConfirm, editingConsumable, refreshTables]);
+
+  const closeConsumableDialog = useCallback(() => {
+    setEditingConsumable(null);
+    setDeleteConfirm(false);
+    consumableForm.reset(defaultConsumableOrderValues);
+  }, [consumableForm]);
+
+  return {
+    handleConsumableEdit,
+    consumableEditDialog: {
+      editingConsumable,
+      deleteConfirm,
+      consumableForm,
+      isSubmittingConsumable,
+      onDelete: handleDeleteConsumable,
+      onClose: closeConsumableDialog,
+      onSubmit: submitConsumableEdit,
+    },
+  };
 }
 
-// `approved` / `rejected` 订单仍可进入弹窗，但只能删除，不能再提交编辑。
 function DashboardConsumableEditDialog({
   dialog,
+  isAdmin,
 }: Readonly<{
   dialog: {
     editingConsumable: DashboardConsumableOrder | null;
@@ -196,6 +237,7 @@ function DashboardConsumableEditDialog({
     onClose: () => void;
     onSubmit: () => void;
   };
+  isAdmin: boolean;
 }>) {
   const {
     editingConsumable,
@@ -207,8 +249,8 @@ function DashboardConsumableEditDialog({
     onSubmit,
   } = dialog;
   const isConsumableEditLocked =
-    editingConsumable?.status === "approved" ||
-    editingConsumable?.status === "rejected";
+    editingConsumable !== null &&
+    !isOrderEditableByRole(editingConsumable.status, isAdmin);
 
   return (
     <Dialog
@@ -223,7 +265,7 @@ function DashboardConsumableEditDialog({
             <span>编辑耗材订单</span>
             {isConsumableEditLocked ? (
               <span className="text-base text-muted-foreground">
-                当前状态仅支持删除
+                当前状态不可编辑
               </span>
             ) : null}
           </DialogTitle>
@@ -250,136 +292,216 @@ function DashboardConsumableEditDialog({
   );
 }
 
-// 编辑弹窗的状态与副作用独立管理，避免页面主函数同时承担列表和弹窗编排。
-function useDashboardConsumableDialogController({
-  consumableForm,
-  currentUserId,
-  currentUserRole,
-  isAdmin,
-  refreshTables,
-}: Readonly<{
-  consumableForm: ReturnType<
-    typeof useForm<
-      ConsumableOrderFormInputData,
-      unknown,
-      ConsumableOrderFormData
+const consumableColumnHelper = createColumnHelper<DashboardConsumableOrder>();
+
+function renderAlertBadge(label: string, title: string) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive"
+      title={title}
+      aria-label={title}
     >
-  >;
-  currentUserId: number | undefined;
-  currentUserRole: string | undefined;
-  isAdmin: boolean;
-  refreshTables: () => Promise<void>;
-}>) {
-  const [editingConsumable, setEditingConsumable] =
-    useState<DashboardConsumableOrder | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [isSubmittingConsumable, setIsSubmittingConsumable] = useState(false);
-
-  // 打开编辑前先做权限拦截，拦截失败直接 toast，不进入弹窗状态。
-  const handleConsumableEdit = useCallback(
-    (itemRaw: Record<string, unknown>) => {
-      const item = itemRaw as unknown as DashboardConsumableOrder;
-      const blockMessage = getConsumableEditBlockMessage(
-        item,
-        currentUserRole,
-        currentUserId,
-        isAdmin,
-      );
-      if (blockMessage) {
-        toast.warning(blockMessage);
-        return;
-      }
-
-      setEditingConsumable(item);
-      setDeleteConfirm(false);
-      consumableForm.reset(buildConsumableFormValues(item));
-    },
-    [consumableForm, currentUserId, currentUserRole, isAdmin],
+      <AlertTriangle className="size-3" />
+      {label}
+    </span>
   );
+}
 
-  // 提交成功后同时失效 Dashboard 列表和订单列表缓存；字段级校验错误回填表单而不是 toast。
-  const submitConsumableEdit = consumableForm.handleSubmit(async (formData) => {
-    if (!editingConsumable) return;
-    setIsSubmittingConsumable(true);
-    try {
-      await consumableOrderAPI.update(editingConsumable.id, {
-        name: formData.name,
-        english_name: formData.english_name || "",
-        specification: formData.specification || "",
-        unit: formData.unit || "",
-        quantity: formData.quantity,
-        price: formData.price,
-        communication: formData.communication || "",
-        notes: processNotes(formData.notes),
-      });
-      setDeleteConfirm(false);
-      setEditingConsumable(null);
-      await refreshTables();
-      toast.success("耗材订单已更新");
-    } catch (err) {
-      const detail = extractApiErrorDetail(err);
-      const validationErrors = toValidationErrors(detail);
-      if (validationErrors.length > 0) {
-        validationErrors.forEach((e) => {
-          if (e.loc?.[1]) {
-            consumableForm.setError(e.loc[1] as keyof ConsumableOrderFormData, {
-              message: e.msg || "输入不合法",
-            });
-          }
-        });
-        return;
-      }
-      toast.error(normalizeApiErrorMessage(detail, "更新失败"));
-    } finally {
-      setIsSubmittingConsumable(false);
-    }
-  });
+function renderConsumableTimeAlertBadges(
+  item: DashboardConsumableOrder,
+  managementMode: boolean,
+) {
+  return (
+    <>
+      {managementMode && isPendingApprovalOverdue(item.status, item.created_at)
+        ? renderAlertBadge("审批超时", "审批超时")
+        : null}
+      {isApprovedOrderOverdue(item.status, item.updated_at)
+        ? renderAlertBadge("收货超时", "收货超时")
+        : null}
+    </>
+  );
+}
 
-  // 删除采用两段式确认：第一次只切确认态，第二次才真正调用删除接口。
-  const handleDeleteConsumable = useCallback(async () => {
-    if (!editingConsumable) return;
-
-    if (!deleteConfirm) {
-      setDeleteConfirm(true);
-      return;
-    }
-
-    try {
-      await consumableOrderAPI.delete(editingConsumable.id);
-      setDeleteConfirm(false);
-      setEditingConsumable(null);
-      consumableForm.reset(defaultConsumableOrderValues);
-      await refreshTables();
-      toast.success("耗材订单已删除");
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "删除失败"));
-    }
-  }, [consumableForm, deleteConfirm, editingConsumable, refreshTables]);
-
-  // 关闭弹窗时同时清理 `editingConsumable`、`deleteConfirm` 和表单默认值。
-  const closeConsumableDialog = useCallback(() => {
-    setEditingConsumable(null);
-    setDeleteConfirm(false);
-    consumableForm.reset(defaultConsumableOrderValues);
-  }, [consumableForm]);
-
+function createConsumableDashboardAPI(
+  currentUserId: number | undefined,
+  managementMode: boolean,
+): FilterAPI {
   return {
-    handleConsumableEdit,
-    consumableEditDialog: {
-      editingConsumable,
-      deleteConfirm,
-      consumableForm,
-      isSubmittingConsumable,
-      onDelete: handleDeleteConsumable,
-      onClose: closeConsumableDialog,
-      onSubmit: submitConsumableEdit,
+    list: async (params) => {
+      const response = managementMode
+        ? await consumableOrderAPI.getAdminConsumableOrders()
+        : await consumableOrderAPI.getMyConsumableOrders();
+      const grouped = (response.data?.data ?? {}) as Record<
+        string,
+        { orders: Record<string, unknown>[] }
+      >;
+      const rows = flattenGroupedOrders<DashboardConsumableOrder>(
+        grouped,
+        managementMode ? undefined : currentUserId,
+      );
+      const local = buildLocalListData(rows, params as DashboardParams, [
+        "name",
+        "specification",
+        "created_at",
+        ...(managementMode ? ["applicant_name"] : []),
+      ]);
+      return { data: local };
     },
   };
 }
 
-export function DashboardConsumableTab() {
+function createConsumableColumns({
+  currentUserId,
+  currentUserRole,
+  isAdmin,
+  managementMode,
+  refreshTables,
+  onEdit,
+}: Readonly<{
+  currentUserId: number | undefined;
+  currentUserRole: string | undefined;
+  isAdmin: boolean;
+  managementMode: boolean;
+  refreshTables: () => Promise<void>;
+  onEdit: (item: DashboardConsumableOrder) => void;
+}>): ColumnDef<Record<string, unknown>, unknown>[] {
+  const orderColumns = getConsumableOrderTableColumns() as ColumnDef<
+    Record<string, unknown>,
+    unknown
+  >[];
+  const baseColumns = managementMode
+    ? orderColumns
+    : removeApplicantColumn(orderColumns);
+  const columns = [...baseColumns];
+  const createdAtColumnIndex = findDashboardColumnIndex(columns, "created_at");
+  if (createdAtColumnIndex >= 0) {
+    columns[createdAtColumnIndex] = consumableColumnHelper.accessor("created_at", {
+      header: "申购时间",
+      size: 190,
+      minSize: 160,
+      maxSize: 240,
+      cell: (info) => {
+        const item = info.row.original as DashboardConsumableOrder;
+        return (
+          <div className="flex items-center gap-2">
+            <span>{formatDate(info.getValue() as string)}</span>
+            {renderConsumableTimeAlertBadges(item, managementMode)}
+          </div>
+        );
+      },
+    }) as ColumnDef<Record<string, unknown>, unknown>;
+  }
+  const statusColumnIndex = findDashboardColumnIndex(columns, "status");
+  if (!managementMode && statusColumnIndex >= 0) {
+    columns[statusColumnIndex] = consumableColumnHelper.accessor("status", {
+      header: "状态",
+      size: 150,
+      minSize: 120,
+      maxSize: 180,
+      cell: (info) => {
+        const item = info.row.original as DashboardConsumableOrder;
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <OrderStatusBadge
+              status={String(info.getValue() ?? "")}
+              order={item}
+              kind="consumable"
+            />
+          </div>
+        );
+      },
+    }) as ColumnDef<Record<string, unknown>, unknown>;
+  }
+  const personalActions = [
+    {
+      id: "confirm-complete",
+      label: "确认收货",
+      confirm: true,
+      confirmLabel: "确认",
+      showWhen: (currItem: DashboardConsumableOrder) =>
+        currItem.status === ConsumableOrderStatus.APPROVED,
+      onClick: async (currItem: DashboardConsumableOrder) => {
+        await consumableOrderAPI.complete(currItem.id);
+        await refreshTables();
+        toast.success("已确认收货");
+      },
+    },
+  ];
+  const managementActions = [
+    {
+      id: "approve",
+      label: "审批",
+      icon: <Check className="size-4.5" />,
+      variant: "modern" as const,
+      className:
+        "text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950",
+      confirm: true,
+      confirmLabel: "确认审批",
+      disableWhen: (currItem: DashboardConsumableOrder) =>
+        !isApprovableOrderStatus(currItem.status),
+      onClick: async (currItem: DashboardConsumableOrder) => {
+        await consumableOrderAPI.approve(currItem.id);
+        await refreshTables();
+        toast.success("审批通过");
+      },
+    },
+    {
+      id: "reject",
+      label: "驳回",
+      icon: <X className="size-4.5" />,
+      variant: "modern" as const,
+      className:
+        "text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20",
+      confirm: true,
+      confirmLabel: "确认驳回",
+      disableWhen: (currItem: DashboardConsumableOrder) =>
+        !isRejectableOrderStatus(currItem.status),
+      onClick: async (currItem: DashboardConsumableOrder) => {
+        await consumableOrderAPI.reject(currItem.id, "管理员驳回");
+        await refreshTables();
+        toast.success("已驳回");
+      },
+    },
+  ];
+  const actions = managementMode ? managementActions : personalActions;
+  const actionColumn = consumableColumnHelper.display({
+    id: "actions",
+    header: "操作",
+    size: 132,
+    minSize: 132,
+    cell: (info) => {
+      const item = info.row.original;
+      const disableEdit =
+        currentUserRole === UserRoles.PUBLIC ||
+        (!isAdmin && item.applicant_id !== currentUserId) ||
+        !isOrderEditableByRole(item.status, isAdmin);
+
+      return (
+        <TableActionButtonsMemo
+          item={item}
+          actions={actions}
+          showEdit={true}
+          disableEdit={disableEdit}
+          onEdit={(target) => onEdit(target as DashboardConsumableOrder)}
+          isAdmin={isAdmin}
+        />
+      );
+    },
+  });
+
+  return [...columns, actionColumn] as ColumnDef<
+    Record<string, unknown>,
+    unknown
+  >[];
+}
+
+// 仪表盘中的耗材订单页签，承载本地筛选、编辑和确认收货流程。
+
+export function DashboardConsumableTab({
+  managementMode = false,
+}: Readonly<{ managementMode?: boolean }>) {
   const currentUser = useAuthStore((state) => state.user);
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale);
   const isAdmin = currentUser?.role === UserRoles.ADMIN;
   const queryClient = useQueryClient();
 
@@ -395,16 +517,19 @@ export function DashboardConsumableTab() {
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["dashboard", "consumables"] }),
+      queryClient.invalidateQueries({
+        queryKey: managementMode
+          ? ["dashboard", "admin", "consumables"]
+          : ["dashboard", "consumables"],
+      }),
       queryClient.invalidateQueries({ queryKey: ["consumable-orders"] }),
     ]);
-    clearRoomStale('consumable_orders');
     requestDashboardCountsRefresh();
-  }, [clearRoomStale, queryClient]);
+  }, [managementMode, queryClient]);
 
   const consumableDashboardAPI = useMemo(
-    () => createConsumableDashboardAPI(currentUser?.id),
-    [currentUser?.id],
+    () => createConsumableDashboardAPI(currentUser?.id, managementMode),
+    [currentUser?.id, managementMode],
   );
   const { handleConsumableEdit, consumableEditDialog } =
     useDashboardConsumableDialogController({
@@ -421,6 +546,7 @@ export function DashboardConsumableTab() {
         currentUserId: currentUser?.id,
         currentUserRole: currentUser?.role,
         isAdmin,
+        managementMode,
         refreshTables,
         onEdit: (item) =>
           handleConsumableEdit(item as unknown as Record<string, unknown>),
@@ -430,6 +556,7 @@ export function DashboardConsumableTab() {
       currentUser?.role,
       handleConsumableEdit,
       isAdmin,
+      managementMode,
       refreshTables,
     ],
   );
@@ -438,10 +565,10 @@ export function DashboardConsumableTab() {
     <>
       <FilterTable
         api={consumableDashboardAPI}
-        queryKey={["dashboard", "consumables"]}
-        tableId="dashboard-consumable-orders"
+        queryKey={managementMode ? ["dashboard", "admin", "consumables"] : ["dashboard", "consumables"]}
+        tableId={managementMode ? "dashboard-admin-consumable-orders" : "dashboard-consumable-orders"}
         realtime={{
-          room: 'consumable_orders',
+          room: "consumable_orders",
           eventTypes: CONSUMABLE_ORDER_SSE_EVENTS,
           onRefresh: refreshTables,
           onSafePatch: () => {
@@ -461,6 +588,10 @@ export function DashboardConsumableTab() {
               return true;
             }
 
+            if (managementMode) {
+              return true;
+            }
+
             if (!item || typeof currentUser?.id !== "number") {
               return false;
             }
@@ -470,11 +601,20 @@ export function DashboardConsumableTab() {
         }}
         customColumns={consumableColumns}
         statusOptions={CONSUMABLE_STATUS_OPTIONS}
-        searchFieldOptions={DASHBOARD_CONSUMABLE_SEARCH_FIELDS}
-        searchPlaceholder="搜索名称、规格、订购时间..."
+        searchFieldOptions={
+          managementMode
+            ? DASHBOARD_CONSUMABLE_ADMIN_SEARCH_FIELDS
+            : DASHBOARD_CONSUMABLE_SEARCH_FIELDS
+        }
+        searchPlaceholder={
+          managementMode
+            ? "搜索名称、规格、订购人、订购时间..."
+            : "搜索名称、规格、订购时间..."
+        }
         title={
           <>
-            <ShoppingCart className="w-5 h-5" /> 我的耗材订单
+            <ShoppingCart className="w-5 h-5" />
+            {managementMode ? "活跃耗材订单" : "我的耗材订单"}
           </>
         }
         noteField="notes"
@@ -484,7 +624,7 @@ export function DashboardConsumableTab() {
           return <ConsumableOrderExpandedRow item={item} />;
         }}
       />
-      <DashboardConsumableEditDialog dialog={consumableEditDialog} />
+      <DashboardConsumableEditDialog dialog={consumableEditDialog} isAdmin={isAdmin} />
     </>
   );
 }

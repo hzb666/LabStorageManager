@@ -85,7 +85,7 @@ function resolveGlobalFilterConfig(cfg: UseTableUrlStateParams['globalFilter']) 
 
 const getSearchValue = (search: SearchRecord, key: string) => search[key]
 
-// 这里只能 merge，不能整段覆盖 search；否则表格回写会顺手抹掉页面上的其他 URL 状态。
+// search 采用 merge 更新，防止表格回写清掉页面其它 URL 状态。
 const mergeSearchPatch = (prev: SearchRecord, patch: SearchRecord) => ({
   ...(prev as Record<string, unknown>),
   ...patch,
@@ -135,7 +135,7 @@ const buildPaginationState = (
   return { pageIndex: Math.max(0, pageNum - 1), pageSize: pageSizeNum }
 }
 
-// 空筛选统一写成 undefined，这样 URL 会自动清理噪音参数，而不是留下空字符串/空数组。
+// 空筛选写成 undefined，URL 会自动清理空字符串/空数组噪音参数。
 const buildColumnFilterPatch = (
   nextFilters: ColumnFiltersState,
   columnFiltersCfg: ColumnFilterConfig[]

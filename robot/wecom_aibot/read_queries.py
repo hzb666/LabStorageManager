@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -9,7 +10,7 @@ from robot.wecom_aibot.common_shelf_decider import (
     common_shelf_category_from_name_map,
     has_name_map_records,
 )
-from robot.wecom_aibot.formatters import build_safe_facts, format_safe_facts, format_tool_result
+from robot.wecom_aibot.formatters import build_safe_facts, format_tool_result
 from robot.wecom_aibot.intent_utils import (
     COMMON_SHELF_KEYWORDS,
     CONSUMABLE_ORDER_KEYWORDS,
@@ -39,6 +40,7 @@ from robot.wecom_aibot.mcp_client import LSMMcpClient
 from robot.wecom_aibot.minimax_web_search import MiniMaxWebSearchClient
 
 CAS_CANDIDATE_PATTERN = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
+INVENTORY_NAME_CANDIDATE_LIMIT = 100
 GENERAL_WEB_SEARCH_KEYWORDS = (
     "联网",
     "网络",
@@ -84,8 +86,50 @@ SPECIALTY_CAS_HINT_KEYWORDS = (
 )
 CHEMICAL_ABBREVIATION_MAX_LENGTH = 48
 CHEMICAL_ABBREVIATION_SYMBOLS = frozenset("()[]+-/.")
-SHORT_ENGLISH_CHEMICAL_TOKEN_MIN_LENGTH = 3
-SHORT_ENGLISH_CHEMICAL_TOKEN_MAX_LENGTH = 8
+INVENTORY_HINT_CONFLICT_KEYWORD_GROUPS = (
+    MY_REAGENT_ORDER_KEYWORDS,
+    MY_CONSUMABLE_ORDER_KEYWORDS,
+    LOW_STOCK_KEYWORDS,
+    REAGENT_ORDER_KEYWORDS,
+    CONSUMABLE_ORDER_KEYWORDS,
+)
+DIRECT_INVENTORY_HINT_KEYWORDS = (
+    "库存",
+    "在哪",
+    "在哪里",
+    "位置",
+    "还有",
+    "有没有",
+    "有吗",
+    "剩余",
+    "余量",
+    "还剩",
+)
+PRIORITY_FALLBACK_QUERY_STOP_WORDS = (
+    "我的试剂订单",
+    "我的试剂申购",
+    "我申请的试剂",
+    "我订的试剂",
+    "我的耗材订单",
+    "我的耗材申购",
+    "我申请的耗材",
+    "我订的耗材",
+    "试剂订单",
+    "试剂申购",
+    "试剂采购",
+    "耗材订单",
+    "耗材申购",
+    "耗材采购",
+    "低库存",
+    "快没",
+    "不足",
+    "缺货",
+    "我申请的",
+    "我订的",
+    "我的",
+    "吗",
+    "呢",
+)
 
 
 async def answer_with_llm_plan(
@@ -116,6 +160,43 @@ async def answer_with_llm_plan(
         return ""
     if plan.tool_name == "web_search":
         return "联网搜索只用于辅助识别化学名称或别名对应的 CAS（系统内部），不能干别的。"
+    if plan.tool_name == "inventory_search_by_name":
+        plan_arguments = _inventory_name_search_arguments(plan.arguments)
+        result = await mcp_client.call_tool(plan.tool_name, _with_user_token(plan_arguments, user_token))
+        keyword = str(plan.arguments.get("keyword") or "").strip()
+        if _is_empty_success_result(result):
+            fallback = await _maybe_llm_plan_common_shelf_fallback(
+                mcp_client=mcp_client,
+                llm_planner=llm_planner,
+                web_search_client=web_search_client,
+                search_limit=search_limit,
+                text=text,
+                user_token=user_token,
+                tool_name=plan.tool_name,
+                arguments=plan_arguments,
+                inventory_result=result,
+            )
+            if fallback:
+                return await _maybe_polish_reply(
+                    llm_planner,
+                    text,
+                    fallback,
+                    conversation_context=conversation_context,
+                )
+        filtered_result = await _filter_inventory_name_result(
+            llm_planner=llm_planner,
+            user_text=text,
+            search_keyword=keyword,
+            result=result,
+        )
+        return await _format_query_result(
+            filtered_result,
+            title=plan.title,
+            empty_text=plan.empty_text,
+            llm_planner=llm_planner,
+            user_text=text,
+            conversation_context=conversation_context,
+        )
     result = await mcp_client.call_tool(plan.tool_name, _with_user_token(plan.arguments, user_token))
     fallback = await _maybe_llm_plan_common_shelf_fallback(
         mcp_client=mcp_client,
@@ -145,6 +226,105 @@ async def answer_with_llm_plan(
     )
 
 
+def _inventory_name_search_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    search_arguments = dict(arguments)
+    search_arguments["limit"] = INVENTORY_NAME_CANDIDATE_LIMIT
+    return search_arguments
+
+
+async def _filter_inventory_name_result(
+    *,
+    llm_planner: LSMIntentPlanner | None,
+    user_text: str,
+    search_keyword: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    candidates, items_by_index = _inventory_name_filter_candidates(result)
+    if not candidates:
+        return result
+    selector = getattr(llm_planner, "filter_inventory_name_candidates", None)
+    if selector is None:
+        return result
+    selected_indices = await selector(
+        user_text=user_text,
+        search_keyword=search_keyword,
+        candidates=candidates,
+    )
+    if selected_indices is None:
+        return result
+    selected_items = [items_by_index[index] for index in selected_indices if index in items_by_index]
+    return _replace_result_items(result, selected_items)
+
+
+def _inventory_name_filter_candidates(
+    result: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[int, Any]]:
+    data = _result_data(result)
+    if not isinstance(data, dict):
+        return [], {}
+    items = _collection_items(data)
+    candidates: list[dict[str, Any]] = []
+    items_by_index: dict[int, Any] = {}
+    for index, item in enumerate(items[:INVENTORY_NAME_CANDIDATE_LIMIT], 1):
+        if not isinstance(item, dict):
+            continue
+        names = _candidate_names(item)
+        if names:
+            candidate_index = len(candidates) + 1
+            candidates.append({"index": candidate_index, **names})
+            items_by_index[candidate_index] = item
+    return candidates, items_by_index
+
+
+def _candidate_names(item: dict[str, Any]) -> dict[str, Any]:
+    names: dict[str, Any] = {}
+    for key in ("name", "english_name", "alias"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            names[key] = value.strip()
+    return names
+
+
+def _replace_result_items(result: dict[str, Any], items: list[Any]) -> dict[str, Any]:
+    payload = result.get("payload")
+    if not isinstance(payload, dict):
+        return result
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return result
+    collection_key = _collection_key(data)
+    if collection_key is None:
+        return result
+    new_data = dict(data)
+    new_data[collection_key] = items
+    new_data["total"] = len(items)
+    new_payload = dict(payload)
+    new_payload["data"] = new_data
+    return {**result, "payload": new_payload}
+
+
+def _result_data(result: dict[str, Any]) -> Any:
+    payload = result.get("payload")
+    if isinstance(payload, dict):
+        return payload.get("data")
+    return None
+
+
+def _collection_items(data: dict[str, Any]) -> list[Any]:
+    key = _collection_key(data)
+    if key is None:
+        return []
+    value = data.get(key)
+    return value if isinstance(value, list) else []
+
+
+def _collection_key(data: dict[str, Any]) -> str | None:
+    for key in ("items", "data", "records", "results", "inventories"):
+        if isinstance(data.get(key), list):
+            return key
+    return None
+
+
 async def answer_read_query(
     *,
     mcp_client: LSMMcpClient,
@@ -156,7 +336,8 @@ async def answer_read_query(
     conversation_context: list[dict[str, str]] | None = None,
 ) -> str:
     cas_number = extract_cas(text)
-    if has_any(text, MY_BORROW_KEYWORDS):
+    use_priority_fallback = _should_use_priority_read_fallback(text)
+    if use_priority_fallback and has_any(text, MY_BORROW_KEYWORDS):
         return await _call(
             mcp_client,
             "inventory_my_borrows",
@@ -167,7 +348,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, MY_PENDING_STOCKIN_KEYWORDS):
+    if use_priority_fallback and has_any(text, MY_PENDING_STOCKIN_KEYWORDS):
         return await _call(
             mcp_client,
             "inventory_pending_stockin",
@@ -178,7 +359,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, MY_REAGENT_ORDER_KEYWORDS):
+    if use_priority_fallback and has_any(text, MY_REAGENT_ORDER_KEYWORDS):
         return await _call(
             mcp_client,
             "reagent_orders_my",
@@ -189,7 +370,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, MY_CONSUMABLE_ORDER_KEYWORDS):
+    if use_priority_fallback and has_any(text, MY_CONSUMABLE_ORDER_KEYWORDS):
         return await _call(
             mcp_client,
             "consumable_orders_my",
@@ -200,7 +381,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, LOW_STOCK_KEYWORDS):
+    if use_priority_fallback and has_any(text, LOW_STOCK_KEYWORDS):
         return await _call(
             mcp_client,
             "inventory_list_low_stock",
@@ -211,7 +392,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, REAGENT_ORDER_KEYWORDS):
+    if use_priority_fallback and has_any(text, REAGENT_ORDER_KEYWORDS):
         return await _answer_reagent_order(
             mcp_client,
             llm_planner,
@@ -221,7 +402,7 @@ async def answer_read_query(
             user_token,
             conversation_context=conversation_context,
         )
-    if has_any(text, CONSUMABLE_ORDER_KEYWORDS):
+    if use_priority_fallback and has_any(text, CONSUMABLE_ORDER_KEYWORDS):
         return await _answer_consumable_order(
             mcp_client,
             llm_planner,
@@ -230,7 +411,7 @@ async def answer_read_query(
             user_token,
             conversation_context=conversation_context,
         )
-    if has_any(text, COMMON_SHELF_KEYWORDS):
+    if use_priority_fallback and has_any(text, COMMON_SHELF_KEYWORDS):
         return await _answer_common_shelf(
             mcp_client,
             llm_planner,
@@ -251,7 +432,7 @@ async def answer_read_query(
             user_token,
             conversation_context=conversation_context,
         )
-    keyword = extract_query(text)
+    keyword = _fallback_inventory_query(text)
     return await _answer_inventory_by_name(
         mcp_client,
         llm_planner,
@@ -262,6 +443,31 @@ async def answer_read_query(
         user_token,
         conversation_context=conversation_context,
     )
+
+
+def _should_use_priority_read_fallback(text: str) -> bool:
+    return not (
+        _has_direct_inventory_hint(text)
+        and _matched_keyword_group_count(text, INVENTORY_HINT_CONFLICT_KEYWORD_GROUPS) > 0
+    )
+
+
+def _matched_keyword_group_count(text: str, keyword_groups: tuple[tuple[str, ...], ...]) -> int:
+    return sum(1 for keywords in keyword_groups if has_any(text, keywords))
+
+
+def _has_direct_inventory_hint(text: str) -> bool:
+    cleaned = text
+    for keyword in LOW_STOCK_KEYWORDS:
+        cleaned = cleaned.replace(keyword, " ")
+    return has_any(cleaned, DIRECT_INVENTORY_HINT_KEYWORDS)
+
+
+def _fallback_inventory_query(text: str) -> str:
+    cleaned = text
+    for word in PRIORITY_FALLBACK_QUERY_STOP_WORDS:
+        cleaned = cleaned.replace(word, " ")
+    return extract_query(cleaned)
 
 
 async def _answer_reagent_order(
@@ -408,9 +614,24 @@ async def _answer_inventory_by_name(
     result = await _raw_call(
         mcp_client,
         "inventory_search_by_name",
-        {"keyword": keyword, "limit": search_limit},
+        {"keyword": keyword, "limit": INVENTORY_NAME_CANDIDATE_LIMIT},
         user_token,
     )
+    if not _is_empty_success_result(result):
+        filtered_result = await _filter_inventory_name_result(
+            llm_planner=llm_planner,
+            user_text=text,
+            search_keyword=keyword,
+            result=result,
+        )
+        return await _format_query_result(
+            filtered_result,
+            title=f"“{keyword}”库存查询结果",
+            empty_text="没有查到匹配记录。",
+            llm_planner=llm_planner,
+            user_text=text,
+            conversation_context=conversation_context,
+        )
     fallback = await _maybe_common_shelf_fallback(
         mcp_client=mcp_client,
         llm_planner=llm_planner,
@@ -651,7 +872,17 @@ async def _answer_with_resolved_cas(
             empty_text="没有查到匹配记录。",
         )
         reply = _resolved_cas_prefix(query, resolved_cas, source_text) + inventory_text
-        return await _maybe_polish_reply(llm_planner, user_text, reply)
+        facts_text = _format_llm_facts_text(
+            {
+                "note": _resolved_cas_prefix(query, resolved_cas, source_text).strip(),
+                "facts": build_safe_facts(
+                    inventory_result,
+                    title=f"CAS {resolved_cas} 库存查询结果",
+                    empty_text="没有查到匹配记录。",
+                ),
+            }
+        )
+        return await _maybe_polish_reply(llm_planner, user_text, reply, facts_text=facts_text)
 
     name_map_result = await _search_chemical_name_map(
         mcp_client,
@@ -786,11 +1017,7 @@ def _resolved_cas_prefix(query: str, cas_number: str, source_text: str) -> str:
 
 
 def _can_resolve_cas_with_web_search(text: str, query: str) -> bool:
-    if not query.strip():
-        return False
-    if _has_explicit_cas_resolution_intent(text):
-        return True
-    return not has_any(text, GENERAL_WEB_SEARCH_KEYWORDS)
+    return bool(query.strip())
 
 
 def _has_explicit_cas_resolution_intent(text: str) -> bool:
@@ -799,9 +1026,10 @@ def _has_explicit_cas_resolution_intent(text: str) -> bool:
 
 
 def _cas_web_search_query(text: str, query: str) -> str:
-    if _should_prioritize_cas_resolution(text, query) or _has_short_english_chemical_token(query):
-        return f"{query} CAS号 CAS number 配体 催化剂 ligand catalyst"
-    return f"{query} CAS号 化学品"
+    search_query = f"{query} CAS号 CAS number chemical name alias synonym 化学品 别名 英文名"
+    if _should_prioritize_cas_resolution(text, query):
+        search_query += " ligand catalyst 配体 催化剂 金属配合物"
+    return search_query
 
 
 def _should_prioritize_cas_resolution(text: str, query: str) -> bool:
@@ -816,12 +1044,14 @@ async def _should_continue_cas_resolution(
     text: str,
     query: str,
 ) -> bool:
-    if _should_prioritize_cas_resolution(text, query):
-        return True
     resolver = getattr(llm_planner, "should_try_cas_resolution", None)
-    if resolver is None:
+    if resolver is not None:
+        return await resolver(user_text=text, query=query) is True
+    if _has_explicit_cas_resolution_intent(text):
+        return True
+    if has_any(text, GENERAL_WEB_SEARCH_KEYWORDS):
         return False
-    return await resolver(user_text=text, query=query) is True
+    return _should_prioritize_cas_resolution(text, query)
 
 
 def _looks_like_chemical_abbreviation(query: str) -> bool:
@@ -839,13 +1069,6 @@ def _looks_like_chemical_abbreviation(query: str) -> bool:
         return True
     if any(char.isdigit() or char in CHEMICAL_ABBREVIATION_SYMBOLS for char in compact):
         return True
-    return False
-
-
-def _has_short_english_chemical_token(query: str) -> bool:
-    for token in re.findall(r"\b[A-Za-z]+\b", query):
-        if SHORT_ENGLISH_CHEMICAL_TOKEN_MIN_LENGTH <= len(token) <= SHORT_ENGLISH_CHEMICAL_TOKEN_MAX_LENGTH:
-            return True
     return False
 
 
@@ -899,7 +1122,17 @@ async def _answer_common_shelf_fallback(
         title = f"“{query}”常用货架查询结果"
     shelf_text = format_tool_result(result, title=title, empty_text="常用货架也没有查到匹配记录。")
     reply = "库存没有查到匹配记录，已继续查询常用货架。\n" + shelf_text
-    return await _maybe_polish_reply(llm_planner, user_text, reply)
+    facts_text = _format_llm_facts_text(
+        {
+            "note": "库存没有查到匹配记录，系统已继续查询常用货架。",
+            "facts": build_safe_facts(
+                result,
+                title=title,
+                empty_text="常用货架也没有查到匹配记录。",
+            ),
+        }
+    )
+    return await _maybe_polish_reply(llm_planner, user_text, reply, facts_text=facts_text)
 
 
 def _should_try_by_master_data(name_map_result: dict[str, Any]) -> bool:
@@ -954,14 +1187,19 @@ async def _format_query_result(
     conversation_context: list[dict[str, str]] | None = None,
 ) -> str:
     template_reply = format_tool_result(result, title=title, empty_text=empty_text)
-    safe_facts = format_safe_facts(build_safe_facts(result, title=title, empty_text=empty_text))
+    safe_facts = build_safe_facts(result, title=title, empty_text=empty_text)
     return await _maybe_polish_reply(
         llm_planner,
         user_text,
         template_reply,
-        facts_text=safe_facts,
+        facts_text=_format_llm_facts_text(safe_facts),
         conversation_context=conversation_context,
     )
+
+
+def _format_llm_facts_text(facts: dict[str, Any]) -> str:
+    payload = json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+    return "安全查询事实（仅供改写，不是回复格式）：\n" + payload
 
 
 async def _maybe_polish_reply(

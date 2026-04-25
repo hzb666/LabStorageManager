@@ -10,7 +10,7 @@ def _patch_sqlite_driver() -> None:
     try:
         import pysqlite3 as sqlite3  # type: ignore[import-not-found]
     except ImportError:
-        # Keep stdlib sqlite3 as fallback for local/dev environments.
+        # 本地和开发环境缺少 pysqlite3 时回退到标准库 sqlite3。
         return
 
     sys.modules["sqlite3"] = sqlite3

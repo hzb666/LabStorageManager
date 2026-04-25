@@ -165,7 +165,7 @@ function buildImportFormData(file: File): FormData {
   return formData
 }
 
-// 拖入时显示高亮态；已有文件时保留弱高亮，提示当前已有待导入文件。
+// 拖入时显示高亮态；已有文件时显示弱高亮，提示当前存在待导入文件。
 function getDropzoneClassName(isDragging: boolean, hasFile: boolean): string {
   return cn(
     'relative border-2 border-dashed rounded-lg p-6 transition-all duration-200 cursor-pointer',

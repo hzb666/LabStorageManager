@@ -1,6 +1,7 @@
 import * as React from "react";
 import {
   Controller,
+  useWatch,
   type Control,
   type ControllerRenderProps,
   type UseFormReturn,
@@ -64,6 +65,7 @@ export interface FieldSchema<T extends FieldValues> {
     label: string;
     title?: string;
     icon?: React.ElementType;
+    activeInputClassName?: string;
   };
   autoComplete?: string;
   onBlur?: (value: unknown) => void;
@@ -120,6 +122,7 @@ type BaseFormProps<
 
 interface FieldRenderState {
   errorMessage?: string;
+  activeInputClassName?: string;
   isDisabled: boolean;
   isReadOnly: boolean;
   showDisabledStyle: boolean;
@@ -163,12 +166,14 @@ function getFieldErrorMessage(errors: unknown, name: string) {
 
 // 统一计算输入类控件的错误态、只读态和整体禁用态样式。
 function getInputClassName({
+  activeInputClassName,
   errorMessage,
   isReadOnly,
   showDisabledStyle,
 }: Readonly<FieldRenderState>) {
   return cn(
     INPUT_STYLES.lg,
+    activeInputClassName && !errorMessage && activeInputClassName,
     errorMessage &&
       "border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30",
     showDisabledStyle && "opacity-50 cursor-not-allowed",
@@ -414,7 +419,7 @@ function renderAutocompleteField<T extends FieldValues>({
   );
 }
 
-// 渲染复选框字段，并保留标签点击可切换的交互方式。
+// 渲染复选框字段，标签点击可切换。
 function renderCheckboxField<T extends FieldValues>({
   field,
   controllerField,
@@ -459,6 +464,7 @@ function BaseFormFieldControl<T extends FieldValues>({
 }: Readonly<BaseFormFieldControlProps<T>>) {
   const fieldId = getFieldId(field.name as string);
   const inputClassName = getInputClassName({
+    activeInputClassName,
     errorMessage,
     isDisabled,
     isReadOnly,
@@ -515,12 +521,21 @@ function BaseFormFieldRenderer<
   disabled,
   readOnly,
 }: Readonly<BaseFormFieldRendererProps<T, TTransformedValues>>) {
+  const watchedToggleValue = useWatch({
+    control,
+    name: field.suffixBooleanToggle?.name ?? field.name,
+  });
+
   if (field.hidden) {
     return null;
   }
 
   const errorMessage = getFieldErrorMessage(errors, field.name as string);
   const renderState: FieldRenderState = {
+    activeInputClassName:
+      field.suffixBooleanToggle?.activeInputClassName && Boolean(watchedToggleValue)
+        ? field.suffixBooleanToggle.activeInputClassName
+        : undefined,
     errorMessage,
     isDisabled: disabled || field.disabled === true,
     isReadOnly: readOnly || field.readOnly === true,
@@ -551,6 +566,7 @@ function BaseFormFieldRenderer<
               field={field}
               controllerField={controllerField}
               errorMessage={renderState.errorMessage}
+              activeInputClassName={renderState.activeInputClassName}
               isDisabled={renderState.isDisabled}
               isReadOnly={renderState.isReadOnly}
               suffix={suffix}
@@ -588,7 +604,7 @@ function BaseForm<
     formState: { errors },
   } = form;
 
-  // BaseForm 故意只管字段区，让调用方按页面语义决定按钮区和操作区的摆放。
+  // BaseForm 负责字段区，按钮区和操作区由调用方按页面语义摆放。
   return (
     <div
       id="base-form-container"

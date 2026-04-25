@@ -1,4 +1,4 @@
-# Models module - Database models for LIMS
+# 数据库模型导出入口。
 from .base import BaseResponse
 
 from .user import PublicUserResponse, User, UserRole, UserResponse
@@ -16,6 +16,19 @@ from .chemical_name_map import (
     ChemicalNameMapCreate,
     ChemicalNameMapResponse,
     ChemicalNameMapUpdate,
+)
+from .reagent_brand import (
+    ReagentBrand,
+    ReagentBrandCreate,
+    ReagentBrandResponse,
+    ReagentBrandUpdate,
+)
+from .compound_structure import (
+    CompoundStructureCache,
+    CompoundStructureCacheResponse,
+    CompoundStructureSource,
+    CompoundStructureStatus,
+    StructureCacheStatusCount,
 )
 from .inventory_operation_log import (
     InventoryOperationAction,
@@ -70,17 +83,17 @@ from .announcement import (
 
 
 __all__ = [
-    # Base
+    # 基础响应。
     "BaseResponse",
-    # User
+    # 用户。
     "User",
     "UserRole",
     "PublicUserResponse",
     "UserResponse",
-    # Session
+    # 会话。
     "UserSession",
     "RuntimeState",
-    # Inventory
+    # 库存。
     "Inventory",
     "InventoryStatus",
     "BorrowLog",
@@ -94,6 +107,15 @@ __all__ = [
     "ChemicalNameMapCreate",
     "ChemicalNameMapUpdate",
     "ChemicalNameMapResponse",
+    "ReagentBrand",
+    "ReagentBrandCreate",
+    "ReagentBrandUpdate",
+    "ReagentBrandResponse",
+    "CompoundStructureCache",
+    "CompoundStructureCacheResponse",
+    "CompoundStructureSource",
+    "CompoundStructureStatus",
+    "StructureCacheStatusCount",
     "InventoryOperationAction",
     "InventoryOperationLog",
     "InventoryOperationLogResponse",
@@ -111,20 +133,20 @@ __all__ = [
     "UserOperationLogResponse",
     "LogTimeline",
     "LogTimelineSourceTable",
-    # Reagent Order
+    # 试剂订单。
     "ReagentOrder",
     "ReagentOrderStatus",
     "ReagentOrderReason",
     "ReagentOrderCreate",
     "ReagentOrderUpdate",
     "ReagentOrderResponse",
-    # Consumable Order
+    # 耗材订单。
     "ConsumableOrder",
     "ConsumableOrderStatus",
     "ConsumableOrderCreate",
     "ConsumableOrderUpdate",
     "ConsumableOrderResponse",
-    # Announcement
+    # 公告。
     "Announcement",
     "AnnouncementBase",
     "AnnouncementCreate",

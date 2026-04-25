@@ -1,5 +1,9 @@
 /** Dashboard 共享工具、类型和常量。 */
 import type { ColumnDef } from '@tanstack/react-table'
+import {
+  ConsumableOrderStatus,
+  ReagentOrderStatus,
+} from '@/api/client'
 import type { FilterOption } from '@/hooks/useTableState'
 import { clearDashboardActiveTab } from '@/lib/storage/appUiStorage'
 import {
@@ -7,6 +11,7 @@ import {
   matchesSearchText,
   type SearchMatchMode,
 } from '@/lib/searchMatchMode'
+import { isAtLeastDisplayNaturalDaysOld } from '@/lib/utils'
 
 // ============================================================================
 // 类型定义
@@ -19,6 +24,7 @@ export interface MyBorrowItem {
   remaining_quantity: number
   unit: string
   borrow_time: string
+  borrower_id?: number | null
   english_name?: string | null
   alias?: string | null
   created_at?: string | null
@@ -26,6 +32,8 @@ export interface MyBorrowItem {
   created_by_name?: string | null
   borrower_name?: string | null
   last_borrower_name?: string | null
+  borrow_days?: number
+  is_overdue?: boolean
 }
 
 export interface PendingStockinItem {
@@ -44,7 +52,11 @@ export interface PendingStockinItem {
   unit: string
   is_hazardous?: boolean
   notes?: string | null
+  temporary_keeper_id?: number | null
+  temporary_keeper_name?: string | null
   stockin_time: string
+  stockin_days?: number
+  is_overdue?: boolean
 }
 
 export interface DashboardOrderBase {
@@ -52,6 +64,9 @@ export interface DashboardOrderBase {
   name: string
   status: string
   created_at: string
+  updated_at?: string | null
+  approved_at?: string | null
+  rejected_at?: string | null
   applicant_id?: number | null
   applicant_name?: string | null
   [key: string]: unknown
@@ -72,6 +87,8 @@ export interface DashboardReagentOrder extends DashboardOrderBase {
   order_reason?: string
   is_hazardous?: boolean
   notes?: string | null
+  arrived_at?: string | null
+  stocked_at?: string | null
 }
 
 export interface DashboardConsumableOrder extends DashboardOrderBase {
@@ -81,6 +98,7 @@ export interface DashboardConsumableOrder extends DashboardOrderBase {
   price?: number | null
   communication?: string | null
   notes?: string | null
+  completed_at?: string | null
 }
 
 export type DashboardParams = {
@@ -102,6 +120,42 @@ export type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
 // ============================================================================
 
 const DASHBOARD_COUNTS_REFRESH_EVENT = 'dashboard-counts-refresh'
+const PENDING_APPROVAL_STATUSES = new Set<string>([
+  ReagentOrderStatus.PENDING,
+  ConsumableOrderStatus.PENDING,
+])
+
+export const PENDING_ORDER_ALERT_DAYS = 2
+export const PENDING_STOCKIN_ALERT_DAYS = 7
+export const APPROVED_ORDER_ALERT_DAYS = 3
+
+function isDateOlderThanDays(dateText: string | null | undefined, days: number): boolean {
+  if (!dateText) {
+    return false
+  }
+  return isAtLeastDisplayNaturalDaysOld(dateText, days)
+}
+
+export function isPendingApprovalOverdue(
+  status: unknown,
+  createdAt: string | null | undefined
+): boolean {
+  return typeof status === 'string'
+    && PENDING_APPROVAL_STATUSES.has(status)
+    && isDateOlderThanDays(createdAt, PENDING_ORDER_ALERT_DAYS)
+}
+
+export function isPendingStockinOverdue(stockinTime: string | null | undefined): boolean {
+  return isDateOlderThanDays(stockinTime, PENDING_STOCKIN_ALERT_DAYS)
+}
+
+export function isApprovedOrderOverdue(
+  status: unknown,
+  updatedAt: string | null | undefined
+): boolean {
+  return status === ReagentOrderStatus.APPROVED
+    && isDateOlderThanDays(updatedAt, APPROVED_ORDER_ALERT_DAYS)
+}
 
 /** 清除 Dashboard 页签持久化状态。 */
 export function clearDashboardTab(): void {
@@ -136,6 +190,11 @@ export const DASHBOARD_REAGENT_SEARCH_FIELDS = [
   { value: 'created_at', label: '订购时间' },
 ]
 
+export const DASHBOARD_REAGENT_ADMIN_SEARCH_FIELDS = [
+  ...DASHBOARD_REAGENT_SEARCH_FIELDS,
+  { value: 'applicant_name', label: '订购人' },
+]
+
 export const DASHBOARD_CONSUMABLE_SEARCH_FIELDS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
@@ -143,10 +202,25 @@ export const DASHBOARD_CONSUMABLE_SEARCH_FIELDS = [
   { value: 'created_at', label: '订购时间' },
 ]
 
+export const DASHBOARD_CONSUMABLE_ADMIN_SEARCH_FIELDS = [
+  ...DASHBOARD_CONSUMABLE_SEARCH_FIELDS,
+  { value: 'applicant_name', label: '订购人' },
+]
+
 export const BORROW_SEARCH_FIELDS = [
   { value: 'all', label: '全部' },
   { value: 'name', label: '名称' },
   { value: 'cas_number', label: 'CAS号' },
+]
+
+export const ADMIN_BORROW_SEARCH_FIELDS = [
+  ...BORROW_SEARCH_FIELDS,
+  { value: 'borrower_name', label: '借用人' },
+]
+
+export const ADMIN_STOCKIN_SEARCH_FIELDS = [
+  ...BORROW_SEARCH_FIELDS,
+  { value: 'temporary_keeper_name', label: '暂存人' },
 ]
 
 /** 广播仪表盘统计刷新信号。 */
@@ -274,7 +348,7 @@ export function flattenGroupedOrders<T extends DashboardOrderBase>(
       ...raw,
       id: Number(raw.order_id ?? raw.id ?? 0),
       status,
-      applicant_id: currentUserId ?? null,
+      applicant_id: currentUserId ?? raw.applicant_id ?? null,
     })) as T[]
   })
 }
@@ -285,5 +359,15 @@ export function removeApplicantColumn(
   return columns.filter((column) => {
     const candidate = column as { id?: string; accessorKey?: string }
     return candidate.id !== 'applicant' && candidate.accessorKey !== 'applicant_name'
+  })
+}
+
+export function findDashboardColumnIndex(
+  columns: ColumnDef<Record<string, unknown>, unknown>[],
+  columnId: string
+): number {
+  return columns.findIndex((column) => {
+    const candidate = column as { id?: string; accessorKey?: string }
+    return candidate.id === columnId || candidate.accessorKey === columnId
   })
 }

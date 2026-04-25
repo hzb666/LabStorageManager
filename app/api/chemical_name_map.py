@@ -3,12 +3,15 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlmodel import select
 
-from app.core.auth import get_current_user
+from app.core.auth import CurrentUser, NonPublicUser, get_current_user
 from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
+from app.core.time_utils import utc_iso_str
 from app.database import DBSession
 from app.models.chemical_name_map import (
     ChemicalNameMap,
@@ -17,11 +20,14 @@ from app.models.chemical_name_map import (
     ChemicalNameMapUpdate,
 )
 from app.models.common_shelf import CommonShelf, CommonShelfGroup
+from app.models.user_operation_log import UserOperationAction
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.common_shelf_queries import search_name_map_cas_numbers
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.pinyin_utils import to_pinyin_parts
 from app.services.search_matchers import TextMatchMode
 from app.services.sql_utils import order_with_nulls_last
+from app.services.user_operation_logger import log_user_operation
 
 router = APIRouter(prefix="/chemical-name-map", tags=["Chemical Name Map"])
 
@@ -31,6 +37,13 @@ VALID_CHEMICAL_NAME_MAP_SORT_FIELDS = {
     "english_name",
     "category",
 }
+
+
+class ChemicalNameMapListResponse(BaseModel):
+    data: list[ChemicalNameMapResponse]
+    total: int
+    skip: int
+    limit: int
 
 
 def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
@@ -102,7 +115,48 @@ def _apply_name_map_payload(
     target.alias_3_initials = alias_3_initials or None
 
 
-@router.get("", response_model=dict, dependencies=[Depends(get_current_user)])
+def _build_chemical_name_map_snapshot(row: ChemicalNameMap) -> dict[str, object]:
+    return {
+        "id": row.id,
+        "cas_number": row.cas_number,
+        "name": row.name,
+        "english_name": row.english_name,
+        "category": row.category,
+        "alias_1": row.alias_1,
+        "alias_2": row.alias_2,
+        "alias_3": row.alias_3,
+        "created_at": utc_iso_str(row.created_at),
+        "updated_at": utc_iso_str(row.updated_at),
+    }
+
+
+def _log_chemical_name_map_operation(
+    db: DBSession,
+    *,
+    request: Request,
+    current_user: CurrentUser,
+    action: UserOperationAction,
+    detail: str,
+    snapshot: dict[str, object],
+) -> None:
+    log_user_operation(
+        db,
+        action=action,
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+        detail=detail,
+        snapshot=snapshot,
+        is_cli=get_request_is_cli(request),
+    )
+
+
+@router.get(
+    "",
+    response_model=ChemicalNameMapListResponse,
+    dependencies=[Depends(get_current_user)],
+)
 def list_chemical_name_map(
     db: DBSession,
     search: Optional[str] = Query(default=None, max_length=100),
@@ -148,8 +202,14 @@ def list_chemical_name_map(
     }
 
 
-@router.post("", response_model=ChemicalNameMapResponse, dependencies=[Depends(get_current_user)])
-def create_chemical_name_map(payload: ChemicalNameMapCreate, db: DBSession):
+@router.post("", response_model=ChemicalNameMapResponse)
+def create_chemical_name_map(
+    payload: ChemicalNameMapCreate,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    current_user: NonPublicUser,
+    db: DBSession,
+):
     cas_number = _validate_cas_number(payload.cas_number)
     existing = db.exec(select(ChemicalNameMap).where(ChemicalNameMap.cas_number == cas_number)).first()
     if existing is not None:
@@ -169,17 +229,38 @@ def create_chemical_name_map(payload: ChemicalNameMapCreate, db: DBSession):
         alias_3=payload.alias_3,
     )
     db.add(row)
+    db.flush()
+    _log_chemical_name_map_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.CREATE_CHEMICAL_NAME_MAP,
+        detail=f"CAS={row.cas_number} 名称={row.name}",
+        snapshot=_build_chemical_name_map_snapshot(row),
+    )
     db.commit()
     db.refresh(row)
+    enqueue_structure_cache_resolution(
+        background_tasks,
+        row.cas_number,
+        reason="chemical_name_map.create",
+    )
     return row
 
 
-@router.put("/{item_id}", response_model=ChemicalNameMapResponse, dependencies=[Depends(get_current_user)])
-def update_chemical_name_map(item_id: int, payload: ChemicalNameMapUpdate, db: DBSession):
+@router.put("/{item_id}", response_model=ChemicalNameMapResponse)
+def update_chemical_name_map(
+    item_id: int,
+    payload: ChemicalNameMapUpdate,
+    request: Request,
+    current_user: NonPublicUser,
+    db: DBSession,
+):
     row = db.get(ChemicalNameMap, item_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chemical name map not found")
 
+    before_snapshot = _build_chemical_name_map_snapshot(row)
     update_data = payload.model_dump(exclude_unset=True)
     if "category" in update_data:
         if update_data["category"] is None:
@@ -195,16 +276,34 @@ def update_chemical_name_map(item_id: int, payload: ChemicalNameMapUpdate, db: D
         alias_3=update_data.get("alias_3"),
     )
     db.add(row)
+    db.flush()
+    _log_chemical_name_map_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.UPDATE_CHEMICAL_NAME_MAP,
+        detail=f"CAS={row.cas_number} 名称={row.name}",
+        snapshot={
+            "before": before_snapshot,
+            "after": _build_chemical_name_map_snapshot(row),
+        },
+    )
     db.commit()
     db.refresh(row)
     return row
 
 
-@router.delete("/{item_id}", response_model=dict, dependencies=[Depends(get_current_user)])
-def delete_chemical_name_map(item_id: int, db: DBSession):
+@router.delete("/{item_id}", response_model=dict)
+def delete_chemical_name_map(
+    item_id: int,
+    request: Request,
+    current_user: NonPublicUser,
+    db: DBSession,
+):
     row = db.get(ChemicalNameMap, item_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chemical name map not found")
+    before_snapshot = _build_chemical_name_map_snapshot(row)
 
     referenced_item_id = db.exec(
         select(CommonShelf.id)
@@ -224,5 +323,16 @@ def delete_chemical_name_map(item_id: int, db: DBSession):
         )
 
     db.delete(row)
+    _log_chemical_name_map_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.DELETE_CHEMICAL_NAME_MAP,
+        detail=f"CAS={row.cas_number} 名称={row.name}",
+        snapshot={
+            "before": before_snapshot,
+            "after": {},
+        },
+    )
     db.commit()
     return {"message": "CAS 主数据已删除", "id": item_id}

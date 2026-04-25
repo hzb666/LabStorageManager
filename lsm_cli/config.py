@@ -47,7 +47,7 @@ def clear_config() -> Path:
 def clear_auth_data() -> Path:
     path = get_config_path()
     config = load_config()
-    # 保留 base_url，避免 logout 后每次都要重新指定服务地址。
+    # logout 清理认证数据，服务地址继续沿用上次配置。
     config.pop("access_token", None)
     config.pop("token_type", None)
     config.pop("user", None)

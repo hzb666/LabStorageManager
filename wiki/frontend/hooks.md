@@ -1,6 +1,6 @@
 # Hooks 层
 
-`frontend/src/hooks/` 负责承接页面中的可复用状态逻辑。它不直接渲染 UI，而是为页面、组件和 `lib/` 提供稳定的状态协作接口。
+`frontend/src/hooks/` 负责承接页面中的可复用状态逻辑，为页面、组件和 `lib/` 提供稳定的状态协作接口。
 
 ## 分类
 
@@ -62,11 +62,11 @@
 
 ### `useErrorLogger`
 
-该 Hook 将运行时异常、Promise 错误和 API 错误收敛为统一的错误记录行为，便于页面层保持简洁。
+该 Hook 将运行时异常、Promise 错误和 API 错误转为统一的错误记录行为，便于页面层保持简洁。
 
 ## 改动入口
 
-- 页面状态过多时，优先考虑新增或拆分 Hook，而不是继续堆进组件
+- 页面状态过多时，优先新增专用 Hook，避免继续堆进组件
 - 表格相关改动通常先看 `useTableState`、`useTableUrlState`、`useColumnResize`
 - 实时同步改动通常先看 `useSSE`、`useListSSE` 和 `store/sseStore.ts`
 - 弹窗和主题改动通常先看 `useDialogState`、`useFormModal`、`useTheme`
@@ -93,7 +93,7 @@
 2. `useDialogState`
 3. `useFormModal`
 
-## 验证建议
+## 验证要点
 
 - 页面状态是否已经抽离到 Hook 层
 - 同一类能力是否复用了现有 Hook

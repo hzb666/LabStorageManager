@@ -28,6 +28,12 @@ class RedisDeleteByPrefixResult:
     deleted_count: int
 
 
+@dataclass(frozen=True)
+class CachedSessionState:
+    session_data: Optional[dict]
+    is_revoked: bool
+
+
 def get_redis() -> Optional[redis.Redis]:
     """获取 Redis 客户端（带简易熔断机制）"""
     global _redis_client, _last_error_time
@@ -71,6 +77,10 @@ def session_key(token_hash: str) -> str:
     return redis_key(f"session:{token_hash}")
 
 
+def revoked_session_key(token_hash: str) -> str:
+    return redis_key(f"session:revoked:{token_hash}")
+
+
 def _redact_redis_key(key: str) -> str:
     if not key:
         return ""
@@ -109,22 +119,32 @@ def cache_session(token_hash: str, session_data: dict, ttl_seconds: int) -> None
 
 
 def get_cached_session(token_hash: str) -> Optional[dict]:
+    return get_cached_session_state(token_hash).session_data
+
+
+def get_cached_session_state(token_hash: str) -> CachedSessionState:
     redis_client = get_redis()
     if redis_client is None:
-        return None
+        return CachedSessionState(session_data=None, is_revoked=False)
 
-    key = session_key(token_hash)
+    cache_key = session_key(token_hash)
+    revoked_key = revoked_session_key(token_hash)
     try:
-        data = redis_client.get(key)
-        if data:
-            return json.loads(data)
+        cached_payload, revoked_marker = redis_client.mget([cache_key, revoked_key])
+        session_data = None
+        if cached_payload:
+            session_data = json.loads(cached_payload)
+        return CachedSessionState(
+            session_data=session_data,
+            is_revoked=bool(revoked_marker),
+        )
     except redis.RedisError as e:
-        _handle_redis_error(e, "读取 Session 缓存", key)
+        _handle_redis_error(e, "读取 Session 缓存状态", f"{cache_key},{revoked_key}")
     except json.JSONDecodeError as e:
-        logger.error("Session 缓存数据损坏 key=%s: %s", _redact_redis_key(key), e)
+        logger.error("Session 缓存数据损坏 key=%s: %s", _redact_redis_key(cache_key), e)
         delete_cached_session(token_hash)
 
-    return None
+    return CachedSessionState(session_data=None, is_revoked=False)
 
 
 def delete_cached_session(token_hash: str) -> None:
@@ -152,6 +172,27 @@ def delete_cached_sessions(token_hashes: Iterable[str]) -> None:
         redis_client.delete(*keys)
     except redis.RedisError as e:
         _handle_redis_error(e, "批量删除 Session 缓存", ",".join(keys))
+
+
+def mark_revoked_sessions(token_hashes: Iterable[str], *, ttl_seconds: int) -> None:
+    if ttl_seconds <= 0:
+        return
+
+    redis_client = get_redis()
+    if redis_client is None:
+        return
+
+    keys = [revoked_session_key(token_hash) for token_hash in token_hashes]
+    if not keys:
+        return
+
+    try:
+        pipeline = redis_client.pipeline(transaction=False)
+        for key in keys:
+            pipeline.setex(key, ttl_seconds, "1")
+        pipeline.execute()
+    except redis.RedisError as e:
+        _handle_redis_error(e, "写入 Session 撤销标记", ",".join(keys))
 
 
 def delete_keys_by_prefix(prefix: str) -> RedisDeleteByPrefixResult:

@@ -23,6 +23,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = get_settings()
     settings.require_websocket()
+    settings.require_token_storage()
 
     try:
         from wecom_aibot_sdk import WSClient, generate_req_id
@@ -31,7 +32,10 @@ async def main() -> None:
 
     store = ProcessedMessageStore(settings.state_db)
     store.init()
-    conversation_store = WecomConversationStore(settings.state_db)
+    conversation_store = WecomConversationStore(
+        settings.state_db,
+        **settings.conversation_store_options(),
+    )
     conversation_store.init()
     mcp_client = LSMMcpClient(settings.mcp_url, read_timeout_seconds=settings.mcp_timeout_seconds)
     handler = WecomAibotHandler(

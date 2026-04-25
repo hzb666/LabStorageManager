@@ -2,7 +2,9 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 // 1. 引入 TanStack Query 需要的 Provider 和 Client
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import '@/lib/browserProcessShim'
 import './index.css'
+import { applyAppZoom } from '@/lib/appZoom'
 import { bootstrapCacheVersion } from '@/lib/cacheVersionBootstrap'
 
 if (import.meta.env.DEV) {
@@ -35,15 +37,18 @@ const queryClient = new QueryClient({
   },
 })
 
+function startCacheVersionBootstrap(): void {
+  bootstrapCacheVersion(queryClient).catch((error) => {
+    console.error('Cache version bootstrap failed:', error)
+  })
+}
+
+applyAppZoom()
+
 async function startApplication(): Promise<void> {
   const rootElement = document.getElementById('root')
   if (!rootElement) {
     throw new Error('Root element not found')
-  }
-
-  const bootstrapResult = await bootstrapCacheVersion(queryClient)
-  if (bootstrapResult.redirected) {
-    return
   }
 
   const { default: App } = await import('./App.tsx')
@@ -55,6 +60,7 @@ async function startApplication(): Promise<void> {
       </QueryClientProvider>
     </StrictMode>,
   )
+  startCacheVersionBootstrap()
 }
 
 startApplication().catch((error) => {

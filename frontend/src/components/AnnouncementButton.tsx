@@ -29,7 +29,7 @@ const getReadStorage = (): Record<string, number> => {
   }
 }
 
-// 已读态存时间戳而不是布尔值，这样公告更新后可以自动重新变成未读。
+// 已读态记录时间戳，公告更新后自动恢复未读。
 const setAnnouncementRead = (id: number) => {
   markAnnouncementRead(getAnnouncementStorageKey(id))
 }
@@ -40,7 +40,7 @@ const parseUtcTimestamp = (dateStr: string): number => {
   return new Date(normalized).getTime()
 }
 
-// 线性移除摘要中的 HTML 标签，同时保留未闭合标签后的原始文本。
+// 线性移除摘要中的 HTML 标签，未闭合标签后的原始文本继续输出。
 const stripHtmlTags = (content: string): string => {
   let result = ''
   let currentIndex = 0
@@ -185,7 +185,7 @@ export function AnnouncementButton({ announcements }: Readonly<AnnouncementButto
                             {announcement.title}
                           </span>
                           <span className="ml-auto text-sm text-muted-foreground shrink-0">
-                            {formatDate(announcement.created_at)}
+                            {formatDate(announcement.updated_at)}
                           </span>
                         </div>
                         <p className="text-sm text-muted-foreground line-clamp-2 mt-1">

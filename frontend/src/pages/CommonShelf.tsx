@@ -1,30 +1,49 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react'
 import { useForm, type FieldValues, type UseFormReturn } from 'react-hook-form'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { Archive, ArrowUpFromLine, Minus, Plus, Trash2 } from 'lucide-react'
+import { Archive, ArrowUpFromLine, Database, Minus, Plus, ShoppingCart, Trash2 } from 'lucide-react'
 
 import {
   chemicalNameMapAPI,
   commonShelfAPI,
+  reagentOrderAPI,
+  ReagentOrderReason,
   type ChemicalCategory,
   type ChemicalNameMapItem,
   type CommonShelfGroup,
   type CommonShelfGroupItem,
 } from '@/api/client'
+import { BaseForm } from '@/components/BaseForm'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { Button } from '@/components/ui/Button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { FilterTable } from '@/components/ui/FilterTable'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import type { FilterAPI, FilterOption } from '@/hooks/useTableState'
 import { UserRoles } from '@/lib/constants'
+import { canWriteNonPublicData } from '@/lib/permissions'
+import {
+  getCommonShelfQuickOrderFormFields,
+} from '@/lib/formConfigs'
+import {
+  getReagentBrandOptionsQueryOptions,
+} from '@/lib/reagentBrandOptions'
 import { COMMON_SHELF_SSE_EVENTS } from '@/lib/sseEvents'
 import {
   COMMON_SHELF_EMPTY_LOCATION_VALUE,
   COMMON_SHELF_GROUP_SEARCH_FIELD_OPTIONS,
   getChemicalNameMapTableColumns,
   getCommonShelfGroupTableColumns,
-  renderCommonShelfCategory,
 } from '@/lib/tableConfigs'
 import { toast } from '@/lib/toast'
 import {
@@ -33,6 +52,7 @@ import {
   CommonShelfAddBottlesSchema,
   CommonShelfGroupEditSchema,
   CommonShelfManualAddSchema,
+  CommonShelfQuickOrderSchema,
   CommonShelfRemoveOneSchema,
   type ChemicalNameMapFormData,
   type ChemicalNameMapFormInputData,
@@ -43,6 +63,8 @@ import {
   type CommonShelfItemEditRowData,
   type CommonShelfManualAddData,
   type CommonShelfManualAddInputData,
+  type CommonShelfQuickOrderData,
+  type CommonShelfQuickOrderInputData,
   type CommonShelfRemoveOneData,
   type CommonShelfRemoveOneInputData,
   createValibotResolver,
@@ -51,7 +73,12 @@ import {
   normalizeApiErrorMessage,
   toValidationErrors,
 } from '@/lib/validationSchemas'
-import { downloadBlobResponse, formatDate } from '@/lib/utils'
+import {
+  downloadBlobResponse,
+  formatChinaDateForFilename,
+  formatDate,
+  processNotes,
+} from '@/lib/utils'
 import {
   ChemicalNameMapEditorDialog,
   ChemicalNameMapManagementDialog,
@@ -60,7 +87,6 @@ import {
   type CommonShelfDialogController,
   type CommonShelfDialogMode,
 } from '@/components/CommonShelfDialogs'
-import { useSSEStore } from '@/store/sseStore'
 import { useAuthStore } from '@/store/useStore'
 
 const DEFAULT_MANUAL_ADD_FORM: CommonShelfManualAddInputData = {
@@ -87,6 +113,13 @@ const DEFAULT_ADD_BOTTLES_FORM: CommonShelfAddBottlesInputData = {
   notes: '',
 }
 
+const DEFAULT_QUICK_ORDER_FORM: CommonShelfQuickOrderInputData = {
+  quantity: '1',
+  price: undefined as unknown as number,
+  purity: '',
+  notes: '',
+}
+
 const DEFAULT_REMOVE_ONE_FORM: CommonShelfRemoveOneInputData = {
   storage_location: '',
 }
@@ -105,7 +138,7 @@ const COMMON_SHELF_STATUS_FILTER_OPTIONS: FilterOption[] = []
 type ManualAddPayload = {
   cas_number: string
   name_snapshot: string
-  brand?: string
+  brand: string
   purity?: string
   specification: string
   count: number
@@ -115,16 +148,30 @@ type ManualAddPayload = {
 
 type CommonShelfDialogForms = CommonShelfDialogController['forms']
 
+type CommonShelfQuickOrderController = {
+  state: {
+    targetGroup: CommonShelfGroup | null
+    isSubmitting: boolean
+  }
+  form: UseFormReturn<CommonShelfQuickOrderInputData, unknown, CommonShelfQuickOrderData>
+  actions: {
+    openQuickOrderDialog: (item: CommonShelfGroup) => void
+    handleOpenChange: (open: boolean) => void
+    handleSubmit: () => Promise<void>
+  }
+}
+
 type CommonShelfDialogControllerParams = {
   refreshCommonShelf: () => Promise<void>
-  canDeleteGroup: boolean
   onRequireChemicalNameMap: (payload: ManualAddPayload) => void
 }
 
 type CommonShelfPageController = {
-  canDeleteGroup: boolean
+  canManageCommonShelf: boolean
   dialogController: CommonShelfDialogController
   chemicalNameMapController: ReturnType<typeof useChemicalNameMapController>
+  quickOrderController: CommonShelfQuickOrderController
+  brandOptions: { label: string; value: string }[]
   columns: ColumnDef<Record<string, unknown>, unknown>[]
   renderExpandedRow: (itemRaw: Record<string, unknown>) => ReactElement
   refreshCommonShelf: () => Promise<void>
@@ -175,7 +222,7 @@ function buildManualAddPayload(data: CommonShelfManualAddData): ManualAddPayload
   return {
     cas_number: data.cas_number,
     name_snapshot: data.name_snapshot,
-    brand: normalizeOptionalText(data.brand),
+    brand: data.brand,
     purity: normalizeOptionalText(data.purity),
     specification: data.specification,
     count: data.count,
@@ -196,14 +243,61 @@ function buildChemicalNameMapPayload(data: ChemicalNameMapFormData) {
   }
 }
 
+function getQuickOrderBrand(item: CommonShelfGroup) {
+  return normalizeOptionalText(item.group.brand)
+}
+
+function buildQuickOrderPayload(item: CommonShelfGroup, data: CommonShelfQuickOrderData) {
+  const brand = getQuickOrderBrand(item)
+  if (!brand) {
+    return null
+  }
+
+  return {
+    cas_number: item.group.cas_number,
+    name: item.display.name,
+    english_name: normalizeOptionalText(item.display.english_name),
+    category: normalizeOptionalText(item.display.category),
+    brand,
+    purity: normalizeOptionalText(data.purity),
+    specification: item.group.specification_text,
+    quantity: data.quantity,
+    price: data.price,
+    order_reason: ReagentOrderReason.COMMON_PUBLIC,
+    notes: processNotes(data.notes),
+  }
+}
+
 function toCommonShelfGroup(row: Record<string, unknown>) {
   return row as unknown as CommonShelfGroup
 }
 
-function renderChemicalAliases(row: Record<string, unknown>) {
-  const aliases = [row.alias_1, row.alias_2, row.alias_3]
+function canDeleteCommonShelfGroup(group: CommonShelfGroup | null): group is CommonShelfGroup {
+  return Boolean(group && group.bottle_count === 0)
+}
+
+function formatAliasList(values: readonly unknown[]) {
+  const aliases = values
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
   return aliases.length > 0 ? aliases.join(' / ') : '-'
+}
+
+function renderChemicalAliases(row: Record<string, unknown>) {
+  return formatAliasList([row.alias_1, row.alias_2, row.alias_3])
+}
+
+function renderCommonShelfAliases(item: CommonShelfGroup) {
+  return formatAliasList([item.display.alias_1, item.display.alias_2, item.display.alias_3])
+}
+
+function renderCommonShelfLocations(item: CommonShelfGroup) {
+  const recentLocations = item.recent_locations ?? []
+  const locationsText = recentLocations.length > 0
+    ? recentLocations
+        .map((location) => `${location.storage_location || '未填写'}（${location.bottle_count}瓶）`)
+        .join(' / ')
+    : '-'
+  return item.location_count > 3 ? `${locationsText}（${item.location_count}个位置）` : locationsText
 }
 
 function useCommonShelfDialogForms(): CommonShelfDialogForms {
@@ -292,30 +386,30 @@ function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
   }
 }
 
-function CommonShelfExpandedRow({ item }: { item: CommonShelfGroup }) {
+function CommonShelfExpandedRow({ item }: Readonly<{ item: CommonShelfGroup }>) {
   return (
-    <div className="flex flex-col gap-4 border-b border-border p-3 md:flex-row">
+    <div className="flex min-h-[124px] flex-col gap-4 border-b border-border p-3 md:flex-row">
       <div className="hidden shrink-0 md:block">
         <MoleculeStructure casNumber={item.group.cas_number} width={150} height={100} />
       </div>
-      <div className="grid flex-1 grid-cols-2 gap-x-6 gap-y-2 md:grid-cols-3">
-        <div>中文名称：{item.display.name || '-'}</div>
-        <div>英文名称：{item.display.english_name || '-'}</div>
-        <div>分类：{renderCommonShelfCategory(item.display.category)}</div>
-        <div>现有瓶数：{item.bottle_count} 瓶</div>
-        <div>位置数：{item.location_count} 处</div>
-        <div>最新入库名称：{item.latest_name_snapshot || '-'}</div>
+      <div className="grid flex-1 grid-cols-1 gap-x-6 gap-y-2 md:m-2 md:grid-cols-2">
+        <div className="break-words">英文名称：{item.display.english_name || '-'}</div>
+        <div className="break-words">别名：{renderCommonShelfAliases(item)}</div>
+        <div className="break-words md:col-span-2">位置：{renderCommonShelfLocations(item)}</div>
         <div>创建时间：{formatDate(item.created_at)}</div>
-        <div>更新时间：{formatDate(item.updated_at)}</div>
+        <div>最近变动：{formatDate(item.updated_at)}</div>
       </div>
     </div>
   )
 }
 
 function createCommonShelfColumns(params: {
+  canEdit: boolean
   onEdit: (item: CommonShelfGroup) => void
   onAddBottles: (item: CommonShelfGroup) => void
   onRemoveOne: (item: CommonShelfGroup) => void
+  onQuickOrder: (item: CommonShelfGroup) => void
+  showQuickOrder: boolean
 }) {
   return getCommonShelfGroupTableColumns({
     renderActions: (row) => {
@@ -323,9 +417,12 @@ function createCommonShelfColumns(params: {
       return (
         <CommonShelfActionButtons
           item={item}
+          canEdit={params.canEdit}
           onEdit={params.onEdit}
           onAddBottles={params.onAddBottles}
           onRemoveOne={params.onRemoveOne}
+          onQuickOrder={params.onQuickOrder}
+          showQuickOrder={params.showQuickOrder}
         />
       )
     },
@@ -333,21 +430,24 @@ function createCommonShelfColumns(params: {
 }
 
 function createChemicalNameMapColumns(params: {
+  canWrite: boolean
   onEdit: (item: ChemicalNameMapItem) => void
   onDelete: (item: ChemicalNameMapItem) => Promise<void>
 }) {
   return getChemicalNameMapTableColumns({
     renderAliases: renderChemicalAliases,
-    renderActions: (row) => {
-      const item = row as unknown as ChemicalNameMapItem
-      return (
-        <ChemicalNameMapActionButtons
-          item={item}
-          onEdit={params.onEdit}
-          onDelete={params.onDelete}
-        />
-      )
-    },
+    renderActions: params.canWrite
+      ? (row) => {
+        const item = row as unknown as ChemicalNameMapItem
+        return (
+          <ChemicalNameMapActionButtons
+            item={item}
+            onEdit={params.onEdit}
+            onDelete={params.onDelete}
+          />
+        )
+      }
+      : undefined,
   }) as unknown as ColumnDef<Record<string, unknown>, unknown>[]
 }
 
@@ -356,6 +456,24 @@ function applyFormValidationDetail(
   setFieldError: (fieldName: string, message: string) => void,
 ) {
   return applyValidationErrors(toValidationErrors(detail), setFieldError)
+}
+
+const QUICK_ORDER_FIELD_NAMES = new Set(['quantity', 'price', 'purity', 'notes'])
+
+function applyQuickOrderValidationDetail(
+  detail: unknown,
+  setFieldError: (fieldName: string, message: string) => void,
+) {
+  let applied = false
+  toValidationErrors(detail).forEach((errorItem) => {
+    const fieldName = errorItem.loc?.[1]
+    if (!QUICK_ORDER_FIELD_NAMES.has(String(fieldName))) {
+      return
+    }
+    setFieldError(String(fieldName), errorItem.msg || '输入不合法')
+    applied = true
+  })
+  return applied
 }
 
 // 把字符串字段名统一映射到 react-hook-form 的 setError，避免每个提交处理器都写一遍类型转换。
@@ -368,7 +486,7 @@ function createFormFieldErrorSetter<TInput extends FieldValues, TOutput>(
   }
 }
 
-// 多个提交流程都需要同样的 loading 包装；这里只抽公共壳子，不隐藏具体业务逻辑。
+// 多个提交流程共用 loading 包装，具体业务逻辑仍由调用方传入。
 async function runWithSubmitting(
   setIsSubmitting: (value: boolean) => void,
   task: () => Promise<void>,
@@ -378,6 +496,85 @@ async function runWithSubmitting(
     await task()
   } finally {
     setIsSubmitting(false)
+  }
+}
+
+function useCommonShelfQuickOrderController({
+  refreshReagentOrders,
+}: {
+  refreshReagentOrders: () => Promise<void>
+}): CommonShelfQuickOrderController {
+  const [targetGroup, setTargetGroup] = useState<CommonShelfGroup | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const form = useForm<CommonShelfQuickOrderInputData, unknown, CommonShelfQuickOrderData>({
+    resolver: createValibotResolver(CommonShelfQuickOrderSchema),
+    defaultValues: DEFAULT_QUICK_ORDER_FORM,
+  })
+
+  const resetQuickOrderDialog = useCallback(() => {
+    setTargetGroup(null)
+    form.reset(DEFAULT_QUICK_ORDER_FORM)
+  }, [form])
+
+  const openQuickOrderDialog = useCallback((item: CommonShelfGroup) => {
+    if (!normalizeOptionalText(item.display.name)) {
+      toast.error('当前 CAS 主数据缺少名称，请先补录后再快速购买')
+      return
+    }
+    if (!getQuickOrderBrand(item)) {
+      toast.error('当前分组缺少品牌，请先编辑分组品牌后再快速购买')
+      return
+    }
+    form.reset(DEFAULT_QUICK_ORDER_FORM)
+    setTargetGroup(item)
+  }, [form])
+
+  const handleOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      resetQuickOrderDialog()
+    }
+  }, [resetQuickOrderDialog])
+
+  const handleSubmit = useCallback(async () => {
+    await form.handleSubmit(async (data) => {
+      const item = targetGroup
+      if (!item) {
+        return
+      }
+      const payload = buildQuickOrderPayload(item, data)
+      if (!payload) {
+        toast.error('当前分组缺少品牌，请先编辑分组品牌后再快速购买')
+        return
+      }
+
+      await runWithSubmitting(setIsSubmitting, async () => {
+        try {
+          await reagentOrderAPI.create(payload)
+          toast.success('常用试剂订单已提交')
+          resetQuickOrderDialog()
+          await refreshReagentOrders()
+        } catch (error) {
+          const errorDetail = extractApiErrorDetail(error)
+          if (applyQuickOrderValidationDetail(errorDetail, createFormFieldErrorSetter(form))) {
+            return
+          }
+          toast.error(normalizeApiErrorMessage(errorDetail, '提交失败'))
+        }
+      })
+    })()
+  }, [form, refreshReagentOrders, resetQuickOrderDialog, targetGroup])
+
+  return {
+    state: {
+      targetGroup,
+      isSubmitting,
+    },
+    form,
+    actions: {
+      openQuickOrderDialog,
+      handleOpenChange,
+      handleSubmit,
+    },
   }
 }
 
@@ -429,8 +626,8 @@ async function executeCommonShelfGroupEdit(params: {
   } = params
 
   try {
-    const response = await commonShelfAPI.updateGroup(groupKey, {
-      brand: normalizeOptionalText(data.brand),
+      const response = await commonShelfAPI.updateGroup(groupKey, {
+      brand: data.brand,
       specification: data.specification,
       // merge 是两阶段确认：第一次只探测撞组，第二次才真的写库。
       confirm_merge: editNeedsMergeConfirm || undefined,
@@ -643,7 +840,6 @@ function useCommonShelfItemEditActions(params: {
 }
 
 function useCommonShelfGroupEditActions(params: {
-  canDeleteGroup: boolean
   deleteConfirm: boolean
   editNeedsMergeConfirm: boolean
   editForm: CommonShelfDialogForms['editForm']
@@ -655,7 +851,6 @@ function useCommonShelfGroupEditActions(params: {
   setIsSubmitting: (value: boolean) => void
 }) {
   const {
-    canDeleteGroup,
     deleteConfirm,
     editNeedsMergeConfirm,
     editForm,
@@ -685,19 +880,20 @@ function useCommonShelfGroupEditActions(params: {
   }, [editForm, editNeedsMergeConfirm, refreshCommonShelf, resetDialogState, selectedGroup, setEditNeedsMergeConfirm, setIsSubmitting])
 
   const handleDelete = useCallback(async () => {
-    if (!selectedGroup || !canDeleteGroup) return
+    const group = selectedGroup
+    if (!canDeleteCommonShelfGroup(group)) return
     if (!deleteConfirm) {
       setDeleteConfirm(true)
       return
     }
     await runWithSubmitting(setIsSubmitting, async () => {
       await executeCommonShelfDeleteGroup({
-        groupKey: selectedGroup.group.group_key,
+        groupKey: group.group.group_key,
         refreshCommonShelf,
         resetDialogState,
       })
     })
-  }, [canDeleteGroup, deleteConfirm, refreshCommonShelf, resetDialogState, selectedGroup, setDeleteConfirm, setIsSubmitting])
+  }, [deleteConfirm, refreshCommonShelf, resetDialogState, selectedGroup, setDeleteConfirm, setIsSubmitting])
 
   useEffect(() => {
     const subscription = editForm.watch((_value, info) => {
@@ -717,10 +913,9 @@ function useCommonShelfGroupEditActions(params: {
   }
 }
 
-// 这里集中管理常用货架弹窗，主页面只负责“何时打开、刷新什么”，避免再分散成多层只转发参数的 hook。
+// 常用货架弹窗集中管理打开时机、刷新目标和表单动作。
 function useCommonShelfDialogController({
   refreshCommonShelf,
-  canDeleteGroup,
   onRequireChemicalNameMap,
 }: CommonShelfDialogControllerParams): CommonShelfDialogController {
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -810,7 +1005,6 @@ function useCommonShelfDialogController({
     handleSubmitEdit,
     handleDelete,
   } = useCommonShelfGroupEditActions({
-    canDeleteGroup,
     deleteConfirm,
     editNeedsMergeConfirm,
     editForm,
@@ -855,10 +1049,12 @@ function useCommonShelfDialogController({
 }
 
 function useChemicalNameMapController({
+  canWrite,
   refreshChemicalNameMap,
   refreshCommonShelf,
   resetCommonShelfDialog,
 }: {
+  canWrite: boolean
   refreshChemicalNameMap: () => Promise<void>
   refreshCommonShelf: () => Promise<void>
   resetCommonShelfDialog: () => void
@@ -887,6 +1083,8 @@ function useChemicalNameMapController({
     prefill?: Partial<ChemicalNameMapFormInputData>
     keepPendingManualAdd?: boolean
   }) => {
+    if (!canWrite) return
+
     setEditingItem(null)
     form.reset({
       ...DEFAULT_CHEMICAL_NAME_MAP_FORM,
@@ -896,15 +1094,19 @@ function useChemicalNameMapController({
       setPendingManualAddPayload(null)
     }
     setEditorOpen(true)
-  }, [form, setPendingManualAddPayload])
+  }, [canWrite, form, setPendingManualAddPayload])
 
   const openChemicalNameMapEditDialog = useCallback((item: ChemicalNameMapItem) => {
+    if (!canWrite) return
+
     setEditingItem(item)
     form.reset(buildChemicalNameMapForm(item))
     setEditorOpen(true)
-  }, [form])
+  }, [canWrite, form])
 
   const promptCreateForMissingCas = useCallback((payload: ManualAddPayload) => {
+    if (!canWrite) return toast.error('公用用户只能查看 CAS 主数据')
+
     setPendingManualAddPayload(payload)
     openChemicalNameMapCreateDialog({
       keepPendingManualAdd: true,
@@ -914,9 +1116,11 @@ function useChemicalNameMapController({
       },
     })
     toast.warning('该 CAS 还未录入主数据，请先补录')
-  }, [openChemicalNameMapCreateDialog])
+  }, [canWrite, openChemicalNameMapCreateDialog])
 
   const handleDeleteChemicalNameMap = useCallback(async (item: ChemicalNameMapItem) => {
+    if (!canWrite) return
+
     try {
       await chemicalNameMapAPI.delete(item.id)
       toast.success('CAS 主数据已删除')
@@ -925,9 +1129,11 @@ function useChemicalNameMapController({
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
-  }, [refreshChemicalNameMap, refreshCommonShelf])
+  }, [canWrite, refreshChemicalNameMap, refreshCommonShelf])
 
   const handleSubmit = useCallback(async () => {
+    if (!canWrite) return
+
     await form.handleSubmit(async (data) => {
       const payload = buildChemicalNameMapPayload(data)
 
@@ -970,6 +1176,7 @@ function useChemicalNameMapController({
       })
     })()
   }, [
+    canWrite,
     editingItem,
     form,
     pendingManualAddPayload,
@@ -981,9 +1188,10 @@ function useChemicalNameMapController({
   ])
 
   const columns = useMemo(() => createChemicalNameMapColumns({
+    canWrite,
     onEdit: openChemicalNameMapEditDialog,
     onDelete: handleDeleteChemicalNameMap,
-  }), [handleDeleteChemicalNameMap, openChemicalNameMapEditDialog])
+  }), [canWrite, handleDeleteChemicalNameMap, openChemicalNameMapEditDialog])
 
   const editorDialog: ChemicalNameMapEditorController = {
     open: editorOpen,
@@ -999,6 +1207,7 @@ function useChemicalNameMapController({
   }
 
   return {
+    canWrite,
     managementOpen,
     setManagementOpen,
     openCreateDialog: () => openChemicalNameMapCreateDialog(),
@@ -1011,10 +1220,12 @@ function useChemicalNameMapController({
 // 收拢货架页的刷新、弹窗、表格列和导出逻辑。
 function useCommonShelfPageController(): CommonShelfPageController {
   const queryClient = useQueryClient()
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
   const currentUser = useAuthStore((state) => state.user)
-  const canDeleteGroup = currentUser?.role === UserRoles.ADMIN
   const requireChemicalNameMapRef = useRef<(payload: ManualAddPayload) => void>(() => undefined)
+  const canManageCommonShelf = canWriteNonPublicData(currentUser?.role)
+  const canQuickOrder = Boolean(currentUser && currentUser.role !== UserRoles.PUBLIC)
+  const canWriteChemicalNameMap = canWriteNonPublicData(currentUser?.role)
+  const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
 
   const refreshCommonShelf = useCallback(async () => {
     await Promise.all([
@@ -1024,23 +1235,29 @@ function useCommonShelfPageController(): CommonShelfPageController {
       queryClient.invalidateQueries({ queryKey: ['common-shelf-remove-locations'] }),
       queryClient.invalidateQueries({ queryKey: ['common-shelf-order-location-suggestions'] }),
     ])
-    clearRoomStale('common_shelf')
-  }, [clearRoomStale, queryClient])
+  }, [queryClient])
 
   const refreshChemicalNameMap = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['chemical-name-map'] })
   }, [queryClient])
 
+  const refreshReagentOrders = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['reagent-orders'] })
+  }, [queryClient])
+
   const dialogController = useCommonShelfDialogController({
     refreshCommonShelf,
-    canDeleteGroup,
     onRequireChemicalNameMap: (payload) => {
       requireChemicalNameMapRef.current(payload)
     },
   })
   const dialogActions = dialogController.actions
+  const quickOrderController = useCommonShelfQuickOrderController({
+    refreshReagentOrders,
+  })
 
   const chemicalNameMapController = useChemicalNameMapController({
+    canWrite: canWriteChemicalNameMap,
     refreshChemicalNameMap,
     refreshCommonShelf,
     resetCommonShelfDialog: dialogActions.resetDialogState,
@@ -1052,20 +1269,26 @@ function useCommonShelfPageController(): CommonShelfPageController {
   const handleExport = useCallback(async () => {
     try {
       const response = await commonShelfAPI.exportCommonShelf()
-      downloadBlobResponse(response, `common_shelf_export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      downloadBlobResponse(response, `common_shelf_export_${formatChinaDateForFilename()}.xlsx`)
     } catch (error) {
       toast.error(getApiErrorMessage(error, '导出失败'))
     }
   }, [])
 
   const columns = useMemo(() => createCommonShelfColumns({
+    canEdit: canManageCommonShelf,
     onEdit: dialogActions.openEditDialog,
     onAddBottles: dialogActions.openAddBottlesDialog,
     onRemoveOne: dialogActions.openRemoveOneDialog,
+    onQuickOrder: quickOrderController.actions.openQuickOrderDialog,
+    showQuickOrder: canQuickOrder,
   }), [
+    canManageCommonShelf,
+    canQuickOrder,
     dialogActions.openAddBottlesDialog,
     dialogActions.openEditDialog,
     dialogActions.openRemoveOneDialog,
+    quickOrderController.actions.openQuickOrderDialog,
   ])
 
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
@@ -1073,9 +1296,11 @@ function useCommonShelfPageController(): CommonShelfPageController {
   }, [])
 
   return {
-    canDeleteGroup,
+    canManageCommonShelf,
     dialogController,
     chemicalNameMapController,
+    quickOrderController,
+    brandOptions,
     columns,
     renderExpandedRow,
     refreshCommonShelf,
@@ -1084,10 +1309,12 @@ function useCommonShelfPageController(): CommonShelfPageController {
 }
 
 function CommonShelfPageHeader({
+  showManualAdd,
   onOpenManualAdd,
   onOpenChemicalNameMapManagement,
   onExport,
 }: {
+  showManualAdd: boolean
   onOpenManualAdd: () => void
   onOpenChemicalNameMapManagement: () => void
   onExport: () => void
@@ -1096,11 +1323,14 @@ function CommonShelfPageHeader({
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <h1 className="text-3xl font-bold text-primary">常用货架</h1>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={onOpenManualAdd} size="lg">
-          <Plus className="mr-1.5 h-4 w-4" />
-          手动添加
-        </Button>
+        {showManualAdd ? (
+          <Button onClick={onOpenManualAdd} size="lg">
+            <Plus className="mr-1.5 h-4 w-4" />
+            手动添加
+          </Button>
+        ) : null}
         <Button variant="modern" size="lg" onClick={onOpenChemicalNameMapManagement}>
+          <Database className="mr-1.5 h-4 w-4" />
           CAS 主数据管理
         </Button>
         <Button variant="modern" size="lg" onClick={onExport}>
@@ -1112,32 +1342,76 @@ function CommonShelfPageHeader({
   )
 }
 
-function CommonShelfPageDialogs({
-  dialogController,
-  chemicalNameMapController,
-  canDeleteGroup,
-}: Pick<CommonShelfPageController, 'dialogController' | 'chemicalNameMapController' | 'canDeleteGroup'>) {
+function QuickOrderSummaryField({ label, value }: Readonly<{ label: string; value: ReactNode }>) {
   return (
-    <>
-      <CommonShelfDialogs dialog={dialogController} showDelete={canDeleteGroup} />
+    <div className="min-w-0">
+      <div className="text-xs font-normal text-muted-foreground">{label}</div>
+      <div className="mt-1 break-words text-sm text-foreground">{value || '-'}</div>
+    </div>
+  )
+}
 
-      <ChemicalNameMapManagementDialog
-        open={chemicalNameMapController.managementOpen}
-        onOpenChange={chemicalNameMapController.setManagementOpen}
-        onCreate={chemicalNameMapController.openCreateDialog}
-        columns={chemicalNameMapController.columns}
-      />
+function CommonShelfQuickOrderDialog({
+  controller,
+}: {
+  controller: CommonShelfQuickOrderController
+}) {
+  const { actions, form, state } = controller
+  const targetGroup = state.targetGroup
+  const fields = useMemo(() => getCommonShelfQuickOrderFormFields(), [])
 
-      <ChemicalNameMapEditorDialog dialog={chemicalNameMapController.editorDialog} />
-    </>
+  return (
+    <Dialog open={Boolean(targetGroup)} onOpenChange={actions.handleOpenChange}>
+      <DialogContent className="max-h-[85vh] w-[92vw] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>快速购买常用</DialogTitle>
+        </DialogHeader>
+        {targetGroup && (
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              actions.handleSubmit().catch(() => undefined)
+            }}
+          >
+            <div className="grid grid-cols-1 gap-x-6 gap-y-2 border-b border-border/70 pb-3 sm:grid-cols-2">
+              <QuickOrderSummaryField label="名称" value={targetGroup.display.name} />
+              <QuickOrderSummaryField label="CAS" value={targetGroup.group.cas_number} />
+              <QuickOrderSummaryField label="品牌" value={targetGroup.group.brand} />
+              <QuickOrderSummaryField label="规格" value={targetGroup.group.specification_text} />
+              <QuickOrderSummaryField label="订购原因" value="公用常用" />
+            </div>
+
+            <BaseForm form={form} fields={fields} columns={2} />
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="modern"
+                size="lg"
+                className="min-w-24"
+                onClick={() => actions.handleOpenChange(false)}
+              >
+                取消
+              </Button>
+              <LoadingButton type="submit" size="lg" className="min-w-36" isLoading={state.isSubmitting}>
+                提交订单
+              </LoadingButton>
+            </div>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 
 export function CommonShelfPage() {
   const {
-    canDeleteGroup,
+    canManageCommonShelf,
     dialogController,
     chemicalNameMapController,
+    quickOrderController,
+    brandOptions,
     columns,
     renderExpandedRow,
     refreshCommonShelf,
@@ -1148,6 +1422,7 @@ export function CommonShelfPage() {
   return (
     <div className="space-y-6">
       <CommonShelfPageHeader
+        showManualAdd={canManageCommonShelf}
         onOpenManualAdd={dialogActions.openManualAddDialog}
         onOpenChemicalNameMapManagement={() => chemicalNameMapController.setManagementOpen(true)}
         onExport={() => {
@@ -1155,11 +1430,25 @@ export function CommonShelfPage() {
         }}
       />
 
-      <CommonShelfPageDialogs
-        dialogController={dialogController}
-        chemicalNameMapController={chemicalNameMapController}
-        canDeleteGroup={canDeleteGroup}
+      <CommonShelfDialogs
+        dialog={dialogController}
+        showDelete={
+          canManageCommonShelf && canDeleteCommonShelfGroup(dialogController.state.selectedGroup)
+        }
+        brandOptions={brandOptions}
       />
+
+      <CommonShelfQuickOrderDialog controller={quickOrderController} />
+
+      <ChemicalNameMapManagementDialog
+        open={chemicalNameMapController.managementOpen}
+        canWrite={chemicalNameMapController.canWrite}
+        onOpenChange={chemicalNameMapController.setManagementOpen}
+        onCreate={chemicalNameMapController.openCreateDialog}
+        columns={chemicalNameMapController.columns}
+      />
+
+      <ChemicalNameMapEditorDialog dialog={chemicalNameMapController.editorDialog} />
 
       <FilterTable
         api={commonShelfAPI as FilterAPI}
@@ -1168,7 +1457,7 @@ export function CommonShelfPage() {
         realtime={{
           room: 'common_shelf',
           eventTypes: COMMON_SHELF_SSE_EVENTS,
-          staleOnly: true,
+          moveUpdatedRowToStartWhenUnsorted: true,
           onRefresh: refreshCommonShelf,
         }}
         customColumns={columns}
@@ -1185,16 +1474,31 @@ export function CommonShelfPage() {
 
 const CommonShelfActionButtons = function CommonShelfActionButtons({
   item,
+  canEdit,
   onEdit,
   onAddBottles,
   onRemoveOne,
+  onQuickOrder,
+  showQuickOrder,
 }: {
   item: CommonShelfGroup
+  canEdit: boolean
   onEdit: (item: CommonShelfGroup) => void
   onAddBottles: (item: CommonShelfGroup) => void
   onRemoveOne: (item: CommonShelfGroup) => void
+  onQuickOrder: (item: CommonShelfGroup) => void
+  showQuickOrder: boolean
 }) {
   const actions = useMemo(() => [
+    {
+      id: 'quick-order',
+      label: '快速购买',
+      icon: <ShoppingCart className="size-4.5" />,
+      variant: 'modern' as const,
+      className: 'text-blue-600 hover:bg-blue-100 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950 dark:hover:text-blue-300',
+      onClick: onQuickOrder,
+      showWhen: () => showQuickOrder,
+    },
     {
       id: 'add-bottles',
       label: '加瓶',
@@ -1212,13 +1516,13 @@ const CommonShelfActionButtons = function CommonShelfActionButtons({
       onClick: onRemoveOne,
       showWhen: (currentItem: CommonShelfGroup) => currentItem.bottle_count > 0,
     },
-  ], [onAddBottles, onRemoveOne])
+  ], [onAddBottles, onQuickOrder, onRemoveOne, showQuickOrder])
 
   return (
     <TableActionButtonsMemo
       item={item}
       actions={actions}
-      showEdit={true}
+      showEdit={canEdit}
       onEdit={onEdit}
     />
   )

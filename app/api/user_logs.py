@@ -6,12 +6,12 @@ import hmac
 import json
 import secrets
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import redis
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import false, func, or_, true
+from sqlalchemy import and_, false, func, or_, true
 from sqlmodel import select
 
 from app.core.redis import get_redis, redis_key
@@ -35,40 +35,18 @@ from app.search_query_log_db import (
     count_search_log_rows,
     fetch_search_log_rows,
 )
-from app.models.inventory_operation_log import (
-    InventoryOperationAction,
-    InventoryOperationLog,
-)
-from app.models.common_shelf_operation_log import (
-    CommonShelfOperationAction,
-    CommonShelfOperationLog,
-)
-from app.models.reagent_order_operation_log import ReagentOrderOperationLog
-from app.models.consumable_order_operation_log import ConsumableOrderOperationLog
 from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
 from app.models.user_operation_log import UserOperationLog
 from app.services.order_fts import build_order_fts_rowid_subquery, should_use_order_fts
 from app.services.pinyin_utils import to_pinyin
-from app.services.common_shelf_operation_logger import parse_common_shelf_snapshot
-from app.services.inventory_operation_logger import parse_inventory_snapshot
-from app.services.order_operation_logger import (
-    parse_consumable_order_snapshot,
-    parse_reagent_order_snapshot,
-)
-from app.services.log_timeline_detail_text import (
-    COMMON_SHELF_ACTION_LABELS,
-    CONSUMABLE_ORDER_ACTION_LABELS,
-    REAGENT_ORDER_ACTION_LABELS,
-    USER_OPERATION_ACTION_LABELS,
-    build_consumable_order_detail_text,
-    build_reagent_order_detail_text,
-    build_user_operation_detail_text,
-    normalize_action_value,
+from app.services.log_timeline_renderer import (
+    NON_USER_OPERATION_ACTION_VALUES,
+    OTHER_USER_OPERATION_ACTION_VALUES,
+    SESSION_USER_OPERATION_ACTION_VALUES,
+    render_log_timeline_candidates,
 )
 from app.services.sql_utils import normalize_search_term
-from app.services.user_operation_logger import parse_user_operation_snapshot
 from app.services.user_service import get_user_by_id
-from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/admin/users", tags=["User Logs"])
 
@@ -183,7 +161,7 @@ def is_token_valid(token: str) -> bool:
 
 class LogsQueryParams(BaseModel):
     keyword: Optional[str] = Field(default=None, max_length=100)  # 搜索关键词
-    category: Optional[str] = None  # 筛选分类：reagent_order, consumable_order, inventory, borrow, session
+    category: Optional[str] = None  # 筛选分类：reagent_order, consumable_order, inventory, borrow, session, other
     skip: int = 0
     limit: int = DEFAULT_PAGE_SIZE
 
@@ -195,6 +173,60 @@ class LogsQueryRequest(BaseModel):
     include_search_logs: bool = False
     skip: int = 0
     limit: int = DEFAULT_PAGE_SIZE
+
+
+class LogSummaryTarget(BaseModel):
+    target_type: str | None = None
+    target_id: int | str | None = None
+    target_name: str | None = None
+    cas_number: str | None = None
+    specification: str | None = None
+    quantity: float | int | None = None
+    unit: str | None = None
+
+
+class LogSummaryMetrics(BaseModel):
+    count: int | None = None
+    result_count: int | None = None
+    quantity_borrowed: float | int | None = None
+    quantity_returned: float | int | None = None
+
+
+class LogSummarySourceMeta(BaseModel):
+    source: str | None = None
+    endpoint: str | None = None
+    query_text: str | None = None
+    device_name: str | None = None
+    ip_address: str | None = None
+    export_scope: str | None = None
+
+
+class LogSummaryData(BaseModel):
+    kind: str
+    action_code: str | None = None
+    actor_name: str | None = None
+    actor_is_external: bool | None = None
+    targets_viewer: bool | None = None
+    target: LogSummaryTarget = Field(default_factory=LogSummaryTarget)
+    metrics: LogSummaryMetrics = Field(default_factory=LogSummaryMetrics)
+    source_meta: LogSummarySourceMeta = Field(default_factory=LogSummarySourceMeta)
+    extra_detail: str | None = None
+    is_returned: bool | None = None
+
+
+class LogItemResponse(BaseModel):
+    time: str | None
+    type: str
+    detail: str
+    summary: LogSummaryData | None = None
+    full_data: dict[str, Any] | None = None
+
+
+class LogsQueryResponse(BaseModel):
+    user_id: int
+    username: str
+    data: list[LogItemResponse]
+    total: int
 
 
 @dataclass
@@ -211,10 +243,6 @@ class LogsCountContext:
     db: DBSession
     user_id: int
     keyword: str | None
-
-
-LogsCandidateBuilder = Callable[[LogsCollectContext, list[dict[str, object]]], None]
-LogsCounter = Callable[[LogsCountContext], int]
 
 
 def _resolve_logs_query_user(token: str, db: DBSession):
@@ -274,6 +302,61 @@ def _append_candidate(
     )
 
 
+def _build_log_summary_target(
+    *,
+    target_type: str | None = None,
+    target_id: int | str | None = None,
+    target_name: str | None = None,
+    cas_number: str | None = None,
+    specification: str | None = None,
+    quantity: float | int | None = None,
+    unit: str | None = None,
+) -> dict[str, object]:
+    return {
+        "target_type": target_type,
+        "target_id": target_id,
+        "target_name": target_name,
+        "cas_number": cas_number,
+        "specification": specification,
+        "quantity": quantity,
+        "unit": unit,
+    }
+
+
+def _build_log_summary_metrics(
+    *,
+    count: int | None = None,
+    result_count: int | None = None,
+    quantity_borrowed: float | int | None = None,
+    quantity_returned: float | int | None = None,
+) -> dict[str, object]:
+    return {
+        "count": count,
+        "result_count": result_count,
+        "quantity_borrowed": quantity_borrowed,
+        "quantity_returned": quantity_returned,
+    }
+
+
+def _build_log_source_meta(
+    *,
+    source: str | None = None,
+    endpoint: str | None = None,
+    query_text: str | None = None,
+    device_name: str | None = None,
+    ip_address: str | None = None,
+    export_scope: str | None = None,
+) -> dict[str, object]:
+    return {
+        "source": source,
+        "endpoint": endpoint,
+        "query_text": query_text,
+        "device_name": device_name,
+        "ip_address": ip_address,
+        "export_scope": export_scope,
+    }
+
+
 LOG_TIMELINE_DETAIL_KEYWORDS_BY_CATEGORY: dict[str, tuple[str, ...]] = {
     "reagent_order": (
         "试剂订单",
@@ -295,9 +378,10 @@ LOG_TIMELINE_DETAIL_KEYWORDS_BY_CATEGORY: dict[str, tuple[str, ...]] = {
         "货架",
     ),
     "borrow": ("借用记录",),
-    "user": ("用户操作", "用户", "会话", "回话"),
+    "session": ("会话", "回话", "设备会话", "登录记录"),
+    "user": ("用户操作", "用户"),
+    "other": ("其他", "品牌", "品牌管理", "CAS 主数据", "公告"),
 }
-
 SESSION_DETAIL_KEYWORDS: tuple[str, ...] = ("登录", "用户登录", "登录记录")
 CLI_LOG_KEYWORDS = {"cli", "[cli]"}
 
@@ -338,502 +422,6 @@ def _resolve_log_timeline_detail_types(raw_keyword: str) -> list[str]:
     ]
 
 
-def _build_order_log_keyword_clause(keyword: str):
-    return or_(
-        ReagentOrderOperationLog.order_name.contains(keyword),
-        ReagentOrderOperationLog.cas_number.contains(keyword),
-        ReagentOrderOperationLog.snapshot_json.contains(keyword),
-        ReagentOrderOperationLog.notes.contains(keyword),
-    )
-
-
-def _build_consumable_order_log_keyword_clause(keyword: str):
-    return or_(
-        ConsumableOrderOperationLog.order_name.contains(keyword),
-        ConsumableOrderOperationLog.specification.contains(keyword),
-        ConsumableOrderOperationLog.snapshot_json.contains(keyword),
-        ConsumableOrderOperationLog.notes.contains(keyword),
-    )
-
-
-def _build_user_operation_keyword_clause(keyword: str):
-    return or_(
-        UserOperationLog.detail.contains(keyword),
-        UserOperationLog.client_ip.contains(keyword),
-        UserOperationLog.request_id.contains(keyword),
-        UserOperationLog.snapshot_json.contains(keyword),
-    )
-
-
-def _build_common_shelf_keyword_clause(keyword: str):
-    return or_(
-        CommonShelfOperationLog.item_name.contains(keyword),
-        CommonShelfOperationLog.cas_number.contains(keyword),
-        CommonShelfOperationLog.snapshot_json.contains(keyword),
-        CommonShelfOperationLog.notes.contains(keyword),
-    )
-
-
-def _append_reagent_order_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(ReagentOrderOperationLog).where(
-        or_(
-            ReagentOrderOperationLog.actor_user_id == context.user_id,
-            ReagentOrderOperationLog.applicant_id == context.user_id,
-        )
-    )
-    if context.keyword:
-        query = query.where(_build_order_log_keyword_clause(context.keyword))
-    logs = context.db.exec(
-        query.order_by(ReagentOrderOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-
-    actor_ids = {log.actor_user_id for log in logs if log.actor_user_id}
-    user_names = batch_get_user_names(context.db, actor_ids)
-
-    for log in logs:
-        snapshot = parse_reagent_order_snapshot(log.snapshot_json)
-        created_at = utc_iso_str(log.created_at)
-        action_value = normalize_action_value(log.action)
-        action_label = REAGENT_ORDER_ACTION_LABELS.get(action_value, action_value)
-        actor_name = user_names.get(log.actor_user_id)
-        detail_prefix = action_label
-        if (
-            log.applicant_id == context.user_id
-            and log.actor_user_id
-            and log.actor_user_id != context.user_id
-        ):
-            detail_prefix = f"{actor_name or '管理员'}{action_label}"
-
-        def build_reagent_order(
-            log=log,
-            snapshot=snapshot,
-            created_at=created_at,
-            detail_prefix=detail_prefix,
-            action_value=action_value,
-        ):
-            before_snapshot = snapshot.get("before")
-            after_snapshot = snapshot.get("after")
-            display_snapshot = after_snapshot or before_snapshot or snapshot
-            quantity = display_snapshot.get("quantity")
-            return {
-                "time": created_at,
-                "type": "reagent_order",
-                "detail": build_reagent_order_detail_text(
-                    detail_prefix,
-                    log.order_name,
-                    snapshot,
-                ),
-                "full_data": {
-                    "id": log.id,
-                    "order_id": log.order_id,
-                    "actor_user_id": log.actor_user_id,
-                    "applicant_id": log.applicant_id,
-                    "action": action_value,
-                    "order_name": log.order_name,
-                    "cas_number": log.cas_number,
-                    "snapshot": snapshot,
-                    "before": before_snapshot,
-                    "after": after_snapshot,
-                    "name": display_snapshot.get("name") or log.order_name,
-                    "specification": f"{display_snapshot.get('initial_quantity') or ''} {display_snapshot.get('unit') or ''}".strip(),
-                    "quantity": quantity,
-                    "brand": display_snapshot.get("brand"),
-                    "purity": display_snapshot.get("purity"),
-                    "price": display_snapshot.get("price"),
-                    "order_reason": display_snapshot.get("order_reason"),
-                    "status": display_snapshot.get("status"),
-                    "category": display_snapshot.get("category"),
-                    "notes": log.notes,
-                    "created_at": created_at,
-                },
-            }
-
-        _append_candidate(candidates, created_at, build_reagent_order)
-
-
-def _append_consumable_order_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(ConsumableOrderOperationLog).where(
-        or_(
-            ConsumableOrderOperationLog.actor_user_id == context.user_id,
-            ConsumableOrderOperationLog.applicant_id == context.user_id,
-        )
-    )
-    if context.keyword:
-        query = query.where(_build_consumable_order_log_keyword_clause(context.keyword))
-    logs = context.db.exec(
-        query.order_by(ConsumableOrderOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-
-    actor_ids = {log.actor_user_id for log in logs if log.actor_user_id}
-    user_names = batch_get_user_names(context.db, actor_ids)
-
-    for log in logs:
-        snapshot = parse_consumable_order_snapshot(log.snapshot_json)
-        created_at = utc_iso_str(log.created_at)
-        action_value = normalize_action_value(log.action)
-        action_label = CONSUMABLE_ORDER_ACTION_LABELS.get(action_value, action_value)
-        actor_name = user_names.get(log.actor_user_id)
-        detail_prefix = action_label
-        if (
-            log.applicant_id == context.user_id
-            and log.actor_user_id
-            and log.actor_user_id != context.user_id
-        ):
-            detail_prefix = f"{actor_name or '管理员'}{action_label}"
-
-        def build_consumable_order(
-            log=log,
-            snapshot=snapshot,
-            created_at=created_at,
-            detail_prefix=detail_prefix,
-            action_value=action_value,
-        ):
-            before_snapshot = snapshot.get("before")
-            after_snapshot = snapshot.get("after")
-            return {
-                "time": created_at,
-                "type": "consumable_order",
-                "detail": build_consumable_order_detail_text(
-                    detail_prefix,
-                    log.order_name,
-                    log.specification,
-                    snapshot,
-                ),
-                "full_data": {
-                    "id": log.id,
-                    "order_id": log.order_id,
-                    "actor_user_id": log.actor_user_id,
-                    "applicant_id": log.applicant_id,
-                    "action": action_value,
-                    "order_name": log.order_name,
-                    "specification": log.specification,
-                    "snapshot": snapshot,
-                    "before": before_snapshot,
-                    "after": after_snapshot,
-                    "notes": log.notes,
-                    "created_at": created_at,
-                },
-            }
-
-        _append_candidate(candidates, created_at, build_consumable_order)
-
-
-def _append_user_operation_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(UserOperationLog).where(
-        or_(
-            UserOperationLog.actor_user_id == context.user_id,
-            UserOperationLog.target_user_id == context.user_id,
-        )
-    )
-    if context.keyword:
-        query = query.where(_build_user_operation_keyword_clause(context.keyword))
-    logs = context.db.exec(
-        query.order_by(UserOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-
-    user_ids = {
-        user_id
-        for log in logs
-        for user_id in (log.actor_user_id, log.target_user_id)
-        if user_id
-    }
-    user_names = batch_get_user_names(context.db, user_ids)
-
-    for log in logs:
-        snapshot = parse_user_operation_snapshot(log.snapshot_json)
-        created_at = utc_iso_str(log.created_at)
-        action_value = normalize_action_value(log.action)
-        action_label = USER_OPERATION_ACTION_LABELS.get(action_value, action_value)
-        actor_name = user_names.get(log.actor_user_id)
-
-        detail = action_label
-        if (
-            log.target_user_id == context.user_id
-            and log.actor_user_id
-            and log.actor_user_id != context.user_id
-        ):
-            detail = f"{actor_name or '管理员'}对你执行: {action_label}"
-        detail = build_user_operation_detail_text(detail, log.detail)
-
-        def build_user_operation(
-            log=log,
-            snapshot=snapshot,
-            created_at=created_at,
-            detail=detail,
-            action_value=action_value,
-        ):
-            return {
-                "time": created_at,
-                "type": "user",
-                "detail": detail,
-                "full_data": {
-                    "id": log.id,
-                    "action": action_value,
-                    "actor_user_id": log.actor_user_id,
-                    "target_user_id": log.target_user_id,
-                    "outcome": log.outcome,
-                    "client_ip": log.client_ip,
-                    "request_id": log.request_id,
-                    "detail": log.detail,
-                    "snapshot": snapshot,
-                    "created_at": created_at,
-                },
-            }
-
-        _append_candidate(candidates, created_at, build_user_operation)
-
-
-def _append_inventory_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(InventoryOperationLog).where(
-        InventoryOperationLog.operator_id == context.user_id,
-        InventoryOperationLog.action == InventoryOperationAction.STOCK_IN,
-    )
-    if context.keyword:
-        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
-    logs = context.db.exec(
-        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-    for log in logs:
-        snapshot = parse_inventory_snapshot(log.snapshot_json)
-        created_at = utc_iso_str(log.created_at)
-
-        def build_inventory(log=log, snapshot=snapshot, created_at=created_at):
-            source = snapshot.get("source")
-            return {
-                "time": created_at,
-                "type": "inventory",
-                "detail": f"入库 {log.item_name} {snapshot.get('initial_quantity') or ''}{snapshot.get('unit') or ''}",
-                "full_data": {
-                    "id": log.id,
-                    "inventory_id": log.inventory_id,
-                    "cas_number": log.cas_number,
-                    "name": log.item_name,
-                    "english_name": snapshot.get("english_name"),
-                    "alias": snapshot.get("alias"),
-                    "category": snapshot.get("category"),
-                    "brand": snapshot.get("brand"),
-                    "purity": snapshot.get("purity"),
-                    "storage_location": snapshot.get("storage_location"),
-                    "initial_quantity": snapshot.get("initial_quantity"),
-                    "remaining_quantity": snapshot.get("remaining_quantity"),
-                    "unit": snapshot.get("unit"),
-                    "is_hazardous": snapshot.get("is_hazardous"),
-                    "notes": snapshot.get("notes"),
-                    "internal_code": snapshot.get("internal_code"),
-                    "status": snapshot.get("status"),
-                    "source": source,
-                    "created_at": created_at,
-                    "updated_at": snapshot.get("updated_at"),
-                }
-            }
-
-        _append_candidate(candidates, created_at, build_inventory)
-
-
-def _append_common_shelf_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(CommonShelfOperationLog).where(
-        CommonShelfOperationLog.operator_id == context.user_id,
-        CommonShelfOperationLog.action != CommonShelfOperationAction.EXPORT,
-    )
-    if context.keyword:
-        query = query.where(_build_common_shelf_keyword_clause(context.keyword))
-    logs = context.db.exec(
-        query.order_by(CommonShelfOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-    for log in logs:
-        snapshot = parse_common_shelf_snapshot(log.snapshot_json)
-        created_at = utc_iso_str(log.created_at)
-        action_value = normalize_action_value(log.action)
-        action_label = COMMON_SHELF_ACTION_LABELS.get(action_value, action_value)
-
-        def build_common_shelf(
-            log=log,
-            snapshot=snapshot,
-            created_at=created_at,
-            action_value=action_value,
-            action_label=action_label,
-        ):
-            before_snapshot = snapshot.get("before")
-            after_snapshot = snapshot.get("after")
-            display_snapshot = after_snapshot or before_snapshot or snapshot
-            return {
-                "time": created_at,
-                "type": "common_shelf",
-                "detail": f"{action_label} {log.item_name}",
-                "full_data": {
-                    "id": log.id,
-                    "common_shelf_id": log.common_shelf_id,
-                    "action": action_value,
-                    "cas_number": log.cas_number,
-                    "name": log.item_name,
-                    "brand": display_snapshot.get("brand"),
-                    "purity": display_snapshot.get("purity"),
-                    "specification_text": display_snapshot.get("specification_text"),
-                    "storage_location": display_snapshot.get("storage_location"),
-                    "count": snapshot.get("count"),
-                    "location": snapshot.get("location"),
-                    "notes": display_snapshot.get("notes"),
-                    "before": before_snapshot,
-                    "after": after_snapshot,
-                    "snapshot": snapshot,
-                    "created_at": created_at,
-                },
-            }
-
-        _append_candidate(candidates, created_at, build_common_shelf)
-
-
-def _append_borrow_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    from app.models.inventory import BorrowLog, Inventory
-
-    query = select(BorrowLog, Inventory).join(
-        Inventory, BorrowLog.inventory_id == Inventory.id
-    ).where(
-        BorrowLog.borrower_id == context.user_id,
-    )
-    if context.keyword:
-        query = query.where(Inventory.name.contains(context.keyword))
-    logs = context.db.exec(
-        query.order_by(BorrowLog.borrow_time.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-    for log, inventory in logs:
-        is_returned = log.return_time is not None
-        return_info = f", 已归还 {log.quantity_returned} {inventory.unit or ''}" if is_returned else ", 未归还"
-        borrow_time = utc_iso_str(log.borrow_time)
-
-        def build_borrow(
-            log=log,
-            inventory=inventory,
-            is_returned=is_returned,
-            return_info=return_info,
-            borrow_time=borrow_time,
-        ):
-            return {
-                "time": borrow_time,
-                "type": "borrow",
-                "detail": f"借用 {inventory.name} {log.quantity_borrowed} {inventory.unit or ''}{return_info}",
-                "full_data": {
-                    "id": log.id,
-                    "inventory_id": log.inventory_id,
-                    "inventory_name": inventory.name,
-                    "cas_number": inventory.cas_number,
-                    "borrow_time": borrow_time,
-                    "return_time": utc_iso_str(log.return_time),
-                    "quantity_borrowed": log.quantity_borrowed,
-                    "quantity_returned": log.quantity_returned,
-                    "unit": inventory.unit,
-                    "notes": log.notes,
-                    "is_returned": is_returned,
-                    "created_at": utc_iso_str(log.created_at),
-                }
-            }
-
-        _append_candidate(candidates, borrow_time, build_borrow)
-
-
-def _append_update_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(InventoryOperationLog).where(
-        InventoryOperationLog.operator_id == context.user_id,
-        InventoryOperationLog.action == InventoryOperationAction.INVENTORY_UPDATE,
-    )
-    if context.keyword:
-        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
-    logs = context.db.exec(
-        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-    for log in logs:
-        snapshot = parse_inventory_snapshot(log.snapshot_json)
-        updated_at = utc_iso_str(log.created_at)
-        before_snapshot = snapshot.get("before", {})
-        after_snapshot = snapshot.get("after", {})
-
-        def build_update(
-            log=log,
-            updated_at=updated_at,
-            before_snapshot=before_snapshot,
-            after_snapshot=after_snapshot,
-        ):
-            return {
-                "time": updated_at,
-                "type": "update",
-                "detail": f"更新库存 {log.item_name}",
-                "full_data": {
-                    "id": log.id,
-                    "inventory_id": log.inventory_id,
-                    "name": log.item_name,
-                    "cas_number": log.cas_number,
-                    "before": before_snapshot,
-                    "after": after_snapshot,
-                    "purity": after_snapshot.get("purity"),
-                    "created_at": updated_at,
-                },
-            }
-
-        _append_candidate(candidates, updated_at, build_update)
-
-
-def _append_delete_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(InventoryOperationLog).where(
-        InventoryOperationLog.operator_id == context.user_id,
-        InventoryOperationLog.action == InventoryOperationAction.INVENTORY_DELETE,
-    )
-    if context.keyword:
-        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
-    logs = context.db.exec(
-        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-    for log in logs:
-        snapshot = parse_inventory_snapshot(log.snapshot_json)
-        deleted_at = utc_iso_str(log.created_at)
-
-        def build_delete(log=log, snapshot=snapshot, deleted_at=deleted_at):
-            return {
-                "time": deleted_at,
-                "type": "delete",
-                "detail": f"删除库存 {log.item_name}",
-                "full_data": {
-                    "id": log.id,
-                    "inventory_id": log.inventory_id,
-                    "cas_number": log.cas_number,
-                    "name": log.item_name,
-                    "english_name": snapshot.get("english_name"),
-                    "alias": snapshot.get("alias"),
-                    "category": snapshot.get("category"),
-                    "brand": snapshot.get("brand"),
-                    "purity": snapshot.get("purity"),
-                    "storage_location": snapshot.get("storage_location"),
-                    "initial_quantity": snapshot.get("initial_quantity"),
-                    "remaining_quantity": snapshot.get("remaining_quantity"),
-                    "unit": snapshot.get("unit"),
-                    "is_hazardous": snapshot.get("is_hazardous"),
-                    "notes": snapshot.get("notes"),
-                    "internal_code": snapshot.get("internal_code"),
-                    "status": snapshot.get("status"),
-                    "created_at": deleted_at,
-                    "updated_at": snapshot.get("updated_at"),
-                },
-            }
-
-        _append_candidate(candidates, deleted_at, build_delete)
-
-
-def _apply_export_keyword_filter(query, keyword: str | None):
-    if not keyword:
-        return query
-
-    # export 详情文本固定包含“导出库存 X 条”，这些关键词应命中全部 export 日志。
-    if keyword in "导出库存条":
-        return query
-
-    return query.where(
-        or_(
-            InventoryOperationLog.item_name.contains(keyword),
-            InventoryOperationLog.snapshot_json.contains(keyword),
-            InventoryOperationLog.notes.contains(keyword),
-        )
-    )
-
-
 def _build_session_keyword_clause(keyword: str):
     if _matches_detail_keyword(keyword, SESSION_DETAIL_KEYWORDS):
         return true()
@@ -844,70 +432,6 @@ def _build_session_keyword_clause(keyword: str):
         UserSession.last_ip_address.contains(keyword),
         UserSession.user_agent.contains(keyword),
     )
-
-
-def _append_export_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
-    query = select(InventoryOperationLog).where(
-        InventoryOperationLog.operator_id == context.user_id,
-        InventoryOperationLog.action == InventoryOperationAction.INVENTORY_EXPORT,
-    )
-    query = _apply_export_keyword_filter(query, context.keyword)
-    logs = context.db.exec(
-        query.order_by(InventoryOperationLog.created_at.desc()).offset(context.skip).limit(context.limit)
-    ).all()
-    for log in logs:
-        snapshot = parse_inventory_snapshot(log.snapshot_json)
-        export_time = utc_iso_str(log.created_at)
-
-        def build_export(log=log, snapshot=snapshot, export_time=export_time):
-            export_count = snapshot.get("count", 0)
-            return {
-                "time": export_time,
-                "type": "export",
-                "detail": f"导出库存 {export_count} 条",
-                "full_data": {
-                    "id": log.id,
-                    "export_scope": "inventory",
-                    "count": export_count,
-                    "created_at": export_time,
-                },
-            }
-
-        _append_candidate(candidates, export_time, build_export)
-
-    common_shelf_query = select(CommonShelfOperationLog).where(
-        CommonShelfOperationLog.operator_id == context.user_id,
-        CommonShelfOperationLog.action == CommonShelfOperationAction.EXPORT,
-    )
-    if context.keyword:
-        if context.keyword not in "导出常用货架条":
-            common_shelf_query = common_shelf_query.where(
-                CommonShelfOperationLog.snapshot_json.contains(context.keyword)
-            )
-    common_shelf_logs = context.db.exec(
-        common_shelf_query.order_by(CommonShelfOperationLog.created_at.desc())
-        .offset(context.skip)
-        .limit(context.limit)
-    ).all()
-    for log in common_shelf_logs:
-        snapshot = parse_common_shelf_snapshot(log.snapshot_json)
-        export_time = utc_iso_str(log.created_at)
-
-        def build_common_shelf_export(log=log, snapshot=snapshot, export_time=export_time):
-            export_count = snapshot.get("count", 0)
-            return {
-                "time": export_time,
-                "type": "export",
-                "detail": f"导出常用货架 {export_count} 条",
-                "full_data": {
-                    "id": log.id,
-                    "export_scope": "common_shelf",
-                    "count": export_count,
-                    "created_at": export_time,
-                },
-            }
-
-        _append_candidate(candidates, export_time, build_common_shelf_export)
 
 
 def _append_session_candidates(context: LogsCollectContext, candidates: list[dict[str, object]]) -> None:
@@ -925,6 +449,18 @@ def _append_session_candidates(context: LogsCollectContext, candidates: list[dic
                 "time": last_active_at,
                 "type": "session",
                 "detail": f"登录 {session.device_name} {session.ip_address}",
+                "summary": {
+                    "kind": "session_login",
+                    "action_code": "login",
+                    "target": _build_log_summary_target(
+                        target_type="session",
+                        target_id=session.id,
+                    ),
+                    "source_meta": _build_log_source_meta(
+                        device_name=session.device_name,
+                        ip_address=session.ip_address,
+                    ),
+                },
                 "full_data": {
                     "id": session.id,
                     "device_id": session.device_id,
@@ -968,10 +504,27 @@ def _format_search_log_detail(row: SearchLogRow) -> str:
 
 
 def _render_search_log_row(row: SearchLogRow) -> dict[str, object]:
+    query_text = row.query or row.normalized_query
     return {
         "time": row.created_at,
         "type": "search",
         "detail": _format_search_log_detail(row),
+        "summary": {
+            "kind": "search",
+            "action_code": "search" if query_text else "filter",
+            "target": _build_log_summary_target(
+                target_type="search_endpoint",
+                target_name=row.endpoint,
+            ),
+            "metrics": _build_log_summary_metrics(
+                result_count=row.result_count,
+            ),
+            "source_meta": _build_log_source_meta(
+                source=row.source,
+                endpoint=row.endpoint,
+                query_text=query_text,
+            ),
+        },
         "full_data": {
             "id": row.id,
             "user_id": row.user_id,
@@ -1005,115 +558,9 @@ def _append_search_log_candidates(
 
 
 def _exec_count_query(context: LogsCountContext, query) -> int:
-    # COUNT 查询始终返回单行单值；None 兜底是为了兼容极端驱动返回。
+    # COUNT 查询始终返回单行单值；None 兜底兼容极端驱动返回。
     result = context.db.exec(query).one()
     return int(result or 0)
-
-
-def _count_reagent_order_candidates(context: LogsCountContext) -> int:
-    query = select(func.count()).select_from(ReagentOrderOperationLog).where(
-        or_(
-            ReagentOrderOperationLog.actor_user_id == context.user_id,
-            ReagentOrderOperationLog.applicant_id == context.user_id,
-        )
-    )
-    if context.keyword:
-        query = query.where(_build_order_log_keyword_clause(context.keyword))
-    return _exec_count_query(context, query)
-
-
-def _count_consumable_order_candidates(context: LogsCountContext) -> int:
-    query = select(func.count()).select_from(ConsumableOrderOperationLog).where(
-        or_(
-            ConsumableOrderOperationLog.actor_user_id == context.user_id,
-            ConsumableOrderOperationLog.applicant_id == context.user_id,
-        )
-    )
-    if context.keyword:
-        query = query.where(_build_consumable_order_log_keyword_clause(context.keyword))
-    return _exec_count_query(context, query)
-
-
-def _count_inventory_operation_candidates(
-    context: LogsCountContext,
-    action: InventoryOperationAction,
-    apply_keyword: bool,
-) -> int:
-    query = select(func.count()).select_from(InventoryOperationLog).where(
-        InventoryOperationLog.operator_id == context.user_id,
-        InventoryOperationLog.action == action,
-    )
-    if apply_keyword and context.keyword:
-        query = query.where(InventoryOperationLog.item_name.contains(context.keyword))
-    return _exec_count_query(context, query)
-
-
-def _count_inventory_candidates(context: LogsCountContext) -> int:
-    return _count_inventory_operation_candidates(
-        context,
-        InventoryOperationAction.STOCK_IN,
-        apply_keyword=True,
-    )
-
-
-def _count_common_shelf_candidates(context: LogsCountContext) -> int:
-    query = select(func.count()).select_from(CommonShelfOperationLog).where(
-        CommonShelfOperationLog.operator_id == context.user_id,
-        CommonShelfOperationLog.action != CommonShelfOperationAction.EXPORT,
-    )
-    if context.keyword:
-        query = query.where(_build_common_shelf_keyword_clause(context.keyword))
-    return _exec_count_query(context, query)
-
-
-def _count_borrow_candidates(context: LogsCountContext) -> int:
-    from app.models.inventory import BorrowLog, Inventory
-
-    query = select(func.count()).select_from(BorrowLog).join(
-        Inventory,
-        BorrowLog.inventory_id == Inventory.id,
-    ).where(
-        BorrowLog.borrower_id == context.user_id,
-    )
-    if context.keyword:
-        query = query.where(Inventory.name.contains(context.keyword))
-    return _exec_count_query(context, query)
-
-
-def _count_update_candidates(context: LogsCountContext) -> int:
-    return _count_inventory_operation_candidates(
-        context,
-        InventoryOperationAction.INVENTORY_UPDATE,
-        apply_keyword=True,
-    )
-
-
-def _count_delete_candidates(context: LogsCountContext) -> int:
-    return _count_inventory_operation_candidates(
-        context,
-        InventoryOperationAction.INVENTORY_DELETE,
-        apply_keyword=True,
-    )
-
-
-def _count_export_candidates(context: LogsCountContext) -> int:
-    inventory_query = select(func.count()).select_from(InventoryOperationLog).where(
-        InventoryOperationLog.operator_id == context.user_id,
-        InventoryOperationLog.action == InventoryOperationAction.INVENTORY_EXPORT,
-    )
-    inventory_query = _apply_export_keyword_filter(inventory_query, context.keyword)
-    inventory_count = _exec_count_query(context, inventory_query)
-
-    common_shelf_query = select(func.count()).select_from(CommonShelfOperationLog).where(
-        CommonShelfOperationLog.operator_id == context.user_id,
-        CommonShelfOperationLog.action == CommonShelfOperationAction.EXPORT,
-    )
-    if context.keyword and context.keyword not in "导出常用货架条":
-        common_shelf_query = common_shelf_query.where(
-            CommonShelfOperationLog.snapshot_json.contains(context.keyword)
-        )
-    common_shelf_count = _exec_count_query(context, common_shelf_query)
-    return inventory_count + common_shelf_count
 
 
 def _count_session_candidates(context: LogsCountContext) -> int:
@@ -1132,42 +579,9 @@ def _count_search_log_candidates(context: LogsCountContext) -> int:
     )
 
 
-def _count_user_operation_candidates(context: LogsCountContext) -> int:
-    query = select(func.count()).select_from(UserOperationLog).where(
-        or_(
-            UserOperationLog.actor_user_id == context.user_id,
-            UserOperationLog.target_user_id == context.user_id,
-        )
-    )
-    if context.keyword:
-        query = query.where(_build_user_operation_keyword_clause(context.keyword))
-    return _exec_count_query(context, query)
-
-
 LOG_TIMELINE_FTS_FIELD_MAP: dict[str, list[str]] = {
     "all": ["search_text", "search_text_pinyin", "detail_search_text"],
 }
-
-
-@dataclass
-class TimelineSourceBundle:
-    reagent_logs: dict[int, ReagentOrderOperationLog]
-    consumable_logs: dict[int, ConsumableOrderOperationLog]
-    inventory_logs: dict[int, InventoryOperationLog]
-    common_shelf_logs: dict[int, CommonShelfOperationLog]
-    user_logs: dict[int, UserOperationLog]
-    borrow_logs: dict[int, tuple[object, object]]
-    user_names: dict[int, str]
-
-
-@dataclass
-class TimelineSourceIds:
-    reagent_ids: list[int]
-    consumable_ids: list[int]
-    inventory_ids: list[int]
-    common_shelf_ids: list[int]
-    user_log_ids: list[int]
-    borrow_ids: list[int]
 
 
 LOG_TIMELINE_CATEGORY_SOURCE_TABLES: dict[str, tuple[LogTimelineSourceTable, ...]] = {
@@ -1176,11 +590,39 @@ LOG_TIMELINE_CATEGORY_SOURCE_TABLES: dict[str, tuple[LogTimelineSourceTable, ...
     "inventory": (LogTimelineSourceTable.INVENTORY_OPERATION_LOG,),
     "common_shelf": (LogTimelineSourceTable.COMMON_SHELF_OPERATION_LOG,),
     "borrow": (LogTimelineSourceTable.BORROWLOG,),
-    "user": (LogTimelineSourceTable.USER_OPERATION_LOG,),
 }
 
 
+def _build_user_operation_action_category_clause(action_values: tuple[str, ...], *, include: bool):
+    source_log_ids = select(UserOperationLog.id).where(
+        UserOperationLog.action.in_(action_values)
+    )
+    action_clause = LogTimeline.source_log_id.in_(source_log_ids)
+    if not include:
+        action_clause = ~action_clause
+    return and_(
+        LogTimeline.source_table == LogTimelineSourceTable.USER_OPERATION_LOG.value,
+        action_clause,
+    )
+
+
 def _build_log_timeline_category_clause(category: str):
+    if category == "user":
+        return _build_user_operation_action_category_clause(
+            NON_USER_OPERATION_ACTION_VALUES,
+            include=False,
+        )
+    if category == "other":
+        return _build_user_operation_action_category_clause(
+            OTHER_USER_OPERATION_ACTION_VALUES,
+            include=True,
+        )
+    if category == "session":
+        return _build_user_operation_action_category_clause(
+            SESSION_USER_OPERATION_ACTION_VALUES,
+            include=True,
+        )
+
     source_tables = LOG_TIMELINE_CATEGORY_SOURCE_TABLES.get(category)
     if source_tables is None:
         return false()
@@ -1300,523 +742,6 @@ def _load_log_timeline_rows(
     return merged_rows[offset:window_size]
 
 
-def _collect_timeline_source_ids(rows: list[LogTimeline]) -> TimelineSourceIds:
-    reagent_ids: list[int] = []
-    consumable_ids: list[int] = []
-    inventory_ids: list[int] = []
-    common_shelf_ids: list[int] = []
-    user_log_ids: list[int] = []
-    borrow_ids: list[int] = []
-
-    for row in rows:
-        source_table = row.source_table.value if hasattr(row.source_table, "value") else str(row.source_table)
-        if source_table == LogTimelineSourceTable.REAGENT_ORDER_OPERATION_LOG.value:
-            reagent_ids.append(row.source_log_id)
-        elif source_table == LogTimelineSourceTable.CONSUMABLE_ORDER_OPERATION_LOG.value:
-            consumable_ids.append(row.source_log_id)
-        elif source_table == LogTimelineSourceTable.INVENTORY_OPERATION_LOG.value:
-            inventory_ids.append(row.source_log_id)
-        elif source_table == LogTimelineSourceTable.COMMON_SHELF_OPERATION_LOG.value:
-            common_shelf_ids.append(row.source_log_id)
-        elif source_table == LogTimelineSourceTable.USER_OPERATION_LOG.value:
-            user_log_ids.append(row.source_log_id)
-        elif source_table == LogTimelineSourceTable.BORROWLOG.value:
-            borrow_ids.append(row.source_log_id)
-
-    return TimelineSourceIds(
-        reagent_ids=reagent_ids,
-        consumable_ids=consumable_ids,
-        inventory_ids=inventory_ids,
-        common_shelf_ids=common_shelf_ids,
-        user_log_ids=user_log_ids,
-        borrow_ids=borrow_ids,
-    )
-
-
-def _load_logs_by_ids(db: DBSession, model_cls, ids: list[int]) -> dict[int, object]:
-    if not ids:
-        return {}
-    return {
-        log.id: log
-        for log in db.exec(select(model_cls).where(model_cls.id.in_(ids))).all()
-        if log.id is not None
-    }
-
-
-def _load_borrow_logs_by_ids(db: DBSession, ids: list[int]) -> dict[int, tuple[object, object]]:
-    if not ids:
-        return {}
-    from app.models.inventory import BorrowLog, Inventory
-
-    borrow_rows = db.exec(
-        select(BorrowLog, Inventory)
-        .join(Inventory, BorrowLog.inventory_id == Inventory.id)
-        .where(BorrowLog.id.in_(ids))
-    ).all()
-    return {
-        borrow_log.id: (borrow_log, inventory)
-        for borrow_log, inventory in borrow_rows
-        if borrow_log.id is not None
-    }
-
-
-def _load_timeline_source_bundle(db: DBSession, rows: list[LogTimeline]) -> TimelineSourceBundle:
-    source_ids = _collect_timeline_source_ids(rows)
-
-    reagent_logs = {}
-    if source_ids.reagent_ids:
-        reagent_logs = _load_logs_by_ids(db, ReagentOrderOperationLog, source_ids.reagent_ids)
-
-    consumable_logs = {}
-    if source_ids.consumable_ids:
-        consumable_logs = _load_logs_by_ids(db, ConsumableOrderOperationLog, source_ids.consumable_ids)
-
-    inventory_logs = {}
-    if source_ids.inventory_ids:
-        inventory_logs = _load_logs_by_ids(db, InventoryOperationLog, source_ids.inventory_ids)
-
-    common_shelf_logs = {}
-    if source_ids.common_shelf_ids:
-        common_shelf_logs = _load_logs_by_ids(db, CommonShelfOperationLog, source_ids.common_shelf_ids)
-
-    user_logs = {}
-    if source_ids.user_log_ids:
-        user_logs = _load_logs_by_ids(db, UserOperationLog, source_ids.user_log_ids)
-
-    borrow_logs = _load_borrow_logs_by_ids(db, source_ids.borrow_ids)
-
-    user_ids: set[int] = set()
-    for log in reagent_logs.values():
-        if log.actor_user_id:
-            user_ids.add(log.actor_user_id)
-        if log.applicant_id:
-            user_ids.add(log.applicant_id)
-    for log in consumable_logs.values():
-        if log.actor_user_id:
-            user_ids.add(log.actor_user_id)
-        if log.applicant_id:
-            user_ids.add(log.applicant_id)
-    for log in user_logs.values():
-        if log.actor_user_id:
-            user_ids.add(log.actor_user_id)
-        if log.target_user_id:
-            user_ids.add(log.target_user_id)
-
-    return TimelineSourceBundle(
-        reagent_logs=reagent_logs,
-        consumable_logs=consumable_logs,
-        inventory_logs=inventory_logs,
-        common_shelf_logs=common_shelf_logs,
-        user_logs=user_logs,
-        borrow_logs=borrow_logs,
-        user_names=batch_get_user_names(db, user_ids) if user_ids else {},
-    )
-
-
-def _wrap_rendered_candidate(rendered: dict[str, object]) -> dict[str, object]:
-    return {
-        "time": rendered["time"],
-        "builder": lambda rendered=rendered: rendered,
-    }
-
-
-def _render_reagent_timeline_row(
-    timeline_row: LogTimeline,
-    log: ReagentOrderOperationLog,
-    *,
-    user_id: int,
-    user_names: dict[int, str],
-) -> dict[str, object]:
-    snapshot = parse_reagent_order_snapshot(log.snapshot_json)
-    created_at = utc_iso_str(log.created_at)
-    action_value = normalize_action_value(log.action)
-    action_label = REAGENT_ORDER_ACTION_LABELS.get(action_value, action_value)
-    actor_name = user_names.get(log.actor_user_id)
-    detail_prefix = action_label
-    if (
-        log.applicant_id == user_id
-        and log.actor_user_id
-        and log.actor_user_id != user_id
-    ):
-        detail_prefix = f"{actor_name or '管理员'}{action_label}"
-
-    before_snapshot = snapshot.get("before")
-    after_snapshot = snapshot.get("after")
-    display_snapshot = after_snapshot or before_snapshot or snapshot
-    quantity = display_snapshot.get("quantity")
-    return {
-        "time": created_at,
-        "type": "reagent_order",
-        "detail": build_reagent_order_detail_text(
-            detail_prefix,
-            log.order_name,
-            snapshot,
-        ),
-        "full_data": {
-            "id": log.id,
-            "order_id": log.order_id,
-            "actor_user_id": log.actor_user_id,
-            "applicant_id": log.applicant_id,
-            "action": action_value,
-            "order_name": log.order_name,
-            "cas_number": log.cas_number,
-            "snapshot": snapshot,
-            "before": before_snapshot,
-            "after": after_snapshot,
-            "name": display_snapshot.get("name") or log.order_name,
-            "specification": f"{display_snapshot.get('initial_quantity') or ''} {display_snapshot.get('unit') or ''}".strip(),
-            "quantity": quantity,
-            "brand": display_snapshot.get("brand"),
-            "purity": display_snapshot.get("purity"),
-            "price": display_snapshot.get("price"),
-            "order_reason": display_snapshot.get("order_reason"),
-            "status": display_snapshot.get("status"),
-            "category": display_snapshot.get("category"),
-            "notes": log.notes,
-            "created_at": created_at,
-            "is_cli": timeline_row.is_cli,
-        },
-    }
-
-
-def _render_consumable_timeline_row(
-    timeline_row: LogTimeline,
-    log: ConsumableOrderOperationLog,
-    *,
-    user_id: int,
-    user_names: dict[int, str],
-) -> dict[str, object]:
-    snapshot = parse_consumable_order_snapshot(log.snapshot_json)
-    created_at = utc_iso_str(log.created_at)
-    action_value = normalize_action_value(log.action)
-    action_label = CONSUMABLE_ORDER_ACTION_LABELS.get(action_value, action_value)
-    actor_name = user_names.get(log.actor_user_id)
-    detail_prefix = action_label
-    if (
-        log.applicant_id == user_id
-        and log.actor_user_id
-        and log.actor_user_id != user_id
-    ):
-        detail_prefix = f"{actor_name or '管理员'}{action_label}"
-
-    before_snapshot = snapshot.get("before")
-    after_snapshot = snapshot.get("after")
-    return {
-        "time": created_at,
-        "type": "consumable_order",
-        "detail": build_consumable_order_detail_text(
-            detail_prefix,
-            log.order_name,
-            log.specification,
-            snapshot,
-        ),
-        "full_data": {
-            "id": log.id,
-            "order_id": log.order_id,
-            "actor_user_id": log.actor_user_id,
-            "applicant_id": log.applicant_id,
-            "action": action_value,
-            "order_name": log.order_name,
-            "specification": log.specification,
-            "snapshot": snapshot,
-            "before": before_snapshot,
-            "after": after_snapshot,
-            "notes": log.notes,
-            "created_at": created_at,
-            "is_cli": timeline_row.is_cli,
-        },
-    }
-
-
-def _render_user_timeline_row(
-    timeline_row: LogTimeline,
-    log: UserOperationLog,
-    *,
-    user_id: int,
-    user_names: dict[int, str],
-) -> dict[str, object]:
-    snapshot = parse_user_operation_snapshot(log.snapshot_json)
-    created_at = utc_iso_str(log.created_at)
-    action_value = normalize_action_value(log.action)
-    action_label = USER_OPERATION_ACTION_LABELS.get(action_value, action_value)
-    actor_name = user_names.get(log.actor_user_id)
-
-    detail = action_label
-    if (
-        log.target_user_id == user_id
-        and log.actor_user_id
-        and log.actor_user_id != user_id
-    ):
-        detail = f"{actor_name or '管理员'}对你执行: {action_label}"
-    detail = build_user_operation_detail_text(detail, log.detail)
-
-    return {
-        "time": created_at,
-        "type": "user",
-        "detail": detail,
-        "full_data": {
-            "id": log.id,
-            "action": action_value,
-            "actor_user_id": log.actor_user_id,
-            "target_user_id": log.target_user_id,
-            "outcome": log.outcome,
-            "client_ip": log.client_ip,
-            "request_id": log.request_id,
-            "detail": log.detail,
-            "snapshot": snapshot,
-            "created_at": created_at,
-            "is_cli": timeline_row.is_cli,
-        },
-    }
-
-
-def _render_inventory_timeline_row(
-    timeline_row: LogTimeline,
-    log: InventoryOperationLog,
-) -> dict[str, object]:
-    snapshot = parse_inventory_snapshot(log.snapshot_json)
-    created_at = utc_iso_str(log.created_at)
-    action_value = normalize_action_value(log.action)
-
-    if action_value == InventoryOperationAction.INVENTORY_UPDATE.value:
-        before_snapshot = snapshot.get("before", {})
-        after_snapshot = snapshot.get("after", {})
-        return {
-            "time": created_at,
-            "type": "inventory",
-            "detail": f"更新库存 {log.item_name}",
-            "full_data": {
-                "id": log.id,
-                "inventory_id": log.inventory_id,
-                "action": action_value,
-                "name": log.item_name,
-                "cas_number": log.cas_number,
-                "before": before_snapshot,
-                "after": after_snapshot,
-                "purity": after_snapshot.get("purity"),
-                "created_at": created_at,
-                "is_cli": timeline_row.is_cli,
-            },
-        }
-
-    if action_value == InventoryOperationAction.INVENTORY_DELETE.value:
-        return {
-            "time": created_at,
-            "type": "inventory",
-            "detail": f"删除库存 {log.item_name}",
-            "full_data": {
-                "id": log.id,
-                "inventory_id": log.inventory_id,
-                "action": action_value,
-                "cas_number": log.cas_number,
-                "name": log.item_name,
-                "english_name": snapshot.get("english_name"),
-                "alias": snapshot.get("alias"),
-                "category": snapshot.get("category"),
-                "brand": snapshot.get("brand"),
-                "purity": snapshot.get("purity"),
-                "storage_location": snapshot.get("storage_location"),
-                "initial_quantity": snapshot.get("initial_quantity"),
-                "remaining_quantity": snapshot.get("remaining_quantity"),
-                "unit": snapshot.get("unit"),
-                "is_hazardous": snapshot.get("is_hazardous"),
-                "notes": snapshot.get("notes"),
-                "internal_code": snapshot.get("internal_code"),
-                "status": snapshot.get("status"),
-                "created_at": created_at,
-                "updated_at": snapshot.get("updated_at"),
-                "is_cli": timeline_row.is_cli,
-            },
-        }
-
-    if action_value == InventoryOperationAction.INVENTORY_EXPORT.value:
-        export_count = snapshot.get("count", 0)
-        return {
-            "time": created_at,
-            "type": "inventory",
-            "detail": f"导出库存 {export_count} 条",
-            "full_data": {
-                "id": log.id,
-                "action": action_value,
-                "export_scope": "inventory",
-                "count": export_count,
-                "created_at": created_at,
-                "is_cli": timeline_row.is_cli,
-            },
-        }
-
-    source = snapshot.get("source")
-    return {
-        "time": created_at,
-        "type": "inventory",
-        "detail": f"入库 {log.item_name} {snapshot.get('initial_quantity') or ''}{snapshot.get('unit') or ''}",
-        "full_data": {
-            "id": log.id,
-            "inventory_id": log.inventory_id,
-            "action": action_value,
-            "cas_number": log.cas_number,
-            "name": log.item_name,
-            "english_name": snapshot.get("english_name"),
-            "alias": snapshot.get("alias"),
-            "category": snapshot.get("category"),
-            "brand": snapshot.get("brand"),
-            "purity": snapshot.get("purity"),
-            "storage_location": snapshot.get("storage_location"),
-            "initial_quantity": snapshot.get("initial_quantity"),
-            "remaining_quantity": snapshot.get("remaining_quantity"),
-            "unit": snapshot.get("unit"),
-            "is_hazardous": snapshot.get("is_hazardous"),
-            "notes": snapshot.get("notes"),
-            "internal_code": snapshot.get("internal_code"),
-            "status": snapshot.get("status"),
-            "source": source,
-            "created_at": created_at,
-            "updated_at": snapshot.get("updated_at"),
-            "is_cli": timeline_row.is_cli,
-        },
-    }
-
-
-def _render_common_shelf_timeline_row(
-    timeline_row: LogTimeline,
-    log: CommonShelfOperationLog,
-) -> dict[str, object]:
-    snapshot = parse_common_shelf_snapshot(log.snapshot_json)
-    created_at = utc_iso_str(log.created_at)
-    action_value = normalize_action_value(log.action)
-
-    if action_value == CommonShelfOperationAction.EXPORT.value:
-        export_count = snapshot.get("count", 0)
-        return {
-            "time": created_at,
-            "type": "common_shelf",
-            "detail": f"导出常用货架 {export_count} 条",
-            "full_data": {
-                "id": log.id,
-                "action": action_value,
-                "export_scope": "common_shelf",
-                "count": export_count,
-                "created_at": created_at,
-                "is_cli": timeline_row.is_cli,
-            },
-        }
-
-    action_label = COMMON_SHELF_ACTION_LABELS.get(action_value, action_value)
-    before_snapshot = snapshot.get("before")
-    after_snapshot = snapshot.get("after")
-    display_snapshot = after_snapshot or before_snapshot or snapshot
-    return {
-        "time": created_at,
-        "type": "common_shelf",
-        "detail": f"{action_label} {log.item_name}",
-        "full_data": {
-            "id": log.id,
-            "common_shelf_id": log.common_shelf_id,
-            "action": action_value,
-            "cas_number": log.cas_number,
-            "name": log.item_name,
-            "brand": display_snapshot.get("brand"),
-            "purity": display_snapshot.get("purity"),
-            "specification_text": display_snapshot.get("specification_text"),
-            "storage_location": display_snapshot.get("storage_location"),
-            "count": snapshot.get("count"),
-            "location": snapshot.get("location"),
-            "notes": display_snapshot.get("notes"),
-            "before": before_snapshot,
-            "after": after_snapshot,
-            "snapshot": snapshot,
-            "created_at": created_at,
-            "is_cli": timeline_row.is_cli,
-        },
-    }
-
-
-def _render_borrow_timeline_row(
-    timeline_row: LogTimeline,
-    borrow_log,
-    inventory,
-) -> dict[str, object]:
-    is_returned = borrow_log.return_time is not None
-    return_info = f", 已归还 {borrow_log.quantity_returned} {inventory.unit or ''}" if is_returned else ", 未归还"
-    borrow_time = utc_iso_str(borrow_log.borrow_time)
-    return {
-        "time": borrow_time,
-        "type": "borrow",
-        "detail": f"借用 {inventory.name} {borrow_log.quantity_borrowed} {inventory.unit or ''}{return_info}",
-        "full_data": {
-            "id": borrow_log.id,
-            "inventory_id": borrow_log.inventory_id,
-            "inventory_name": inventory.name,
-            "cas_number": inventory.cas_number,
-            "borrow_time": borrow_time,
-            "return_time": utc_iso_str(borrow_log.return_time),
-            "quantity_borrowed": borrow_log.quantity_borrowed,
-            "quantity_returned": borrow_log.quantity_returned,
-            "unit": inventory.unit,
-            "notes": borrow_log.notes,
-            "is_returned": is_returned,
-            "created_at": utc_iso_str(borrow_log.created_at),
-            "is_cli": timeline_row.is_cli,
-        },
-    }
-
-
-def _render_timeline_candidate(
-    timeline_row: LogTimeline,
-    *,
-    bundle: TimelineSourceBundle,
-    user_id: int,
-) -> dict[str, object] | None:
-    source_table = timeline_row.source_table.value if hasattr(timeline_row.source_table, "value") else str(timeline_row.source_table)
-    if source_table == LogTimelineSourceTable.REAGENT_ORDER_OPERATION_LOG.value:
-        log = bundle.reagent_logs.get(timeline_row.source_log_id)
-        if log is None:
-            return None
-        return _render_reagent_timeline_row(
-            timeline_row,
-            log,
-            user_id=user_id,
-            user_names=bundle.user_names,
-        )
-    if source_table == LogTimelineSourceTable.CONSUMABLE_ORDER_OPERATION_LOG.value:
-        log = bundle.consumable_logs.get(timeline_row.source_log_id)
-        if log is None:
-            return None
-        return _render_consumable_timeline_row(
-            timeline_row,
-            log,
-            user_id=user_id,
-            user_names=bundle.user_names,
-        )
-    if source_table == LogTimelineSourceTable.INVENTORY_OPERATION_LOG.value:
-        log = bundle.inventory_logs.get(timeline_row.source_log_id)
-        if log is None:
-            return None
-        return _render_inventory_timeline_row(timeline_row, log)
-    if source_table == LogTimelineSourceTable.COMMON_SHELF_OPERATION_LOG.value:
-        log = bundle.common_shelf_logs.get(timeline_row.source_log_id)
-        if log is None:
-            return None
-        return _render_common_shelf_timeline_row(timeline_row, log)
-    if source_table == LogTimelineSourceTable.USER_OPERATION_LOG.value:
-        log = bundle.user_logs.get(timeline_row.source_log_id)
-        if log is None:
-            return None
-        return _render_user_timeline_row(
-            timeline_row,
-            log,
-            user_id=user_id,
-            user_names=bundle.user_names,
-        )
-    if source_table == LogTimelineSourceTable.BORROWLOG.value:
-        borrow_row = bundle.borrow_logs.get(timeline_row.source_log_id)
-        if borrow_row is None:
-            return None
-        borrow_log, inventory = borrow_row
-        return _render_borrow_timeline_row(timeline_row, borrow_log, inventory)
-    return None
-
-
 def _collect_timeline_candidates(
     context: LogsCollectContext,
     *,
@@ -1830,17 +755,11 @@ def _collect_timeline_candidates(
         offset=offset,
         limit=limit,
     )
-    if not rows:
-        return []
-
-    bundle = _load_timeline_source_bundle(context.db, rows)
-    candidates: list[dict[str, object]] = []
-    for row in rows:
-        rendered = _render_timeline_candidate(row, bundle=bundle, user_id=context.user_id)
-        if rendered is None:
-            continue
-        candidates.append(_wrap_rendered_candidate(rendered))
-    return candidates
+    return render_log_timeline_candidates(
+        context.db,
+        rows,
+        user_id=context.user_id,
+    )
 
 
 def _collect_user_logs(
@@ -1849,9 +768,27 @@ def _collect_user_logs(
     include_search_logs: bool,
 ) -> list[dict[str, object]]:
     if category == "session":
+        merged_limit = context.skip + context.limit
         candidates: list[dict[str, object]] = []
-        _append_session_candidates(context, candidates)
-        return candidates
+        timeline_candidates = _collect_timeline_candidates(
+            context,
+            category="session",
+            offset=0,
+            limit=merged_limit,
+        )
+        _append_session_candidates(
+            LogsCollectContext(
+                db=context.db,
+                user_id=context.user_id,
+                keyword=context.keyword,
+                skip=0,
+                limit=merged_limit,
+            ),
+            candidates,
+        )
+        candidates = [*timeline_candidates, *candidates]
+        candidates.sort(key=lambda item: item["time"], reverse=True)
+        return candidates[context.skip : context.skip + context.limit]
 
     if category == "search":
         candidates: list[dict[str, object]] = []
@@ -1909,7 +846,10 @@ def _collect_user_logs_total(
     include_search_logs: bool,
 ) -> int:
     if category == "session":
-        return _count_session_candidates(context)
+        return (
+            _count_log_timeline_candidates(context, "session")
+            + _count_session_candidates(context)
+        )
     if category == "search":
         return _count_search_log_candidates(context) if include_search_logs else 0
     if category is None:
@@ -1937,7 +877,7 @@ def generate_logs_token(
     db: DBSession,
 ):
     _ensure_user_logs_access(current_user, user_id)
-    # 日志 token 会触发跨表聚合查询，仍要保留基础限流。
+    # 日志 token 会触发跨表聚合查询，仍需基础限流。
     _check_logs_token_rate_limit(current_user.id)
     _record_logs_token_request(current_user.id)
     
@@ -1958,7 +898,7 @@ def generate_logs_token(
     }
 
 
-@router.post("/logs/query", response_model=dict)
+@router.post("/logs/query", response_model=LogsQueryResponse)
 def get_user_logs(
     request: LogsQueryRequest,
     current_user: CurrentUser,

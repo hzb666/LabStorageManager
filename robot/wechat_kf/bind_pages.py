@@ -5,6 +5,8 @@ from __future__ import annotations
 import html
 from typing import Any
 
+from app.core.constants import PASSWORD_MAX_LENGTH, USERNAME_MAX_LENGTH
+
 
 def bind_form_html(state: str, error: str) -> str:
     safe_state = html.escape(state, quote=True)
@@ -23,11 +25,11 @@ def bind_form_html(state: str, error: str) -> str:
             <form method="post" action="/wechat/kf/bind/{safe_state}" class="form">
               <div class="field">
                 <label for="username">用户名</label>
-                <input id="username" name="username" autocomplete="username" maxlength="20" required>
+                <input id="username" name="username" autocomplete="username" maxlength="{USERNAME_MAX_LENGTH}" required>
               </div>
               <div class="field">
                 <label for="password">密码</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" maxlength="50" required>
+                <input id="password" name="password" type="password" autocomplete="current-password" maxlength="{PASSWORD_MAX_LENGTH}" required>
               </div>
               <button type="submit">绑定账号</button>
             </form>

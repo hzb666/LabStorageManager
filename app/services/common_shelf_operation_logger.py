@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlmodel import Session
 
+from app.core.time_utils import utc_iso_str
 from app.models.common_shelf import CommonShelf, CommonShelfGroup
 from app.models.common_shelf_operation_log import (
     CommonShelfOperationAction,
@@ -59,8 +60,8 @@ def build_common_shelf_snapshot(item: CommonShelf) -> dict[str, Any]:
         "nt": item.notes,
         "oi": item.source_order_id,
         "cb": item.created_by_id,
-        "cr": item.created_at.isoformat() if item.created_at else None,
-        "up": item.updated_at.isoformat() if item.updated_at else None,
+        "cr": utc_iso_str(item.created_at),
+        "up": utc_iso_str(item.updated_at),
     }
 
 
@@ -84,8 +85,8 @@ def build_common_shelf_group_snapshot(group: CommonShelfGroup) -> dict[str, Any]
         "nt": None,
         "oi": None,
         "cb": group.created_by_id,
-        "cr": group.created_at.isoformat() if group.created_at else None,
-        "up": group.updated_at.isoformat() if group.updated_at else None,
+        "cr": utc_iso_str(group.created_at),
+        "up": utc_iso_str(group.updated_at),
     }
 
 

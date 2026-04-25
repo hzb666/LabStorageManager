@@ -17,6 +17,7 @@ export const LOG_TYPE_OPTIONS: LogTypeOption[] = [
   { value: 'inventory', label: '库存' },
   { value: 'common_shelf', label: '常用' },
   { value: 'borrow', label: '借用' },
+  { value: 'other', label: '其他' },
   { value: 'user', label: '用户' },
   { value: 'session', label: '会话' },
 ]
@@ -32,8 +33,10 @@ const LOG_TYPE_BADGE_META: Record<string, LogTypeBadgeMeta> = {
   inventory: { label: '库存', color: 'purple' },
   common_shelf: { label: '常用', color: 'amber' },
   borrow: { label: '借用', color: 'cyan' },
+  other: { label: '其他', color: 'gray' },
   session: { label: '会话', color: 'teal' },
   user: { label: '用户', color: 'indigo' },
+  export: { label: '导出', color: 'orange' },
   search: { label: '搜索', color: 'orange' },
 }
 

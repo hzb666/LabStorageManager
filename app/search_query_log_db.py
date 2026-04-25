@@ -132,11 +132,11 @@ class SearchLogRow:
 
 
 def _open_connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(str(QUERY_LOG_DB_PATH), timeout=1.0)
+    connection = sqlite3.connect(str(QUERY_LOG_DB_PATH), timeout=3.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL;")
     connection.execute("PRAGMA synchronous=NORMAL;")
-    connection.execute("PRAGMA busy_timeout=1000;")
+    connection.execute("PRAGMA busy_timeout=3000;")
     return connection
 
 

@@ -12,7 +12,7 @@ from typing import Optional, TypeVar
 
 from sqlmodel import Session, SQLModel, select
 
-# Both SQLAlchemy's .returning() and raw-SQL RETURNING require SQLite >= 3.35.0
+# SQLAlchemy .returning() 和原生 RETURNING 都需要 SQLite >= 3.35.0。
 SQLITE_SUPPORTS_RETURNING: bool = (
     tuple(int(x) for x in sqlite3.sqlite_version.split(".")) >= (3, 35, 0)
 )
@@ -34,7 +34,7 @@ def exec_delete_returning_first(
         if row is None:
             return None
         return model_cls.model_validate(dict(row._mapping))
-    # Fallback: fetch the row first, then delete it.
+    # 旧 SQLite 先读取单行，再执行删除。
     existing = db.exec(select(model_cls).where(delete_stmt.whereclause)).first()
     if existing is None:
         return None
@@ -54,7 +54,7 @@ def exec_delete_returning_all(
     if SQLITE_SUPPORTS_RETURNING:
         rows = db.exec(delete_stmt.returning(*model_cls.__table__.columns)).all()
         return [model_cls.model_validate(dict(row._mapping)) for row in rows]
-    # Fallback: fetch all matching rows first, then delete them.
+    # 旧 SQLite 先读取全部匹配行，再执行删除。
     existing = db.exec(select(model_cls).where(delete_stmt.whereclause)).all()
     if not existing:
         return []

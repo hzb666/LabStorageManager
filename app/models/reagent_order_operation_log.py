@@ -20,6 +20,7 @@ class ReagentOrderOperationAction(str, Enum):
     DELETE = "delete"
     APPROVE = "approve"
     REJECT = "reject"
+    EXPORT = "export"
 
 
 class ReagentOrderOperationLog(SQLModel, table=True):

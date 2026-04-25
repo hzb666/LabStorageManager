@@ -25,6 +25,7 @@ import type {
   SearchFieldOption,
 } from "@/hooks/useTableState";
 import { getInventoryTableColumns } from "@/lib/tableConfigs";
+import { useSSEStore } from "@/store/sseStore";
 import { cn } from "@/lib/utils";
 
 declare module "@tanstack/react-table" {
@@ -42,6 +43,8 @@ export interface FilterTableProps {
   customColumns?: ColumnDef<Record<string, unknown>, unknown>[];
   onEdit?: (item: Record<string, unknown>) => void;
   onBorrowSuccess?: () => void;
+  onQueryError?: (error: unknown) => void;
+  onQueryDataReady?: (context: FilterTableQueryDataReadyContext) => void;
   statusOptions?: FilterOption[];
   searchFieldOptions?: SearchFieldOption[];
   showFuzzySearch?: boolean;
@@ -51,10 +54,20 @@ export interface FilterTableProps {
   pageSize?: number;
   debounceMs?: number;
   extraParams?: Record<string, unknown>;
+  suppressSorting?: boolean;
   searchPlaceholder?: string;
+  searchInputDisabled?: boolean;
+  searchInputDisabledReason?: string;
+  searchInputDisabledValue?: string;
+  onSearchInputDisabledClear?: () => void;
+  searchResetSignal?: unknown;
+  sortingResetSignal?: unknown;
+  expandAllSignal?: unknown;
+  collapseAllSignal?: unknown;
   searchActions?: React.ReactNode;
   title?: React.ReactNode;
   enableExpandAll?: boolean;
+  disableExpandedRowAnimation?: boolean;
   renderExpandedRow?: (item: Record<string, unknown>) => React.ReactNode;
   noteField?: string;
   scrollHeight?: number | string;
@@ -67,6 +80,7 @@ export interface FilterTableProps {
     room: string;
     eventTypes: readonly string[];
     staleOnly?: boolean;
+    moveUpdatedRowToStartWhenUnsorted?: boolean;
     onRefresh?: () => void | Promise<void>;
     searchFieldMap?: Partial<Record<string, string[]>>;
     onSafePatch?: (event: import("@/hooks/useSSE").SSEEventEnvelope) => void;
@@ -74,6 +88,55 @@ export interface FilterTableProps {
       event: import("@/hooks/useSSE").SSEEventEnvelope,
       context: import("@/hooks/useListSSE").ListSSEContext,
     ) => boolean;
+  };
+}
+
+export interface FilterTableQueryDataReadyContext {
+  extraParams: Record<string, unknown>;
+  globalFilter: string;
+  hasSorting: boolean;
+  searchField: string;
+  total: number;
+}
+
+const DEFAULT_FILTER_TABLE_PROPS = {
+  className: "",
+  debounceMs: 300,
+  defaultSearchField: "all",
+  defaultStatus: "all",
+  emptyText: "暂无数据",
+  enableExpandAll: true,
+  extraParams: {} as Record<string, unknown>,
+  pageSize: 50,
+  queryKey: ["list"] as string[],
+  searchFieldOptions: DEFAULT_SEARCH_FIELD_OPTIONS,
+  searchInputDisabled: false,
+  searchPlaceholder: "搜索名称、CAS号、位置...",
+  showFuzzySearch: true,
+  statusOptions: DEFAULT_STATUS_OPTIONS,
+} satisfies Partial<FilterTableProps>;
+
+function resolveFilterTableProps(props: Readonly<FilterTableProps>) {
+  return {
+    ...props,
+    className: props.className ?? DEFAULT_FILTER_TABLE_PROPS.className,
+    debounceMs: props.debounceMs ?? DEFAULT_FILTER_TABLE_PROPS.debounceMs,
+    defaultSearchField:
+      props.defaultSearchField ?? DEFAULT_FILTER_TABLE_PROPS.defaultSearchField,
+    defaultStatus: props.defaultStatus ?? DEFAULT_FILTER_TABLE_PROPS.defaultStatus,
+    emptyText: props.emptyText ?? DEFAULT_FILTER_TABLE_PROPS.emptyText,
+    enableExpandAll: props.enableExpandAll ?? DEFAULT_FILTER_TABLE_PROPS.enableExpandAll,
+    extraParams: props.extraParams ?? DEFAULT_FILTER_TABLE_PROPS.extraParams,
+    pageSize: props.pageSize ?? DEFAULT_FILTER_TABLE_PROPS.pageSize,
+    queryKey: props.queryKey ?? DEFAULT_FILTER_TABLE_PROPS.queryKey,
+    searchFieldOptions:
+      props.searchFieldOptions ?? DEFAULT_FILTER_TABLE_PROPS.searchFieldOptions,
+    searchInputDisabled:
+      props.searchInputDisabled ?? DEFAULT_FILTER_TABLE_PROPS.searchInputDisabled,
+    searchPlaceholder:
+      props.searchPlaceholder ?? DEFAULT_FILTER_TABLE_PROPS.searchPlaceholder,
+    showFuzzySearch: props.showFuzzySearch ?? DEFAULT_FILTER_TABLE_PROPS.showFuzzySearch,
+    statusOptions: props.statusOptions ?? DEFAULT_FILTER_TABLE_PROPS.statusOptions,
   };
 }
 
@@ -136,6 +199,10 @@ function getScrollHeight(
   }
 
   return "calc(100vh - 112px - 16px)";
+}
+
+function shouldDisableExpandAll(isAllExpanded: boolean, isTableAtTop: boolean): boolean {
+  return !isAllExpanded && !isTableAtTop;
 }
 
 function resolveTableColumns(
@@ -237,6 +304,47 @@ function useLocationSearchSync({
   ]);
 }
 
+function useChangedSignalEffect({
+  effect,
+  signal,
+}: Readonly<{
+  effect: () => void;
+  signal: unknown;
+}>) {
+  const lastSignalRef = useRef<unknown>(signal);
+
+  useEffect(() => {
+    if (Object.is(signal, lastSignalRef.current)) {
+      return;
+    }
+
+    lastSignalRef.current = signal;
+    effect();
+  }, [effect, signal]);
+}
+
+// 外部筛选接管结果集时清空文字搜索，避免同一请求同时携带两套搜索条件。
+function useSearchResetSignal({
+  applySearchImmediate,
+  defaultSearchField,
+  resetSignal,
+  searchInputDisabled,
+}: Readonly<{
+  applySearchImmediate: (search: string, field?: string) => void;
+  defaultSearchField: string;
+  resetSignal: unknown;
+  searchInputDisabled: boolean;
+}>) {
+  useChangedSignalEffect({
+    signal: resetSignal,
+    effect: () => {
+      if (searchInputDisabled) {
+        applySearchImmediate("", defaultSearchField);
+      }
+    },
+  });
+}
+
 // 在筛选条件变化后重置展开态，避免旧展开行与新结果集错位。
 function useExpandedResetOnFilterChange({
   enableExpandAll,
@@ -302,6 +410,68 @@ function useExpandedResetOnFilterChange({
   ]);
 }
 
+// 外部业务场景需要在结果集刷新后默认展开全部，例如结构检索命中后展示匹配高亮。
+function useExpandAllSignal({
+  enableExpandAll,
+  expandAllSignal,
+  filter,
+}: Readonly<{
+  enableExpandAll: boolean;
+  expandAllSignal: unknown;
+  filter: ReturnType<typeof useTableState>;
+}>) {
+  useChangedSignalEffect({
+    signal: expandAllSignal,
+    effect: () => {
+      if (!enableExpandAll || expandAllSignal === null || expandAllSignal === undefined) {
+        return;
+      }
+
+      filter.setAllExpanded(true);
+    },
+  });
+}
+
+function useCollapseAllSignal({
+  collapseAllSignal,
+  enableExpandAll,
+  filter,
+}: Readonly<{
+  collapseAllSignal: unknown;
+  enableExpandAll: boolean;
+  filter: ReturnType<typeof useTableState>;
+}>) {
+  useChangedSignalEffect({
+    signal: collapseAllSignal,
+    effect: () => {
+      if (!enableExpandAll || collapseAllSignal === null || collapseAllSignal === undefined) {
+        return;
+      }
+
+      filter.setAllExpanded(false);
+    },
+  });
+}
+
+function useSortingResetSignal({
+  filter,
+  sortingResetSignal,
+}: Readonly<{
+  filter: ReturnType<typeof useTableState>;
+  sortingResetSignal: unknown;
+}>) {
+  useChangedSignalEffect({
+    signal: sortingResetSignal,
+    effect: () => {
+      if (sortingResetSignal === null || sortingResetSignal === undefined) {
+        return;
+      }
+
+      filter.setSorting([]);
+    },
+  });
+}
+
 interface FilterTableHeaderProps {
   disableExpandAll: boolean;
   displayCount: string | number;
@@ -362,6 +532,7 @@ function FilterTableHeader({
 }
 
 function useFilterTableRealtime({
+  extraParams,
   filter,
   isTableAtTop,
   queryKey,
@@ -369,15 +540,18 @@ function useFilterTableRealtime({
   searchFieldOptions,
 }: Readonly<{
   filter: ReturnType<typeof useTableState>;
+  extraParams: Record<string, unknown>;
   isTableAtTop: boolean;
   queryKey?: readonly unknown[];
   realtime?: FilterTableProps["realtime"];
   searchFieldOptions: SearchFieldOption[];
 }>) {
+  const clearStaleKey = useSSEStore((state) => state.clearStaleKey);
   const activeQueryKey = useMemo<readonly unknown[]>(() => {
     const baseKey = queryKey ?? [];
     return [
       ...baseKey,
+      extraParams,
       filter.statusFilter,
       filter.globalFilter,
       filter.searchField,
@@ -392,6 +566,7 @@ function useFilterTableRealtime({
     filter.searchField,
     filter.sorting,
     filter.statusFilter,
+    extraParams,
     queryKey,
   ]);
 
@@ -403,11 +578,12 @@ function useFilterTableRealtime({
           const candidates = [record.id, record.inventory_id, record.order_id];
           return (
             candidates.find(
-              (candidate): candidate is number => typeof candidate === "number",
+              (candidate): candidate is string | number =>
+                typeof candidate === "string" || typeof candidate === "number",
             ) ?? null
           );
         })
-        .filter((id): id is number => id !== null),
+        .filter((id): id is string | number => id !== null),
     );
   }, [filter.data]);
 
@@ -423,6 +599,25 @@ function useFilterTableRealtime({
   const staleKey = useMemo(() => {
     return `${realtime?.room ?? "__disabled__"}::${JSON.stringify(activeQueryKey)}`;
   }, [activeQueryKey, realtime?.room]);
+  const isStale = useSSEStore((state) => state.hasStaleKey(staleKey));
+  const staleRefreshSeenRef = useRef(false);
+
+  useEffect(() => {
+    if (!isStale) {
+      staleRefreshSeenRef.current = false;
+      return;
+    }
+
+    if (filter.isFetching) {
+      staleRefreshSeenRef.current = true;
+      return;
+    }
+
+    if (staleRefreshSeenRef.current && !filter.isError) {
+      clearStaleKey(staleKey);
+      staleRefreshSeenRef.current = false;
+    }
+  }, [clearStaleKey, filter.isError, filter.isFetching, isStale, staleKey]);
 
   const handleRealtimeRefresh = React.useCallback(async () => {
     if (realtime?.onRefresh) {
@@ -450,6 +645,8 @@ function useFilterTableRealtime({
     }),
     onSafePatch: realtime?.onSafePatch,
     staleOnly: realtime?.staleOnly ?? false,
+    moveUpdatedRowToStartWhenUnsorted:
+      realtime?.moveUpdatedRowToStartWhenUnsorted ?? false,
     shouldHandleEvent: realtime?.shouldHandleEvent,
   });
 
@@ -462,6 +659,7 @@ function useFilterTableRealtime({
 interface FilterTableContentProps {
   emptyText: string;
   enableExpandAll: boolean;
+  disableExpandedRowAnimation?: boolean;
   filter: ReturnType<typeof useTableState>;
   noteField?: string;
   renderExpandedRow?: (item: Record<string, unknown>) => React.ReactNode;
@@ -476,6 +674,7 @@ interface FilterTableContentProps {
 function FilterTableContent({
   emptyText,
   enableExpandAll,
+  disableExpandedRowAnimation,
   filter,
   noteField,
   renderExpandedRow,
@@ -509,6 +708,7 @@ function FilterTableContent({
         renderExpandedRow={renderExpandedRow}
         scrollHeight={scrollHeight}
         enableExpandAll={enableExpandAll}
+        disableExpandedRowAnimation={disableExpandedRowAnimation}
         expandAllStorageKey={tableId}
         noteField={noteField}
         isAllExpanded={filter.isAllExpanded}
@@ -524,30 +724,13 @@ function FilterTableContent({
   );
 }
 
-function FilterTableRealtimeBanner({
-  realtime,
-  staleKey,
-  onRefresh,
-}: Readonly<{
-  realtime?: FilterTableProps["realtime"];
-  staleKey: string;
-  onRefresh: () => void | Promise<void>;
-}>) {
-  if (!realtime) {
-    return null;
-  }
-
-  return (
-    <StaleBanner
-      staleKey={staleKey}
-      onRefresh={onRefresh}
-    />
-  );
-}
-
 function FilterTableControls({
   filter,
   searchFieldOptions,
+  searchInputDisabled,
+  searchInputDisabledReason,
+  searchInputDisabledValue,
+  onSearchInputDisabledClear,
   searchActions,
   searchPlaceholder,
   showFuzzySearch,
@@ -558,6 +741,10 @@ function FilterTableControls({
 }: Readonly<{
   filter: ReturnType<typeof useTableState>;
   searchFieldOptions: SearchFieldOption[];
+  searchInputDisabled: boolean;
+  searchInputDisabledReason?: string;
+  searchInputDisabledValue?: string;
+  onSearchInputDisabledClear?: () => void;
   searchActions?: React.ReactNode;
   searchPlaceholder: string;
   showFuzzySearch?: boolean;
@@ -571,6 +758,10 @@ function FilterTableControls({
       className={filterClassName}
       searchInput={filter.searchInput}
       onSearchInputChange={filter.setSearchInput}
+      searchInputDisabled={searchInputDisabled}
+      searchInputDisabledReason={searchInputDisabledReason}
+      searchInputDisabledValue={searchInputDisabledValue}
+      onSearchInputDisabledClear={onSearchInputDisabledClear}
       statusFilter={filter.statusFilter}
       onStatusFilterChange={filter.setStatusFilter}
       searchField={filter.searchField}
@@ -588,43 +779,6 @@ function FilterTableControls({
       actions={toolbarActions}
     />
   );
-}
-
-function useValidStatusFilter({
-  defaultStatus,
-  setStatusFilter,
-  statusFilter,
-  statusOptions,
-}: Readonly<{
-  defaultStatus: string;
-  setStatusFilter: (value: string) => void;
-  statusFilter: string;
-  statusOptions: FilterOption[];
-}>) {
-  useEffect(() => {
-    const hasCurrentStatus = statusOptions.some((option) => option.value === statusFilter);
-    if (!hasCurrentStatus) {
-      setStatusFilter(defaultStatus);
-    }
-  }, [defaultStatus, setStatusFilter, statusFilter, statusOptions]);
-}
-
-function useInitialUrlSearchState({
-  defaultSearchField,
-  locationSearch,
-  searchFieldOptions,
-}: Readonly<{
-  defaultSearchField: string;
-  locationSearch: string;
-  searchFieldOptions: SearchFieldOption[];
-}>) {
-  return useMemo(() => {
-    return getInitialUrlSearchState({
-      defaultSearchField,
-      locationSearch,
-      searchFieldOptions,
-    });
-  }, [defaultSearchField, locationSearch, searchFieldOptions]);
 }
 
 function useFilterTableInstance({
@@ -665,42 +819,152 @@ function useFilterTableInstance({
   });
 }
 
+function useFilterTableEffects({
+  defaultStatus,
+  defaultSearchField,
+  enableExpandAll,
+  expandAllSignal,
+  collapseAllSignal,
+  extraParams,
+  filter,
+  initialUrlSearchState,
+  locationSearch,
+  onQueryDataReady,
+  onQueryError,
+  searchInputDisabled,
+  searchResetSignal,
+  sortingResetSignal,
+  statusOptions,
+  table,
+}: Readonly<{
+  defaultStatus: string;
+  defaultSearchField: string;
+  enableExpandAll: boolean;
+  expandAllSignal: unknown;
+  collapseAllSignal: unknown;
+  extraParams: Record<string, unknown>;
+  filter: ReturnType<typeof useTableState>;
+  initialUrlSearchState: ReturnType<typeof getInitialUrlSearchState>;
+  locationSearch: string;
+  onQueryDataReady?: (context: FilterTableQueryDataReadyContext) => void;
+  onQueryError?: (error: unknown) => void;
+  searchInputDisabled: boolean;
+  searchResetSignal: unknown;
+  sortingResetSignal: unknown;
+  statusOptions: FilterOption[];
+  table: Table<Record<string, unknown>>;
+}>) {
+  const { setStatusFilter, statusFilter } = filter;
+
+  useEffect(() => {
+    if (filter.isError) {
+      onQueryError?.(filter.error);
+    }
+  }, [filter.error, filter.isError, onQueryError]);
+
+  useEffect(() => {
+    if (!onQueryDataReady || filter.isLoading || filter.isFetching) {
+      return;
+    }
+
+    if (filter.isPlaceholderData || filter.isError) {
+      return;
+    }
+
+    onQueryDataReady({
+      extraParams,
+      globalFilter: filter.globalFilter,
+      hasSorting: filter.sorting.length > 0,
+      searchField: filter.searchField,
+      total: filter.total,
+    });
+  }, [
+    extraParams,
+    filter.globalFilter,
+    filter.isError,
+    filter.isFetching,
+    filter.isLoading,
+    filter.isPlaceholderData,
+    filter.searchField,
+    filter.sorting,
+    filter.total,
+    onQueryDataReady,
+  ]);
+
+  useEffect(() => {
+    const hasCurrentStatus = statusOptions.some((option) => option.value === statusFilter);
+    if (!hasCurrentStatus) {
+      setStatusFilter(defaultStatus);
+    }
+  }, [defaultStatus, setStatusFilter, statusFilter, statusOptions]);
+
+  useSearchResetSignal({
+    applySearchImmediate: filter.applySearchImmediate,
+    defaultSearchField,
+    resetSignal: searchResetSignal,
+    searchInputDisabled,
+  });
+  useLocationSearchSync({
+    applySearchImmediate: filter.applySearchImmediate,
+    defaultSearchField,
+    initialUrlSearchState,
+    locationSearch,
+  });
+  useExpandedResetOnFilterChange({ enableExpandAll, filter, table });
+  useExpandAllSignal({ enableExpandAll, expandAllSignal, filter });
+  useCollapseAllSignal({ enableExpandAll, collapseAllSignal, filter });
+  useSortingResetSignal({ filter, sortingResetSignal });
+}
+
 // 组合筛选栏、表格状态与数据表格渲染，是 FilterTable 的总入口。
-export function FilterTable({
-  api,
-  queryKey = ["list"],
-  tableId,
-  customColumns,
-  onEdit,
-  onBorrowSuccess,
-  statusOptions = DEFAULT_STATUS_OPTIONS,
-  searchFieldOptions = DEFAULT_SEARCH_FIELD_OPTIONS,
-  showFuzzySearch = true,
-  showMatchMode,
-  defaultStatus = "all",
-  defaultSearchField = "all",
-  pageSize = 50,
-  debounceMs = 300,
-  extraParams = {},
-  searchPlaceholder = "搜索名称、CAS号、位置...",
-  searchActions,
-  title,
-  enableExpandAll = true,
-  renderExpandedRow,
-  noteField,
-  scrollHeight,
-  className = "",
-  filterClassName,
-  cardClassName,
-  emptyText = "暂无数据",
-  toolbarActions,
-  realtime,
-}: Readonly<FilterTableProps>) {
+export function FilterTable(props: Readonly<FilterTableProps>) {
+  const {
+    api,
+    queryKey,
+    tableId,
+    customColumns,
+    onEdit,
+    onBorrowSuccess,
+    onQueryError,
+    onQueryDataReady,
+    statusOptions,
+    searchFieldOptions,
+    showFuzzySearch,
+    showMatchMode,
+    defaultStatus,
+    defaultSearchField,
+    pageSize,
+    debounceMs,
+    extraParams,
+    suppressSorting,
+    searchPlaceholder,
+    searchInputDisabled,
+    searchInputDisabledReason,
+    searchInputDisabledValue,
+    onSearchInputDisabledClear,
+    searchResetSignal,
+    sortingResetSignal,
+    expandAllSignal,
+    collapseAllSignal,
+    searchActions,
+    title,
+    enableExpandAll,
+    disableExpandedRowAnimation,
+    renderExpandedRow,
+    noteField,
+    scrollHeight,
+    className,
+    filterClassName,
+    cardClassName,
+    emptyText,
+    toolbarActions,
+    realtime,
+  } = resolveFilterTableProps(props);
   const location = useLocation();
   const actionRefs = useActionRefs({ onEdit, onBorrowSuccess });
   const [isTableAtTop, setIsTableAtTop] = useState(true);
 
-  const initialUrlSearchState = useInitialUrlSearchState({
+  const initialUrlSearchState = getInitialUrlSearchState({
     defaultSearchField,
     locationSearch: location.search,
     searchFieldOptions,
@@ -717,19 +981,35 @@ export function FilterTable({
     pageSize,
     debounceMs,
     extraParams,
+    suppressSorting: Boolean(suppressSorting),
     initialSearch: initialUrlSearchState.search,
     initialSearchField: initialUrlSearchState.field,
     enableFuzzySearch: showFuzzySearch,
   });
 
-  useValidStatusFilter({
+  const table = useFilterTableInstance({ actionRefs, customColumns, filter });
+
+  useFilterTableEffects({
     defaultStatus,
-    setStatusFilter: filter.setStatusFilter,
-    statusFilter: filter.statusFilter,
+    defaultSearchField,
+    enableExpandAll,
+    expandAllSignal,
+    collapseAllSignal,
+    extraParams,
+    filter,
+    initialUrlSearchState,
+    locationSearch: location.search,
+    onQueryDataReady,
+    onQueryError,
+    searchInputDisabled,
+    searchResetSignal,
+    sortingResetSignal,
     statusOptions,
+    table,
   });
 
   const { handleRealtimeRefresh, staleKey } = useFilterTableRealtime({
+    extraParams,
     filter,
     isTableAtTop,
     queryKey,
@@ -737,29 +1017,20 @@ export function FilterTable({
     searchFieldOptions,
   });
 
-  useLocationSearchSync({
-    applySearchImmediate: filter.applySearchImmediate,
-    defaultSearchField,
-    initialUrlSearchState,
-    locationSearch: location.search,
-  });
-
-  const table = useFilterTableInstance({ actionRefs, customColumns, filter });
-
-  useExpandedResetOnFilterChange({ enableExpandAll, filter, table });
-
-  const calculatedScrollHeight = useMemo(() => {
-    return getScrollHeight(filter.data.length, scrollHeight);
-  }, [filter.data.length, scrollHeight]);
+  const calculatedScrollHeight = getScrollHeight(filter.data.length, scrollHeight);
 
   // 当列表已下滚时，阻止“展开全部”，避免用户在中段展开后产生强烈跳动。
-  const disableExpandAll = !filter.isAllExpanded && !isTableAtTop;
+  const disableExpandAll = shouldDisableExpandAll(filter.isAllExpanded, isTableAtTop);
 
   return (
     <div className={cn("space-y-6", className)}>
       <FilterTableControls
         filter={filter}
         searchFieldOptions={searchFieldOptions}
+        searchInputDisabled={searchInputDisabled}
+        searchInputDisabledReason={searchInputDisabledReason}
+        searchInputDisabledValue={searchInputDisabledValue}
+        onSearchInputDisabledClear={onSearchInputDisabledClear}
         searchActions={searchActions}
         searchPlaceholder={searchPlaceholder}
         showFuzzySearch={showFuzzySearch}
@@ -782,6 +1053,7 @@ export function FilterTable({
           <FilterTableContent
             emptyText={emptyText}
             enableExpandAll={enableExpandAll}
+            disableExpandedRowAnimation={disableExpandedRowAnimation}
             filter={filter}
             noteField={noteField}
             renderExpandedRow={renderExpandedRow}
@@ -791,11 +1063,12 @@ export function FilterTable({
             table={table}
             tableId={tableId}
           />
-          <FilterTableRealtimeBanner
-            realtime={realtime}
-            staleKey={staleKey}
-            onRefresh={handleRealtimeRefresh}
-          />
+          {realtime && (
+            <StaleBanner
+              staleKey={staleKey}
+              onRefresh={handleRealtimeRefresh}
+            />
+          )}
         </CardContent>
       </Card>
     </div>

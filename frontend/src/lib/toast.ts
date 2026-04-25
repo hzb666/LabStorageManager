@@ -28,7 +28,7 @@ function generateToastId(): string {
   return `${Date.now().toString(16)}-${counter}`
 }
 
-// 这里是极轻量事件总线，让非组件代码也能沿用同一条 toast 派发通道。
+// 轻量事件总线让非组件代码复用同一条 toast 派发通道。
 export const subscribeToToasts = (listener: Listener) => {
   listeners.add(listener)
   return () => {

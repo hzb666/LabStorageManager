@@ -1,4 +1,4 @@
-# app/routers/announcements.py
+# 公告路由。
 """
 Announcement API Routes - System Announcements Management
 """
@@ -8,11 +8,11 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlmodel import Session, select, func
 
-from app.core.auth import get_current_user, require_admin
+from app.core.auth import AdminUser, get_current_user, require_admin
 from app.core.config import settings
 from app.core.constants import INVALID_FILENAME_PREFIX, INVALID_FILENAME_SEGMENTS, MAX_PAGE_SIZE
-from app.core.request_utils import get_client_ip
-from app.core.time_utils import get_utc_now
+from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
+from app.core.time_utils import get_utc_now, utc_iso_str
 from app.database import get_db
 from app.models.announcement import (
     Announcement,
@@ -21,14 +21,16 @@ from app.models.announcement import (
     AnnouncementUpdate,
 )
 from app.models.user import User
+from app.models.user_operation_log import UserOperationAction
 from app.services.image_service import save_announcement_image, delete_file, get_directory_storage_info
 from app.services.rate_limit import enforce_rate_limit
+from app.services.user_operation_logger import log_user_operation
 from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/announcements", tags=["Announcements"])
 
 logger = logging.getLogger(__name__)
-# ==================== Helper Functions ====================
+# ==================== 辅助函数 ====================
 
 
 def get_announcement_by_id(db: Session, announcement_id: int) -> Optional[Announcement]:
@@ -63,7 +65,42 @@ def _delete_removed_announcement_images(
     _delete_announcement_images(removed_images)
 
 
-# ==================== Public Endpoints ====================
+def _build_announcement_snapshot(announcement: Announcement) -> dict[str, object]:
+    return {
+        "id": announcement.id,
+        "title": announcement.title,
+        "is_pinned": announcement.is_pinned,
+        "is_visible": announcement.is_visible,
+        "image_count": len(announcement.images or []),
+        "created_by": announcement.created_by,
+        "created_at": utc_iso_str(announcement.created_at),
+        "updated_at": utc_iso_str(announcement.updated_at),
+    }
+
+
+def _log_announcement_operation(
+    db: Session,
+    *,
+    request: Request,
+    current_user: User,
+    action: UserOperationAction,
+    detail: str,
+    snapshot: dict[str, object],
+) -> None:
+    log_user_operation(
+        db,
+        action=action,
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        client_ip=get_client_ip(request),
+        request_id=get_request_id(request),
+        detail=detail,
+        snapshot=snapshot,
+        is_cli=get_request_is_cli(request),
+    )
+
+
+# ==================== 公开接口 ====================
 
 
 @router.get("/public", response_model=List[AnnouncementResponse], dependencies=[Depends(get_current_user)])
@@ -104,7 +141,7 @@ def get_storage_info():
     return storage_info
 
 
-# ==================== Admin Endpoints ====================
+# ==================== 管理员接口 ====================
 
 
 @router.get("/", response_model=List[AnnouncementResponse], dependencies=[Depends(require_admin)])
@@ -147,6 +184,7 @@ MAX_VISIBLE_ANNOUNCEMENTS = settings.max_visible_announcements
 @router.post("/", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
 def create_announcement(
     announcement: AnnouncementCreate,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)],
 ):
@@ -185,6 +223,15 @@ def create_announcement(
     )
 
     db.add(db_announcement)
+    db.flush()
+    _log_announcement_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.CREATE_ANNOUNCEMENT,
+        detail=f"公告={db_announcement.title}",
+        snapshot=_build_announcement_snapshot(db_announcement),
+    )
     db.commit()
     db.refresh(db_announcement)
 
@@ -208,11 +255,13 @@ def get_announcement(
     return enrich_with_creator_name(announcement, db)
 
 
-@router.put("/{announcement_id}", response_model=AnnouncementResponse, dependencies=[Depends(require_admin)])
+@router.put("/{announcement_id}", response_model=AnnouncementResponse)
 def update_announcement(
     announcement_id: int,
     announcement_update: AnnouncementUpdate,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: AdminUser,
 ):
     """
     Update announcement (admin only)
@@ -224,15 +273,28 @@ def update_announcement(
             detail="Announcement not found"
         )
 
-    # Update fields
+    # 更新字段。
     old_images = list(announcement.images or [])
+    before_snapshot = _build_announcement_snapshot(announcement)
     update_data = announcement_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(announcement, field, value)
 
-    # Update timestamp
+    # 更新时间戳。
     announcement.updated_at = get_utc_now()
 
+    db.flush()
+    _log_announcement_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.UPDATE_ANNOUNCEMENT,
+        detail=f"公告={announcement.title}",
+        snapshot={
+            "before": before_snapshot,
+            "after": _build_announcement_snapshot(announcement),
+        },
+    )
     db.commit()
     db.refresh(announcement)
 
@@ -242,10 +304,12 @@ def update_announcement(
     return enrich_with_creator_name(announcement, db)
 
 
-@router.delete("/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
+@router.delete("/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_announcement(
     announcement_id: int,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: AdminUser,
 ):
     """
     Delete announcement (admin only)
@@ -258,17 +322,31 @@ def delete_announcement(
             detail="Announcement not found"
         )
 
-    # Delete associated images
+    # 删除关联图片。
+    before_snapshot = _build_announcement_snapshot(announcement)
     _delete_announcement_images(announcement.images)
 
     db.delete(announcement)
+    _log_announcement_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.DELETE_ANNOUNCEMENT,
+        detail=f"公告={announcement.title}",
+        snapshot={
+            "before": before_snapshot,
+            "after": {},
+        },
+    )
     db.commit()
 
 
-@router.post("/{announcement_id}/toggle-pin", response_model=AnnouncementResponse, dependencies=[Depends(require_admin)])
+@router.post("/{announcement_id}/toggle-pin", response_model=AnnouncementResponse)
 def toggle_pin_announcement(
     announcement_id: int,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: AdminUser,
 ):
     """
     Toggle pin status of announcement (admin only)
@@ -280,19 +358,34 @@ def toggle_pin_announcement(
             detail="Announcement not found"
         )
 
+    before_snapshot = _build_announcement_snapshot(announcement)
     announcement.is_pinned = not announcement.is_pinned
     announcement.updated_at = get_utc_now()
 
+    db.flush()
+    _log_announcement_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.UPDATE_ANNOUNCEMENT_PIN,
+        detail=f"公告={announcement.title} 置顶={announcement.is_pinned}",
+        snapshot={
+            "before": before_snapshot,
+            "after": _build_announcement_snapshot(announcement),
+        },
+    )
     db.commit()
     db.refresh(announcement)
 
     return enrich_with_creator_name(announcement, db)
 
 
-@router.post("/{announcement_id}/toggle-visibility", response_model=AnnouncementResponse, dependencies=[Depends(require_admin)])
+@router.post("/{announcement_id}/toggle-visibility", response_model=AnnouncementResponse)
 def toggle_visibility_announcement(
     announcement_id: int,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: AdminUser,
 ):
     """
     Toggle visibility of announcement (admin only)
@@ -304,19 +397,34 @@ def toggle_visibility_announcement(
             detail="Announcement not found"
         )
 
+    before_snapshot = _build_announcement_snapshot(announcement)
     announcement.is_visible = not announcement.is_visible
     announcement.updated_at = get_utc_now()
 
+    db.flush()
+    _log_announcement_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.UPDATE_ANNOUNCEMENT_VISIBILITY,
+        detail=f"公告={announcement.title} 可见={announcement.is_visible}",
+        snapshot={
+            "before": before_snapshot,
+            "after": _build_announcement_snapshot(announcement),
+        },
+    )
     db.commit()
     db.refresh(announcement)
 
     return enrich_with_creator_name(announcement, db)
 
 
-@router.post("/upload-image", dependencies=[Depends(require_admin)])
+@router.post("/upload-image")
 async def upload_announcement_image(
     file: UploadFile,
     request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: AdminUser,
 ):
     """
     Upload announcement image (admin only)
@@ -340,11 +448,25 @@ async def upload_announcement_image(
         
     # 使用带有格式和大小校验的函数
     image_url = save_announcement_image(file)
+    _log_announcement_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.UPLOAD_ANNOUNCEMENT_IMAGE,
+        detail=f"图片={image_url}",
+        snapshot={"image_url": image_url},
+    )
+    db.commit()
     return {"url": image_url, "message": "Image uploaded successfully"}
 
 
-@router.delete("/images/{filename}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
-def delete_announcement_image(filename: str):
+@router.delete("/images/{filename}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_announcement_image(
+    filename: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: AdminUser,
+):
     """
     Delete announcement image (admin only)
     """
@@ -358,3 +480,12 @@ def delete_announcement_image(filename: str):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Image not found"
         )
+    _log_announcement_operation(
+        db,
+        request=request,
+        current_user=current_user,
+        action=UserOperationAction.DELETE_ANNOUNCEMENT_IMAGE,
+        detail=f"图片={filename}",
+        snapshot={"filename": filename},
+    )
+    db.commit()

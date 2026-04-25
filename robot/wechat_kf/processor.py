@@ -19,7 +19,7 @@ from robot.wechat_kf.messages import (
 )
 from robot.wechat_kf.rate_limit import WechatKfRateLimiter
 from robot.wecom_aibot.conversation_store import WecomConversationStore
-from robot.wecom_aibot.intent_utils import BIND_PATTERN, is_help_request
+from robot.wecom_aibot.intent_utils import BIND_PATTERN, is_help_request, is_unbind_request
 from robot.wecom_aibot.lsm_orchestrator import LSMRobotOrchestrator
 from robot.wecom_aibot.replies import text_reply
 from robot.wecom_aibot.store import ProcessedMessageStore
@@ -293,7 +293,7 @@ class WechatKfMessageProcessor:
 
 
 def _should_force_bind_link(text: str, binding: dict[str, Any] | None) -> bool:
-    if text in {"绑定状态", "我的绑定", "解绑", "取消绑定"}:
+    if text in {"绑定状态", "我的绑定"} or is_unbind_request(text):
         return False
     if is_help_request(text):
         return False

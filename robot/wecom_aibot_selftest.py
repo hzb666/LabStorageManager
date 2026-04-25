@@ -7,7 +7,9 @@ import asyncio
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
+from robot.wecom_aibot.config import WecomAibotSettings
 from robot.wecom_aibot.conversation_store import WecomConversationStore
 from robot.wecom_aibot.crypto import WecomAesCipher, generate_signature
 from robot.wecom_aibot.formatters import build_safe_facts, format_safe_facts, format_tool_result
@@ -20,7 +22,10 @@ from robot.wecom_aibot.llm_planner import (
 )
 from robot.wecom_aibot.lsm_orchestrator import LSMRobotOrchestrator
 from robot.wecom_aibot.messages import parse_text_message
+from robot.wecom_aibot.minimax_web_search import build_minimax_mcp_env, build_web_search_client
+from robot.wecom_aibot.replies import clamp_text, text_reply
 from robot.wecom_aibot.store import ProcessedMessageStore
+from robot.wecom_aibot.token_crypto import TOKEN_CIPHER_PREFIX
 
 
 def _test_encoding_aes_key() -> str:
@@ -46,6 +51,12 @@ class SlowFakeOrchestrator(FakeOrchestrator):
     async def answer(self, *, text: str, payload: dict) -> str:
         await asyncio.sleep(0.05)
         return await super().answer(text=text, payload=payload)
+
+
+class ThinkingFakeOrchestrator(FakeOrchestrator):
+    async def answer(self, *, text: str, payload: dict) -> str:
+        self.calls += 1
+        return "<think>内部推理不要发出去</think>\n可以查询库存。"
 
 
 class FakeMcpClient:
@@ -386,6 +397,65 @@ def _auth_expired_result() -> dict:
 
 
 class WecomAibotSelfTest(unittest.TestCase):
+    def test_minimax_mcp_env_excludes_service_secrets(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PATH": "bin-path",
+                "OPENAI_API_KEY": "openai-secret",
+                "WECOM_AIBOT_SECRET": "wecom-secret",
+                "WECOM_AIBOT_TOKEN_ENCRYPTION_KEY": "token-secret",
+                "LSM_MCP_SERVICE_TOKEN": "service-token",
+            },
+            clear=True,
+        ):
+            env = build_minimax_mcp_env(api_key="minimax-secret", api_host="https://api.minimaxi.com")
+
+        self.assertEqual("bin-path", env["PATH"])
+        self.assertEqual("minimax-secret", env["MINIMAX_API_KEY"])
+        self.assertEqual("https://api.minimaxi.com", env["MINIMAX_API_HOST"])
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertNotIn("WECOM_AIBOT_SECRET", env)
+        self.assertNotIn("WECOM_AIBOT_TOKEN_ENCRYPTION_KEY", env)
+        self.assertNotIn("LSM_MCP_SERVICE_TOKEN", env)
+
+    def test_openai_api_key_does_not_configure_minimax_search(self) -> None:
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "openai-secret"}, clear=True):
+            settings = WecomAibotSettings(_env_file=None)
+
+        self.assertEqual("openai-secret", settings.llm_api_key)
+        self.assertEqual("", settings.minimax_api_key)
+        self.assertIsNone(build_web_search_client(settings))
+
+    def test_text_reply_strips_complete_think_blocks(self) -> None:
+        response = text_reply("<think>先分析</think>\n库存有 3 瓶。")
+
+        content = response["text"]["content"]
+        self.assertEqual("库存有 3 瓶。", content)
+        self.assertNotIn("<think>", content)
+
+    def test_clamp_text_strips_unclosed_think_blocks_with_fallback(self) -> None:
+        self.assertEqual(
+            "我没有拿到可发送的回复，请换个问法再试。",
+            clamp_text("<think>只返回了内部推理", 3500),
+        )
+
+    def test_handler_strips_think_blocks_from_orchestrator_reply(self) -> None:
+        database_path = Path("tmp") / "robot-think-reply-state.db"
+        _remove_sqlite_files(database_path)
+        store = ProcessedMessageStore(database_path)
+        store.init()
+        handler = WecomAibotHandler(
+            orchestrator=ThinkingFakeOrchestrator(),
+            store=store,
+            welcome_text="welcome",
+        )
+
+        response = asyncio.run(handler.handle_payload(_payload()))
+
+        self.assertEqual("可以查询库存。", response["text"]["content"])
+        _remove_sqlite_files(database_path)
+
     def test_crypto_round_trip(self) -> None:
         cipher = WecomAesCipher(token="token", encoding_aes_key=_test_encoding_aes_key())
         encrypted = cipher.encrypt_payload(
@@ -484,6 +554,81 @@ class WecomAibotSelfTest(unittest.TestCase):
         context = store.get_context("chat:u1")
         self.assertEqual(5, len(context))
         self.assertEqual({f"用户{index}" for index in range(5)}, {item["user"] for item in context})
+        _remove_sqlite_files(database_path)
+
+    def test_binding_token_is_encrypted_at_rest(self) -> None:
+        workspace_tmp = Path("tmp")
+        workspace_tmp.mkdir(exist_ok=True)
+        database_path = workspace_tmp / "robot-binding-token-state.db"
+        _remove_sqlite_files(database_path)
+        store = WecomConversationStore(
+            database_path,
+            token_encryption_key="unit-test-secret",
+            allow_plaintext_tokens=False,
+        )
+        store.init()
+        store.save_binding(
+            wecom_userid="u1",
+            username="alice",
+            access_token="user-secret-token",
+            user={"username": "alice"},
+        )
+
+        connection = store._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT lsm_access_token
+                FROM wecom_aibot_user_binding
+                WHERE wecom_userid = ?
+                """,
+                ("u1",),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertIsNotNone(row)
+        self.assertNotEqual("user-secret-token", row[0])
+        self.assertTrue(str(row[0]).startswith(TOKEN_CIPHER_PREFIX))
+        self.assertEqual("user-secret-token", store.get_binding("u1")["access_token"])
+        _remove_sqlite_files(database_path)
+
+    def test_plaintext_binding_token_migrates_on_secure_read(self) -> None:
+        workspace_tmp = Path("tmp")
+        workspace_tmp.mkdir(exist_ok=True)
+        database_path = workspace_tmp / "robot-binding-token-migrate-state.db"
+        _remove_sqlite_files(database_path)
+        plain_store = WecomConversationStore(database_path)
+        plain_store.init()
+        plain_store.save_binding(
+            wecom_userid="u1",
+            username="alice",
+            access_token="legacy-token",
+            user={"username": "alice"},
+        )
+
+        secure_store = WecomConversationStore(
+            database_path,
+            token_encryption_key="unit-test-secret",
+            allow_plaintext_tokens=False,
+        )
+        self.assertEqual("legacy-token", secure_store.get_binding("u1")["access_token"])
+
+        connection = secure_store._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT lsm_access_token
+                FROM wecom_aibot_user_binding
+                WHERE wecom_userid = ?
+                """,
+                ("u1",),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        self.assertIsNotNone(row)
+        self.assertTrue(str(row[0]).startswith(TOKEN_CIPHER_PREFIX))
         _remove_sqlite_files(database_path)
 
     def test_handler_replays_duplicate_msgid_without_requery(self) -> None:
@@ -763,7 +908,7 @@ class WecomAibotSelfTest(unittest.TestCase):
         )
 
         bind_reply = asyncio.run(orchestrator.answer(text="绑定 alice secret", payload=_payload()))
-        unbind_reply = asyncio.run(orchestrator.answer(text="解绑", payload=_payload()))
+        unbind_reply = asyncio.run(orchestrator.answer(text="帮我退出登录这个账号", payload=_payload()))
 
         self.assertIn("绑定成功", bind_reply)
         self.assertIn("确认解除", unbind_reply)
@@ -773,7 +918,7 @@ class WecomAibotSelfTest(unittest.TestCase):
         self.assertEqual("已取消。", still_bound_reply)
         self.assertEqual("alice", store.get_binding("u1")["username"])
 
-        second_unbind_reply = asyncio.run(orchestrator.answer(text="取消绑定", payload=_payload()))
+        second_unbind_reply = asyncio.run(orchestrator.answer(text="我想解除绑定当前账号", payload=_payload()))
         self.assertIn("确认解除", second_unbind_reply)
 
         confirm_reply = asyncio.run(orchestrator.answer(text="确认", payload=_payload()))
@@ -818,7 +963,7 @@ class WecomAibotSelfTest(unittest.TestCase):
         self.assertIn(
             (
                 "inventory_search_by_name",
-                {"keyword": "乙醇", "limit": 5, "user_token": "user-secret-token"},
+                {"keyword": "乙醇", "limit": 100, "user_token": "user-secret-token"},
             ),
             mcp.calls,
         )
@@ -845,7 +990,7 @@ class WecomAibotSelfTest(unittest.TestCase):
         self.assertIn(
             (
                 "inventory_search_by_name",
-                {"keyword": "乙醇", "limit": 5, "user_token": "expired-token"},
+                {"keyword": "乙醇", "limit": 100, "user_token": "expired-token"},
             ),
             mcp.calls,
         )

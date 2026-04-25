@@ -7,7 +7,7 @@ from typing import Tuple, Optional
 from app.core.constants import SPEC_PATTERN
 
 
-# Canonical unit form mapping (lowercase -> display form)
+# 单位规范形式映射（小写输入 -> 展示形式）。
 UNIT_CANONICAL: dict[str, str] = {
     "ml": "mL",
     "l": "L",
@@ -50,10 +50,10 @@ def format_specification(initial_quantity: Optional[float], unit: str) -> Option
     if not initial_quantity:
         return None
     
-    # Normalize unit to canonical form (e.g., "ml" -> "mL")
+    # 将单位标准化为展示形式，例如 ml -> mL。
     normalized_unit = UNIT_CANONICAL.get(unit.lower(), unit)
     
-    # Format number: integer without decimals, float with decimals
+    # 整数不显示小数，浮点数带小数。
     if initial_quantity == int(initial_quantity):
         formatted = f"{int(initial_quantity)} {normalized_unit}"
     else:
@@ -79,8 +79,7 @@ def parse_specification(spec: str) -> Tuple[float, str]:
     
     spec = spec.strip()
     
-    # Pattern: number + optional space + unit
-    # Use (\d+(?:\.\d+)?) to avoid matching invalid formats like "1.5.5"
+    # 匹配“数字 + 可选空格 + 单位”，排除 1.5.5 这类非法数字。
     match = re.match(SPEC_PATTERN, spec)
     
     if not match:

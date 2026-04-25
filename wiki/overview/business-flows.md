@@ -37,11 +37,11 @@ flowchart LR
 - `complete` 仅允许申请人或管理员调用，并要求订单处于已审批状态。
 - 耗材不生成库存记录，数据保留在 `consumable_order` 表中。
 
-## 浏览器扩展导入流程
+## 浏览器插件导入流程
 
 ```mermaid
 flowchart LR
-    Cart["试剂平台购物车"] --> Popup["扩展 popup"]
+    Cart["试剂平台购物车"] --> Popup["插件 popup"]
     Popup --> Storage["chrome.storage.local"]
     Storage --> Bridge["import-bridge.js"]
     Bridge --> PageCache["cart_import_batch_latest"]
@@ -54,7 +54,7 @@ flowchart LR
 
 说明：
 
-- 扩展通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js" /> 抓取购物车数据，并写入 `chrome.storage.local.import_batch_latest`。
+- 浏览器插件通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js" /> 抓取购物车数据，并写入 `chrome.storage.local.import_batch_latest`。
 - `/cart-import` 页面再通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" /> 读取页面缓存。
 - 前端导入页逐条调用标准的 `reagentOrderAPI.create` 或 `consumableOrderAPI.create`，由试剂订单与耗材订单路由完成落库。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py" /> 提供 `/api/cart-sync`，用于匹配分析场景。

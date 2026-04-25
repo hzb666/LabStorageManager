@@ -6,18 +6,39 @@ import {
   CACHE_VERSION_RESET_NOTICE,
   CACHE_VERSION_STORAGE_KEY,
 } from '@/lib/constants'
+import { persistRuntimeTimeConfig, type RuntimeTimeConfig } from '@/lib/runtimeTimeConfig'
 import { disconnectAllSSEConnections } from '@/lib/sseRuntime'
 import { useSSEStore } from '@/store/sseStore'
 
 type RuntimeCacheVersionResponse = {
   cache_version?: unknown
+  display_utc_offset?: unknown
+  display_timezone?: unknown
 }
 
 type CacheVersionBootstrapResult = {
   redirected: boolean
 }
 
-const CACHE_VERSION_FETCH_TIMEOUT_MS = 500
+type RuntimeBootstrapPayload = {
+  cacheVersion: string | null
+  timeConfig: RuntimeTimeConfig | null
+}
+
+const CACHE_VERSION_FETCH_TIMEOUT_MS = 2000
+
+function getErrorName(error: unknown): string {
+  if (!error || typeof error !== 'object' || !('name' in error)) {
+    return ''
+  }
+  const name = (error as { name?: unknown }).name
+  return typeof name === 'string' ? name : ''
+}
+
+function isExpectedCacheVersionAbort(error: unknown): boolean {
+  const errorName = getErrorName(error)
+  return errorName === 'AbortError' || errorName === 'TimeoutError'
+}
 
 function readStoredCacheVersion(): string | null {
   try {
@@ -44,7 +65,27 @@ function persistInvalidationNotice(): void {
   }
 }
 
-async function fetchRuntimeCacheVersion(): Promise<string | null> {
+function normalizeRuntimeTimeConfig(data: RuntimeCacheVersionResponse): RuntimeTimeConfig | null {
+  const displayUtcOffset =
+    typeof data.display_utc_offset === 'string'
+      ? data.display_utc_offset.trim()
+      : ''
+  const displayTimeZone =
+    typeof data.display_timezone === 'string'
+      ? data.display_timezone.trim()
+      : ''
+
+  if (!displayUtcOffset || !displayTimeZone) {
+    return null
+  }
+
+  return {
+    displayUtcOffset,
+    displayTimeZone,
+  }
+}
+
+async function fetchRuntimeCacheVersion(): Promise<RuntimeBootstrapPayload> {
   const controller = new AbortController()
   const timeoutId = globalThis.setTimeout(() => {
     controller.abort(new DOMException('Cache version probe timed out', 'TimeoutError'))
@@ -66,9 +107,27 @@ async function fetchRuntimeCacheVersion(): Promise<string | null> {
         ? data.cache_version.trim()
         : ''
 
-    return cacheVersion || null
+    return {
+      cacheVersion: cacheVersion || null,
+      timeConfig: normalizeRuntimeTimeConfig(data),
+    }
   } finally {
     globalThis.clearTimeout(timeoutId)
+  }
+}
+
+async function resolveRuntimeBootstrapPayload(): Promise<RuntimeBootstrapPayload | null> {
+  try {
+    return await fetchRuntimeCacheVersion()
+  } catch (error) {
+    if (isExpectedCacheVersionAbort(error)) {
+      if (import.meta.env.DEV) {
+        console.debug('Cache version bootstrap skipped:', error)
+      }
+      return null
+    }
+    console.error('Cache version bootstrap failed:', error)
+    return null
   }
 }
 
@@ -164,34 +223,42 @@ async function clearClientState(queryClient: QueryClient): Promise<void> {
   ])
 }
 
-export async function bootstrapCacheVersion(queryClient: QueryClient): Promise<CacheVersionBootstrapResult> {
-  let currentCacheVersion: string | null = null
+function persistRuntimeBootstrapState(
+  cacheVersion: string | null,
+  timeConfig: RuntimeTimeConfig | null,
+): void {
+  if (cacheVersion) {
+    persistCacheVersion(cacheVersion)
+  }
+  persistRuntimeTimeConfig(timeConfig)
+}
 
-  try {
-    currentCacheVersion = await fetchRuntimeCacheVersion()
-  } catch (error) {
-    console.error('Cache version bootstrap failed:', error)
+export async function bootstrapCacheVersion(queryClient: QueryClient): Promise<CacheVersionBootstrapResult> {
+  const payload = await resolveRuntimeBootstrapPayload()
+  if (!payload) {
     return { redirected: false }
   }
 
+  const { cacheVersion: currentCacheVersion, timeConfig } = payload
   if (!currentCacheVersion) {
+    persistRuntimeBootstrapState(null, timeConfig)
     return { redirected: false }
   }
 
   const storedCacheVersion = readStoredCacheVersion()
   if (storedCacheVersion === currentCacheVersion) {
-    persistCacheVersion(currentCacheVersion)
+    persistRuntimeBootstrapState(currentCacheVersion, timeConfig)
     return { redirected: false }
   }
 
   const hasStoredState = storedCacheVersion !== null || await hasPersistentClientState()
   if (!hasStoredState) {
-    persistCacheVersion(currentCacheVersion)
+    persistRuntimeBootstrapState(currentCacheVersion, timeConfig)
     return { redirected: false }
   }
 
   await clearClientState(queryClient)
-  persistCacheVersion(currentCacheVersion)
+  persistRuntimeBootstrapState(currentCacheVersion, timeConfig)
   persistInvalidationNotice()
 
   if (globalThis.location.pathname !== '/login') {

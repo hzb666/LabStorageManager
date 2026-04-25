@@ -14,7 +14,7 @@ import redis
 
 from app.core.constants import EXCEL_FILE_MAX_BYTES, IMPORT_PREVIEW_SESSION_TTL_SECONDS
 from app.core.redis import get_redis, redis_key
-from app.core.time_utils import get_utc_now
+from app.core.time_utils import get_utc_now, parse_utc_datetime, utc_iso_str
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ class InventoryImportPreviewSession:
 
 PREVIEW_SESSION_REDIS_SCOPE = "import_preview_session"
 PREVIEW_SESSION_METADATA_PREFIX = "lsm-import-preview-"
+PREVIEW_SESSION_DIR_NAME = "lab-storage-manager-inventory-import-preview"
 _GETDEL_LUA = """
 local v = redis.call('GET', KEYS[1])
 if v then
@@ -43,12 +44,33 @@ _local_preview_sessions: dict[str, InventoryImportPreviewSession] = {}
 _local_preview_sessions_lock = threading.Lock()
 
 
+def get_inventory_import_preview_dir() -> Path:
+    preview_dir = Path(tempfile.gettempdir()) / PREVIEW_SESSION_DIR_NAME
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    return preview_dir
+
+
+def _resolve_managed_preview_path(file_path: str | Path | None) -> Path | None:
+    if not file_path:
+        return None
+    try:
+        preview_dir = get_inventory_import_preview_dir().resolve()
+        resolved_path = Path(file_path).resolve(strict=False)
+    except OSError:
+        logger.warning("Failed to resolve preview file path: %s", file_path)
+        return None
+    if not resolved_path.is_relative_to(preview_dir):
+        logger.warning("Refusing to cleanup unmanaged preview file: %s", file_path)
+        return None
+    return resolved_path
+
+
 def _preview_session_key(*, user_id: int, token: str) -> str:
     return redis_key(f"{PREVIEW_SESSION_REDIS_SCOPE}:{user_id}:{token}")
 
 
 def _preview_session_metadata_path(token: str) -> Path:
-    return Path(tempfile.gettempdir()) / f"{PREVIEW_SESSION_METADATA_PREFIX}{token}.json"
+    return get_inventory_import_preview_dir() / f"{PREVIEW_SESSION_METADATA_PREFIX}{token}.json"
 
 
 def _delete_preview_metadata(token: str) -> None:
@@ -66,17 +88,18 @@ def _write_preview_metadata(session: InventoryImportPreviewSession) -> None:
         "user_id": session.user_id,
         "default_storage_location": session.default_storage_location,
         "default_is_hazardous": session.default_is_hazardous,
-        "expires_at": session.expires_at.isoformat(),
+        "expires_at": utc_iso_str(session.expires_at),
     }
     metadata_path = _preview_session_metadata_path(session.token)
     metadata_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def _delete_preview_file(file_path: str | None) -> None:
-    if not file_path:
+    managed_file_path = _resolve_managed_preview_path(file_path)
+    if managed_file_path is None:
         return
     try:
-        Path(file_path).unlink(missing_ok=True)
+        managed_file_path.unlink(missing_ok=True)
     except OSError:
         logger.warning("Failed to cleanup preview file: %s", file_path)
 
@@ -110,7 +133,7 @@ def _cleanup_expired_local_preview_sessions(*, now_utc: datetime | None = None) 
 
 def cleanup_expired_inventory_import_preview_artifacts(*, now_utc: datetime | None = None) -> None:
     current_time = now_utc or get_utc_now()
-    for metadata_path in Path(tempfile.gettempdir()).glob(f"{PREVIEW_SESSION_METADATA_PREFIX}*.json"):
+    for metadata_path in get_inventory_import_preview_dir().glob(f"{PREVIEW_SESSION_METADATA_PREFIX}*.json"):
         try:
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -124,14 +147,14 @@ def cleanup_expired_inventory_import_preview_artifacts(*, now_utc: datetime | No
         token = str(payload.get("token") or metadata_path.stem.removeprefix(PREVIEW_SESSION_METADATA_PREFIX))
         file_path = payload.get("file_path")
         expires_at_raw = payload.get("expires_at")
-        try:
-            expires_at = datetime.fromisoformat(str(expires_at_raw))
-        except (TypeError, ValueError):
+        expires_at = parse_utc_datetime(expires_at_raw)
+        if expires_at is None:
             _delete_preview_file(str(file_path) if file_path else None)
             _delete_preview_metadata(token)
             continue
 
-        if expires_at <= current_time or not file_path or not Path(str(file_path)).exists():
+        managed_file_path = _resolve_managed_preview_path(str(file_path) if file_path else None)
+        if expires_at <= current_time or managed_file_path is None or not managed_file_path.exists():
             _delete_preview_file(str(file_path) if file_path else None)
             _delete_preview_metadata(token)
 
@@ -175,22 +198,26 @@ def _parse_preview_session(
         if default_storage_location is not None:
             default_storage_location = str(default_storage_location)
         default_is_hazardous = bool(payload["default_is_hazardous"])
-        expires_at = datetime.fromisoformat(str(payload["expires_at"]))
-    except (KeyError, TypeError, ValueError) as exc:
+        expires_at = parse_utc_datetime(payload["expires_at"])
+    except (KeyError, TypeError) as exc:
         raise ValueError("Preview token is invalid or expired") from exc
+
+    if expires_at is None:
+        raise ValueError("Preview token is invalid or expired")
 
     if expires_at <= get_utc_now():
         _delete_preview_file(file_path)
         _delete_preview_metadata(token)
         raise ValueError("Preview token is invalid or expired")
 
-    if not Path(file_path).exists():
+    managed_file_path = _resolve_managed_preview_path(file_path)
+    if managed_file_path is None or not managed_file_path.exists():
         _delete_preview_metadata(token)
         raise ValueError("Preview token is invalid or expired")
 
     return InventoryImportPreviewSession(
         token=token,
-        file_path=file_path,
+        file_path=str(managed_file_path),
         file_suffix=file_suffix,
         user_id=user_id,
         default_storage_location=default_storage_location,
@@ -207,7 +234,9 @@ def create_inventory_import_preview_session(
     default_is_hazardous: bool,
 ) -> str:
     cleanup_expired_inventory_import_preview_artifacts()
-    source_path = Path(file_path)
+    source_path = _resolve_managed_preview_path(file_path)
+    if source_path is None:
+        raise ValueError("Preview source file is not managed")
     if not source_path.exists():
         raise ValueError("Preview source file does not exist")
     if source_path.stat().st_size > EXCEL_FILE_MAX_BYTES:
@@ -225,7 +254,7 @@ def create_inventory_import_preview_session(
         default_is_hazardous=default_is_hazardous,
         expires_at=expires_at,
     )
-    # 始终保留本机副本：Redis 短时不可用时仍可确认导入（同实例）。
+    # 本机副本始终写入：Redis 短时不可用时仍可确认导入（同实例）。
     _set_local_preview_session(session)
     _write_preview_metadata(session)
 
@@ -236,7 +265,7 @@ def create_inventory_import_preview_session(
         "file_suffix": file_suffix,
         "default_storage_location": default_storage_location,
         "default_is_hazardous": default_is_hazardous,
-        "expires_at": expires_at.isoformat(),
+        "expires_at": utc_iso_str(expires_at),
     }
     redis_client = get_redis()
     if redis_client is not None:

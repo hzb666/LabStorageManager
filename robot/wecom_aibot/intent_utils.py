@@ -29,6 +29,7 @@ MY_BORROW_KEYWORDS = ("我的借用", "我借了", "我借的", "借用中", "�
 MY_REAGENT_ORDER_KEYWORDS = ("我的试剂订单", "我的试剂申购", "我申请的试剂", "我订的试剂")
 MY_CONSUMABLE_ORDER_KEYWORDS = ("我的耗材订单", "我的耗材申购", "我申请的耗材", "我订的耗材")
 MY_PENDING_STOCKIN_KEYWORDS = ("我的暂存", "我的待补全入库", "待补全入库", "我的待入库", "待入库")
+UNBIND_KEYWORDS = ("退出", "登出", "注销", "解绑", "解除绑定", "取消绑定", "换绑", "换账号", "换账户")
 CONFIRM_WORDS = {"确认", "确定", "yes", "y"}
 CANCEL_WORDS = {"取消", "放弃", "不", "no", "n"}
 STATE_TTL_MINUTES = 5
@@ -115,6 +116,10 @@ def is_borrow_intent(text: str) -> bool:
 
 def is_return_intent(text: str) -> bool:
     return has_any(text, RETURN_KEYWORDS)
+
+
+def is_unbind_request(text: str) -> bool:
+    return has_any(text, UNBIND_KEYWORDS)
 
 
 def extract_cas(text: str) -> str:

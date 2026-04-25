@@ -201,7 +201,7 @@ export const USER_ROLE_MAP: Record<string, string> = {
   public: '公用账户',
 }
 
-// User Role 常量 - 用于代码中的角色判断
+// 用户角色常量 - 用于代码中的角色判断
 export const UserRoles = {
   ADMIN: 'admin',
   USER: 'user',

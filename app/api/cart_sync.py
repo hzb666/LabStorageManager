@@ -17,7 +17,7 @@ from app.services.cas_utils import normalize_cas
 router = APIRouter(prefix="/cart-sync", tags=["CartSync"])
 
 
-# ==================== Enums ====================
+# ==================== 枚举 ====================
 class OrderType(str, Enum):
     """订单类型"""
     CONSUMABLE = "consumable"  # 耗材订单
@@ -30,7 +30,7 @@ class MatchType(str, Enum):
     NONE = "none"  # 无匹配
 
 
-# ==================== Request/Response Models ====================
+# ==================== 请求与响应模型 ====================
 class CartItem(BaseModel):
     """购物车商品"""
     name: str
@@ -95,7 +95,7 @@ def match_reagent_order(db: Session, item: CartItem) -> MatchedItem:
     return MatchedItem(cart_item=item, matched_id=None, match_type=MatchType.NONE, similarity=0.0)
 
 
-# ==================== API Routes ====================
+# ==================== API 路由 ====================
 @router.post("", response_model=CartSyncResponse, dependencies=[Depends(get_current_user)])
 async def sync_cart(
     request: CartItemRequest,

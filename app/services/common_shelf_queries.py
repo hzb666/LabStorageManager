@@ -5,7 +5,7 @@ import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, delete, func, or_
@@ -22,6 +22,7 @@ from app.models.common_shelf import (
     CommonShelfGroupListResponse,
     CommonShelfGroupResponse,
     CommonShelfLocationSummaryResponse,
+    CommonShelfRecentLocationResponse,
 )
 from app.services.cas_utils import normalize_cas
 from app.services.chemical_name_map_fts import (
@@ -43,6 +44,7 @@ from app.services.sql_utils import normalize_search_term
 
 
 COMMON_SHELF_NOT_FOUND = "CommonShelf group not found"
+MAX_RECENT_LOCATIONS = 3
 
 CHEMICAL_NAME_MAP_SQL_FIELD_MAP = {
     "name": [
@@ -114,7 +116,13 @@ class CommonShelfGroupRow(Protocol):
     updated_at: Optional[datetime]
     map_name: Optional[str]
     map_english_name: Optional[str]
+    map_alias_1: Optional[str]
+    map_alias_2: Optional[str]
+    map_alias_3: Optional[str]
     map_category: Optional[ChemicalCategory]
+
+
+GroupIdentityKey = tuple[str, str, str]
 
 
 def build_group_key(*, cas_number: str, brand_normalized: str, specification_normalized: str) -> str:
@@ -731,6 +739,9 @@ def _build_common_shelf_group_page_query(grouped_subquery, *, sort_by: Optional[
             grouped_subquery.c.name_snapshot,
             ChemicalNameMap.name.label("map_name"),
             ChemicalNameMap.english_name.label("map_english_name"),
+            ChemicalNameMap.alias_1.label("map_alias_1"),
+            ChemicalNameMap.alias_2.label("map_alias_2"),
+            ChemicalNameMap.alias_3.label("map_alias_3"),
             ChemicalNameMap.category.label("map_category"),
         )
         .select_from(grouped_subquery)
@@ -748,6 +759,7 @@ def _build_common_shelf_group_page_query(grouped_subquery, *, sort_by: Optional[
 def _build_group_list_response(
     *,
     rows: list[CommonShelfGroupRow],
+    recent_locations_by_key: dict[GroupIdentityKey, list[CommonShelfRecentLocationResponse]],
     total: int,
     skip: int,
     limit: int,
@@ -759,13 +771,15 @@ def _build_group_list_response(
             brand_normalized=row.brand_normalized,
             specification_normalized=row.specification_normalized,
         )
-        data.append(_build_group_response(row, group_key))
+        identity_key = (row.cas_number, row.brand_normalized, row.specification_normalized)
+        data.append(_build_group_response(row, group_key, recent_locations_by_key.get(identity_key, [])))
     return CommonShelfGroupListResponse(data=data, current=len(data), total=total, skip=skip, limit=limit)
 
 
 def _build_group_response(
     row: CommonShelfGroupRow,
     group_key: str,
+    recent_locations: list[CommonShelfRecentLocationResponse],
 ) -> CommonShelfGroupResponse:
     return CommonShelfGroupResponse(
         group=CommonShelfGroupIdentity(
@@ -779,14 +793,103 @@ def _build_group_response(
         display=CommonShelfGroupDisplay(
             name=row.map_name or row.name_snapshot,
             english_name=row.map_english_name,
+            alias_1=row.map_alias_1,
+            alias_2=row.map_alias_2,
+            alias_3=row.map_alias_3,
             category=row.map_category,
         ),
         bottle_count=int(row.bottle_count or 0),
         location_count=int(row.location_count or 0),
+        recent_locations=recent_locations,
         latest_name_snapshot=row.name_snapshot,
         created_at=row.created_at or get_utc_now(),
         updated_at=row.updated_at or row.created_at or get_utc_now(),
     )
+
+
+def serialize_common_shelf_group_row(response: CommonShelfGroupResponse) -> dict[str, Any]:
+    payload = response.model_dump(mode="json")
+    payload["id"] = response.group.group_key
+    payload["cas_number"] = response.group.cas_number
+    payload["name"] = response.display.name
+    payload["alias_1"] = response.display.alias_1
+    payload["alias_2"] = response.display.alias_2
+    payload["alias_3"] = response.display.alias_3
+    payload["brand"] = response.group.brand
+    payload["specification"] = response.group.specification_text
+    payload["storage_location"] = next(
+        (
+            location.storage_location
+            for location in response.recent_locations
+            if location.storage_location
+        ),
+        None,
+    )
+    payload["category"] = response.display.category
+    return payload
+
+
+def _build_group_identity_clauses(rows: list[CommonShelfGroupRow]):
+    return [
+        and_(
+            CommonShelf.cas_number == row.cas_number,
+            CommonShelf.brand_normalized == row.brand_normalized,
+            CommonShelf.specification_normalized == row.specification_normalized,
+        )
+        for row in rows
+    ]
+
+
+def _load_recent_locations_by_key(
+    db: Session,
+    rows: list[CommonShelfGroupRow],
+) -> dict[GroupIdentityKey, list[CommonShelfRecentLocationResponse]]:
+    clauses = _build_group_identity_clauses(rows)
+    if not clauses:
+        return {}
+
+    item_rows = db.exec(
+        select(
+            CommonShelf.cas_number,
+            CommonShelf.brand_normalized,
+            CommonShelf.specification_normalized,
+            CommonShelf.storage_location,
+            CommonShelf.storage_location_normalized,
+        )
+        .where(or_(*clauses))
+        .order_by(CommonShelf.created_at.desc(), CommonShelf.id.desc())
+    ).all()
+    recent_location_keys_by_key: dict[GroupIdentityKey, list[str]] = {}
+    location_counts_by_key: dict[GroupIdentityKey, dict[str, CommonShelfRecentLocationResponse]] = {}
+    seen_locations_by_key: dict[GroupIdentityKey, set[str]] = {}
+    for item in item_rows:
+        identity_key = (item.cas_number, item.brand_normalized, item.specification_normalized)
+        location_key = item.storage_location_normalized or ""
+        location_counts = location_counts_by_key.setdefault(identity_key, {})
+        current_location = location_counts.get(location_key)
+        if current_location is None:
+            current_location = CommonShelfRecentLocationResponse(
+                storage_location=item.storage_location,
+                bottle_count=0,
+            )
+            location_counts[location_key] = current_location
+        current_location.bottle_count += 1
+        if current_location.storage_location in {None, ""} and item.storage_location:
+            current_location.storage_location = item.storage_location
+
+        seen_locations = seen_locations_by_key.setdefault(identity_key, set())
+        if location_key in seen_locations:
+            continue
+        seen_locations.add(location_key)
+        recent_location_keys_by_key.setdefault(identity_key, []).append(location_key)
+
+    return {
+        identity_key: [
+            location_counts_by_key[identity_key][location_key]
+            for location_key in location_keys[:MAX_RECENT_LOCATIONS]
+        ]
+        for identity_key, location_keys in recent_location_keys_by_key.items()
+    }
 
 
 def list_grouped_common_shelf(
@@ -827,9 +930,51 @@ def list_grouped_common_shelf(
         page_query = page_query.limit(options.limit)
 
     rows = db.exec(page_query).all()
+    recent_locations_by_key = _load_recent_locations_by_key(db, rows)
     return _build_group_list_response(
         rows=rows,
+        recent_locations_by_key=recent_locations_by_key,
         total=total,
         skip=options.skip,
         limit=options.limit,
     )
+
+
+def get_common_shelf_group_row_payload(
+    db: Session,
+    *,
+    group_fields: CommonShelfGroupFields,
+) -> dict[str, Any] | None:
+    filtered_groups = (
+        select(CommonShelfGroup)
+        .where(CommonShelfGroup.is_deleted.is_(False))
+        .where(CommonShelfGroup.cas_number == group_fields.cas_number)
+        .where(CommonShelfGroup.brand_normalized == group_fields.brand_normalized)
+        .where(CommonShelfGroup.specification_normalized == group_fields.specification_normalized)
+        .subquery("filtered_common_shelf_group")
+    )
+    item_counts = _build_common_shelf_item_counts_subquery(filtered_groups)
+    grouped_subquery = _build_common_shelf_grouped_subquery(filtered_groups, item_counts)
+    row = db.exec(
+        _build_common_shelf_group_page_query(
+            grouped_subquery,
+            sort_by=None,
+            sort_order="desc",
+        )
+    ).first()
+    if row is None:
+        return None
+
+    recent_locations_by_key = _load_recent_locations_by_key(db, [row])
+    group_key = build_group_key(
+        cas_number=row.cas_number,
+        brand_normalized=row.brand_normalized,
+        specification_normalized=row.specification_normalized,
+    )
+    identity_key = (row.cas_number, row.brand_normalized, row.specification_normalized)
+    response = _build_group_response(
+        row,
+        group_key,
+        recent_locations_by_key.get(identity_key, []),
+    )
+    return serialize_common_shelf_group_row(response)

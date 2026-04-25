@@ -59,7 +59,7 @@ interface UserListParams extends PaginationParams {
 // 弹窗状态只允许 `create / edit / delete` 三种模式。
 type AdminUsersDialogMode = 'create' | 'edit' | 'delete'
 
-// 为用户表格列定义保留字段级类型推导。
+// 用户表格列定义使用字段级类型推导。
 const columnHelper = createColumnHelper<User>()
 const ADMIN_USER_ROLE_FILTER_OPTIONS = [
   { value: 'all', label: '全部角色' },
@@ -193,7 +193,7 @@ function moveCurrentUserToTop(
   return result
 }
 
-// 存在筛选、总数可用且不是占位数据时显示“当前 / 总计”；其余场景只显示当前总数。
+// 存在筛选、总数可用且数据非占位时显示“当前 / 总计”；其余场景显示当前总数。
 function getUserDisplayCount(
   total: number,
   totalWithoutFilter: number,
@@ -679,7 +679,7 @@ export function AdminUsersPage() {
   )
 }
 
-// 行操作继续保留编辑、日志、启用和禁用入口，并按当前用户和目标状态控制可用性。
+// 行操作提供编辑、日志、启用和禁用入口，并按当前用户和目标状态控制可用性。
 const ActionButtons = React.memo(function ActionButtons({
   user,
   currentUserId,

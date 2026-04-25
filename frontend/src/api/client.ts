@@ -76,7 +76,7 @@ const shouldTriggerAuthInvalidation = (args: {
   )
 }
 
-// Request interceptor — 不再从 localStorage 读取 token，改为使用 Cookie
+// 请求拦截器使用 Cookie 认证，不读取 localStorage token。
 api.interceptors.request.use(
   (config) => {
     const sseClientId = useSSEStore.getState().clientId
@@ -86,7 +86,7 @@ api.interceptors.request.use(
       config.headers = headers
     }
 
-    // Token 现在通过 httpOnly Cookie 自动发送，不需要手动设置
+    // token 由 httpOnly Cookie 自动发送，无需手动设置。
     return config
   },
   (error) => {
@@ -94,7 +94,7 @@ api.interceptors.request.use(
   }
 )
 
-// Response interceptor to handle auth errors
+// 响应拦截器处理认证失效。
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -112,7 +112,7 @@ api.interceptors.response.use(
   }
 )
 
-// Paginated response type
+// 分页响应类型。
 export interface PaginatedResponse<T> {
   data: T[]
   current?: number
@@ -127,7 +127,7 @@ export interface PaginationParams {
   search?: string
 }
 
-// Reagent Order Status Enum
+// 试剂订单状态枚举。
 export enum ReagentOrderStatus {
   PENDING = "pending",
   APPROVED = "approved",
@@ -136,7 +136,7 @@ export enum ReagentOrderStatus {
   REJECTED = "rejected",
 }
 
-// Reagent Order Reason Enum
+// 试剂订单原因枚举。
 export enum ReagentOrderReason {
   RUNNING_OUT = "running_out",
   NOT_STOCKED = "not_stocked",
@@ -171,7 +171,7 @@ export interface StockInPayload extends ReagentWorkflowEditPayload {
   remaining_quantity?: number
 }
 
-// Consumable Order Status Enum
+// 耗材订单状态枚举。
 export enum ConsumableOrderStatus {
   PENDING = "pending",
   APPROVED = "approved",
@@ -179,7 +179,7 @@ export enum ConsumableOrderStatus {
   COMPLETED = "completed",
 }
 
-// Consumable Order Reason Enum
+// 耗材订单原因枚举。
 export enum ConsumableOrderReason {
   NONE = "none",
   RUNNING_OUT = "running_out",
@@ -191,7 +191,7 @@ export enum ConsumableOrderReason {
   DEGRADED = "degraded",
 }
 
-// Session Info type for device management
+// 设备管理会话信息类型。
 export interface SessionInfo {
   id: number
   user_id: number
@@ -204,7 +204,28 @@ export interface SessionInfo {
   expires_at: string
 }
 
-// Auth APIs
+export interface UserAdminListItem {
+  id: number
+  username: string
+  full_name: string | null
+  full_name_pinyin?: string | null
+  full_name_pinyin_initials?: string | null
+  role: 'admin' | 'user' | 'public'
+  is_active: boolean
+  created_at: string
+  avatar_url?: string
+  last_active_at?: string | null
+}
+
+export interface UserAdminListResponse {
+  data: UserAdminListItem[]
+  total: number
+  total_without_filter: number
+  skip: number
+  limit: number
+}
+
+// 认证 API。
 export const authAPI = {
   login: (username: string, password: string) =>
     api.post('/users/login', { 
@@ -219,7 +240,7 @@ export const authAPI = {
     api.post('/users/change-password', { old_password: oldPassword, new_password: newPassword }),
 }
 
-// Session APIs (Device Management)
+// 设备会话 API。
 export const sessionAPI = {
   list: () => api.get('/users/me/sessions'),
   delete: (id: number) => api.delete(`/users/me/sessions/${id}`),
@@ -229,7 +250,7 @@ export const sessionAPI = {
     api.patch(`/users/me/sessions/${id}`, data),
 }
 
-// User Admin APIs
+// 用户管理 API。
 export const userAdminAPI = {
   list: (params?: {
     skip?: number
@@ -239,7 +260,7 @@ export const userAdminAPI = {
     role?: string
     is_active?: boolean
   }) =>
-    api.get('/users/', { params }),
+    api.get<UserAdminListResponse>('/users/', { params }),
   create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' | 'public' }) =>
     api.post('/users', data),
   update: (id: number, data: { username?: string; full_name?: string; role?: string; is_active?: boolean }) =>
@@ -270,13 +291,14 @@ export const userAdminAPI = {
 export interface UserSearchItem {
   id: number
   full_name: string
+  username: string
 }
 
 export const userAPI = {
   searchUsers: (query: string) => api.get<UserSearchItem[]>('/users/search', { params: { q: query } }),
 }
 
-// Reagent Order APIs
+// 试剂订单 API。
 export interface CASOverviewOrder {
   id: number
   name: string
@@ -298,7 +320,9 @@ export interface CASOverviewInventory {
 
 export interface CASOverviewResponse {
   cas_number: string
-  display_name: string | null
+  preferred_name: string | null
+  preferred_name_source?: string | null
+  display_name?: string | null
   has_warning: boolean
   orders: {
     total_count: number
@@ -308,6 +332,34 @@ export interface CASOverviewResponse {
     total_count: number
     latest: CASOverviewInventory | null
   }
+}
+
+export interface DashboardPanelCodes {
+  label_code?: string | null
+  impact_code?: string | null
+}
+
+export interface DashboardPanelEntity {
+  entity_type?: string | null
+  entity_id?: number | string | null
+  name?: string | null
+  preferred_name?: string | null
+  preferred_name_source?: string | null
+  cas_number?: string | null
+  brand?: string | null
+  specification?: string | null
+  quantity?: number | null
+  unit?: string | null
+  actor_name?: string | null
+}
+
+export interface DashboardPanelMetrics {
+  count?: number | null
+  value?: number | null
+  remaining_quantity?: number | null
+  initial_quantity?: number | null
+  remaining_percent?: number | null
+  threshold_days?: number | null
 }
 
 export const reagentOrderAPI = {
@@ -327,13 +379,13 @@ export const reagentOrderAPI = {
     english_name?: string
     alias?: string
     category?: string
-    brand?: string
+    brand: string
     purity?: string
     specification: string
     quantity: number
     price: number
     order_reason: ReagentOrderReason
-    is_hazardous: boolean
+    is_hazardous?: boolean
     notes?: string
   }) => api.post('/reagent-orders', data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/reagent-orders/${id}`, data),
@@ -350,11 +402,12 @@ export const reagentOrderAPI = {
     params?: { exclude_order_id?: number }
   ) => api.get<CASOverviewResponse>(`/reagent-orders/cas-overview/${casNumber}`, { params }),
   getMyReagentOrders: () => api.get('/reagent-orders/dashboard/my-reagent-orders'),
+  getAdminReagentOrders: () => api.get('/reagent-orders/dashboard/admin/reagent-orders'),
   getArrivedOrders: () => api.get('/reagent-orders/dashboard/arrived-orders'),
   exportOrders: () => api.get('/reagent-orders/export', { responseType: 'blob' }),
 }
 
-// Consumable Order APIs (new)
+// 耗材订单 API。
 export const consumableOrderAPI = {
   list: (params?: PaginationParams & {
     status_filter?: ConsumableOrderStatus
@@ -385,6 +438,7 @@ export const consumableOrderAPI = {
     api.post(`/consumable-orders/${id}/reject`, { reason }),
   complete: (id: number) => api.post(`/consumable-orders/${id}/complete`),
   getMyConsumableOrders: () => api.get('/consumable-orders/dashboard/my-consumable-orders'),
+  getAdminConsumableOrders: () => api.get('/consumable-orders/dashboard/admin/consumable-orders'),
   exportOrders: () => api.get('/consumable-orders/export', { responseType: 'blob' as const }),
 }
 
@@ -393,12 +447,16 @@ export interface InventoryReturnPayload {
   notes?: string
 }
 
-// Inventory APIs
+// 库存 API。
 export const inventoryAPI = {
   list: (params?: PaginationParams & {
     status_filter?: string
     cas_filter?: string
     hazardous_only?: boolean
+    structure_search_id?: string
+    structure_match_mode?: string
+    structure_query?: string
+    structure_query_format?: string
     search?: string
     search_field?: string
     fuzzy?: boolean
@@ -416,7 +474,11 @@ export const inventoryAPI = {
   update: (id: number, data: Record<string, unknown>) => api.put(`/inventory/${id}`, data),
   delete: (id: number) => api.delete(`/inventory/${id}`),
   getMyBorrows: () => api.get('/inventory/dashboard/my-borrows'),
+  getAdminBorrows: () => api.get('/inventory/dashboard/admin/borrows'),
   getPendingStockin: () => api.get('/inventory/dashboard/pending-stockin'),
+  getAdminPendingStockin: () => api.get('/inventory/dashboard/admin/pending-stockin'),
+  completePendingStockin: (id: number, data: StockInPayload) =>
+    api.post(`/inventory/${id}/complete-stockin`, data),
   getBorrowHistory: (id: number) => api.get(`/inventory/${id}/borrow-history`),
   getImportTemplate: () => api.get('/inventory/import/template'),
   downloadTemplate: () => api.get('/inventory/import/template', { responseType: 'blob' }),
@@ -433,7 +495,7 @@ export const inventoryAPI = {
     alias?: string
     specification: string
     quantity_bottles: number
-    brand?: string
+    brand: string
     category?: string
     purity?: string
     storage_location?: string
@@ -441,6 +503,125 @@ export const inventoryAPI = {
     notes?: string
   }) => api.post('/inventory/manual-add', data),
   exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
+}
+
+export interface AdminDashboardPanelItem {
+  label: string
+  detail: string
+  submitter_name?: string
+  count?: number
+  impact?: string
+  value?: number
+  alert_kind?: 'inventory' | 'common_shelf'
+  remaining_quantity?: number | null
+  initial_quantity?: number | null
+  unit?: string | null
+  specification?: string | null
+  remaining_percent?: number | null
+  severity?: 'high' | 'medium' | 'low' | 'neutral' | 'success' | 'warning'
+  tone?: 'neutral' | 'success' | 'warning' | 'high'
+  tab?: 'reagents' | 'consumables' | 'borrows' | 'stockin'
+  created_at?: string
+  is_overdue?: boolean
+  codes?: DashboardPanelCodes
+  entity?: DashboardPanelEntity
+  metrics?: DashboardPanelMetrics
+}
+
+export interface AdminDashboardSummary {
+  reagent_order_count: number
+  consumable_order_count: number
+  borrowed_inventory_count: number
+  pending_stockin_count: number
+  reagent_order_delta: number
+  consumable_order_delta: number
+  borrowed_inventory_delta: number
+  pending_stockin_delta: number
+  pending_reagent_count: number
+  pending_consumable_count: number
+  approved_reagent_count: number
+  overdue_borrow_count: number
+  pending_reagent_overdue_count: number
+  pending_consumable_overdue_count: number
+  pending_stockin_overdue_count: number
+  long_unarrived_approved_reagent_count: number
+  long_unconfirmed_approved_consumable_count: number
+  long_pending_order_count: number
+  common_stock_alert_count: number
+  recent_arrival_count: number
+  recent_reagent_order_count?: number
+  recent_consumable_order_count?: number
+  stock_in_activity_count: number
+  order_total_value?: number
+  is_all_time?: boolean
+  todo_items: AdminDashboardPanelItem[]
+  risk_items: AdminDashboardPanelItem[]
+  recent_actions: AdminDashboardPanelItem[]
+  stock_alert_items: AdminDashboardPanelItem[]
+  system_status: AdminDashboardPanelItem[]
+  item_counts: DashboardAdminItemCounts
+  recent_window_days: number
+  system_version?: string
+  generated_at: string
+}
+
+export interface AdminDashboardWindowStats {
+  recent_window_days: number
+  is_all_time: boolean
+  recent_arrival_count: number
+  recent_reagent_order_count: number
+  recent_consumable_order_count: number
+  stock_in_activity_count: number
+  order_total_value: number
+}
+
+export type DashboardBoardSection = 'actions' | 'orders' | 'stockAlerts'
+export type DashboardAdminSection = 'todos' | 'risks' | 'stockAlerts'
+
+export interface DashboardBoardItemCounts {
+  action_items: number
+  order_overview_items: number
+  stock_alert_items: number
+}
+
+export interface DashboardAdminItemCounts {
+  todo_items: number
+  risk_items: number
+  stock_alert_items: number
+}
+
+export interface DashboardBoardSummary {
+  action_items: AdminDashboardPanelItem[]
+  order_overview_items: AdminDashboardPanelItem[]
+  recent_items: AdminDashboardPanelItem[]
+  stock_alert_items: AdminDashboardPanelItem[]
+  announcement_items: AdminDashboardPanelItem[]
+  system_status: AdminDashboardPanelItem[]
+  item_counts: DashboardBoardItemCounts
+  recent_window_days: number
+  system_version?: string
+  generated_at: string
+}
+
+export const dashboardAPI = {
+  getBoardSummary: () => api.get<{ data: DashboardBoardSummary }>('/dashboard/board/summary'),
+  getBoardSectionItems: (section: DashboardBoardSection, params?: Pick<PaginationParams, 'skip' | 'limit'>) =>
+    api.get<PaginatedResponse<AdminDashboardPanelItem>>(`/dashboard/board/sections/${section}`, {
+      params,
+    }),
+  getBoardWindowStats: (windowDays = 7, allTime = false) =>
+    api.get<{ data: AdminDashboardWindowStats }>('/dashboard/board/summary/window-stats', {
+      params: { window_days: windowDays, all_time: allTime },
+    }),
+  getAdminSummary: () => api.get<{ data: AdminDashboardSummary }>('/dashboard/admin/summary'),
+  getAdminSectionItems: (section: DashboardAdminSection, params?: Pick<PaginationParams, 'skip' | 'limit'>) =>
+    api.get<PaginatedResponse<AdminDashboardPanelItem>>(`/dashboard/admin/sections/${section}`, {
+      params,
+    }),
+  getAdminWindowStats: (windowDays = 7, allTime = false) =>
+    api.get<{ data: AdminDashboardWindowStats }>('/dashboard/admin/summary/window-stats', {
+      params: { window_days: windowDays, all_time: allTime },
+    }),
 }
 
 export type ChemicalCategory =
@@ -462,7 +643,15 @@ export interface CommonShelfGroupIdentity {
 export interface CommonShelfGroupDisplay {
   name: string
   english_name: string | null
+  alias_1: string | null
+  alias_2: string | null
+  alias_3: string | null
   category: ChemicalCategory | null
+}
+
+export interface CommonShelfRecentLocation {
+  storage_location: string | null
+  bottle_count: number
 }
 
 export interface CommonShelfGroup {
@@ -471,10 +660,34 @@ export interface CommonShelfGroup {
   display: CommonShelfGroupDisplay
   bottle_count: number
   location_count: number
+  recent_locations: CommonShelfRecentLocation[]
   latest_name_snapshot: string
   created_at: string
   updated_at: string
+  cas_number: string
+  name: string
+  alias_1: string | null
+  alias_2: string | null
+  alias_3: string | null
+  brand: string | null
+  specification: string
+  storage_location: string | null
+  category: ChemicalCategory | null
 }
+
+type CommonShelfGroupApiRow = Omit<
+  CommonShelfGroup,
+  'id'
+  | 'cas_number'
+  | 'name'
+  | 'alias_1'
+  | 'alias_2'
+  | 'alias_3'
+  | 'brand'
+  | 'specification'
+  | 'storage_location'
+  | 'category'
+>
 
 export interface CommonShelfLocationSummary {
   storage_location: string | null
@@ -505,6 +718,35 @@ export interface ChemicalNameMapItem {
   updated_at: string
 }
 
+export interface ReagentBrandItem {
+  id: number
+  name: string
+  name_normalized: string
+  name_pinyin: string | null
+  name_pinyin_initials: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+function normalizeCommonShelfGroupRow(
+  item: CommonShelfGroupApiRow,
+): CommonShelfGroup {
+  return {
+    ...item,
+    id: item.group.group_key,
+    cas_number: item.group.cas_number,
+    name: item.display.name,
+    alias_1: item.display.alias_1,
+    alias_2: item.display.alias_2,
+    alias_3: item.display.alias_3,
+    brand: item.group.brand,
+    specification: item.group.specification_text,
+    storage_location: item.recent_locations.find((location) => location.storage_location)?.storage_location ?? null,
+    category: item.display.category,
+  }
+}
+
 export const commonShelfAPI = {
   list: async (params?: PaginationParams & {
     search?: string
@@ -514,22 +756,19 @@ export const commonShelfAPI = {
     sort_by?: string
     sort_order?: string
   }) => {
-    const response = await api.get<PaginatedResponse<Omit<CommonShelfGroup, 'id'>>>('/common-shelf/groups', { params })
+    const response = await api.get<PaginatedResponse<CommonShelfGroupApiRow>>('/common-shelf/groups', { params })
     return {
       ...response,
       data: {
         ...response.data,
-        data: response.data.data.map((item) => ({
-          ...item,
-          id: item.group.group_key,
-        })),
+        data: response.data.data.map((item) => normalizeCommonShelfGroupRow(item)),
       },
     }
   },
   manualAdd: (data: {
     cas_number: string
     name_snapshot: string
-    brand?: string
+    brand: string
     purity?: string
     specification: string
     count: number
@@ -548,7 +787,7 @@ export const commonShelfAPI = {
   getGroupItems: (groupKey: string) =>
     api.get<CommonShelfGroupItem[]>(`/common-shelf/groups/${groupKey}/items`),
   updateGroup: (groupKey: string, data: {
-    brand?: string
+    brand: string
     specification: string
     confirm_merge?: boolean
   }) => api.put(`/common-shelf/groups/${groupKey}`, data),
@@ -600,22 +839,40 @@ export const chemicalNameMapAPI = {
   delete: (id: number) => api.delete(`/chemical-name-map/${id}`),
 }
 
-// Chemical Info APIs
+export const reagentBrandAPI = {
+  list: (params?: PaginationParams & {
+    search?: string
+    sort_by?: string
+    sort_order?: string
+    include_inactive?: boolean
+  }) => api.get<PaginatedResponse<ReagentBrandItem>>('/reagent-brands', { params }),
+  create: (data: { name: string }) => api.post<ReagentBrandItem>('/reagent-brands', data),
+  update: (id: number, data: { name: string }) =>
+    api.put<ReagentBrandItem>(`/reagent-brands/${id}`, data),
+  delete: (id: number) => api.delete(`/reagent-brands/${id}`),
+}
+
+// 化学信息 API。
 export interface ChemicalInfo {
   cas_number: string
   name: string | null
   english_name: string | null
   warning?: string | null
+  smiles?: string | null
+  chinese_name_is_translated?: boolean
 }
 
 export const chemicalAPI = {
-  getInfo: (casNumber: string, options?: { skipChinese?: boolean }) =>
+  getInfo: (casNumber: string, options?: { skipChinese?: boolean; cacheOnly?: boolean }) =>
     api.get<ChemicalInfo>(`/chemical-info/${casNumber}`, {
-      params: options?.skipChinese ? { skip_chinese: true } : undefined,
+      params: {
+        skip_chinese: options?.skipChinese || undefined,
+        cache_only: options?.cacheOnly || undefined,
+      },
     }),
 }
 
-// Announcement types
+// 公告类型。
 export interface Announcement {
   id: number
   title: string
@@ -636,7 +893,7 @@ export interface StorageInfo {
   image_count: number
 }
 
-// Announcement APIs
+// 公告 API。
 export const announcementAPI = {
   list: (params?: { skip?: number; limit?: number }) =>
     api.get<Announcement[]>('/announcements/', { params }),
@@ -671,11 +928,43 @@ export const announcementAPI = {
   getStorageInfo: () => api.get<StorageInfo>('/announcements/storage-info'),
 }
 
-// User Operation Logs APIs
+// 用户操作日志 API。
 export interface LogItem {
   time: string | null
   type: string
   detail: string
+  summary?: {
+    kind: string
+    action_code?: string | null
+    actor_name?: string | null
+    actor_is_external?: boolean | null
+    targets_viewer?: boolean | null
+    target?: {
+      target_type?: string | null
+      target_id?: number | string | null
+      target_name?: string | null
+      cas_number?: string | null
+      specification?: string | null
+      quantity?: number | null
+      unit?: string | null
+    }
+    metrics?: {
+      count?: number | null
+      result_count?: number | null
+      quantity_borrowed?: number | null
+      quantity_returned?: number | null
+    }
+    source_meta?: {
+      source?: string | null
+      endpoint?: string | null
+      query_text?: string | null
+      device_name?: string | null
+      ip_address?: string | null
+      export_scope?: string | null
+    }
+    extra_detail?: string | null
+    is_returned?: boolean | null
+  }
   // 展开后显示的完整数据（所有数据库字段）
   full_data?: Record<string, unknown>
 }
@@ -698,8 +987,7 @@ export interface LogsAPI {
   }) => Promise<{ data: { data: LogItem[]; total: number } }>
 }
 
-// 创建日志 API 适配器（用于 FilterTable）
-// 注意：FilterTable 使用 status_filter 参数，但日志 API 需要 category，需要转换
+// 日志 API 适配器将 FilterTable 的 status_filter 转成日志接口的 category。
 export const createLogsAPI = (token: string): LogsAPI => ({
   list: async (params) => {
     const payload: {
@@ -716,14 +1004,13 @@ export const createLogsAPI = (token: string): LogsAPI => ({
     if (params.search) payload.keyword = params.search
     if (params.include_search_logs === true) payload.include_search_logs = true
 
-    // 将 status_filter 转换为 category（FilterTable 使用 status_filter，日志 API 需要 category）
-    // 注意：'all' 表示全部类型，不传参给后端
+    // 'all' 表示全部类型，不向后端传 category。
     if (params.status_filter && params.status_filter !== 'all') {
       payload.category = params.status_filter
     }
 
     const response = await api.post<LogsResponse>('/admin/users/logs/query', payload)
-    // LogsResponse 包含 { user_id, username, data: LogItem[], total }
+    // 日志响应包含 { user_id, username, data: LogItem[], total }。
     const logsData = response.data
     return { data: { data: logsData.data, total: logsData.total } }
   }

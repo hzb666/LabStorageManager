@@ -1,6 +1,6 @@
 # 字段参考
 
-本页按业务语义解释主要表里的关键字段，而不是重复展示 schema dump。它更适合作为字段职责速查表；如果要先理解实体之间的关系，可以先看 [数据模型](/database/data-model)。
+本页根据当前 `lab_inventory.db` 的实际 schema 整理字段职责，同时保留业务语义说明。实体关系详见 [数据模型](/database/data-model)。
 
 ## `users`
 
@@ -12,7 +12,7 @@
 | `full_name` | 显示姓名 | 前端常用展示名 |
 | `role` | 角色 | `admin` / `user` / `public` |
 | `is_active` | 启用状态 | 禁用后不可正常使用 |
-| `avatar_url` | 头像地址 | 指向静态资源，不存二进制 |
+| `avatar_url` | 头像地址 | 指向 `/static/` 上传资源，不存二进制 |
 | `username_version` | 用户名版本号 | 用于使旧 token 失效 |
 | `full_name_pinyin` | 姓名拼音 | 排序和搜索辅助 |
 | `full_name_pinyin_initials` | 姓名首字母 | 搜索辅助 |
@@ -57,6 +57,7 @@
 | `quantity` | 申购瓶数 |
 | `price` | 价格 |
 | `order_reason` | 申购原因 |
+| `purity` | 纯度 |
 | `is_hazardous` | 是否危险品 |
 | `notes` | 备注 |
 
@@ -69,6 +70,32 @@
 | `created_at` / `updated_at` | 创建与更新时间 |
 | `name_pinyin` / `category_pinyin` / `brand_pinyin` | 搜索与排序辅助字段 |
 | `*_initials` | 拼音首字母搜索辅助 |
+
+## `reagent_brand`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 品牌记录 id |
+| `name` | 品牌名称 | 表单展示值 |
+| `name_normalized` | 标准化品牌名称 | 唯一键，用于去重 |
+| `name_pinyin` | 品牌拼音 | 搜索和排序辅助 |
+| `name_pinyin_initials` | 拼音首字母 | 搜索辅助 |
+| `is_active` | 是否启用 | 停用后不再作为当前品牌选项展示 |
+| `created_at` / `updated_at` | 审计时间 | 操作日志和排序使用 |
+
+## `chemical_name_map`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | CAS 主数据记录 id |
+| `cas_number` | CAS 号 | 唯一索引，进入搜索 |
+| `name` | 中文名 | 必填，前端展示和映射使用 |
+| `english_name` | 英文名 | 可选 |
+| `alias_1` / `alias_2` / `alias_3` | 别名 | 支持多个常见别名 |
+| `category` | 分类 | 化学品分类 |
+| `name_pinyin` / `name_initials` | 中文名拼音与首字母 | 排序和搜索辅助 |
+| `alias_*_pinyin` / `alias_*_initials` | 别名拼音与首字母 | 别名搜索辅助 |
+| `created_at` / `updated_at` | 审计时间 | 数据维护时间 |
 
 ## `consumable_order`
 
@@ -113,12 +140,12 @@
 | `remaining_quantity` | 剩余数量 | 当前可用量 |
 | `remaining_percent` | 剩余比例 | 为排序和筛选预计算 |
 | `unit` | 单位 | 规格单位 |
+| `purity` | 纯度 | 试剂纯度 |
 
 ### 状态与归属
 
 | 字段 | 含义 | 说明 |
 | --- | --- | --- |
-| `is_common` | 是否常用货架 | 普通库存和常用货架共表的关键字段 |
 | `status` | 库存状态 | `in_stock`、`borrowed` 等 |
 | `borrower_id` | 当前借用人 | 借出时使用 |
 | `last_borrower_id` | 上一次借用人 | 用于追溯 |
@@ -145,11 +172,47 @@
 | `borrower_id` | 借用人 | 关联 `users.id` |
 | `borrow_time` | 借出时间 | 默认创建时记录 |
 | `return_time` | 归还时间 | 未归还时为空 |
-| `is_consume` | 是否直接消耗 | 区分“借出归还”与“直接消耗” |
 | `quantity_borrowed` | 借出数量 | 必填 |
 | `quantity_returned` | 归还数量 | 部分归还时有意义 |
 | `notes` | 备注 | 借还说明 |
 | `created_at` | 记录创建时间 | 审计字段 |
+
+## `common_shelf`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 常用货架瓶级记录 id |
+| `internal_code` | 内部编号 | 每瓶常用货架库存唯一编号 |
+| `cas_number` | CAS 号 | 分组和查询关键字段 |
+| `name_snapshot` | 名称快照 | 分组显示名称 |
+| `brand` / `brand_normalized` | 品牌与归一化品牌 | 分组、合并和显示 |
+| `specification_text` / `specification_normalized` | 规格文本与归一化规格 | 分组和合并 |
+| `spec_quantity` / `spec_unit` | 规格数量与单位 | 由规格解析得到 |
+| `purity` | 纯度 | 常用货架纯度 |
+| `notes` | 备注 | 瓶级备注 |
+| `storage_location` / `storage_location_normalized` | 位置与归一化位置 | 位置统计和筛选 |
+| `storage_location_pinyin` / `storage_location_pinyin_initials` | 位置拼音与首字母 | 位置搜索辅助 |
+| `source_order_id` | 来源试剂订单 | 从试剂订单入常用货架时保留来源 |
+| `created_by_id` | 创建人 | 手工添加或入库操作人 |
+
+## `common_shelf_group`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 分组记录 id |
+| `cas_number` | CAS 号 | 分组身份的一部分 |
+| `name_snapshot` | 名称快照 | 分组显示名称 |
+| `brand` | 品牌 | 展示值 |
+| `brand_normalized` | 归一化品牌 | 分组身份的一部分 |
+| `purity` | 纯度 | 分组纯度 |
+| `specification_text` | 规格文本 | 展示值 |
+| `spec_quantity` / `spec_unit` | 规格数量与单位 | 规格解析结果 |
+| `specification_normalized` | 归一化规格 | 分组身份的一部分 |
+| `notes` | 备注 | 分组备注 |
+| `created_by_id` | 创建人 | 关联 `users.id` |
+| `is_deleted` | 是否删除 | 删除后释放活动分组唯一约束 |
+| `created_at` / `updated_at` | 审计时间 | 分组排序和维护时间 |
+| `deleted_at` | 删除时间 | 软删除审计字段 |
 
 ## `announcements`
 
@@ -163,6 +226,135 @@
 | `is_visible` | 是否可见 | 控制前台展示 |
 | `created_by` | 创建人 | 关联管理员 |
 | `created_at` / `updated_at` | 审计时间 | 展示和排序使用 |
+
+## `compound_structure_cache`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `cas_number` | 主键 | 标准化 CAS |
+| `smiles_canonical` / `smiles_isomeric` | SMILES | 结构检索和展示 |
+| `molblock` | MolBlock | 人工结构和结构编辑器交换格式 |
+| `inchikey` | InChIKey | 结构身份辅助 |
+| `english_name` / `chinese_name` | 外部名称缓存 | 用于结构检索结果展示 |
+| `source` / `source_id` | 结构来源 | PubChem、人工或其他来源 |
+| `status` | 解析状态 | `pending/resolved/ambiguous/not_found/...` |
+| `candidate_count` / `candidates_json` | 候选信息 | CAS 对应多个候选时使用 |
+| `manually_verified` | 人工确认标记 | 防止自动解析覆盖人工结构 |
+
+## `log_timeline`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 日志读模型 id |
+| `occurred_at` | 发生时间 | 时间线排序字段 |
+| `is_cli` | 是否来自 CLI | 区分脚本入口和浏览器入口 |
+| `actor_user_id` | 操作人 | 关联用户 |
+| `subject_user_id` | 受影响用户 | 用户日志筛选字段 |
+| `source_table` / `source_log_id` | 源日志定位 | 指向库存、订单、常用货架、用户或借还日志 |
+| `search_text` / `search_text_pinyin` | 主搜索文本 | 物料名、CAS 和拼音 |
+| `detail_search_text` | 详情搜索文本 | 操作说明、数量、状态等可搜索内容 |
+
+## 操作日志表
+
+### `inventory_operation_log`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 日志 id |
+| `inventory_id` | 库存 id | 对应库存记录 |
+| `operator_id` | 操作人 | 关联 `users.id`，删除用户时级联 |
+| `action` | 操作类型 | 库存新增、更新、借用、归还等 |
+| `item_name` / `cas_number` | 物料快照 | 便于日志检索和展示 |
+| `snapshot_json` | 数据快照 | 操作当时的库存快照 |
+| `notes` | 备注 | 操作说明 |
+| `created_at` | 操作时间 | 日志排序字段 |
+
+### `reagent_order_operation_log`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 日志 id |
+| `order_id` | 试剂订单 id | 对应订单记录 |
+| `actor_user_id` | 操作人 | 关联 `users.id` |
+| `applicant_id` | 申请人 | 关联 `users.id` |
+| `action` | 操作类型 | 申请、审批、驳回、到货、入库等 |
+| `order_name` / `cas_number` | 订单快照 | 便于日志检索 |
+| `snapshot_json` | 数据快照 | 操作当时的订单快照 |
+| `notes` | 备注 | 操作说明 |
+| `created_at` | 操作时间 | 日志排序字段 |
+
+### `consumable_order_operation_log`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 日志 id |
+| `order_id` | 耗材订单 id | 对应订单记录 |
+| `actor_user_id` | 操作人 | 关联 `users.id` |
+| `applicant_id` | 申请人 | 关联 `users.id` |
+| `action` | 操作类型 | 申请、审批、驳回、完成等 |
+| `order_name` / `specification` | 订单快照 | 便于日志检索 |
+| `snapshot_json` | 数据快照 | 操作当时的订单快照 |
+| `notes` | 备注 | 操作说明 |
+| `created_at` | 操作时间 | 日志排序字段 |
+
+### `common_shelf_operation_log`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 日志 id |
+| `common_shelf_id` | 常用货架记录 id | 对应瓶级记录 |
+| `operator_id` | 操作人 | 关联 `users.id`，删除用户时级联 |
+| `action` | 操作类型 | 添加、更新、移除等 |
+| `item_name` / `cas_number` | 物料快照 | 便于日志检索 |
+| `snapshot_json` | 数据快照 | 操作当时的常用货架快照 |
+| `notes` | 备注 | 操作说明 |
+| `created_at` | 操作时间 | 日志排序字段 |
+
+### `user_operation_log`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 日志 id |
+| `actor_user_id` | 操作人 | 关联 `users.id` |
+| `target_user_id` | 目标用户 | 被影响用户 |
+| `action` | 操作类型 | 登录、创建用户、修改角色等 |
+| `outcome` | 操作结果 | 成功或失败状态 |
+| `client_ip` | 客户端 IP | 请求来源 |
+| `request_id` | 请求标识 | 跨日志定位 |
+| `detail` | 详情 | 人类可读说明 |
+| `snapshot_json` | 数据快照 | 操作上下文 |
+| `created_at` | 操作时间 | 日志排序字段 |
+
+## 运行状态与序列
+
+### `runtime_state`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `key` | 主键 | 运行状态键 |
+| `value` | 状态值 | 字符串形式保存 |
+| `updated_at` | 更新时间 | 状态刷新时间 |
+
+### `internal_code_sequences`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `prefix` | 主键 | 内部编号前缀 |
+| `current_seq` | 当前序列值 | 下一个编号生成依据 |
+| `updated_at` | 更新时间 | 序列更新记录 |
+
+## FTS 虚表字段
+
+| 虚表 | 字段 |
+| --- | --- |
+| `inventory_fts` | `cas_number`, `name`, `name_pinyin`, `name_pinyin_initials`, `alias`, `category`, `category_pinyin`, `category_pinyin_initials`, `brand`, `brand_pinyin`, `brand_pinyin_initials`, `storage_location`, `storage_location_pinyin`, `storage_location_pinyin_initials` |
+| `reagent_order_fts` | `cas_number`, `name`, `name_pinyin`, `name_pinyin_initials`, `category`, `category_pinyin`, `category_pinyin_initials`, `brand`, `brand_pinyin`, `brand_pinyin_initials` |
+| `consumable_order_fts` | `name`, `name_pinyin`, `name_pinyin_initials`, `specification`, `communication` |
+| `users_fts` | `full_name`, `full_name_pinyin`, `full_name_pinyin_initials` |
+| `chemical_name_map_fts` | `cas_number`, `name`, `english_name`, `alias_1`, `alias_2`, `alias_3`, `name_pinyin`, `name_initials`, `alias_1_pinyin`, `alias_1_initials`, `alias_2_pinyin`, `alias_2_initials`, `alias_3_pinyin`, `alias_3_initials` |
+| `log_timeline_fts` | `search_text`, `search_text_pinyin`, `detail_search_text` |
+
+FTS 的影子表由 SQLite 自动维护，不作为业务模型直接读写。
 
 ## DTO 与表字段
 
@@ -180,8 +372,19 @@
 ## 参考代码
 
 - [app/models/announcement.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/announcement.py)
+- [app/models/chemical_name_map.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/chemical_name_map.py)
+- [app/models/common_shelf.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/common_shelf.py)
+- [app/models/common_shelf_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/common_shelf_operation_log.py)
+- [app/models/compound_structure.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/compound_structure.py)
 - [app/models/consumable_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order.py)
+- [app/models/consumable_order_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order_operation_log.py)
 - [app/models/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory.py)
+- [app/models/inventory_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory_operation_log.py)
+- [app/models/log_timeline.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/log_timeline.py)
+- [app/models/reagent_brand.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_brand.py)
 - [app/models/reagent_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py)
+- [app/models/reagent_order_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order_operation_log.py)
+- [app/models/runtime_state.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/runtime_state.py)
 - [app/models/user.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/user.py)
+- [app/models/user_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/user_operation_log.py)
 - [app/models/user_session.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/user_session.py)

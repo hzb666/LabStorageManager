@@ -1,10 +1,11 @@
-import DefaultTheme from 'vitepress/theme'
+import DefaultTheme from 'vitepress/theme-without-fonts'
 import MermaidAuto from './components/MermaidAuto.vue'
 import InlineCodeRef from './components/InlineCodeRef.vue'
+import LandingHome from './components/LandingHome.vue'
 import Layout from './Layout.vue'
-import './fontLoader'
 
 import './custom.css'
+import './fontLoader'
 
 export default {
   extends: DefaultTheme,
@@ -13,5 +14,6 @@ export default {
     DefaultTheme.enhanceApp?.(ctx)
     ctx.app.component('Mermaid', MermaidAuto)
     ctx.app.component('InlineCodeRef', InlineCodeRef)
+    ctx.app.component('LandingHome', LandingHome)
   }
 }

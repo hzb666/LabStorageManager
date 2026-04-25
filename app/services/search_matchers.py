@@ -171,7 +171,7 @@ def build_cas_search_clause(
         return field == term
 
     if mode == CASSearchMode.PREFIX:
-        # Prefix LIKE can use B-Tree index on normalized CAS column.
+        # 前缀 LIKE 可命中标准化 CAS 列上的 B-Tree 索引。
         return field.like(f"{term}%")
 
     return build_text_search_clause(field, term, fuzzy=fuzzy, match_mode=match_mode)
@@ -193,7 +193,7 @@ def normalize_date_search_term(search_value: str) -> str:
     if not digits:
         return ""
 
-    # Ignore hour/minute/second. Keep at most yyyyMMdd.
+    # 忽略时分秒，最多取 yyyyMMdd。
     if len(digits) >= 8:
         return digits[:8]
     return digits

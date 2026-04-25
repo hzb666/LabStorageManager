@@ -9,7 +9,7 @@ from typing import Any, Optional
 from fastapi import HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.core.time_utils import get_utc_now, to_china_time
+from app.core.time_utils import get_display_now, to_display_time
 from app.services.spec_utils import format_specification
 
 _DANGEROUS_SPREADSHEET_PREFIXES = ("=", "+", "-", "@")
@@ -30,6 +30,13 @@ class ExportSheet:
     headers: list[str]
     rows: list[list[Any]]
     text_columns: set[int]
+
+
+def _format_display_datetime(value: Any) -> str:
+    display_time = to_display_time(value)
+    if display_time is None:
+        return ""
+    return display_time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _get_field(item: Any, field: str, default: Any = None) -> Any:
@@ -93,7 +100,7 @@ def _export_to_xlsx(
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    filename = f"{filename_prefix}_{get_utc_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"{filename_prefix}_{get_display_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
     return StreamingResponse(
         iter([output.getvalue()]),
@@ -141,9 +148,7 @@ def export_inventory_xlsx(
             if hasattr(_get_field(item, "status"), "value")
             else _get_field(item, "status"),
             "是" if _get_field(item, "is_hazardous") else "否",
-            to_china_time(_get_field(item, "created_at")).strftime("%Y-%m-%d %H:%M:%S")
-            if _get_field(item, "created_at")
-            else "",
+            _format_display_datetime(_get_field(item, "created_at")),
             _get_field(item, "notes") or "",
         ]
 
@@ -200,8 +205,8 @@ def export_common_shelf_xlsx(
             _get_field(group, "location_count") or 0,
             _get_field(group, "latest_name_snapshot") or "",
             _get_field(display_data, "notes") or "",
-            to_china_time(created_at).strftime("%Y-%m-%d %H:%M:%S") if created_at else "",
-            to_china_time(updated_at).strftime("%Y-%m-%d %H:%M:%S") if updated_at else "",
+            _format_display_datetime(created_at),
+            _format_display_datetime(updated_at),
         ]
 
     rows = [row_converter(group) for group in groups]
@@ -267,7 +272,7 @@ def export_reagent_orders_xlsx(
             status_value.value if hasattr(status_value, "value") else status_value,
             "是" if _get_field(item, "is_hazardous") else "否",
             user_map.get(_get_field(item, "applicant_id"), "") if _get_field(item, "applicant_id") else "",
-            to_china_time(_get_field(item, "created_at")).strftime("%Y-%m-%d %H:%M:%S") if _get_field(item, "created_at") else "",
+            _format_display_datetime(_get_field(item, "created_at")),
             _get_field(item, "notes") or "",
         ]
 
@@ -316,7 +321,7 @@ def export_consumable_orders_xlsx(
             _get_field(item, "price") or "",
             status_value.value if hasattr(status_value, "value") else status_value,
             user_map.get(_get_field(item, "applicant_id"), "") if _get_field(item, "applicant_id") else "",
-            to_china_time(_get_field(item, "created_at")).strftime("%Y-%m-%d %H:%M:%S") if _get_field(item, "created_at") else "",
+            _format_display_datetime(_get_field(item, "created_at")),
             _get_field(item, "notes") or "",
         ]
 

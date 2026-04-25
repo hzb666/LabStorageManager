@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlmodel import Session
 
+from app.core.time_utils import utc_iso_str
 from app.models.consumable_order import ConsumableOrder
 from app.models.consumable_order_operation_log import (
     ConsumableOrderOperationAction,
@@ -43,6 +44,7 @@ REAGENT_SNAPSHOT_KEY_MAP = {
     "up": "updated_at",
     "bf": "before",
     "af": "after",
+    "ct": "count",
 }
 
 CONSUMABLE_SNAPSHOT_KEY_MAP = {
@@ -62,6 +64,7 @@ CONSUMABLE_SNAPSHOT_KEY_MAP = {
     "up": "updated_at",
     "bf": "before",
     "af": "after",
+    "ct": "count",
 }
 
 
@@ -90,8 +93,8 @@ def build_reagent_order_snapshot(order: ReagentOrder) -> dict[str, Any]:
         "nt": order.notes,
         "ap": order.applicant_id,
         "st": _enum_value(order.status),
-        "cr": order.created_at.isoformat() if order.created_at else None,
-        "up": order.updated_at.isoformat() if order.updated_at else None,
+        "cr": utc_iso_str(order.created_at),
+        "up": utc_iso_str(order.updated_at),
     }
 
 
@@ -111,8 +114,8 @@ def build_consumable_order_snapshot(order: ConsumableOrder) -> dict[str, Any]:
         "nt": order.notes,
         "ap": order.applicant_id,
         "st": _enum_value(order.status),
-        "cr": order.created_at.isoformat() if order.created_at else None,
-        "up": order.updated_at.isoformat() if order.updated_at else None,
+        "cr": utc_iso_str(order.created_at),
+        "up": utc_iso_str(order.updated_at),
     }
 
 
@@ -328,6 +331,27 @@ def log_reagent_order_reject(
     )
 
 
+def log_reagent_order_export(
+    db: Session,
+    *,
+    exported_count: int,
+    actor_user_id: int | None,
+    is_cli: bool,
+) -> ReagentOrderOperationLog:
+    return _create_reagent_order_operation_log(
+        db,
+        order_id=0,
+        actor_user_id=actor_user_id,
+        applicant_id=None,
+        action=ReagentOrderOperationAction.EXPORT,
+        order_name="试剂订单导出",
+        cas_number="",
+        snapshot={"ct": exported_count},
+        notes=None,
+        is_cli=is_cli,
+    )
+
+
 def log_consumable_order_create(
     db: Session,
     *,
@@ -472,5 +496,26 @@ def log_consumable_order_arrival_complete(
         specification=after_order.specification,
         snapshot=snapshot,
         notes=after_order.notes,
+        is_cli=is_cli,
+    )
+
+
+def log_consumable_order_export(
+    db: Session,
+    *,
+    exported_count: int,
+    actor_user_id: int | None,
+    is_cli: bool,
+) -> ConsumableOrderOperationLog:
+    return _create_consumable_order_operation_log(
+        db,
+        order_id=0,
+        actor_user_id=actor_user_id,
+        applicant_id=None,
+        action=ConsumableOrderOperationAction.EXPORT,
+        order_name="耗材订单导出",
+        specification="",
+        snapshot={"ct": exported_count},
+        notes=None,
         is_cli=is_cli,
     )

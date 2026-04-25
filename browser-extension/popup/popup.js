@@ -359,7 +359,7 @@ async function getSystemTheme() {
         // 如果点击的是标题链接，不触发切换
         if (e.target.closest('a')) return;
 
-        // 如果点击的不是复选框本身，则手动切换复选框的状态
+        // 点击卡片空白区域时手动切换复选框状态
         if (e.target !== checkbox) {
           checkbox.checked = !checkbox.checked;
         }

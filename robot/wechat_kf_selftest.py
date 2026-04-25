@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from app.core.constants import PASSWORD_MAX_LENGTH, USERNAME_MAX_LENGTH
 from robot.wechat_kf.binding import WechatKfBindStore
 from robot.wechat_kf.bind_pages import bind_form_html, bind_success_html
 from robot.wechat_kf.config import WechatKfSettings
@@ -19,7 +20,7 @@ from robot.wechat_kf.messages import (
 )
 from robot.wechat_kf.processor import WechatKfMessageProcessor
 from robot.wechat_kf.rate_limit import WechatKfRateLimiter
-from robot.wechat_kf.webhook import _extract_encrypted_body, _parse_plaintext
+from robot.wechat_kf.webhook import _bind_error_message, _extract_encrypted_body, _parse_plaintext
 from robot.wecom_aibot.conversation_store import WecomConversationStore
 from robot.wecom_aibot.crypto import WecomAesCipher
 from robot.wecom_aibot.store import ProcessedMessageStore
@@ -320,6 +321,19 @@ class WechatKfSelfTest(unittest.TestCase):
         self.assertEqual([], orchestrator.calls)
         _remove_sqlite_files(database_path)
 
+    def test_unbound_logout_request_does_not_force_web_bind_link(self) -> None:
+        database_path = Path("tmp") / "wechat-kf-logout-no-bind-link.db"
+        _remove_sqlite_files(database_path)
+        _, processor, client, orchestrator, _ = _processor(database_path)
+        client.messages = [_customer_text("m1", "我想退出登录")]
+
+        sent_count = asyncio.run(processor.process_event({"Token": "sync-token"}, "https://host"))
+
+        self.assertEqual(1, sent_count)
+        self.assertEqual("已查询：我想退出登录", client.sent[0]["content"])
+        self.assertEqual(["我想退出登录"], [call["text"] for call in orchestrator.calls])
+        _remove_sqlite_files(database_path)
+
     def test_bind_store_token_expires_and_can_be_used(self) -> None:
         database_path = Path("tmp") / "wechat-kf-token.db"
         _remove_sqlite_files(database_path)
@@ -392,7 +406,56 @@ class WechatKfSelfTest(unittest.TestCase):
         self.assertIn('class="login-shell"', page)
         self.assertIn('class="login-card"', page)
         self.assertIn('action="/wechat/kf/bind/state-1"', page)
+        self.assertIn(f'maxlength="{USERNAME_MAX_LENGTH}"', page)
+        self.assertIn(f'maxlength="{PASSWORD_MAX_LENGTH}"', page)
         self.assertIn("用户名或密码错误", page)
+
+    def test_bind_error_message_keeps_invalid_credentials_user_facing(self) -> None:
+        result = _cli_error_result(
+            exit_code=2,
+            code="HTTP_ERROR",
+            message="Invalid credentials",
+            detail={"detail": "Invalid credentials"},
+        )
+
+        self.assertEqual("绑定失败，请检查用户名或密码。", _bind_error_message(result))
+
+    def test_bind_error_message_handles_non_credential_failures(self) -> None:
+        self.assertEqual(
+            "登录尝试过于频繁，请稍后再试。",
+            _bind_error_message(
+                _cli_error_result(
+                    exit_code=5,
+                    code="HTTP_ERROR",
+                    message="Too many login attempts, please try again in 5 minutes",
+                )
+            ),
+        )
+        self.assertEqual(
+            "账号已禁用或无权用于机器人绑定，请联系管理员。",
+            _bind_error_message(
+                _cli_error_result(
+                    exit_code=3,
+                    code="HTTP_ERROR",
+                    message="User account is disabled",
+                )
+            ),
+        )
+        self.assertEqual(
+            "绑定服务暂时不可用，请稍后再试。",
+            _bind_error_message({"ok": False, "exit_code": 9, "error": {"code": "NETWORK_ERROR"}}),
+        )
+        self.assertEqual(
+            "用户名或密码格式不符合要求。",
+            _bind_error_message(
+                _cli_error_result(
+                    exit_code=1,
+                    code="HTTP_ERROR",
+                    message="",
+                    detail=[{"loc": ["body", "password"], "msg": "too long"}],
+                )
+            ),
+        )
 
     def test_bind_pages_escape_user_content(self) -> None:
         form_page = bind_form_html('bad"><script>', "<script>alert(1)</script>")
@@ -413,6 +476,19 @@ def _customer_text(msgid: str, content: str) -> dict[str, Any]:
         "external_userid": "user1",
         "text": {"content": content},
     }
+
+
+def _cli_error_result(
+    *,
+    exit_code: int,
+    code: str,
+    message: str,
+    detail: Any | None = None,
+) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if detail is not None:
+        error["detail"] = detail
+    return {"ok": False, "exit_code": exit_code, "payload": {"ok": False, "error": error}}
 
 
 def _customer_image(msgid: str) -> dict[str, Any]:

@@ -1,0 +1,4 @@
+.ketcher-no-image-upload [data-testid='open-from-image-button'],
+.ketcher-no-image-upload input[type='file'][accept*='image/'] {
+  display: none !important;
+}

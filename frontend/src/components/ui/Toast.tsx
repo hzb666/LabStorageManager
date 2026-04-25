@@ -19,7 +19,7 @@ const styles: Record<ToastType, string> = {
 }
 
 function ToastItem({ toast, onRemove }: Readonly<{ toast: ToastData; onRemove: (id: string) => void }>) {
-  // 只保留控制离场的 isExiting 状态，去掉了复杂的 isMounted
+  // 离场动画由 isExiting 控制，去掉复杂的 isMounted。
   const [isExiting, setIsExiting] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 

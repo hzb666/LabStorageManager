@@ -97,6 +97,9 @@ export default defineConfig({
     react(),
     createDualCompressionPlugin(),
   ],
+  define: {
+    global: 'globalThis',
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

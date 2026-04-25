@@ -27,7 +27,8 @@ import { clearDashboardTab } from '@/lib/dashboardUtils'
 import { clearBugButtonHiddenUntil, getBugButtonHiddenUntil } from '@/lib/storage/appUiStorage'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
-import { UserRoles, USER_ROLE_MAP } from '@/lib/constants'
+import { UserRoles, USER_ROLE_MAP, type UserRole } from '@/lib/constants'
+import { canWriteNonPublicData } from '@/lib/permissions'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { SidebarLogo } from '@/components/SidebarLogo'
@@ -36,6 +37,7 @@ import { AuthDeferredShell } from '@/components/AuthDeferredShell'
 type NavGroup = '功能' | '管理'
 type TooltipSide = ComponentProps<typeof TooltipContent>['side']
 const SIDEBAR_TRANSITION_MS = 300
+const ANNOUNCEMENT_ROUTE_REFRESH_THROTTLE_MS = 60 * 1000
 
 interface NavItem {
   title: string
@@ -43,6 +45,7 @@ interface NavItem {
   icon: typeof LayoutDashboard
   group: NavGroup
   adminOnly?: boolean
+  nonPublicOnly?: boolean
 }
 
 type LayoutUser = ReturnType<typeof useAuthStore.getState>['user']
@@ -54,14 +57,22 @@ const navItems: NavItem[] = [
   { title: '耗材订单', href: '/consumables', icon: ShoppingCart, group: '功能' },
   { title: '库存列表', href: '/inventory', icon: Package, group: '功能' },
   { title: '常用货架', href: '/common-shelf', icon: Archive, group: '功能' },
-  { title: '导入数据', href: '/import', icon: FolderInput, group: '功能' },
+  { title: '导入数据', href: '/import', icon: FolderInput, group: '功能', nonPublicOnly: true },
   { title: '用户管理', href: '/admin/users', icon: Users, adminOnly: true, group: '管理' },
   { title: '公告管理', href: '/admin/announcements', icon: Megaphone, adminOnly: true, group: '管理' },
 ]
 
-// 只有 `ADMIN` 能看到 `adminOnly` 导航项，权限过滤统一在这里做。
-function getFilteredNavItems(userRole?: string) {
-  return navItems.filter((item) => !item.adminOnly || userRole === UserRoles.ADMIN)
+// 侧边栏入口按角色过滤；后端仍负责最终权限校验。
+function getFilteredNavItems(userRole?: UserRole | null) {
+  return navItems.filter((item) => {
+    if (item.adminOnly && userRole !== UserRoles.ADMIN) {
+      return false
+    }
+    if (item.nonPublicOnly && !canWriteNonPublicData(userRole)) {
+      return false
+    }
+    return true
+  })
 }
 
 // 桌面侧边栏折叠时通过 `opacity / max-width / ml` 组合隐藏文字，避免布局跳动。
@@ -444,7 +455,7 @@ function MobileUserLink({
   )
 }
 
-// 移动端保留主题切换和二次确认退出入口。
+// 移动端提供主题切换和二次确认退出入口。
 function MobileSidebarActions({
   theme,
   toggleTheme,
@@ -589,7 +600,7 @@ function useDesktopSidebarTooltipGuard({
   toggleSidebar: () => void
 }) {
   const [sidebarTooltipSuspended, setSidebarTooltipSuspended] = useState(false)
-  const sidebarTooltipTimerRef = useRef<number | null>(null)
+  const sidebarTooltipTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
 
   const blurActiveElement = useCallback(() => {
     const activeElement = document.activeElement
@@ -745,6 +756,7 @@ function LayoutDeferredOutlet({ pathname }: Readonly<{ pathname: string }>) {
 export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean }>) {
   const location = useLocation()
   const { user, logout } = useAuthStore()
+  const userId = user?.id
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
   const { theme, toggleTheme } = useTheme()
   const isMobile = useIsMobile()
@@ -754,11 +766,25 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
   const [showBugButton, setShowBugButton] = useState(
     () => Date.now() >= getBugButtonHiddenUntil()
   )
+  const lastAnnouncementCheckAtRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
+    let requestSettled = false
+    const previousCheckAt = lastAnnouncementCheckAtRef.current
 
-    // 只在布局层拉一次公告；用取消标记兜住卸载场景，避免异步回写已卸载组件。
+    if (!userId) {
+      return undefined
+    }
+
+    const now = Date.now()
+    if (now - previousCheckAt < ANNOUNCEMENT_ROUTE_REFRESH_THROTTLE_MS) {
+      return undefined
+    }
+
+    lastAnnouncementCheckAtRef.current = now
+
+    // 路由切换时按 1 分钟节流检查公告；用取消标记兜住卸载场景。
     const fetchAnnouncements = async () => {
       try {
         const response = await announcementAPI.getPublic()
@@ -769,6 +795,8 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
         if (!cancelled) {
           console.error('Failed to fetch announcements:', error)
         }
+      } finally {
+        requestSettled = true
       }
     }
 
@@ -776,8 +804,11 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
 
     return () => {
       cancelled = true
+      if (!requestSettled) {
+        lastAnnouncementCheckAtRef.current = previousCheckAt
+      }
     }
-  }, [])
+  }, [location.pathname, userId])
 
   const handleBugButtonRightClick = useCallback(() => {
     setShowBugButton(false)

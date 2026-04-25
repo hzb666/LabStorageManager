@@ -96,6 +96,18 @@ class UserListQuery:
     is_active: Optional[bool] = None
 
 
+class UserListItemResponse(UserResponse):
+    last_active_at: str | None = None
+
+
+class UserListResponse(BaseModel):
+    data: list[UserListItemResponse]
+    total: int
+    total_without_filter: int
+    skip: int
+    limit: int
+
+
 def _resolve_request_token_is_cli(request: Request) -> bool:
     token = extract_access_token(request)
     if not token:
@@ -156,7 +168,10 @@ def _load_user_last_active_map(db: Session, user_ids: list[int]) -> dict[int, ob
     }
 
 
-def _serialize_user_list(users: list[User], last_active_map: dict[int, object]) -> list[dict]:
+def _serialize_user_list(
+    users: list[User],
+    last_active_map: dict[int, object],
+) -> list[dict[str, object]]:
     user_responses = []
     for user in users:
         user_dict = UserResponse.model_validate(user).model_dump(mode='json')
@@ -416,6 +431,7 @@ class ChangePasswordRequest(BaseModel):
 class UserSearchItem(BaseModel):
     id: int
     full_name: str
+    username: str
 
 
 @dataclass
@@ -950,7 +966,7 @@ def create_user(
     return db_user
 
 
-@router.get("/", response_model=dict)
+@router.get("/", response_model=UserListResponse)
 def list_users(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)],
@@ -1003,7 +1019,10 @@ def search_users(
     )
 
     users = db.exec(statement).all()
-    return [UserSearchItem(id=user.id, full_name=user.full_name) for user in users]
+    return [
+        UserSearchItem(id=user.id, full_name=user.full_name, username=user.username)
+        for user in users
+    ]
 
 
 @router.get("/me", response_model=UserResponse)
@@ -1280,8 +1299,7 @@ def reset_user_password(
         window_seconds=PASSWORD_RESET_RATE_WINDOW_SECONDS,
     )
 
-    # 重置管理员密码时，要求当前操作者再次验证自己的口令，而不是目标管理员旧口令。
-    # 否则该接口会退化成“在线探测目标管理员密码是否正确”的 oracle。
+    # 重置管理员密码需验证当前操作者口令，防止接口变成目标密码探测入口。
     if user.role == UserRole.ADMIN:
         if not password_request.old_password:
             raise HTTPException(

@@ -1,5 +1,6 @@
-from datetime import datetime, timezone, timedelta
-from app.core.constants import CHINA_UTC_OFFSET_HOURS
+from datetime import datetime, time, timedelta, timezone
+
+from app.core.config import settings
 
 
 def get_utc_now() -> datetime:
@@ -13,29 +14,112 @@ def get_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def to_china_time(dt: datetime) -> datetime:
+def _coerce_utc_naive(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _get_display_offset_delta() -> timedelta:
+    offset_text = settings.display_utc_offset
+    sign = 1 if offset_text.startswith("+") else -1
+    hours_text, minutes_text = offset_text[1:].split(":", 1)
+    return timedelta(hours=sign * int(hours_text), minutes=sign * int(minutes_text))
+
+
+def get_display_timezone_label() -> str:
+    return f"UTC{settings.display_utc_offset}"
+
+
+def get_display_tzinfo() -> timezone:
+    return timezone(_get_display_offset_delta(), name=get_display_timezone_label())
+
+
+def to_display_time(dt: datetime | None) -> datetime | None:
     """
-    将UTC时间转换为中国时区时间(UTC+8)。
-    
-    用于导出Excel/CSV时显示本地时间。
-    如果datetime对象有时区信息，先转换为UTC，再加8小时。
-    如果是naive datetime，直接加8小时（假设存储的是UTC时间）。
+    Convert a stored UTC datetime into the configured fixed display offset.
+
+    Non-browser-rendered outputs (downloads/exports/text reports) should use
+    this helper instead of hand-written offset math at call sites.
+    """
+    normalized = _coerce_utc_naive(dt)
+    if normalized is None:
+        return None
+    return normalized + _get_display_offset_delta()
+
+
+def get_display_now() -> datetime:
+    """
+    获取当前 display offset 时间，用于导出等非浏览器转换场景。
+    """
+    return to_display_time(get_utc_now())
+
+
+def get_display_day_age_cutoff(days: int, now: datetime | None = None) -> datetime:
+    """
+    Return the UTC cutoff for records at least `days` display-calendar days old.
+
+    Example with UTC+08: an item created any time on Apr 10 becomes 2 natural
+    days old at Apr 12 00:00 display time, so the cutoff is Apr 11 00:00
+    display time converted back to UTC.
+    """
+    if days < 1:
+        raise ValueError("days must be at least 1")
+
+    display_now = to_display_time(now or get_utc_now())
+    if display_now is None:
+        raise ValueError("now must not be None")
+
+    cutoff_display_date = display_now.date() - timedelta(days=days - 1)
+    cutoff_display_midnight = datetime.combine(cutoff_display_date, time.min)
+    cutoff = normalize_to_utc_naive(cutoff_display_midnight)
+    if cutoff is None:
+        raise ValueError("cutoff must not be None")
+    return cutoff
+
+
+def is_display_day_age_at_least(
+    dt: datetime | None,
+    days: int,
+    now: datetime | None = None,
+) -> bool:
+    """Check age using configured display-time natural days, not elapsed hours."""
+    normalized = _coerce_utc_naive(dt)
+    return normalized is not None and normalized < get_display_day_age_cutoff(days, now)
+
+
+def normalize_to_utc_naive(dt: datetime | None) -> datetime | None:
+    """
+    Normalize imported/user-provided datetimes into the project's UTC naive shape.
+
+    - aware datetime: convert to UTC then strip tzinfo
+    - naive datetime: interpret as configured display offset, then convert to UTC
     """
     if dt is None:
         return None
-    # 先转为UTC再转换，确保正确处理
     if dt.tzinfo is not None:
-        # 如果有时区信息，先转为UTC
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    # 加8小时
-    return dt + timedelta(hours=CHINA_UTC_OFFSET_HOURS)
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return (dt - _get_display_offset_delta()).replace(tzinfo=None)
+
+
+def to_china_time(dt: datetime | None) -> datetime | None:
+    """
+    Backward-compatible wrapper for historical China-time helpers.
+
+    Deprecated: use `to_display_time()` instead.
+    """
+    return to_display_time(dt)
 
 
 def get_china_now() -> datetime:
     """
-    获取当前中国时区时间(UTC+8)，用于导出等需要显示本地时间的场景。
+    Backward-compatible wrapper for historical China-time helpers.
+
+    Deprecated: use `get_display_now()` instead.
     """
-    return get_utc_now() + timedelta(hours=CHINA_UTC_OFFSET_HOURS)
+    return get_display_now()
 
 
 def utc_iso_str(dt: datetime | None) -> str | None:
@@ -47,8 +131,30 @@ def utc_iso_str(dt: datetime | None) -> str | None:
     如果 datetime 对象有时区信息，会先转换为 UTC 再格式化。
     如果传入 None，返回 None。
     """
-    if dt is None:
+    normalized = _coerce_utc_naive(dt)
+    if normalized is None:
         return None
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt.isoformat() + 'Z'
+    return normalized.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def parse_utc_datetime(value: object) -> datetime | None:
+    """
+    Parse a UTC datetime string into the project's naive UTC datetime shape.
+
+    Accepts both the legacy internal form without suffix and the API/cache form
+    with a trailing Z, so old Redis/local metadata remains readable.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed

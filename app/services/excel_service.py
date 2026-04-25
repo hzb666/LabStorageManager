@@ -30,7 +30,7 @@ from app.core.constants import (
     EXCEL_RED_FONT_COLOR,
     INTERNAL_CODE_MAX_SEQUENCE,
 )
-from app.core.time_utils import get_utc_now
+from app.core.time_utils import get_utc_now, normalize_to_utc_naive
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -41,7 +41,7 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
     return remaining / initial
 
 
-# ==================== File Upload Security ====================
+# ==================== 文件上传安全 ====================
 # 允许的文件扩展名
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 
@@ -180,7 +180,7 @@ def _generate_internal_code_with_tracking(
     sequence_tracker: dict[tuple[str, str], int],
     created_at: Optional[datetime] = None
 ) -> str:
-    # 同一批次里相同 CAS 也要拿到不同流水号，否则会撞内部编码唯一约束。
+    # 同一批次里相同 CAS 也要拿到不同流水号，防止内部编码唯一约束冲突。
     date_str = (created_at or get_utc_now()).strftime("%y%m%d")
     prefix = build_internal_code_prefix(cas_number, created_at=created_at)
     tracker_key = (prefix, date_str)
@@ -236,7 +236,7 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     except ValueError as e:
         return False, f"Invalid specification format: {str(e)}"
 
-    # 剩余量不能超过规格解析出的初始量，否则导入后库存状态立刻失真。
+    # 剩余量不能超过规格解析出的初始量，防止导入后库存状态立刻失真。
     remaining_raw = row.get('remaining_quantity')
     if pd.notna(remaining_raw):
         remaining_text = str(remaining_raw).strip()
@@ -335,12 +335,13 @@ def _build_inventory_from_import_row(
     initial_quantity = spec_value
     remaining_qty = _parse_remaining_quantity(row, initial_quantity)
     optional_fields = _normalize_import_optional_fields(row, context.default_storage_location)
-    created_at = _parse_import_created_at(row.get('created_at'))
+    imported_created_at = _parse_import_created_at(row.get('created_at'))
+    stored_created_at = normalize_to_utc_naive(imported_created_at)
     internal_code = _generate_internal_code_with_tracking(
         context.db,
         normalized_cas,
         context.sequence_tracker,
-        created_at,
+        imported_created_at,
     )
     name = str(row['name']).strip()
     pinyin_fields = compute_pinyin_fields(
@@ -366,7 +367,7 @@ def _build_inventory_from_import_row(
         is_hazardous=_parse_boolean(row.get('is_hazardous'), context.default_is_hazardous),
         status=InventoryStatus.IN_STOCK,
         notes=optional_fields['notes'],
-        created_at=created_at,
+        created_at=stored_created_at,
         created_by_id=context.user_id,
         **pinyin_fields,
     )
@@ -390,11 +391,13 @@ def _build_import_result(
     *,
     created: int,
 ) -> dict[str, Any]:
+    cas_numbers = sorted({item.cas_number for item in prepared.created_items if item.cas_number})
     return {
         "success": len(prepared.errors) == 0,
         "total_rows": prepared.total_rows,
         "valid_rows": prepared.valid_rows,
         "created": created,
+        "created_cas_numbers": cas_numbers if created > 0 else [],
         "errors": prepared.errors,
         "preview_items": prepared.preview_items,
     }

@@ -5,10 +5,17 @@ This is the foundation for deduplication in the system.
 """
 import re
 from typing import Optional
+
 from app.core.constants import CAS_PATTERN
 
 
 BIOLOGICAL_REAGENT_CAS = "生物试剂"
+DASH_TRANSLATION = str.maketrans({
+    "－": "-",
+    "–": "-",
+    "—": "-",
+    "‑": "-",
+})
 
 
 def is_special_cas_value(cas: str) -> bool:
@@ -17,7 +24,7 @@ def is_special_cas_value(cas: str) -> bool:
 
 
 
-def normalize_cas(cas: str) -> str:
+def normalize_cas(cas: str | None) -> str:
     """
     Normalize CAS number: remove spaces, convert to uppercase.
     
@@ -35,8 +42,8 @@ def normalize_cas(cas: str) -> str:
     if not cas:
         return ""
     
-    # Remove all whitespace
-    normalized = cas.replace(" ", "").replace("\t", "").upper()
+    # 移除空白字符并标准化常见短横线变体。
+    normalized = re.sub(r"\s+", "", str(cas).translate(DASH_TRANSLATION)).upper()
     return normalized
 
 
@@ -80,37 +87,45 @@ def validate_cas_format(cas: str) -> tuple[bool, Optional[str]]:
     if not cas:
         return False, "CAS number is required"
 
-    # `validate_and_normalize_cas` passes normalized input, so compare directly
-    # here to avoid a second normalize pass via `is_special_cas_value`.
+    # 入参已由 validate_and_normalize_cas 标准化，可直接比较特殊 CAS。
     if cas == BIOLOGICAL_REAGENT_CAS:
         return True, None
     
-    # Check basic pattern
+    # 检查基础格式。
     if not re.match(CAS_PATTERN, cas):
         return False, "Invalid CAS format. Expected: XXXXX-XX-X"
     
-    # Split and validate structure
+    # 拆分并校验结构。
     parts = cas.split("-")
     if len(parts) != 3:
         return False, "Invalid CAS format"
     
-    # Extract parts
-    first_part = parts[0]  # 2-7 digits
-    second_part = parts[1]  # 2 digits
-    check_digit = parts[2]  # 1 digit
+    # 提取 CAS 三段内容。
+    first_part = parts[0]  # 2-7 位数字
+    second_part = parts[1]  # 2 位数字
+    check_digit = parts[2]  # 1 位数字
     
-    # Combine first two parts as sequence number
+    # 前两段组合为主体序列。
     sequence_number = first_part + second_part
     
-    # Calculate expected check digit
+    # 计算期望校验位。
     expected_check_digit = _calculate_cas_check_digit(sequence_number)
     actual_check_digit = int(check_digit)
     
-    # Validate check digit
+    # 校验最后一位。
     if expected_check_digit != actual_check_digit:
         return False, f"Invalid CAS check digit. Expected: {expected_check_digit}"
     
     return True, None
+
+
+def is_valid_cas(cas: str | None) -> bool:
+    """Return True when the normalized value is a real CAS number with a valid check digit."""
+    normalized = normalize_cas(cas)
+    if not normalized or normalized == BIOLOGICAL_REAGENT_CAS:
+        return False
+    is_valid, _error = validate_cas_format(normalized)
+    return is_valid
 
 
 def validate_and_normalize_cas(cas: str) -> tuple[bool, Optional[str], str]:

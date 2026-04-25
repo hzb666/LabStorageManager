@@ -34,7 +34,11 @@ logger = logging.getLogger(__name__)
 @lru_cache
 def get_conversation_store() -> WecomConversationStore:
     settings = get_settings()
-    return WecomConversationStore(settings.state_db)
+    aibot_settings = get_aibot_settings()
+    return WecomConversationStore(
+        settings.state_db,
+        **aibot_settings.conversation_store_options(),
+    )
 
 
 @lru_cache
@@ -110,6 +114,7 @@ def get_processor() -> WechatKfMessageProcessor:
 async def lifespan(_: FastAPI):
     settings = get_settings()
     settings.require_webhook()
+    get_aibot_settings().require_token_storage()
     get_processed_store().init()
     get_conversation_store().init()
     get_bind_store().init()
@@ -180,9 +185,10 @@ async def submit_bind_form(
         {"username": clean_username, "password": password},
     )
     if not result_ok(result):
-        return bind_form_html(state, "绑定失败，请检查用户名或密码。")
+        return bind_form_html(state, _bind_error_message(result))
     data = payload_data(result)
     if not isinstance(data, dict) or not isinstance(data.get("access_token"), str):
+        logger.warning("wechat_kf_bind_login_missing_token")
         return bind_form_html(state, "绑定失败，请稍后再试。")
     user = data.get("user") if isinstance(data.get("user"), dict) else {}
     get_conversation_store().save_binding(
@@ -193,6 +199,61 @@ async def submit_bind_form(
     )
     get_bind_store().mark_used(state)
     return bind_success_html(user, clean_username)
+
+
+def _bind_error_message(result: dict[str, Any]) -> str:
+    code, message = _bind_error_fields(result)
+    exit_code = _bind_exit_code(result)
+    text = f"{code} {message}".lower()
+    logger.info(
+        "wechat_kf_bind_login_failed exit_code=%s code=%s",
+        exit_code if exit_code is not None else "",
+        code or "",
+    )
+
+    if code in {
+        "CLI_TIMEOUT",
+        "EMPTY_MCP_RESULT",
+        "EMPTY_STDOUT",
+        "INVALID_JSON_SHAPE",
+        "INVALID_JSON_STDOUT",
+        "NETWORK_ERROR",
+    }:
+        return "绑定服务暂时不可用，请稍后再试。"
+    if exit_code == 5 or "too many login attempts" in text or "ip limit reached" in text:
+        return "登录尝试过于频繁，请稍后再试。"
+    if exit_code == 3 or "account is disabled" in text or "account_disabled" in text:
+        return "账号已禁用或无权用于机器人绑定，请联系管理员。"
+    if exit_code == 7 or "validation" in text:
+        return "用户名或密码格式不符合要求。"
+    if exit_code == 2 or "invalid credentials" in text:
+        return "绑定失败，请检查用户名或密码。"
+    return "绑定失败，请稍后再试。"
+
+
+def _bind_error_fields(result: dict[str, Any]) -> tuple[str, str]:
+    payload = result.get("payload")
+    payload_error = payload.get("error") if isinstance(payload, dict) else None
+    top_error = result.get("error")
+    error = payload_error if isinstance(payload_error, dict) else top_error
+    if not isinstance(error, dict):
+        return "", ""
+
+    code = error.get("code")
+    message = error.get("message")
+    detail = error.get("detail")
+    if isinstance(detail, dict):
+        detail_value = detail.get("detail")
+        if isinstance(detail_value, str):
+            message = f"{message or ''} {detail_value}".strip()
+    if isinstance(detail, list):
+        message = f"{message or ''} validation".strip()
+    return (code if isinstance(code, str) else "", message if isinstance(message, str) else "")
+
+
+def _bind_exit_code(result: dict[str, Any]) -> int | None:
+    exit_code = result.get("exit_code")
+    return exit_code if isinstance(exit_code, int) else None
 
 
 async def _read_limited_body(request: Request) -> bytes:

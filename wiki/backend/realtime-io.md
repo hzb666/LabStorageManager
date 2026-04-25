@@ -31,7 +31,7 @@
 
 ### Excel 导入
 
-库存导入由 `/api/inventory/import/preview`、`/api/inventory/import/confirm` 和 `/api/inventory/import/template` 共同提供。导入链路的重点不是“上传文件”，而是后端要完成完整的导入判定：
+库存导入由 `/api/inventory/import/preview`、`/api/inventory/import/confirm` 和 `/api/inventory/import/template` 共同提供。后端在导入链路中完成以下判定：
 
 - 文件大小、扩展名和内容的早期校验
 - 表头与字段映射校验
@@ -41,11 +41,11 @@
 
 因此前端只负责上传和展示结果，不应复制导入规则。
 
-### 浏览器扩展导入
+### 浏览器插件导入
 
 购物车同步也是导入能力，但它分成“采集”和“写入系统”两段：
 
-1. 扩展在外部平台采集购物车与商品详情。
+1. 浏览器插件在外部平台采集购物车与商品详情。
 2. popup 把最近一次导入批次写入 `chrome.storage.local`。
 3. 导入页桥接脚本把批次复制到页面 `localStorage.cart_import_batch_latest`。
 4. 前端导入页逐条调用标准的试剂订单或耗材订单创建接口。
@@ -54,24 +54,25 @@
 
 ## 导出链路
 
-导出不是简单把 REST 列表 JSON 转存，而是正式的数据输出能力：
+导出链路属于正式数据输出能力，不能直接转存 REST 列表 JSON：
 
 - 库存、常用货架、试剂订单、耗材订单都支持导出。
 - 统一由专门的导出服务生成面向用户的文件结构。
 - 前端通过 blob 下载，文件名由页面和后端共同约定。
 
-新增导出页面时，建议继续沿用“后端生成文件，前端只负责触发下载”的模式。
+新增导出页面沿用“后端生成文件，前端触发下载”的模式。
 
-## 图片与静态资源
+## 图片与 `/static/`
 
 项目坚持图片不上数据库：
 
 - 头像、公告图片、订单相关图片都写入文件系统。
 - 数据库只存 URL 或文件名。
-- `CachedStaticFiles` 为静态资源统一写入超长缓存头和安全头。
-- Nginx 同时转发 `/static/` 和 `/api/static/`，便于不同入口访问。
+- 运行目录是 `static/`；Docker Compose 中对应 `/data/static`。
+- `CachedStaticFiles` 将资源挂载到 `/static/`，并统一写入超长缓存头和安全头。
+- Nginx 将 `/static/` 转发到后端，便于不同入口访问。
 
-如果新增图片类字段，应优先复用 `image_service` 的压缩、命名和路径策略，而不是把二进制直接写进模型。
+新增图片类字段时，优先复用 `image_service` 的压缩、命名和路径策略；禁止将二进制写入模型。
 
 ## 化学信息服务
 
@@ -82,11 +83,11 @@
 - 英文名优先来自 PubChem，中文名来自 chemblink；必要时可结合翻译能力。
 - 内部有独立缓存和外部请求安全限制，避免 SSRF 风险。
 
-这部分能力适合复用于入库页、订单页和脚本工具，但仍应通过后端统一对外暴露，不建议让前端直接请求第三方站点。
+这部分能力可复用于入库页、订单页和脚本工具，并通过后端统一对外暴露。前端禁止直接请求第三方站点。
 
 ## 补充：房间、序号与降级路径
 
-- 房间白名单：`inventory` / `common_shelf` / `reagent_orders` / `consumable_orders` / `cart_sync`，在 `/api/events` 中校验。
+- 房间白名单：`inventory` / `common_shelf` / `reagent_orders` / `consumable_orders` / `dashboard`，在 `/api/events` 中校验。
 - 序号生成优先使用 Redis `INCR`，失败时回退本地计数 `fallback_seq`。
 - `sse_manager.broadcast` 会调用 `redis_pubsub.publish`，Redis 不可用时只保留本地推送。
 - 慢客户端队列满时会被断开，避免阻塞服务器。
@@ -105,14 +106,14 @@
 - 导入文件超限或格式错误时要正确返回 400/413，前端也需要匹配提示。
 - 新增外部数据抓取能力时，要继续沿用 `chemical_info` 的出站访问限制和缓存策略。
 
-## 验证建议
+## 验证要点
 
 - 手动断开 Redis，确认当前实例仍能广播，但跨实例不可达。
 - 压测 SSE，确认慢客户端会被自动断开。
 - 上传超 2MB 或不支持的扩展名，确认会立即拒绝。
 - 成功导入后，确认 SSE 推送能让前端列表刷新。
 
-## 二次开发建议
+## 二次开发规则
 
 - 需要实时同步的新列表，优先复用现有 SSE 房间和 `useListSSE` 模式。
 - 新增导入接口时，要同时考虑上传大小限制、缓存失效和 SSE 广播。

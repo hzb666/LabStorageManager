@@ -61,7 +61,7 @@ const getProgressFillClassName = (percentage: number): string => {
   return 'bg-amber-500'
 }
 
-// 计算进度条宽度，并为极小值保留最小可见宽度。
+// 计算进度条宽度，并给极小值设置最小可见宽度。
 const getProgressWidth = (percentage: number): string => {
   if (percentage === 0) {
     return '0%'

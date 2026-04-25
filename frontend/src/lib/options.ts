@@ -1,8 +1,8 @@
 // 申购原因选项
 export const ORDER_REASON_OPTIONS = [
   { label: '没有', value: 'not_stocked' },
-  { label: '库存用完', value: 'running_out' },
   { label: '公用常用', value: 'common_public' },
+  { label: '库存用完', value: 'running_out' },
   { label: '没找到', value: 'not_found' },
   { label: '追加订购', value: 'reorder' },
   { label: '大量使用', value: 'high_usage' },
@@ -46,64 +46,5 @@ export const REAGENT_CATEGORY_OPTIONS = [
   { label: '酚', value: '酚' },
   { label: '饱和&芳香烃', value: '饱和&芳香烃' },
   { label: '其他', value: '其他' },
-]
-
-export const REAGENT_BRAND_OPTIONS = [
-  // 字母开头
-  { label: '3A', value: '3A' },
-  { label: 'ACROS', value: 'ACROS' },
-  { label: 'Adamas', value: 'Adamas' },
-  { label: 'Adamas-beta', value: 'Adamas-beta' },
-  { label: 'ALFA', value: 'ALFA' },
-  { label: 'Aldrich', value: 'Aldrich' },
-  { label: 'Ark Pharm', value: 'Ark Pharm' },
-
-  // A-C 汉字
-  { label: '阿拉丁', value: '阿拉丁' },
-  { label: '安耐吉', value: '安耐吉' },
-
-  // B
-  { label: '百灵威', value: '百灵威' },
-  { label: '毕得', value: '毕得' },
-
-  // E-F
-  { label: 'Energy Chemical', value: 'Energy Chemical' },
-  { label: 'Fisher Scientific', value: 'Fisher Scientific' },
-
-  // G
-  { label: '国药', value: '国药' },
-  { label: '国产其他', value: '国产其他' },
-  { label: '光复', value: '光复' },
-
-  // I-J
-  { label: 'Innochem', value: 'Innochem' },
-  { label: 'J&K', value: 'J&K' },
-
-  // L
-  { label: '乐研', value: '乐研' },
-
-  // M
-  { label: 'MACKLIN', value: 'MACKLIN' },
-  { label: 'Merck', value: 'Merck' },
-  { label: 'MREDA', value: 'MREDA' },
-
-  // O
-  { label: '偶合', value: '偶合' },
-
-  // S
-  { label: '韶远', value: '韶远' },
-  { label: 'Sigma', value: 'Sigma' },
-
-  // T
-  { label: 'TCI', value: 'TCI' },
-  { label: 'Thermo Fisher', value: 'Thermo Fisher' },
-  { label: '泰坦', value: '泰坦' },
-
-  // 其他
-  { label: '未确认', value: '未确认' },
-  { label: '欣恒研', value: '欣恒研' },
-  { label: '进口其他', value: '进口其他' },
-  { label: '分装', value: '分装' },
-  { label: '自己合成', value: '自己合成' },
 ]
 

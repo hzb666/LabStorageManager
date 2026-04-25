@@ -22,7 +22,9 @@ const MemoizedExpandedRow = memo(
   <TData,>({ original, renderExpandedRow }: MemoizedExpandedRowProps<TData>) => {
     return <>{renderExpandedRow(original)}</>
   },
-  (prevProps, nextProps) => prevProps.original === nextProps.original
+  (prevProps, nextProps) =>
+    prevProps.original === nextProps.original &&
+    prevProps.renderExpandedRow === nextProps.renderExpandedRow
 ) as <TData>(props: MemoizedExpandedRowProps<TData>) => React.JSX.Element
 
 // 渲染单行数据及其展开区，并处理强调标记和点击展开逻辑。
@@ -30,12 +32,14 @@ function InnerRowComponent<TData>({
   row,
   isExpanded,
   renderExpandedRow,
+  disableExpandedRowAnimation,
   noteField,
   onRowClick,
 }: Readonly<{
   row: Row<TData>
   isExpanded: boolean
   renderExpandedRow?: (row: TData) => React.ReactNode
+  disableExpandedRowAnimation?: boolean
   noteField?: string
   onRowClick?: (e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => void
 }>) {
@@ -47,7 +51,7 @@ function InnerRowComponent<TData>({
   const hasNote = Boolean(noteValue)
   const isHighlighted = noteValue?.startsWith('[强调]') || false
 
-  // 点击行时优先走外部点击处理，否则退回到默认的展开切换。
+  // 点击行时优先走外部点击处理，缺省时使用默认展开切换。
   const handleToggle = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (onRowClick) {
@@ -103,7 +107,15 @@ function InnerRowComponent<TData>({
       </div>
 
       <AnimatePresence initial={false}>
-        {isExpanded && renderExpandedRow && (
+        {isExpanded && renderExpandedRow && disableExpandedRowAnimation && (
+          <div className="bg-muted/30 border-b dark:bg-input/30 border-border">
+            <MemoizedExpandedRow
+              original={original}
+              renderExpandedRow={renderExpandedRow}
+            />
+          </div>
+        )}
+        {isExpanded && renderExpandedRow && !disableExpandedRowAnimation && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -132,6 +144,7 @@ const InnerRow = memo(InnerRowComponent, (prevProps, nextProps) => {
     prevProps.row.original === nextProps.row.original &&
     prevProps.isExpanded === nextProps.isExpanded &&
     prevProps.renderExpandedRow === nextProps.renderExpandedRow &&
+    prevProps.disableExpandedRowAnimation === nextProps.disableExpandedRowAnimation &&
     prevProps.noteField === nextProps.noteField &&
     prevProps.onRowClick === nextProps.onRowClick
   )
@@ -144,6 +157,7 @@ const InnerRow = memo(InnerRowComponent, (prevProps, nextProps) => {
 interface DataTableBodyProps<TData> {
   rows: Row<TData>[]
   renderExpandedRow?: (row: TData) => React.ReactNode
+  disableExpandedRowAnimation?: boolean
   noteField?: string
   shouldUseVirtualization: boolean
   rowVirtualizer: Virtualizer<HTMLDivElement, Element>
@@ -177,6 +191,7 @@ function getFooterMessage(rowCount: number, total?: number, searchKeyword?: stri
 export function DataTableBody<TData>({
   rows,
   renderExpandedRow,
+  disableExpandedRowAnimation,
   noteField,
   shouldUseVirtualization,
   rowVirtualizer,
@@ -221,6 +236,7 @@ export function DataTableBody<TData>({
                     row={row}
                     isExpanded={row.getIsExpanded()}
                     renderExpandedRow={renderExpandedRow}
+                    disableExpandedRowAnimation={disableExpandedRowAnimation}
                     noteField={noteField}
                     onRowClick={handleRowClick}
                   />
@@ -235,6 +251,7 @@ export function DataTableBody<TData>({
                 row={row}
                 isExpanded={row.getIsExpanded()}
                 renderExpandedRow={renderExpandedRow}
+                disableExpandedRowAnimation={disableExpandedRowAnimation}
                 noteField={noteField}
                 onRowClick={handleRowClick}
               />

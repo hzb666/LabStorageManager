@@ -1,6 +1,6 @@
 # 目录结构
 
-这个仓库同时包含 FastAPI 后端、React 前端、浏览器扩展、CLI、MCP 服务、企业微信入口、Docker/Nginx 部署文件和 VitePress wiki。先明确目录边界，再去看业务流程和接口，会更高效。
+这个仓库同时包含 FastAPI 后端、React 前端、浏览器插件、CLI、MCP 服务、企业微信入口、Docker/Nginx 部署文件和 VitePress wiki。先明确目录边界，再去看业务流程和接口，会更高效。
 
 ## 顶层目录
 
@@ -8,12 +8,12 @@
 | --- | --- | --- |
 | `app/` | FastAPI 后端入口、路由、服务、模型与核心基础设施 | `main.py`、`api/`、`services/`、`models/` |
 | `frontend/` | React 19 前端，页面、组件、hooks、状态管理 | `src/App.tsx`、`src/pages/`、`src/hooks/` |
-| `browser-extension/` | Chrome 扩展，采集外部购物车并桥接到系统 | `build-config.mjs`、`content/`、`popup/` |
-| `lsm_cli/` | 本地命令行客户端，只通过后端 API 工作 | `__main__.py`、`commands/` |
+| `browser-extension/` | Chrome 浏览器插件，采集外部购物车并桥接到系统 | `build-config.mjs`、`content/`、`popup/` |
+| `lsm_cli/` | 本地命令行客户端，供脚本和 Agent skill 通过后端 API 工作 | `__main__.py`、`main.py`、`client.py`、`config.py` |
 | `lsm_mcp/` | 受控 MCP 工具服务，调用 CLI 子进程 | `http_app.py`、`cli_runner.py` |
 | `robot/` | 企业微信智能机器人和微信客服入口 | `wecom_aibot/`、`wechat_kf/` |
+| `static/` | 上传图片和静态文件运行目录；Compose 中对应 `/data/static` | `/static/` |
 | `docker/` | 前后端镜像与 Nginx 反向代理配置 | `docker-compose.yml`、`docker/nginx/default.conf` |
-| `static/` | 上传图片、模板等静态资源目录 | 上传链路、公告图片、导入模板 |
 | `wiki/` | 当前知识库源码 | 站点配置、主题定制与各章节页面 |
 
 ## 后端目录
@@ -28,7 +28,7 @@
 
 ### `app/api/`
 
-路由层负责 HTTP 路径、权限依赖、请求参数和返回模型。建议优先阅读：
+路由层负责 HTTP 路径、权限依赖、请求参数和返回模型。优先阅读：
 
 1. `users.py`
 2. `inventory.py`
@@ -36,8 +36,10 @@
 4. `reagent_orders_workflow.py`
 5. `consumable_orders.py`
 6. `announcements.py`
-7. `cart_sync.py`
-8. `events.py`
+7. `dashboard.py`
+8. `reagent_brands.py`
+9. `cart_sync.py`
+10. `events.py`
 
 ### `app/services/`
 
@@ -49,8 +51,13 @@
 - 会话与限流
 - 图片、导入导出
 - SSE 广播
+- 操作日志时间线
+- 结构检索
+- 仪表盘聚合、section 分页和窗口统计
 
 更适合在理解“业务怎么做”时阅读。
+
+`app/services/dashboard/` 负责仪表盘业务逻辑：`summary.py` 负责汇总和 section 分发，`items.py` 负责待办/风险/告警 item，`metrics.py` 负责计数和自然天阈值，`common.py` 放共享 builder 与常量。
 
 ### `app/models/`
 
@@ -61,7 +68,16 @@ SQLModel 数据模型和 API DTO，包括：
 - 响应 DTO
 - 状态枚举
 
-建议先读 [数据模型](/database/data-model)，再对照 [字段参考](/database/field-reference)。
+先读 [数据模型](/database/data-model)，再对照 [字段参考](/database/field-reference)。
+
+### `app/db_bootstrap/`
+
+SQLite 启动期数据库准备集中放在这里：
+
+- `schema_upgrades.py`：兼容字段与启动期回填。
+- `sqlite_indexes.py`：复合索引和统计信息刷新。
+- `sqlite_fts.py`：FTS 表、触发器、重建和一致性检查。
+- `schema_consistency.py`：模型与数据库结构校验。
 
 ### `app/core/`
 
@@ -77,7 +93,7 @@ SQLModel 数据模型和 API DTO，包括：
 
 ### `frontend/src/pages/`
 
-页面层按业务拆分，包括登录、仪表盘、库存、试剂订单、耗材订单、公告管理、设备管理、日志和导入页。
+页面层按业务组织，包括登录、仪表盘、库存、试剂订单、耗材订单、公告管理、设备管理、日志、结构检索和导入页。
 
 ### `frontend/src/components/`
 
@@ -106,6 +122,8 @@ SQLModel 数据模型和 API DTO，包括：
 - 表格列配置
 - 状态文案和常量
 - API URL 构造
+- 品牌选项查询配置
+- 本地存储读写与运行时配置
 - 设备 ID 与 toast 工具
 
 ### `frontend/src/store/`
@@ -116,22 +134,22 @@ Zustand 状态层用于：
 - UI 状态
 - SSE 连接和 stale 房间状态
 
-## 浏览器扩展目录
+## 浏览器插件目录
 
 | 路径 | 作用 |
 | --- | --- |
-| `browser-extension/build-config.mjs` | 根据扩展 env 生成 manifest 和运行配置 |
+| `browser-extension/build-config.mjs` | 根据插件 env 生成 manifest 和运行配置 |
 | `browser-extension/content/script.js` | 抓取购物车或商品详情 |
 | `browser-extension/content/import-bridge.js` | 把批次数据桥接到系统 `/cart-import` 页面 |
-| `browser-extension/popup/` | 扩展弹窗 UI |
+| `browser-extension/popup/` | 插件弹窗 UI |
 
-扩展不是后端的第二套前端，而是采集器和投递器。
+浏览器插件定位为采集器和投递器。
 
 ## CLI、MCP 与机器人目录
 
 | 路径 | 作用 |
 | --- | --- |
-| `lsm_cli/` | 面向脚本和 MCP 的命令行入口，输出 JSON，不直接访问数据库 |
+| `lsm_cli/` | 面向脚本、Agent skill 和 MCP 的命令行入口，输出 JSON，不直接访问数据库 |
 | `lsm_mcp/` | MCP Streamable HTTP 服务，按白名单映射到 CLI 命令 |
 | `robot/wecom_aibot/` | 企业微信智能机器人实现 |
 | `robot/wechat_kf/` | 微信客服一对一会话入口 |
@@ -175,6 +193,7 @@ Zustand 状态层用于：
 
 ## 参考代码
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
+- [app/db_bootstrap](https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap)
 - [app/services](https://github.com/hzb666/LabStorageManager/tree/main/app/services)
 - [app/models](https://github.com/hzb666/LabStorageManager/tree/main/app/models)
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)

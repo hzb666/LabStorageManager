@@ -1,13 +1,18 @@
 import { defineConfig } from "vitepress";
 import { MermaidPlugin } from "@leelaa/vitepress-plugin-extended";
 
+const SITE_BASE = "/LabStorageManager/";
+
 export default defineConfig({
   lang: "zh-CN",
   title: "LabStorageManager",
   description: "基于真实代码行为整理的实验室库存管理系统知识库",
-  base: "/LabStorageManager/",
+  base: SITE_BASE,
   head: [
-    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: `${SITE_BASE}favicon.svg` }],
+    ["link", { rel: "preconnect", href: "https://fonts.googleapis.cn" }],
+    ["link", { rel: "preconnect", href: "https://fonts.gstatic.cn", crossorigin: "" }],
+    ["script", {}, "document.documentElement.setAttribute('data-font-state','loading')"],
   ],
   lastUpdated: true,
   cleanUrls: true,
@@ -81,7 +86,7 @@ export default defineConfig({
           { text: "库存、借还与常用货架", link: "/user-guide/inventory-and-borrowing" },
           { text: "账户、公告与使用支持", link: "/user-guide/account-and-support" },
           { text: "管理员指南", link: "/user-guide/admin-guide" },
-          { text: "常见情况说明", link: "/user-guide/faq" },
+          { text: "使用排障", link: "/user-guide/faq" },
         ],
       },
       {
@@ -140,7 +145,7 @@ export default defineConfig({
           { text: "关键文件索引", link: "/dev-guide/key-files" },
           { text: "开发、部署与代理", link: "/dev-guide/deployment" },
           { text: "运维与排障", link: "/dev-guide/docker-nginx" },
-          { text: "购物车同步扩展", link: "/dev-guide/cart-sync" },
+          { text: "浏览器插件购物车同步", link: "/dev-guide/cart-sync" },
           { text: "术语表", link: "/dev-guide/glossary" },
         ],
       },

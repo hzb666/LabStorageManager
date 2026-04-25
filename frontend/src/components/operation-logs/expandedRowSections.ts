@@ -37,6 +37,36 @@ const COMMON_SHELF_ACTION_LABELS: Record<string, string> = {
   export: '导出',
 }
 
+const OTHER_ACTION_LABELS: Record<string, string> = {
+  create_reagent_brand: '新增品牌',
+  update_reagent_brand: '修改品牌',
+  delete_reagent_brand: '删除品牌',
+  create_chemical_name_map: '新增 CAS 主数据',
+  update_chemical_name_map: '修改 CAS 主数据',
+  delete_chemical_name_map: '删除 CAS 主数据',
+  create_announcement: '新增公告',
+  update_announcement: '修改公告',
+  delete_announcement: '删除公告',
+  update_announcement_pin: '切换公告置顶',
+  update_announcement_visibility: '切换公告可见性',
+  upload_announcement_image: '上传公告图片',
+  delete_announcement_image: '删除公告图片',
+}
+
+const SESSION_ACTION_LABELS: Record<string, string> = {
+  delete_session: '删除设备会话',
+  delete_other_sessions: '删除其他设备会话',
+  refresh_session: '刷新设备会话',
+  update_session: '修改设备会话',
+}
+
+const EXPORT_SCOPE_LABELS: Record<string, string> = {
+  inventory: '库存',
+  common_shelf: '常用货架',
+  reagent_orders: '试剂订单',
+  consumable_orders: '耗材订单',
+}
+
 function formatAction(value: unknown, labels: Record<string, string>): string {
   const action = formatText(value, '')
   return labels[action] ?? action
@@ -64,6 +94,15 @@ function formatInventoryCategory(value: unknown): string {
     return ''
   }
   return category
+}
+
+function getSnapshotChange(fullData: LogRecord) {
+  const snapshot = asRecord(fullData.snapshot)
+  const before = asRecord(snapshot.before)
+  const after = asRecord(snapshot.after)
+  const current = Object.keys(after).length > 0 ? after : snapshot
+  const hasChange = Object.keys(before).length > 0 || Object.keys(after).length > 0
+  return { snapshot, before, after, current, hasChange }
 }
 
 interface OrderChangeSectionOptions {
@@ -279,10 +318,11 @@ function buildBorrowSections(fullData: LogRecord): DetailSection[] {
 }
 
 function buildExportSections(fullData: LogRecord): DetailSection[] {
+  const exportScope = formatText(fullData.export_scope, '')
   return [
     section('导出信息', [
       field('操作', '导出'),
-      field('导出对象', fullData.export_scope === 'common_shelf' ? '常用货架' : '库存'),
+      field('导出对象', EXPORT_SCOPE_LABELS[exportScope] ?? exportScope),
       field('导出条数', fullData.count),
       dateField('导出时间', fullData.created_at),
     ]),
@@ -306,15 +346,33 @@ function buildCommonShelfSectionsByAction(fullData: LogRecord): DetailSection[] 
 }
 
 function buildSessionSections(fullData: LogRecord): DetailSection[] {
+  const { before, after, current, hasChange } = getSnapshotChange(fullData)
+  const operationSections = hasValue(fullData.action)
+    ? [
+        section('会话操作', [
+          field('操作', formatAction(fullData.action, SESSION_ACTION_LABELS)),
+          field('结果', fullData.outcome),
+          field('客户端 IP', fullData.client_ip),
+          field('说明', fullData.detail, { wide: true }),
+        ]),
+      ]
+    : []
   return [
+    ...operationSections,
     section('登录信息', [
-      field('设备名称', fullData.device_name),
-      field('IP地址', fullData.ip_address),
-      field('最近 IP', fullData.last_ip_address),
-      field('User-Agent', fullData.user_agent, { wide: true, mono: true }),
-      dateField('首次登录', fullData.created_at),
-      dateField('最后活跃', fullData.last_active_at),
-      dateField('过期时间', fullData.expires_at),
+      field('设备名称', firstValue(current.device_name, fullData.device_name), {
+        visible: !hasChange,
+      }),
+      diffField('设备名称', before.device_name, after.device_name),
+      field('IP地址', firstValue(current.ip_address, fullData.ip_address)),
+      field('最近 IP', firstValue(current.last_ip_address, fullData.last_ip_address)),
+      field('User-Agent', firstValue(current.user_agent, fullData.user_agent), {
+        wide: true,
+        mono: true,
+      }),
+      dateField('首次登录', firstValue(current.created_at, fullData.created_at)),
+      dateField('最后活跃', firstValue(current.last_active_at, fullData.last_active_at)),
+      dateField('过期时间', firstValue(current.expires_at, fullData.expires_at)),
     ]),
     systemSection(fullData),
   ]
@@ -363,6 +421,65 @@ function buildUserSections(fullData: LogRecord): DetailSection[] {
   ]
 }
 
+function buildOtherSections(fullData: LogRecord): DetailSection[] {
+  const { before, after, current, hasChange } = getSnapshotChange(fullData)
+  const action = getActionValue(fullData)
+  const detailSection = buildOtherDetailSection(action, before, after, current, hasChange)
+  return [
+    section('其他操作', [
+      field('操作', formatAction(fullData.action, OTHER_ACTION_LABELS)),
+      field('结果', fullData.outcome),
+      field('客户端 IP', fullData.client_ip),
+      field('说明', fullData.detail, { wide: true }),
+    ]),
+    detailSection,
+    systemSection(fullData),
+  ]
+}
+
+function buildOtherDetailSection(
+  action: string,
+  before: LogRecord,
+  after: LogRecord,
+  current: LogRecord,
+  hasChange: boolean
+): DetailSection {
+  if (action.includes('chemical_name_map')) {
+    return section('CAS 主数据', [
+      field('记录ID', current.id, { mono: true }),
+      field('CAS', current.cas_number),
+      field('名称', current.name, { visible: !hasChange }),
+      diffField('名称', before.name, after.name),
+      diffField('英文名', before.english_name, after.english_name),
+      diffField('分类', before.category, after.category),
+      diffField('别名1', before.alias_1, after.alias_1),
+      diffField('别名2', before.alias_2, after.alias_2),
+      diffField('别名3', before.alias_3, after.alias_3),
+    ])
+  }
+
+  if (action.includes('announcement')) {
+    return section('公告', [
+      field('公告ID', current.id, { mono: true }),
+      field('标题', current.title, { visible: !hasChange }),
+      diffField('标题', before.title, after.title),
+      diffField('置顶', formatBoolean(before.is_pinned), formatBoolean(after.is_pinned)),
+      diffField('可见', formatBoolean(before.is_visible), formatBoolean(after.is_visible)),
+      diffField('图片数', before.image_count, after.image_count),
+      field('图片', firstValue(current.image_url, current.filename), { wide: true }),
+    ])
+  }
+
+  return section('品牌', [
+    field('品牌ID', current.brand_id, { mono: true }),
+    field('品牌名称', current.name, { visible: !hasChange }),
+    diffField('品牌名称', before.name, after.name),
+    diffField('启用状态', formatBoolean(before.is_active), formatBoolean(after.is_active)),
+    field('拼音', current.name_pinyin),
+    field('拼音首字母', current.name_pinyin_initials),
+  ])
+}
+
 function buildFallbackSections(fullData: LogRecord): DetailSection[] {
   const fields = Object.entries(fullData)
     .filter(([, value]) => !isRecord(value) && !Array.isArray(value))
@@ -394,6 +511,8 @@ export function buildSections(type: string, fullData: LogRecord): DetailSection[
       return buildSearchSections(fullData)
     case 'user':
       return buildUserSections(fullData)
+    case 'other':
+      return buildOtherSections(fullData)
     default:
       return buildFallbackSections(fullData)
   }

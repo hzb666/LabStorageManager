@@ -177,6 +177,29 @@ class LSMIntentPlanner:
     max_output_tokens: int
     search_limit: int
 
+    async def _request_output_text(
+        self,
+        *,
+        payload: dict[str, Any],
+        timeout_event: str,
+        failure_event: str,
+    ) -> str | None:
+        try:
+            data = await asyncio.to_thread(
+                _post_llm_api,
+                self.api_url,
+                self.api_key,
+                self.timeout_seconds,
+                payload,
+            )
+        except requests.Timeout:
+            logger.warning(timeout_event)
+            return None
+        except requests.RequestException as exc:
+            logger.warning("%s type=%s", failure_event, type(exc).__name__)
+            return None
+        return _extract_output_text(data)
+
     async def plan(
         self,
         user_text: str,
@@ -191,21 +214,12 @@ class LSMIntentPlanner:
             search_limit=self.search_limit,
             max_output_tokens=self.max_output_tokens,
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_llm_plan_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_llm_plan_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_plan(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_llm_plan_timeout",
+            failure_event="wecom_aibot_llm_plan_failed",
+        )
+        return _parse_plan(output_text) if output_text else None
 
     async def detect_context_reset(
         self,
@@ -222,21 +236,12 @@ class LSMIntentPlanner:
             conversation_context=conversation_context,
             max_output_tokens=min(self.max_output_tokens, 120),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_context_reset_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_context_reset_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_context_reset(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_context_reset_timeout",
+            failure_event="wecom_aibot_context_reset_failed",
+        )
+        return _parse_context_reset(output_text) if output_text else None
 
     async def should_try_common_shelf(
         self,
@@ -253,21 +258,12 @@ class LSMIntentPlanner:
             cas_number=cas_number,
             max_output_tokens=min(self.max_output_tokens, 160),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_common_shelf_decision_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_common_shelf_decision_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_common_shelf_decision(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_common_shelf_decision_timeout",
+            failure_event="wecom_aibot_common_shelf_decision_failed",
+        )
+        return _parse_common_shelf_decision(output_text) if output_text else None
 
     async def resolve_cas_from_search(
         self,
@@ -288,21 +284,12 @@ class LSMIntentPlanner:
             search_summary=search_summary,
             max_output_tokens=min(self.max_output_tokens, 240),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_cas_resolution_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_cas_resolution_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_cas_resolution(_extract_output_text(data), candidates)
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_cas_resolution_timeout",
+            failure_event="wecom_aibot_cas_resolution_failed",
+        )
+        return _parse_cas_resolution(output_text, candidates) if output_text else None
 
     async def resolve_cas_from_knowledge(
         self,
@@ -317,21 +304,12 @@ class LSMIntentPlanner:
             query=query,
             max_output_tokens=min(self.max_output_tokens, 160),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_cas_knowledge_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_cas_knowledge_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_cas_knowledge_resolution(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_cas_knowledge_timeout",
+            failure_event="wecom_aibot_cas_knowledge_failed",
+        )
+        return _parse_cas_knowledge_resolution(output_text) if output_text else None
 
     async def should_try_cas_resolution(
         self,
@@ -346,24 +324,36 @@ class LSMIntentPlanner:
             query=query,
             max_output_tokens=min(self.max_output_tokens, 120),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_cas_resolution_decision_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning(
-                "wecom_aibot_cas_resolution_decision_failed type=%s",
-                type(exc).__name__,
-            )
-            return None
-        return _parse_cas_resolution_decision(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_cas_resolution_decision_timeout",
+            failure_event="wecom_aibot_cas_resolution_decision_failed",
+        )
+        return _parse_cas_resolution_decision(output_text) if output_text else None
+
+    async def filter_inventory_name_candidates(
+        self,
+        *,
+        user_text: str,
+        search_keyword: str,
+        candidates: list[dict[str, Any]],
+    ) -> list[int] | None:
+        if not candidates:
+            return []
+        payload = _build_inventory_name_filter_payload(
+            model=self.model,
+            api_style=self.api_style,
+            user_text=user_text,
+            search_keyword=search_keyword,
+            candidates=candidates,
+            max_output_tokens=min(self.max_output_tokens, 220),
+        )
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_inventory_name_filter_timeout",
+            failure_event="wecom_aibot_inventory_name_filter_failed",
+        )
+        return _parse_inventory_name_filter_selection(output_text, len(candidates)) if output_text else None
 
     async def parse_return_request(
         self,
@@ -378,21 +368,12 @@ class LSMIntentPlanner:
             conversation_context=conversation_context,
             max_output_tokens=min(self.max_output_tokens, 180),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_return_request_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_return_request_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_return_request_resolution(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_return_request_timeout",
+            failure_event="wecom_aibot_return_request_failed",
+        )
+        return _parse_return_request_resolution(output_text) if output_text else None
 
     async def resolve_return_quantity(
         self,
@@ -417,21 +398,12 @@ class LSMIntentPlanner:
             conversation_context=conversation_context,
             max_output_tokens=min(self.max_output_tokens, 180),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_return_quantity_timeout")
-            return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_return_quantity_failed type=%s", type(exc).__name__)
-            return None
-        return _parse_return_quantity_resolution(_extract_output_text(data))
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_return_quantity_timeout",
+            failure_event="wecom_aibot_return_quantity_failed",
+        )
+        return _parse_return_quantity_resolution(output_text) if output_text else None
 
     async def polish_reply(
         self,
@@ -450,21 +422,14 @@ class LSMIntentPlanner:
             conversation_context=conversation_context,
             max_output_tokens=min(self.max_output_tokens, 600),
         )
-        try:
-            data = await asyncio.to_thread(
-                _post_llm_api,
-                self.api_url,
-                self.api_key,
-                self.timeout_seconds,
-                payload,
-            )
-        except requests.Timeout:
-            logger.warning("wecom_aibot_reply_polish_timeout")
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_reply_polish_timeout",
+            failure_event="wecom_aibot_reply_polish_failed",
+        )
+        if output_text is None:
             return None
-        except requests.RequestException as exc:
-            logger.warning("wecom_aibot_reply_polish_failed type=%s", type(exc).__name__)
-            return None
-        reply = _extract_output_text(data).strip()
+        reply = output_text.strip()
         return reply if is_safe_llm_reply(reply) else None
 
 
@@ -733,6 +698,44 @@ def _build_reply_polish_payload(
     }
 
 
+def _build_inventory_name_filter_payload(
+    *,
+    model: str,
+    api_style: Literal["responses", "chat_completions"],
+    user_text: str,
+    search_keyword: str,
+    candidates: list[dict[str, Any]],
+    max_output_tokens: int,
+) -> dict[str, Any]:
+    instructions = _inventory_name_filter_instructions()
+    user_content = json.dumps(
+        {
+            "user_text": user_text,
+            "search_keyword": search_keyword,
+            "candidates": candidates[:100],
+        },
+        ensure_ascii=False,
+    )
+    if api_style == "chat_completions":
+        return {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": user_content},
+            ],
+            "max_tokens": max_output_tokens,
+            "temperature": 0,
+            "stream": False,
+        }
+    return {
+        "model": model,
+        "instructions": instructions,
+        "input": [{"role": "user", "content": user_content}],
+        "max_output_tokens": max_output_tokens,
+        "store": False,
+    }
+
+
 def _build_return_quantity_payload(
     *,
     model: str,
@@ -873,23 +876,28 @@ def _instructions(search_limit: int) -> str:
         "例如明确代词指代、同一化学品/订单/借用流程或用户继续追问上一轮结果。"
         "如果用户明显提出新的任务、对象或查询主题，要忽略无关上下文，按当前消息处理。"
         "不要把上下文当作查询结果，也不要直接根据上下文回答库存事实；"
-        "涉及库存、订单、借用、暂存仍必须选择工具或开始确认流程。"
+        "涉及库存、订单、借用、暂存时，优先用工具或确认流程获取事实，避免编造结果。"
         "你可以选择只读查询工具，或选择开始借用/开始归还流程。"
         "开始借用/开始归还只会进入候选展示和人工确认，不能直接执行写操作。"
         "不能执行入库、下单、更新或删除。"
         "不要使用或暴露内部编码，用户通常不知道内部码。"
-        "用户表达想拿、领、借、使用某个库存时，选择 start_borrow。"
-        "用户表达还回、归还、用掉、消耗、还剩某个库存时，选择 start_return。"
-        "用户问库存、还有吗、在哪里时，必须优先选择 inventory_search_by_name "
-        "或 inventory_get_by_cas，不要用主数据工具替代库存查询。"
-        "用户问我的借用、我借了哪些、借用中，选择 inventory_my_borrows。"
-        "用户问我的暂存、待补全入库、我的待入库，选择 inventory_pending_stockin。"
-        "用户问我的试剂订单或我的试剂申购，选择 reagent_orders_my。"
-        "用户问我的耗材订单或我的耗材申购，选择 consumable_orders_my。"
-        "库存、试剂订单、耗材订单的名称搜索默认是包含搜索。"
-        "由你根据用户语义判断是否明确要求名称完整一致；只有明确要求时，"
-        "才给名称搜索工具参数 exact=true；否则不要传 exact 或传 false。"
-        "不要给 CAS 查询、常用货架查询或主数据查询传 exact。"
+        "用户表达明确要领取、借用或实际使用某个库存时，可以选择 start_borrow；"
+        "如果只是询问用法、建议、是否有库存或在讨论概念，不要仅因出现“用/借”等词进入流程。"
+        "用户明确表达归还、登记消耗量或登记归还后剩余量时，可以选择 start_return；"
+        "如果数量、对象或动作含义不清，可以澄清或先查询候选，不要强行进入流程。"
+        "用户问库存、还有吗、在哪里时，根据语义选择库存名称、CAS、常用货架、"
+        "个人记录、订单查询或澄清回复；不要被单个关键词固定到某个工具。"
+        "用户问个人相关借用、暂存、待入库或订单时，结合完整语义选择个人记录工具；"
+        "如果同时给出具体化学品或订单对象，可以查询对应对象而不是只按“我的”固定路由。"
+        "库存名称查询的 keyword 应是用于召回候选的搜索词，而不是必须照抄用户原话；"
+        "用户给出位置、取代、衍生物、类似物、不规范写法或宽泛结构描述时，"
+        "优先选择能召回候选的核心名称、主体名称、通用名、英文名或等价别名，"
+        "候选是否符合用户原始限定由系统在查询后再筛选。"
+        "库存、试剂订单、耗材订单的名称搜索默认是包含搜索；"
+        "exact=true 只适合用户明确要求名称完整一致、精确匹配或完全等于某名称的情况。"
+        "对位、邻位、间位、取代、衍生物、类似物、带某基团等化学修饰描述"
+        "更像宽泛筛选或澄清条件，不等同于 exact=true。"
+        "CAS 查询和常用货架查询不需要 exact 参数。"
         "如果用户要求允许工具以外的 MCP 能力，必须用 reply 明确说明暂不支持，"
         "不要编造工具名。"
         "不要把联网搜索规划成直接回复用户的 MCP 工具；网络搜索只能由系统内部"
@@ -903,7 +911,8 @@ def _instructions(search_limit: int) -> str:
         '"quantity_mode":"used或remaining","quantity_value":20,"quantity_unit":"毫升"}}；'
         '{"action":"help"}；'
         '{"action":"reply","reply":"简短中文回复"}。'
-        f"列表查询 limit 默认 {search_limit}，最大 10。"
+        "库存名称搜索会由系统拉取较多候选，最终回复再截断展示。"
+        f"其他列表查询 limit 默认 {search_limit}。"
     )
 
 
@@ -926,12 +935,11 @@ def _common_shelf_decision_instructions() -> str:
         "你判断一个实验室查询词是否值得在常用货架中继续查询。"
         "只输出 JSON object，不输出 Markdown。"
         "系统已经先查过普通库存且没有命中；你只判断是否补查常用货架。"
-        "常用货架通常只包含基础酸、碱、盐和常用溶剂。"
-        "只有查询词明显是实验室非常常用的基础酸碱盐或溶剂时返回 true。"
-        "例如乙醇、甲醇、乙腈、丙酮、二氯甲烷、盐酸、硫酸、氢氧化钠、"
-        "氯化钠、碳酸钠等返回 true。"
-        "很专门的试剂、催化剂、配体、抑制剂、标准品、内标、树脂、"
-        "商品名、牌号名或用途特别窄的材料通常返回 false。"
+        "常用货架倾向保存实验室常备、通用、多人共用或常被别名/简称询问的物品。"
+        "不要只按固定类别判断；如果查询词可能是常备试剂、溶剂、酸碱盐、材料、"
+        "常见别名、英文名或简称，可以返回 true 让系统补查。"
+        "只有当查询词明显不是货架物品、明显是账号/帮助/订单动作、或极可能需要"
+        "个人记录/订单/澄清而非货架查询时，返回 false。"
         '输出格式：{"try_common_shelf":true} 或 {"try_common_shelf":false}。'
     )
 
@@ -940,8 +948,8 @@ def _cas_resolution_instructions() -> str:
     return (
         "你只负责判断搜索结果里的候选 CAS 哪一个对应用户给出的化学名称或别名。"
         "只输出 JSON object，不输出 Markdown。"
-        "遇到缩写、配体、催化剂、膦配体或金属催化剂名称时，要积极从搜索结果中"
-        "识别最匹配的 CAS，但仍只能选择搜索结果里明确支持的候选。"
+        "遇到缩写、名称别名、英文名、商品常用名或不规范写法时，要积极从搜索结果中"
+        "识别最匹配的 CAS；类别不限，但仍只能选择搜索结果里明确支持的候选。"
         "如果候选 CAS 明确对应查询词，返回该 CAS；如果不确定，返回空字符串。"
         "不要臆造候选列表之外的 CAS。"
         '输出格式：{"cas_number":"64-17-5"} 或 {"cas_number":""}。'
@@ -952,8 +960,10 @@ def _cas_knowledge_instructions() -> str:
     return (
         "你只负责用通用化学知识判断用户给出的化学名称或别名是否有明确 CAS。"
         "只输出 JSON object，不输出 Markdown。"
-        "对常见缩写、配体、催化剂、膦配体和金属催化剂名称可以直接给出非常确定的 CAS；"
-        "如果只是大概知道、存在同名商品或歧义，则返回空字符串，交由受限网络搜索辅助。"
+        "只要对某个化学名称、英文名、别名、商品常用名或缩写非常确定，就可以返回 CAS；"
+        "类别不限于常见缩写、配体、催化剂或金属配合物。"
+        "配体、催化剂、膦配体、金属配合物和商品化催化剂经常存在别名或缩写；"
+        "如果不能非常确定，不要猜，返回空字符串，交由受限 CAS 联网搜索辅助。"
         "如果非常确定，返回 CAS；如果不确定、名称有歧义或不是化学品，返回空字符串。"
         "不要解释，不要联网，不要猜测。"
         '输出格式：{"cas_number":"64-17-5"} 或 {"cas_number":""}。'
@@ -965,12 +975,27 @@ def _cas_resolution_decision_instructions() -> str:
         "你只判断是否值得继续为用户查询词寻找 CAS。"
         "只输出 JSON object，不输出 Markdown。"
         "系统已经先查过普通库存和 CAS 主数据，但没有得到可用库存或 CAS。"
-        "如果查询词像化学品、试剂缩写、配体、催化剂、膦配体、金属配合物、"
-        "金属催化剂或实验室常见化学名称，返回 true。"
-        "如果查询词更像系统命令、普通英文单词、账号/登录/帮助/订单/库存动作词、"
-        "人名、地点、品牌泛称或非化学问题，返回 false。"
+        "如果查询词可能是化学品、试剂、材料、名称别名、英文名、商品常用名、"
+        "缩写或不规范写法，倾向返回 true，让系统用受限联网搜索只找 CAS。"
+        "配体、催化剂、膦配体、金属配合物、金属催化剂和商品化催化剂"
+        "更可能需要通过联网确认 CAS，除非明显不是用户要查的实验室物品，否则更应返回 true。"
+        "只有当查询词明显是系统命令、账号/登录/帮助、纯订单或库存动作词、"
+        "普通闲聊、人名、地点、品牌泛称或非化学问题时，返回 false。"
         "不需要给 CAS，也不要解释。"
         '输出格式：{"try_cas_resolution":true} 或 {"try_cas_resolution":false}。'
+    )
+
+
+def _inventory_name_filter_instructions() -> str:
+    return (
+        "你只负责根据用户原始问题，从库存名称搜索候选中选择可能符合条件的记录。"
+        "只输出 JSON object，不输出 Markdown。"
+        "只能依据候选里的名称、英文名和别名判断，不要使用 CAS 或库存数量做化学推断。"
+        "如果用户有对位、邻位、间位、取代、衍生物、类似物等限定，"
+        "优先保留名称上可能符合这些限定的候选；明显不符合的候选不要选。"
+        "如果用户只是普通名称查询，没有额外限定，选择最相关的候选。"
+        "最多选择 10 个，按相关性排序；如果没有可能符合的候选，返回空数组。"
+        '输出格式：{"selected_indices":[1,3]}，索引来自候选的 index 字段。'
     )
 
 
@@ -1019,6 +1044,8 @@ def _reply_polish_instructions() -> str:
         "你只负责把系统已经查询到的安全 facts 改写成自然、简洁的中文回复。"
         "严格只能使用安全 facts 中出现的信息，"
         "不得补充、猜测或编造库存、位置、数量、订单状态、借用人。"
+        "facts_text 是事实来源，不是回复模板；不要照抄 JSON、标题或字段清单，"
+        "不要逐字段展开。"
         "conversation_context 只用于理解当前用户问题和组织措辞，不能作为事实来源。"
         "只有上下文与当前问题有明确具体关联时才参考；"
         "当前问题换了对象或任务时，不要延续旧主题。"
@@ -1026,8 +1053,11 @@ def _reply_polish_instructions() -> str:
         "接口错误详情、用户 ID 或任何内部标识。"
         "不要提到 MCP、API、工具调用、模板、facts 或安全过滤。"
         "如果 facts 表示没有查到，就结合用户问题自然说明没有查到，不要照抄固定话术。"
-        "保留重要事实：名称、英文名、别名、分类、CAS、规格、纯度、数量、位置、"
+        "优先保留用户最关心的事实：名称、别名、CAS、规格、纯度、数量、位置、"
         "状态、借用人、暂存人、申请人、订单状态、备注。"
+        "用户没有明确需要时，省略创建时间、更新时间、分类、英文名等低价值字段，"
+        "让回复更短；如果这些字段能直接回答用户问题或用于区分候选，可以保留。"
+        "即使用户追问，也只能使用安全 facts 中已经出现的信息，不能突破安全边界。"
         "回复 1 到 5 行，中文，纯文本，不使用 Markdown 表格。"
     )
 
@@ -1149,6 +1179,37 @@ def _parse_cas_resolution_decision(text: str) -> bool | None:
         return None
     decision = payload.get("try_cas_resolution")
     return decision if isinstance(decision, bool) else None
+
+
+def _parse_inventory_name_filter_selection(text: str, candidate_count: int) -> list[int] | None:
+    raw = _extract_json_object_text(text)
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    indices = payload.get("selected_indices")
+    if not isinstance(indices, list):
+        return None
+    result: list[int] = []
+    seen: set[int] = set()
+    for item in indices:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, str) and item.strip().isdigit():
+            item = int(item.strip())
+        if not isinstance(item, int):
+            continue
+        if item < 1 or item > candidate_count or item in seen:
+            continue
+        result.append(item)
+        seen.add(item)
+        if len(result) >= 10:
+            break
+    return result
 
 
 def _parse_return_quantity_resolution(text: str) -> dict[str, Any] | None:

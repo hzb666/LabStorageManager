@@ -1,14 +1,12 @@
-# 耗材订单 API 路由：耗材申购流程管理。
-# 与试剂订单分离（耗材无需入库流程）。
 import logging
 import time
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Annotated, Optional, Dict, Any
+from datetime import datetime, timedelta
+from typing import Annotated, Any, Collection, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlmodel import Session, select, func, delete
+from sqlalchemy import and_, or_
+from sqlmodel import Session, delete, func, select, update as sql_update
 
 from app.database import DBSession
 from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
@@ -34,12 +32,8 @@ from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     TextMatchMode,
     build_applicant_id_subquery,
-    build_date_search_clause,
-    build_text_search_clause,
-    collect_search_fields,
-    combine_or_clauses,
 )
-from app.services.sql_utils import normalize_search_term, order_with_nulls_last
+from app.services.sql_utils import order_with_nulls_last
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
@@ -47,20 +41,27 @@ from app.services.api_utils import (
     normalize_pagination,
     set_cached_result,
 )
-from app.services.order_fts import (
-    OrderFTSError,
-    build_order_fts_id_clause,
-    build_order_fts_rowid_subquery,
-    should_use_order_fts,
+from app.services.order_list_search import (
+    OrderListSearchConfig,
+    apply_order_list_single_field_search,
+    build_order_list_all_search_clause,
+    build_order_list_fts_state,
+    normalize_order_list_search_value,
 )
 from app.services.sse_manager import sse_manager
+from app.services.export_rate_limit import EXPORT_SCOPE_CONSUMABLE_ORDERS, enforce_export_rate_limit
 from app.services.order_operation_logger import (
     log_consumable_order_approve,
     log_consumable_order_arrival_complete,
     log_consumable_order_create,
     log_consumable_order_delete,
+    log_consumable_order_export,
     log_consumable_order_reject,
     log_consumable_order_update,
+)
+from app.services.order_status_times import (
+    get_consumable_order_status_times,
+    get_order_status_time_fields,
 )
 from app.services.search_query_log_service import (
     buffer_search_log,
@@ -71,13 +72,44 @@ from app.services.search_query_log_service import (
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 logger = logging.getLogger(__name__)
 
-# ==================== Search Cache ====================
+# ==================== 搜索缓存 ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
 DELETE_ORDER_FORBIDDEN_DETAIL = "Only the order applicant or admin can delete this order"
 DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL = "Public account cannot delete orders"
+DELETE_APPROVED_ORDER_FORBIDDEN_DETAIL = "Approved or completed consumable orders cannot be deleted"
+CONSUMABLE_ORDER_DELETE_LOCKED_STATUSES = frozenset(
+    {
+        ConsumableOrderStatus.APPROVED,
+        ConsumableOrderStatus.COMPLETED,
+    }
+)
+CONSUMABLE_ORDER_REJECTABLE_STATUSES = frozenset(
+    {
+        ConsumableOrderStatus.PENDING,
+        ConsumableOrderStatus.APPROVED,
+    }
+)
+CONSUMABLE_ORDER_APPROVABLE_STATUSES = frozenset(
+    {
+        ConsumableOrderStatus.PENDING,
+        ConsumableOrderStatus.REJECTED,
+    }
+)
+CONSUMABLE_ORDER_EDITABLE_STATUSES = frozenset(
+    {ConsumableOrderStatus.PENDING, ConsumableOrderStatus.REJECTED}
+)
+CONSUMABLE_ORDER_ADMIN_EDITABLE_STATUSES = frozenset(
+    {*CONSUMABLE_ORDER_EDITABLE_STATUSES, ConsumableOrderStatus.APPROVED}
+)
+DASHBOARD_ACTIVE_REJECTED_DAYS = 7
+DASHBOARD_CONSUMABLE_STATUSES = (
+    ConsumableOrderStatus.PENDING,
+    ConsumableOrderStatus.APPROVED,
+    ConsumableOrderStatus.REJECTED,
+)
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
 VALID_CONSUMABLE_SORT_FIELDS = {
@@ -105,26 +137,15 @@ CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP = {
     'specification': ["specification"],
     'communication': ["communication"],
 }
-
-
-@dataclass(frozen=True)
-class ConsumableOrderFTSState:
-    # 封装耗材订单 FTS 构建结果，减少筛选主流程的分支数量。
-
-    fts_clause: Any
-    fts_rowid_subquery: Any
-
-
-@dataclass(frozen=True)
-class ConsumableOrderSingleFieldSearchOptions:
-    # 封装耗材订单单字段搜索参数，避免 helper 参数过多。
-
-    search_field: Optional[str]
-    search_value: str
-    fuzzy: bool
-    match_mode: TextMatchMode
-    applicant_id_subquery: Any
-    fts_clause: Any
+CONSUMABLE_ORDER_SEARCH_CONFIG = OrderListSearchConfig(
+    id_column=ConsumableOrder.id,
+    applicant_id_column=ConsumableOrder.applicant_id,
+    created_at_column=ConsumableOrder.created_at,
+    sql_field_map=CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP,
+    fts_field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
+    applicant_search_keys=frozenset(APPLICANT_SEARCH_KEYS),
+    cas_search_keys=frozenset(),
+)
 
 
 class ConsumableOrderListQuery(BaseModel):
@@ -141,180 +162,135 @@ class ConsumableOrderListQuery(BaseModel):
     sort_order: Optional[str] = "desc"
 
 
+def _consumable_status_value(value: ConsumableOrderStatus) -> str:
+    return value.value if hasattr(value, "value") else str(value)
+
+
+def _claim_consumable_order_status_transition(
+    db: Session,
+    *,
+    order_id: int,
+    expected_status: ConsumableOrderStatus,
+    target_status: ConsumableOrderStatus,
+) -> None:
+    _claim_consumable_order_status_transition_from(
+        db,
+        order_id=order_id,
+        expected_statuses=(expected_status,),
+        target_status=target_status,
+    )
+
+
+def _claim_consumable_order_status_transition_from(
+    db: Session,
+    *,
+    order_id: int,
+    expected_statuses: Collection[ConsumableOrderStatus],
+    target_status: ConsumableOrderStatus,
+) -> None:
+    expected_status_values = tuple(expected_statuses)
+    if not expected_status_values:
+        raise ValueError("expected_statuses cannot be empty")
+    status_clause = (
+        ConsumableOrder.status == expected_status_values[0]
+        if len(expected_status_values) == 1
+        else ConsumableOrder.status.in_(expected_status_values)
+    )
+    result = db.exec(
+        sql_update(ConsumableOrder)
+        .where(ConsumableOrder.id == order_id)
+        .where(status_clause)
+        .values(status=target_status, updated_at=get_utc_now())
+    )
+    if result.rowcount != 0:
+        return
+
+    latest_status = db.exec(select(ConsumableOrder.status).where(ConsumableOrder.id == order_id)).first()
+    if latest_status is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "Order status already changed to "
+            f"{_consumable_status_value(latest_status)}, please refresh and retry"
+        ),
+    )
+
+
 def _delete_consumable_order_with_permission(
     db: Session,
     *,
     order_id: int,
     current_user: CurrentUser,
 ) -> ConsumableOrder:
-    # Atomic delete avoids check-then-delete races; explicit existence check preserves 404/403 semantics.
+    # 原子删除消除先查后删竞争；未删到时再区分 404/403。
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=DELETE_ORDER_PUBLIC_FORBIDDEN_DETAIL,
         )
 
-    delete_stmt = delete(ConsumableOrder).where(ConsumableOrder.id == order_id)
+    delete_stmt = (
+        delete(ConsumableOrder)
+        .where(ConsumableOrder.id == order_id)
+        .where(~ConsumableOrder.status.in_(CONSUMABLE_ORDER_DELETE_LOCKED_STATUSES))
+    )
     if current_user.role != UserRole.ADMIN:
         delete_stmt = delete_stmt.where(ConsumableOrder.applicant_id == current_user.id)
     deleted_item = exec_delete_returning_first(db, delete_stmt, ConsumableOrder)
     if deleted_item is not None:
         return deleted_item
 
-    order_exists = db.exec(select(ConsumableOrder.id).where(ConsumableOrder.id == order_id)).first()
-    if order_exists is None:
+    existing_order = get_consumable_order_by_id(db, order_id)
+    if existing_order is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+    if existing_order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=DELETE_ORDER_FORBIDDEN_DETAIL,
+        )
+    _ensure_consumable_order_deletable(existing_order)
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=DELETE_ORDER_FORBIDDEN_DETAIL,
     )
 
 
+def _ensure_consumable_order_deletable(order: ConsumableOrder) -> None:
+    if order.status in CONSUMABLE_ORDER_DELETE_LOCKED_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=DELETE_APPROVED_ORDER_FORBIDDEN_DETAIL,
+        )
+
+
+def _ensure_consumable_order_rejectable(order: ConsumableOrder) -> None:
+    if order.status not in CONSUMABLE_ORDER_REJECTABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot reject order with status: {order.status}",
+        )
+
+
 def _add_specification(item_dict: dict) -> dict:
     # 补充 specification 展示字段。
-    # specification 为用户直接输入的完整规格字符串，无需拼接。
-    # specification 字段已包含在 model_dump 中，无需额外处理
+    # specification 为用户直接输入的完整规格字符串，model_dump 已包含该字段。
     return item_dict
 
 
 def _serialize_consumable_order(order: ConsumableOrder, db: Session) -> dict[str, Any]:
     users_map = batch_get_user_names(db, {order.applicant_id} if order.applicant_id else set())
+    status_times = get_consumable_order_status_times(db, [order])
     return _add_specification({
         **ConsumableOrderResponse.model_validate(order).model_dump(mode="json"),
+        **get_order_status_time_fields(status_times, order),
         "applicant_name": users_map.get(order.applicant_id, ""),
     })
 
 
 def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[ConsumableOrder]:
-    # Get consumable order by ID
+    # 按 ID 获取耗材订单。
     return db.get(ConsumableOrder, order_id)
-
-
-def _normalize_order_search_value(search: Optional[str], *, fuzzy: bool) -> Optional[str]:
-    # 标准化耗材订单搜索词，统一 fuzzy 与空输入处理。
-
-    if not search:
-        return None
-    raw_search = search.strip()
-    if not raw_search:
-        return None
-    if fuzzy:
-        return normalize_search_term(raw_search)
-    return raw_search
-
-
-def _build_consumable_order_fts_state(
-    *,
-    search_value: str,
-    search_field: Optional[str],
-    fuzzy: bool,
-    match_mode: TextMatchMode,
-) -> ConsumableOrderFTSState:
-    # 构建耗材订单 FTS 条件，失败时返回空状态并回退 SQL LIKE。
-
-    use_fts = (
-        match_mode == TextMatchMode.CONTAINS
-        and (not fuzzy)
-        and should_use_order_fts(search_value)
-    )
-    if not use_fts:
-        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-    try:
-        return ConsumableOrderFTSState(
-            fts_clause=build_order_fts_id_clause(
-                ConsumableOrder.id,
-                fts_table="consumable_order_fts",
-                search_value=search_value,
-                search_field=search_field,
-                field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
-            ),
-            fts_rowid_subquery=build_order_fts_rowid_subquery(
-                fts_table="consumable_order_fts",
-                search_value=search_value,
-                search_field='all',
-                field_map=CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP,
-            ),
-        )
-    except OrderFTSError:
-        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Consumable order FTS fallback to SQL LIKE due to runtime error: %s",
-            exc,
-        )
-        return ConsumableOrderFTSState(fts_clause=None, fts_rowid_subquery=None)
-
-
-def _apply_consumable_order_single_field_search(
-    base,
-    *,
-    options: ConsumableOrderSingleFieldSearchOptions,
-):
-    # 处理耗材订单单字段搜索，按 applicant/date/fts/like 分支执行。
-
-    filtered = base
-    matched = True
-    search_field = options.search_field
-    if search_field in APPLICANT_SEARCH_KEYS:
-        filtered = base.where(ConsumableOrder.applicant_id.in_(options.applicant_id_subquery))
-    elif search_field == 'created_at':
-        filtered = base.where(build_date_search_clause(ConsumableOrder.created_at, options.search_value))
-    elif options.fts_clause is not None and search_field in CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP:
-        filtered = base.where(options.fts_clause)
-    elif search_field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP:
-        filtered = base.where(
-            combine_or_clauses(
-                build_text_search_clause(
-                    field,
-                    options.search_value,
-                    fuzzy=options.fuzzy,
-                    match_mode=options.match_mode,
-                )
-                for field in CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP[search_field]
-            )
-        )
-    else:
-        matched = False
-    return filtered, matched
-
-
-def _build_consumable_order_all_search_clause(
-    *,
-    search_value: str,
-    fuzzy: bool,
-    match_mode: TextMatchMode,
-    applicant_id_subquery,
-    fts_rowid_subquery,
-):
-    # 构建耗材订单 ALL 搜索条件，保留 applicant/date/fts/like 召回但避免多路 UNION。
-
-    all_clauses = [
-        ConsumableOrder.applicant_id.in_(applicant_id_subquery),
-        build_date_search_clause(ConsumableOrder.created_at, search_value),
-    ]
-
-    if fts_rowid_subquery is not None:
-        all_clauses.append(
-            ConsumableOrder.id.in_(fts_rowid_subquery)
-        )
-    else:
-        text_fields = collect_search_fields(
-            CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP,
-            exclude_keys={'created_at'},
-        )
-        if text_fields:
-            all_clauses.append(
-                combine_or_clauses(
-                    build_text_search_clause(
-                        field,
-                        search_value,
-                        fuzzy=fuzzy,
-                        match_mode=match_mode,
-                    )
-                    for field in text_fields
-                )
-            )
-    return combine_or_clauses(all_clauses)
 
 
 def _apply_consumable_order_filters(
@@ -330,7 +306,7 @@ def _apply_consumable_order_filters(
     if status_filter:
         base = base.where(ConsumableOrder.status == status_filter)
 
-    search_value = _normalize_order_search_value(search, fuzzy=fuzzy)
+    search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
     if not search_value:
         return base
 
@@ -339,29 +315,34 @@ def _apply_consumable_order_filters(
         fuzzy=fuzzy,
         match_mode=match_mode,
     )
-    fts_state = _build_consumable_order_fts_state(
+    fts_state = build_order_list_fts_state(
+        config=CONSUMABLE_ORDER_SEARCH_CONFIG,
+        fts_table="consumable_order_fts",
         search_value=search_value,
         search_field=search_field,
         fuzzy=fuzzy,
         match_mode=match_mode,
+        allow_fts=True,
+        logger=logger,
+        log_label="Consumable order",
     )
 
     if search_field and search_field != 'all':
-        single_field_filtered, matched = _apply_consumable_order_single_field_search(
+        single_field_filtered, matched = apply_order_list_single_field_search(
             base,
-            options=ConsumableOrderSingleFieldSearchOptions(
-                search_field=search_field,
-                search_value=search_value,
-                fuzzy=fuzzy,
-                match_mode=match_mode,
-                applicant_id_subquery=applicant_id_subquery,
-                fts_clause=fts_state.fts_clause,
-            ),
+            config=CONSUMABLE_ORDER_SEARCH_CONFIG,
+            search_field=search_field,
+            search_value=search_value,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+            applicant_id_subquery=applicant_id_subquery,
+            fts_clause=fts_state.fts_clause,
         )
         if matched:
             return single_field_filtered
 
-    all_search_clause = _build_consumable_order_all_search_clause(
+    all_search_clause = build_order_list_all_search_clause(
+        config=CONSUMABLE_ORDER_SEARCH_CONFIG,
         search_value=search_value,
         fuzzy=fuzzy,
         match_mode=match_mode,
@@ -380,7 +361,7 @@ async def create_consumable_order(
     current_user: CurrentUser,
     db: DBSession,
 ):
-    # Create a new consumable order
+    # 创建耗材订单。
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
@@ -533,13 +514,18 @@ def list_consumable_orders(
     else:
         orders = []
 
-    # Enrich with applicant names
+    # 补充申请人姓名。
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     users_map = batch_get_user_names(db, applicant_ids)
+    status_times = get_consumable_order_status_times(db, orders)
 
     result = {
         "data": [
-            _add_specification({**ConsumableOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")})
+            _add_specification({
+                **ConsumableOrderResponse.model_validate(o).model_dump(),
+                **get_order_status_time_fields(status_times, o),
+                "applicant_name": users_map.get(o.applicant_id, ""),
+            })
             for o in orders
         ],
         "total": total,
@@ -577,13 +563,16 @@ def list_consumable_orders(
     return result
 
 
-# --- Export ---
+# 导出接口。
 
 @router.get("/export", dependencies=[Depends(require_admin)])
 def export_consumable_orders(
+    request: Request,
     db: DBSession,
+    current_user: CurrentUser,
 ):
-    # Export consumable orders as a downloadable XLSX file.
+    enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_CONSUMABLE_ORDERS)
+    # 导出耗材订单 XLSX 文件。
     from app.services.xlsx_export import export_consumable_orders_xlsx
 
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
@@ -593,7 +582,15 @@ def export_consumable_orders(
     all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    return export_consumable_orders_xlsx(orders, all_users_map)
+    response = export_consumable_orders_xlsx(orders, all_users_map)
+    log_consumable_order_export(
+        db,
+        exported_count=len(orders),
+        actor_user_id=current_user.id,
+        is_cli=get_request_is_cli(request),
+    )
+    db.commit()
+    return response
 
 
 @router.get("/{order_id}", response_model=ConsumableOrderResponse, dependencies=[Depends(get_current_user)])
@@ -601,14 +598,14 @@ def get_consumable_order(
     order_id: int,
     db: DBSession,
 ):
-    # Get consumable order by ID
+    # 按 ID 获取耗材订单。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ORDER_NOT_FOUND
         )
-    return order
+    return _serialize_consumable_order(order, db)
 
 
 @router.put("/{order_id}", response_model=ConsumableOrderResponse)
@@ -619,7 +616,7 @@ async def update_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Update consumable order information
+    # 更新耗材订单信息。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -639,13 +636,15 @@ async def update_consumable_order(
             detail="Only the order applicant or admin can update this order"
         )
 
-    if current_user.role != UserRole.ADMIN and order.status in (
-        ConsumableOrderStatus.APPROVED,
-        ConsumableOrderStatus.REJECTED,
-    ):
+    editable_statuses = (
+        CONSUMABLE_ORDER_ADMIN_EDITABLE_STATUSES
+        if current_user.role == UserRole.ADMIN
+        else CONSUMABLE_ORDER_EDITABLE_STATUSES
+    )
+    if order.status not in editable_statuses:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Approved or rejected orders can only be deleted by non-admin users"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending, rejected, or admin-approved orders can be edited"
         )
 
     before_order = ConsumableOrder.model_validate(order)
@@ -664,16 +663,22 @@ async def update_consumable_order(
         if field in update_data:
             update_data[field] = normalized_strings[field]
     
-    # 如果更新了 name，重新计算拼音字段（只保留 name_pinyin）
+    # name 更新后重新计算拼音字段（当前写入 name_pinyin）。
     if "name" in update_data:
         name = update_data.get("name")
         pinyin_fields = compute_pinyin_fields(name=name)
-        # ConsumableOrder 保留名称的拼音搜索字段
+        # ConsumableOrder 写入名称拼音搜索字段。
         update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
         update_data['name_pinyin_initials'] = pinyin_fields.get('name_pinyin_initials')
-    
+    should_resubmit = order.status in {
+        ConsumableOrderStatus.APPROVED,
+        ConsumableOrderStatus.REJECTED,
+    }
+
     for field, value in update_data.items():
         setattr(order, field, value)
+    if should_resubmit:
+        order.status = ConsumableOrderStatus.PENDING
 
     log_consumable_order_update(
         db,
@@ -693,7 +698,7 @@ async def update_consumable_order(
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
     )
     
-    return order
+    return _serialize_consumable_order(order, db)
 
 
 @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
@@ -703,7 +708,7 @@ async def approve_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Approve a consumable order (Admin only)
+    # 管理员审批通过耗材订单。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -711,13 +716,19 @@ async def approve_consumable_order(
             detail=ORDER_NOT_FOUND
         )
     
-    if order.status != ConsumableOrderStatus.PENDING:
+    if order.status not in CONSUMABLE_ORDER_APPROVABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot approve order with status: {order.status}"
         )
-    
+
     before_order = ConsumableOrder.model_validate(order)
+    _claim_consumable_order_status_transition_from(
+        db,
+        order_id=order_id,
+        expected_statuses=CONSUMABLE_ORDER_APPROVABLE_STATUSES,
+        target_status=ConsumableOrderStatus.APPROVED,
+    )
     order.status = ConsumableOrderStatus.APPROVED
     log_consumable_order_approve(
         db,
@@ -746,15 +757,22 @@ async def reject_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Reject a consumable order (Admin only). Does not modify notes.
+    # 管理员驳回耗材订单，备注不随状态流转改写。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ORDER_NOT_FOUND
         )
-    
+
+    _ensure_consumable_order_rejectable(order)
     before_order = ConsumableOrder.model_validate(order)
+    _claim_consumable_order_status_transition_from(
+        db,
+        order_id=order_id,
+        expected_statuses=CONSUMABLE_ORDER_REJECTABLE_STATUSES,
+        target_status=ConsumableOrderStatus.REJECTED,
+    )
     order.status = ConsumableOrderStatus.REJECTED
     log_consumable_order_reject(
         db,
@@ -792,7 +810,7 @@ async def complete_consumable_order(
             detail=ORDER_NOT_FOUND
         )
     
-    # Check if user is the applicant or admin
+    # 仅申请人或管理员可完成订单。
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -804,9 +822,15 @@ async def complete_consumable_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot complete order with status: {order.status}. Order must be APPROVED first."
         )
-    
+
     before_order = ConsumableOrder.model_validate(order)
-    # Consumables complete directly (no stock-in)
+    _claim_consumable_order_status_transition(
+        db,
+        order_id=order_id,
+        expected_status=ConsumableOrderStatus.APPROVED,
+        target_status=ConsumableOrderStatus.COMPLETED,
+    )
+    # 耗材订单完成后直接结束，无入库步骤。
     order.status = ConsumableOrderStatus.COMPLETED
     log_consumable_order_arrival_complete(
         db,
@@ -832,58 +856,102 @@ async def complete_consumable_order(
     }
 
 
-@router.get("/dashboard/my-consumable-orders")
-def get_my_consumable_orders(
-    current_user: CurrentUser,
-    db: DBSession,
-):
-    # Get current user's consumable order progress
-    dashboard_statuses = [
-        ConsumableOrderStatus.PENDING,
-        ConsumableOrderStatus.APPROVED,
-        ConsumableOrderStatus.REJECTED,
-    ]
-    statement = select(ConsumableOrder).where(
-        ConsumableOrder.applicant_id == current_user.id,
-        ConsumableOrder.status.in_(dashboard_statuses),
-    ).order_by(ConsumableOrder.created_at.desc())
-    
-    orders = db.exec(statement).all()
-    
-    status_labels = {
-        ConsumableOrderStatus.PENDING.value: "已申购",
-        ConsumableOrderStatus.APPROVED.value: "已批准",
-        ConsumableOrderStatus.REJECTED.value: "未通过",
-    }
+def _build_consumable_dashboard_groups(
+    orders: list[ConsumableOrder],
+    users_map: dict[int, str],
+    status_times,
+) -> dict[str, dict[str, Any]]:
     grouped_orders: dict[str, dict[str, Any]] = {
-        status.value: {"orders": [], "count": 0, "label": status_labels[status.value]}
-        for status in dashboard_statuses
+        status.value: {
+            "status": status.value,
+            "orders": [],
+            "count": 0,
+        }
+        for status in DASHBOARD_CONSUMABLE_STATUSES
     }
-    
+
     for order in orders:
         order_data = {
             "order_id": order.id,
             "name": order.name,
             "english_name": order.english_name,
             "specification": getattr(order, 'specification', '') or '',
+            "unit": order.unit,
             "quantity": order.quantity,
             "price": order.price,
+            "communication": order.communication,
             "notes": order.notes,
+            "applicant_id": order.applicant_id,
+            "applicant_name": users_map.get(order.applicant_id) if order.applicant_id else "",
             "created_at": utc_iso_str(order.created_at),
-            "updated_at": utc_iso_str(order.updated_at)
+            "updated_at": utc_iso_str(order.updated_at),
+            **{
+                key: utc_iso_str(value)
+                for key, value in get_order_status_time_fields(status_times, order).items()
+            },
         }
-        
+
         status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
         if status_key not in grouped_orders:
-            grouped_orders[status_key] = {"orders": [], "count": 0, "label": status_key}
+            grouped_orders[status_key] = {"status": status_key, "orders": [], "count": 0}
         grouped_orders[status_key]["orders"].append(order_data)
 
     for key in grouped_orders:
         grouped_orders[key]["count"] = len(grouped_orders[key]["orders"])
-    
+
+    return grouped_orders
+
+
+def _admin_consumable_dashboard_clause(cutoff):
+    return or_(
+        ConsumableOrder.status.in_(
+            [ConsumableOrderStatus.PENDING, ConsumableOrderStatus.APPROVED]
+        ),
+        and_(
+            ConsumableOrder.status == ConsumableOrderStatus.REJECTED,
+            ConsumableOrder.updated_at >= cutoff,
+        ),
+    )
+
+
+@router.get("/dashboard/my-consumable-orders")
+def get_my_consumable_orders(
+    current_user: CurrentUser,
+    db: DBSession,
+):
+    # 获取当前用户耗材订单进度。
+    statement = select(ConsumableOrder).where(
+        ConsumableOrder.applicant_id == current_user.id,
+        ConsumableOrder.status.in_(DASHBOARD_CONSUMABLE_STATUSES),
+    ).order_by(ConsumableOrder.created_at.desc())
+
+    orders = db.exec(statement).all()
+    users_map = {current_user.id: current_user.full_name}
+    status_times = get_consumable_order_status_times(db, orders)
+
     return {
-        "data": grouped_orders,
+        "data": _build_consumable_dashboard_groups(orders, users_map, status_times),
         "total": len(orders)
+    }
+
+
+@router.get("/dashboard/admin/consumable-orders", dependencies=[Depends(require_admin)])
+def get_admin_consumable_orders(db: DBSession):
+    cutoff = get_utc_now() - timedelta(days=DASHBOARD_ACTIVE_REJECTED_DAYS)
+    statement = (
+        select(ConsumableOrder)
+        .where(_admin_consumable_dashboard_clause(cutoff))
+        .order_by(ConsumableOrder.created_at.desc())
+    )
+
+    orders = db.exec(statement).all()
+    applicant_ids = {order.applicant_id for order in orders if order.applicant_id}
+    users_map = batch_get_user_names(db, applicant_ids)
+    status_times = get_consumable_order_status_times(db, orders)
+
+    return {
+        "data": _build_consumable_dashboard_groups(orders, users_map, status_times),
+        "total": len(orders),
     }
 
 
@@ -894,7 +962,7 @@ async def delete_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Delete a consumable order (only applicant or admin can delete).
+    # 删除耗材订单，仅申请人或管理员可执行。
     order = _delete_consumable_order_with_permission(
         db,
         order_id=order_id,

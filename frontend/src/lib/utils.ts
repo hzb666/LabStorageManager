@@ -3,9 +3,138 @@ import type { AxiosResponse } from 'axios'
 import { twMerge } from "tailwind-merge"
 import { buildBackendUrl } from "./apiConfig"
 import { inputConfigs } from "./inputConfigs"
+import { getStoredDisplayUtcOffset } from './runtimeTimeConfig'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+const localFilenameDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
+const DEFAULT_DISPLAY_UTC_OFFSET = '+08:00'
+const DAY_IN_MS = 24 * 60 * 60 * 1000
+
+function getDateTimeParts(date: Date, formatter: Intl.DateTimeFormat) {
+  const parts = formatter.formatToParts(date)
+  const getPart = (type: Intl.DateTimeFormatPartTypes) => (
+    parts.find(part => part.type === type)?.value ?? ''
+  )
+
+  return {
+    year: getPart('year'),
+    month: getPart('month'),
+    day: getPart('day'),
+    hour: getPart('hour'),
+    minute: getPart('minute'),
+    second: getPart('second'),
+  }
+}
+
+function getUtcOffsetLabel(date: Date): string {
+  const offsetMinutes = -date.getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const absoluteMinutes = Math.abs(offsetMinutes)
+  const hours = String(Math.floor(absoluteMinutes / 60)).padStart(2, '0')
+  const minutes = String(absoluteMinutes % 60).padStart(2, '0')
+
+  return `UTC${sign}${hours}:${minutes}`
+}
+
+function normalizeUtcOffset(offsetText: string): string {
+  const trimmed = offsetText.trim()
+  if (!trimmed) {
+    throw new Error('UTC offset is required')
+  }
+
+  const sign = trimmed[0]
+  if (sign !== '+' && sign !== '-') {
+    throw new Error('UTC offset must start with + or -')
+  }
+
+  const body = trimmed.slice(1)
+  const [hoursRaw, minutesRaw = '00'] = body.includes(':')
+    ? body.split(':', 2)
+    : [body, '00']
+
+  if (!/^\d{1,2}$/.test(hoursRaw) || !/^\d{1,2}$/.test(minutesRaw)) {
+    throw new Error('UTC offset must use digits like +8 or +08:00')
+  }
+
+  const hours = Number(hoursRaw)
+  const minutes = Number(minutesRaw)
+  if (hours > 14 || minutes >= 60 || (hours === 14 && minutes !== 0)) {
+    throw new Error('UTC offset must be within UTC-14:00 to UTC+14:00')
+  }
+
+  return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+export function formatUtcOffsetLabel(offsetText: string): string {
+  return `UTC${normalizeUtcOffset(offsetText)}`
+}
+
+function getUtcOffsetMinutes(offsetText: string): number {
+  const normalized = normalizeUtcOffset(offsetText)
+  const sign = normalized.startsWith('+') ? 1 : -1
+  const [hoursText, minutesText] = normalized.slice(1).split(':', 2)
+  return sign * (Number(hoursText) * 60 + Number(minutesText))
+}
+
+function getUtcShiftedDate(date: string | Date, offsetText: string): Date {
+  const sourceDate = new Date(date)
+  return new Date(sourceDate.getTime() + getUtcOffsetMinutes(offsetText) * 60_000)
+}
+
+function getUtcDateParts(date: Date) {
+  return {
+    year: String(date.getUTCFullYear()),
+    month: String(date.getUTCMonth() + 1).padStart(2, '0'),
+    day: String(date.getUTCDate()).padStart(2, '0'),
+    hour: String(date.getUTCHours()).padStart(2, '0'),
+    minute: String(date.getUTCMinutes()).padStart(2, '0'),
+    second: String(date.getUTCSeconds()).padStart(2, '0'),
+  }
+}
+
+function getDisplayUtcOffsetMinutes(): number {
+  try {
+    return getUtcOffsetMinutes(getStoredDisplayUtcOffset() ?? DEFAULT_DISPLAY_UTC_OFFSET)
+  } catch {
+    return getUtcOffsetMinutes(DEFAULT_DISPLAY_UTC_OFFSET)
+  }
+}
+
+function getDisplayShiftedDate(date: string | Date): Date | null {
+  const sourceDate = new Date(date)
+  if (Number.isNaN(sourceDate.getTime())) {
+    return null
+  }
+  return new Date(sourceDate.getTime() + getDisplayUtcOffsetMinutes() * 60_000)
+}
+
+function getDisplayDateParts(date: string | Date) {
+  const shiftedDate = getDisplayShiftedDate(date)
+  return shiftedDate ? getUtcDateParts(shiftedDate) : null
+}
+
+function getDisplayDateIndex(date: string | Date): number | null {
+  const parts = getDisplayDateParts(date)
+  if (!parts) {
+    return null
+  }
+
+  return Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+  ) / DAY_IN_MS
 }
 
 export function formatDate(date: string | Date): string {
@@ -13,8 +142,33 @@ export function formatDate(date: string | Date): string {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    timeZone: 'Asia/Shanghai',
   })
+}
+
+export function formatDisplayDate(date: string | Date): string {
+  const parts = getDisplayDateParts(date)
+  if (!parts) {
+    return formatDate(date)
+  }
+  return `${parts.year}/${parts.month}/${parts.day}`
+}
+
+export function formatDisplayDateTime(date: string | Date): string {
+  const parts = getDisplayDateParts(date)
+  if (!parts) {
+    return formatDateTime(date)
+  }
+  return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`
+}
+
+export function isAtLeastDisplayNaturalDaysOld(
+  date: string | Date,
+  days: number,
+  now: string | Date = new Date(),
+): boolean {
+  const targetDay = getDisplayDateIndex(date)
+  const currentDay = getDisplayDateIndex(now)
+  return targetDay !== null && currentDay !== null && currentDay - targetDay >= days
 }
 
 export function formatDateTime(date: string | Date): string {
@@ -24,8 +178,88 @@ export function formatDateTime(date: string | Date): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: 'Asia/Shanghai',
+    hour12: false,
   })
+}
+
+function formatLocalDateTimeValue(date: string | Date, withSeconds: boolean): string {
+  return new Date(date).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' as const } : {}),
+    hour12: false,
+  })
+}
+
+export function formatDateTimeWithSeconds(date: string | Date): string {
+  return formatLocalDateTimeValue(date, true)
+}
+
+export function formatLocalDateTimeWithSeconds(date: string | Date): string {
+  return formatLocalDateTimeValue(date, true)
+}
+
+export function getLocalTimeZoneLabel(date: string | Date = new Date()): string {
+  const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const offsetLabel = getUtcOffsetLabel(new Date(date))
+
+  return resolvedTimeZone ? `${resolvedTimeZone} (${offsetLabel})` : offsetLabel
+}
+
+export function formatLocalDateTimeForFilename(date = new Date()): string {
+  const { year, month, day, hour, minute, second } = getDateTimeParts(
+    date,
+    localFilenameDateTimeFormatter,
+  )
+  return `${year}-${month}-${day}_${hour}-${minute}-${second}`
+}
+
+export function formatUtcOffsetDateTimeWithSeconds(
+  date: string | Date,
+  offsetText: string,
+): string {
+  const shiftedDate = getUtcShiftedDate(date, offsetText)
+  const { year, month, day, hour, minute, second } = getUtcDateParts(shiftedDate)
+  return `${year}/${month}/${day} ${hour}:${minute}:${second}`
+}
+
+export function formatUtcOffsetDateTimeForFilename(
+  date: string | Date,
+  offsetText: string,
+): string {
+  const shiftedDate = getUtcShiftedDate(date, offsetText)
+  const { year, month, day, hour, minute, second } = getUtcDateParts(shiftedDate)
+  return `${year}-${month}-${day}_${hour}-${minute}-${second}`
+}
+
+export function formatDisplayDateForFilename(date = new Date()): string {
+  const displayUtcOffset = getStoredDisplayUtcOffset()
+  if (displayUtcOffset) {
+    return formatUtcOffsetDateTimeForFilename(date, displayUtcOffset).slice(0, 10)
+  }
+
+  const { year, month, day } = getDateTimeParts(date, localFilenameDateTimeFormatter)
+  return `${year}-${month}-${day}`
+}
+
+export function formatDisplayDateTimeForFilename(date = new Date()): string {
+  const displayUtcOffset = getStoredDisplayUtcOffset()
+  if (displayUtcOffset) {
+    return formatUtcOffsetDateTimeForFilename(date, displayUtcOffset)
+  }
+
+  return formatLocalDateTimeForFilename(date)
+}
+
+export function formatChinaDateForFilename(date = new Date()): string {
+  return formatDisplayDateForFilename(date)
+}
+
+export function formatChinaDateTimeForFilename(date = new Date()): string {
+  return formatDisplayDateTimeForFilename(date)
 }
 
 export function truncate(str: string, length: number): string {
@@ -38,7 +272,7 @@ export function getAllTags(): string[] {
   return Object.keys(inputConfigs)
 }
 
-// 备注保留标签前缀，只移除空标签。
+// 备注标签前缀随内容返回，空标签会被移除。
 export function processNotes(notes: string | undefined): string {
   if (!notes) return ''
 

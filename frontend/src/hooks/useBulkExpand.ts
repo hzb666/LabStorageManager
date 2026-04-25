@@ -1,5 +1,5 @@
 /** 批量展开/折叠动画 Hook。 */
-import { useRef, useCallback, useState, useEffect } from 'react'
+import { useRef, useCallback, useState, useEffect, useLayoutEffect } from 'react'
 import type { Table as TableType, Row } from '@tanstack/react-table'
 import type { Virtualizer } from '@tanstack/react-virtual'
 
@@ -13,6 +13,7 @@ interface UseBulkExpandOptions<TData> {
   rows: Row<TData>[]
   enableExpandAll: boolean
   isAllExpanded: boolean
+  disableBulkExpandAnimation?: boolean
   bodyScrollRef: React.RefObject<HTMLDivElement | null>
 }
 
@@ -61,6 +62,7 @@ export function useBulkExpand<TData>({
   rows,
   enableExpandAll,
   isAllExpanded,
+  disableBulkExpandAnimation,
   bodyScrollRef,
 }: UseBulkExpandOptions<TData>) {
   const [isBulkAnimating, setIsBulkAnimating] = useState(false)
@@ -146,7 +148,7 @@ export function useBulkExpand<TData>({
   }, [rows, bodyScrollRef])
 
   // 批量展开/折叠 effect
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!enableExpandAll) return
 
     if (!hasMountedExpandAllRef.current) {
@@ -169,6 +171,20 @@ export function useBulkExpand<TData>({
     bulkExpandedSnapshotRef.current = new Set(
       rows.filter((row) => row.getIsExpanded()).map((row) => row.id)
     )
+
+    if (disableBulkExpandAnimation) {
+      table.toggleAllRowsExpanded(isAllExpanded)
+      bulkExpandedSnapshotRef.current = null
+      requestAnimationFrame(() => {
+        virtualizerRef.current?.measure()
+        requestAnimationFrame(() => {
+          virtualizerRef.current?.measure()
+          restoreBulkAnchor(bulkAnchorRef.current)
+          bulkAnchorRef.current = null
+        })
+      })
+      return
+    }
 
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 动画状态需要同步设置以冻结 virtualizer estimateSize
     setIsBulkAnimating(true)
@@ -204,6 +220,7 @@ export function useBulkExpand<TData>({
   }, [
     isAllExpanded,
     enableExpandAll,
+    disableBulkExpandAnimation,
     table,
     rows,
     captureBulkAnchor,

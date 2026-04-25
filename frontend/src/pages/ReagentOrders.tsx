@@ -1,7 +1,7 @@
 // 试剂订单页面 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、入库 参考 Inventory 页面实现，使用 FilterTable 组件
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import type { UseFormReturn } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
@@ -16,19 +16,22 @@ import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 // 业务组件
 import { BaseForm } from '@/components/BaseForm'
 import { EditDialogActions } from '@/components/EditDialogActions'
+import { ReagentBrandManagementDialogs } from '@/components/ReagentBrandManagementDialogs'
 import useDialogState from '@/hooks/useDialogState'
 import { useAuthStore } from '@/store/useStore'
-import { useSSEStore } from '@/store/sseStore'
 import { REAGENT_STATUS_MAP, UserRoles } from '@/lib/constants'
+import { canWriteNonPublicData } from '@/lib/permissions'
 import type { FilterAPI } from '@/hooks/useTableState'
+import type { AutocompleteOption } from '@/components/ui/AutoComplete'
 
 // 工具与API
 import {
   reagentOrderAPI,
   chemicalAPI,
   ReagentOrderReason,
+  ReagentOrderStatus,
 } from '@/api/client'
-import { downloadBlobResponse, processNotes } from '@/lib/utils'
+import { downloadBlobResponse, formatChinaDateForFilename, processNotes } from '@/lib/utils'
 import { ReagentOrderExpandedRow } from '@/components/ReagentOrderExpandedRow'
 import {
   ReagentCasDuplicateWarning,
@@ -54,6 +57,14 @@ import {
   enhanceCasLookupField,
 } from '@/lib/formConfigs'
 import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderSubmitHelpers'
+import {
+  isApprovableOrderStatus,
+  isOrderEditableByRole,
+  isRejectableOrderStatus,
+} from '@/lib/orderEditRules'
+import {
+  getReagentBrandOptionsQueryOptions,
+} from '@/lib/reagentBrandOptions'
 import { REAGENT_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
 
 // 图标
@@ -64,6 +75,7 @@ import {
   ArrowUpFromLine,
   ScanSearch,
   Check,
+  Tags,
   X,
 } from 'lucide-react'
 
@@ -89,6 +101,10 @@ interface ReagentOrder {
   status: string
   created_at: string
   updated_at: string
+  approved_at?: string | null
+  rejected_at?: string | null
+  arrived_at?: string | null
+  stocked_at?: string | null
 }
 
 type ReagentOrderDialogState = 'edit' | 'add' | null
@@ -157,7 +173,7 @@ function createReagentOrderCreatePayload(formData: ReagentOrderFormData) {
     english_name: formData.english_name || undefined,
     alias: formData.alias || undefined,
     category: formData.category || undefined,
-    brand: formData.brand || undefined,
+    brand: formData.brand,
     purity: formData.purity || undefined,
     specification: formData.specification,
     quantity: formData.quantity,
@@ -168,7 +184,7 @@ function createReagentOrderCreatePayload(formData: ReagentOrderFormData) {
   }
 }
 
-// 生成编辑试剂订单的请求体。 保留当前更新接口的空字符串语义，同时把字段组装从提交流程中抽离。
+// 生成编辑试剂订单的请求体，沿用当前更新接口的空字符串语义，并抽离字段组装。
 function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
   return {
     name: formData.name,
@@ -190,12 +206,13 @@ function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
 // 生成试剂订单表单字段配置。 把 CAS 自动识别按钮与 onBlur 检查逻辑收口到单点，避免 JSX 内嵌复杂映射。
 function createReagentOrderFormFields(params: {
   dialogState: ReagentOrderDialogState
+  brandOptions: AutocompleteOption[]
   handleCasLookup: () => Promise<void>
   isCasLookupLoading: boolean
   checkCASWarning: (casNumber: string, options?: { force?: boolean }) => Promise<void>
 }) {
-  const { dialogState, handleCasLookup, isCasLookupLoading, checkCASWarning } = params
-  const fields = getReagentOrderFormFields()
+  const { dialogState, brandOptions, handleCasLookup, isCasLookupLoading, checkCASWarning } = params
+  const fields = getReagentOrderFormFields({ brandOptions })
 
   if (dialogState !== 'add') {
     return fields
@@ -215,12 +232,13 @@ function createReagentOrderFormFields(params: {
 // 管理试剂订单弹窗里的 CAS 联动与重复检查。 把 CAS 专项逻辑从弹窗控制器中拆开，避免单个 hook 继续膨胀。
 function useReagentOrderCasController(params: {
   dialogState: ReagentOrderDialogState
+  brandOptions: AutocompleteOption[]
   editingItemId?: number
   form: UseFormReturn<ReagentOrderFormInputData, unknown, ReagentOrderFormData>
   navigate: (path: string) => void
   setDialogState: (state: ReagentOrderDialogState) => void
 }) {
-  const { dialogState, editingItemId, form, navigate, setDialogState } = params
+  const { dialogState, brandOptions, editingItemId, form, navigate, setDialogState } = params
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
   const { casWarning, casLoading, checkCASWarning, clearCASWarning, handleCasValueChange } = useReagentCasDuplicateCheck()
 
@@ -312,11 +330,12 @@ function useReagentOrderCasController(params: {
   const formFields = useMemo(() => {
     return createReagentOrderFormFields({
       dialogState,
+      brandOptions,
       handleCasLookup,
       isCasLookupLoading,
       checkCASWarning,
     })
-  }, [dialogState, handleCasLookup, isCasLookupLoading, checkCASWarning])
+  }, [dialogState, brandOptions, handleCasLookup, isCasLookupLoading, checkCASWarning])
 
   return {
     casWarning,
@@ -331,6 +350,7 @@ function useReagentOrderCasController(params: {
 function useReagentOrderDialogController(
   refreshOrders: () => void | Promise<void>,
   navigate: (path: string) => void,
+  brandOptions: AutocompleteOption[],
 ) {
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [editingItem, setEditingItem] = useState<ReagentOrder | null>(null)
@@ -343,6 +363,7 @@ function useReagentOrderDialogController(
   })
   const casController = useReagentOrderCasController({
     dialogState,
+    brandOptions,
     editingItemId: editingItem?.id,
     form,
     navigate,
@@ -379,7 +400,11 @@ function useReagentOrderDialogController(
       })
       await Promise.resolve(refreshOrders())
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {
-        edit: '订单信息已更新',
+        edit:
+          editingItem?.status === ReagentOrderStatus.REJECTED ||
+          editingItem?.status === ReagentOrderStatus.APPROVED
+            ? '订单已重新提交待审批'
+            : '订单信息已更新',
         add: '试剂订单创建成功',
       })
       if (successMessage) {
@@ -463,14 +488,15 @@ function createReagentOrderColumns(
   const actionColumn = columnHelper.display({
     id: 'actions',
     header: '操作',
-    size: 100,
-    minSize: 100,
-    maxSize: 100,
+    size: 132,
+    minSize: 132,
+    maxSize: 132,
     cell: (info) => {
       const meta = info.table.options.meta
       return (
         <ActionButtons
           item={info.row.original as unknown as Record<string, unknown>}
+          isAdmin={isAdmin}
           onEdit={meta?.onEdit as unknown as (item: Record<string, unknown>) => void}
           onRefresh={onRefresh}
         />
@@ -485,26 +511,29 @@ function createReagentOrderColumns(
 // 主组件
 // ============================================================================
 
-// 直接组合列表、页头和叶子组件，避免继续保留只转发参数的壳层。
+// 直接组合列表、页头和叶子组件，去掉转发参数的壳层。
 export function ReagentOrdersPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
-  const clearRoomStale = useSSEStore((state) => state.clearRoomStale)
-  const isAdmin = currentUser?.role === UserRoles.ADMIN
-  const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
+  const currentUserRole = currentUser?.role
+  const isAdmin = currentUserRole === UserRoles.ADMIN
+  const canCreateOrder = currentUserRole !== UserRoles.PUBLIC
+  const canViewBrands = Boolean(currentUser)
+  const canWriteBrands = canWriteNonPublicData(currentUserRole)
+  const [brandManagementOpen, setBrandManagementOpen] = useState(false)
+  const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
   const refreshOrders = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['reagent-orders'] })
-    clearRoomStale('reagent_orders')
-  }, [clearRoomStale, queryClient])
-  const dialogController = useReagentOrderDialogController(refreshOrders, navigate)
+  }, [queryClient])
+  const dialogController = useReagentOrderDialogController(refreshOrders, navigate, brandOptions)
 
   const handleExport = useCallback(async () => {
     try {
       const response = await reagentOrderAPI.exportOrders()
-      downloadBlobResponse(response, `reagent_orders_${new Date().toISOString().slice(0, 10)}.xlsx`)
-    } catch {
-      toast.error('导出失败')
+      downloadBlobResponse(response, `reagent_orders_${formatChinaDateForFilename()}.xlsx`)
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '导出失败'))
     }
   }, [])
 
@@ -527,6 +556,11 @@ export function ReagentOrdersPage() {
               <Plus className="w-4 h-4 mr-1.5" /> 创建订单
             </Button>
           )}
+          {canViewBrands && (
+            <Button variant="modern" size="lg" onClick={() => setBrandManagementOpen(true)}>
+              <Tags className="w-4 h-4 mr-1.5" /> 品牌管理
+            </Button>
+          )}
           {isAdmin && (
             <Button variant="modern" size="lg" onClick={handleExport}>
               <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
@@ -534,6 +568,13 @@ export function ReagentOrdersPage() {
           )}
         </div>
       </div>
+      {canViewBrands && (
+        <ReagentBrandManagementDialogs
+          open={brandManagementOpen}
+          onOpenChange={setBrandManagementOpen}
+          canWrite={canWriteBrands}
+        />
+      )}
       <Dialog open={dialogController.dialogState !== null} onOpenChange={dialogController.handleDialogOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -602,10 +643,12 @@ export function ReagentOrdersPage() {
 // 渲染试剂订单行级操作。 把审批与驳回逻辑封装在表格单元内，避免页面主组件直接承载行级动作细节。
 const ActionButtons = React.memo(function ActionButtons({
   item,
+  isAdmin,
   onEdit,
   onRefresh,
 }: {
   item: Record<string, unknown>
+  isAdmin: boolean
   onEdit: (item: Record<string, unknown>) => void
   onRefresh: () => void | Promise<void>
 }) {
@@ -623,7 +666,7 @@ const ActionButtons = React.memo(function ActionButtons({
       className: 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950',
       confirm: true,
       confirmLabel: '确认审批',
-      disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'rejected',
+      disableWhen: (currItem: Record<string, unknown>) => !isApprovableOrderStatus(currItem.status),
       onClick: async (currItem: Record<string, unknown>) => {
         await reagentOrderAPI.approve(currItem.id as number)
         await onRefreshRef.current()
@@ -638,7 +681,7 @@ const ActionButtons = React.memo(function ActionButtons({
       className: 'text-destructive hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/20',
       confirm: true,
       confirmLabel: '确认驳回',
-      disableWhen: (currItem: Record<string, unknown>) => currItem.status !== 'pending' && currItem.status !== 'approved',
+      disableWhen: (currItem: Record<string, unknown>) => !isRejectableOrderStatus(currItem.status),
       onClick: async (currItem: Record<string, unknown>) => {
         await reagentOrderAPI.reject(currItem.id as number, '管理员驳回')
         await onRefreshRef.current()
@@ -652,6 +695,7 @@ const ActionButtons = React.memo(function ActionButtons({
       item={item}
       actions={actions}
       showEdit={true}
+      disableEdit={!isOrderEditableByRole(item.status, isAdmin)}
       onEdit={onEdit}
     />
   )

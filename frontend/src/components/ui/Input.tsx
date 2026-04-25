@@ -122,7 +122,7 @@ const getInputValueState = (
 ) => {
   const isNumber = type === "number"
   const isControlled = value !== undefined
-  // 修复：0 是有效值，应该显示为 "0" 而不是空字符串
+  // 修复：0 作为有效值显示为 "0"，不回退为空字符串。
   const rawValue =
     isControlled && value !== null && value !== undefined ? String(value) : ""
   const isActive = enableTagToggle && rawValue.startsWith(tag)
@@ -176,7 +176,7 @@ const getInputClassName = ({
   )
 }
 
-// 左侧只保留一个槽位，优先级固定为 prefixButton > tagToggle > prefix，避免多个入口抢位置。
+// 左侧槽位固定为一个，优先级为 prefixButton > tagToggle > prefix，防止多个入口抢位置。
 const renderLeftArea = ({
   DefaultIcon,
   activeConfig,

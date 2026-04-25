@@ -149,7 +149,7 @@ export function ensureDeviceName(generator: () => string): string {
   return nextName
 }
 
-// 存储不可用时也要保留当前会话级标识，避免审计链路直接失去设备维度。
+// 存储不可用时写入当前会话级标识，维持审计链路的设备维度。
 export function getDeviceId(): string {
   return ensureDeviceId(generateUUID)
 }
@@ -214,7 +214,7 @@ function generateUUIDFromCryptoValues(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
 }
 
-// 极端环境下退化为可追踪的确定性标识，重点是不断供，而不是继续伪造“随机”语义。
+// 极端环境下退化为可追踪的确定性标识，保障设备标识持续可用。
 function generateFallbackUUID(): string {
   fallbackIdCounter = (fallbackIdCounter + 1) % 0xffff
   const timestampHex = Date.now().toString(16).padStart(12, '0')

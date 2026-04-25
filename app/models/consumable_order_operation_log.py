@@ -21,6 +21,7 @@ class ConsumableOrderOperationAction(str, Enum):
     APPROVE = "approve"
     REJECT = "reject"
     ARRIVAL_COMPLETE = "arrival_complete"
+    EXPORT = "export"
 
 
 class ConsumableOrderOperationLog(SQLModel, table=True):

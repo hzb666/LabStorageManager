@@ -1,6 +1,6 @@
 ---
 name: lab-storage-manager-cli
-description: "Use when the task must operate LabStorageManager through its local CLI (`lsm`) for login, inventory, common shelf, borrow state, reagent orders, or consumable orders, and the work must stay inside the CLI's allowed command surface instead of raw HTTP, direct backend imports, or database access."
+description: "Use when the task must operate LabStorageManager through its local CLI (`lsm`) for login, inventory, borrow state, reagent orders, consumable orders, common shelf, or CAS master data, and the work must stay inside the CLI's allowed command surface instead of raw HTTP, direct backend imports, or database access."
 ---
 
 # Lab Storage Manager CLI
@@ -24,7 +24,6 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 - 禁止使用明文密码参数。优先 `--password-stdin`，否则接受隐藏输入提示。
 - `auth login` 不接受 `--token`；登录成功会写本地配置。
 - `create` 命令继续使用 JSON object 负载；`--data-json` 与 `--data-file` 二选一。非 `create` 写操作优先使用显式命令参数；如果命令不接受 body，不要传 `--data-*`。
-- 常用货架只开放查询、手动添加、加瓶和扣减 1 瓶；禁止分组编辑、条目编辑、删除、导出和 CAS 主数据管理。
 - 禁止文件上传、导出、删除、用户管理、会话管理、密码修改、头像修改。
 - 如果目标操作没有对应 CLI 命令，立即停止并明确说明“当前 CLI 不支持该操作”。
 
@@ -45,17 +44,22 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
   - `LSM_USERNAME`
   - `LSM_PASSWORD`
 - 推荐首次由用户提供一次 URL、用户名、密码后写入该文件。
-- 后续如果认证失效或本地无 token，默认先从该 `.env` 读取并尝试重新登录，不再要求用户重复提供。
+- `lsm` 本身不会自动加载技能目录 `.env`；Agent 必须先在命令外读取该文件，再把值传给 `lsm auth login`。
+- 后续如果认证失效、本地无 token，或用户明确要求使用 `.env` 账号，默认先从该 `.env` 读取并尝试重新登录，不再要求用户重复提供。
+- 如果 `lsm auth whoami` 成功，也必须核对当前用户名是否等于 `LSM_USERNAME`；不一致时不能默默沿用当前 token。
 - 如果 `.env` 缺失、字段为空、或使用 `.env` 登录失败，再向用户确认。
 
 ## 快速开始
 
 1. 确认命令面：`lsm --help`
 2. 首次把 URL、用户名、密码写入技能目录下的 `.env`
-3. 认证探测：先执行 `lsm auth whoami`
-4. 若未登录，则从技能目录 `.env` 读取 `LSM_BASE_URL`、`LSM_USERNAME`、`LSM_PASSWORD` 并使用 `--password-stdin` 登录
-5. 登录成功后再次执行 `lsm auth whoami`
-6. 执行目标命令并解析 stdout JSON
+3. 先读取技能目录 `.env`，拿到 `LSM_BASE_URL`、`LSM_USERNAME`、`LSM_PASSWORD`
+4. 认证探测：执行 `lsm auth whoami`
+5. 若 `whoami` 成功且用户名等于 `LSM_USERNAME`，继续执行目标命令
+6. 若 `whoami` 成功但用户名不等于 `LSM_USERNAME`，先说明当前用户与 `.env` 用户不一致；用户要求使用 `.env` 账号时，使用 `.env` 重新登录
+7. 若未登录，则使用 `.env` 和 `--password-stdin` 登录
+8. 登录成功后再次执行 `lsm auth whoami`，确认用户名等于 `LSM_USERNAME`
+9. 执行目标命令并解析 stdout JSON
 
 ## 允许的命令分组
 
@@ -80,14 +84,23 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 ### reagent-orders
 - `reagent-orders list`
 - `reagent-orders get`
-- `reagent-orders my`
 - `reagent-orders cas`
 - `reagent-orders name`
+- `reagent-orders my`
 - `reagent-orders create`
 - `reagent-orders update`
 - `reagent-orders cas-overview`
 - `reagent-orders confirm-arrival`
 - `reagent-orders stock-in`
+
+### consumable-orders
+- `consumable-orders list`
+- `consumable-orders get`
+- `consumable-orders name`
+- `consumable-orders my`
+- `consumable-orders create`
+- `consumable-orders update`
+- `consumable-orders complete`
 
 ### common-shelf
 - `common-shelf list`
@@ -98,29 +111,29 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 - `common-shelf add-bottles`
 - `common-shelf remove-one`
 
-### consumable-orders
-- `consumable-orders list`
-- `consumable-orders get`
-- `consumable-orders my`
-- `consumable-orders name`
-- `consumable-orders create`
-- `consumable-orders update`
-- `consumable-orders complete`
+### chemical-name-map
+- `chemical-name-map list`
+- `chemical-name-map search`
+- `chemical-name-map cas`
 
 ## 标准执行流程
 
 1. 先判定任务是否存在对应 CLI 子命令。
-2. 需要认证时，默认先执行 `lsm auth whoami` 探测当前本地 token 是否可用。
-   - 若 `whoami` 成功，则继续执行目标命令
+2. 需要认证时，默认先读取技能目录 `.env`，再执行 `lsm auth whoami` 探测当前本地 token 是否可用。
+   - 若 `whoami` 成功且当前用户名等于 `LSM_USERNAME`，则继续执行目标命令
+   - 若 `whoami` 成功但当前用户名不等于 `LSM_USERNAME`，不能默默沿用当前 token；如果用户明确要求使用 `.env` 账号，则使用 `.env` 重新登录，否则先说明当前登录用户和 `.env` 用户不一致
    - 若 `whoami` 失败或本地无 token，则默认从技能目录 `.env` 读取 `LSM_BASE_URL`、`LSM_USERNAME`、`LSM_PASSWORD` 并执行登录
+   - `.env` 是 Agent 配置，不是 CLI 内置配置；不能假设 `lsm` 会自动读取它
    - 登录时优先使用 `--password-stdin`
    - `--base-url` 通常只需在首次登录时显式设置一次；登录成功后会写入本地配置，后续一般无需重复设置
    - `--token` / `--base-url` 仅作临时覆盖；对 `auth whoami` / `auth logout` 不应污染本地配置
    - 若 `.env` 缺失、字段不完整、或使用 `.env` 登录失败，再向用户确认
 3. 对写操作目标不确定时，先用 `list`、`get`、`cas`、`code`、`my-*` 等读命令定位目标，并从返回 JSON 中读取准确 ID。
    - 查 CAS 时，优先使用专门接口 `lsm inventory cas <cas_number>`
-   - 查名称时优先使用对应 `name` 快捷命令，例如 `lsm inventory name <keyword>`、`lsm reagent-orders name <keyword>`、`lsm consumable-orders name <keyword>`。
-   - 查试剂订单 CAS 列表时使用 `lsm reagent-orders cas <cas_number>`；`reagent-orders cas-overview` 是 CAS 概览，不是订单列表。
+   - 查名称时，优先使用 `lsm inventory name <keyword>`
+   - 查试剂订单 CAS 时，优先使用 `lsm reagent-orders cas <cas_number>`
+   - 查试剂/耗材订单名称时，优先使用 `lsm reagent-orders name <keyword>` 或 `lsm consumable-orders name <keyword>`
+   - 库存查不到且需要判断常用货架时，先查 `lsm chemical-name-map search <keyword>` 或 `lsm chemical-name-map cas <cas_number>`；分类为 `acid`、`base`、`salt`、`solvent` 时，再查 `lsm common-shelf alias <keyword>` 或 `lsm common-shelf cas <cas_number>`
    - `inventory list` 不支持按 `inventory_id` 过滤；已知 ID 时直接使用 `inventory get <inventory_id>`
    - 查询库存时，默认应整理并返回这些关键信息：名称（`name`）、CAS（`cas_number`）、品牌（`brand`）、剩余量或规格（`remaining_quantity` / `specification`）、借用状态（`status`）以及借用人（优先 `borrower_name`）
    - 查询库存时，若给出名称但精确查询查不到，可以用别名、关键词做模糊搜索，但只能列出候选和匹配依据；不得用化学知识自行认定目标。只有 CAS、内部编码、精确别名或用户确认能唯一定位时，才可继续读取 ID 或执行写操作。
@@ -129,9 +142,6 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
    - `inventory return <inventory_id>` 可用 `--used-quantity`，但输入值必须已经是库存 `unit` 对应的数量；若用户单位不同，先用 `inventory get <inventory_id>` 核对 `remaining_quantity`、`unit`、`specification`，只在换算明确后提交换算后的数量；禁止传 `--unit` 或 JSON `unit` 字段。
    - 如果单位换算需要密度、滴数、瓶容量、开瓶状态或其它上下文，必须先向用户确认，不得猜测。
    - `inventory update <inventory_id>` 每次只更新一个库存 ID，且只提交显式传入的字段。
-   - 常用货架写操作必须先用 `common-shelf list` 拿到准确 `group.group_key`；扣减前优先用 `common-shelf locations <group_key>` 核对位置和瓶数，且必须明确 `storage_location`。
-   - `common-shelf add-bottles <group_key>` 只允许添加瓶数和位置；不得修改分组品牌、规格或 CAS 主数据。
-   - `common-shelf remove-one <group_key>` 每次只扣减 1 瓶，必须传 `--storage-location` 或 JSON `storage_location`；不得用删除接口替代。
    - 所有 `<inventory_id>` / `<order_id>` 都必须是单个正整数，不支持 `1,2`、`1-3` 这类批量写入形式。
 5. 在真正执行写操作前，再次复核：目标 ID 是否正确、动作是否正确、输入值与单位是否正确、命令是否会命中用户想要的对象；任何一项不能完全确认时，先询问用户。
 6. 读操作优先 `list`、`get`、`my-*` 这类命令，不要臆造 query/path。

@@ -12,7 +12,9 @@ from robot.wecom_aibot.llm_planner import (
     ACTION_START_BORROW,
     ACTION_START_RETURN,
     LSMToolPlan,
+    _cas_resolution_decision_instructions,
     _compact_conversation_context,
+    _instructions,
     _parse_plan,
     is_safe_llm_reply,
 )
@@ -92,6 +94,46 @@ class FakePolishPlanner:
         return self.reply
 
 
+class FakeInventoryNameFilterPlanner:
+    def __init__(self, selected_indices: list[int], reply: str) -> None:
+        self.selected_indices = selected_indices
+        self.reply = reply
+        self.filter_calls: list[dict[str, Any]] = []
+        self.polish_calls: list[dict[str, str]] = []
+
+    async def filter_inventory_name_candidates(
+        self,
+        *,
+        user_text: str,
+        search_keyword: str,
+        candidates: list[dict[str, Any]],
+    ) -> list[int]:
+        self.filter_calls.append(
+            {
+                "user_text": user_text,
+                "search_keyword": search_keyword,
+                "candidates": candidates,
+            }
+        )
+        return self.selected_indices
+
+    async def polish_reply(self, *, user_text: str, facts_text: str, **_: Any) -> str:
+        self.polish_calls.append({"user_text": user_text, "facts_text": facts_text})
+        return self.reply
+
+
+class KeywordInventoryMcpClient(FakeMcpClient):
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append((name, arguments))
+        if name == "inventory_search_by_name":
+            keyword = arguments.get("keyword")
+            if keyword == "对位取代苯胺":
+                return _empty_inventory()
+            if keyword == "苯胺":
+                return _aniline_inventory()
+        return self.responses.get(name, _ok_data({"items": [], "total": 0}))
+
+
 class FakeWebSearchClient:
     def __init__(self, response_text: str = "MiniMax API 文档。") -> None:
         self.calls: list[str] = []
@@ -140,6 +182,63 @@ def _inventory_item() -> dict[str, Any]:
                 }
             ],
             "total": 1,
+        }
+    )
+
+
+def _aniline_inventory() -> dict[str, Any]:
+    return _ok_data(
+        {
+            "items": [
+                {
+                    "id": 51,
+                    "name": "4-溴苯胺",
+                    "english_name": "4-Bromoaniline",
+                    "cas_number": "106-40-1",
+                    "remaining_quantity": 25,
+                    "unit": "g",
+                    "storage_location": "B-01",
+                },
+                {
+                    "id": 52,
+                    "name": "2-氯苯胺",
+                    "english_name": "2-Chloroaniline",
+                    "cas_number": "95-51-2",
+                    "remaining_quantity": 10,
+                    "unit": "g",
+                    "storage_location": "B-02",
+                },
+            ],
+            "total": 2,
+        }
+    )
+
+
+def _sparse_aniline_inventory() -> dict[str, Any]:
+    return _ok_data(
+        {
+            "items": [
+                {"id": 50, "cas_number": "999-99-9"},
+                {
+                    "id": 51,
+                    "name": "4-溴苯胺",
+                    "english_name": "4-Bromoaniline",
+                    "cas_number": "106-40-1",
+                    "remaining_quantity": 25,
+                    "unit": "g",
+                    "storage_location": "B-01",
+                },
+                {
+                    "id": 52,
+                    "name": "2-氯苯胺",
+                    "english_name": "2-Chloroaniline",
+                    "cas_number": "95-51-2",
+                    "remaining_quantity": 10,
+                    "unit": "g",
+                    "storage_location": "B-02",
+                },
+            ],
+            "total": 3,
         }
     )
 
@@ -271,6 +370,86 @@ def _pending_stockin() -> dict[str, Any]:
 
 
 class WecomReadQuerySelfTest(unittest.TestCase):
+    def test_planner_instructions_do_not_force_inventory_search_for_stock_words(self) -> None:
+        instructions = _instructions(5)
+
+        self.assertNotIn("必须优先选择 inventory_search_by_name", instructions)
+        self.assertNotIn("通常选择 start_borrow", instructions)
+        self.assertNotIn("只有查询词明显是实验室非常常用", instructions)
+        self.assertIn("不要被单个关键词固定到某个工具", instructions)
+        self.assertIn("不等同于 exact=true", instructions)
+
+    def test_cas_resolution_prompt_encourages_ligand_catalyst_web_fallback(self) -> None:
+        instructions = _cas_resolution_decision_instructions()
+
+        self.assertIn("配体、催化剂", instructions)
+        self.assertIn("更应返回 true", instructions)
+        self.assertIn("受限联网搜索只找 CAS", instructions)
+
+    def test_inventory_name_plan_searches_candidate_keyword_and_filters_names(self) -> None:
+        mcp = KeywordInventoryMcpClient({})
+        planner = FakeInventoryNameFilterPlanner(
+            selected_indices=[1],
+            reply="可能符合的是 4-溴苯胺，位置 B-01。",
+        )
+
+        reply = asyncio.run(
+            answer_with_llm_plan(
+                mcp_client=mcp,
+                llm_planner=planner,
+                web_search_client=None,
+                search_limit=5,
+                text="查一下对位取代苯胺还有吗",
+                user_token="token",
+                plan=LSMToolPlan(
+                    action=ACTION_CALL_TOOL,
+                    tool_name="inventory_search_by_name",
+                    arguments={"keyword": "苯胺", "limit": 5},
+                    title="库存查询结果",
+                ),
+            )
+        )
+
+        self.assertIn("4-溴苯胺", reply)
+        self.assertNotIn("2-氯苯胺", planner.polish_calls[0]["facts_text"])
+        self.assertEqual("苯胺", planner.filter_calls[0]["search_keyword"])
+        self.assertEqual("4-溴苯胺", planner.filter_calls[0]["candidates"][0]["name"])
+        self.assertEqual("2-氯苯胺", planner.filter_calls[0]["candidates"][1]["name"])
+        self.assertEqual(
+            [("inventory_search_by_name", {"keyword": "苯胺", "limit": 100, "user_token": "token"})],
+            mcp.calls,
+        )
+        self.assertIn("4-溴苯胺", planner.polish_calls[0]["facts_text"])
+
+    def test_inventory_name_filter_uses_candidate_index_mapping(self) -> None:
+        mcp = FakeMcpClient({"inventory_search_by_name": _sparse_aniline_inventory()})
+        planner = FakeInventoryNameFilterPlanner(
+            selected_indices=[2],
+            reply="可能符合的是 2-氯苯胺，位置 B-02。",
+        )
+
+        asyncio.run(
+            answer_with_llm_plan(
+                mcp_client=mcp,
+                llm_planner=planner,
+                web_search_client=None,
+                search_limit=5,
+                text="查一下邻位取代苯胺还有吗",
+                user_token="token",
+                plan=LSMToolPlan(
+                    action=ACTION_CALL_TOOL,
+                    tool_name="inventory_search_by_name",
+                    arguments={"keyword": "苯胺", "limit": 5},
+                    title="库存查询结果",
+                ),
+            )
+        )
+
+        self.assertEqual(1, planner.filter_calls[0]["candidates"][0]["index"])
+        self.assertEqual(2, planner.filter_calls[0]["candidates"][1]["index"])
+        self.assertIn("2-氯苯胺", planner.polish_calls[0]["facts_text"])
+        self.assertNotIn("4-溴苯胺", planner.polish_calls[0]["facts_text"])
+
     def test_empty_inventory_uses_master_data_before_common_shelf(self) -> None:
         mcp = FakeMcpClient(
             {
@@ -310,9 +489,86 @@ class WecomReadQuerySelfTest(unittest.TestCase):
         )
 
         self.assertIn(
-            ("inventory_search_by_name", {"keyword": "乙醇", "limit": 5, "user_token": "token"}),
+            ("inventory_search_by_name", {"keyword": "乙醇", "limit": 100, "user_token": "token"}),
             mcp.calls,
         )
+
+    def test_inventory_hint_overrides_my_reagent_order_keyword_fallback(self) -> None:
+        mcp = FakeMcpClient(
+            {
+                "inventory_search_by_name": _inventory_item(),
+                "reagent_orders_my": _my_reagent_orders(),
+            }
+        )
+
+        reply = asyncio.run(
+            answer_read_query(
+                mcp_client=mcp,
+                llm_planner=None,
+                web_search_client=None,
+                search_limit=5,
+                text="我申请的试剂乙醇还有库存吗",
+                user_token="token",
+            )
+        )
+
+        self.assertIn("库存查询结果", reply)
+        self.assertIn(
+            ("inventory_search_by_name", {"keyword": "乙醇", "limit": 100, "user_token": "token"}),
+            mcp.calls,
+        )
+        self.assertNotIn("reagent_orders_my", [name for name, _ in mcp.calls])
+
+    def test_inventory_hint_overrides_low_stock_keyword_fallback(self) -> None:
+        mcp = FakeMcpClient(
+            {
+                "inventory_search_by_name": _inventory_item(),
+                "inventory_list_low_stock": _empty_inventory(),
+            }
+        )
+
+        asyncio.run(
+            answer_read_query(
+                mcp_client=mcp,
+                llm_planner=None,
+                web_search_client=None,
+                search_limit=5,
+                text="低库存乙醇还有吗",
+                user_token="token",
+            )
+        )
+
+        self.assertIn(
+            ("inventory_search_by_name", {"keyword": "乙醇", "limit": 100, "user_token": "token"}),
+            mcp.calls,
+        )
+        self.assertNotIn("inventory_list_low_stock", [name for name, _ in mcp.calls])
+
+    def test_explicit_common_shelf_query_keeps_priority_with_location_hint(self) -> None:
+        mcp = FakeMcpClient(
+            {
+                "common_shelf_search_by_alias": _common_shelf(),
+                "inventory_search_by_name": _inventory_item(),
+            }
+        )
+
+        reply = asyncio.run(
+            answer_read_query(
+                mcp_client=mcp,
+                llm_planner=None,
+                web_search_client=None,
+                search_limit=5,
+                text="常用货架乙醇位置",
+                user_token="token",
+            )
+        )
+
+        self.assertIn("常用货架", reply)
+        self.assertIn(
+            ("common_shelf_search_by_alias", {"keyword": "乙醇", "limit": 5, "user_token": "token"}),
+            mcp.calls,
+        )
+        self.assertNotIn("inventory_search_by_name", [name for name, _ in mcp.calls])
 
     def test_my_borrows_query_calls_dashboard_tool(self) -> None:
         mcp = FakeMcpClient({"inventory_my_borrows": _my_borrows()})
@@ -406,11 +662,13 @@ class WecomReadQuerySelfTest(unittest.TestCase):
 
         self.assertEqual("乙醇还有 300ml，在 A-01。CAS 是 64-17-5。", reply)
         self.assertEqual("乙醇在哪里", planner.calls[0]["user_text"])
+        self.assertIn("安全查询事实", planner.calls[0]["facts_text"])
         self.assertIn("库存查询结果", planner.calls[0]["facts_text"])
         self.assertIn("乙醇", planner.calls[0]["facts_text"])
-        self.assertIn("英文名 Ethanol", planner.calls[0]["facts_text"])
-        self.assertIn("别名 酒精", planner.calls[0]["facts_text"])
-        self.assertIn("纯度 AR", planner.calls[0]["facts_text"])
+        self.assertIn('"英文名":"Ethanol"', planner.calls[0]["facts_text"])
+        self.assertIn('"别名":"酒精"', planner.calls[0]["facts_text"])
+        self.assertIn('"纯度":"AR"', planner.calls[0]["facts_text"])
+        self.assertNotIn("英文名 Ethanol", planner.calls[0]["facts_text"])
         self.assertNotIn("LSM-SECRET-001", planner.calls[0]["facts_text"])
 
     def test_read_query_rejects_unsafe_llm_polished_reply(self) -> None:
@@ -472,7 +730,7 @@ class WecomReadQuerySelfTest(unittest.TestCase):
         self.assertIn(
             (
                 "inventory_search_by_name",
-                {"keyword": "乙醇", "limit": 5, "exact": True, "user_token": "token"},
+                {"keyword": "乙醇", "limit": 100, "exact": True, "user_token": "token"},
             ),
             mcp.calls,
         )
@@ -779,7 +1037,13 @@ class WecomReadQuerySelfTest(unittest.TestCase):
         self.assertIn("网络搜索仅用于辅助识别 CAS", reply)
         self.assertIn("识别为 564483-18-7", reply)
         self.assertIn("XPhos", reply)
-        self.assertEqual(["XPhos 配体 CAS号 CAS number 配体 催化剂 ligand catalyst"], web.calls)
+        self.assertEqual(
+            [
+                "XPhos 配体 CAS号 CAS number chemical name alias synonym "
+                "化学品 别名 英文名 ligand catalyst 配体 催化剂 金属配合物"
+            ],
+            web.calls,
+        )
         self.assertIn(
             ("inventory_get_by_cas", {"cas_number": "564483-18-7", "user_token": "token"}),
             mcp.calls,
@@ -822,7 +1086,10 @@ class WecomReadQuerySelfTest(unittest.TestCase):
         self.assertIn("网络搜索仅用于辅助识别 CAS", reply)
         self.assertIn("识别为 12150-46-8", reply)
         self.assertIn("dppf", reply)
-        self.assertEqual(["dppf CAS号 CAS number 配体 催化剂 ligand catalyst"], web.calls)
+        self.assertEqual(
+            ["dppf CAS号 CAS number chemical name alias synonym 化学品 别名 英文名"],
+            web.calls,
+        )
         self.assertEqual([{"user_text": "查询 dppf 库存", "query": "dppf"}], planner.cas_decision_calls)
         self.assertIn(
             ("inventory_get_by_cas", {"cas_number": "12150-46-8", "user_token": "token"}),
@@ -917,7 +1184,10 @@ class WecomReadQuerySelfTest(unittest.TestCase):
 
         self.assertIn("识别为 64-17-5", reply)
         self.assertIn("乙醇", reply)
-        self.assertEqual(["酒精 CAS号 化学品"], web.calls)
+        self.assertEqual(
+            ["酒精 CAS号 CAS number chemical name alias synonym 化学品 别名 英文名"],
+            web.calls,
+        )
         self.assertEqual([{"user_text": "查询酒精库存", "query": "酒精"}], planner.cas_decision_calls)
         self.assertIn(
             ("inventory_get_by_cas", {"cas_number": "64-17-5", "user_token": "token"}),
@@ -986,6 +1256,44 @@ class WecomReadQuerySelfTest(unittest.TestCase):
         self.assertIn("网络搜索仅用于辅助识别 CAS", reply)
         self.assertEqual(1, len(web.calls))
         self.assertIn("CAS号", web.calls[0])
+        self.assertIn(
+            ("inventory_get_by_cas", {"cas_number": "12150-46-8", "user_token": "token"}),
+            mcp.calls,
+        )
+
+    def test_general_search_words_can_still_use_cas_web_fallback_when_llm_allows(self) -> None:
+        mcp = FakeMcpClient(
+            {
+                "inventory_search_by_name": _empty_inventory(),
+                "chemical_name_map_search": _ok_data({"data": [], "total": 0}),
+                "inventory_get_by_cas": _ok_data(
+                    {
+                        "cas_number": "12150-46-8",
+                        "exists_in_inventory": True,
+                        "items": [{"name": "dppf", "cas_number": "12150-46-8"}],
+                        "total": 1,
+                    }
+                ),
+            }
+        )
+        planner = FakeCasResolutionDecisionPlanner(True)
+        web = FakeWebSearchClient("dppf ligand CAS number 12150-46-8。")
+
+        reply = asyncio.run(
+            answer_read_query(
+                mcp_client=mcp,
+                llm_planner=planner,
+                web_search_client=web,
+                search_limit=5,
+                text="搜一下 dppf 库存",
+                user_token="token",
+            )
+        )
+
+        self.assertIn("网络搜索仅用于辅助识别 CAS", reply)
+        self.assertEqual(1, len(web.calls))
+        self.assertIn("CAS号", web.calls[0])
+        self.assertEqual([{"user_text": "搜一下 dppf 库存", "query": "搜一下 dppf"}], planner.cas_decision_calls)
         self.assertIn(
             ("inventory_get_by_cas", {"cas_number": "12150-46-8", "user_token": "token"}),
             mcp.calls,

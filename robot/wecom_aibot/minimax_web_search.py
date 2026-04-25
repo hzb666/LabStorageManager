@@ -16,6 +16,19 @@ logger = logging.getLogger(__name__)
 
 MINIMAX_MCP_PACKAGE = "minimax-coding-plan-mcp"
 WEB_SEARCH_TOOL = "web_search"
+CHILD_PROCESS_ENV_ALLOWLIST = (
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "HOME",
+    "USERPROFILE",
+    "TMP",
+    "TEMP",
+    "TMPDIR",
+)
 
 
 @dataclass(frozen=True)
@@ -42,11 +55,7 @@ class MiniMaxWebSearchClient:
         server = StdioServerParameters(
             command=self.command,
             args=[MINIMAX_MCP_PACKAGE, "-y"],
-            env={
-                **os.environ,
-                "MINIMAX_API_KEY": self.api_key,
-                "MINIMAX_API_HOST": self.api_host,
-            },
+            env=build_minimax_mcp_env(api_key=self.api_key, api_host=self.api_host),
         )
         async with stdio_client(server) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
@@ -61,7 +70,7 @@ class MiniMaxWebSearchClient:
 def build_web_search_client(settings: Any) -> MiniMaxWebSearchClient | None:
     if not settings.web_search_enabled:
         return None
-    api_key = settings.minimax_api_key or settings.llm_api_key
+    api_key = settings.minimax_api_key
     if not api_key.strip():
         return None
     return MiniMaxWebSearchClient(
@@ -70,6 +79,17 @@ def build_web_search_client(settings: Any) -> MiniMaxWebSearchClient | None:
         command=settings.minimax_mcp_command,
         timeout_seconds=settings.minimax_mcp_timeout_seconds,
     )
+
+
+def build_minimax_mcp_env(*, api_key: str, api_host: str) -> dict[str, str]:
+    env = {
+        name: value
+        for name in CHILD_PROCESS_ENV_ALLOWLIST
+        if (value := os.getenv(name))
+    }
+    env["MINIMAX_API_KEY"] = api_key
+    env["MINIMAX_API_HOST"] = api_host
+    return env
 
 
 def _decode_call_tool_result(result: types.CallToolResult) -> dict[str, Any]:

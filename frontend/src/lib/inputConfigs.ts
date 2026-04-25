@@ -81,7 +81,7 @@ export interface InputStyles {
 }
 
 export const defaultInputStyles: InputStyles = {
-  // 完全保留原有的 input 样式结构
+  // 沿用原 input 样式结构
   wrapper: "relative flex items-center w-full group",
   leftArea: "absolute left-1.5 top-1 bottom-1 flex items-center z-10",
 

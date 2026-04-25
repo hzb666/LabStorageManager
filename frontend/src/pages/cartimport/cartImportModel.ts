@@ -437,7 +437,7 @@ export function shouldApplyReagentAsyncResult(
   snapshot: ReagentAsyncRequestSnapshot,
   state: ReagentAsyncGuardState,
 ): boolean {
-  // 结果必须同时命中“最新请求 + 当前条目 + 当前类型 + 当前 CAS”，否则一律丢弃。
+  // 结果需同时命中“最新请求 + 当前条目 + 当前类型 + 当前 CAS”，不匹配的一律丢弃。
   return (
     snapshot.token === state.latestToken &&
     snapshot.orderType === "reagent" &&

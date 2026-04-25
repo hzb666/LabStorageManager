@@ -1,3 +1,5 @@
+import { chemicalAPI } from '@/api/client'
+
 import { isSpecialCasValue } from './validationSchemas'
 import {
   CHEMICAL_PROPERTIES_CACHE_MAX_SIZE,
@@ -36,7 +38,7 @@ const inFlightRequests = new Map<string, Promise<ChemicalProperties | null>>()
 const recentPubChemRequestTimestamps: number[] = []
 let rateLimitQueue: Promise<void> = Promise.resolve()
 
-// 归一化化学属性对象，确保缓存中仅保留受支持字段。
+// 归一化化学属性对象，缓存只写入受支持字段。
 function normalizeChemicalProperties(value: Record<string, unknown>): ChemicalProperties {
   return {
     smiles: typeof value.smiles === 'string' ? value.smiles : undefined,
@@ -235,7 +237,31 @@ async function withPubChemRateLimit<T>(task: () => Promise<T>): Promise<T> {
 const storageCache = loadFromStorage()
 storageCache.forEach((entry, key) => memoryCache.set(key, entry))
 
-// 这里只查并缓存 SMILES/IUPACName；特殊 CAS 直接跳过，避免无意义外部查询。
+async function queryBackendCachedCompoundData(
+  casNumber: string
+): Promise<ChemicalProperties | null> {
+  try {
+    const response = await chemicalAPI.getInfo(casNumber, {
+      skipChinese: true,
+      cacheOnly: true,
+    })
+    const data: ChemicalProperties = {
+      smiles: response.data.smiles ?? undefined,
+      iupacName: response.data.english_name ?? undefined,
+    }
+
+    if (!data.smiles) {
+      return null
+    }
+
+    setCachedProperties(casNumber, data)
+    return data
+  } catch {
+    return null
+  }
+}
+
+// 查询并缓存 SMILES/IUPACName；特殊 CAS 直接跳过外部查询。
 export async function queryCompoundData(casNumber: string): Promise<ChemicalProperties | null> {
   if (!casNumber) return null
   if (isSpecialCasValue(casNumber)) return null
@@ -250,6 +276,11 @@ export async function queryCompoundData(casNumber: string): Promise<ChemicalProp
 
   const requestPromise = (async () => {
     try {
+      const backendCached = await queryBackendCachedCompoundData(casNumber)
+      if (backendCached) {
+        return backendCached
+      }
+
       const restUrl = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(casNumber)}/property/SMILES,IUPACName/JSON`
       const restRes = await withPubChemRateLimit(() =>
         fetch(restUrl, { headers: { Accept: 'application/json' } })

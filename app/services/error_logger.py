@@ -3,8 +3,10 @@ import logging
 import re
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
 from app.core.constants import DEFAULT_LOG_HOURS, DEFAULT_LOG_LINES
+from app.core.time_utils import to_display_time
 
 # 敏感关键词列表（用于日志脱敏）
 SENSITIVE_KEYWORDS = [
@@ -18,6 +20,10 @@ SENSITIVE_KEYWORDS = [
 # 日志目录
 LOG_DIR = Path(__file__).parent.parent.parent / "logs"
 LOG_FILE = LOG_DIR / "error.log"
+ERROR_LOG_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+ERROR_LOG_TIMESTAMP_PATTERN = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?P<suffix>.*)$"
+)
 
 # 确保日志目录存在
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -84,6 +90,44 @@ def sanitize_log_content(content: str) -> str:
     return sanitized
 
 
+def _convert_log_timestamp_to_display_time(line: str) -> str:
+    """
+    将错误日志行首的服务器本地时间转换为配置的展示时区时间。
+
+    日志文件里的时间戳由 logging.Formatter 按服务器本地时区写入，
+    bug report 下载时需要统一显示为 DISPLAY_UTC_OFFSET 对应时间。
+    """
+    match = ERROR_LOG_TIMESTAMP_PATTERN.match(line)
+    if match is None:
+        return line
+
+    timestamp_text = match.group("timestamp")
+    try:
+        local_naive = datetime.strptime(timestamp_text, ERROR_LOG_TIMESTAMP_FORMAT)
+    except ValueError:
+        return line
+
+    local_tzinfo = datetime.now().astimezone().tzinfo
+    if local_tzinfo is None:
+        return line
+
+    utc_naive = (
+        local_naive
+        .replace(tzinfo=local_tzinfo)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    display_time = to_display_time(utc_naive)
+    if display_time is None:
+        return line
+
+    return f"{display_time.strftime(ERROR_LOG_TIMESTAMP_FORMAT)}{match.group('suffix')}"
+
+
+def _format_error_log_line(line: str) -> str:
+    return sanitize_log_content(_convert_log_timestamp_to_display_time(line))
+
+
 def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
     """
     获取最近的错误日志
@@ -110,7 +154,7 @@ def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
         recent_lines = error_lines[-lines:] if len(error_lines) > lines else error_lines
         
         # 对每行进行脱敏处理
-        sanitized_lines = [sanitize_log_content(line) for line in recent_lines]
+        sanitized_lines = [_format_error_log_line(line) for line in recent_lines]
         
         return sanitized_lines
         
@@ -148,13 +192,13 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
             try:
                 # 提取时间戳 (格式: 2024-01-01 12:00:00)
                 time_str = line.split("[")[0].strip()
-                log_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+                log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
                 
                 if log_time >= cutoff_time:
-                    recent_errors.append(sanitize_log_content(line))
+                    recent_errors.append(_format_error_log_line(line))
             except (ValueError, IndexError):
-                # 如果无法解析时间，保留该行
-                recent_errors.append(sanitize_log_content(line))
+                # 时间解析失败时返回该行
+                recent_errors.append(_format_error_log_line(line))
         
         return recent_errors
         

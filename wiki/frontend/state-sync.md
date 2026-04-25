@@ -4,7 +4,7 @@
 
 ## Zustand 状态职责
 
-当前全局状态不是一个大 store，而是几类职责明确的状态源：
+当前全局状态由多类职责明确的状态源组成：
 
 - `useAuthStore`：负责登录态、`authStatus` 状态机、服务端会话探测和退出流程。
 - `useUIStore`：负责侧边栏折叠状态。
@@ -13,7 +13,7 @@
 `useAuthStore` 有几个关键点：
 
 - 本地持久化键是 `auth-storage`。
-- 持久化内容只有 `user` 和 `isAuthenticated`，不是完整认证状态机。
+- 持久化内容仅包含 `user` 和 `isAuthenticated`。
 - TTL 为 3 天，过期后会自动清理。
 - 应用启动时必须走一次 `bootstrapAuth()`，不能直接信任本地快照。
 
@@ -27,8 +27,8 @@
 
 这套设计里有两个重要约束：
 
-- 搜索输入和实际查询词不是一回事。输入框先写 `searchInput`，防抖后才同步到 `globalFilter`。
-- URL 同步采用 merge patch，而不是整体覆盖 `location.search`，避免把页面其他 URL 状态一并抹掉。
+- 搜索输入和实际查询词分离。输入框先写 `searchInput`，防抖后同步到 `globalFilter`。
+- URL 同步采用 merge patch，避免整体覆盖 `location.search` 并抹掉页面其他 URL 状态。
 
 ## SSE 与实时状态
 
@@ -36,8 +36,8 @@
 
 - `useSSE` 建立 `/api/events?rooms=...` 连接，监听 `connected`、`auth.invalid` 和业务事件。
 - `useSSEStore.processSeq()` 会逐房间记录 `lastSeqByRoom`，用于检测重复事件和断档。
-- 重连后，如果已经不是第一次打开流，前端会把当前房间标为 stale。
-- 如果发现序号断档，也会直接 stale，而不是尝试猜测丢失的数据。
+- 重连后，非首次打开流会把当前房间标为 stale。
+- 序号断档会直接触发 stale。
 
 `useListSSE` 的策略可以概括成一句话：只有在“局部 patch 不会破坏当前列表语义”时才 patch，否则就 stale。
 
@@ -58,7 +58,7 @@
 
 - `api/client.ts` 会把当前 `clientId` 写入普通 API 请求头 `X-SSE-Client-Id`。
 - 后端广播时会回写 `actor_client_id`，前端收到后会跳过自己触发的回声事件。
-- 如果 SSE 收到 `auth.invalid`，前端会调用 `triggerSessionInvalidation()`，统一收敛到重新登录流程。
+- 如果 SSE 收到 `auth.invalid`，前端会调用 `triggerSessionInvalidation()`，进入重新登录流程。
 - `bootstrapAuth()` 对启动探测请求会带 `X-Skip-Auth-Invalidation: 1`，避免一次启动探测失败就弹全局失效提示。
 
 ## 本地存储分层
@@ -66,11 +66,11 @@
 当前本地存储大致分成四类：
 
 - `app-ui`：主题、字体来源、仪表盘激活页签、公告已读/关闭、Bug 按钮隐藏状态。
-- `app-table`：各表格的 `expandAll`、`fuzzySearch`、列宽。
+- `app-table`：各表格的 `expandAll`、`fuzzySearch`、`matchMode`、列宽。
 - `app-auth-meta`：设备 `id/name` 和 remembered user。
-- 独立键：`auth-storage`、`sidebar-storage`、`chemical_properties_cache`、`cart_import_batch_latest`。
+- 独立键：`auth-storage`、`sidebar-storage`、`chemical_properties_cache`、`cart_import_batch_latest`、`runtime-time-config`。
 
-这几层的设计重点是“让同类偏好写到同一个规范化对象里”，而不是每个功能各自散落在多个 localStorage key 里。
+这几层的设计目标为“同类偏好写入同一个规范化对象”，避免每个功能散落多个 localStorage key。
 
 ## 主题与壳层状态
 
@@ -88,7 +88,7 @@
 3. 只要 patch 的正确性不再可证，就把列表标为 stale。
 4. 页面根据 stale 标记重新拉完整快照。
 
-这意味着 stale 不是失败，而是当前实现里一种主动的正确性保护机制。
+stale 是当前实现中的主动正确性保护机制。
 
 ## 改动入口
 
@@ -98,14 +98,16 @@
 - 搜索、防抖、分页、列宽：优先改 `useTableState.tsx`
 - URL 查询参数联动：优先改 `useTableUrlState.ts`
 - 主题持久化和公告已读：优先改 `appUiStorage.ts`
+- 运行时展示时区：优先改 `cacheVersionBootstrap.ts` 和 `runtimeTimeConfig.ts`
 
-## 验证建议
+## 验证要点
 
 - 刷新已登录页面时，`authStatus` 是否从 `checking` 正常过渡到 `authenticated`。
-- 强制断网或重连时，列表是否进入 stale 流程，而不是默默停在旧数据。
+- 强制断网或重连时，列表进入 stale 流程。
 - 同一条数据被当前客户端修改后，是否能正确跳过自己的 SSE 回声事件。
 - 搜索命中、排序字段更新、删除事件这些场景下，是否都按预期选择 patch 或 stale。
 - 更改列宽、展开状态、模糊搜索后，是否能在刷新后恢复。
+- 后端展示时区变化后，`runtime-time-config` 是否能被刷新。
 
 ## 参考代码
 - [frontend/src/api/client.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts)
@@ -114,6 +116,8 @@
 - [frontend/src/hooks/useTableState.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableState.tsx)
 - [frontend/src/hooks/useTableUrlState.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableUrlState.ts)
 - [frontend/src/hooks/useTheme.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTheme.ts)
+- [frontend/src/lib/cacheVersionBootstrap.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/cacheVersionBootstrap.ts)
+- [frontend/src/lib/runtimeTimeConfig.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/runtimeTimeConfig.ts)
 - [frontend/src/store/sseStore.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/sseStore.ts)
 - [frontend/src/store/useStore.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/useStore.ts)
 - [frontend/src/lib/storage/appAuthMetaStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appAuthMetaStorage.ts)

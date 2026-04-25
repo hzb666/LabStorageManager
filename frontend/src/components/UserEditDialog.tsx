@@ -74,7 +74,6 @@ const ALLOWED_TYPES = [
   "image/jpg",
   "image/png",
   "image/webp",
-  "image/gif",
 ];
 const AUTH_LOCAL_STORAGE_KEYS = ["auth-storage"];
 const MAX_SIZE_MB = 5;
@@ -141,7 +140,7 @@ function resetAvatarInput() {
 // 在上传前校验头像格式和大小，并返回用户可读的错误文案。
 function validateAvatarFile(file: File) {
   if (!ALLOWED_TYPES.includes(file.type)) {
-    return "仅支持 JPG、PNG、GIF、WebP 格式的图片";
+    return "仅支持 JPG、PNG、WebP 格式的图片";
   }
 
   if (file.size > MAX_SIZE_MB * 1024 * 1024) {
@@ -190,7 +189,7 @@ function getPasswordErrorMessage(error: unknown) {
   return normalizeApiErrorMessage(detail, "密码修改失败");
 }
 
-// 将密码错误尽量映射到具体字段，否则回退为通用 toast。
+// 将密码错误尽量映射到具体字段，无法映射时回退为通用 toast。
 function applyPasswordError(
   passwordForm: UseFormReturn<ChangePasswordFormData>,
   errorMessage: string,
@@ -261,7 +260,7 @@ async function handleUsernameChanged(onClose: () => void) {
   try {
     await authAPI.logout();
   } catch {
-    // 服务端注销失败也不能阻断强制重新登录，否则本地身份已清空但页面还留在旧会话里。
+    // 服务端注销失败不阻断强制重新登录，本地身份已清空时页面应退出旧会话。
   }
 
   redirectToLogin();
@@ -564,7 +563,7 @@ interface UsePasswordHandlerOptions {
   setChangePasswordLoading: Dispatch<SetStateAction<boolean>>;
 }
 
-// 自改密码与管理员重置他人密码走两条链路，这里只统一表单入口和错误回填。
+// 自改密码与管理员重置他人密码走两条链路，表单入口和错误回填共用。
 function usePasswordChangeHandler({
   user,
   currentUser,
@@ -624,7 +623,7 @@ interface AvatarSectionProps {
   onAvatarError: () => void;
 }
 
-// 渲染头像上传区域，保留 hover 蒙层、删除按钮和提示文案。
+// 渲染头像上传区域，包含 hover 蒙层、删除按钮和提示文案。
 function AvatarSection({
   user,
   avatarPreview,
