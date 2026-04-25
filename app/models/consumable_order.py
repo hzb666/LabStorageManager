@@ -159,3 +159,6 @@ class ConsumableOrderResponse(BaseResponse):
     status: ConsumableOrderStatus
     created_at: datetime
     updated_at: datetime
+    approved_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None

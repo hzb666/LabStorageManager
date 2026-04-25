@@ -75,7 +75,7 @@ type RDKitHighlightDetails = {
 
 let rdkitLoaderPromise: Promise<RDKitModule> | null = null
 
-// 这里只做内存级缓存，刷新后自然失效，避免把大段 SVG 持久化到存储层。
+// 内存级缓存随刷新失效，大段 SVG 不写入持久化存储。
 const SVG_MAX_CACHE_SIZE = 100
 const svgCache = new Map<string, MoleculeSvgCacheValue>()
 const MOLECULE_RENDER_CONCURRENCY = 3

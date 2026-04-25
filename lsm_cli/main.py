@@ -252,7 +252,7 @@ def _handle_auth_logout(args: argparse.Namespace) -> None:
             clear_auth_data()
         raise
     else:
-        # 本地 token 一旦失效或登出，就不再保留，避免 agent 继续复用旧凭据重试。
+        # 本地 token 失效或登出后清理，阻止 agent 复用旧凭据重试。
         if persist_local_auth:
             clear_auth_data()
         succeed(data)
@@ -517,14 +517,19 @@ def _build_inventory_return_payload(
     args: argparse.Namespace,
     client: APIClient,
 ) -> dict[str, Any]:
-    has_explicit = any(
+    has_quantity_explicit = any(
         getattr(args, field_name, None) is not None
         for field_name in ("remaining_quantity", "used_quantity")
     )
-    if has_explicit and _has_inline_payload_args(args):
+    has_notes_explicit = getattr(args, "notes", None) is not None
+    if (has_quantity_explicit or has_notes_explicit) and _has_inline_payload_args(args):
         raise CLILocalInputError(PAYLOAD_SOURCE_ERROR)
 
-    if args.used_quantity is None and args.remaining_quantity is None:
+    if not has_quantity_explicit:
+        if has_notes_explicit:
+            raise CLILocalInputError(
+                "inventory return requires --remaining-quantity or --used-quantity with --notes"
+            )
         payload = load_json_payload(args.data_json, args.data_file, required=True)
         _validate_payload_finite_numbers(payload or {}, "remaining_quantity")
         if payload and "unit" in payload:
@@ -535,7 +540,10 @@ def _build_inventory_return_payload(
         raise CLILocalInputError("Use either --remaining-quantity or --used-quantity, not both")
 
     if args.remaining_quantity is not None:
-        return {"remaining_quantity": args.remaining_quantity}
+        payload = {"remaining_quantity": args.remaining_quantity}
+        if has_notes_explicit:
+            payload["notes"] = args.notes
+        return payload
 
     if args.used_quantity < 0:
         raise CLILocalInputError("used quantity must be greater than or equal to 0")
@@ -550,16 +558,23 @@ def _build_inventory_return_payload(
     payload: dict[str, Any] = {
         "remaining_quantity": max(0.0, round(current_remaining - args.used_quantity, 10))
     }
+    if has_notes_explicit:
+        payload["notes"] = args.notes
     return payload
 
 
 def _handle_inventory_borrow(args: argparse.Namespace) -> None:
     client = _client_from_args(args)
+    payload = (
+        {"actual_borrower_id": args.actual_borrower_id}
+        if getattr(args, "actual_borrower_id", None) is not None
+        else None
+    )
     _request_with_payload(
         client=client,
         method="POST",
         path=f"/inventory/{args.inventory_id}/borrow",
-        json_body=None,
+        json_body=payload,
     )
 
 
@@ -934,9 +949,20 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
         inventory_sub, name="pending-stockin", help_text="Get current user's pending stock-in items",
         path="/inventory/dashboard/pending-stockin",
     )
+    _register_get_command(
+        inventory_sub, name="borrow-history", help_text="Get inventory borrow history",
+        path="/inventory/{inventory_id}/borrow-history",
+        add_target_argument=_add_inventory_id_argument,
+    )
     borrow = inventory_sub.add_parser("borrow", help="Borrow an inventory item")
     _add_connection_arguments(borrow)
     _add_inventory_id_argument(borrow)
+    borrow.add_argument(
+        "--actual-borrower-id",
+        dest="actual_borrower_id",
+        type=_parse_positive_int,
+        help="Actual borrower ID when borrowing through a public account",
+    )
     borrow.set_defaults(handler=_handle_inventory_borrow)
 
     return_cmd = inventory_sub.add_parser("return", help="Return an inventory item")
@@ -953,6 +979,7 @@ def _register_inventory_commands(subparsers: argparse._SubParsersAction[argparse
         type=_parse_finite_float_arg,
         help="Interpret input as used quantity; CLI converts it to remaining_quantity before submit",
     )
+    return_cmd.add_argument("--notes", help="Return notes")
     return_cmd.set_defaults(handler=_handle_inventory_return)
     _register_post_command(
         inventory_sub, name="manual-add", help_text="Create inventory manually",

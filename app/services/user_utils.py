@@ -18,7 +18,7 @@ def batch_get_user_names(db: Session, user_ids: Set[Optional[int]]) -> Dict[int,
     Returns:
         Dict mapping user_id to user display name (full_name or username)
     """
-    # Filter out None values
+    # 过滤空值。
     valid_ids = {uid for uid in user_ids if uid is not None}
 
     if not valid_ids:

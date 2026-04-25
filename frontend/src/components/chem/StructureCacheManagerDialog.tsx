@@ -11,7 +11,13 @@ import type {
 } from '@/api/structureSearchApi'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import {
+  Dialog,
+  DialogCloseButton,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
@@ -35,6 +41,7 @@ import { parseStructureCandidates } from './structureCandidateUtils'
 const PAGE_SIZE = 20
 const ADMIN_DEFAULT_STATUS_FILTER = 'needs_action'
 const VIEWER_DEFAULT_STATUS_FILTER = 'resolved'
+const TRANSLATED_NAME_SUFFIX = '（译）'
 
 type StatusFilterOption = {
   value: string
@@ -81,7 +88,7 @@ export interface StructureCacheManagerDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-// 表格行操作在卡片、表体、行组件间整体传递，避免同一组行为被拆成多组扁平 props。
+// 行操作按行为组传递，减少跨层 props 零散传递。
 type CacheActionHandlers = {
   onManualEdit: (cache: CompoundStructureCache) => void
   onOpenCandidates: (cache: CompoundStructureCache) => void
@@ -131,8 +138,32 @@ function SourceMeta({ cache }: Readonly<{ cache: CompoundStructureCache }>) {
         <span>{getSourceLabel(cache.source)}</span>
         {cache.source_id && <span className="text-muted-foreground">CID {cache.source_id}</span>}
       </div>
-      <div className="truncate text-muted-foreground">
-        {cache.english_name || cache.chinese_name || cache.inchikey || '-'}
+      <div className="truncate text-muted-foreground" title={cache.inchikey || undefined}>
+        {cache.inchikey || '-'}
+      </div>
+    </div>
+  )
+}
+
+function getChineseNameLabel(cache: CompoundStructureCache): string {
+  if (!cache.chinese_name) return '-'
+  if (!cache.chinese_name_is_translated || cache.chinese_name.endsWith(TRANSLATED_NAME_SUFFIX)) {
+    return cache.chinese_name
+  }
+  return `${cache.chinese_name}${TRANSLATED_NAME_SUFFIX}`
+}
+
+function CacheNames({ cache }: Readonly<{ cache: CompoundStructureCache }>) {
+  const chineseNameLabel = getChineseNameLabel(cache)
+  return (
+    <div className="space-y-1 text-sm leading-5">
+      <div className="min-w-0 truncate" title={cache.english_name || undefined}>
+        <span className="mr-1.5 text-muted-foreground">英文</span>
+        {cache.english_name || '-'}
+      </div>
+      <div className="min-w-0 truncate" title={chineseNameLabel === '-' ? undefined : chineseNameLabel}>
+        <span className="mr-1.5 text-muted-foreground">中文</span>
+        {chineseNameLabel}
       </div>
     </div>
   )
@@ -275,7 +306,7 @@ function RowActions({
 }
 
 function getCacheTableColumnCount(canManage: boolean): number {
-  return canManage ? 6 : 5
+  return canManage ? 7 : 6
 }
 
 function CacheRow({
@@ -292,8 +323,9 @@ function CacheRow({
   const confirming = activeAction?.startsWith(`confirm:${cache.cas_number}:`) ?? false
   return (
     <tr className="border-b border-border hover:bg-muted/30 transition-colors last:border-b-0">
-      <td className="px-3 py-3 align-top font-medium">{cache.cas_number}</td>
+      <td className="px-3 py-3 align-top font-normal">{cache.cas_number}</td>
       <td className="px-3 py-3 align-top"><StatusBadge status={cache.status} /></td>
+      <td className="px-3 py-3 align-top"><CacheNames cache={cache} /></td>
       <td className="px-3 py-3 align-top"><SourceMeta cache={cache} /></td>
       <td className="px-3 py-3 align-top text-muted-foreground">{getUpdatedAtLabel(cache)}</td>
       <td className="px-3 py-3 align-top">
@@ -408,7 +440,7 @@ function CacheTableCard({
       </CardHeader>
       <CardContent className="p-0">
         <div className="px-6 rounded-md overflow-auto">
-          <table className="w-full min-w-[1040px]" style={{ tableLayout: 'fixed' }}>
+          <table className="w-full min-w-[1240px]" style={{ tableLayout: 'fixed' }}>
             <CacheTableColumns canManage={canManage} />
             <CacheTableHeader canManage={canManage} />
             <CacheTableBody
@@ -433,7 +465,8 @@ function CacheTableColumns({ canManage }: Readonly<{ canManage: boolean }>) {
     <colgroup>
       <col className="w-[120px]" />
       <col className="w-[120px]" />
-      <col className="w-[260px]" />
+      <col className="w-[280px]" />
+      <col className="w-[240px]" />
       <col className="w-[160px]" />
       <col />
       {canManage ? <col className="w-[96px]" /> : null}
@@ -447,6 +480,7 @@ function CacheTableHeader({ canManage }: Readonly<{ canManage: boolean }>) {
       <tr className="border-b-2 border-border">
         <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">CAS</th>
         <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">状态</th>
+        <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">名称</th>
         <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">结构来源</th>
         <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">更新时间</th>
         <th className="h-11 px-3 font-bold text-foreground text-left align-middle text-base">详情</th>
@@ -592,12 +626,16 @@ function CandidateReviewDialog({
     <Dialog open={Boolean(cache)} onOpenChange={onOpenChange}>
       <DialogContent className="w-[96vw] max-w-5xl p-4 md:p-6">
         <DialogHeader className="mb-4">
-          <DialogTitle className="mb-0">PubChem 候选确认</DialogTitle>
+          <DialogTitle className="mb-0 pr-10">PubChem 候选确认</DialogTitle>
+          <DialogCloseButton
+            aria-label="关闭 PubChem 候选确认弹窗"
+            onClick={() => onOpenChange(false)}
+          />
         </DialogHeader>
         <div className="space-y-4">
           <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="font-medium">CAS {cache.cas_number}</span>
+              <span className="font-normal">CAS {cache.cas_number}</span>
               <StatusBadge status={cache.status} />
               <CandidateSummary candidates={candidates} />
             </div>
@@ -634,12 +672,16 @@ function StructurePreviewDialog({
     <Dialog open={Boolean(cache)} onOpenChange={onOpenChange}>
       <DialogContent className="w-[96vw] max-w-3xl p-4 md:p-6">
         <DialogHeader className="mb-4">
-          <DialogTitle className="mb-0">结构详情</DialogTitle>
+          <DialogTitle className="mb-0 pr-10">结构详情</DialogTitle>
+          <DialogCloseButton
+            aria-label="关闭结构详情弹窗"
+            onClick={() => onOpenChange(false)}
+          />
         </DialogHeader>
         <div className="space-y-4">
           <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="font-medium">CAS {cache.cas_number}</span>
+              <span className="font-normal">CAS {cache.cas_number}</span>
               <StatusBadge status={cache.status} />
               {cache.source_id && (
                 <span className="text-muted-foreground">CID {cache.source_id}</span>
@@ -894,10 +936,14 @@ export function StructureCacheManagerDialog(props: Readonly<StructureCacheManage
   return (
     <>
       <Dialog open={open} onOpenChange={manager.onDialogOpenChange}>
-        <DialogContent className="w-[96vw] max-w-7xl p-4 md:p-6">
+        <DialogContent className="w-[98vw] max-w-[96rem] p-4 md:p-6">
           <div className="flex flex-col gap-4">
             <DialogHeader className="shrink-0">
-              <DialogTitle className="mb-0">结构缓存管理</DialogTitle>
+              <DialogTitle className="mb-0 pr-10">结构缓存管理</DialogTitle>
+              <DialogCloseButton
+                aria-label="关闭结构缓存管理弹窗"
+                onClick={() => manager.onDialogOpenChange(false)}
+              />
             </DialogHeader>
             <ManagerToolbar {...manager.filters} />
             <CacheTableCard canManage={manager.canManage} {...manager.table} />

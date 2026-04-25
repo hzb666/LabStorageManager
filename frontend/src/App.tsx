@@ -10,6 +10,7 @@ import { TooltipProvider } from '@/components/ui/Tooltip'
 import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { UserRoles } from '@/lib/constants'
+import { canWriteNonPublicData } from '@/lib/permissions'
 
 // 懒加载页面组件 - 使用默认导出
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
@@ -52,7 +53,7 @@ function ProtectedLayoutRoute() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 
   if (authStatus === 'checking' && isAuthenticated) {
-    // 保留 Layout 外壳，避免硬刷新时整页白屏；只延后真正的业务内容区。
+    // 硬刷新校验会话时继续显示 Layout 外壳，业务内容区等待校验完成。
     return <Layout deferOutlet />
   }
   if (authStatus === 'checking') {
@@ -68,6 +69,14 @@ function ProtectedLayoutRoute() {
 function AdminRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const user = useAuthStore((state) => state.user)
   if (user?.role !== UserRoles.ADMIN) {
+    return <Navigate to="/" replace />
+  }
+  return <>{children}</>
+}
+
+function NonPublicRoute({ children }: Readonly<{ children: React.ReactNode }>) {
+  const user = useAuthStore((state) => state.user)
+  if (!canWriteNonPublicData(user?.role)) {
     return <Navigate to="/" replace />
   }
   return <>{children}</>
@@ -141,9 +150,11 @@ function AppContent() {
               </Suspense>
             } />
             <Route path="import" element={
-              <Suspense fallback={<AuthDeferredShell pathname="/import" />}>
-                <ImportPage />
-              </Suspense>
+              <NonPublicRoute>
+                <Suspense fallback={<AuthDeferredShell pathname="/import" />}>
+                  <ImportPage />
+                </Suspense>
+              </NonPublicRoute>
             } />
             <Route
               path="admin/users"

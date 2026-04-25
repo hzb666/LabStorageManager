@@ -31,6 +31,8 @@ import { CHEMICAL_CATEGORY_LABELS } from './constants'
 type BrandAutocompleteOption = { label: string; value: string }
 
 const EMPTY_BRAND_OPTIONS: BrandAutocompleteOption[] = []
+const HAZARDOUS_NAME_ACTIVE_INPUT_CLASS =
+  'border-amber-400 focus-visible:border-amber-500 focus-visible:ring-amber-400/30 dark:border-amber-500 dark:focus-visible:border-amber-400 dark:focus-visible:ring-amber-400/30'
 
 function resolveBrandOptions(brandOptions?: BrandAutocompleteOption[]): BrandAutocompleteOption[] {
   return brandOptions ?? EMPTY_BRAND_OPTIONS
@@ -128,6 +130,7 @@ export function getInventoryFormFields(
       placeholder: '如: 乙醇',
       suffixBooleanToggle: {
         name: 'is_hazardous' as const,
+        activeInputClassName: HAZARDOUS_NAME_ACTIVE_INPUT_CLASS,
         label: '危险品',
         title: '标记为危险品',
         icon: AlertTriangle,
@@ -201,6 +204,7 @@ export function getReagentOrderFormFields(config?: {
       placeholder: '如: 乙醇',
       suffixBooleanToggle: {
         name: 'is_hazardous' as const,
+        activeInputClassName: HAZARDOUS_NAME_ACTIVE_INPUT_CLASS,
         label: '危险品',
         title: '标记为危险品',
         icon: AlertTriangle,
@@ -362,6 +366,7 @@ const reagentWorkflowBaseFields = [
     placeholder: '如: 乙醇',
     suffixBooleanToggle: {
       name: 'is_hazardous',
+      activeInputClassName: HAZARDOUS_NAME_ACTIVE_INPUT_CLASS,
       label: '危险品',
       title: '标记为危险品',
       icon: AlertTriangle,

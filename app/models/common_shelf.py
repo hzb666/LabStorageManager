@@ -136,13 +136,13 @@ class CommonShelfGroup(SQLModel, table=True):
     name_snapshot: str = Field(min_length=1, max_length=200)
     brand: Optional[str] = Field(default=None, max_length=100)
     brand_normalized: str = Field(max_length=100)
-    # Compatibility columns only. Purity and notes belong to bottle rows.
+    # 兼容旧字段；纯度和备注以瓶记录为准。
     purity: Optional[str] = Field(default=None, max_length=20)
     specification_text: str = Field(max_length=50)
     spec_quantity: float
     spec_unit: str = Field(max_length=20)
     specification_normalized: str = Field(max_length=50)
-    # Compatibility columns only. Purity and notes belong to bottle rows.
+    # 兼容旧字段；纯度和备注以瓶记录为准。
     notes: Optional[str] = Field(default=None, max_length=100)
     created_by_id: Optional[int] = Field(
         default=None,

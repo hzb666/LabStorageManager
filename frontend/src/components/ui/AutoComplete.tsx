@@ -15,6 +15,7 @@ interface AutocompleteProps {
   options: AutocompleteOption[]
   value?: string
   onChange?: (value: string) => void
+  onSelect?: (option: AutocompleteOption) => void
   placeholder?: string
   disabled?: boolean
   className?: string
@@ -138,6 +139,7 @@ export function Autocomplete({
   options,
   value = '',
   onChange,
+  onSelect,
   placeholder,
   disabled,
   className,
@@ -193,6 +195,7 @@ export function Autocomplete({
     setInputValue(option.label)
     setDebouncedInputValue(option.label)
     onChange?.(option.label)
+    onSelect?.(option)
     inputRef.current?.focus()
   }
   const handleInputFocus = () => {

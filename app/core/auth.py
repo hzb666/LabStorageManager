@@ -409,11 +409,11 @@ def create_access_token(
         "exp": get_utc_now() + expires_delta,
         "iat": get_utc_now(),
     }
-    # `client` 只是服务端签发的来源标记，用于 CLI/Web 分流，不单独授予权限。
+    # `client` 由服务端签发，仅标记 CLI/Web 来源，不授予额外权限。
     if client:
         payload["client"] = client
     
-    # 生产环境必须使用 RS256；HS256 仅保留给开发环境兜底。
+    # 生产环境必须使用 RS256；开发环境可用 HS256 兜底。
     if settings.algorithm == "RS256":
         token = jwt.encode(
             payload,
@@ -433,7 +433,7 @@ def create_access_token(
 
 def decode_token(token: str) -> dict:
     try:
-        # 生产环境必须使用 RS256；HS256 仅保留给开发环境兜底。
+        # 生产环境必须使用 RS256；开发环境可用 HS256 兜底。
         if settings.algorithm == "RS256":
             payload = jwt.decode(
                 token,

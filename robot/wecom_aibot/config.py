@@ -62,7 +62,6 @@ class WecomAibotSettings(BaseSettings):
         validation_alias=AliasChoices(
             "WECOM_AIBOT_MINIMAX_API_KEY",
             "MINIMAX_API_KEY",
-            "OPENAI_API_KEY",
         ),
     )
     minimax_api_host: str = Field(

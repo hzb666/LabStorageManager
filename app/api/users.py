@@ -431,6 +431,7 @@ class ChangePasswordRequest(BaseModel):
 class UserSearchItem(BaseModel):
     id: int
     full_name: str
+    username: str
 
 
 @dataclass
@@ -1018,7 +1019,10 @@ def search_users(
     )
 
     users = db.exec(statement).all()
-    return [UserSearchItem(id=user.id, full_name=user.full_name) for user in users]
+    return [
+        UserSearchItem(id=user.id, full_name=user.full_name, username=user.username)
+        for user in users
+    ]
 
 
 @router.get("/me", response_model=UserResponse)
@@ -1295,8 +1299,7 @@ def reset_user_password(
         window_seconds=PASSWORD_RESET_RATE_WINDOW_SECONDS,
     )
 
-    # 重置管理员密码时，要求当前操作者再次验证自己的口令，而不是目标管理员旧口令。
-    # 否则该接口会退化成“在线探测目标管理员密码是否正确”的 oracle。
+    # 重置管理员密码需验证当前操作者口令，防止接口变成目标密码探测入口。
     if user.role == UserRole.ADMIN:
         if not password_request.old_password:
             raise HTTPException(

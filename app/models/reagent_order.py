@@ -222,3 +222,7 @@ class ReagentOrderResponse(BaseResponse):
     status: ReagentOrderStatus
     created_at: datetime
     updated_at: datetime
+    approved_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    arrived_at: Optional[datetime] = None
+    stocked_at: Optional[datetime] = None

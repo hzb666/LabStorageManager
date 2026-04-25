@@ -54,7 +54,7 @@ function StructureResultRow({ result }: Readonly<{ result: SubstructureSearchRes
   const summary = result.inventory_summary
   return (
     <tr className="border-t border-border">
-      <td className="px-3 py-3 align-top font-medium text-foreground">
+      <td className="px-3 py-3 align-top font-normal text-foreground">
         <div>{getResultDisplayName(result)}</div>
         <div className="mt-1 text-xs text-muted-foreground">{result.cas_number}</div>
       </td>
@@ -110,11 +110,11 @@ export function StructureSearchResultsPanel({
           <table className="w-full min-w-[760px] border-collapse text-left">
             <thead className="bg-muted/50 text-sm text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-medium">化合物</th>
-                <th className="px-3 py-2 font-medium">库存数</th>
-                <th className="px-3 py-2 font-medium">位置</th>
-                <th className="px-3 py-2 font-medium">总量</th>
-                <th className="px-3 py-2 font-medium">结构来源</th>
+                <th className="px-3 py-2 font-normal">化合物</th>
+                <th className="px-3 py-2 font-normal">库存数</th>
+                <th className="px-3 py-2 font-normal">位置</th>
+                <th className="px-3 py-2 font-normal">总量</th>
+                <th className="px-3 py-2 font-normal">结构来源</th>
               </tr>
             </thead>
             <tbody>

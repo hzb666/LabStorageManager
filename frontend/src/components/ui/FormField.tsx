@@ -11,21 +11,8 @@ export interface FormFieldProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 /**
- * FormField - 表单字段组合组件
- * 封装 Label + Input/Select + ErrorMessage 的组合
- * 支持语义化颜色和 dark mode
- * 
- * 使用示例:
- * ```tsx
- * <FormField label="规格" required error={formErrors.specification}>
- *   <Input
- *     id="add_spec"
- *     value={formData.specification}
- *     onChange={(e) => handleChange('specification', e.target.value)}
- *     className={cn(INPUT_STYLES.lg, error && 'border-destructive')}
- *   />
- * </FormField>
- * ```
+ * 表单字段组合组件。
+ * 封装标签、控件和错误提示，并支持语义化颜色与深色模式。
  */
 const FormField = React.forwardRef<HTMLDivElement, FormFieldProps>(
   ({ className, label, error, required, children, hideLabel, ...props }, ref) => {

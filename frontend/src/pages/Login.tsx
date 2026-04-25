@@ -53,7 +53,7 @@ const normalLoginFields: FieldSchema<LoginFormData>[] = [
   },
 ]
 
-// 锁屏阶段禁止改用户名，切换账号走独立按钮流程，因此这里只保留密码输入。
+// 锁屏阶段禁止改用户名，切换账号走独立按钮流程，表单只提供密码输入。
 const lockScreenFields: FieldSchema<LockScreenForm>[] = [
   {
     name: 'password',
@@ -66,7 +66,7 @@ const lockScreenFields: FieldSchema<LockScreenForm>[] = [
   },
 ]
 
-// 这里只保留 remembered user 持久化和同步所需字段，而不是完整 user 结构。
+// 记住的用户信息保存持久化和同步所需字段。
 type LoginUser = {
   id: number
   username: string
@@ -74,7 +74,7 @@ type LoginUser = {
   avatar_url?: string | null
 }
 
-// remembered user 存在，且当前不在普通登录提交流程、也不在页面跳转中时，才显示锁屏界面。
+// 存在记住的用户信息，且当前未提交普通登录、未发生页面跳转时，显示锁屏界面。
 function shouldShowLockScreen(
   rememberedUser: RememberedUser | null,
   isLoggingIn: boolean,
@@ -96,7 +96,7 @@ function saveRememberedLoginUser(
   })
 }
 
-// 锁屏登录后，若用户名变了就重建 remembered user；否则只同步头像和姓名。
+// 锁屏登录后，用户名变化则重建记住的用户信息；用户名不变时同步头像和姓名。
 function syncRememberedUserAfterLockLogin(
   rememberedUser: RememberedUser,
   user: LoginUser,
@@ -184,7 +184,7 @@ function LockScreenSummary({ rememberedUser }: Readonly<{ rememberedUser: Rememb
   )
 }
 
-// 锁屏视图必须保留切换用户入口，避免 remembered user 失效时只能刷新页面退出锁屏。
+// 锁屏视图提供切换用户入口，remembered user 失效时也能退出锁屏。
 function LockScreenFormView({
   error,
   form,

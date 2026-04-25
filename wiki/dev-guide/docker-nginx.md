@@ -74,7 +74,7 @@ Docker 部署时需要保证主业务库、搜索日志库和归档输出目录�
 
 - `NOAUTH` 或连接失败：核对 `REDIS_HOST`、`REDIS_PORT`；Redis 对外监听时还要核对 `REDIS_PASSWORD`。
 - Redis 不可用时，登录限流和会话缓存会降级，功能可能仍可用，但吞吐和安全边界会下降。
-- 如前端收到 `X-Redis-Status: unavailable`，应优先检查 Redis，而不是直接怀疑业务接口。
+- 前端收到 `X-Redis-Status: unavailable` 时，优先检查 Redis 状态。
 
 ### `/static/` 或 API 404
 

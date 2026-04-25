@@ -15,7 +15,13 @@ import {
 import { BaseForm } from '@/components/BaseForm'
 import type { AutocompleteOption } from '@/components/ui/AutoComplete'
 import { Button } from '@/components/ui/Button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import {
+  Dialog,
+  DialogCloseButton,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/Dialog'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { Label } from '@/components/ui/Label'
@@ -68,8 +74,7 @@ interface CommonShelfEditModeState {
 
 const CHEMICAL_NAME_MAP_SEARCH_ONLY_OPTIONS = [{ value: 'all', label: '全部' }]
 
-// 常用货架弹窗统一使用分组 controller。
-// 页面层只关心 state/forms/actions/itemEdit 四类职责，避免继续平铺几十个字段来回透传。
+// 常用货架弹窗按 state/forms/actions/itemEdit 分组接收 controller。
 export interface CommonShelfDialogController {
   state: {
     mode: CommonShelfDialogMode
@@ -135,7 +140,7 @@ function handleDialogSubmit(
   }
 }
 
-// 统一承载弹窗对象摘要，沿用归还弹窗的轻量信息区样式。
+// 弹窗对象摘要沿用归还弹窗的轻量信息区样式。
 function DialogEntitySummary({
   title,
   details,
@@ -147,7 +152,7 @@ function DialogEntitySummary({
 }) {
   return (
     <div className="space-y-1">
-      <p className="font-medium">{title}</p>
+      <p className="font-normal">{title}</p>
       <p className={cn("text-sm text-muted-foreground", detailsClassName)}>{details}</p>
     </div>
   )
@@ -157,8 +162,7 @@ function renderCommonShelfGroupBrandSpec(group: CommonShelfGroup) {
   return `${group.group.brand || '无品牌'} / ${group.group.specification_text}`
 }
 
-// 通用的取消/提交按钮区。
-// 各业务模式只保留自己的字段和文案，不再重复写一整段按钮布局。
+// 取消/提交按钮集中布局，各业务模式只传文案和状态。
 function DialogSubmitActions({
   onCancel,
   submitLabel,
@@ -187,9 +191,9 @@ function getCommonShelfDialogTitle(mode: CommonShelfDialogMode) {
     case 'edit':
       return '编辑常用货架分组'
     case 'add-bottles':
-      return '新增瓶数'
+      return '加瓶'
     case 'remove-one':
-      return '扣减 1 瓶'
+      return '拿取'
     default:
       return ''
   }
@@ -490,7 +494,7 @@ function CommonShelfEditDialogContent({
         </form>
       ) : (
         <div className="space-y-3">
-          <div className="hidden gap-3 px-3 text-center text-base font-semibold text-foreground sm:flex">
+          <div className="hidden gap-3 px-3 text-center text-base font-bold text-foreground sm:flex">
             <div className="grid min-w-0 flex-1 grid-cols-3 gap-4">
               <div>纯度</div>
               <div>位置</div>
@@ -572,7 +576,7 @@ function renderRemoveOneDialog(
       />
       <DialogSubmitActions
         onCancel={() => actions.handleOpenChange(false)}
-        submitLabel="确认扣减"
+        submitLabel="确认拿取"
         isSubmitting={state.isSubmitting}
       />
     </form>
@@ -592,7 +596,7 @@ export function CommonShelfDialogs({
   const { mode, selectedGroup } = state
   const locationSuggestionsQuery = useQuery({
     queryKey: ['common-shelf-location-suggestions', selectedGroup?.group.group_key],
-    // 位置建议只服务“加瓶”，避免编辑/删除弹窗也触发同一组位置查询。
+    // 位置建议仅在“加瓶”弹窗加载。
     enabled: mode === 'add-bottles' && Boolean(selectedGroup),
     queryFn: async () => {
       const response = await commonShelfAPI.getLocationSuggestions(selectedGroup!.group.group_key)
@@ -601,7 +605,7 @@ export function CommonShelfDialogs({
   })
   const removeLocationsQuery = useQuery({
     queryKey: ['common-shelf-remove-locations', selectedGroup?.group.group_key],
-    // “扣减1瓶”需要精确到位置和先后顺序，因此单独拉完整位置统计，而不是复用建议列表。
+    // “扣减1瓶”按位置和先后顺序处理，需要完整位置统计。
     enabled: mode === 'remove-one' && Boolean(selectedGroup),
     queryFn: async () => {
       const response = await commonShelfAPI.getLocations(selectedGroup!.group.group_key)
@@ -683,7 +687,11 @@ export function ChemicalNameMapManagementDialog({
       <DialogContent className="h-[85vh] w-[98vw] min-w-[min(98vw,72rem)] max-w-[92rem] overflow-hidden md:w-[92vw]">
         <div className="flex h-full flex-col gap-4">
           <DialogHeader className="shrink-0">
-            <DialogTitle className="mb-0">CAS 主数据管理</DialogTitle>
+            <DialogTitle className="mb-0 pr-10">CAS 主数据管理</DialogTitle>
+            <DialogCloseButton
+              aria-label="关闭 CAS 主数据管理弹窗"
+              onClick={() => onOpenChange(false)}
+            />
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-hidden">
             <FilterTable

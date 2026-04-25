@@ -72,9 +72,12 @@ def should_backfill_names(
     *,
     include_names: bool,
     force_names: bool,
+    skip_manual: bool,
     skip_chinese: bool,
 ) -> bool:
     if not include_names:
+        return False
+    if existing and existing.manually_verified and skip_manual and force_names:
         return False
     if existing is None or force_names:
         return True
@@ -120,6 +123,7 @@ def select_backfill_targets(
             existing,
             include_names=options.include_names,
             force_names=options.force_names,
+            skip_manual=options.skip_manual,
             skip_chinese=options.skip_chinese,
         )
         if not resolve_structure and not resolve_names:
@@ -135,6 +139,7 @@ def resolve_missing_names(
     cas_number: str,
     *,
     skip_chinese: bool,
+    skip_manual: bool,
     force_names: bool,
 ) -> str:
     if not is_valid_cas(cas_number):
@@ -145,6 +150,7 @@ def resolve_missing_names(
         cache,
         include_names=True,
         force_names=force_names,
+        skip_manual=skip_manual,
         skip_chinese=skip_chinese,
     ):
         return "skipped-cached"

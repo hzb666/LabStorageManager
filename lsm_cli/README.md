@@ -259,6 +259,12 @@ python -m lsm_cli auth login --username alice
 | `--token <token>` | 临时覆盖本地保存的 Bearer token；不适用于 `auth login` |
 | `--timeout <seconds>` | HTTP 超时，默认 `5.0` |
 
+## 环境变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `LSM_CLI_TOKEN` | 临时覆盖本地保存的 Bearer token；优先级低于 `--token`，高于本地配置；不适用于 `auth login` |
+
 ## 通用输入参数
 
 ### Query 参数
@@ -348,6 +354,7 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 | `inventory code <internal_code>` | 按内部编码查询库存 | `GET /inventory/code/{internal_code}` |
 | `inventory my-borrows` | 查看当前用户借用中的库存 | `GET /inventory/dashboard/my-borrows` |
 | `inventory pending-stockin` | 查看当前用户待补全入库项 | `GET /inventory/dashboard/pending-stockin` |
+| `inventory borrow-history <inventory_id>` | 查看单条库存最近借用历史 | `GET /inventory/{inventory_id}/borrow-history` |
 | `inventory borrow <inventory_id>` | 借用库存 | `POST /inventory/{inventory_id}/borrow` |
 | `inventory return <inventory_id>` | 归还库存 | `POST /inventory/{inventory_id}/return` |
 | `inventory manual-add` | 手工新增库存 | `POST /inventory/manual-add` |
@@ -506,6 +513,12 @@ python -m lsm_cli inventory borrow 123
 `borrow` 每次只借用一个 `inventory_id`，不会按名称、CAS、
 搜索结果或逗号列表批量借用。
 
+公共账号代借时可显式传入实际借用人：
+
+```bash
+python -m lsm_cli inventory borrow 123 --actual-borrower-id 12
+```
+
 ### inventory return
 
 对应模型：`InventoryBorrowReturn`
@@ -535,6 +548,12 @@ python -m lsm_cli inventory return 123 --used-quantity 20
 
 ```bash
 python -m lsm_cli inventory return 123 --remaining-quantity 320
+```
+
+可附加归还备注：
+
+```bash
+python -m lsm_cli inventory return 123 --used-quantity 20 --notes "已取用 20ml"
 ```
 
 ### inventory manual-add

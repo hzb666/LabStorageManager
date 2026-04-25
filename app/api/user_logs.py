@@ -558,7 +558,7 @@ def _append_search_log_candidates(
 
 
 def _exec_count_query(context: LogsCountContext, query) -> int:
-    # COUNT 查询始终返回单行单值；None 兜底是为了兼容极端驱动返回。
+    # COUNT 查询始终返回单行单值；None 兜底兼容极端驱动返回。
     result = context.db.exec(query).one()
     return int(result or 0)
 
@@ -877,7 +877,7 @@ def generate_logs_token(
     db: DBSession,
 ):
     _ensure_user_logs_access(current_user, user_id)
-    # 日志 token 会触发跨表聚合查询，仍要保留基础限流。
+    # 日志 token 会触发跨表聚合查询，仍需基础限流。
     _check_logs_token_rate_limit(current_user.id)
     _record_logs_token_request(current_user.id)
     

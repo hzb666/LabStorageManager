@@ -205,7 +205,7 @@ def compress_image(
     max_width: int = None,
     max_height: int = None
 ) -> Image.Image:
-    # 头像压缩优先满足体积约束，其次再保留更多画质。
+    # 头像压缩优先满足体积约束，再尽量提升画质。
     if max_size_kb is None:
         max_size_kb = settings.max_image_size_kb
     if max_width is None:

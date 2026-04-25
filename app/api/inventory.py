@@ -16,7 +16,7 @@ from sqlmodel import Session, select, func, delete
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
-from app.core.auth import CurrentSession, get_current_user
+from app.core.auth import CurrentSession, get_current_user, require_non_public
 from app.core.config import settings
 from app.core.constants import (    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
@@ -94,7 +94,7 @@ router = APIRouter(prefix="/inventory", tags=["Inventory"])
 LIST_CACHE_PREFIX = "list:"
 INVENTORY_NOT_FOUND = "Inventory item not found"
 
-# ==================== Search Cache ====================
+# ==================== 搜索缓存 ====================
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 INVENTORY_SEARCH_SQL_FIELD_MAP = {
     'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
@@ -443,7 +443,7 @@ def _apply_inventory_all_field_search(
     match_mode: TextMatchMode,
     cas_exact_or_prefix: bool,
 ):
-    # 处理 ALL 搜索模式，能走 FTS 时优先 FTS，否则回退到 LIKE 聚合。
+    # 处理 ALL 搜索模式，能走 FTS 时优先 FTS；FTS 不可用时回退到 LIKE 聚合。
 
     can_use_fts_all = (
         match_mode == TextMatchMode.CONTAINS
@@ -712,7 +712,7 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
 
 
 def _ensure_inventory_required_brand(item: Inventory, update_data: dict) -> None:
-    # 库存列表编辑后必须保留有效品牌，兼容旧数据但阻止继续保存空品牌。
+    # 库存列表编辑后必须写入有效品牌，兼容旧数据并阻止保存空品牌。
 
     effective_brand = update_data.get('brand', item.brand)
     if not isinstance(effective_brand, str) or not effective_brand.strip():
@@ -721,7 +721,7 @@ def _ensure_inventory_required_brand(item: Inventory, update_data: dict) -> None
         update_data['brand'] = effective_brand.strip()
 
 
-# Register named/extended routes first to keep path precedence semantics.
+# 先注册具名和扩展路由，保持路径优先级。
 register_inventory_extended_routes(router, SEARCH_CACHE, LIST_CACHE_PREFIX)
 
 
@@ -1030,11 +1030,11 @@ def _apply_inventory_pinyin_updates(item: Inventory, *, update_data: dict) -> No
         setattr(item, pinyin_field, pinyin_value)
 
 
-@router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_user)])
+@router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_inventory(
     inventory_id: int,
     request: Request,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_non_public)],
     db: Annotated[Session, Depends(get_db)],
 ):
     pending_stockin_clause = (

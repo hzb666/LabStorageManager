@@ -45,7 +45,7 @@ class StagedSessionRefresh:
     rotated_token_hashes: tuple[str, ...]
     now_utc: datetime
 
-# ==================== Memory Fallback Rate Limiting ====================
+# ==================== 内存后备限流 ====================
 # 内存后备速率限制（Redis 不可用时使用）
 
 LOGIN_ATTEMPTS: Dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次失败时间)
@@ -208,7 +208,7 @@ def stage_revoke_user_sessions(
     *,
     except_token_hash: str | None = None,
 ) -> list[str]:
-    # 这里只暂存待删 session，真正的缓存删除和 SSE 通知必须等事务提交成功。
+    # 事务提交成功后再删除缓存并通知 SSE。
     statement = select(UserSession).where(UserSession.user_id == user_id)
     if except_token_hash:
         statement = statement.where(UserSession.token_hash != except_token_hash)

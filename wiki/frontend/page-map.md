@@ -6,7 +6,6 @@
 
 - `/login`：独立登录页，不使用主布局壳层。
 - `/cart-import`：独立受保护页，用于承接浏览器插件桥接批次，不走主业务布局。
-- `/test-error`：人工验证错误边界。
 - `*`：未匹配路径进入 `NotFoundPage`。
 - `/`：仪表盘。
 - `/reagents`：试剂订单。
@@ -15,13 +14,14 @@
 - `/common-shelf`：常用货架。
 - `/import`：Excel 或手工批量导入相关页面。
 - `/devices`：个人设备和会话管理。
+- `/logs`：当前账号的操作日志查看。
 - `/admin/users`：用户管理。
 - `/admin/announcements`：公告管理。
-- `/admin/logs`：操作日志查看。
+- `/admin/logs`：管理员从用户管理页进入的用户操作日志查看。
 
 ## 守卫与加载方式
 
-当前路由不是一个统一守卫包住所有页面，而是按页面性质分层：
+当前路由按页面性质分层：
 
 - `LoginRoute`：控制登录页的反向跳转。
 - `ProtectedRoute`：保护独立页面，当前主要用于 `/cart-import`。
@@ -36,7 +36,7 @@
 
 - `Login`：不需要侧边栏、公告条或用户菜单。
 - `CartImport`：虽然需要登录，但它是一次性导入工作区，因此不复用常规布局。
-- `TestError` 和 `NotFound`：保持独立，便于单独验证和兜底。
+- `NotFound`：保持独立，用于未匹配路径兜底。
 
 ### 主布局页
 
@@ -48,13 +48,19 @@
 - 用户入口
 - 退出登录确认
 
-这意味着如果某个页面应该出现在主导航里，就通常应该挂在主布局路由树下，而不是另起一个独立路由。
+需要出现在主导航的页面通常挂在主布局路由树下，独立路由仅用于独立工作区或错误页。
 
 ## 页面职责分布
 
 ### 仪表盘
 
-`Dashboard` 负责展示各条主业务链的汇总状态，例如我的试剂订单、我的耗材订单、待补位置库存等。它偏读聚合接口，不承担复杂编辑流程。
+`Dashboard` 负责仪表盘视图编排。页面入口保留在 `Dashboard.tsx`，数据 hook、看板/管理面板、订单 tab 与库存 tab 放在 `pages/dashboard/` 下。
+
+角色分支：
+
+- 普通用户：个人模式和成员看板。
+- 管理员：个人模式和管理模式。
+- 公用账户：公告和全局窗口统计。
 
 ### 订单页
 
@@ -65,7 +71,7 @@
 - 接入各自的 SSE 房间
 - 表格行展开后再展示更细粒度的详情和操作按钮
 
-二者最大的不同不是前端表格，而是后端工作流分叉：试剂有到货/入库链，耗材只有审批/完成链。
+二者的主要差异来自后端工作流分叉：试剂有到货/入库链，耗材只有审批/完成链。
 
 ### 库存与常用货架页
 
@@ -78,27 +84,30 @@
 
 ### 管理页
 
-`AdminUsers`、`AnnouncementManagement`、`OperationLogs` 都属于后台管理页：
+`AdminUsers`、`AnnouncementManagement` 属于后台管理页：
 
 - 只对管理员开放
 - 通常同时依赖列表和表单
-- 更强调权限、审计和导出，而不是日常高频操作
+- 更强调权限、审计和导出
+
+`OperationLogs` 同时服务 `/logs` 和 `/admin/logs`。前者从个人设备页进入，后者从用户管理页带短期日志令牌进入。
 
 ### 设备页
 
-`DeviceManagement` 放在主布局里，但不是管理员页。它承载个人会话查看、设备名修改和会话下线，是认证系统在前端的直接落点。
+`DeviceManagement` 放在主布局里，面向个人会话管理。它承载个人会话查看、设备名修改和会话下线，是认证系统在前端的直接落点。
 
 ## 页面与 API / 状态同步对照
 
 | 页面 | 主 API 模块 | 常用 SSE rooms |
 | --- | --- | --- |
-| `Dashboard` | `reagentOrderAPI.getMyReagentOrders`、`consumableOrderAPI.getMyConsumableOrders`、`inventoryAPI.getPendingStockin` | `dashboard`、`inventory` |
+| `Dashboard` | `dashboardAPI.getBoardSummary`、`dashboardAPI.getBoardSectionItems`、`dashboardAPI.getBoardWindowStats`、`dashboardAPI.getAdminSummary`、`dashboardAPI.getAdminSectionItems` | `dashboard`、`inventory` |
 | `ReagentOrders` | `reagentOrderAPI` | `reagent_orders` |
 | `ConsumableOrders` | `consumableOrderAPI` | `consumable_orders` |
 | `Inventory` | `inventoryAPI` | `inventory` |
 | `CommonShelf` | `commonShelfAPI` | `common_shelf` |
 | `CartImport` | `authAPI`、`reagentOrderAPI`、`consumableOrderAPI` | 以本地草稿和标准 API 为主，不直接依赖 SSE 房间 |
 | `DeviceManagement` | `sessionAPI` | 通常不依赖业务 SSE 房间 |
+| `OperationLogs` | `logsAPI`、`userAPI.generateLogsToken` | 通常不依赖业务 SSE 房间 |
 
 ## 导航与页面分组
 
@@ -110,8 +119,8 @@
 这里有几个细节值得记住：
 
 - `adminOnly` 导航项只在当前用户是管理员时出现。
-- `/devices` 不在主导航列表里，而是挂在侧边栏底部的用户信息区。
-- `/admin/logs` 当前可以访问，但不在左侧主导航项数组里。
+- `/devices` 挂在侧边栏底部的用户信息区。
+- `/logs` 和 `/admin/logs` 当前可以访问，但不在左侧主导航项数组里。
 
 ## 页面改动时的判断顺序
 
@@ -123,11 +132,12 @@
 
 按这个顺序判断，通常就能知道它该挂在哪层、该复用哪些基础设施。
 
-## 验证建议
+## 验证要点
 
 - 未登录访问受保护页时，是否全部被正确拦截。
 - 管理员和普通用户看到的导航项是否不同。
-- `/cart-import` 是否保持独立工作区体验，而不是混入主布局。
+- `/cart-import` 保持独立工作区体验。
+- `/logs` 和 `/admin/logs` 是否都能通过短期日志令牌进入。
 - 切换不同业务页后，相关列表是否仍能收到正确的 SSE 更新或 stale 提示。
 - 新页面挂载后，是否选用了正确的懒加载 fallback 和路由守卫。
 

@@ -86,6 +86,50 @@ SPECIALTY_CAS_HINT_KEYWORDS = (
 )
 CHEMICAL_ABBREVIATION_MAX_LENGTH = 48
 CHEMICAL_ABBREVIATION_SYMBOLS = frozenset("()[]+-/.")
+INVENTORY_HINT_CONFLICT_KEYWORD_GROUPS = (
+    MY_REAGENT_ORDER_KEYWORDS,
+    MY_CONSUMABLE_ORDER_KEYWORDS,
+    LOW_STOCK_KEYWORDS,
+    REAGENT_ORDER_KEYWORDS,
+    CONSUMABLE_ORDER_KEYWORDS,
+)
+DIRECT_INVENTORY_HINT_KEYWORDS = (
+    "库存",
+    "在哪",
+    "在哪里",
+    "位置",
+    "还有",
+    "有没有",
+    "有吗",
+    "剩余",
+    "余量",
+    "还剩",
+)
+PRIORITY_FALLBACK_QUERY_STOP_WORDS = (
+    "我的试剂订单",
+    "我的试剂申购",
+    "我申请的试剂",
+    "我订的试剂",
+    "我的耗材订单",
+    "我的耗材申购",
+    "我申请的耗材",
+    "我订的耗材",
+    "试剂订单",
+    "试剂申购",
+    "试剂采购",
+    "耗材订单",
+    "耗材申购",
+    "耗材采购",
+    "低库存",
+    "快没",
+    "不足",
+    "缺货",
+    "我申请的",
+    "我订的",
+    "我的",
+    "吗",
+    "呢",
+)
 
 
 async def answer_with_llm_plan(
@@ -292,7 +336,8 @@ async def answer_read_query(
     conversation_context: list[dict[str, str]] | None = None,
 ) -> str:
     cas_number = extract_cas(text)
-    if has_any(text, MY_BORROW_KEYWORDS):
+    use_priority_fallback = _should_use_priority_read_fallback(text)
+    if use_priority_fallback and has_any(text, MY_BORROW_KEYWORDS):
         return await _call(
             mcp_client,
             "inventory_my_borrows",
@@ -303,7 +348,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, MY_PENDING_STOCKIN_KEYWORDS):
+    if use_priority_fallback and has_any(text, MY_PENDING_STOCKIN_KEYWORDS):
         return await _call(
             mcp_client,
             "inventory_pending_stockin",
@@ -314,7 +359,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, MY_REAGENT_ORDER_KEYWORDS):
+    if use_priority_fallback and has_any(text, MY_REAGENT_ORDER_KEYWORDS):
         return await _call(
             mcp_client,
             "reagent_orders_my",
@@ -325,7 +370,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, MY_CONSUMABLE_ORDER_KEYWORDS):
+    if use_priority_fallback and has_any(text, MY_CONSUMABLE_ORDER_KEYWORDS):
         return await _call(
             mcp_client,
             "consumable_orders_my",
@@ -336,7 +381,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, LOW_STOCK_KEYWORDS):
+    if use_priority_fallback and has_any(text, LOW_STOCK_KEYWORDS):
         return await _call(
             mcp_client,
             "inventory_list_low_stock",
@@ -347,7 +392,7 @@ async def answer_read_query(
             user_text=text,
             conversation_context=conversation_context,
         )
-    if has_any(text, REAGENT_ORDER_KEYWORDS):
+    if use_priority_fallback and has_any(text, REAGENT_ORDER_KEYWORDS):
         return await _answer_reagent_order(
             mcp_client,
             llm_planner,
@@ -357,7 +402,7 @@ async def answer_read_query(
             user_token,
             conversation_context=conversation_context,
         )
-    if has_any(text, CONSUMABLE_ORDER_KEYWORDS):
+    if use_priority_fallback and has_any(text, CONSUMABLE_ORDER_KEYWORDS):
         return await _answer_consumable_order(
             mcp_client,
             llm_planner,
@@ -366,7 +411,7 @@ async def answer_read_query(
             user_token,
             conversation_context=conversation_context,
         )
-    if has_any(text, COMMON_SHELF_KEYWORDS):
+    if use_priority_fallback and has_any(text, COMMON_SHELF_KEYWORDS):
         return await _answer_common_shelf(
             mcp_client,
             llm_planner,
@@ -387,7 +432,7 @@ async def answer_read_query(
             user_token,
             conversation_context=conversation_context,
         )
-    keyword = extract_query(text)
+    keyword = _fallback_inventory_query(text)
     return await _answer_inventory_by_name(
         mcp_client,
         llm_planner,
@@ -398,6 +443,31 @@ async def answer_read_query(
         user_token,
         conversation_context=conversation_context,
     )
+
+
+def _should_use_priority_read_fallback(text: str) -> bool:
+    return not (
+        _has_direct_inventory_hint(text)
+        and _matched_keyword_group_count(text, INVENTORY_HINT_CONFLICT_KEYWORD_GROUPS) > 0
+    )
+
+
+def _matched_keyword_group_count(text: str, keyword_groups: tuple[tuple[str, ...], ...]) -> int:
+    return sum(1 for keywords in keyword_groups if has_any(text, keywords))
+
+
+def _has_direct_inventory_hint(text: str) -> bool:
+    cleaned = text
+    for keyword in LOW_STOCK_KEYWORDS:
+        cleaned = cleaned.replace(keyword, " ")
+    return has_any(cleaned, DIRECT_INVENTORY_HINT_KEYWORDS)
+
+
+def _fallback_inventory_query(text: str) -> str:
+    cleaned = text
+    for word in PRIORITY_FALLBACK_QUERY_STOP_WORDS:
+        cleaned = cleaned.replace(word, " ")
+    return extract_query(cleaned)
 
 
 async def _answer_reagent_order(

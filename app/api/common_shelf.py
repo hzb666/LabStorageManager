@@ -7,7 +7,7 @@ from typing import Optional, Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from app.core.auth import CurrentSession, CurrentUser, get_current_user
+from app.core.auth import CurrentSession, CurrentUser, NonPublicUser, get_current_user
 from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SSEEventType, SSERoom
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.core.time_utils import get_utc_now
@@ -74,6 +74,7 @@ from app.services.search_query_log_service import (
 )
 from app.services.search_matchers import TextMatchMode
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.services.export_rate_limit import EXPORT_SCOPE_COMMON_SHELF, enforce_export_rate_limit
 from app.services.xlsx_export import export_common_shelf_xlsx
 
 router = APIRouter(prefix="/common-shelf", tags=["CommonShelf"])
@@ -286,12 +287,12 @@ def get_common_shelf_group_items(group_key: str, db: DBSession):
     ]
 
 
-@router.post("/manual-add", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.post("/manual-add", response_model=dict)
 async def manual_add_common_shelf(
     payload: CommonShelfManualCreate,
     request: Request,
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser,
+    current_user: NonPublicUser,
     db: DBSession,
 ):
     target_group_fields = _build_manual_create_group_fields(payload)
@@ -345,12 +346,12 @@ async def manual_add_common_shelf(
     }
 
 
-@router.put("/groups/{group_key}", response_model=dict, dependencies=[Depends(get_current_user)])
+@router.put("/groups/{group_key}", response_model=dict)
 async def update_common_shelf_group(
     group_key: str,
     payload: CommonShelfGroupEditRequest,
     request: Request,
-    current_user: CurrentUser,
+    current_user: NonPublicUser,
     db: DBSession,
 ):
     current_group_fields, current_group = _get_group_or_404(db, group_key)
@@ -463,14 +464,13 @@ async def update_common_shelf_group(
 @router.put(
     "/groups/{group_key}/items/{item_id}",
     response_model=dict,
-    dependencies=[Depends(get_current_user)],
 )
 async def update_common_shelf_item(
     group_key: str,
     item_id: int,
     payload: CommonShelfGroupItemUpdateRequest,
     request: Request,
-    current_user: CurrentUser,
+    current_user: NonPublicUser,
     db: DBSession,
 ):
     group_fields, items = _get_group_items_or_404(db, group_key)
@@ -635,13 +635,12 @@ async def remove_one_common_shelf(
 @router.delete(
     "/groups/{group_key}/items/{item_id}",
     response_model=dict,
-    dependencies=[Depends(get_current_user)],
 )
 async def delete_common_shelf_item(
     group_key: str,
     item_id: int,
     request: Request,
-    current_user: CurrentUser,
+    current_user: NonPublicUser,
     db: DBSession,
 ):
     group_fields, items = _get_group_items_or_404(db, group_key)
@@ -691,7 +690,7 @@ async def delete_common_shelf_item(
 async def delete_common_shelf_group(
     group_key: str,
     request: Request,
-    current_user: CurrentUser,
+    current_user: NonPublicUser,
     db: DBSession,
 ):
     group_fields, group = _get_group_or_404(db, group_key)
@@ -727,6 +726,7 @@ async def delete_common_shelf_group(
 
 @router.get("/export", dependencies=[Depends(get_current_user)])
 def export_common_shelf(request: Request, db: DBSession, current_user: CurrentUser):
+    enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_COMMON_SHELF)
     # 导出复用分组查询，保证页面看到的聚合口径和 Excel 导出口径一致。
     response = list_grouped_common_shelf(
         db,

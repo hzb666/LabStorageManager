@@ -76,7 +76,7 @@ const shouldTriggerAuthInvalidation = (args: {
   )
 }
 
-// Request interceptor — 不再从 localStorage 读取 token，改为使用 Cookie
+// 请求拦截器使用 Cookie 认证，不读取 localStorage token。
 api.interceptors.request.use(
   (config) => {
     const sseClientId = useSSEStore.getState().clientId
@@ -86,7 +86,7 @@ api.interceptors.request.use(
       config.headers = headers
     }
 
-    // Token 现在通过 httpOnly Cookie 自动发送，不需要手动设置
+    // token 由 httpOnly Cookie 自动发送，无需手动设置。
     return config
   },
   (error) => {
@@ -94,7 +94,7 @@ api.interceptors.request.use(
   }
 )
 
-// Response interceptor to handle auth errors
+// 响应拦截器处理认证失效。
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -112,7 +112,7 @@ api.interceptors.response.use(
   }
 )
 
-// Paginated response type
+// 分页响应类型。
 export interface PaginatedResponse<T> {
   data: T[]
   current?: number
@@ -127,7 +127,7 @@ export interface PaginationParams {
   search?: string
 }
 
-// Reagent Order Status Enum
+// 试剂订单状态枚举。
 export enum ReagentOrderStatus {
   PENDING = "pending",
   APPROVED = "approved",
@@ -136,7 +136,7 @@ export enum ReagentOrderStatus {
   REJECTED = "rejected",
 }
 
-// Reagent Order Reason Enum
+// 试剂订单原因枚举。
 export enum ReagentOrderReason {
   RUNNING_OUT = "running_out",
   NOT_STOCKED = "not_stocked",
@@ -171,7 +171,7 @@ export interface StockInPayload extends ReagentWorkflowEditPayload {
   remaining_quantity?: number
 }
 
-// Consumable Order Status Enum
+// 耗材订单状态枚举。
 export enum ConsumableOrderStatus {
   PENDING = "pending",
   APPROVED = "approved",
@@ -179,7 +179,7 @@ export enum ConsumableOrderStatus {
   COMPLETED = "completed",
 }
 
-// Consumable Order Reason Enum
+// 耗材订单原因枚举。
 export enum ConsumableOrderReason {
   NONE = "none",
   RUNNING_OUT = "running_out",
@@ -191,7 +191,7 @@ export enum ConsumableOrderReason {
   DEGRADED = "degraded",
 }
 
-// Session Info type for device management
+// 设备管理会话信息类型。
 export interface SessionInfo {
   id: number
   user_id: number
@@ -225,7 +225,7 @@ export interface UserAdminListResponse {
   limit: number
 }
 
-// Auth APIs
+// 认证 API。
 export const authAPI = {
   login: (username: string, password: string) =>
     api.post('/users/login', { 
@@ -240,7 +240,7 @@ export const authAPI = {
     api.post('/users/change-password', { old_password: oldPassword, new_password: newPassword }),
 }
 
-// Session APIs (Device Management)
+// 设备会话 API。
 export const sessionAPI = {
   list: () => api.get('/users/me/sessions'),
   delete: (id: number) => api.delete(`/users/me/sessions/${id}`),
@@ -250,7 +250,7 @@ export const sessionAPI = {
     api.patch(`/users/me/sessions/${id}`, data),
 }
 
-// User Admin APIs
+// 用户管理 API。
 export const userAdminAPI = {
   list: (params?: {
     skip?: number
@@ -291,13 +291,14 @@ export const userAdminAPI = {
 export interface UserSearchItem {
   id: number
   full_name: string
+  username: string
 }
 
 export const userAPI = {
   searchUsers: (query: string) => api.get<UserSearchItem[]>('/users/search', { params: { q: query } }),
 }
 
-// Reagent Order APIs
+// 试剂订单 API。
 export interface CASOverviewOrder {
   id: number
   name: string
@@ -406,7 +407,7 @@ export const reagentOrderAPI = {
   exportOrders: () => api.get('/reagent-orders/export', { responseType: 'blob' }),
 }
 
-// Consumable Order APIs (new)
+// 耗材订单 API。
 export const consumableOrderAPI = {
   list: (params?: PaginationParams & {
     status_filter?: ConsumableOrderStatus
@@ -446,7 +447,7 @@ export interface InventoryReturnPayload {
   notes?: string
 }
 
-// Inventory APIs
+// 库存 API。
 export const inventoryAPI = {
   list: (params?: PaginationParams & {
     status_filter?: string
@@ -543,6 +544,8 @@ export interface AdminDashboardSummary {
   pending_reagent_overdue_count: number
   pending_consumable_overdue_count: number
   pending_stockin_overdue_count: number
+  long_unarrived_approved_reagent_count: number
+  long_unconfirmed_approved_consumable_count: number
   long_pending_order_count: number
   common_stock_alert_count: number
   recent_arrival_count: number
@@ -556,6 +559,7 @@ export interface AdminDashboardSummary {
   recent_actions: AdminDashboardPanelItem[]
   stock_alert_items: AdminDashboardPanelItem[]
   system_status: AdminDashboardPanelItem[]
+  item_counts: DashboardAdminItemCounts
   recent_window_days: number
   system_version?: string
   generated_at: string
@@ -571,6 +575,21 @@ export interface AdminDashboardWindowStats {
   order_total_value: number
 }
 
+export type DashboardBoardSection = 'actions' | 'orders' | 'stockAlerts'
+export type DashboardAdminSection = 'todos' | 'risks' | 'stockAlerts'
+
+export interface DashboardBoardItemCounts {
+  action_items: number
+  order_overview_items: number
+  stock_alert_items: number
+}
+
+export interface DashboardAdminItemCounts {
+  todo_items: number
+  risk_items: number
+  stock_alert_items: number
+}
+
 export interface DashboardBoardSummary {
   action_items: AdminDashboardPanelItem[]
   order_overview_items: AdminDashboardPanelItem[]
@@ -578,6 +597,7 @@ export interface DashboardBoardSummary {
   stock_alert_items: AdminDashboardPanelItem[]
   announcement_items: AdminDashboardPanelItem[]
   system_status: AdminDashboardPanelItem[]
+  item_counts: DashboardBoardItemCounts
   recent_window_days: number
   system_version?: string
   generated_at: string
@@ -585,11 +605,19 @@ export interface DashboardBoardSummary {
 
 export const dashboardAPI = {
   getBoardSummary: () => api.get<{ data: DashboardBoardSummary }>('/dashboard/board/summary'),
+  getBoardSectionItems: (section: DashboardBoardSection, params?: Pick<PaginationParams, 'skip' | 'limit'>) =>
+    api.get<PaginatedResponse<AdminDashboardPanelItem>>(`/dashboard/board/sections/${section}`, {
+      params,
+    }),
   getBoardWindowStats: (windowDays = 7, allTime = false) =>
     api.get<{ data: AdminDashboardWindowStats }>('/dashboard/board/summary/window-stats', {
       params: { window_days: windowDays, all_time: allTime },
     }),
   getAdminSummary: () => api.get<{ data: AdminDashboardSummary }>('/dashboard/admin/summary'),
+  getAdminSectionItems: (section: DashboardAdminSection, params?: Pick<PaginationParams, 'skip' | 'limit'>) =>
+    api.get<PaginatedResponse<AdminDashboardPanelItem>>(`/dashboard/admin/sections/${section}`, {
+      params,
+    }),
   getAdminWindowStats: (windowDays = 7, allTime = false) =>
     api.get<{ data: AdminDashboardWindowStats }>('/dashboard/admin/summary/window-stats', {
       params: { window_days: windowDays, all_time: allTime },
@@ -824,7 +852,7 @@ export const reagentBrandAPI = {
   delete: (id: number) => api.delete(`/reagent-brands/${id}`),
 }
 
-// Chemical Info APIs
+// 化学信息 API。
 export interface ChemicalInfo {
   cas_number: string
   name: string | null
@@ -844,7 +872,7 @@ export const chemicalAPI = {
     }),
 }
 
-// Announcement types
+// 公告类型。
 export interface Announcement {
   id: number
   title: string
@@ -865,7 +893,7 @@ export interface StorageInfo {
   image_count: number
 }
 
-// Announcement APIs
+// 公告 API。
 export const announcementAPI = {
   list: (params?: { skip?: number; limit?: number }) =>
     api.get<Announcement[]>('/announcements/', { params }),
@@ -900,7 +928,7 @@ export const announcementAPI = {
   getStorageInfo: () => api.get<StorageInfo>('/announcements/storage-info'),
 }
 
-// User Operation Logs APIs
+// 用户操作日志 API。
 export interface LogItem {
   time: string | null
   type: string
@@ -959,8 +987,7 @@ export interface LogsAPI {
   }) => Promise<{ data: { data: LogItem[]; total: number } }>
 }
 
-// 创建日志 API 适配器（用于 FilterTable）
-// 注意：FilterTable 使用 status_filter 参数，但日志 API 需要 category，需要转换
+// 日志 API 适配器将 FilterTable 的 status_filter 转成日志接口的 category。
 export const createLogsAPI = (token: string): LogsAPI => ({
   list: async (params) => {
     const payload: {
@@ -977,14 +1004,13 @@ export const createLogsAPI = (token: string): LogsAPI => ({
     if (params.search) payload.keyword = params.search
     if (params.include_search_logs === true) payload.include_search_logs = true
 
-    // 将 status_filter 转换为 category（FilterTable 使用 status_filter，日志 API 需要 category）
-    // 注意：'all' 表示全部类型，不传参给后端
+    // 'all' 表示全部类型，不向后端传 category。
     if (params.status_filter && params.status_filter !== 'all') {
       payload.category = params.status_filter
     }
 
     const response = await api.post<LogsResponse>('/admin/users/logs/query', payload)
-    // LogsResponse 包含 { user_id, username, data: LogItem[], total }
+    // 日志响应包含 { user_id, username, data: LogItem[], total }。
     const logsData = response.data
     return { data: { data: logsData.data, total: logsData.total } }
   }

@@ -50,10 +50,11 @@ import {
 } from '@/lib/validationSchemas'
 import type { InventoryFormData, InventoryFormInputData } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
-import { UserRoles } from '@/lib/constants'
+import { UserRoles, type UserRole } from '@/lib/constants'
 import { getReagentBrandOptionsQueryOptions } from '@/lib/reagentBrandOptions'
 import { useAuthStore } from '@/store/useStore'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
+import { canWriteNonPublicData } from '@/lib/permissions'
 
 import { defaultInventoryValues, enhanceCasLookupField, getInventoryFormFields } from '@/lib/formConfigs'
 
@@ -291,7 +292,7 @@ function validateManualStorageLocation(params: {
   if (!isEffectivelyEmptyStorageLocation(formData.storage_location)) {
     return true
   }
-  form.setError('storage_location', { message: '公用账户手动入库必须填写存放位置' })
+  form.setError('storage_location', { message: '请填写存放位置' })
   return false
 }
 
@@ -461,7 +462,9 @@ function useInventoryDialogController(
   }
 }
 
-function createInventoryColumns(): ColumnDef<Record<string, unknown>, unknown>[] {
+function createInventoryColumns(params: {
+  onBorrow: (item: InventoryItem) => void | Promise<void>
+}): ColumnDef<Record<string, unknown>, unknown>[] {
   const baseColumns = getInventoryTableColumns()
   const actionColumn = columnHelper.display({
     id: 'actions',
@@ -475,7 +478,7 @@ function createInventoryColumns(): ColumnDef<Record<string, unknown>, unknown>[]
         <ActionButtons
           item={{ ...(info.row.original as unknown as InventoryItem) }}
           onEdit={meta?.onEdit as (item: InventoryItem) => void}
-          onBorrowSuccess={meta?.onBorrowSuccess as () => void}
+          onBorrow={params.onBorrow}
         />
       )
     },
@@ -627,15 +630,17 @@ function useStructureDialogPreload(enabled: boolean) {
 }
 
 function StructureDialogFallback({
+  contentClassName,
   open,
   onOpenChange,
 }: Readonly<{
+  contentClassName?: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }>) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-48 max-w-md items-center justify-center">
+      <DialogContent className={contentClassName ?? "flex h-48 max-w-md items-center justify-center"}>
         <Loader2 className="size-8 animate-spin text-muted-foreground" />
       </DialogContent>
     </Dialog>
@@ -798,6 +803,7 @@ function StructureCacheManagerEntry({
         <React.Suspense
           fallback={(
             <StructureDialogFallback
+              contentClassName="flex min-h-[32rem] w-[98vw] max-w-[96rem] items-center justify-center p-4 md:p-6"
               open={open}
               onOpenChange={setOpen}
             />
@@ -815,8 +821,10 @@ function StructureCacheManagerEntry({
 }
 
 function InventoryFormDialog({
+  canDeleteInventory,
   dialogController,
 }: Readonly<{
+  canDeleteInventory: boolean
   dialogController: ReturnType<typeof useInventoryDialogController>
 }>) {
   const isEditing = dialogController.dialogState === 'edit'
@@ -835,7 +843,7 @@ function InventoryFormDialog({
             mode={dialogController.dialogState ?? 'add'}
             onCancel={() => dialogController.setDialogState(null)}
             onDelete={
-              isEditing && dialogController.editingItem
+              canDeleteInventory && isEditing && dialogController.editingItem
                 ? dialogController.handleDeleteClick
                 : undefined
             }
@@ -850,9 +858,137 @@ function InventoryFormDialog({
   )
 }
 
+function InventoryPageHeader({
+  canManageInventory,
+  dialogController,
+  onExport,
+  structureEditor,
+}: Readonly<{
+  canManageInventory: boolean
+  dialogController: ReturnType<typeof useInventoryDialogController>
+  onExport: () => Promise<void>
+  structureEditor: ReturnType<typeof useInventoryStructureEditor>
+}>) {
+  return (
+    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+      <h1 className="text-3xl font-bold text-primary">库存管理</h1>
+      <div className="flex flex-wrap gap-2">
+        {canManageInventory ? (
+          <Button onClick={dialogController.handleAddClick} size="lg">
+            <Plus className="mr-1.5 h-4 w-4" /> 手动入库
+          </Button>
+        ) : null}
+        <StructureCacheManagerEntry onManualEdit={structureEditor.handleManualStructureEdit} />
+        <Button variant="modern" size="lg" onClick={onExport}>
+          <ArrowUpFromLine className="mr-1.5 h-4 w-4" /> 导出
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function InventoryStructureSearchDialog({
+  initialMolblock,
+  shouldRender,
+  structureEditor,
+}: Readonly<{
+  initialMolblock: string | null
+  shouldRender: boolean
+  structureEditor: ReturnType<typeof useInventoryStructureEditor>
+}>) {
+  if (!shouldRender) {
+    return null
+  }
+
+  return (
+    <React.Suspense
+      fallback={(
+        <StructureDialogFallback
+          open={structureEditor.structureDialogOpen}
+          onOpenChange={structureEditor.handleStructureDialogOpenChange}
+        />
+      )}
+    >
+      <StructureSearchDialog
+        open={structureEditor.structureDialogOpen}
+        initialMolblock={initialMolblock}
+        manualEditTarget={structureEditor.manualEditTarget}
+        onManualSaved={structureEditor.handleManualStructureSaved}
+        onOpenChange={structureEditor.handleStructureDialogOpenChange}
+        onResults={structureEditor.handleStructureResults}
+      />
+    </React.Suspense>
+  )
+}
+
+function useInventoryBorrowController({
+  currentUserRole,
+  refreshInventory,
+}: Readonly<{
+  currentUserRole?: UserRole | null
+  refreshInventory: () => void | Promise<void>
+}>) {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [pendingItem, setPendingItem] = useState<InventoryItem | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleDialogOpenChange = useCallback((open: boolean) => {
+    setDialogOpen(open)
+    if (!open) {
+      setPendingItem(null)
+    }
+  }, [])
+
+  const executeBorrow = useCallback(async (inventoryId: number, actualBorrowerId?: number) => {
+    setIsSubmitting(true)
+    try {
+      await inventoryAPI.borrow(
+        inventoryId,
+        actualBorrowerId ? { actual_borrower_id: actualBorrowerId } : undefined
+      )
+      await Promise.resolve(refreshInventory())
+      toast.success('借用成功')
+      setDialogOpen(false)
+      setPendingItem(null)
+    } catch (error) {
+      const maybeStatus = typeof error === 'object' && error !== null && 'response' in error
+        ? (error as { response?: { status?: number } }).response?.status
+        : undefined
+      const message = getApiErrorMessage(error, '借用失败')
+      toast[maybeStatus === 409 ? 'warning' : 'error'](message)
+      throw error
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [refreshInventory])
+
+  const handleBorrowRequest = useCallback(async (item: InventoryItem) => {
+    if (currentUserRole === UserRoles.PUBLIC) {
+      setPendingItem(item)
+      setDialogOpen(true)
+      return
+    }
+    await executeBorrow(item.id)
+  }, [currentUserRole, executeBorrow])
+
+  const handleConfirm = useCallback(async (actualBorrowerId: number) => {
+    if (!pendingItem) return
+    await executeBorrow(pendingItem.id, actualBorrowerId)
+  }, [executeBorrow, pendingItem])
+
+  return {
+    dialogOpen,
+    handleBorrowRequest,
+    handleConfirm,
+    handleDialogOpenChange,
+    isSubmitting,
+  }
+}
+
 export function InventoryPage() {
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
+  const canManageInventory = canWriteNonPublicData(currentUser?.role)
   const structureEditor = useInventoryStructureEditor()
   const {
     handleClearStructureFilter,
@@ -871,19 +1007,27 @@ export function InventoryPage() {
   }, [handleClearStructureFilter, structureFilter])
   const dialogController = useInventoryDialogController(
     loadInventory,
-    currentUser?.role === UserRoles.PUBLIC,
+    false,
   )
 
   const handleExport = useCallback(async () => {
     try {
       const response = await inventoryAPI.exportInventory()
       downloadBlobResponse(response, `inventory_export_${formatChinaDateForFilename()}.xlsx`)
-    } catch {
-      toast.error('导出失败')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '导出失败'))
     }
   }, [])
 
-  const columns = useMemo(() => createInventoryColumns(), [])
+  const borrowController = useInventoryBorrowController({
+    currentUserRole: currentUser?.role,
+    refreshInventory: loadInventory,
+  })
+
+  const columns = useMemo(
+    () => createInventoryColumns({ onBorrow: borrowController.handleBorrowRequest }),
+    [borrowController.handleBorrowRequest]
+  )
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as InventoryItem
     return (
@@ -915,38 +1059,24 @@ export function InventoryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <h1 className="text-3xl font-bold text-primary">库存管理</h1>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={dialogController.handleAddClick} size="lg">
-            <Plus className="mr-1.5 h-4 w-4" /> 手动入库
-          </Button>
-          <StructureCacheManagerEntry onManualEdit={structureEditor.handleManualStructureEdit} />
-          <Button variant="modern" size="lg" onClick={handleExport}>
-            <ArrowUpFromLine className="mr-1.5 h-4 w-4" /> 导出
-          </Button>
-        </div>
-      </div>
-      <InventoryFormDialog dialogController={dialogController} />
-      {shouldRenderStructureDialog && (
-        <React.Suspense
-          fallback={(
-            <StructureDialogFallback
-              open={structureEditor.structureDialogOpen}
-              onOpenChange={structureEditor.handleStructureDialogOpenChange}
-            />
-          )}
-        >
-          <StructureSearchDialog
-            open={structureEditor.structureDialogOpen}
-            initialMolblock={structureInitialMolblock}
-            manualEditTarget={structureEditor.manualEditTarget}
-            onManualSaved={structureEditor.handleManualStructureSaved}
-            onOpenChange={structureEditor.handleStructureDialogOpenChange}
-            onResults={structureEditor.handleStructureResults}
-          />
-        </React.Suspense>
-      )}
+      <InventoryPageHeader
+        canManageInventory={canManageInventory}
+        dialogController={dialogController}
+        onExport={handleExport}
+        structureEditor={structureEditor}
+      />
+      <InventoryFormDialog canDeleteInventory={canManageInventory} dialogController={dialogController} />
+      <BorrowDialog
+        open={borrowController.dialogOpen}
+        onOpenChange={borrowController.handleDialogOpenChange}
+        isSubmitting={borrowController.isSubmitting}
+        onConfirm={borrowController.handleConfirm}
+      />
+      <InventoryStructureSearchDialog
+        initialMolblock={structureInitialMolblock}
+        shouldRender={shouldRenderStructureDialog}
+        structureEditor={structureEditor}
+      />
       <FilterTable
         api={inventoryAPI as FilterAPI}
         queryKey={['inventory']}
@@ -961,7 +1091,6 @@ export function InventoryPage() {
         onQueryError={handleInventoryQueryError}
         onQueryDataReady={structureEditor.handleStructureQueryDataReady}
         onEdit={dialogController.handleEditClick}
-        onBorrowSuccess={loadInventory}
         title={<><Package className="w-5 h-5" /> 库存列表</>}
         searchPlaceholder="搜索名称、CAS号、位置..."
         suppressSorting={Boolean(structureEditor.structureFilter)}
@@ -995,40 +1124,14 @@ export function InventoryPage() {
 const ActionButtons = React.memo(function ActionButtons({
   item,
   onEdit,
-  onBorrowSuccess
+  onBorrow
 }: {
   item: InventoryItem;
   onEdit: (item: InventoryItem) => void;
-  onBorrowSuccess: () => void | Promise<void>
+  onBorrow: (item: InventoryItem) => void | Promise<void>
 }) {
   const currentUser = useAuthStore((state) => state.user)
   const isPublicUser = currentUser?.role === UserRoles.PUBLIC
-  const [borrowDialogOpen, setBorrowDialogOpen] = useState(false)
-  const [pendingBorrowItem, setPendingBorrowItem] = useState<InventoryItem | null>(null)
-  const [isSubmittingBorrow, setIsSubmittingBorrow] = useState(false)
-
-  const executeBorrow = useCallback(async (inventoryId: number, actualBorrowerId?: number) => {
-    setIsSubmittingBorrow(true)
-    try {
-      await inventoryAPI.borrow(
-        inventoryId,
-        actualBorrowerId ? { actual_borrower_id: actualBorrowerId } : undefined
-      )
-      await onBorrowSuccess()
-      toast.success('借用成功')
-      setBorrowDialogOpen(false)
-      setPendingBorrowItem(null)
-    } catch (error) {
-      const maybeStatus = typeof error === 'object' && error !== null && 'response' in error
-        ? (error as { response?: { status?: number } }).response?.status
-        : undefined
-      const message = getApiErrorMessage(error, '借用失败')
-      toast[maybeStatus === 409 ? 'warning' : 'error'](message)
-      throw error
-    } finally {
-      setIsSubmittingBorrow(false)
-    }
-  }, [onBorrowSuccess])
 
   const statusDisplay = useMemo(() => {
     const statusList = [
@@ -1057,8 +1160,9 @@ const ActionButtons = React.memo(function ActionButtons({
       {
         id: 'borrow',
         label: '借用',
-        confirm: true,
-        confirmLabel: '确认',
+        className: isPublicUser ? 'h-8 px-3' : undefined,
+        confirm: !isPublicUser,
+        confirmLabel: isPublicUser ? undefined : '确认',
         showWhen: (currItem: InventoryItem) =>
           currItem.status === 'in_stock' && !currItem.temporary_keeper_id,
         onClick: async (currItem: InventoryItem) => {
@@ -1072,46 +1176,24 @@ const ActionButtons = React.memo(function ActionButtons({
             throw new Error('剩余量未填写')
           }
 
-          if (isPublicUser) {
-            setPendingBorrowItem(currItem)
-            setBorrowDialogOpen(true)
-            return
-          }
-
-          await executeBorrow(currItem.id)
+          await onBorrow(currItem)
         }
       }
     ]
-  }, [isPublicUser, executeBorrow])
+  }, [isPublicUser, onBorrow])
 
   return (
-    <>
-      <TableActionButtonsMemo
-        item={item}
-        actions={actions}
-        showEdit={true}
-        onEdit={onEdit}
-        statusField="status"
-        statusDisplay={statusDisplay}
-      />
-      <BorrowDialog
-        open={borrowDialogOpen}
-        onOpenChange={(open) => {
-          setBorrowDialogOpen(open)
-          if (!open) {
-            setPendingBorrowItem(null)
-          }
-        }}
-        isSubmitting={isSubmittingBorrow}
-        onConfirm={async (actualBorrowerId) => {
-          if (!pendingBorrowItem) return
-          await executeBorrow(pendingBorrowItem.id, actualBorrowerId)
-        }}
-      />
-    </>
+    <TableActionButtonsMemo
+      item={item}
+      actions={actions}
+      showEdit={true}
+      onEdit={onEdit}
+      statusField="status"
+      statusDisplay={statusDisplay}
+    />
   )
 }, (prevProps, nextProps) => {
-  if (prevProps.onEdit !== nextProps.onEdit || prevProps.onBorrowSuccess !== nextProps.onBorrowSuccess) {
+  if (prevProps.onEdit !== nextProps.onEdit || prevProps.onBorrow !== nextProps.onBorrow) {
     return false;
   }
 

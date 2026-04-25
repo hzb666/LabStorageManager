@@ -54,10 +54,14 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
   试剂支持 CAS 号、到货确认、一键入库；耗材支持独立订单流程与完成态管理。
 - CAS 防重与库存预警
   申购时可按 CAS 查询现有库存和历史订单，降低重复购买概率。
+- 试剂品牌主数据
+  试剂订单、库存和待入库表单共享品牌选项，支持拼音搜索、软删除和操作日志记录。
 - 中文拼音检索与 FTS 搜索
   名称、分类、品牌、位置等字段会预计算拼音，并结合 SQLite FTS5 提供搜索能力。
 - 库存借还闭环
   支持借出、归还、借用历史、当前借用人、临时保管人等字段。
+- 仪表盘与管理看板
+  个人模式展示订单、借用和待入库待办；成员看板展示公告、运行统计、个人待处理、订单概览、近期到货/入库和库存告警；管理员管理模式展示全局待办、风险提醒、库存告警和管理表格；公用账户展示公告和全局窗口统计。
 - 常用货架与常用试剂
   支持常用货架分组、CAS 主数据、位置统计、加瓶和扣减。
 - 用户、设备、会话治理
@@ -80,7 +84,7 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
 | 后端 | FastAPI, SQLModel, SQLite, Redis, python-jose, bcrypt, Pillow, pypinyin |
 | 前端 | React 19, TypeScript 5.9, Vite 8, React Router 7, Zustand, React Hook Form, Valibot |
 | UI | Radix UI, Tailwind CSS 4, Lucide React, Framer Motion |
-| 表格与数据 | TanStack Table 8, TanStack Virtual, Axios |
+| 表格与数据 | TanStack Table 8, TanStack Virtual, TanStack Query 5, Axios |
 | 化学相关 | RDKit, Ketcher, PubChem 解析, 本地结构缓存 |
 | 自动化入口 | `lsm_cli`, Agent skill, `lsm_mcp`, 企业微信智能机器人, 微信客服, 浏览器插件 |
 | 构建与校验 | Poetry, npm, ruff, ESLint, TypeScript build |
@@ -90,7 +94,7 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
 
 ### 1. 前置要求
 
-建议本地环境：
+本地环境：
 
 - Python 3.11+
 - Node.js 20+
@@ -140,17 +144,17 @@ cp .env.example .env
 
 | 变量 | 说明 |
 | --- | --- |
-| `ENV` | 本地开发建议 `development` |
+| `ENV` | 本地开发使用 `development` |
 | `CORS_ORIGINS` | 前端地址白名单，开发时通常为 `http://localhost:5173` |
 | `DEFAULT_ADMIN_PASSWORD` | 必填；后端首次启动会用它初始化管理员 |
 | `ALGORITHM` | 默认 `RS256` |
 | `DATABASE_URL` | 主库 SQLite 连接串，必须指向文件型 SQLite；本地示例默认 `sqlite:///./lab_inventory.db`，Docker Compose 默认写入 `/data/lab_inventory.db` |
 | `QUERY_LOG_DIR` | 搜索日志库目录 |
 
-开发环境建议：
+开发环境配置：
 
 - 将 `ENV=development`
-- 把 `CORS_ORIGINS` 改成你的前端地址
+- 将 `CORS_ORIGINS` 改为当前前端地址
 - 首次启动前设置 `DEFAULT_ADMIN_PASSWORD`
 
 说明：
@@ -203,7 +207,7 @@ npm run dev
 | --- | --- | --- |
 | `DATABASE_URL` | `sqlite:///./lab_inventory.db` | 主库 SQLite 连接串；本地默认写入项目根目录，Docker Compose 默认覆盖为 `sqlite:////data/lab_inventory.db` |
 | `QUERY_LOG_DIR` | `logs` | 搜索日志库目录；Docker Compose 默认覆盖为 `/data/logs` |
-| `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署建议 true；本地开发或无可信反代时设为 false |
+| `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署设为 true；本地开发或无可信反代时设为 false |
 | `CACHE_VERSION` | `0.1.0` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | 登录态默认 7 天 |
 | `SESSION_EXPIRE_HOURS` | `72` | 会话有效期 |
@@ -292,6 +296,9 @@ cd frontend
 # 开发启动
 npm run dev
 
+# 生成带版本号的 RDKit 和本地字体资源映射
+npm run generate:static-assets
+
 # Lint
 npm run lint
 
@@ -314,7 +321,7 @@ docker compose logs -f frontend
 docker compose logs -f redis
 ```
 
-Compose 默认把主库、搜索日志库、上传文件和密钥放在持久化 volume 中。备份 SQLite 主库前建议先做 checkpoint，并保证主库及其 WAL/SHM 伴随文件处于同一备份批次。
+Compose 默认把主库、搜索日志库、上传文件和密钥放在持久化 volume 中。备份 SQLite 主库前先做 checkpoint，并保证主库及其 WAL/SHM 伴随文件处于同一备份批次。
 
 ## CLI 支持
 
@@ -383,6 +390,7 @@ React 19 + Vite + Axios
         v
 FastAPI
   |- Auth / Session
+  |- Dashboard
   |- Inventory
   |- Reagent Orders
   |- Consumable Orders
@@ -438,9 +446,10 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
 
 | Key | 用途 |
 | --- | --- |
-| `app-ui` | 主题、字体来源、Dashboard 页签、公告已读/关闭、Bug 按钮隐藏 |
-| `app-table` | 表格 `expandAll`、`fuzzySearch`、列宽 |
+| `app-ui` | 主题、字体来源、仪表盘页签与模式偏好、公告已读/关闭、Bug 按钮隐藏 |
+| `app-table` | 表格 `expandAll`、`fuzzySearch`、`matchMode`、列宽 |
 | `app-auth-meta` | 设备 `id/name`、remembered user |
+| `runtime-time-config` | 后端返回的展示时区和 UTC 偏移 |
 | `auth-storage` | Zustand 登录态持久化，带 TTL |
 | `sidebar-storage` | Zustand 侧栏状态持久化，带 TTL |
 | `chemical_properties_cache` | 化学属性缓存，独立长 TTL |
@@ -460,7 +469,7 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
 
 这是并发读写的基础约束，项目在数据库连接层已强制设置。
 
-### 2. 订单到库存是 Copy，不是 Move
+### 2. 订单到库存采用 Copy 语义
 
 试剂一键入库时会根据订单生成库存记录，但订单本身保留，用于审计和回溯。
 
@@ -516,14 +525,18 @@ app/
 └── services/             # 业务服务
 ```
 
+仪表盘聚合逻辑位于 `app/services/dashboard/`，覆盖汇总分发、item 构造、指标统计和通用 builder。
+
 主要接口模块：
 
 - `users.py`
 - `user_sessions.py`
 - `user_logs.py`
+- `dashboard.py`
 - `inventory.py`
 - `reagent_orders.py`
 - `consumable_orders.py`
+- `reagent_brands.py`
 - `announcements.py`
 - `cart_sync.py`
 - `events.py`
@@ -536,12 +549,14 @@ app/
 ```text
 frontend/src/
 ├── api/                  # Axios API 封装
-├── components/           # UI 组件
+├── components/           # UI 组件、业务组件、结构检索与日志详情组件
 ├── hooks/                # 自定义 hooks
-├── lib/                  # 工具、常量、校验
+├── lib/                  # 工具、常量、校验、品牌选项与本地存储
 ├── pages/                # 页面级组件
 └── store/                # Zustand 状态管理
 ```
+
+仪表盘入口为 `frontend/src/pages/Dashboard.tsx`，辅助文件集中在 `frontend/src/pages/dashboard/`。
 
 ## 部署说明
 

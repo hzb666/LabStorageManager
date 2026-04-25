@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 MAX_ITEMS = 5
+MAX_DIAGNOSTIC_TEXT_LENGTH = 120
 COLLECTION_KEYS = (
     "items",
     "records",
@@ -164,6 +165,15 @@ INTERNAL_KEY_PARTS = (
     "userid",
     "openid",
 )
+SAFE_DIAGNOSTIC_KEYS = (
+    "code",
+    "category",
+    "status_code",
+    "retryable",
+    "fields",
+    "llm_hint",
+    "request_id",
+)
 SENSITIVE_VALUE_PATTERN = re.compile(
     r"(sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]+|eyJ[A-Za-z0-9_-]{20,}\.)",
     re.IGNORECASE,
@@ -177,7 +187,11 @@ def format_tool_result(result: dict[str, Any], *, title: str, empty_text: str) -
 def build_safe_facts(result: dict[str, Any], *, title: str, empty_text: str) -> dict[str, Any]:
     """Build a safe, user-facing facts payload from a CLI/MCP result."""
     if not _is_success(result):
-        return {"text": _format_error(result), "empty": False}
+        facts: dict[str, Any] = {"text": _format_error(result), "empty": False}
+        diagnostic = _extract_safe_error_diagnostic(result)
+        if diagnostic:
+            facts["diagnostic"] = diagnostic
+        return facts
 
     data = _extract_payload_data(result)
     items = _extract_items(data)
@@ -273,6 +287,68 @@ def _format_error(result: dict[str, Any]) -> str:
     if isinstance(error, dict) and error.get("code") in {"CLI_TIMEOUT", "NETWORK_ERROR"}:
         return "后端服务暂时不可达，请稍后再试。"
     return "系统异常，请稍后再试。"
+
+
+def _extract_safe_error_diagnostic(result: dict[str, Any]) -> dict[str, Any]:
+    diagnostic: dict[str, Any] = {}
+    exit_code = result.get("exit_code")
+    if isinstance(exit_code, int):
+        diagnostic["exit_code"] = exit_code
+
+    for error in _iter_error_payloads(result):
+        if not isinstance(error, dict):
+            continue
+        for key in SAFE_DIAGNOSTIC_KEYS:
+            value = _safe_diagnostic_value(key, error.get(key))
+            if value not in (None, [], {}):
+                diagnostic[key] = value
+    return diagnostic
+
+
+def _iter_error_payloads(result: dict[str, Any]):
+    yield result.get("error")
+    payload = result.get("payload")
+    if isinstance(payload, dict):
+        yield payload.get("error")
+
+
+def _safe_diagnostic_value(key: str, value: Any) -> Any:
+    if key == "status_code":
+        return value if isinstance(value, int) and 100 <= value <= 599 else None
+    if key == "retryable":
+        return value if isinstance(value, bool) else None
+    if key == "fields":
+        return _safe_diagnostic_fields(value)
+    return _safe_diagnostic_text(value)
+
+
+def _safe_diagnostic_fields(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    fields: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        field: dict[str, str] = {}
+        for key in ("name", "reason", "message"):
+            text = _safe_diagnostic_text(item.get(key))
+            if text:
+                field[key] = text
+        if field:
+            fields.append(field)
+    return fields
+
+
+def _safe_diagnostic_text(value: Any) -> str | None:
+    if not isinstance(value, (str, int)):
+        return None
+    text = " ".join(str(value).strip().split())
+    if not text:
+        return None
+    text = SENSITIVE_VALUE_PATTERN.sub("[redacted]", text)
+    if len(text) > MAX_DIAGNOSTIC_TEXT_LENGTH:
+        return f"{text[:MAX_DIAGNOSTIC_TEXT_LENGTH - 3]}..."
+    return text
 
 
 def _format_item(item: Any, index: int) -> str:

@@ -167,6 +167,7 @@ type CommonShelfDialogControllerParams = {
 }
 
 type CommonShelfPageController = {
+  canManageCommonShelf: boolean
   dialogController: CommonShelfDialogController
   chemicalNameMapController: ReturnType<typeof useChemicalNameMapController>
   quickOrderController: CommonShelfQuickOrderController
@@ -403,6 +404,7 @@ function CommonShelfExpandedRow({ item }: Readonly<{ item: CommonShelfGroup }>) 
 }
 
 function createCommonShelfColumns(params: {
+  canEdit: boolean
   onEdit: (item: CommonShelfGroup) => void
   onAddBottles: (item: CommonShelfGroup) => void
   onRemoveOne: (item: CommonShelfGroup) => void
@@ -415,6 +417,7 @@ function createCommonShelfColumns(params: {
       return (
         <CommonShelfActionButtons
           item={item}
+          canEdit={params.canEdit}
           onEdit={params.onEdit}
           onAddBottles={params.onAddBottles}
           onRemoveOne={params.onRemoveOne}
@@ -483,7 +486,7 @@ function createFormFieldErrorSetter<TInput extends FieldValues, TOutput>(
   }
 }
 
-// 多个提交流程都需要同样的 loading 包装；这里只抽公共壳子，不隐藏具体业务逻辑。
+// 多个提交流程共用 loading 包装，具体业务逻辑仍由调用方传入。
 async function runWithSubmitting(
   setIsSubmitting: (value: boolean) => void,
   task: () => Promise<void>,
@@ -910,7 +913,7 @@ function useCommonShelfGroupEditActions(params: {
   }
 }
 
-// 这里集中管理常用货架弹窗，主页面只负责“何时打开、刷新什么”，避免再分散成多层只转发参数的 hook。
+// 常用货架弹窗集中管理打开时机、刷新目标和表单动作。
 function useCommonShelfDialogController({
   refreshCommonShelf,
   onRequireChemicalNameMap,
@@ -1219,6 +1222,7 @@ function useCommonShelfPageController(): CommonShelfPageController {
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.user)
   const requireChemicalNameMapRef = useRef<(payload: ManualAddPayload) => void>(() => undefined)
+  const canManageCommonShelf = canWriteNonPublicData(currentUser?.role)
   const canQuickOrder = Boolean(currentUser && currentUser.role !== UserRoles.PUBLIC)
   const canWriteChemicalNameMap = canWriteNonPublicData(currentUser?.role)
   const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
@@ -1272,12 +1276,14 @@ function useCommonShelfPageController(): CommonShelfPageController {
   }, [])
 
   const columns = useMemo(() => createCommonShelfColumns({
+    canEdit: canManageCommonShelf,
     onEdit: dialogActions.openEditDialog,
     onAddBottles: dialogActions.openAddBottlesDialog,
     onRemoveOne: dialogActions.openRemoveOneDialog,
     onQuickOrder: quickOrderController.actions.openQuickOrderDialog,
     showQuickOrder: canQuickOrder,
   }), [
+    canManageCommonShelf,
     canQuickOrder,
     dialogActions.openAddBottlesDialog,
     dialogActions.openEditDialog,
@@ -1290,6 +1296,7 @@ function useCommonShelfPageController(): CommonShelfPageController {
   }, [])
 
   return {
+    canManageCommonShelf,
     dialogController,
     chemicalNameMapController,
     quickOrderController,
@@ -1302,10 +1309,12 @@ function useCommonShelfPageController(): CommonShelfPageController {
 }
 
 function CommonShelfPageHeader({
+  showManualAdd,
   onOpenManualAdd,
   onOpenChemicalNameMapManagement,
   onExport,
 }: {
+  showManualAdd: boolean
   onOpenManualAdd: () => void
   onOpenChemicalNameMapManagement: () => void
   onExport: () => void
@@ -1314,10 +1323,12 @@ function CommonShelfPageHeader({
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <h1 className="text-3xl font-bold text-primary">常用货架</h1>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={onOpenManualAdd} size="lg">
-          <Plus className="mr-1.5 h-4 w-4" />
-          手动添加
-        </Button>
+        {showManualAdd ? (
+          <Button onClick={onOpenManualAdd} size="lg">
+            <Plus className="mr-1.5 h-4 w-4" />
+            手动添加
+          </Button>
+        ) : null}
         <Button variant="modern" size="lg" onClick={onOpenChemicalNameMapManagement}>
           <Database className="mr-1.5 h-4 w-4" />
           CAS 主数据管理
@@ -1334,7 +1345,7 @@ function CommonShelfPageHeader({
 function QuickOrderSummaryField({ label, value }: Readonly<{ label: string; value: ReactNode }>) {
   return (
     <div className="min-w-0">
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="text-xs font-normal text-muted-foreground">{label}</div>
       <div className="mt-1 break-words text-sm text-foreground">{value || '-'}</div>
     </div>
   )
@@ -1396,6 +1407,7 @@ function CommonShelfQuickOrderDialog({
 
 export function CommonShelfPage() {
   const {
+    canManageCommonShelf,
     dialogController,
     chemicalNameMapController,
     quickOrderController,
@@ -1410,6 +1422,7 @@ export function CommonShelfPage() {
   return (
     <div className="space-y-6">
       <CommonShelfPageHeader
+        showManualAdd={canManageCommonShelf}
         onOpenManualAdd={dialogActions.openManualAddDialog}
         onOpenChemicalNameMapManagement={() => chemicalNameMapController.setManagementOpen(true)}
         onExport={() => {
@@ -1419,7 +1432,9 @@ export function CommonShelfPage() {
 
       <CommonShelfDialogs
         dialog={dialogController}
-        showDelete={canDeleteCommonShelfGroup(dialogController.state.selectedGroup)}
+        showDelete={
+          canManageCommonShelf && canDeleteCommonShelfGroup(dialogController.state.selectedGroup)
+        }
         brandOptions={brandOptions}
       />
 
@@ -1459,6 +1474,7 @@ export function CommonShelfPage() {
 
 const CommonShelfActionButtons = function CommonShelfActionButtons({
   item,
+  canEdit,
   onEdit,
   onAddBottles,
   onRemoveOne,
@@ -1466,6 +1482,7 @@ const CommonShelfActionButtons = function CommonShelfActionButtons({
   showQuickOrder,
 }: {
   item: CommonShelfGroup
+  canEdit: boolean
   onEdit: (item: CommonShelfGroup) => void
   onAddBottles: (item: CommonShelfGroup) => void
   onRemoveOne: (item: CommonShelfGroup) => void
@@ -1505,7 +1522,7 @@ const CommonShelfActionButtons = function CommonShelfActionButtons({
     <TableActionButtonsMemo
       item={item}
       actions={actions}
-      showEdit={true}
+      showEdit={canEdit}
       onEdit={onEdit}
     />
   )

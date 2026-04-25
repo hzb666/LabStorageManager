@@ -117,7 +117,7 @@ export function DataTable<TData>({
   const scrollbarWidth = useDataTableViewportEffects(bodyScrollRef, sortingState)
 
   useEffect(() => {
-    // 受控展开态由外层驱动；这里只回写非受控场景，避免本地存储与父级双写冲突。
+    // 受控展开态由外层驱动；本地回写限定在非受控场景，防止本地存储与父级双写冲突。
     if (!isControlled && enableExpandAll && expandAllStorageKey) {
       setExpandAllState(expandAllStorageKey, isAllExpanded)
     }
@@ -187,7 +187,7 @@ export function DataTable<TData>({
     getItemKey: getRowItemKey,
   })
 
-  // 批量展开和滚动逻辑必须消费同一个 virtualizer，否则测量和滚动基准会分叉。
+  // 批量展开和滚动逻辑消费同一个 virtualizer，保证测量和滚动基准一致。
   useEffect(() => { setVirtualizer(rowVirtualizer) }, [rowVirtualizer, setVirtualizer])
   useSyncVirtualizerRef(rowVirtualizer, setVirtualizerForScroll)
 

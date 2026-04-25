@@ -18,6 +18,8 @@ const localFilenameDateTimeFormatter = new Intl.DateTimeFormat('en-CA', {
   second: '2-digit',
   hourCycle: 'h23',
 })
+const DEFAULT_DISPLAY_UTC_OFFSET = '+08:00'
+const DAY_IN_MS = 24 * 60 * 60 * 1000
 
 function getDateTimeParts(date: Date, formatter: Intl.DateTimeFormat) {
   const parts = formatter.formatToParts(date)
@@ -101,12 +103,72 @@ function getUtcDateParts(date: Date) {
   }
 }
 
+function getDisplayUtcOffsetMinutes(): number {
+  try {
+    return getUtcOffsetMinutes(getStoredDisplayUtcOffset() ?? DEFAULT_DISPLAY_UTC_OFFSET)
+  } catch {
+    return getUtcOffsetMinutes(DEFAULT_DISPLAY_UTC_OFFSET)
+  }
+}
+
+function getDisplayShiftedDate(date: string | Date): Date | null {
+  const sourceDate = new Date(date)
+  if (Number.isNaN(sourceDate.getTime())) {
+    return null
+  }
+  return new Date(sourceDate.getTime() + getDisplayUtcOffsetMinutes() * 60_000)
+}
+
+function getDisplayDateParts(date: string | Date) {
+  const shiftedDate = getDisplayShiftedDate(date)
+  return shiftedDate ? getUtcDateParts(shiftedDate) : null
+}
+
+function getDisplayDateIndex(date: string | Date): number | null {
+  const parts = getDisplayDateParts(date)
+  if (!parts) {
+    return null
+  }
+
+  return Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+  ) / DAY_IN_MS
+}
+
 export function formatDate(date: string | Date): string {
   return new Date(date).toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   })
+}
+
+export function formatDisplayDate(date: string | Date): string {
+  const parts = getDisplayDateParts(date)
+  if (!parts) {
+    return formatDate(date)
+  }
+  return `${parts.year}/${parts.month}/${parts.day}`
+}
+
+export function formatDisplayDateTime(date: string | Date): string {
+  const parts = getDisplayDateParts(date)
+  if (!parts) {
+    return formatDateTime(date)
+  }
+  return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`
+}
+
+export function isAtLeastDisplayNaturalDaysOld(
+  date: string | Date,
+  days: number,
+  now: string | Date = new Date(),
+): boolean {
+  const targetDay = getDisplayDateIndex(date)
+  const currentDay = getDisplayDateIndex(now)
+  return targetDay !== null && currentDay !== null && currentDay - targetDay >= days
 }
 
 export function formatDateTime(date: string | Date): string {
@@ -210,7 +272,7 @@ export function getAllTags(): string[] {
   return Object.keys(inputConfigs)
 }
 
-// 备注保留标签前缀，只移除空标签。
+// 备注标签前缀随内容返回，空标签会被移除。
 export function processNotes(notes: string | undefined): string {
   if (!notes) return ''
 

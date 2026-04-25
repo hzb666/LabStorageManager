@@ -263,7 +263,7 @@ function attachAuthInvalidListener(args: {
       reason = payload.reason || reason
       code = payload.code || ''
     } catch {
-      // 保留默认失效原因。
+      // 解析失败时沿用默认失效原因。
     }
 
     const notice = shouldSuppressAuthNoticeByReason(reason)

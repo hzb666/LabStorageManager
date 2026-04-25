@@ -1,12 +1,12 @@
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Annotated, Optional, Dict, Any
+from typing import Annotated, Any, Collection, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import and_, or_
-from sqlmodel import Session, select, func, delete
+from sqlmodel import Session, delete, func, select, update as sql_update
 
 from app.database import DBSession
 from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
@@ -49,6 +49,7 @@ from app.services.order_list_search import (
     normalize_order_list_search_value,
 )
 from app.services.sse_manager import sse_manager
+from app.services.export_rate_limit import EXPORT_SCOPE_CONSUMABLE_ORDERS, enforce_export_rate_limit
 from app.services.order_operation_logger import (
     log_consumable_order_approve,
     log_consumable_order_arrival_complete,
@@ -57,6 +58,10 @@ from app.services.order_operation_logger import (
     log_consumable_order_export,
     log_consumable_order_reject,
     log_consumable_order_update,
+)
+from app.services.order_status_times import (
+    get_consumable_order_status_times,
+    get_order_status_time_fields,
 )
 from app.services.search_query_log_service import (
     buffer_search_log,
@@ -67,7 +72,7 @@ from app.services.search_query_log_service import (
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 logger = logging.getLogger(__name__)
 
-# ==================== Search Cache ====================
+# ==================== 搜索缓存 ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 LIST_CACHE_PREFIX = "list:"
@@ -157,13 +162,68 @@ class ConsumableOrderListQuery(BaseModel):
     sort_order: Optional[str] = "desc"
 
 
+def _consumable_status_value(value: ConsumableOrderStatus) -> str:
+    return value.value if hasattr(value, "value") else str(value)
+
+
+def _claim_consumable_order_status_transition(
+    db: Session,
+    *,
+    order_id: int,
+    expected_status: ConsumableOrderStatus,
+    target_status: ConsumableOrderStatus,
+) -> None:
+    _claim_consumable_order_status_transition_from(
+        db,
+        order_id=order_id,
+        expected_statuses=(expected_status,),
+        target_status=target_status,
+    )
+
+
+def _claim_consumable_order_status_transition_from(
+    db: Session,
+    *,
+    order_id: int,
+    expected_statuses: Collection[ConsumableOrderStatus],
+    target_status: ConsumableOrderStatus,
+) -> None:
+    expected_status_values = tuple(expected_statuses)
+    if not expected_status_values:
+        raise ValueError("expected_statuses cannot be empty")
+    status_clause = (
+        ConsumableOrder.status == expected_status_values[0]
+        if len(expected_status_values) == 1
+        else ConsumableOrder.status.in_(expected_status_values)
+    )
+    result = db.exec(
+        sql_update(ConsumableOrder)
+        .where(ConsumableOrder.id == order_id)
+        .where(status_clause)
+        .values(status=target_status, updated_at=get_utc_now())
+    )
+    if result.rowcount != 0:
+        return
+
+    latest_status = db.exec(select(ConsumableOrder.status).where(ConsumableOrder.id == order_id)).first()
+    if latest_status is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "Order status already changed to "
+            f"{_consumable_status_value(latest_status)}, please refresh and retry"
+        ),
+    )
+
+
 def _delete_consumable_order_with_permission(
     db: Session,
     *,
     order_id: int,
     current_user: CurrentUser,
 ) -> ConsumableOrder:
-    # Atomic delete avoids check-then-delete races; explicit existence check preserves 404/403 semantics.
+    # 原子删除消除先查后删竞争；未删到时再区分 404/403。
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -214,21 +274,22 @@ def _ensure_consumable_order_rejectable(order: ConsumableOrder) -> None:
 
 def _add_specification(item_dict: dict) -> dict:
     # 补充 specification 展示字段。
-    # specification 为用户直接输入的完整规格字符串，无需拼接。
-    # specification 字段已包含在 model_dump 中，无需额外处理
+    # specification 为用户直接输入的完整规格字符串，model_dump 已包含该字段。
     return item_dict
 
 
 def _serialize_consumable_order(order: ConsumableOrder, db: Session) -> dict[str, Any]:
     users_map = batch_get_user_names(db, {order.applicant_id} if order.applicant_id else set())
+    status_times = get_consumable_order_status_times(db, [order])
     return _add_specification({
         **ConsumableOrderResponse.model_validate(order).model_dump(mode="json"),
+        **get_order_status_time_fields(status_times, order),
         "applicant_name": users_map.get(order.applicant_id, ""),
     })
 
 
 def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[ConsumableOrder]:
-    # Get consumable order by ID
+    # 按 ID 获取耗材订单。
     return db.get(ConsumableOrder, order_id)
 
 
@@ -300,7 +361,7 @@ async def create_consumable_order(
     current_user: CurrentUser,
     db: DBSession,
 ):
-    # Create a new consumable order
+    # 创建耗材订单。
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
@@ -453,13 +514,18 @@ def list_consumable_orders(
     else:
         orders = []
 
-    # Enrich with applicant names
+    # 补充申请人姓名。
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     users_map = batch_get_user_names(db, applicant_ids)
+    status_times = get_consumable_order_status_times(db, orders)
 
     result = {
         "data": [
-            _add_specification({**ConsumableOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")})
+            _add_specification({
+                **ConsumableOrderResponse.model_validate(o).model_dump(),
+                **get_order_status_time_fields(status_times, o),
+                "applicant_name": users_map.get(o.applicant_id, ""),
+            })
             for o in orders
         ],
         "total": total,
@@ -497,7 +563,7 @@ def list_consumable_orders(
     return result
 
 
-# --- Export ---
+# 导出接口。
 
 @router.get("/export", dependencies=[Depends(require_admin)])
 def export_consumable_orders(
@@ -505,7 +571,8 @@ def export_consumable_orders(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Export consumable orders as a downloadable XLSX file.
+    enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_CONSUMABLE_ORDERS)
+    # 导出耗材订单 XLSX 文件。
     from app.services.xlsx_export import export_consumable_orders_xlsx
 
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
@@ -531,14 +598,14 @@ def get_consumable_order(
     order_id: int,
     db: DBSession,
 ):
-    # Get consumable order by ID
+    # 按 ID 获取耗材订单。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ORDER_NOT_FOUND
         )
-    return order
+    return _serialize_consumable_order(order, db)
 
 
 @router.put("/{order_id}", response_model=ConsumableOrderResponse)
@@ -549,7 +616,7 @@ async def update_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Update consumable order information
+    # 更新耗材订单信息。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -596,11 +663,11 @@ async def update_consumable_order(
         if field in update_data:
             update_data[field] = normalized_strings[field]
     
-    # 如果更新了 name，重新计算拼音字段（只保留 name_pinyin）
+    # name 更新后重新计算拼音字段（当前写入 name_pinyin）。
     if "name" in update_data:
         name = update_data.get("name")
         pinyin_fields = compute_pinyin_fields(name=name)
-        # ConsumableOrder 保留名称的拼音搜索字段
+        # ConsumableOrder 写入名称拼音搜索字段。
         update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
         update_data['name_pinyin_initials'] = pinyin_fields.get('name_pinyin_initials')
     should_resubmit = order.status in {
@@ -631,7 +698,7 @@ async def update_consumable_order(
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
     )
     
-    return order
+    return _serialize_consumable_order(order, db)
 
 
 @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
@@ -641,7 +708,7 @@ async def approve_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Approve a consumable order (Admin only)
+    # 管理员审批通过耗材订单。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
@@ -654,8 +721,14 @@ async def approve_consumable_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot approve order with status: {order.status}"
         )
-    
+
     before_order = ConsumableOrder.model_validate(order)
+    _claim_consumable_order_status_transition_from(
+        db,
+        order_id=order_id,
+        expected_statuses=CONSUMABLE_ORDER_APPROVABLE_STATUSES,
+        target_status=ConsumableOrderStatus.APPROVED,
+    )
     order.status = ConsumableOrderStatus.APPROVED
     log_consumable_order_approve(
         db,
@@ -684,16 +757,22 @@ async def reject_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Reject a consumable order (Admin only). Does not modify notes.
+    # 管理员驳回耗材订单，备注不随状态流转改写。
     order = get_consumable_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ORDER_NOT_FOUND
         )
-    
+
     _ensure_consumable_order_rejectable(order)
     before_order = ConsumableOrder.model_validate(order)
+    _claim_consumable_order_status_transition_from(
+        db,
+        order_id=order_id,
+        expected_statuses=CONSUMABLE_ORDER_REJECTABLE_STATUSES,
+        target_status=ConsumableOrderStatus.REJECTED,
+    )
     order.status = ConsumableOrderStatus.REJECTED
     log_consumable_order_reject(
         db,
@@ -731,7 +810,7 @@ async def complete_consumable_order(
             detail=ORDER_NOT_FOUND
         )
     
-    # Check if user is the applicant or admin
+    # 仅申请人或管理员可完成订单。
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -743,9 +822,15 @@ async def complete_consumable_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot complete order with status: {order.status}. Order must be APPROVED first."
         )
-    
+
     before_order = ConsumableOrder.model_validate(order)
-    # Consumables complete directly (no stock-in)
+    _claim_consumable_order_status_transition(
+        db,
+        order_id=order_id,
+        expected_status=ConsumableOrderStatus.APPROVED,
+        target_status=ConsumableOrderStatus.COMPLETED,
+    )
+    # 耗材订单完成后直接结束，无入库步骤。
     order.status = ConsumableOrderStatus.COMPLETED
     log_consumable_order_arrival_complete(
         db,
@@ -774,6 +859,7 @@ async def complete_consumable_order(
 def _build_consumable_dashboard_groups(
     orders: list[ConsumableOrder],
     users_map: dict[int, str],
+    status_times,
 ) -> dict[str, dict[str, Any]]:
     grouped_orders: dict[str, dict[str, Any]] = {
         status.value: {
@@ -799,6 +885,10 @@ def _build_consumable_dashboard_groups(
             "applicant_name": users_map.get(order.applicant_id) if order.applicant_id else "",
             "created_at": utc_iso_str(order.created_at),
             "updated_at": utc_iso_str(order.updated_at),
+            **{
+                key: utc_iso_str(value)
+                for key, value in get_order_status_time_fields(status_times, order).items()
+            },
         }
 
         status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
@@ -829,7 +919,7 @@ def get_my_consumable_orders(
     current_user: CurrentUser,
     db: DBSession,
 ):
-    # Get current user's consumable order progress
+    # 获取当前用户耗材订单进度。
     statement = select(ConsumableOrder).where(
         ConsumableOrder.applicant_id == current_user.id,
         ConsumableOrder.status.in_(DASHBOARD_CONSUMABLE_STATUSES),
@@ -837,9 +927,10 @@ def get_my_consumable_orders(
 
     orders = db.exec(statement).all()
     users_map = {current_user.id: current_user.full_name}
+    status_times = get_consumable_order_status_times(db, orders)
 
     return {
-        "data": _build_consumable_dashboard_groups(orders, users_map),
+        "data": _build_consumable_dashboard_groups(orders, users_map, status_times),
         "total": len(orders)
     }
 
@@ -856,9 +947,10 @@ def get_admin_consumable_orders(db: DBSession):
     orders = db.exec(statement).all()
     applicant_ids = {order.applicant_id for order in orders if order.applicant_id}
     users_map = batch_get_user_names(db, applicant_ids)
+    status_times = get_consumable_order_status_times(db, orders)
 
     return {
-        "data": _build_consumable_dashboard_groups(orders, users_map),
+        "data": _build_consumable_dashboard_groups(orders, users_map, status_times),
         "total": len(orders),
     }
 
@@ -870,7 +962,7 @@ async def delete_consumable_order(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Delete a consumable order (only applicant or admin can delete).
+    # 删除耗材订单，仅申请人或管理员可执行。
     order = _delete_consumable_order_with_permission(
         db,
         order_id=order_id,

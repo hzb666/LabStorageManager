@@ -17,9 +17,9 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         className={cn(
           styles.input.base,
           styles.input.inactive,
-          // 去掉 h-auto! 允许拖拽改变高度，保留其他 ! 强制覆盖单行居中排版
+          // 去掉 h-auto!，允许拖拽改变高度；其它 ! 覆盖单行居中排版。
           "h-auto min-h-16 resize-y block w-full py-2! px-3! leading-normal!",
-          // 仅保留颜色和阴影的过渡，解决拖拽卡顿
+          // 颜色和阴影参与过渡，拖拽高度不参与动画。
           "transition-[color,box-shadow,border-color]",
           className
         )}

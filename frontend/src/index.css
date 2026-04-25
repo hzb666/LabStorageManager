@@ -162,7 +162,7 @@
   }
 }
 
-/* Prevent focus zoom on mobile devices */
+/* 移动端输入控件使用 16px 字号，防止聚焦时页面缩放。 */
 @media screen and (max-width: 767px) {
 
   input,
@@ -193,7 +193,7 @@
     align-items: center;
   }
 
-  /* Input 垂直居中 - 使用 padding 适配不同高度 */
+  /* 输入框垂直居中 - 使用 padding 适配不同高度 */
   .input-vcenter {
     padding-top: 0;
     padding-bottom: 0;
@@ -353,11 +353,8 @@
 }
 
 /* =========================================
-   Marquee Animation for Announcement Banner
+   公告横幅滚动动画
    ========================================= */
-/* index.css */
-
-/* index.css */
 
 @keyframes marquee-infinite {
   0% {

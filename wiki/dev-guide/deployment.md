@@ -55,6 +55,8 @@ npm run dev
 
 默认前端访问 `http://localhost:5173`，API 前缀是 `http://localhost:8000/api`。如需覆盖，可通过 `VITE_API_URL` 调整。
 
+`npm run dev` 会先执行 `npm run generate:static-assets`，为 RDKit、本地 WASM 和字体写入带版本号的资源映射。
+
 生产环境前端按静态站点部署：
 
 ```bash
@@ -63,7 +65,7 @@ npm ci
 npm run build
 ```
 
-将前端构建产物放到 Nginx 站点根目录。后端代码、上传资源、密钥、数据库文件和运行依赖放在后端运行目录，由进程管理器启动 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`。
+`npm run build` 同样会先生成公共资源映射。将前端构建产物放到 Nginx 站点根目录。后端代码、上传资源、密钥、数据库文件和运行依赖放在后端运行目录，由进程管理器启动 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`。
 
 本地 `.env.example` 默认主库是 `sqlite:///./lab_inventory.db`，搜索日志目录是 `logs`。Docker Compose 会把它们覆盖到 `/data/lab_inventory.db` 和 `/data/logs`，并把上传资源保存到 `/data/static`。
 
@@ -110,7 +112,7 @@ APP_PORT=80 docker compose up -d --build
 - 若 Nginx 前面还有受信代理，需把 `TRUST_PROXY_HEADERS` 设为 `true`，并确保代理透传 `X-Forwarded-*`。
 - 自定义域名或 TLS 场景下，需要补充 `listen 443 ssl`、证书路径和 `server_name`，同时保持 `/api` 与前端路由边界不变。
 - `VITE_API_URL` 必须与代理路径对齐；如果前端部署在独立子域，不要继续使用默认 `/api` 假设。
-- 上传大小同时受后端和 Nginx 限制，生产配置建议 `MAX_UPLOAD_REQUEST_SIZE_MB=12`，Nginx `client_max_body_size 12m`。公告图片和头像仍由业务代码限制为 5MB。
+- 上传大小同时受后端和 Nginx 限制，生产配置使用 `MAX_UPLOAD_REQUEST_SIZE_MB=12` 和 Nginx `client_max_body_size 12m`。公告图片和头像仍由业务代码限制为 5MB。
 
 ## 最小验证清单
 

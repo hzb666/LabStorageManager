@@ -9,7 +9,13 @@ import {
 } from '@/api/client'
 import { BaseForm } from '@/components/BaseForm'
 import { Button } from '@/components/ui/Button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import {
+  Dialog,
+  DialogCloseButton,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/Dialog'
 import { HighlightText } from '@/components/ui/HighlightText'
 import { Input } from '@/components/ui/Input'
 import { LoadingButton } from '@/components/ui/LoadingButton'
@@ -236,7 +242,7 @@ function ReagentBrandGrid({
           type="button"
           title={brand.name}
           className={cn(
-            'min-h-14 min-w-0 border-b border-r border-border/60 px-4 py-3 text-left text-lg font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'min-h-14 min-w-0 border-b border-r border-border/60 px-4 py-3 text-left text-lg font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             canWrite
               ? 'transition-colors hover:bg-accent hover:text-primary dark:hover:bg-input'
               : 'cursor-default disabled:opacity-100',
@@ -267,7 +273,7 @@ function ReagentBrandManagementDialog({
   onEdit: (item: ReagentBrandItem) => void
 }) {
   const [searchInput, setSearchInput] = useState('')
-  const { data, isError, isFetching, isLoading, isPlaceholderData } = useReagentBrandList(
+  const { data, isError, isLoading } = useReagentBrandList(
     open,
     searchInput,
   )
@@ -285,7 +291,11 @@ function ReagentBrandManagementDialog({
       <DialogContent className="h-[82vh] !w-[min(96vw,64rem)] !max-w-none overflow-hidden">
         <div className="flex h-full flex-col gap-4">
           <DialogHeader className="shrink-0">
-            <DialogTitle className="mb-0">品牌管理</DialogTitle>
+            <DialogTitle className="mb-0 pr-10">品牌管理</DialogTitle>
+            <DialogCloseButton
+              aria-label="关闭品牌管理弹窗"
+              onClick={() => onOpenChange(false)}
+            />
           </DialogHeader>
           <div className="grid w-full shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-3">
             <Input
@@ -303,17 +313,14 @@ function ReagentBrandManagementDialog({
             )}
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            <div className="flex items-center px-1 py-3">
-              <div className="flex items-center gap-2 text-xl font-semibold">
+            <div className="flex items-center px-1 pb-5 pt-3">
+              <div className="flex items-center gap-2 text-xl font-bold">
                 <Tags className="h-5 w-5" />
                 品牌列表
                 <span className="font-normal text-muted-foreground">
                   ({countLabel})
                 </span>
               </div>
-              {isFetching && !isPlaceholderData && (
-                <span className="ml-3 text-sm text-muted-foreground">更新中</span>
-              )}
             </div>
             <div className="h-[calc(82vh-15rem)] overflow-y-auto border-t border-border/60">
               <ReagentBrandGrid

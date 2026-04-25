@@ -493,6 +493,83 @@ class WecomReadQuerySelfTest(unittest.TestCase):
             mcp.calls,
         )
 
+    def test_inventory_hint_overrides_my_reagent_order_keyword_fallback(self) -> None:
+        mcp = FakeMcpClient(
+            {
+                "inventory_search_by_name": _inventory_item(),
+                "reagent_orders_my": _my_reagent_orders(),
+            }
+        )
+
+        reply = asyncio.run(
+            answer_read_query(
+                mcp_client=mcp,
+                llm_planner=None,
+                web_search_client=None,
+                search_limit=5,
+                text="我申请的试剂乙醇还有库存吗",
+                user_token="token",
+            )
+        )
+
+        self.assertIn("库存查询结果", reply)
+        self.assertIn(
+            ("inventory_search_by_name", {"keyword": "乙醇", "limit": 100, "user_token": "token"}),
+            mcp.calls,
+        )
+        self.assertNotIn("reagent_orders_my", [name for name, _ in mcp.calls])
+
+    def test_inventory_hint_overrides_low_stock_keyword_fallback(self) -> None:
+        mcp = FakeMcpClient(
+            {
+                "inventory_search_by_name": _inventory_item(),
+                "inventory_list_low_stock": _empty_inventory(),
+            }
+        )
+
+        asyncio.run(
+            answer_read_query(
+                mcp_client=mcp,
+                llm_planner=None,
+                web_search_client=None,
+                search_limit=5,
+                text="低库存乙醇还有吗",
+                user_token="token",
+            )
+        )
+
+        self.assertIn(
+            ("inventory_search_by_name", {"keyword": "乙醇", "limit": 100, "user_token": "token"}),
+            mcp.calls,
+        )
+        self.assertNotIn("inventory_list_low_stock", [name for name, _ in mcp.calls])
+
+    def test_explicit_common_shelf_query_keeps_priority_with_location_hint(self) -> None:
+        mcp = FakeMcpClient(
+            {
+                "common_shelf_search_by_alias": _common_shelf(),
+                "inventory_search_by_name": _inventory_item(),
+            }
+        )
+
+        reply = asyncio.run(
+            answer_read_query(
+                mcp_client=mcp,
+                llm_planner=None,
+                web_search_client=None,
+                search_limit=5,
+                text="常用货架乙醇位置",
+                user_token="token",
+            )
+        )
+
+        self.assertIn("常用货架", reply)
+        self.assertIn(
+            ("common_shelf_search_by_alias", {"keyword": "乙醇", "limit": 5, "user_token": "token"}),
+            mcp.calls,
+        )
+        self.assertNotIn("inventory_search_by_name", [name for name, _ in mcp.calls])
+
     def test_my_borrows_query_calls_dashboard_tool(self) -> None:
         mcp = FakeMcpClient({"inventory_my_borrows": _my_borrows()})
 

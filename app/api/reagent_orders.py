@@ -61,11 +61,16 @@ from app.services.order_list_search import (
 )
 from app.services.inventory_queries import regular_inventory_query
 from app.services.sse_manager import sse_manager
+from app.services.export_rate_limit import EXPORT_SCOPE_REAGENT_ORDERS, enforce_export_rate_limit
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.services.order_operation_logger import (
     log_reagent_order_create,
     log_reagent_order_export,
     log_reagent_order_update,
+)
+from app.services.order_status_times import (
+    get_order_status_time_fields,
+    get_reagent_order_status_times,
 )
 from app.services.search_query_log_service import (
     buffer_search_log,
@@ -78,7 +83,7 @@ from app.api.reagent_orders_workflow import register_workflow_routes
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
 logger = logging.getLogger(__name__)
 
-# ==================== Search Cache ====================
+# ==================== 搜索缓存 ====================
 # 简单内存缓存，用于减少重复搜索查询
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 LIST_CACHE_PREFIX = "list:"
@@ -190,7 +195,7 @@ class CASOverviewResponseModel(BaseResponse):
 
 
 def _validate_order_reason(reason: Optional[str], required: bool = False) -> Optional[ReagentOrderReason]:
-    # Validate order reason in API layer and convert to enum for model persistence.
+    # API 层校验订购原因，并转换为模型持久化使用的枚举。
     if reason is None:
         if required:
             raise HTTPException(
@@ -223,7 +228,7 @@ def _ensure_required_brand(brand: Optional[str]) -> str:
 
 
 def _add_specification(item_dict: dict) -> dict:
-    # Add computed specification field to order response dict
+    # 为订单响应补充计算后的规格字段。
     initial = item_dict.get("initial_quantity", 0)
     unit = item_dict.get("unit", "")
     item_dict["specification"] = format_specification(initial, unit)
@@ -232,13 +237,15 @@ def _add_specification(item_dict: dict) -> dict:
 
 def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]:
     users_map = batch_get_user_names(db, {order.applicant_id} if order.applicant_id else set())
+    status_times = get_reagent_order_status_times(db, [order])
     return _add_specification({
         **ReagentOrderResponse.model_validate(order).model_dump(mode="json"),
+        **get_order_status_time_fields(status_times, order),
         "applicant_name": users_map.get(order.applicant_id, ""),
     })
 
 def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
-    # Get reagent order by ID
+    # 按 ID 获取试剂订单。
     return db.get(ReagentOrder, order_id)
 
 
@@ -318,7 +325,7 @@ async def create_reagent_order(
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
-    # Normalize CAS Number
+    # 标准化 CAS 号。
     normalized_cas = normalize_cas(order.cas_number)
     is_valid, error = validate_cas_format(normalized_cas)
     
@@ -328,7 +335,7 @@ async def create_reagent_order(
             detail=f"Invalid CAS format: {error}"
         )
     
-    # Parse specification to get initial_quantity and unit
+    # 解析规格得到初始量和单位。
     try:
         initial_quantity, unit = parse_specification(order.specification)
     except SpecificationError as e:
@@ -351,7 +358,7 @@ async def create_reagent_order(
         brand=normalized_brand,
     )
 
-    # Create order
+    # 创建订单记录。
     db_order = ReagentOrder(
         cas_number=normalized_cas,
         name=normalized.get('name', order.name),
@@ -513,13 +520,18 @@ def list_reagent_orders(
     else:
         orders = []
 
-    # Enrich with applicant names
+    # 补充申请人姓名。
     applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
     users_map = batch_get_user_names(db, applicant_ids)
+    status_times = get_reagent_order_status_times(db, orders)
 
     result = {
         "data": [
-            _add_specification({**ReagentOrderResponse.model_validate(o).model_dump(), "applicant_name": users_map.get(o.applicant_id, "")})
+            _add_specification({
+                **ReagentOrderResponse.model_validate(o).model_dump(),
+                **get_order_status_time_fields(status_times, o),
+                "applicant_name": users_map.get(o.applicant_id, ""),
+            })
             for o in orders
         ],
         "total": total,
@@ -558,7 +570,7 @@ def list_reagent_orders(
     return result
 
 
-# --- Export ---
+# 导出接口。
 
 @router.get("/export", dependencies=[Depends(require_admin)])
 def export_reagent_orders(
@@ -566,7 +578,8 @@ def export_reagent_orders(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    # Export reagent orders as a downloadable XLSX file.
+    enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_REAGENT_ORDERS)
+    # 导出试剂订单 XLSX 文件。
     from app.services.xlsx_export import export_reagent_orders_xlsx
 
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
@@ -597,7 +610,7 @@ def get_cas_overview(
     db: DBSession,
     exclude_order_id: Optional[int] = None,
 ):
-    # Get CAS overview for duplicate-check hints in forms and expanded rows.
+    # 获取 CAS 概览，用于表单查重提示和展开行提示。
     normalized_cas = normalize_cas(cas_number)
 
     if is_special_cas_value(normalized_cas):
@@ -711,14 +724,14 @@ def get_reagent_order(
     order_id: int,
     db: DBSession,
 ):
-    # Get reagent order by ID
+    # 按 ID 获取试剂订单。
     order = get_reagent_order_by_id(db, order_id)
     if not order:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
-    return order
+    return _serialize_reagent_order(order, db)
 
 
 @router.put("/{order_id}", response_model=ReagentOrderResponse)
@@ -779,7 +792,7 @@ async def update_reagent_order(
             reason="reagent_order.update",
         )
     
-    return order
+    return _serialize_reagent_order(order, db)
 
 
 def _ensure_reagent_order_edit_permission(order: ReagentOrder, *, current_user: CurrentUser) -> None:

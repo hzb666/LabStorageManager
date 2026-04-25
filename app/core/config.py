@@ -9,7 +9,7 @@ from typing import Annotated, Any, List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode
-from app.core.constants import CAS_PATTERN, RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
+from app.core.constants import RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
 
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     private_key_path: str = Field(default=".keys/private.pem", description="JWT private key path")
     public_key_path: str = Field(default=".keys/public.pem", description="JWT public key path")
     
-    # CORS
+    # 跨域配置。
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
     trust_proxy_headers: bool = Field(
         default=False,
@@ -134,8 +134,7 @@ class Settings(BaseSettings):
     redis_password: Optional[str] = Field(default=None, description="Redis password")
     redis_key_prefix: str = Field(default="lsm", description="Redis key prefix for app namespace")
     
-    # CAS 设置
-    cas_pattern: str = CAS_PATTERN
+    # 化学结构缓存与检索
     chem_structure_feature_enabled: bool = Field(
         default=True,
         description="Enable local structure cache and substructure search features",

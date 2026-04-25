@@ -47,8 +47,9 @@ export function AnnouncementDetail({ announcement, open, onOpenChange }: Readonl
               </DialogHeader>
 
               <div className="space-y-4 mt-2">
-                <div className="text-muted-foreground">
-                  发布时间: {formatDateTime(announcement.created_at)}
+                <div className="space-y-1 text-muted-foreground">
+                  <div>发布时间: {formatDateTime(announcement.created_at)}</div>
+                  <div>更新时间: {formatDateTime(announcement.updated_at)}</div>
                 </div>
 
                 <div className="prose dark:prose-invert max-w-none">

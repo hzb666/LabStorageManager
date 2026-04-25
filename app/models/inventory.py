@@ -44,7 +44,7 @@ class InventoryBase(SQLModel):
 class Inventory(InventoryBase, table=True):
     """Inventory database model - Individual item tracking"""
     __table_args__ = (
-        # 搜索和排序加速：只保留能真正命中 B-Tree 的索引。
+        # 搜索和排序加速：使用可命中 B-Tree 的索引。
         Index("ix_inventory_cas_number_created_at_id", "cas_number", "created_at", "id"),
         Index("ix_inventory_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
         Index("ix_inventory_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),

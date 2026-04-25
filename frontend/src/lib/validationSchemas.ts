@@ -627,7 +627,7 @@ export const safeString = (value: unknown, fallback = '-'): string => {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return String(value)
   }
-  // 对象类型，返回 fallback 而不是 [object Object]
+  // 对象类型统一回退到 fallback，防止显示 [object Object]。
   return fallback
 }
 

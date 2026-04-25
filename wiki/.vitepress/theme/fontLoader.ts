@@ -148,6 +148,17 @@ async function loadGoogleFonts() {
   ])
 }
 
+async function loadLocalFonts() {
+  const fontText = getPageFontText()
+
+  await Promise.race([
+    waitForLocalFonts(fontText),
+    delay(FONT_TIMEOUT_MS).then(() => {
+      throw new Error('Local font loading timed out.')
+    })
+  ])
+}
+
 async function bootstrapFontLoading() {
   markFontState('loading')
 
@@ -156,7 +167,7 @@ async function bootstrapFontLoading() {
     markWebFontsReady('google')
   } catch {
     try {
-      await waitForLocalFonts()
+      await loadLocalFonts()
       markWebFontsReady('local')
     } catch {
       markFontState('fallback')

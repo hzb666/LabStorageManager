@@ -569,7 +569,7 @@ async def security_headers_middleware(
     _apply_security_headers(response, request.url.path)
     return response
 
-# Global exception handler for logging 500 errors - must be added BEFORE routes
+# 全局异常处理器需先于路由注册，用于记录 500 错误。
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     """Global exception handler to log all unhandled errors"""
@@ -600,13 +600,13 @@ async def global_exception_handler(request, exc):
     _apply_trusted_origin_cors_headers(response, request)
     return response
 
-# Mount static files with caching
+# 挂载带缓存策略的静态文件目录。
 STATIC_DIR = Path(__file__).parent.parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# Include routers
+# 注册业务路由。
 app.include_router(users.router, prefix="/api")
 app.include_router(user_logs.router, prefix="/api")
 app.include_router(inventory.router, prefix="/api")
@@ -664,8 +664,7 @@ def get_runtime_cache_version(response: Response) -> dict[str, str]:
         "display_timezone": get_display_timezone_label(),
     }
 
-# Import models to ensure tables are created
-# This is needed for SQLModel to register all models
+# 导入模型并完成 SQLModel 表注册。
 from app.models import (  # noqa: E402, F401
     Announcement,
     BorrowLog,

@@ -240,9 +240,7 @@ def _parse_query_molecule(*, query: str, query_format: str):
 
 
 def _normalize_wildcard_smarts(query: str) -> str:
-    # Ketcher exports R/dummy atoms as [#0], but RDKit treats that as atomic number
-    # 0 instead of a match-any-atom wildcard. For search semantics, R means any
-    # substituent atom, so normalize it before parsing.
+    # Ketcher 将 R/dummy atom 导出为 [#0]；RDKit 解析前需改成任意原子通配符。
     return _DUMMY_ATOM_SMARTS_PATTERN.sub(lambda match: f"[*{match.group('atom_map') or ''}]", query)
 
 

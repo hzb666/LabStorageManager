@@ -41,7 +41,7 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
     return remaining / initial
 
 
-# ==================== File Upload Security ====================
+# ==================== 文件上传安全 ====================
 # 允许的文件扩展名
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 
@@ -180,7 +180,7 @@ def _generate_internal_code_with_tracking(
     sequence_tracker: dict[tuple[str, str], int],
     created_at: Optional[datetime] = None
 ) -> str:
-    # 同一批次里相同 CAS 也要拿到不同流水号，否则会撞内部编码唯一约束。
+    # 同一批次里相同 CAS 也要拿到不同流水号，防止内部编码唯一约束冲突。
     date_str = (created_at or get_utc_now()).strftime("%y%m%d")
     prefix = build_internal_code_prefix(cas_number, created_at=created_at)
     tracker_key = (prefix, date_str)
@@ -236,7 +236,7 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     except ValueError as e:
         return False, f"Invalid specification format: {str(e)}"
 
-    # 剩余量不能超过规格解析出的初始量，否则导入后库存状态立刻失真。
+    # 剩余量不能超过规格解析出的初始量，防止导入后库存状态立刻失真。
     remaining_raw = row.get('remaining_quantity')
     if pd.notna(remaining_raw):
         remaining_text = str(remaining_raw).strip()

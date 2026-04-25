@@ -329,7 +329,7 @@ export async function fetchBackendErrorLogs(hours: number = 24): Promise<Backend
     })
     return response.data
   } catch (error) {
-    // 如果不是管理员，可能无法获取后端日志
+    // 非管理员场景可能无法获取后端日志
     console.warn('无法获取后端日志:', error)
     return {
       logs: [],

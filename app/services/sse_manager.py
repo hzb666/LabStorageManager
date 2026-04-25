@@ -130,7 +130,7 @@ class SSEManager:
             async with local_room.lock:
                 local_room.clients.discard(client.client_id)
 
-            # Reclaim empty rooms to avoid unbounded in-memory room growth.
+            # 无客户端房间及时回收，限制内存占用。
             async with self._manager_lock:
                 current_room = self._rooms.get(room)
                 if current_room is not local_room:
@@ -247,7 +247,7 @@ class SSEManager:
                     client.queue_full_streak = 0
                 delivered += 1
             except asyncio.QueueFull:
-                # Queue full means client is too slow; drop and eventually disconnect.
+                # 队列已满表示客户端过慢，先丢弃事件并累计断开计数。
                 client.dropped_events += 1
                 client.queue_full_streak += 1
                 logger.warning(
@@ -264,7 +264,7 @@ class SSEManager:
         return delivered
 
     async def _disconnect_slow_client(self, client: SSEClient) -> None:
-        # Client may already be disconnected by another coroutine.
+        # 客户端可能已被其他协程断开。
         if self._clients.get(client.client_id) is not client:
             return
 
@@ -300,8 +300,7 @@ class SSEManager:
         client.revoked = True
         client.revoke_reason = reason
 
-        # Drop already-buffered business events so revocation is the next thing the
-        # client sees. Otherwise a kicked session can still consume stale messages.
+        # 清空已缓存业务事件，确保被踢会话下一条收到失效通知。
         with suppress(asyncio.QueueEmpty):
             while True:
                 client.queue.get_nowait()
@@ -376,7 +375,7 @@ class SSEManager:
         raw_channel = message.get("channel")
         channel = self._decode_pubsub_value(raw_channel)
 
-        # Extract room from channel with prefix: "lsm:sse:room-123" -> "room-123"
+        # 从 Redis channel 前缀中提取 room 名称。
         prefix_pattern = f"{REDIS_KEY_PREFIX}:sse:"
         if channel.startswith(prefix_pattern):
             room = channel[len(prefix_pattern):]
@@ -398,7 +397,7 @@ class SSEManager:
             return None
 
         if event.get("origin") == self._origin:
-            # Already pushed locally by this process.
+            # 本进程已完成本地推送。
             return None
 
         event_type = str(event.get("event") or "message")
@@ -540,7 +539,7 @@ class SSEManager:
     ) -> AsyncGenerator[str, None]:
         try:
             while True:
-                # Stop stream quickly when client is removed (e.g., slow client governance).
+                # 客户端被移除后尽快停止 stream。
                 if self._clients.get(client.client_id) is not client:
                     break
                 if client.revoked and client.queue.empty():

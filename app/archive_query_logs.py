@@ -93,7 +93,7 @@ def _build_archive_path(output_dir: Path, now: datetime) -> Path:
 def _open_connection(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(str(path))
     connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA busy_timeout=1000;")
+    connection.execute("PRAGMA busy_timeout=3000;")
     return connection
 
 

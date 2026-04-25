@@ -19,6 +19,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 
 - 用户与角色
 - 试剂订单
+- 试剂品牌
 - 耗材订单
 - 库存
 - 借用日志
@@ -38,8 +39,8 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />：初始化 SQLite 引擎，启用 WAL 和外键，并编排启动期数据库准备。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" />：集中维护 SQLite schema 补齐、性能索引、FTS 表和一致性检查。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/core" />：`auth.py` 负责 JWT 与会话检查，`constants.py` 维护通用常量，`request_utils.py` 统一请求上下文。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/models" />：使用 SQLModel 定义用户、订单、库存、借用日志、公告和会话等对象。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/api" />：承载 `users`、`inventory`、`reagent_orders`、`reagent_orders_workflow`、`consumable_orders`、`cart_sync`、`announcements`、`events`、`chem` 等接口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/models" />：使用 SQLModel 定义用户、订单、库存、品牌、借用日志、公告和会话等对象。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/api" />：承载 `users`、`dashboard`、`inventory`、`reagent_orders`、`reagent_orders_workflow`、`consumable_orders`、`reagent_brands`、`cart_sync`、`announcements`、`events`、`chem` 等接口。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/services" />：提供 CAS 规范化、规格解析、拼音字段、内码生成、SSE 广播、查询缓存、操作日志时间线和结构检索等能力。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/main.tsx" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" />：挂载查询客户端、认证状态、SSE hook 和路由树。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" />：统一 Axios 实例、Cookie 登录和各业务 API 的调用方式。
@@ -53,6 +54,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 
 - 试剂与耗材采用双链路处理。
 - CAS 号重复提醒用于降低重复采购。
+- 试剂品牌选项由后端主数据接口维护，前端表单统一复用。
 - 试剂支持到货确认、暂存和一键入库。
 - 常用货架覆盖“高频领用”的库存场景。
 - SQLite 以 WAL 模式运行，兼顾部署简单和并发读取。
@@ -74,7 +76,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 | 层级 | 技术 |
 | --- | --- |
 | 后端 | FastAPI + SQLModel + SQLite(WAL) + Redis |
-| 前端 | React 19 + TypeScript + Vite + React Router |
+| 前端 | React 19 + TypeScript 5.9 + Vite 8 + React Router 7 |
 | 数据获取 | Axios + TanStack Query |
 | 大表格与搜索 | TanStack Table + Virtual + 后端检索/拼音字段 |
 | 认证与会话 | JWT + 多设备会话管理 |
@@ -124,7 +126,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 5. 浏览器插件导入调整：先看 [浏览器插件购物车同步](/dev-guide/cart-sync)。
 6. CLI、MCP 和机器人入口调整：先看 [关键文件导航](/dev-guide/key-files) 和 [API 边界与导航](/overview/api-boundary)。
 
-## 验证建议
+## 验证要点
 
 - 登录后检查 `/api/users/me`，确认认证链路正常。
 - 打开两个浏览器标签，验证库存或订单更新后是否能收到 SSE 刷新。
@@ -136,6 +138,8 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 - [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)
 - [app/api/chem.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py)
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py)
+- [app/api/dashboard.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py)
+- [app/api/reagent_brands.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_brands.py)
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)
 - [app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)

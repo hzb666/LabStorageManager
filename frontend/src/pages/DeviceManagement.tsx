@@ -51,7 +51,7 @@ const columnHelper = createColumnHelper<SessionInfo>()
 
 type DeviceDialogMode = 'kick' | 'kickAll'
 
-// 搜索输入保留原值，`globalFilter` 只在 300ms 防抖后、且不超过最大长度时更新；清空或只剩空白时立即清除过滤。
+// 搜索输入维持原始文本，`globalFilter` 在 300ms 防抖后更新；清空或空白时立即清除过滤。
 function useDeviceSearchState() {
   const [inputValue, setInputValue] = useState('')
   const [globalFilter, setGlobalFilter] = useState('')
@@ -562,7 +562,7 @@ function useDeviceDialogState(
   const handleKickAllDevices = useCallback(async () => {
     setKickAllLoading(true)
     try {
-      // 后端会保留当前设备会话，这里只负责触发并刷新，不在前端自行过滤会话列表。
+      // 后端负责当前设备会话保护，前端触发刷新，不自行过滤会话列表。
       await sessionAPI.deleteAll()
       setDialogState(null)
       refetchSessions()

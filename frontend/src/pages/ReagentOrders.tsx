@@ -101,6 +101,10 @@ interface ReagentOrder {
   status: string
   created_at: string
   updated_at: string
+  approved_at?: string | null
+  rejected_at?: string | null
+  arrived_at?: string | null
+  stocked_at?: string | null
 }
 
 type ReagentOrderDialogState = 'edit' | 'add' | null
@@ -180,7 +184,7 @@ function createReagentOrderCreatePayload(formData: ReagentOrderFormData) {
   }
 }
 
-// 生成编辑试剂订单的请求体。 保留当前更新接口的空字符串语义，同时把字段组装从提交流程中抽离。
+// 生成编辑试剂订单的请求体，沿用当前更新接口的空字符串语义，并抽离字段组装。
 function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
   return {
     name: formData.name,
@@ -507,7 +511,7 @@ function createReagentOrderColumns(
 // 主组件
 // ============================================================================
 
-// 直接组合列表、页头和叶子组件，避免继续保留只转发参数的壳层。
+// 直接组合列表、页头和叶子组件，去掉转发参数的壳层。
 export function ReagentOrdersPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -528,8 +532,8 @@ export function ReagentOrdersPage() {
     try {
       const response = await reagentOrderAPI.exportOrders()
       downloadBlobResponse(response, `reagent_orders_${formatChinaDateForFilename()}.xlsx`)
-    } catch {
-      toast.error('导出失败')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '导出失败'))
     }
   }, [])
 

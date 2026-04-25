@@ -1,7 +1,7 @@
 /**
- * Banner shown when list snapshot is considered structurally stale.
+ * 列表快照结构性过期时显示的横幅。
  *
- * Keep it independent so each page can opt in with minimal wiring.
+ * 保持独立组件形态，页面只需少量接线即可接入。
  */
 import { useCallback, useState } from "react";
 import { RefreshCw } from "lucide-react";

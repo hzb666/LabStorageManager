@@ -53,7 +53,7 @@ function WarningSectionLabel({ label, onClick }: Readonly<WarningSectionLabelPro
   return <span className="font-bold">{label}</span>
 }
 
-// 这里只消费后端给出的 has_warning 结果，不在前端重复推导冲突规则。
+// 消费后端给出的 has_warning 结果，前端不重复推导冲突规则。
 export function ReagentCasDuplicateWarning({
   casWarning,
   className,

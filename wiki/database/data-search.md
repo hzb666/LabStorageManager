@@ -4,7 +4,7 @@
 
 ## 查询基线
 
-SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py) 会在连接建立时强制执行 `PRAGMA journal_mode=WAL`、`PRAGMA foreign_keys=ON`、`PRAGMA synchronous=NORMAL` 和 `PRAGMA busy_timeout=1000`，`init_db()` 启动阶段还会顺序完成：
+SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py) 会在连接建立时强制执行 `PRAGMA journal_mode=WAL`、`PRAGMA foreign_keys=ON`、`PRAGMA synchronous=NORMAL` 和 `PRAGMA busy_timeout=3000`，`init_db()` 启动阶段还会顺序完成：
 
 - `SQLModel.metadata.create_all(engine)`
 - `app/db_bootstrap/schema_upgrades.py` 的兼容字段与启动期回填
@@ -14,7 +14,7 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 - `check_sqlite_schema_consistency`
 - `ANALYZE` 与 `PRAGMA optimize`
 
-因此，索引、FTS 和一致性检查都属于运行时初始化流程，而不是事后补救步骤。
+索引、FTS 和一致性检查均属于运行时初始化流程。
 
 ## 标准化与拼音预计算
 
@@ -24,7 +24,7 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 - 规格、位置、货架等格式性字段都在后端完成清洗。
 - `pinyin_utils.py` 会为用户、库存、试剂订单和耗材订单写入 `*_pinyin` 与 `*_pinyin_initials` 字段。
 
-这些字段不是展示冗余，而是排序、筛选和搜索直接依赖的查询字段。
+这些字段属于排序、筛选和搜索直接依赖的查询字段。
 
 ## FTS 表与触发器
 
@@ -65,11 +65,11 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 - 复合索引覆盖库存状态、借用记录、用户会话、订单筛选等高频路径。
 - 拼音字段和拼音首字母字段直接参与排序与搜索。
-- FTS5 与普通索引并存，而不是强行只选一种方案。
+- FTS5 与普通索引并存，分别覆盖全文搜索和结构化筛选场景。
 - 列表首页在无搜索条件时允许命中后端短 TTL 内存缓存，减少重复查询。
 - 搜索或分页请求会绕过首页缓存，避免旧数据误命中。
 
-目标不是把所有查询压到一条最快路径，而是让常见查询稳定、复杂查询可接受、异常时可降级。
+查询设计目标为常见查询稳定、复杂查询可接受、异常时可降级。
 
 ## 变更检查
 
@@ -79,7 +79,7 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 4. 补充必要索引，避免新增全表扫描路径。
 5. 验证 FTS 失败回退到 `LIKE` 后的结果正确性。
 
-## 验证建议
+## 验证要点
 
 - 核对 `PRAGMA journal_mode;` 与 `PRAGMA foreign_keys;`。
 - 对比六张 FTS 表与主表 `COUNT(*)` 是否一致。

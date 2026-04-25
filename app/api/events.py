@@ -49,7 +49,7 @@ def _parse_and_validate_rooms(rooms_param: str) -> list[str]:
 
 
 def _filter_rooms_by_user_access(current_user: User, rooms: list[str]) -> list[str]:
-    # 先保留独立鉴权钩子，后续若房间权限收紧时不需要改建连主流程。
+    # 独立鉴权钩子先落位，后续收紧房间权限时不改建连主流程。
     _ = current_user
     return rooms
 

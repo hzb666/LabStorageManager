@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from app.core.config import settings
 
@@ -55,6 +55,39 @@ def get_display_now() -> datetime:
     获取当前 display offset 时间，用于导出等非浏览器转换场景。
     """
     return to_display_time(get_utc_now())
+
+
+def get_display_day_age_cutoff(days: int, now: datetime | None = None) -> datetime:
+    """
+    Return the UTC cutoff for records at least `days` display-calendar days old.
+
+    Example with UTC+08: an item created any time on Apr 10 becomes 2 natural
+    days old at Apr 12 00:00 display time, so the cutoff is Apr 11 00:00
+    display time converted back to UTC.
+    """
+    if days < 1:
+        raise ValueError("days must be at least 1")
+
+    display_now = to_display_time(now or get_utc_now())
+    if display_now is None:
+        raise ValueError("now must not be None")
+
+    cutoff_display_date = display_now.date() - timedelta(days=days - 1)
+    cutoff_display_midnight = datetime.combine(cutoff_display_date, time.min)
+    cutoff = normalize_to_utc_naive(cutoff_display_midnight)
+    if cutoff is None:
+        raise ValueError("cutoff must not be None")
+    return cutoff
+
+
+def is_display_day_age_at_least(
+    dt: datetime | None,
+    days: int,
+    now: datetime | None = None,
+) -> bool:
+    """Check age using configured display-time natural days, not elapsed hours."""
+    normalized = _coerce_utc_naive(dt)
+    return normalized is not None and normalized < get_display_day_age_cutoff(days, now)
 
 
 def normalize_to_utc_naive(dt: datetime | None) -> datetime | None:

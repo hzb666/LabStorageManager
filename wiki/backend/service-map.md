@@ -33,9 +33,11 @@ flowchart TD
 | `user_sessions.py` | 设备会话管理 |
 | `inventory.py` | 库存基础 CRUD |
 | `inventory_extended_routes.py` | 导入导出、借还、仪表盘等库存扩展路由 |
+| `dashboard.py` | 仪表盘聚合、分页 section 和窗口统计路由 |
 | `common_shelf.py` | 常用货架专用路由 |
 | `reagent_orders.py` | 试剂订单基础 CRUD |
 | `reagent_orders_workflow.py` | 试剂审批、到货、入库工作流 |
+| `reagent_brands.py` | 试剂品牌主数据 |
 | `consumable_orders.py` | 耗材订单 CRUD 与状态流转 |
 | `announcements.py` | 公告管理与图片上传 |
 | `cart_sync.py` | 购物车匹配与导入 |
@@ -57,6 +59,15 @@ flowchart TD
 
 ## 订单与库存核心服务
 
+### 仪表盘聚合
+
+| 文件 | 作用 |
+| --- | --- |
+| `dashboard/common.py` | 仪表盘常量、结构化 item builder 和通用分页辅助 |
+| `dashboard/summary.py` | 管理员汇总、成员看板、公用账户看板和 section 分发 |
+| `dashboard/items.py` | 待办、风险、库存告警、最近动作和系统状态 item 构造 |
+| `dashboard/metrics.py` | 管理端计数、近期窗口统计和自然天阈值判断 |
+
 ### 查询与搜索
 
 | 文件 | 作用 |
@@ -64,7 +75,12 @@ flowchart TD
 | `inventory_queries.py` | 库存查询拼装 |
 | `inventory_fts.py` | 库存全文搜索入口与异常 |
 | `order_fts.py` | 订单 FTS |
+| `order_list_search.py` | 订单列表搜索参数和查询辅助 |
+| `order_status_times.py` | 订单状态时间字段计算 |
 | `search_matchers.py` | 搜索字段分类、子查询合并、匹配逻辑 |
+| `chemical_name_map_fts.py` | CAS 主数据 FTS 查询 |
+| `common_shelf_queries.py` | 常用货架分组查询、筛选和排序 |
+| `search_query_log_service.py` | 搜索查询日志记录 |
 | `sql_utils.py` | 搜索词清洗、排序辅助 |
 
 ### 标准化与预处理
@@ -75,13 +91,18 @@ flowchart TD
 | `spec_utils.py` | 规格字符串解析与格式化 |
 | `shelf_utils.py` | 货架位置标准化 |
 | `pinyin_utils.py` | 拼音与首字母预计算 |
+| `reagent_brand_service.py` | 试剂品牌名称标准化与拼音字段 |
 
 ### 库存创建与编号
 
 | 文件 | 作用 |
 | --- | --- |
 | `inventory_creation.py` | 创建库存时的共用逻辑 |
+| `inventory_import_preview_sessions.py` | 库存导入预览会话和临时文件管理 |
+| `inventory_state_guards.py` | 库存状态变更前置校验 |
 | `internal_code.py` | 生成瓶级内部编号 |
+| `common_shelf_creation.py` | 常用货架创建逻辑 |
+| `common_shelf_group_records.py` | 常用货架分组记录维护 |
 
 ## 用户、会话与限流服务
 
@@ -104,6 +125,9 @@ flowchart TD
 | `error_logger.py` | 错误记录能力 |
 | `api_utils.py` | API 层缓存清理和通用辅助 |
 | `archive_scheduler.py` | 后端内置日志归档调度，支持固定时间、每周和周期模式 |
+| `cache_reset_service.py` | 运行时缓存版本和缓存重置 |
+| `export_rate_limit.py` | 导出接口限流 |
+| `log_queue.py` | 异步文件日志队列 |
 
 ### 化学结构
 
@@ -111,10 +135,14 @@ flowchart TD
 | --- | --- |
 | `pubchem_resolver.py` | PubChem CAS 与 CID 解析 |
 | `structure_cache_repo.py` | 结构缓存读写 |
+| `structure_cache_tasks.py` | 结构缓存后台任务 |
 | `structure_cache_workflow.py` | 自动解析、候选确认和人工结构写入 |
+| `structure_backfill.py` | 结构缓存补全任务 |
 | `structure_index.py` | RDKit 子结构索引 |
 | `structure_inventory_summary.py` | 结构检索结果的库存汇总 |
 | `structure_normalizer.py` | MolBlock 规范化 |
+| `structure_search_cache.py` | 结构检索短期缓存 |
+| `rdkit_smiles.py` | RDKit SMILES 解析与规范化 |
 
 ### 操作日志时间线
 
@@ -126,6 +154,9 @@ flowchart TD
 | `user_operation_logger.py` | 用户操作日志 |
 | `log_timeline_projection.py` | 源日志投影到时间线读模型 |
 | `log_timeline_detail_text.py` | 日志详情搜索文本构造 |
+| `log_timeline_renderer.py` | 时间线详情渲染 |
+| `log_timeline_detail_backfill.py` | 时间线详情文本补全 |
+| `log_timeline_consistency.py` | 时间线触发器和孤儿记录清理 |
 
 ## 实时能力
 
@@ -147,12 +178,12 @@ flowchart TD
 
 模型层通常分成两类：
 
-- 表模型：`User`、`Inventory`、`CommonShelf`、`CommonShelfGroup`、`ReagentOrder`、`ConsumableOrder`、`Announcement`、`UserSession`、`BorrowLog`、`CompoundStructureCache`、`LogTimeline`
+- 表模型：`User`、`Inventory`、`CommonShelf`、`CommonShelfGroup`、`ReagentOrder`、`ReagentBrand`、`ConsumableOrder`、`Announcement`、`UserSession`、`BorrowLog`、`CompoundStructureCache`、`LogTimeline`
 - DTO / Response：`Create`、`Update`、`Response` 等输入输出模型
 
 实体关系和字段职责可继续对照 [数据模型](/database/data-model) 与 [字段参考](/database/field-reference)。
 
-## 定位建议
+## 定位规则
 
 ### 登录、Cookie、Token、管理员权限
 
@@ -188,7 +219,7 @@ flowchart TD
 - `sse_manager.py`
 - `sse_redis.py`
 
-## 二次开发建议
+## 二次开发规则
 
 - 如果逻辑只为某个 HTTP 动作服务，优先留在 `api/`
 - 如果逻辑会被多个路由复用，放进 `services/`

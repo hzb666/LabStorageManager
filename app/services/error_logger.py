@@ -197,7 +197,7 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
                 if log_time >= cutoff_time:
                     recent_errors.append(_format_error_log_line(line))
             except (ValueError, IndexError):
-                # 如果无法解析时间，保留该行
+                # 时间解析失败时返回该行
                 recent_errors.append(_format_error_log_line(line))
         
         return recent_errors

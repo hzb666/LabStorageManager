@@ -2,7 +2,8 @@
 import logging
 import os
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Annotated, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
@@ -10,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select, func, update as sql_update
 
-from app.core.auth import CurrentUser, get_current_user, require_admin
+from app.core.auth import NonPublicUser, get_current_user, require_admin
 from app.core.constants import (
     IMPORT_UPLOAD_RATE_LIMIT,
     IMPORT_UPLOAD_RATE_LIMIT_WINDOW_SECONDS,
@@ -24,7 +25,7 @@ from app.core.constants import (
 )
 from app.services.sse_manager import sse_manager
 from app.core.request_utils import get_client_ip, get_request_is_cli, get_sse_client_id
-from app.core.time_utils import get_utc_now, utc_iso_str
+from app.core.time_utils import get_utc_now, is_display_day_age_at_least, utc_iso_str
 from app.database import DBSession, get_db
 from app.models.inventory import (
     BorrowLog,
@@ -39,12 +40,14 @@ from app.models.user import User, UserRole
 from app.services.api_utils import clear_cache_by_prefix, empty_to_none
 from app.services.cas_utils import normalize_cas, is_special_cas_value
 from app.services.xlsx_export import export_inventory_xlsx
-from app.services.excel_service import validate_uploaded_file
+from app.services.excel_service import ALLOWED_EXTENSIONS, validate_uploaded_file
+from app.services.export_rate_limit import EXPORT_SCOPE_INVENTORY, enforce_export_rate_limit
 from app.services.inventory_import_preview_sessions import (
     cleanup_expired_inventory_import_preview_artifacts,
     consume_inventory_import_preview_session,
     create_inventory_import_preview_session,
     discard_inventory_import_preview_session,
+    get_inventory_import_preview_dir,
 )
 from app.services.inventory_creation import create_manual_inventory_items
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
@@ -61,7 +64,7 @@ from app.services.inventory_queries import (
 from app.services.log_timeline_projection import project_borrow_log
 from app.services.rate_limit import enforce_rate_limit
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.shelf_utils import is_effectively_empty_storage_location, normalize_storage_location
+from app.services.shelf_utils import normalize_storage_location
 from app.services.spec_utils import SpecificationError, format_specification, parse_specification
 from app.services.user_utils import batch_get_user_names
 
@@ -72,14 +75,32 @@ logger = logging.getLogger(__name__)
 
 
 def _is_overdue_borrow(updated_at: datetime | None, now: datetime) -> bool:
-    return updated_at is not None and updated_at < now - timedelta(days=OVERDUE_BORROW_DAYS)
+    return is_display_day_age_at_least(updated_at, OVERDUE_BORROW_DAYS, now)
 
 
 def _is_overdue_pending_stockin(created_at: datetime | None, now: datetime) -> bool:
-    return (
-        created_at is not None
-        and created_at < now - timedelta(days=PENDING_STOCKIN_OVERDUE_DAYS)
-    )
+    return is_display_day_age_at_least(created_at, PENDING_STOCKIN_OVERDUE_DAYS, now)
+
+
+def _get_import_upload_suffix(file: UploadFile) -> str:
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Only .xlsx, .xls, .csv are allowed",
+        )
+    return suffix
+
+
+def _save_import_upload(file: UploadFile) -> str:
+    suffix = _get_import_upload_suffix(file)
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=suffix,
+        dir=get_inventory_import_preview_dir(),
+    ) as tmp_file:
+        tmp_file.write(file.file.read())
+        return tmp_file.name
 
 
 class InventoryImportQuery(BaseModel):
@@ -176,16 +197,6 @@ def _serialize_inventory_items(db: Session, items: list[Inventory]) -> list[dict
 
 def _serialize_inventory_item(db: Session, item: Inventory) -> dict[str, Any]:
     return _serialize_inventory_items(db, [item])[0]
-
-
-def _ensure_public_manual_location(item_data: ManualInventoryCreate, current_user: User) -> None:
-    if current_user.role != UserRole.PUBLIC:
-        return
-    if is_effectively_empty_storage_location(item_data.storage_location):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="storage_location is required",
-        )
 
 
 def _ensure_manual_pending_stockin_access(item: Inventory, current_user: User) -> None:
@@ -393,6 +404,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         current_user: Annotated[User, Depends(get_current_user)],
         db: DBSession,
     ):
+        enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_INVENTORY)
         # 导出库存工作簿，仅包含常规库存。
         statement = regular_inventory_query().order_by(Inventory.created_at.desc())
         items = db.exec(statement).all()
@@ -466,10 +478,9 @@ def _register_manual_and_dashboard_routes(
         item_data: ManualInventoryCreate,
         request: Request,
         background_tasks: BackgroundTasks,
-        current_user: Annotated[User, Depends(get_current_user)],
+        current_user: NonPublicUser,
         db: Annotated[Session, Depends(get_db)],
     ):
-        _ensure_public_manual_location(item_data, current_user)
         created_items = create_manual_inventory_items(
             db,
             item_data,
@@ -702,11 +713,6 @@ def _register_import_routes(
     search_cache: Dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
-    def _save_import_upload(file: UploadFile) -> str:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename) as tmp_file:
-            tmp_file.write(file.file.read())
-            return tmp_file.name
-
     def _format_import_response(
         message: str,
         result: dict[str, Any],
@@ -735,7 +741,7 @@ def _register_import_routes(
         )
 
     @router.get("/import/template")
-    def get_import_template(current_user: CurrentUser):
+    def get_import_template(current_user: NonPublicUser):
         # 下载导入模板，CAS 列按文本格式保存。
         from app.services.excel_service import generate_excel_template
 
@@ -759,7 +765,7 @@ def _register_import_routes(
     def preview_inventory_import(
         file: Annotated[UploadFile, File(...)],
         request: Request,
-        current_user: Annotated[User, Depends(get_current_user)],
+        current_user: NonPublicUser,
         db: Annotated[Session, Depends(get_db)],
         query: Annotated[InventoryImportQuery, Depends()],
     ):
@@ -796,14 +802,14 @@ def _register_import_routes(
             )
         finally:
             if not preview_session_owns_file and os.path.exists(tmp_file_path):
-                os.remove(tmp_file_path)
+                Path(tmp_file_path).unlink(missing_ok=True)
 
     @router.post("/import/confirm")
     def confirm_inventory_import(
         body: InventoryImportConfirmBody,
         request: Request,
         background_tasks: BackgroundTasks,
-        current_user: Annotated[User, Depends(get_current_user)],
+        current_user: NonPublicUser,
         db: Annotated[Session, Depends(get_db)],
     ):
         from app.services.excel_service import confirm_inventory_import_from_excel
@@ -1083,7 +1089,7 @@ def _register_return_route(
         return result
 
 
-# 注册借用历史接口，保留原权限校验和最近 10 条日志返回逻辑。
+# 注册借用历史接口，沿用原权限校验和最近 10 条日志返回逻辑。
 def _register_borrow_history_route(router: APIRouter) -> None:
     # 返回借用历史。
     @router.get("/{inventory_id}/borrow-history", dependencies=[Depends(get_current_user)])

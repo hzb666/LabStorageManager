@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { userAPI, type UserSearchItem } from '@/api/client'
+import { Autocomplete, type AutocompleteOption } from '@/components/ui/AutoComplete'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
-import { Input } from '@/components/ui/Input'
+import { FormField } from '@/components/ui/FormField'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 
 interface BorrowDialogProps {
@@ -13,130 +14,129 @@ interface BorrowDialogProps {
   isSubmitting: boolean
 }
 
-export function BorrowDialog({ open, onOpenChange, onConfirm, isSubmitting }: Readonly<BorrowDialogProps>) {
+type BorrowDialogContentProps = Pick<BorrowDialogProps, 'onConfirm' | 'isSubmitting'> & {
+  onCancel: () => void
+}
+
+const MIN_BORROWER_SEARCH_LENGTH = 2
+
+function toBorrowerOptions(users: UserSearchItem[]): AutocompleteOption[] {
+  return users.map((user) => ({
+    label: user.username ? `${user.full_name}（${user.username}）` : user.full_name,
+    value: String(user.id),
+  }))
+}
+
+function BorrowDialogContent({ onCancel, onConfirm, isSubmitting }: Readonly<BorrowDialogContentProps>) {
   const [keyword, setKeyword] = useState('')
   const [options, setOptions] = useState<UserSearchItem[]>([])
-  const [loadingOptions, setLoadingOptions] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<UserSearchItem | null>(null)
+  const [selectedBorrower, setSelectedBorrower] = useState<UserSearchItem | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
 
   useEffect(() => {
-    if (!open) {
-      setKeyword('')
-      setOptions([])
-      setSelectedUser(null)
-      setErrorMessage('')
-    }
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-
     const normalized = keyword.trim()
-    if (normalized.length < 2) {
-      setOptions([])
-      setLoadingOptions(false)
+    if (normalized.length < MIN_BORROWER_SEARCH_LENGTH) {
       return
     }
 
     const timer = setTimeout(async () => {
-      setLoadingOptions(true)
       try {
         const response = await userAPI.searchUsers(normalized)
         setOptions(response.data ?? [])
       } catch {
         setOptions([])
-      } finally {
-        setLoadingOptions(false)
       }
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [keyword, open])
+  }, [keyword])
 
-  const showOptions = useMemo(() => {
-    const normalized = keyword.trim()
-    return normalized.length >= 2 && options.length > 0
-  }, [keyword, options])
+  const autocompleteOptions = useMemo(() => toBorrowerOptions(options), [options])
 
   const handleInputChange = (value: string) => {
     setKeyword(value)
+    setSelectedBorrower(null)
     setErrorMessage('')
-    if (!selectedUser) return
-    if (value.trim() !== selectedUser.full_name) {
-      setSelectedUser(null)
+    if (value.trim().length < MIN_BORROWER_SEARCH_LENGTH) {
+      setOptions([])
     }
   }
 
-  const handleSelect = (user: UserSearchItem) => {
-    setSelectedUser(user)
-    setKeyword(user.full_name)
+  const handleSelectBorrower = (option: AutocompleteOption) => {
+    const selected = options.find((user) => String(user.id) === option.value) ?? null
+    setSelectedBorrower(selected)
     setErrorMessage('')
   }
 
   const handleConfirm = async () => {
-    if (!selectedUser || keyword.trim() !== selectedUser?.full_name) {
+    if (!selectedBorrower) {
       setErrorMessage('请从候选列表中选择真实借用人')
       return
     }
+
     try {
-      await onConfirm(selectedUser.id)
+      await onConfirm(selectedBorrower.id)
     } catch {
       setErrorMessage('借用失败，请重试')
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>选择实际借用人</DialogTitle>
-        </DialogHeader>
+    <DialogContent className="max-w-md">
+      <DialogHeader>
+        <DialogTitle className="mb-3">选择实际借用人</DialogTitle>
+      </DialogHeader>
 
-        <div className="space-y-3">
-          <div className="space-y-2">
-            <Input
+      <div>
+        <div>
+          <p className="mb-4 text-base text-muted-foreground">仅支持选择系统中现有用户，不能自由输入。</p>
+          <FormField label="实际借用人" required error={errorMessage}>
+            <Autocomplete
+              options={autocompleteOptions}
               value={keyword}
-              onChange={(e) => handleInputChange(e.target.value)}
+              onChange={handleInputChange}
+              onSelect={handleSelectBorrower}
               placeholder="输入姓名或拼音，至少2个字符"
-              autoFocus
+              minSearchLength={MIN_BORROWER_SEARCH_LENGTH}
             />
-            <p className="text-sm text-muted-foreground">仅支持选择系统中现有用户，不能自由输入。</p>
-          </div>
-
-          {loadingOptions && (
-            <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
-              正在搜索用户...
-            </div>
-          )}
-
-          {showOptions && !loadingOptions && (
-            <div className="max-h-48 overflow-auto rounded-md border border-border">
-              {options.map((user) => (
-                <button
-                  key={user.id}
-                  type="button"
-                  className="block w-full border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent"
-                  onClick={() => handleSelect(user)}
-                >
-                  {user.full_name}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {!!errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
-
-          <div className="flex gap-2 pt-1">
-            <Button variant="modern" className="flex-1" onClick={() => onOpenChange(false)}>
-              取消
-            </Button>
-            <LoadingButton className="flex-1" isLoading={isSubmitting} onClick={handleConfirm}>
-              确认借用
-            </LoadingButton>
-          </div>
+          </FormField>
         </div>
-      </DialogContent>
+
+        <div className="mt-8 grid grid-cols-2 gap-2">
+          <Button
+            type="button"
+            variant="modern"
+            size="lg"
+            className="w-full"
+            onClick={onCancel}
+          >
+            取消
+          </Button>
+          <LoadingButton
+            type="button"
+            size="lg"
+            className="w-full"
+            isLoading={isSubmitting}
+            onClick={handleConfirm}
+          >
+            确认借用
+          </LoadingButton>
+        </div>
+      </div>
+    </DialogContent>
+  )
+}
+
+export function BorrowDialog({ open, onOpenChange, onConfirm, isSubmitting }: Readonly<BorrowDialogProps>) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open && (
+        <BorrowDialogContent
+          isSubmitting={isSubmitting}
+          onCancel={() => onOpenChange(false)}
+          onConfirm={onConfirm}
+        />
+      )}
     </Dialog>
   )
 }

@@ -11,6 +11,7 @@ import {
   matchesSearchText,
   type SearchMatchMode,
 } from '@/lib/searchMatchMode'
+import { isAtLeastDisplayNaturalDaysOld } from '@/lib/utils'
 
 // ============================================================================
 // 类型定义
@@ -64,6 +65,8 @@ export interface DashboardOrderBase {
   status: string
   created_at: string
   updated_at?: string | null
+  approved_at?: string | null
+  rejected_at?: string | null
   applicant_id?: number | null
   applicant_name?: string | null
   [key: string]: unknown
@@ -84,6 +87,8 @@ export interface DashboardReagentOrder extends DashboardOrderBase {
   order_reason?: string
   is_hazardous?: boolean
   notes?: string | null
+  arrived_at?: string | null
+  stocked_at?: string | null
 }
 
 export interface DashboardConsumableOrder extends DashboardOrderBase {
@@ -93,6 +98,7 @@ export interface DashboardConsumableOrder extends DashboardOrderBase {
   price?: number | null
   communication?: string | null
   notes?: string | null
+  completed_at?: string | null
 }
 
 export type DashboardParams = {
@@ -114,7 +120,6 @@ export type DashboardTab = 'reagents' | 'consumables' | 'borrows' | 'stockin'
 // ============================================================================
 
 const DASHBOARD_COUNTS_REFRESH_EVENT = 'dashboard-counts-refresh'
-const DAY_IN_MS = 24 * 60 * 60 * 1000
 const PENDING_APPROVAL_STATUSES = new Set<string>([
   ReagentOrderStatus.PENDING,
   ConsumableOrderStatus.PENDING,
@@ -128,11 +133,7 @@ function isDateOlderThanDays(dateText: string | null | undefined, days: number):
   if (!dateText) {
     return false
   }
-  const timestamp = Date.parse(dateText)
-  if (Number.isNaN(timestamp)) {
-    return false
-  }
-  return timestamp < Date.now() - days * DAY_IN_MS
+  return isAtLeastDisplayNaturalDaysOld(dateText, days)
 }
 
 export function isPendingApprovalOverdue(
@@ -358,5 +359,15 @@ export function removeApplicantColumn(
   return columns.filter((column) => {
     const candidate = column as { id?: string; accessorKey?: string }
     return candidate.id !== 'applicant' && candidate.accessorKey !== 'applicant_name'
+  })
+}
+
+export function findDashboardColumnIndex(
+  columns: ColumnDef<Record<string, unknown>, unknown>[],
+  columnId: string
+): number {
+  return columns.findIndex((column) => {
+    const candidate = column as { id?: string; accessorKey?: string }
+    return candidate.id === columnId || candidate.accessorKey === columnId
   })
 }

@@ -174,7 +174,7 @@ def _create_common_shelf_rows(
         created_items: list[CommonShelf] = []
         try:
             with db.begin_nested():
-                # Savepoint rollback only affects this batch, preserving outer confirm-arrival updates.
+                # Savepoint 回滚只影响当前批次，外层到货确认更新不受影响。
                 ensure_active_common_shelf_group(
                     db,
                     cas_number=cas_number,

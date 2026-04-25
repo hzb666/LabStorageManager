@@ -49,7 +49,7 @@ const removeClosedAnnouncement = (
   setClosedStorage(storage);
 };
 
-// 记录关闭时间而不是布尔值，这样过期和 updated_at 变更都能自动让关闭态失效。
+// 关闭态记录时间戳，过期或公告更新后自动失效。
 const dismissAnnouncement = (id: number): void => {
   persistDismissedAnnouncement(getAnnouncementStorageKey(id));
 };

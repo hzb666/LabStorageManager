@@ -1,7 +1,7 @@
 # 试剂订单工作流路由：审批、到货、仪表盘、入库。
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Collection, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,6 +59,10 @@ from app.services.order_operation_logger import (
     log_reagent_order_delete,
     log_reagent_order_update,
     log_reagent_order_reject,
+)
+from app.services.order_status_times import (
+    get_order_status_time_fields,
+    get_reagent_order_status_times,
 )
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 
@@ -177,10 +181,33 @@ def _claim_reagent_order_status_transition(
     expected_status: ReagentOrderStatus,
     target_status: ReagentOrderStatus,
 ) -> None:
+    _claim_reagent_order_status_transition_from(
+        db,
+        order_id=order_id,
+        expected_statuses=(expected_status,),
+        target_status=target_status,
+    )
+
+
+def _claim_reagent_order_status_transition_from(
+    db: Session,
+    *,
+    order_id: int,
+    expected_statuses: Collection[ReagentOrderStatus],
+    target_status: ReagentOrderStatus,
+) -> None:
+    expected_status_values = tuple(expected_statuses)
+    if not expected_status_values:
+        raise ValueError("expected_statuses cannot be empty")
+    status_clause = (
+        ReagentOrder.status == expected_status_values[0]
+        if len(expected_status_values) == 1
+        else ReagentOrder.status.in_(expected_status_values)
+    )
     result = db.exec(
         sql_update(ReagentOrder)
         .where(ReagentOrder.id == order_id)
-        .where(ReagentOrder.status == expected_status)
+        .where(status_clause)
         .values(status=target_status, updated_at=get_utc_now())
     )
     if result.rowcount != 0:
@@ -208,9 +235,11 @@ def _ensure_reagent_order_deletable(order: ReagentOrder) -> None:
 
 def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]:
     users_map = batch_get_user_names(db, {order.applicant_id} if order.applicant_id else set())
+    status_times = get_reagent_order_status_times(db, [order])
     return {
         **ReagentOrderResponse.model_validate(order).model_dump(mode="json"),
         "specification": format_specification(order.initial_quantity, order.unit),
+        **get_order_status_time_fields(status_times, order),
         "applicant_name": users_map.get(order.applicant_id, ""),
     }
 
@@ -545,6 +574,12 @@ def _register_approval_routes(
             )
 
         before_order = ReagentOrder.model_validate(order)
+        _claim_reagent_order_status_transition_from(
+            db,
+            order_id=order_id,
+            expected_statuses=REAGENT_ORDER_APPROVABLE_STATUSES,
+            target_status=ReagentOrderStatus.APPROVED,
+        )
         order.status = ReagentOrderStatus.APPROVED
         log_reagent_order_approve(
             db,
@@ -583,6 +618,12 @@ def _register_approval_routes(
             )
 
         before_order = ReagentOrder.model_validate(order)
+        _claim_reagent_order_status_transition_from(
+            db,
+            order_id=order_id,
+            expected_statuses=REAGENT_ORDER_REJECTABLE_STATUSES,
+            target_status=ReagentOrderStatus.REJECTED,
+        )
         order.status = ReagentOrderStatus.REJECTED
         log_reagent_order_reject(
             db,
@@ -787,6 +828,7 @@ def _register_arrival_routes(
 def _build_reagent_dashboard_groups(
     orders: list[ReagentOrder],
     users_map: dict[int, str],
+    status_times,
 ) -> dict[str, dict[str, Any]]:
     grouped_orders: dict[str, dict[str, Any]] = {
         status.value: {
@@ -819,6 +861,10 @@ def _build_reagent_dashboard_groups(
             "applicant_name": users_map.get(order.applicant_id) if order.applicant_id else "",
             "created_at": utc_iso_str(order.created_at),
             "updated_at": utc_iso_str(order.updated_at),
+            **{
+                key: utc_iso_str(value)
+                for key, value in get_order_status_time_fields(status_times, order).items()
+            },
         }
 
         status_key = order.status.value if hasattr(order.status, "value") else str(order.status)
@@ -880,9 +926,10 @@ def _register_dashboard_routes(router: APIRouter) -> None:
 
         orders = db.exec(statement).all()
         users_map = {current_user.id: current_user.full_name}
+        status_times = get_reagent_order_status_times(db, orders)
 
         return {
-            "data": _build_reagent_dashboard_groups(orders, users_map),
+            "data": _build_reagent_dashboard_groups(orders, users_map, status_times),
             "total": len(orders),
         }
 
@@ -898,9 +945,10 @@ def _register_dashboard_routes(router: APIRouter) -> None:
         orders = db.exec(statement).all()
         applicant_ids = {order.applicant_id for order in orders if order.applicant_id}
         users_map = batch_get_user_names(db, applicant_ids)
+        status_times = get_reagent_order_status_times(db, orders)
 
         return {
-            "data": _build_reagent_dashboard_groups(orders, users_map),
+            "data": _build_reagent_dashboard_groups(orders, users_map, status_times),
             "total": len(orders),
         }
 
@@ -1079,7 +1127,7 @@ def _delete_reagent_order_with_permission(
     order_id: int,
     current_user: CurrentUser,
 ) -> ReagentOrder:
-    # Keep delete atomic while preserving legacy API semantics: missing -> 404, unauthorized existing row -> 403.
+    # 原子删除消除竞争；未删到时维持 404/403 区分语义。
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

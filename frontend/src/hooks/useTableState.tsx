@@ -198,7 +198,7 @@ function buildListParams(args: {
   return params
 }
 
-// 列宽缓存只是一层偏好设置；读失败时回退默认布局，别让表格因此不可用。
+// 列宽缓存属于偏好设置，读取失败时回退默认布局。
 function readColumnSizingStorage(tableId: string): ColumnSizingState {
   if (globalThis.window === undefined) return {}
   try {
@@ -262,7 +262,7 @@ function useExpandAllState(expandStorageId: string, defaultExpanded: boolean) {
   }, [])
 
   const resetExpanded = useCallback(() => {
-    // 这里故意保留空实现，只是维持返回契约；真正的单行展开重置仍由外层表格实例处理。
+    // 返回契约包含 resetExpanded；单行展开重置由外层表格实例处理。
   }, [])
 
   return { isAllExpanded, setAllExpanded, toggleExpandAll, resetExpanded }
@@ -411,7 +411,7 @@ function getDisplayCount(args: {
   return shouldShowGrandTotal ? `${total}/${grandTotal}` : `${total}`
 }
 
-// 这个 key 顺序必须和列表查询保持一致，否则会读不到同一组缓存。
+// 缓存 key 顺序和列表查询保持一致，确保命中同一组缓存。
 function buildTableQueryKey(
   queryKey: string[],
   extraParams: Record<string, unknown>,

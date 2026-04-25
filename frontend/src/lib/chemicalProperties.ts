@@ -38,7 +38,7 @@ const inFlightRequests = new Map<string, Promise<ChemicalProperties | null>>()
 const recentPubChemRequestTimestamps: number[] = []
 let rateLimitQueue: Promise<void> = Promise.resolve()
 
-// 归一化化学属性对象，确保缓存中仅保留受支持字段。
+// 归一化化学属性对象，缓存只写入受支持字段。
 function normalizeChemicalProperties(value: Record<string, unknown>): ChemicalProperties {
   return {
     smiles: typeof value.smiles === 'string' ? value.smiles : undefined,
@@ -261,7 +261,7 @@ async function queryBackendCachedCompoundData(
   }
 }
 
-// 这里只查并缓存 SMILES/IUPACName；特殊 CAS 直接跳过，避免无意义外部查询。
+// 查询并缓存 SMILES/IUPACName；特殊 CAS 直接跳过外部查询。
 export async function queryCompoundData(casNumber: string): Promise<ChemicalProperties | null> {
   if (!casNumber) return null
   if (isSpecialCasValue(casNumber)) return null

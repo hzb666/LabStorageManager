@@ -53,7 +53,7 @@ flowchart TD
 
 - 试剂和耗材是两条不同工作流，试剂会继续流转到库存，耗材在完成后结束。
 - SQLite 的连接行为在 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" /> 中初始化，索引、FTS 和 schema 校验在 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" /> 中维护。
-- SSE 是增量通知，不是第二事实源；前端仍需通过 HTTP 查询获取权威数据。
+- SSE 承担增量通知职责；前端仍需通过 HTTP 查询获取权威数据。
 - 浏览器插件只做采集和桥接，数据清洗和订单创建仍由后端完成。
 - 企业微信入口只作为受控消息入口，查询和写入最终仍走 MCP、CLI 和后端 API。
 
@@ -78,7 +78,7 @@ flowchart TD
 - 常用货架前端路径是 `/common-shelf`，接口路径是 `/api/common-shelf*`。
 - 数据库 FTS 覆盖 `inventory`、`reagent_order`、`consumable_order`、`users`、`chemical_name_map` 和 `log_timeline`。
 - 结构检索默认开启，可关闭；启用后由 `chem` API、结构缓存表和 RDKit 索引共同工作。
-- Redis 是增强层，不是唯一事实源；不可用时系统仍保持 SQLite 可用。
+- Redis 承担增强层职责；不可用时系统仍保持 SQLite 可用。
 
 ## 参考代码
 - [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)

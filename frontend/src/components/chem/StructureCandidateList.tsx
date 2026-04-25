@@ -83,12 +83,12 @@ function CandidateMeta({ candidate }: Readonly<{ candidate: PubChemCandidate }>)
             href={`${PUBCHEM_COMPOUND_URL}/${cid}`}
             target="_blank"
             rel="noreferrer"
-            className="font-medium text-primary hover:underline"
+            className="font-normal text-primary hover:underline"
           >
             CID {cid}
           </a>
         ) : (
-          <span className="font-medium">未知 CID</span>
+          <span className="font-normal">未知 CID</span>
         )}
         {candidate.molecular_formula && (
           <span className="text-muted-foreground">{candidate.molecular_formula}</span>

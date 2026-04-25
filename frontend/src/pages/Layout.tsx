@@ -27,7 +27,8 @@ import { clearDashboardTab } from '@/lib/dashboardUtils'
 import { clearBugButtonHiddenUntil, getBugButtonHiddenUntil } from '@/lib/storage/appUiStorage'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
-import { UserRoles, USER_ROLE_MAP } from '@/lib/constants'
+import { UserRoles, USER_ROLE_MAP, type UserRole } from '@/lib/constants'
+import { canWriteNonPublicData } from '@/lib/permissions'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { SidebarLogo } from '@/components/SidebarLogo'
@@ -44,6 +45,7 @@ interface NavItem {
   icon: typeof LayoutDashboard
   group: NavGroup
   adminOnly?: boolean
+  nonPublicOnly?: boolean
 }
 
 type LayoutUser = ReturnType<typeof useAuthStore.getState>['user']
@@ -55,14 +57,22 @@ const navItems: NavItem[] = [
   { title: '耗材订单', href: '/consumables', icon: ShoppingCart, group: '功能' },
   { title: '库存列表', href: '/inventory', icon: Package, group: '功能' },
   { title: '常用货架', href: '/common-shelf', icon: Archive, group: '功能' },
-  { title: '导入数据', href: '/import', icon: FolderInput, group: '功能' },
+  { title: '导入数据', href: '/import', icon: FolderInput, group: '功能', nonPublicOnly: true },
   { title: '用户管理', href: '/admin/users', icon: Users, adminOnly: true, group: '管理' },
   { title: '公告管理', href: '/admin/announcements', icon: Megaphone, adminOnly: true, group: '管理' },
 ]
 
-// 只有 `ADMIN` 能看到 `adminOnly` 导航项，权限过滤统一在这里做。
-function getFilteredNavItems(userRole?: string) {
-  return navItems.filter((item) => !item.adminOnly || userRole === UserRoles.ADMIN)
+// 侧边栏入口按角色过滤；后端仍负责最终权限校验。
+function getFilteredNavItems(userRole?: UserRole | null) {
+  return navItems.filter((item) => {
+    if (item.adminOnly && userRole !== UserRoles.ADMIN) {
+      return false
+    }
+    if (item.nonPublicOnly && !canWriteNonPublicData(userRole)) {
+      return false
+    }
+    return true
+  })
 }
 
 // 桌面侧边栏折叠时通过 `opacity / max-width / ml` 组合隐藏文字，避免布局跳动。
@@ -445,7 +455,7 @@ function MobileUserLink({
   )
 }
 
-// 移动端保留主题切换和二次确认退出入口。
+// 移动端提供主题切换和二次确认退出入口。
 function MobileSidebarActions({
   theme,
   toggleTheme,

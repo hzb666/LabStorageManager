@@ -70,6 +70,9 @@ interface ConsumableOrder {
   status: string
   created_at: string
   updated_at: string
+  approved_at?: string | null
+  rejected_at?: string | null
+  completed_at?: string | null
 }
 
 const columnHelper = createColumnHelper<ConsumableOrder>()
@@ -131,7 +134,7 @@ function createConsumableOrderCreatePayload(formData: ConsumableOrderFormData) {
   }
 }
 
-// 生成编辑耗材订单的请求体。 保持更新接口继续沿用当前空字符串回写语义，而不是把判断堆在提交处理器里。
+// 生成编辑耗材订单的请求体，沿用当前更新接口的空字符串语义，并抽离字段组装。
 function createConsumableOrderUpdatePayload(formData: ConsumableOrderFormData) {
   return {
     name: formData.name,
@@ -146,7 +149,7 @@ function createConsumableOrderUpdatePayload(formData: ConsumableOrderFormData) {
   }
 }
 
-// 管理耗材订单弹窗、表单与提交删除流程。 把页面主组件收回成列表编排层，只保留筛选、表格和入口按钮。
+// 管理耗材订单弹窗、表单与提交删除流程，页面主组件收敛为列表编排层。
 function useConsumableOrderDialogController(refreshOrders: () => void | Promise<void>) {
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [deleteConfirm, setDeleteConfirm] = useState(false)
@@ -292,7 +295,7 @@ function createConsumableOrderColumns(
 // 主组件
 // ============================================================================
 
-// 直接组合列表、筛选与叶子组件，避免继续保留只转发参数的头部和弹窗壳层。
+// 直接组合列表、筛选与叶子组件，去掉转发参数的头部和弹窗壳层。
 export function ConsumableOrdersPage() {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
@@ -313,8 +316,8 @@ export function ConsumableOrdersPage() {
     try {
       const response = await consumableOrderAPI.exportOrders()
       downloadBlobResponse(response, `consumable_orders_export_${formatChinaDateForFilename()}.xlsx`)
-    } catch {
-      toast.error('导出失败')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '导出失败'))
     }
   }, [])
 
@@ -330,7 +333,7 @@ export function ConsumableOrdersPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold text-primary">耗材订购</h1>
+        <h1 className="text-3xl font-bold text-primary card-title-placeholder">耗材订购</h1>
         <div className="flex flex-wrap gap-2">
           {canCreateOrder && (
             <Button onClick={dialogController.handleAddClick} size="lg">

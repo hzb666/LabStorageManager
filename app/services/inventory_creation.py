@@ -88,7 +88,7 @@ def create_manual_inventory_items(
             db.flush()
             return created_items
         except IntegrityError as exc:
-            # Full rollback is required here because this path does not use nested savepoints.
+            # 当前路径没有嵌套 savepoint，冲突后需要回滚整个事务。
             db.rollback()
             if not is_internal_code_unique_violation(exc):
                 raise

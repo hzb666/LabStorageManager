@@ -51,7 +51,7 @@ function InnerRowComponent<TData>({
   const hasNote = Boolean(noteValue)
   const isHighlighted = noteValue?.startsWith('[强调]') || false
 
-  // 点击行时优先走外部点击处理，否则退回到默认的展开切换。
+  // 点击行时优先走外部点击处理，缺省时使用默认展开切换。
   const handleToggle = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (onRowClick) {

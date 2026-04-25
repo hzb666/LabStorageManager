@@ -5,6 +5,11 @@ import type { CellContext, ColumnDef } from '@tanstack/react-table'
 import type { ReactNode } from 'react'
 import { HighlightText } from '@/components/ui/HighlightText'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import {
+  OrderStatusBadge,
+  type OrderStatusBadgeKind,
+  type OrderStatusTimeFields,
+} from '@/components/OrderStatusBadge'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
 import { formatDate, formatDateTime, getFullImageUrl } from '@/lib/utils'
@@ -56,6 +61,19 @@ function renderStatusBadgeCell(status: unknown, color?: BadgeColor) {
   return <StatusBadge status={safeString(status, '')} color={color} />
 }
 
+function renderOrderStatusBadgeCell(
+  info: CellContext<TableRowData, unknown>,
+  kind: OrderStatusBadgeKind,
+) {
+  return (
+    <OrderStatusBadge
+      status={safeString(info.getValue(), '')}
+      order={info.row.original as OrderStatusTimeFields}
+      kind={kind}
+    />
+  )
+}
+
 function renderHazardousNameCell(
   info: CellContext<TableRowData, unknown>,
   className?: string,
@@ -65,8 +83,7 @@ function renderHazardousNameCell(
   return (
     <div
       className={cn(
-        'flex min-w-0 items-center gap-1.5 rounded-sm border-l-4 pl-2 transition-colors',
-        isHazardous ? 'border-amber-400 dark:border-amber-600' : 'border-transparent',
+        'flex min-w-0 items-center gap-1.5',
         className,
       )}
     >
@@ -226,7 +243,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 60,
       minSize: 60,
       maxSize: 80,
-      cell: info => renderStatusBadgeCell(info.getValue()),
+      cell: info => renderOrderStatusBadgeCell(info, 'reagent'),
     }),
   ]
 }
@@ -292,7 +309,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       size: 60,
       minSize: 50,
       maxSize: 100,
-      cell: info => renderStatusBadgeCell(info.getValue()),
+      cell: info => renderOrderStatusBadgeCell(info, 'consumable'),
     }),
   ]
 }
@@ -430,7 +447,7 @@ export function getCommonShelfGroupTableColumns(args: {
     columnHelper.accessor((row) => Number(row.bottle_count ?? 0), {
       id: 'bottle_count',
       header: '剩余瓶数',
-      cell: (info) => <span className="font-medium">{info.getValue()} 瓶</span>,
+      cell: (info) => <span className="font-normal">{info.getValue()} 瓶</span>,
     }),
     columnHelper.display({
       id: 'actions',

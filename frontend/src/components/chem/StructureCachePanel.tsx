@@ -128,7 +128,7 @@ function StructureCacheMeta({
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-medium">结构缓存：{loading ? '读取中...' : getStatusLabel(cache)}</span>
+        <span className="font-normal">结构缓存：{loading ? '读取中...' : getStatusLabel(cache)}</span>
         {cache?.manually_verified && (
           <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-300">
             <ShieldCheck className="size-3.5" />

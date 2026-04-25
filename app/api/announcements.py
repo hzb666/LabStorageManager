@@ -1,4 +1,4 @@
-# app/routers/announcements.py
+# 公告路由。
 """
 Announcement API Routes - System Announcements Management
 """
@@ -30,7 +30,7 @@ from app.services.user_utils import batch_get_user_names
 router = APIRouter(prefix="/announcements", tags=["Announcements"])
 
 logger = logging.getLogger(__name__)
-# ==================== Helper Functions ====================
+# ==================== 辅助函数 ====================
 
 
 def get_announcement_by_id(db: Session, announcement_id: int) -> Optional[Announcement]:
@@ -100,7 +100,7 @@ def _log_announcement_operation(
     )
 
 
-# ==================== Public Endpoints ====================
+# ==================== 公开接口 ====================
 
 
 @router.get("/public", response_model=List[AnnouncementResponse], dependencies=[Depends(get_current_user)])
@@ -141,7 +141,7 @@ def get_storage_info():
     return storage_info
 
 
-# ==================== Admin Endpoints ====================
+# ==================== 管理员接口 ====================
 
 
 @router.get("/", response_model=List[AnnouncementResponse], dependencies=[Depends(require_admin)])
@@ -273,14 +273,14 @@ def update_announcement(
             detail="Announcement not found"
         )
 
-    # Update fields
+    # 更新字段。
     old_images = list(announcement.images or [])
     before_snapshot = _build_announcement_snapshot(announcement)
     update_data = announcement_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(announcement, field, value)
 
-    # Update timestamp
+    # 更新时间戳。
     announcement.updated_at = get_utc_now()
 
     db.flush()
@@ -322,7 +322,7 @@ def delete_announcement(
             detail="Announcement not found"
         )
 
-    # Delete associated images
+    # 删除关联图片。
     before_snapshot = _build_announcement_snapshot(announcement)
     _delete_announcement_images(announcement.images)
 

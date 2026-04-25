@@ -58,6 +58,7 @@ npm run dev
 
 - 开发模式默认监听 5173。
 - 前端 API 基址通常由 `VITE_API_URL` 指向 `http://localhost:8000/api`。
+- `npm run dev` 和 `npm run build` 会先生成 RDKit 与本地字体的带版本号资源映射。
 - 生产构建使用 `npm run build`。
 - 浏览器插件构建使用 `npm run build:extension`，该命令会根据插件运行配置生成 `manifest.json` 和 `shared/generated-config.js`。
 

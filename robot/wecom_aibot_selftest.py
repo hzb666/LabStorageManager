@@ -7,7 +7,9 @@ import asyncio
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
+from robot.wecom_aibot.config import WecomAibotSettings
 from robot.wecom_aibot.conversation_store import WecomConversationStore
 from robot.wecom_aibot.crypto import WecomAesCipher, generate_signature
 from robot.wecom_aibot.formatters import build_safe_facts, format_safe_facts, format_tool_result
@@ -20,6 +22,7 @@ from robot.wecom_aibot.llm_planner import (
 )
 from robot.wecom_aibot.lsm_orchestrator import LSMRobotOrchestrator
 from robot.wecom_aibot.messages import parse_text_message
+from robot.wecom_aibot.minimax_web_search import build_minimax_mcp_env, build_web_search_client
 from robot.wecom_aibot.replies import clamp_text, text_reply
 from robot.wecom_aibot.store import ProcessedMessageStore
 from robot.wecom_aibot.token_crypto import TOKEN_CIPHER_PREFIX
@@ -394,6 +397,36 @@ def _auth_expired_result() -> dict:
 
 
 class WecomAibotSelfTest(unittest.TestCase):
+    def test_minimax_mcp_env_excludes_service_secrets(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PATH": "bin-path",
+                "OPENAI_API_KEY": "openai-secret",
+                "WECOM_AIBOT_SECRET": "wecom-secret",
+                "WECOM_AIBOT_TOKEN_ENCRYPTION_KEY": "token-secret",
+                "LSM_MCP_SERVICE_TOKEN": "service-token",
+            },
+            clear=True,
+        ):
+            env = build_minimax_mcp_env(api_key="minimax-secret", api_host="https://api.minimaxi.com")
+
+        self.assertEqual("bin-path", env["PATH"])
+        self.assertEqual("minimax-secret", env["MINIMAX_API_KEY"])
+        self.assertEqual("https://api.minimaxi.com", env["MINIMAX_API_HOST"])
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertNotIn("WECOM_AIBOT_SECRET", env)
+        self.assertNotIn("WECOM_AIBOT_TOKEN_ENCRYPTION_KEY", env)
+        self.assertNotIn("LSM_MCP_SERVICE_TOKEN", env)
+
+    def test_openai_api_key_does_not_configure_minimax_search(self) -> None:
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "openai-secret"}, clear=True):
+            settings = WecomAibotSettings(_env_file=None)
+
+        self.assertEqual("openai-secret", settings.llm_api_key)
+        self.assertEqual("", settings.minimax_api_key)
+        self.assertIsNone(build_web_search_client(settings))
+
     def test_text_reply_strips_complete_think_blocks(self) -> None:
         response = text_reply("<think>先分析</think>\n库存有 3 瓶。")
 

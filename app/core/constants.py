@@ -6,7 +6,7 @@ string drift.
 
 from datetime import date
 
-# ==================== HTTP Security ====================
+# ==================== HTTP 安全 ====================
 HSTS_MAX_AGE_SECONDS = 31_536_000
 STATIC_CACHE_MAX_AGE_SECONDS = 315_360_000
 UPLOAD_PATHS = (
@@ -27,15 +27,18 @@ CSP_SCRIPT_SRC_STRICT = "'self'"
 CSP_SCRIPT_SRC_DOCS = "'self' 'unsafe-inline'"
 DOCS_PATH_PREFIXES = ("/docs", "/redoc")
 
-# ==================== Pagination and Cache ====================
+# ==================== 分页与缓存 ====================
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 50
 # 列表查询缓存 TTL（秒）：用于降低短时间重复查询开销
 LIST_CACHE_TTL_SECONDS = 10
 CACHE_MAX_ITEMS = 100
 CACHE_PRUNE_COUNT = 10
+EXPORT_RATE_LIMIT = 2
+EXPORT_RATE_LIMIT_WINDOW_SECONDS = 60
+EXPORT_RATE_LIMIT_SCOPE_PREFIX = "export"
 
-# ==================== Auth and Session ====================
+# ==================== 认证与会话 ====================
 ACTIVITY_DEBOUNCE_SECONDS = 300
 BEARER_PREFIX_LEN = 7
 MAX_LOGIN_ATTEMPTS = 5
@@ -49,13 +52,13 @@ UNKNOWN_DEVICE = "Unknown Device"
 ANONYMOUS_DEVICE_PREFIX = "anonymous-"
 ANONYMOUS_DEVICE_TOKEN_HEX_LENGTH = 8
 
-# ==================== User Validation ====================
+# ==================== 用户校验 ====================
 USERNAME_MIN_LENGTH = 3
 USERNAME_MAX_LENGTH = 20
 PASSWORD_MIN_LENGTH = 6
 PASSWORD_MAX_LENGTH = 50
 
-# ==================== Inventory and Orders ====================
+# ==================== 库存与订单 ====================
 OVERDUE_BORROW_DAYS = 3
 LOW_STOCK_PERCENT = 0.20
 LOW_STOCK_PERCENT_DISPLAY = 20
@@ -63,7 +66,7 @@ MAX_BOTTLES_PER_IMPORT = 99
 MAX_ORDER_QUANTITY = 99
 TRANSLATED_NAME_SUFFIX = "（译）"
 
-# ==================== Upload and Image ====================
+# ==================== 上传与图片 ====================
 DEFAULT_IMAGE_MAX_MB = 1.0
 ANNOUNCEMENT_IMAGE_MAX_MB = 5.0
 AVATAR_MAX_SIZE_MB = 5.0
@@ -77,7 +80,7 @@ IMAGE_MAX_PIXELS = 20_000_000
 UPLOAD_FILENAME_UUID_PREFIX_LEN = 8
 TIMESTAMP_FILENAME_FORMAT = "%Y%m%d_%H%M%S"
 
-# ==================== Import and Excel ====================
+# ==================== 导入与 Excel ====================
 EXCEL_FILE_MAX_BYTES = 2 * 1024 * 1024
 EXCEL_DATE_EPOCH = date(1899, 12, 30)
 IMPORT_PREVIEW_SESSION_TTL_SECONDS = 15 * 60
@@ -87,7 +90,7 @@ EXCEL_RED_FONT_COLOR = "FF0000"
 INTERNAL_CODE_SEQUENCE_PAD_WIDTH = 3
 INTERNAL_CODE_MAX_SEQUENCE = (10 ** INTERNAL_CODE_SEQUENCE_PAD_WIDTH) - 1
 
-# ==================== Logs ====================
+# ==================== 日志 ====================
 LOG_TOKEN_EXPIRE_HOURS = 2
 LOG_TOKEN_RATE_LIMIT = 3
 LOG_TOKEN_RATE_WINDOW = 30
@@ -95,10 +98,10 @@ LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_LOG_LINES = 100
 DEFAULT_LOG_HOURS = 24
 
-# ==================== Timezone ====================
+# ==================== 时区 ====================
 CHINA_UTC_OFFSET_HOURS = 8
 
-# ==================== Network and External Calls ====================
+# ==================== 网络与外部调用 ====================
 REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS = 1
 REDIS_SOCKET_TIMEOUT_SECONDS = 1
 # Redis 熔断冷却时长（秒）：连接失败后在冷却期内不重复发起连接
@@ -111,24 +114,24 @@ CHEMICAL_INFO_CACHE_MAX_SIZE = 1000
 CHEMICAL_INFO_CACHE_TTL_SECONDS = 3600
 MIN_REQUEST_TIMEOUT_SECONDS = 0.1  # requests 库最小超时要求
 
-# ==================== Import/Rate-limit policy ====================
+# ==================== 导入与限流策略 ====================
 IMPORT_RATE_LIMIT_DIVISOR = 2
 MIN_IMPORT_RATE_LIMIT = 3
 TEMPLATE_DOWNLOAD_RATE_LIMIT = 1
 TEMPLATE_DOWNLOAD_WINDOW_SECONDS = 2
 TEMPLATE_DOWNLOAD_RATE_LIMIT_SCOPE = "download_inventory_import_template"
 
-# ==================== Security and Validation ====================
+# ==================== 安全与校验 ====================
 CAS_PATTERN = r"^\d{2,7}-\d{2}-\d$"
 SPEC_PATTERN = r"^(\d+(?:\.\d+)?)\s*([a-zA-Zμ个瓶支盒包套]+)$"
 INVALID_FILENAME_SEGMENTS = ("..",)
 INVALID_FILENAME_PREFIX = "/"
 
-# ==================== Crypto ====================
+# ==================== 加密 ====================
 RSA_PUBLIC_EXPONENT = 65537
 RSA_KEY_SIZE_BITS = 2048
 
-# ==================== SSE (Server-Sent Events) ====================
+# ==================== SSE 事件流 ====================
 
 
 class SSEEventType:
@@ -165,7 +168,7 @@ class SSERoom:
     DASHBOARD = "dashboard"
 
 
-# SSE runtime tuning
+# SSE 运行时参数。
 # 单连接待发送队列上限：超过后触发慢连接治理逻辑
 SSE_CLIENT_QUEUE_MAXSIZE = 200
 # 单房间 replay 缓冲上限：用于连接恢复时补发最近事件

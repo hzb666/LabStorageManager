@@ -1,10 +1,10 @@
 # 核心 API 与工作流
 
-本页聚焦“对象 CRUD”和“跨步骤工作流”之间的分工。前者负责稳定的资源读写，后者负责审批、入库、完成等状态推进。理解这层分界后，新增接口时更容易判断应该放在哪个文件里。
+本页梳理“对象 CRUD”和“跨步骤工作流”的职责边界。对象 CRUD 负责稳定资源读写，工作流接口负责审批、入库、完成等状态推进。
 
 ## 路由分层
 
-后端并不是把所有业务塞进一个大路由文件，而是按职责拆分：
+后端按职责组织路由文件：
 
 - [app/api/users.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py) 负责登录、用户 CRUD、头像与密码。
 - [app/api/user_sessions.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_sessions.py) 负责设备与会话。
@@ -12,8 +12,10 @@
 - [app/api/reagent_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py) 负责试剂订单的创建、列表与编辑。
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py) 负责审批、到货、入库和删除。
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py) 同时承担耗材订单 CRUD 与状态流转。
+- [app/api/dashboard.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py) 提供成员看板、管理员汇总、section 分页和窗口统计路由，具体聚合逻辑下沉到 `app/services/dashboard/`。
 - [app/api/announcements.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py)、[app/api/error_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/error_logs.py)、[app/api/user_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py)、[app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)、[app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py) 则处理外围能力。
 - [app/api/common_shelf.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py)、[app/api/chemical_name_map.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chemical_name_map.py) 负责常用货架分组与 CAS 主数据维护。
+- [app/api/reagent_brands.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_brands.py) 负责试剂品牌主数据，供试剂订单、库存和待入库表单复用。
 
 ## 试剂工作流
 
@@ -25,7 +27,7 @@
 4. 申请人或管理员在到货后调用 `POST /api/reagent-orders/{id}/confirm-arrival`。
 5. 需要转库存的订单再调用 `POST /api/reagent-orders/{id}/stock-in`，把订单数据复制到 `inventory`。
 
-这里的关键约束不是状态名字，而是“订单转库存是 copy，不是 move”。订单记录必须保留，用于审计、回溯和统计。
+关键约束为“订单转库存采用 copy 语义”。订单记录必须保留，用于审计、回溯和统计。
 
 ## 耗材工作流
 
@@ -35,11 +37,11 @@
 2. 管理员审批通过或驳回。
 3. 审批通过后直接 `complete`，不进入瓶级库存管理。
 
-因此 [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py) 同时承担查询、修改、审批与完成逻辑。它的重点是表单校验、导出与状态过滤，而不是库存生成。
+[app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py) 同时承担查询、修改、审批与完成逻辑，主要职责为表单校验、导出与状态过滤。
 
 ## 库存工作流
 
-库存接口是一组复合能力，而不是单一 CRUD：
+库存接口由多组复合能力构成：
 
 - 列表查询同时承担分页、排序、短 TTL 缓存、CAS 搜索、文本搜索、FTS 搜索和拼音排序。
 - `manual-add` 支持管理员绕过订单链路直接入库。
@@ -49,16 +51,25 @@
 - 常用货架由独立的 `common_shelf` 表（`CommonShelf` 模型）维护，按 `CAS + 品牌 + 规格` 形成分组键 `group_key`，并由 `/api/common-shelf/*` 提供分组级与瓶级操作。
 - 手动加瓶前会校验 CAS 主数据；若缺失主数据，需要先走 `/api/chemical-name-map` 完成补录，避免常用货架出现无法稳定展示名称的脏数据。
 
+## 试剂品牌主数据
+
+试剂品牌由 `/api/reagent-brands` 统一维护，前端通过 `reagentBrandAPI` 和 `getReagentBrandOptionsQueryOptions()` 读取品牌选项。
+
+- 列表接口支持名称、拼音和首字母搜索。
+- 创建和编辑时会标准化品牌名称并写入拼音字段。
+- 删除采用停用方式，历史订单和库存里的品牌文本不会被改写。
+- 新增、修改和删除都会写入用户操作日志。
+
 ## 事件驱动补充层
 
-路由不是唯一的更新出口。很多接口在数据库提交后还会广播 SSE：
+数据库提交后的更新出口包含路由响应和 SSE 广播：
 
 - 库存创建、编辑、删除、借用、归还
 - 常用货架创建、编辑、删除、加瓶、扣减 1 瓶
 - 试剂订单与耗材订单的创建、更新、删除
 - 仪表盘聚合数据更新
 
-这意味着前端页面不是“请求一次然后静态展示”，而是以 HTTP 快照为基线，再通过 SSE 做增量修正或 stale 提示。
+前端页面以 HTTP 快照为基线，再通过 SSE 执行增量修正或 stale 提示。
 
 ## 购物车同步
 
@@ -118,16 +129,16 @@
 - 批量导入需校验文件大小与行数，超限会返回 413/400；模板变更也要同步前端下载链接。
 - 新增命名路由时，要注意它不能被 `/{id}` 路由吞掉。
 
-## 验证建议
+## 验证要点
 
 - 试剂流程：新建 -> 审批 -> 到货 -> 入库，确认库存生成且 `source_order_id` 回填。
 - 耗材流程：新建 -> 审批 -> 完成，确认不会生成库存记录。
 - 借用流程：借用后状态应锁定编辑，归还后可恢复；日志应记录 borrower/returner。
 - 购物车导入：模拟浏览器插件提交批次，确认页面能逐条生成标准试剂或耗材订单。
 
-## 二次开发建议
+## 二次开发规则
 
-- 新增业务接口时，先判断它是“对象 CRUD”还是“工作流动作”，后者通常更适合单独放在 workflow 路由中。
+- 新增业务接口时，先判断接口类型属于“对象 CRUD”或“工作流动作”；工作流动作通常放在 workflow 路由中。
 - 任何会改动列表结果的接口，都要同时考虑缓存失效和 SSE 广播。
 - 库存相关新路由若是命名路由，必须优先于 `/{inventory_id}` 注册。
 - 面向前端或浏览器插件的正式接口，应同时在 [API 参考](/backend/api-reference) 中登记。
@@ -137,9 +148,11 @@
 - [app/api/announcements.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py)
 - [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py)
+- [app/api/dashboard.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py)
 - [app/api/error_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/error_logs.py)
 - [app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py)
 - [app/api/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py)
+- [app/api/reagent_brands.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_brands.py)
 - [app/api/reagent_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py)
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)
 - [app/api/user_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py)

@@ -67,6 +67,11 @@
 - 用途：页面路由。
 - 落点：`frontend/src/App.tsx`
 
+### TanStack Query 5
+
+- 用途：服务端数据缓存、请求状态和列表刷新。
+- 落点：`frontend/src/main.tsx`、`frontend/src/api/client.ts`、各业务页面的 `useQuery` 调用。
+
 ### Zustand
 
 - 用途：认证状态、UI 状态和 SSE 状态。
@@ -81,6 +86,12 @@
 
 - 用途：表单状态管理与输入校验。
 - 落点：`frontend/src/lib/validationSchemas.ts`、`frontend/src/lib/formConfigs.tsx`
+
+### 前端公共资源映射
+
+- 用途：为 RDKit 脚本、WASM 和本地字体生成带版本号的访问路径。
+- 落点：`frontend/scripts/lib-assets.mjs`、`frontend/src/lib/staticAssets.ts`
+- 触发方式：`npm run dev` 和 `npm run build` 会先执行 `npm run generate:static-assets`。
 
 ### Tailwind CSS 4 + Radix UI
 
@@ -159,6 +170,7 @@ flowchart LR
 | --- | --- |
 | 后端 lint | `ruff check app/` |
 | 前端 lint | `cd frontend && npm run lint` |
+| 前端公共资源映射 | `cd frontend && npm run generate:static-assets` |
 | wiki 本地开发 | `cd wiki && npm run dev` |
 | wiki 构建 | `cd wiki && npm run build` |
 | 浏览器插件配置生成 | `npm run build:extension` |

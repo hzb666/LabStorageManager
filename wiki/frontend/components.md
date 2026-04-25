@@ -59,6 +59,7 @@
 | `BaseForm` | 基于配置渲染表单 |
 | `BorrowDialog` | 提供借用确认流程 |
 | `UserEditDialog` | 提供用户编辑、头像和密码管理 |
+| `ReagentBrandManagementDialogs` | 提供试剂品牌列表、新增、编辑和停用流程 |
 | `EditDialogActions` | 提供编辑弹窗底部动作区 |
 
 ### 表格展开与详情
@@ -121,7 +122,7 @@
 4. `lib/formConfigs.tsx`
 5. `lib/validationSchemas.ts`
 
-## 验证建议
+## 验证要点
 
 - 新组件是否只承担单一职责
 - 组件是否避免直接依赖接口地址和缓存实现
@@ -134,6 +135,7 @@
 - [frontend/src/components/BorrowDialog.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BorrowDialog.tsx)
 - [frontend/src/components/ErrorBoundary.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ErrorBoundary.tsx)
 - [frontend/src/components/ReagentOrderExpandedRow.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ReagentOrderExpandedRow.tsx)
+- [frontend/src/components/ReagentBrandManagementDialogs.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ReagentBrandManagementDialogs.tsx)
 - [frontend/src/components/TableActionButtons.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/TableActionButtons.tsx)
 - [frontend/src/components/UserEditDialog.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/UserEditDialog.tsx)
 - [frontend/src/components/ui/DataTable.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ui/DataTable.tsx)

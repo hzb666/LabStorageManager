@@ -1,5 +1,5 @@
 /**
- * BugReportButton - Bug反馈按钮组件
+ * BugReportButton - 问题反馈按钮组件
  * 
  * 点击后：
  * 1. 获取前端错误日志

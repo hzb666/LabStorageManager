@@ -1,12 +1,12 @@
 # 从零到上手
 
-本页给首次接手仓库的开发者一条最短学习路径。目标不是一次看完所有模块，而是在较短时间内建立对业务主线、代码分层、运行边界和常见改动入口的稳定认知。
+本页提供首次接手仓库的最短学习路径，用于建立对业务主线、代码分层、运行边界和常见改动入口的稳定认知。
 
 ## 第一阶段：先建立三个核心判断
 
 先把下面三件事记牢，再开始读代码：
 
-- 试剂和耗材不是一条流程。试剂订单会继续流向暂存、库存或常用货架；耗材订单在完成后结束。
+- 试剂和耗材使用不同流程。试剂订单会继续流向暂存、库存或常用货架；耗材订单在完成后结束。
 - `Inventory` 才是现货事实源。借用日志、仪表盘卡片、常用货架展示都不能替代它。
 - 前端大量页面看似不同，实际共享同一套表格、URL 状态、SSE 和认证恢复基础设施。
 
@@ -14,7 +14,7 @@
 
 ## 第二阶段：用 30 分钟建立代码地图
 
-建议按这个顺序读：
+按以下顺序阅读：
 
 1. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/README.md" />：确认项目定位、运行方式和部署入口。
 2. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />：理解后端入口、中间件、生命周期、路由挂载和 `/cart-import` 重定向。
@@ -26,7 +26,7 @@
 
 ## 第三阶段：把业务链路走一遍
 
-建议你至少亲手走完下面五条链路：
+至少走通以下五条链路：
 
 1. 登录并刷新页面，观察登录态是否被正确恢复。
 2. 提交一条试剂订单，管理员审批，再执行到货确认。
@@ -44,14 +44,14 @@
 - bridge 脚本把批次桥接到 `/cart-import`
 - 导入页逐条提交成标准订单
 
-建议至少看这几个文件：
+导入链路涉及以下文件：
 
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/popup/popup.js" />
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" />
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx" />
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/cartimport/cartImportControllers.ts" />
 
-这条链路的重点不是“能抓到数据”，而是“插件只是桥接，最终仍走系统自身的订单创建规则”。
+这条链路的关键边界为“插件只负责桥接，最终仍走系统自身的订单创建规则”。
 
 ## 第五阶段：常见改动入口
 
@@ -66,9 +66,9 @@
 - 状态同步：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useListSSE.ts" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/sseStore.ts" />
 - 表单和输入验证：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BaseForm.tsx" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/formConfigs.tsx" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/validationSchemas.ts" />
 
-## 第六阶段：第一轮实操建议
+## 第六阶段：第一轮实操
 
-建议按以下顺序完成第一轮熟悉：
+按以下顺序完成第一轮熟悉：
 
 1. 跑通本地后端与前端。
 2. 登录系统并浏览主要页面。
@@ -78,7 +78,7 @@
 6. 跟踪浏览器插件把购物车桥接到 `/cart-import` 的链路。
 7. 打开两个页面标签，验证写操作后 SSE 是否让列表进入刷新或 stale 状态。
 
-完成这几步后，再读 [关键文件索引](/dev-guide/key-files) 和 [核心导读](/dev-guide/principal-guide) 会更容易把文件、职责和运行时现象对应起来。
+完成这些步骤后，继续阅读 [关键文件索引](/dev-guide/key-files) 和 [核心导读](/dev-guide/principal-guide)，建立文件、职责和运行时现象之间的映射关系。
 
 ## 关键机制补充
 

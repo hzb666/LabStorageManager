@@ -33,7 +33,7 @@ function renderSections(sections: DetailSection[]) {
     <div className="flex-1 space-y-5">
       {visibleSections.map(item => (
         <section key={item.title} className="space-y-2">
-          <h3 className="text-base font-semibold text-foreground">{item.title}</h3>
+          <h3 className="text-base font-bold text-foreground">{item.title}</h3>
           <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
             {item.fields.map(detail => (
               <div
@@ -43,7 +43,7 @@ function renderSections(sections: DetailSection[]) {
                   detail.wide && 'sm:col-span-2 xl:col-span-4'
                 )}
               >
-                <span className="shrink-0 font-medium text-muted-foreground">
+                <span className="shrink-0 font-normal text-muted-foreground">
                   {detail.label}：
                 </span>
                 <span
@@ -70,7 +70,7 @@ export function OperationLogExpandedRow({ item }: Readonly<{ item: LogItem }>) {
   return (
     <div className="border-b border-border bg-muted/20 px-4 py-4">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-base font-medium text-foreground">{detail || '操作详情'}</div>
+        <div className="text-base font-normal text-foreground">{detail || '操作详情'}</div>
         {hasValue(item.type) && (
           <div className="text-sm text-muted-foreground">
             类型：{getLogTypeLabel(formatText(item.type))}
