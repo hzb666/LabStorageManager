@@ -109,7 +109,9 @@ BUGS.md
 # Tests
 tests/
 scripts/
-!frontend/scripts/
+/lsm_mcp_selftest.py
+/robot/**/*_selftest.py
+/robot/**/test_*.py
 .playwright-cli/
 
 # Others
