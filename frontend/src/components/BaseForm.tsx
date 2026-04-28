@@ -457,6 +457,7 @@ function BaseFormFieldControl<T extends FieldValues>({
   field,
   controllerField,
   errorMessage,
+  activeInputClassName,
   isDisabled,
   isReadOnly,
   showDisabledStyle,
