@@ -46,7 +46,7 @@ function BorrowDialogContent({ onCancel, onConfirm, isSubmitting }: Readonly<Bor
       } catch {
         setOptions([])
       }
-    }, 300)
+    }, 100)
 
     return () => clearTimeout(timer)
   }, [keyword])

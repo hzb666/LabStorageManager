@@ -19,14 +19,14 @@
 `init_db()` 的顺序不能打乱：
 
 1. `SQLModel.metadata.create_all(engine)` 注册模型。
-2. `schema_upgrades.py` 补齐兼容字段和启动期回填。
+2. `schema_upgrades.py` 补齐兼容字段、执行结构绑定回填并检查常用货架分组一致性；缺少分组记录时阻止启动。
 3. `ensure_sqlite_performance_indexes` 创建性能索引并刷新统计信息。
 4. `log_timeline_consistency` 维护日志时间线删除触发器并清理孤儿行。
 5. `ensure_sqlite_inventory_fts` 建立 FTS 表与触发器。
 6. `check_sqlite_fts_consistency` 和 `check_sqlite_schema_consistency` 校验全文检索、表结构与索引一致性。
 7. 创建默认管理员。
 
-数据库结构、索引、全文检索和基础账号均属于启动期职责。
+数据库结构、索引、全文检索、结构一致性阻断和基础账号均属于启动期职责。
 
 搜索查询日志使用独立 SQLite 文件，不写入主业务库。启动阶段由 `init_query_log_db()` 创建 `search_logs` 表和索引，再由 `start_search_query_log_worker()` 启动低优先级写入线程。列表页搜索会先进入内存缓冲，达到批量阈值或等待时间后写入独立库；关闭时会先 flush 待写入队列。
 

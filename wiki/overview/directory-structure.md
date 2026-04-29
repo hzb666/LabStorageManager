@@ -74,7 +74,7 @@ SQLModel 数据模型和 API DTO，包括：
 
 SQLite 启动期数据库准备集中放在这里：
 
-- `schema_upgrades.py`：兼容字段与启动期回填。
+- `schema_upgrades.py`：兼容字段、结构绑定回填和常用货架分组一致性检查。
 - `sqlite_indexes.py`：复合索引和统计信息刷新。
 - `sqlite_fts.py`：FTS 表、触发器、重建和一致性检查。
 - `schema_consistency.py`：模型与数据库结构校验。

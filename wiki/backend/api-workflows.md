@@ -45,7 +45,7 @@
 
 - 列表查询同时承担分页、排序、短 TTL 缓存、CAS 搜索、文本搜索、FTS 搜索和拼音排序。
 - `manual-add` 支持管理员绕过订单链路直接入库。
-- `borrow` 和 `return` 会修改状态、写借还历史，并通过 SSE 通知前端。
+- `borrow`、`return` 和 `return-delete` 会修改状态、写借还历史或库存删除日志，并通过 SSE 通知前端。
 - `dashboard/my-borrows` 和 `dashboard/pending-stockin` 为首页和仪表盘聚合数据。
 - `import/template` 与 `import` 组成 Excel 导入链路。
 - 常用货架由独立的 `common_shelf` 表（`CommonShelf` 模型）维护，按 `CAS + 品牌 + 规格` 形成分组键 `group_key`，并由 `/api/common-shelf/*` 提供分组级与瓶级操作。
@@ -64,7 +64,7 @@
 
 数据库提交后的更新出口包含路由响应和 SSE 广播：
 
-- 库存创建、编辑、删除、借用、归还
+- 库存创建、编辑、删除、借用、归还、零剩余归还删除
 - 常用货架创建、编辑、删除、加瓶、扣减 1 瓶
 - 试剂订单与耗材订单的创建、更新、删除
 - 仪表盘聚合数据更新
@@ -108,7 +108,8 @@
 
 - 入库来源：手动新增、批量导入、试剂订单复制；都会预计算拼音与 internal_code，并可写入常用货架标记。
 - 借用/归还：校验当前 `borrower_id` 和数量，借用会记录 `borrow_log`，公用账号会弹出选择借用人；归还/消费会更新数量与 `last_borrower_id`。
-- 删除保护：已借出状态禁止编辑/删除，需先归还。
+- 规格补录：缺少规格或单位的借用记录，归还时通过 `InventoryBorrowReturn.specification` 补齐后再校验剩余量。
+- 删除保护：已借出状态禁止普通编辑/删除；归还后最终剩余量为 0 时，可走 `return-delete` 完成删除并写库存删除日志。
 - FTS 与缓存：库存写操作会重建缓存并通过 SSE 推送 `inventory` / `common_shelf` 房间。
 
 ### 购物车导入

@@ -15,7 +15,10 @@ import {
 } from "@/api/client";
 import { useSSE } from "@/hooks/useSSE";
 import {
+  getDashboardAlertBadgeClassName,
+  isApprovedOrderOverdue,
   type DashboardTab,
+  type DashboardAlertTone,
   subscribeDashboardCountsRefresh,
 } from "@/lib/dashboardUtils";
 import {
@@ -73,7 +76,9 @@ export function getEffectiveDashboardMode(
 
 export type DashboardCounts = {
   reagentCount: number;
+  reagentArrivalOverdueCount: number;
   consumableCount: number;
+  consumableReceiptOverdueCount: number;
   borrowCount: number;
   borrowOverdueCount: number;
   stockinCount: number;
@@ -86,7 +91,9 @@ export type DashboardCountsState = {
 
 export const EMPTY_COUNTS: DashboardCounts = {
   reagentCount: 0,
+  reagentArrivalOverdueCount: 0,
   consumableCount: 0,
+  consumableReceiptOverdueCount: 0,
   borrowCount: 0,
   borrowOverdueCount: 0,
   stockinCount: 0,
@@ -100,10 +107,40 @@ function countGroupedOrders(grouped: Record<string, { orders: unknown[] }>): num
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getOptionalString(value: unknown): string | null | undefined {
+  if (value === null || value === undefined || typeof value === "string") {
+    return value;
+  }
+  return undefined;
+}
+
+function countGroupedApprovedOrderOverdue(
+  grouped: Record<string, { orders: unknown[] }>,
+): number {
+  return Object.entries(grouped).reduce((sum, [groupStatus, item]) => {
+    const overdueCount = (item.orders ?? []).filter((order) => {
+      if (!isRecord(order)) {
+        return false;
+      }
+      return isApprovedOrderOverdue(
+        order.status ?? groupStatus,
+        getOptionalString(order.updated_at),
+      );
+    }).length;
+    return sum + overdueCount;
+  }, 0);
+}
+
 function isCountsEqual(a: DashboardCounts, b: DashboardCounts): boolean {
   return (
     a.reagentCount === b.reagentCount &&
+    a.reagentArrivalOverdueCount === b.reagentArrivalOverdueCount &&
     a.consumableCount === b.consumableCount &&
+    a.consumableReceiptOverdueCount === b.consumableReceiptOverdueCount &&
     a.borrowCount === b.borrowCount &&
     a.borrowOverdueCount === b.borrowOverdueCount &&
     a.stockinCount === b.stockinCount
@@ -115,7 +152,9 @@ async function loadPublicDashboardCounts(): Promise<DashboardCounts> {
   const borrowRes = await inventoryAPI.getMyBorrows();
   return {
     reagentCount: 0,
+    reagentArrivalOverdueCount: 0,
     consumableCount: 0,
+    consumableReceiptOverdueCount: 0,
     borrowCount: (borrowRes.data?.data ?? []).length,
     borrowOverdueCount: borrowRes.data?.overdue_count ?? 0,
     stockinCount: 0,
@@ -142,7 +181,9 @@ async function loadMemberDashboardCounts(): Promise<DashboardCounts> {
 
   return {
     reagentCount: countGroupedOrders(reagentGrouped),
+    reagentArrivalOverdueCount: countGroupedApprovedOrderOverdue(reagentGrouped),
     consumableCount: countGroupedOrders(consumableGrouped),
+    consumableReceiptOverdueCount: countGroupedApprovedOrderOverdue(consumableGrouped),
     borrowCount: (borrowRes.data?.data ?? []).length,
     borrowOverdueCount: borrowRes.data?.overdue_count ?? 0,
     stockinCount: (stockinRes.data?.data ?? []).length,
@@ -257,14 +298,23 @@ function formatManagementDelta(delta: number, isLoading: boolean): string {
 }
 
 function getCardAlertBadge(text: string): React.ReactNode {
+  return getCardAlertBadgeWithTone(text);
+}
+
+function getCardAlertBadgeWithTone(
+  text: string,
+  tone: DashboardAlertTone = "destructive",
+): React.ReactNode {
   return (
-    <span className="shrink-0 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive">
+    <span className={getDashboardAlertBadgeClassName(tone)}>
       {text}
     </span>
   );
 }
 
-function getCardAlertBadges(items: Array<{ count: number; label: string }>): React.ReactNode {
+function getCardAlertBadges(
+  items: Array<{ count: number; label: string; tone?: DashboardAlertTone }>,
+): React.ReactNode {
   const visibleItems = items.filter((item) => item.count > 0);
   if (visibleItems.length === 0) {
     return undefined;
@@ -275,7 +325,7 @@ function getCardAlertBadges(items: Array<{ count: number; label: string }>): Rea
       {visibleItems.map((item) => (
         <span
           key={item.label}
-          className="shrink-0 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive"
+          className={getDashboardAlertBadgeClassName(item.tone)}
         >
           {item.count} 个{item.label}
         </span>
@@ -301,9 +351,7 @@ export function getDashboardCardItems(
     titleSuffix:
       !isLoading && counts.borrowOverdueCount > 0
         ? (
-            <span className="shrink-0 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive">
-              {counts.borrowOverdueCount} 个超期
-            </span>
+            getCardAlertBadge(`${counts.borrowOverdueCount} 个超时`)
           )
         : undefined,
   };
@@ -318,12 +366,26 @@ export function getDashboardCardItems(
       title: "试剂订单",
       icon: ShoppingCart,
       value: isLoading ? loadingValue : counts.reagentCount,
+      titleSuffix:
+        !isLoading && counts.reagentArrivalOverdueCount > 0
+          ? getCardAlertBadgeWithTone(
+              `${counts.reagentArrivalOverdueCount} 个到货超时`,
+              "warning",
+            )
+          : undefined,
     },
     {
       tab: "consumables",
       title: "耗材订单",
       icon: ShoppingCart,
       value: isLoading ? loadingValue : counts.consumableCount,
+      titleSuffix:
+        !isLoading && counts.consumableReceiptOverdueCount > 0
+          ? getCardAlertBadgeWithTone(
+              `${counts.consumableReceiptOverdueCount} 个收货超时`,
+              "warning",
+            )
+          : undefined,
     },
     borrowCard,
     {
@@ -352,7 +414,11 @@ export function getManagementCardItems(
         ? undefined
         : getCardAlertBadges([
             { count: summary.pending_reagent_overdue_count, label: "审批超时" },
-            { count: summary.long_unarrived_approved_reagent_count, label: "到货超时" },
+            {
+              count: summary.long_unarrived_approved_reagent_count,
+              label: "到货超时",
+              tone: "warning",
+            },
           ]),
       icon: ShoppingCart,
       value: value(summary.reagent_order_count),
@@ -368,6 +434,7 @@ export function getManagementCardItems(
             {
               count: summary.long_unconfirmed_approved_consumable_count,
               label: "收货超时",
+              tone: "warning",
             },
           ]),
       icon: ShoppingCart,
@@ -379,7 +446,7 @@ export function getManagementCardItems(
       title: "正在借用",
       titleSuffix:
         !isLoading && summary.overdue_borrow_count > 0
-          ? getCardAlertBadge(`${summary.overdue_borrow_count} 个超期`)
+          ? getCardAlertBadge(`${summary.overdue_borrow_count} 个超时`)
           : undefined,
       icon: Package,
       value: value(summary.borrowed_inventory_count),
@@ -417,7 +484,6 @@ const EMPTY_ADMIN_SUMMARY: AdminDashboardSummary = {
   pending_stockin_overdue_count: 0,
   long_unarrived_approved_reagent_count: 0,
   long_unconfirmed_approved_consumable_count: 0,
-  long_pending_order_count: 0,
   common_stock_alert_count: 0,
   recent_arrival_count: 0,
   recent_reagent_order_count: 0,

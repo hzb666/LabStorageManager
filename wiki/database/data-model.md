@@ -126,7 +126,7 @@ erDiagram
 
 ### BorrowLog
 
-- `quantity_borrowed`、`quantity_returned` 使系统能够记录数量变化，而不仅是状态变化。
+- `quantity_borrowed`、`quantity_returned` 使系统能够记录数量变化，而不仅是状态变化；规格或剩余量未知的历史借用可记录为 0。
 
 ### Announcement
 

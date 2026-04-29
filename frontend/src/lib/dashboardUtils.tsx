@@ -1,4 +1,5 @@
 /** Dashboard 共享工具、类型和常量。 */
+import type { QueryClient } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
   ConsumableOrderStatus,
@@ -21,8 +22,10 @@ export interface MyBorrowItem {
   inventory_id: number
   name: string
   cas_number: string
-  remaining_quantity: number
-  unit: string
+  initial_quantity?: number | null
+  specification?: string | null
+  remaining_quantity?: number | null
+  unit?: string | null
   borrow_time: string
   borrower_id?: number | null
   english_name?: string | null
@@ -129,6 +132,20 @@ export const PENDING_ORDER_ALERT_DAYS = 2
 export const PENDING_STOCKIN_ALERT_DAYS = 7
 export const APPROVED_ORDER_ALERT_DAYS = 3
 
+export type DashboardAlertTone = 'destructive' | 'warning'
+
+const DASHBOARD_ALERT_BADGE_BASE_CLASS =
+  'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal'
+
+export function getDashboardAlertBadgeClassName(
+  tone: DashboardAlertTone = 'destructive'
+): string {
+  if (tone === 'warning') {
+    return `${DASHBOARD_ALERT_BADGE_BASE_CLASS} bg-yellow-100 text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300`
+  }
+  return `${DASHBOARD_ALERT_BADGE_BASE_CLASS} bg-destructive/10 text-destructive`
+}
+
 function isDateOlderThanDays(dateText: string | null | undefined, days: number): boolean {
   if (!dateText) {
     return false
@@ -138,11 +155,11 @@ function isDateOlderThanDays(dateText: string | null | undefined, days: number):
 
 export function isPendingApprovalOverdue(
   status: unknown,
-  createdAt: string | null | undefined
+  updatedAt: string | null | undefined
 ): boolean {
   return typeof status === 'string'
     && PENDING_APPROVAL_STATUSES.has(status)
-    && isDateOlderThanDays(createdAt, PENDING_ORDER_ALERT_DAYS)
+    && isDateOlderThanDays(updatedAt, PENDING_ORDER_ALERT_DAYS)
 }
 
 export function isPendingStockinOverdue(stockinTime: string | null | undefined): boolean {
@@ -229,6 +246,12 @@ export function requestDashboardCountsRefresh(): void {
     return
   }
   window.dispatchEvent(new Event(DASHBOARD_COUNTS_REFRESH_EVENT))
+}
+
+/** 业务写操作后统一刷新 dashboard 快照和本地统计事件。 */
+export async function refreshDashboardAfterMutation(queryClient: QueryClient): Promise<void> {
+  await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+  requestDashboardCountsRefresh()
 }
 
 /** 订阅仪表盘统计刷新信号。 */

@@ -66,6 +66,7 @@ import {
   getReagentBrandOptionsQueryOptions,
 } from '@/lib/reagentBrandOptions'
 import { REAGENT_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
+import { refreshDashboardAfterMutation } from '@/lib/dashboardUtils'
 
 // 图标
 import {
@@ -354,7 +355,6 @@ function useReagentOrderDialogController(
 ) {
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [editingItem, setEditingItem] = useState<ReagentOrder | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const form = useForm<ReagentOrderFormInputData, unknown, ReagentOrderFormData>({
     resolver: createValibotResolver(ReagentOrderSchema),
@@ -372,7 +372,6 @@ function useReagentOrderDialogController(
 
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
-    setDeleteConfirm(false)
     form.reset(defaultReagentOrderValues)
     casController.clearCASWarning()
     setDialogState('add')
@@ -381,7 +380,6 @@ function useReagentOrderDialogController(
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ReagentOrder
     setEditingItem(item)
-    setDeleteConfirm(false)
     form.reset(createReagentOrderFormValues(item))
     setDialogState('edit')
   }, [form, setDialogState])
@@ -410,7 +408,6 @@ function useReagentOrderDialogController(
       if (successMessage) {
         toast.success(successMessage)
       }
-      setDeleteConfirm(false)
       setDialogState(null)
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
@@ -429,14 +426,8 @@ function useReagentOrderDialogController(
   const handleDeleteClick = useCallback(async () => {
     if (!editingItem) return
 
-    if (!deleteConfirm) {
-      setDeleteConfirm(true)
-      return
-    }
-
     try {
       await reagentOrderAPI.delete(editingItem.id)
-      setDeleteConfirm(false)
       setEditingItem(null)
       setDialogState(null)
       casController.clearCASWarning()
@@ -445,12 +436,11 @@ function useReagentOrderDialogController(
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
-  }, [casController, deleteConfirm, editingItem, refreshOrders, setDialogState])
+  }, [casController, editingItem, refreshOrders, setDialogState])
 
   const handleDialogOpenChange = useCallback((open: boolean) => {
     if (!open) {
       setDialogState(null)
-      setDeleteConfirm(false)
       form.reset()
       casController.clearCASWarning()
     }
@@ -459,7 +449,6 @@ function useReagentOrderDialogController(
   return {
     dialogState,
     editingItem,
-    deleteConfirm,
     isSubmitting,
     casWarning: casController.casWarning,
     casLoading: casController.casLoading,
@@ -523,8 +512,11 @@ export function ReagentOrdersPage() {
   const canWriteBrands = canWriteNonPublicData(currentUserRole)
   const [brandManagementOpen, setBrandManagementOpen] = useState(false)
   const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
-  const refreshOrders = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['reagent-orders'] })
+  const refreshOrders = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }),
+      refreshDashboardAfterMutation(queryClient),
+    ])
   }, [queryClient])
   const dialogController = useReagentOrderDialogController(refreshOrders, navigate, brandOptions)
 
@@ -599,7 +591,6 @@ export function ReagentOrdersPage() {
                   ? dialogController.handleDeleteClick
                   : undefined
               }
-              deleteConfirm={dialogController.deleteConfirm}
               submitLabelEdit="保存"
               submitLabelAdd="提交订单"
               isSubmitting={dialogController.isSubmitting}

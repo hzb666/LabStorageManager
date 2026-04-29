@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-CAS_PATTERN = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
+CAS_PATTERN = re.compile(r"(?<!\d)\d{2,7}-\d{2}-\d(?!\d)")
 ID_PATTERN = re.compile(r"\b\d+\b")
 BIND_PATTERN = re.compile(r"^绑定\s+(\S+)\s+(.+)$")
 QUANTITY_PATTERN_TEXT = r"([0-9]+(?:\.[0-9]+)?)\s*([A-Za-zμµ\u4e00-\u9fff]*)"

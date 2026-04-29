@@ -1,14 +1,13 @@
 """Dashboard panel item builders."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, func
 from sqlmodel import Session, select
 
-from app.core.constants import OVERDUE_BORROW_DAYS
+from app.core.constants import LOW_STOCK_PERCENT, OVERDUE_BORROW_DAYS
 from app.core.time_utils import get_display_day_age_cutoff, utc_iso_str
 from app.models.chemical_name_map import ChemicalNameMap
 from app.models.common_shelf import CommonShelf, CommonShelfGroup
@@ -29,7 +28,6 @@ from app.models.user import User
 from app.models.user_session import UserSession
 from app.services.dashboard.common import (
     COMMON_SHELF_ALERT_BOTTLE_THRESHOLD,
-    INVENTORY_STOCK_ALERT_PERCENT,
     LIST_LIMIT,
     LONG_PENDING_DAYS,
     LONG_UNARRIVED_APPROVED_DAYS,
@@ -74,7 +72,6 @@ def _append_recent_actions(
     users_map: dict[int, str],
     *,
     actor_attr: str,
-    label_suffix: str,
     detail_attr: str,
 ) -> None:
     for log in logs:
@@ -103,7 +100,6 @@ def _append_recent_actions(
         actions.append(
             _with_dashboard_structured(
                 {
-                    "label": f"{actor_name}{label_suffix}",
                     "detail": subject_name,
                     "created_at": utc_iso_str(log.created_at),
                 },
@@ -154,38 +150,28 @@ def _get_recent_management_actions(db: Session) -> list[dict[str, Any]]:
         CommonShelfOperationLog.action == CommonShelfOperationAction.STOCK_IN,
     )
     log_groups = [
-        (reagent_logs, "actor_user_id", "处理试剂订单", "order_name"),
-        (consumable_logs, "actor_user_id", "处理耗材订单", "order_name"),
-        (inventory_logs, "operator_id", "完成入库", "item_name"),
-        (common_logs, "operator_id", "更新常用货架", "item_name"),
+        (reagent_logs, "actor_user_id", "order_name"),
+        (consumable_logs, "actor_user_id", "order_name"),
+        (inventory_logs, "operator_id", "item_name"),
+        (common_logs, "operator_id", "item_name"),
     ]
     users_map = batch_get_user_names(
         db,
         _collect_recent_log_actor_ids(
-            [(logs, actor_attr) for logs, actor_attr, _, _ in log_groups]
+            [(logs, actor_attr) for logs, actor_attr, _ in log_groups]
         ),
     )
 
-    for logs, actor_attr, label_suffix, detail_attr in log_groups:
+    for logs, actor_attr, detail_attr in log_groups:
         _append_recent_actions(
             actions,
             logs,
             users_map,
             actor_attr=actor_attr,
-            label_suffix=label_suffix,
             detail_attr=detail_attr,
         )
 
     return sorted(actions, key=lambda item: item["created_at"], reverse=True)[:LIST_LIMIT]
-
-@dataclass(frozen=True)
-class SystemStatusCounts:
-    pending_reagent_count: int
-    pending_consumable_count: int
-    pending_stockin_count: int
-    overdue_borrow_count: int
-    long_pending_order_count: int
-
 
 def _get_todo_items(
     db: Session,
@@ -197,7 +183,7 @@ def _get_todo_items(
     reagent_statement = (
         select(ReagentOrder)
         .where(ReagentOrder.status == ReagentOrderStatus.PENDING)
-        .order_by(ReagentOrder.created_at.desc())
+        .order_by(ReagentOrder.updated_at.desc())
     )
     if limit is not None:
         reagent_statement = reagent_statement.limit(limit)
@@ -205,7 +191,7 @@ def _get_todo_items(
     consumable_statement = (
         select(ConsumableOrder)
         .where(ConsumableOrder.status == ConsumableOrderStatus.PENDING)
-        .order_by(ConsumableOrder.created_at.desc())
+        .order_by(ConsumableOrder.updated_at.desc())
     )
     if limit is not None:
         consumable_statement = consumable_statement.limit(limit)
@@ -218,13 +204,12 @@ def _get_todo_items(
     items.extend(
         _with_dashboard_structured(
             {
-                "label": "待审批试剂订单",
                 "detail": f"{order.name} · {order.cas_number}",
                 "submitter_name": users_map.get(order.applicant_id) or "-",
                 "tab": "reagents",
-                "severity": "high" if order.created_at < overdue_cutoff else "medium",
-                "is_overdue": order.created_at < overdue_cutoff,
-                "created_at": utc_iso_str(order.created_at),
+                "severity": "high" if order.updated_at < overdue_cutoff else "medium",
+                "is_overdue": order.updated_at < overdue_cutoff,
+                "created_at": utc_iso_str(order.updated_at),
             },
             label_code="todo.reagent_order_pending_approval",
             entity=_build_dashboard_entity(
@@ -247,13 +232,12 @@ def _get_todo_items(
     items.extend(
         _with_dashboard_structured(
             {
-                "label": "待审批耗材订单",
                 "detail": f"{order.name} · {order.specification or order.unit or '-'}",
                 "submitter_name": users_map.get(order.applicant_id) or "-",
                 "tab": "consumables",
-                "severity": "high" if order.created_at < overdue_cutoff else "medium",
-                "is_overdue": order.created_at < overdue_cutoff,
-                "created_at": utc_iso_str(order.created_at),
+                "severity": "high" if order.updated_at < overdue_cutoff else "medium",
+                "is_overdue": order.updated_at < overdue_cutoff,
+                "created_at": utc_iso_str(order.updated_at),
             },
             label_code="todo.consumable_order_pending_approval",
             entity=_build_dashboard_entity(
@@ -279,7 +263,6 @@ def _get_todo_items(
 
 
 def _build_system_status_item(
-    label: str,
     value: int,
     tone: str,
     *,
@@ -287,7 +270,6 @@ def _build_system_status_item(
 ) -> dict[str, Any]:
     return _with_dashboard_structured(
         {
-            "label": label,
             "value": value,
             "detail": "",
             "tone": tone,
@@ -318,19 +300,16 @@ def _build_user_activity_system_status(db: Session, now: datetime) -> list[dict[
     )
     return [
         _build_system_status_item(
-            "启用用户",
             active_user_count,
             "neutral",
             label_code="system_status.active_users",
         ),
         _build_system_status_item(
-            "有效会话",
             active_session_count,
             "success" if active_session_count > 0 else "neutral",
             label_code="system_status.active_sessions",
         ),
         _build_system_status_item(
-            "今日活跃",
             recent_active_user_count,
             "success" if recent_active_user_count > 0 else "neutral",
             label_code="system_status.active_users_today",
@@ -342,41 +321,8 @@ def _build_system_status(
     *,
     db: Session,
     now: datetime,
-    counts: SystemStatusCounts,
 ) -> list[dict[str, Any]]:
-    return [
-        *_build_user_activity_system_status(db, now),
-        _build_system_status_item(
-            "待审试剂",
-            counts.pending_reagent_count,
-            "warning" if counts.pending_reagent_count > 0 else "success",
-            label_code="system_status.pending_reagent_orders",
-        ),
-        _build_system_status_item(
-            "待审耗材",
-            counts.pending_consumable_count,
-            "warning" if counts.pending_consumable_count > 0 else "success",
-            label_code="system_status.pending_consumable_orders",
-        ),
-        _build_system_status_item(
-            "暂存入库",
-            counts.pending_stockin_count,
-            "warning" if counts.pending_stockin_count > 0 else "success",
-            label_code="system_status.pending_stockin",
-        ),
-        _build_system_status_item(
-            "逾期借用",
-            counts.overdue_borrow_count,
-            "high" if counts.overdue_borrow_count > 0 else "success",
-            label_code="system_status.overdue_borrows",
-        ),
-        _build_system_status_item(
-            "处理积压",
-            counts.long_pending_order_count,
-            "warning" if counts.long_pending_order_count > 0 else "success",
-            label_code="system_status.pending_backlog",
-        ),
-    ]
+    return _build_user_activity_system_status(db, now)
 
 BOARD_ORDER_OVERVIEW_REAGENT_STATUSES = (
     ReagentOrderStatus.PENDING, ReagentOrderStatus.APPROVED, ReagentOrderStatus.REJECTED
@@ -451,7 +397,6 @@ def _build_user_order_overview_items(
 ) -> list[dict[str, Any]]:
     items = [
         _board_panel_item(
-            "试剂",
             order.name,
             tab="reagents",
             impact=BOARD_ORDER_OVERVIEW_STATUS_LABELS.get(order.status.value, order.status.value),
@@ -475,7 +420,6 @@ def _build_user_order_overview_items(
     ]
     items.extend(
         _board_panel_item(
-            "耗材",
             order.name,
             tab="consumables",
             impact=BOARD_ORDER_OVERVIEW_STATUS_LABELS.get(order.status.value, order.status.value),
@@ -589,7 +533,6 @@ def _get_user_board_action_items(
 ) -> list[dict[str, Any]]:
     items = [
         _board_panel_item(
-            "待确认到货",
             _reagent_detail(order),
             tab="reagents",
             created_at=order.updated_at,
@@ -610,7 +553,6 @@ def _get_user_board_action_items(
     ]
     items.extend(
         _board_panel_item(
-            "待确认耗材",
             _consumable_detail(order),
             tab="consumables",
             created_at=order.updated_at,
@@ -630,7 +572,6 @@ def _get_user_board_action_items(
     )
     items.extend(
         _board_panel_item(
-            "借用超期",
             _inventory_detail(item),
             tab="borrows",
             severity="high",
@@ -657,7 +598,6 @@ def _build_reagent_order_risk_item(
     order: ReagentOrder,
     users_map: dict[int, str],
     *,
-    label: str,
     label_code: str,
     threshold_days: int,
     created_at: datetime,
@@ -665,7 +605,6 @@ def _build_reagent_order_risk_item(
     specification = format_specification(order.initial_quantity, order.unit) or "-"
     return _with_dashboard_structured(
         {
-            "label": label,
             "detail": _join_dashboard_detail_parts(order.name, order.cas_number, specification),
             "submitter_name": users_map.get(order.applicant_id) or "-",
             "severity": "medium",
@@ -693,7 +632,6 @@ def _build_consumable_order_risk_item(
     order: ConsumableOrder,
     users_map: dict[int, str],
     *,
-    label: str,
     label_code: str,
     threshold_days: int,
     created_at: datetime,
@@ -701,7 +639,6 @@ def _build_consumable_order_risk_item(
     specification = order.specification or order.unit or "-"
     return _with_dashboard_structured(
         {
-            "label": label,
             "detail": _join_dashboard_detail_parts(order.name, specification),
             "submitter_name": users_map.get(order.applicant_id) or "-",
             "severity": "medium",
@@ -728,7 +665,6 @@ def _build_inventory_risk_item(
     item: Inventory,
     users_map: dict[int, str],
     *,
-    label: str,
     label_code: str,
     threshold_days: int,
     user_id: int | None,
@@ -739,7 +675,6 @@ def _build_inventory_risk_item(
     specification = format_specification(item.initial_quantity, item.unit) or "-"
     return _with_dashboard_structured(
         {
-            "label": label,
             "detail": _join_dashboard_detail_parts(item.name, item.cas_number, specification),
             "submitter_name": users_map.get(user_id) or "-",
             "severity": severity,
@@ -784,9 +719,9 @@ def _get_risk_items(
         select(ReagentOrder)
         .where(
             ReagentOrder.status == ReagentOrderStatus.PENDING,
-            ReagentOrder.created_at < long_pending_cutoff,
+            ReagentOrder.updated_at < long_pending_cutoff,
         )
-        .order_by(ReagentOrder.created_at.asc()),
+        .order_by(ReagentOrder.updated_at.asc()),
         limit,
     )
     consumable_pending_orders = _exec_dashboard_limited(
@@ -794,9 +729,9 @@ def _get_risk_items(
         select(ConsumableOrder)
         .where(
             ConsumableOrder.status == ConsumableOrderStatus.PENDING,
-            ConsumableOrder.created_at < long_pending_cutoff,
+            ConsumableOrder.updated_at < long_pending_cutoff,
         )
-        .order_by(ConsumableOrder.created_at.asc()),
+        .order_by(ConsumableOrder.updated_at.asc()),
         limit,
     )
     reagent_unarrived_orders = _exec_dashboard_limited(
@@ -852,10 +787,9 @@ def _get_risk_items(
         _build_reagent_order_risk_item(
             order,
             users_map,
-            label="试剂订单审批超时",
             label_code="risk.reagent_order_approval_timeout",
             threshold_days=LONG_PENDING_DAYS,
-            created_at=order.created_at,
+            created_at=order.updated_at,
         )
         for order in reagent_pending_orders
     ]
@@ -863,10 +797,9 @@ def _get_risk_items(
         _build_consumable_order_risk_item(
             order,
             users_map,
-            label="耗材订单审批超时",
             label_code="risk.consumable_order_approval_timeout",
             threshold_days=LONG_PENDING_DAYS,
-            created_at=order.created_at,
+            created_at=order.updated_at,
         )
         for order in consumable_pending_orders
     )
@@ -874,7 +807,6 @@ def _get_risk_items(
         _build_reagent_order_risk_item(
             order,
             users_map,
-            label="试剂长时间未到货",
             label_code="risk.reagent_order_unarrived",
             threshold_days=LONG_UNARRIVED_APPROVED_DAYS,
             created_at=order.updated_at,
@@ -885,7 +817,6 @@ def _get_risk_items(
         _build_consumable_order_risk_item(
             order,
             users_map,
-            label="耗材长时间未收货",
             label_code="risk.consumable_order_unconfirmed",
             threshold_days=LONG_UNARRIVED_APPROVED_DAYS,
             created_at=order.updated_at,
@@ -896,7 +827,6 @@ def _get_risk_items(
         _build_inventory_risk_item(
             item,
             users_map,
-            label="暂存超时",
             label_code="risk.pending_stockin_overdue",
             threshold_days=PENDING_STOCKIN_ALERT_DAYS,
             user_id=item.temporary_keeper_id,
@@ -910,7 +840,6 @@ def _get_risk_items(
         _build_inventory_risk_item(
             item,
             users_map,
-            label="借用超时",
             label_code="risk.borrow_overdue",
             threshold_days=OVERDUE_BORROW_DAYS,
             user_id=item.borrower_id,
@@ -978,7 +907,7 @@ def _count_inventory_stock_alerts(db: Session) -> int:
         .where(Inventory.initial_quantity.is_not(None))
         .where(Inventory.initial_quantity > 0)
         .where(Inventory.remaining_quantity.is_not(None))
-        .where(remaining_percent < INVENTORY_STOCK_ALERT_PERCENT)
+        .where(remaining_percent < LOW_STOCK_PERCENT)
     )
     return _count(db, statement)
 
@@ -999,7 +928,7 @@ def _get_inventory_stock_alerts(
         .where(Inventory.initial_quantity.is_not(None))
         .where(Inventory.initial_quantity > 0)
         .where(Inventory.remaining_quantity.is_not(None))
-        .where(remaining_percent < INVENTORY_STOCK_ALERT_PERCENT)
+        .where(remaining_percent < LOW_STOCK_PERCENT)
         .order_by(remaining_percent.asc(), Inventory.updated_at.desc())
     )
     if limit is not None:
@@ -1008,7 +937,6 @@ def _get_inventory_stock_alerts(
     return [
         _with_dashboard_structured(
             {
-                "label": "库存低量",
                 "detail": _join_dashboard_detail_parts(item.name, item.cas_number),
                 "alert_kind": "inventory",
                 "remaining_quantity": item.remaining_quantity,
@@ -1078,7 +1006,6 @@ def _get_common_shelf_stock_alerts(
     return [
         _with_dashboard_structured(
             {
-                "label": "常用低量",
                 "detail": _join_dashboard_detail_parts(
                     standard_name_by_cas.get(group.cas_number) or group.name_snapshot,
                     group.brand,

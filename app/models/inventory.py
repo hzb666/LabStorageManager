@@ -198,6 +198,7 @@ class InventoryBorrowReturn(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     remaining_quantity: float = Field(ge=0)
+    specification: Optional[str] = Field(default=None, max_length=100)
     notes: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -261,7 +262,7 @@ class BorrowLog(SQLModel, table=True):
     )
     borrow_time: datetime = Field(default_factory=get_utc_now)
     return_time: Optional[datetime] = None
-    quantity_borrowed: float = Field(gt=0)
+    quantity_borrowed: float = Field(ge=0)
     quantity_returned: Optional[float] = None
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=get_utc_now)

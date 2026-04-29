@@ -3,6 +3,7 @@ import { CheckCircle, List, Loader2, Trash2, X } from "lucide-react";
 
 import { BaseForm } from "@/components/BaseForm";
 import { CartImportLoadingScreen } from "@/components/CartImportLoadingScreen";
+import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { ReagentCasDuplicateWarning } from "@/components/ReagentCasDuplicateWarning";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -194,7 +195,6 @@ function CartImportFormPanel(
     handleTypeSwitch,
   } = formState;
   const {
-    deleteConfirm,
     submitting,
     handleDeleteCurrent,
     handleSubmitCurrent,
@@ -271,16 +271,15 @@ function CartImportFormPanel(
         ) : null}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 order-1">
-            <Button
+            <ConfirmDeleteButton
               variant="destructive"
               size="lg"
               type="button"
-              onClick={handleDeleteCurrent}
+              onConfirm={handleDeleteCurrent}
               disabled={submitting || !currentItem}
-            >
-              <Trash2 className="w-4 h-4 mr-1.5" />
-              {deleteConfirm ? "确认删除" : "删除"}
-            </Button>
+              icon={<Trash2 className="w-4 h-4 mr-1.5" />}
+              resetKey={currentItem?.id}
+            />
           </div>
           <div className="flex items-center gap-2 order-2">
             {casLoading && orderType === "reagent" && (

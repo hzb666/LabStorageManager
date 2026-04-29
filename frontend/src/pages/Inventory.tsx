@@ -52,6 +52,7 @@ import type { InventoryFormData, InventoryFormInputData } from '@/lib/validation
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 import { UserRoles, type UserRole } from '@/lib/constants'
 import { getReagentBrandOptionsQueryOptions } from '@/lib/reagentBrandOptions'
+import { refreshDashboardAfterMutation } from '@/lib/dashboardUtils'
 import { useAuthStore } from '@/store/useStore'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 import { canWriteNonPublicData } from '@/lib/permissions'
@@ -312,7 +313,6 @@ function useInventoryDialogController(
 ) {
   const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
-  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
@@ -323,14 +323,12 @@ function useInventoryDialogController(
   })
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
-    setDeleteConfirm(false)
     form.reset(defaultInventoryValues)
     setDialogState('add')
   }, [form, setDialogState])
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as InventoryItem
     setEditingItem(item)
-    setDeleteConfirm(false)
     form.reset(createInventoryFormValues(item))
     setDialogState('edit')
   }, [form, setDialogState])
@@ -410,11 +408,6 @@ function useInventoryDialogController(
   const handleDeleteClick = useCallback(async () => {
     if (!editingItem) return
 
-    if (!deleteConfirm) {
-      setDeleteConfirm(true)
-      return
-    }
-
     try {
       await inventoryAPI.delete(editingItem.id)
       setDialogState(null)
@@ -423,12 +416,11 @@ function useInventoryDialogController(
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
-  }, [deleteConfirm, editingItem, refreshInventory, setDialogState])
+  }, [editingItem, refreshInventory, setDialogState])
   const handleDialogOpenChange = useCallback((open: boolean) => {
     if (open) return
     setDialogState(null)
     form.reset()
-    setDeleteConfirm(false)
   }, [form, setDialogState])
   const formFields = useMemo(() => createInventoryFormFields({
     dialogState,
@@ -448,7 +440,6 @@ function useInventoryDialogController(
 
   return {
     dialogState,
-    deleteConfirm,
     editingItem,
     isSubmitting,
     form,
@@ -847,7 +838,6 @@ function InventoryFormDialog({
                 ? dialogController.handleDeleteClick
                 : undefined
             }
-            deleteConfirm={dialogController.deleteConfirm}
             submitLabelEdit="保存"
             submitLabelAdd="确认入库"
             isSubmitting={dialogController.isSubmitting}
@@ -996,7 +986,10 @@ export function InventoryPage() {
   } = structureEditor
   useStructureDialogPreload(structureSearchEnabled)
   const loadInventory = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ['inventory'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+      refreshDashboardAfterMutation(queryClient),
+    ])
   }, [queryClient])
   const handleInventoryQueryError = useCallback((error: unknown) => {
     if (!structureFilter || getApiErrorStatus(error) !== 410) {
@@ -1166,16 +1159,6 @@ const ActionButtons = React.memo(function ActionButtons({
         showWhen: (currItem: InventoryItem) =>
           currItem.status === 'in_stock' && !currItem.temporary_keeper_id,
         onClick: async (currItem: InventoryItem) => {
-          // 借用前校验：检查规格和剩余量是否填写
-          if (!currItem.specification || currItem.specification.trim() === '') {
-            toast.warning('请先填写规格才能借用')
-            throw new Error('规格未填写')
-          }
-          if (currItem.remaining_quantity === undefined || currItem.remaining_quantity === null) {
-            toast.warning('请先填写剩余量才能借用')
-            throw new Error('剩余量未填写')
-          }
-
           await onBorrow(currItem)
         }
       }

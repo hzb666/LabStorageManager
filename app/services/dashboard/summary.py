@@ -26,7 +26,6 @@ from app.services.dashboard.common import (
     _get_dashboard_section_page,
 )
 from app.services.dashboard.items import (
-    SystemStatusCounts,
     _build_system_status,
     _build_user_order_overview_items,
     _count_common_shelf_alerts,
@@ -171,9 +170,6 @@ def build_admin_dashboard_summary(db: Session) -> dict[str, Any]:
         db,
         now,
     )
-    long_pending_order_count = (
-        long_pending_reagent_order_count + long_pending_consumable_order_count
-    )
     pending_reagent_overdue_count = _count_pending_reagent_orders_overdue(db, now)
     pending_consumable_overdue_count = _count_pending_consumable_orders_overdue(
         db,
@@ -221,7 +217,6 @@ def build_admin_dashboard_summary(db: Session) -> dict[str, Any]:
             "long_unconfirmed_approved_consumable_count": (
                 long_unconfirmed_approved_consumable_count
             ),
-            "long_pending_order_count": long_pending_order_count,
             "common_stock_alert_count": _count_common_shelf_alerts(db),
             **recent_window_stats,
             "todo_items": _get_todo_items(db, now),
@@ -236,13 +231,6 @@ def build_admin_dashboard_summary(db: Session) -> dict[str, Any]:
             "system_status": _build_system_status(
                 db=db,
                 now=now,
-                counts=SystemStatusCounts(
-                    pending_reagent_count=pending_reagent_count,
-                    pending_consumable_count=pending_consumable_count,
-                    pending_stockin_count=pending_stockin_count,
-                    overdue_borrow_count=overdue_borrow_count,
-                    long_pending_order_count=long_pending_order_count,
-                ),
             ),
             "system_version": settings.app_version,
             "generated_at": utc_iso_str(now),
@@ -278,7 +266,6 @@ def _get_board_recent_items(db: Session) -> list[dict[str, Any]]:
     ).all()
     items = [
         _board_panel_item(
-            "试剂到货",
             order.name,
             tab="reagents",
             created_at=order.updated_at,
@@ -299,7 +286,6 @@ def _get_board_recent_items(db: Session) -> list[dict[str, Any]]:
     ]
     items.extend(
         _board_panel_item(
-            "耗材到货",
             order.name,
             tab="consumables",
             created_at=order.updated_at,
@@ -319,7 +305,6 @@ def _get_board_recent_items(db: Session) -> list[dict[str, Any]]:
     )
     items.extend(
         _board_panel_item(
-            "订单入库",
             item.name,
             tab="stockin",
             created_at=item.created_at,
@@ -351,7 +336,6 @@ def _get_board_announcement_items(db: Session) -> list[dict[str, Any]]:
     users_map = batch_get_user_names(db, creator_ids)
     return [
         _board_panel_item(
-            "置顶公告" if announcement.is_pinned else "公告",
             announcement.title,
             impact="置顶" if announcement.is_pinned else "公告",
             severity="medium" if announcement.is_pinned else "success",

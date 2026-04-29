@@ -861,10 +861,7 @@ def _build_reagent_dashboard_groups(
             "applicant_name": users_map.get(order.applicant_id) if order.applicant_id else "",
             "created_at": utc_iso_str(order.created_at),
             "updated_at": utc_iso_str(order.updated_at),
-            **{
-                key: utc_iso_str(value)
-                for key, value in get_order_status_time_fields(status_times, order).items()
-            },
+            **get_order_status_time_fields(status_times, order),
         }
 
         status_key = order.status.value if hasattr(order.status, "value") else str(order.status)

@@ -25,6 +25,7 @@
 | `Toast` | 承载全局通知展示 |
 | `Tooltip` | 提供补充说明层 |
 | `LoadingButton` | 统一按钮加载态 |
+| `ConfirmDeleteButton` | 在删除前提供同按钮二次确认，可复用普通按钮或加载按钮外观 |
 
 ### 表格与列表
 
@@ -60,7 +61,7 @@
 | `BorrowDialog` | 提供借用确认流程 |
 | `UserEditDialog` | 提供用户编辑、头像和密码管理 |
 | `ReagentBrandManagementDialogs` | 提供试剂品牌列表、新增、编辑和停用流程 |
-| `EditDialogActions` | 提供编辑弹窗底部动作区 |
+| `EditDialogActions` | 提供编辑弹窗底部动作区，并复用删除二次确认按钮 |
 
 ### 表格展开与详情
 
@@ -133,6 +134,7 @@
 - [frontend/src/components/AnnouncementBanner.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/AnnouncementBanner.tsx)
 - [frontend/src/components/BaseForm.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BaseForm.tsx)
 - [frontend/src/components/BorrowDialog.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BorrowDialog.tsx)
+- [frontend/src/components/ConfirmDeleteButton.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ConfirmDeleteButton.tsx)
 - [frontend/src/components/ErrorBoundary.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ErrorBoundary.tsx)
 - [frontend/src/components/ReagentOrderExpandedRow.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ReagentOrderExpandedRow.tsx)
 - [frontend/src/components/ReagentBrandManagementDialogs.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ReagentBrandManagementDialogs.tsx)

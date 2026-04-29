@@ -444,6 +444,7 @@ export const consumableOrderAPI = {
 
 export interface InventoryReturnPayload {
   remaining_quantity: number
+  specification?: string
   notes?: string
 }
 
@@ -471,6 +472,8 @@ export const inventoryAPI = {
   borrow: (id: number, data?: { actual_borrower_id?: number }) => api.post(`/inventory/${id}/borrow`, data),
   return: (id: number, data: InventoryReturnPayload) =>
     api.post(`/inventory/${id}/return`, data),
+  returnDelete: (id: number, data: InventoryReturnPayload) =>
+    api.post(`/inventory/${id}/return-delete`, data),
   update: (id: number, data: Record<string, unknown>) => api.put(`/inventory/${id}`, data),
   delete: (id: number) => api.delete(`/inventory/${id}`),
   getMyBorrows: () => api.get('/inventory/dashboard/my-borrows'),
@@ -506,7 +509,6 @@ export const inventoryAPI = {
 }
 
 export interface AdminDashboardPanelItem {
-  label: string
   detail: string
   submitter_name?: string
   count?: number
@@ -546,7 +548,6 @@ export interface AdminDashboardSummary {
   pending_stockin_overdue_count: number
   long_unarrived_approved_reagent_count: number
   long_unconfirmed_approved_consumable_count: number
-  long_pending_order_count: number
   common_stock_alert_count: number
   recent_arrival_count: number
   recent_reagent_order_count?: number

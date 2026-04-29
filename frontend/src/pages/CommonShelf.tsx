@@ -39,6 +39,7 @@ import {
   getReagentBrandOptionsQueryOptions,
 } from '@/lib/reagentBrandOptions'
 import { COMMON_SHELF_SSE_EVENTS } from '@/lib/sseEvents'
+import { refreshDashboardAfterMutation } from '@/lib/dashboardUtils'
 import {
   COMMON_SHELF_EMPTY_LOCATION_VALUE,
   COMMON_SHELF_GROUP_SEARCH_FIELD_OPTIONS,
@@ -331,13 +332,11 @@ function resetCommonShelfDialogForms(forms: CommonShelfDialogForms) {
 function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
   const [mode, setMode] = useState<CommonShelfDialogMode>(null)
   const [selectedGroup, setSelectedGroup] = useState<CommonShelfGroup | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editNeedsMergeConfirm, setEditNeedsMergeConfirm] = useState(false)
 
   const resetDialogState = useCallback(() => {
     setMode(null)
     setSelectedGroup(null)
-    setDeleteConfirm(false)
     setEditNeedsMergeConfirm(false)
     resetCommonShelfDialogForms(forms)
   }, [forms])
@@ -373,9 +372,7 @@ function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
   return {
     mode,
     selectedGroup,
-    deleteConfirm,
     editNeedsMergeConfirm,
-    setDeleteConfirm,
     setEditNeedsMergeConfirm,
     resetDialogState,
     openManualAddDialog,
@@ -840,24 +837,20 @@ function useCommonShelfItemEditActions(params: {
 }
 
 function useCommonShelfGroupEditActions(params: {
-  deleteConfirm: boolean
   editNeedsMergeConfirm: boolean
   editForm: CommonShelfDialogForms['editForm']
   refreshCommonShelf: () => Promise<void>
   resetDialogState: () => void
   selectedGroup: CommonShelfGroup | null
-  setDeleteConfirm: (value: boolean) => void
   setEditNeedsMergeConfirm: (value: boolean) => void
   setIsSubmitting: (value: boolean) => void
 }) {
   const {
-    deleteConfirm,
     editNeedsMergeConfirm,
     editForm,
     refreshCommonShelf,
     resetDialogState,
     selectedGroup,
-    setDeleteConfirm,
     setEditNeedsMergeConfirm,
     setIsSubmitting,
   } = params
@@ -882,10 +875,6 @@ function useCommonShelfGroupEditActions(params: {
   const handleDelete = useCallback(async () => {
     const group = selectedGroup
     if (!canDeleteCommonShelfGroup(group)) return
-    if (!deleteConfirm) {
-      setDeleteConfirm(true)
-      return
-    }
     await runWithSubmitting(setIsSubmitting, async () => {
       await executeCommonShelfDeleteGroup({
         groupKey: group.group.group_key,
@@ -893,7 +882,7 @@ function useCommonShelfGroupEditActions(params: {
         resetDialogState,
       })
     })
-  }, [deleteConfirm, refreshCommonShelf, resetDialogState, selectedGroup, setDeleteConfirm, setIsSubmitting])
+  }, [refreshCommonShelf, resetDialogState, selectedGroup, setIsSubmitting])
 
   useEffect(() => {
     const subscription = editForm.watch((_value, info) => {
@@ -929,9 +918,7 @@ function useCommonShelfDialogController({
   const {
     mode,
     selectedGroup,
-    deleteConfirm,
     editNeedsMergeConfirm,
-    setDeleteConfirm,
     setEditNeedsMergeConfirm,
     resetDialogState,
     openManualAddDialog,
@@ -1005,13 +992,11 @@ function useCommonShelfDialogController({
     handleSubmitEdit,
     handleDelete,
   } = useCommonShelfGroupEditActions({
-    deleteConfirm,
     editNeedsMergeConfirm,
     editForm,
     refreshCommonShelf,
     resetDialogState,
     selectedGroup,
-    setDeleteConfirm,
     setEditNeedsMergeConfirm,
     setIsSubmitting,
   })
@@ -1021,7 +1006,6 @@ function useCommonShelfDialogController({
       mode,
       selectedGroup,
       isSubmitting,
-      deleteConfirm,
       editNeedsMergeConfirm,
     },
     forms,
@@ -1234,15 +1218,22 @@ function useCommonShelfPageController(): CommonShelfPageController {
       queryClient.invalidateQueries({ queryKey: ['common-shelf-location-suggestions'] }),
       queryClient.invalidateQueries({ queryKey: ['common-shelf-remove-locations'] }),
       queryClient.invalidateQueries({ queryKey: ['common-shelf-order-location-suggestions'] }),
+      refreshDashboardAfterMutation(queryClient),
     ])
   }, [queryClient])
 
   const refreshChemicalNameMap = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ['chemical-name-map'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['chemical-name-map'] }),
+      refreshDashboardAfterMutation(queryClient),
+    ])
   }, [queryClient])
 
   const refreshReagentOrders = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ['reagent-orders'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }),
+      refreshDashboardAfterMutation(queryClient),
+    ])
   }, [queryClient])
 
   const dialogController = useCommonShelfDialogController({

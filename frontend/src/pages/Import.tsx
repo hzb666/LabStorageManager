@@ -6,6 +6,7 @@ import {
   type DragEvent,
   type ReactNode,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { AxiosError } from 'axios'
 import {
   CheckCircle,
@@ -24,6 +25,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { IMPORT_TEMPLATE_COLUMNS } from '@/lib/constants'
 import { toast } from '@/lib/toast'
+import { refreshDashboardAfterMutation } from '@/lib/dashboardUtils'
 import { getApiErrorMessage, normalizeApiErrorMessage } from '@/lib/validationSchemas'
 import { cn } from '@/lib/utils'
 
@@ -616,6 +618,7 @@ function ImportResultCard({
 
 // 导入页主组件只负责模板下载、文件上传和结果展示的状态编排。
 export function ImportPage() {
+  const queryClient = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
   const [submittingStage, setSubmittingStage] = useState<ImportStage | null>(null)
   const [resultStage, setResultStage] = useState<ImportStage | null>(null)
@@ -719,6 +722,10 @@ export function ImportPage() {
       setResultStage('confirm')
       setPreviewToken(null)
       if (response.data.success) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+          refreshDashboardAfterMutation(queryClient),
+        ])
         toast.success(`导入成功！共 ${response.data.created} 条记录`)
       }
     } catch (error) {
@@ -727,7 +734,7 @@ export function ImportPage() {
     } finally {
       setSubmittingStage(null)
     }
-  }, [previewToken])
+  }, [previewToken, queryClient])
 
   const handleDownloadTemplate = useCallback(async () => {
     try {

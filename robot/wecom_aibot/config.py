@@ -9,6 +9,8 @@ from typing import Literal
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.constants import LOW_STOCK_PERCENT
+
 
 class WecomAibotSettings(BaseSettings):
     """Runtime configuration loaded from environment variables."""
@@ -40,7 +42,7 @@ class WecomAibotSettings(BaseSettings):
         validation_alias=AliasChoices("WECOM_AIBOT_ALLOW_PLAINTEXT_TOKEN_STORAGE"),
     )
     search_limit: int = Field(default=5, ge=1, le=10)
-    low_stock_threshold: float = Field(default=0.2, ge=0, le=1)
+    low_stock_threshold: float = Field(default=LOW_STOCK_PERCENT, ge=0, le=1)
     callback_max_body_bytes: int = Field(default=1_048_576, ge=1024)
     welcome_text: str = "你好，我是实验室库存助手。可以问我库存、位置、低库存和借用状态。"
     mcp_url: str = Field(

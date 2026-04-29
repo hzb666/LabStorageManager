@@ -17,7 +17,6 @@ RECENT_WINDOW_DAYS = 7
 DASHBOARD_WINDOW_MIN_DAYS = 3
 DASHBOARD_WINDOW_MAX_DAYS = 365
 COMMON_SHELF_ALERT_BOTTLE_THRESHOLD = 3
-INVENTORY_STOCK_ALERT_PERCENT = 0.10
 TODO_PENDING_ALERT_DAYS = 2
 LONG_PENDING_DAYS = TODO_PENDING_ALERT_DAYS
 LONG_UNARRIVED_APPROVED_DAYS = 3
@@ -143,7 +142,6 @@ def _exec_dashboard_limited(db: Session, statement: Any, limit: int | None) -> l
 
 
 def _board_panel_item(
-    label: str,
     detail: str,
     *,
     tab: str | None = None,
@@ -159,7 +157,6 @@ def _board_panel_item(
 ) -> dict[str, Any]:
     return _with_dashboard_structured(
         {
-            "label": label,
             "detail": detail,
             "tab": tab,
             "severity": severity,

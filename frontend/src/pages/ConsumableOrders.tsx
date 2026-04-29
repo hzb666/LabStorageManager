@@ -1,5 +1,6 @@
 // 耗材订单页面 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、完成 参考 Inventory 页面实现，使用 FilterTable 组件
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useForm } from 'react-hook-form'
 
@@ -44,6 +45,7 @@ import {
   isRejectableOrderStatus,
 } from '@/lib/orderEditRules'
 import { CONSUMABLE_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
+import { refreshDashboardAfterMutation } from '@/lib/dashboardUtils'
 
 // 图标
 import {
@@ -152,7 +154,6 @@ function createConsumableOrderUpdatePayload(formData: ConsumableOrderFormData) {
 // 管理耗材订单弹窗、表单与提交删除流程，页面主组件收敛为列表编排层。
 function useConsumableOrderDialogController(refreshOrders: () => void | Promise<void>) {
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
-  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [editingItem, setEditingItem] = useState<ConsumableOrder | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const form = useForm<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>({
@@ -163,7 +164,6 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
 
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
-    setDeleteConfirm(false)
     form.reset(defaultConsumableOrderValues)
     setDialogState('add')
   }, [form, setDialogState])
@@ -171,7 +171,6 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
     setEditingItem(item)
-    setDeleteConfirm(false)
     form.reset(createConsumableOrderFormValues(item))
     setDialogState('edit')
   }, [form, setDialogState])
@@ -179,7 +178,6 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
   const handleDialogOpenChange = useCallback((open: boolean) => {
     if (!open) {
       setDialogState(null)
-      setDeleteConfirm(false)
       form.reset()
     }
   }, [form, setDialogState])
@@ -208,7 +206,6 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
       if (successMessage) {
         toast.success(successMessage)
       }
-      setDeleteConfirm(false)
       setDialogState(null)
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
@@ -227,14 +224,8 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
   const handleDeleteClick = useCallback(async () => {
     if (!editingItem) return
 
-    if (!deleteConfirm) {
-      setDeleteConfirm(true)
-      return
-    }
-
     try {
       await consumableOrderAPI.delete(editingItem.id)
-      setDeleteConfirm(false)
       setEditingItem(null)
       setDialogState(null)
       await Promise.resolve(refreshOrders())
@@ -242,11 +233,10 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
-  }, [deleteConfirm, editingItem, refreshOrders, setDialogState])
+  }, [editingItem, refreshOrders, setDialogState])
 
   return {
     dialogState,
-    deleteConfirm,
     editingItem,
     isSubmitting,
     form,
@@ -300,6 +290,7 @@ export function ConsumableOrdersPage() {
   const currentUser = useAuthStore((state) => state.user)
   const isAdmin = currentUser?.role === UserRoles.ADMIN
   const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
+  const queryClient = useQueryClient()
   const filter = useTableState({
     api: consumableOrderAPI,
     queryKey: ['consumable-orders'],
@@ -307,10 +298,13 @@ export function ConsumableOrdersPage() {
     statusOptions: CONSUMABLE_ORDER_STATUS_OPTIONS,
     searchFieldOptions: CONSUMABLE_SEARCH_FIELD_OPTIONS,
   })
-  const dialogController = useConsumableOrderDialogController(filter.invalidate)
   const refreshOrders = useCallback(async () => {
-    await filter.invalidate()
-  }, [filter])
+    await Promise.all([
+      filter.invalidate(),
+      refreshDashboardAfterMutation(queryClient),
+    ])
+  }, [filter, queryClient])
+  const dialogController = useConsumableOrderDialogController(refreshOrders)
 
   const handleExport = useCallback(async () => {
     try {
@@ -362,7 +356,6 @@ export function ConsumableOrdersPage() {
                   ? dialogController.handleDeleteClick
                   : undefined
               }
-              deleteConfirm={dialogController.deleteConfirm}
               submitLabelEdit="保存"
               submitLabelAdd="提交订单"
               isSubmitting={dialogController.isSubmitting}

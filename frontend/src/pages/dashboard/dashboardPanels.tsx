@@ -136,25 +136,20 @@ const DASHBOARD_LABEL_TEXT_BY_CODE: Record<string, string> = {
   "todo.reagent_order_pending_approval": "待审批试剂订单",
   "todo.consumable_order_pending_approval": "待审批耗材订单",
   "risk.order_timeout": "订单超时",
-  "risk.reagent_order_approval_timeout": "试剂订单审批超时",
-  "risk.consumable_order_approval_timeout": "耗材订单审批超时",
-  "risk.reagent_order_unarrived": "试剂长时间未到货",
-  "risk.consumable_order_unconfirmed": "耗材长时间未收货",
+  "risk.reagent_order_approval_timeout": "审批超时",
+  "risk.consumable_order_approval_timeout": "审批超时",
+  "risk.reagent_order_unarrived": "到货超时",
+  "risk.consumable_order_unconfirmed": "收货超时",
   "risk.borrow_overdue": "借用超时",
   "risk.pending_stockin_overdue": "暂存超时",
   "system_status.active_users": "启用用户",
   "system_status.active_sessions": "有效会话",
   "system_status.active_users_today": "今日活跃",
-  "system_status.pending_reagent_orders": "待审试剂",
-  "system_status.pending_consumable_orders": "待审耗材",
-  "system_status.pending_stockin": "暂存入库",
-  "system_status.overdue_borrows": "逾期借用",
-  "system_status.pending_backlog": "处理积压",
   "board.order_overview.reagent_order": "试剂",
   "board.order_overview.consumable_order": "耗材",
   "board.action.reagent_order_arrived_pending_confirm": "待确认到货",
   "board.action.consumable_order_arrived_pending_confirm": "待确认耗材",
-  "board.action.borrow_overdue": "借用超期",
+  "board.action.borrow_overdue": "借用超时",
   "board.recent.reagent_order_arrived": "试剂到货",
   "board.recent.consumable_order_completed": "耗材到货",
   "board.recent.inventory_stocked": "订单入库",
@@ -166,6 +161,14 @@ const DASHBOARD_IMPACT_TEXT_BY_CODE: Record<string, string> = {
   "order_status.rejected": "已驳回",
   "announcement.pinned": "置顶",
   "announcement.normal": "公告",
+};
+
+const MANAGEMENT_ACTION_LABEL_SUFFIX_BY_CODE: Record<string, string> = {
+  "management_action.reagent_order_reviewed": "处理试剂订单",
+  "management_action.consumable_order_reviewed": "处理耗材订单",
+  "management_action.inventory_stocked": "完成入库",
+  "management_action.common_shelf_updated": "更新常用货架",
+  "management_action.other": "处理事项",
 };
 
 function joinDashboardDetailParts(
@@ -188,7 +191,7 @@ function getDashboardPanelItemKey(
   index: number,
   scope: string,
 ): string {
-  const code = getDashboardItemCode(item) ?? item.label;
+  const code = getDashboardItemCode(item) ?? item.entity?.entity_type ?? "dashboard-item";
   const entityType = item.entity?.entity_type ?? "";
   const entityId = item.entity?.entity_id;
   if (entityType && entityId !== null && entityId !== undefined && entityId !== "") {
@@ -227,19 +230,11 @@ function getDashboardEntitySpecification(item: AdminDashboardPanelItem): string 
 
 function getManagementActionLabelText(item: AdminDashboardPanelItem): string | undefined {
   const code = getDashboardItemCode(item);
-  if (code === "management_action.reagent_order_reviewed") {
-    return `${item.entity?.actor_name || "系统"}处理试剂订单`;
+  if (!code) {
+    return undefined;
   }
-  if (code === "management_action.consumable_order_reviewed") {
-    return `${item.entity?.actor_name || "系统"}处理耗材订单`;
-  }
-  if (code === "management_action.inventory_stocked") {
-    return `${item.entity?.actor_name || "系统"}完成入库`;
-  }
-  if (code === "management_action.common_shelf_updated") {
-    return `${item.entity?.actor_name || "系统"}更新常用货架`;
-  }
-  return undefined;
+  const suffix = MANAGEMENT_ACTION_LABEL_SUFFIX_BY_CODE[code];
+  return suffix ? `${item.entity?.actor_name || "系统"}${suffix}` : undefined;
 }
 
 function getDashboardItemLabelText(item: AdminDashboardPanelItem): string {
@@ -252,13 +247,13 @@ function getDashboardItemLabelText(item: AdminDashboardPanelItem): string {
   if (code === "board.announcement") {
     return getDashboardItemImpactCode(item) === "announcement.pinned" ? "置顶公告" : "公告";
   }
-  const label = (code && DASHBOARD_LABEL_TEXT_BY_CODE[code]) || item.label;
+  const label = (code && DASHBOARD_LABEL_TEXT_BY_CODE[code]) || code || "-";
   return isDashboardRiskCode(code) ? `${label}${getDashboardRiskThresholdSuffix(item)}` : label;
 }
 
 function getDashboardRiskCategoryText(item: AdminDashboardPanelItem): string {
   const code = getDashboardItemCode(item);
-  return (code && DASHBOARD_LABEL_TEXT_BY_CODE[code]) || item.label;
+  return (code && DASHBOARD_LABEL_TEXT_BY_CODE[code]) || code || "-";
 }
 
 function getDashboardRiskNameText(item: AdminDashboardPanelItem): string {
@@ -554,7 +549,16 @@ function ManagementRiskTable({
             key={getDashboardPanelItemKey(item, index, "management-risk")}
             {...getManagementRowInteraction(item, onTabChange)}
           >
-            <td className="px-2 py-4 text-base font-normal leading-6">{labelText}</td>
+            <td className="px-2 py-3.5">
+              <span
+                className={cn(
+                  "inline-flex h-7 items-center rounded-md px-2 text-base font-normal leading-6",
+                  getPanelToneClassName(item.severity),
+                )}
+              >
+                {labelText}
+              </span>
+            </td>
             {showContent ? (
               <td className="truncate px-2 py-4 text-base leading-6">{detailText}</td>
             ) : null}
@@ -580,7 +584,7 @@ function ManagementRiskDetailTable({
     <ManagementTableShell
       emptyText="当前没有明显风险提醒"
       headers={[
-        { label: "风险类别", className: "w-[24%]" },
+        { label: "类别", className: "w-[24%]" },
         { label: "名称", className: "w-[34%]" },
         { label: "人员", className: "w-[18%]" },
         { label: "时间", className: "w-[24%]" },
@@ -606,7 +610,7 @@ function ManagementRiskDetailTable({
           <td className="truncate px-2 py-4 text-base font-normal leading-6">
             {getDashboardRiskNameText(item)}
           </td>
-          <td className="truncate px-2 py-4 text-base leading-6 text-muted-foreground">
+          <td className="truncate px-2 py-4 text-base leading-6">
             {item.submitter_name || "-"}
           </td>
           <td className="whitespace-nowrap px-2 py-4 text-base leading-6 text-muted-foreground">
@@ -676,7 +680,7 @@ function DashboardPanelDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[94vw] max-w-5xl md:w-[94vw]">
         <DialogHeader>
-          <DialogTitle className="mb-4 pr-10 text-xl">
+          <DialogTitle className="mb-4 pr-10">
             <span>{title}</span>
             {titleSuffix}
           </DialogTitle>
@@ -983,7 +987,16 @@ function DashboardBoardItemTable({
             key={getDashboardPanelItemKey(item, index, "board-item")}
             {...getManagementRowInteraction(item, onTabChange)}
           >
-            <td className="px-2 py-4 text-base font-normal leading-6">{labelText}</td>
+            <td className="px-2 py-3.5">
+              <span
+                className={cn(
+                  "inline-flex h-7 items-center rounded-md px-2 text-base font-normal leading-6",
+                  getPanelToneClassName(item.severity),
+                )}
+              >
+                {labelText}
+              </span>
+            </td>
             <td className="truncate px-2 py-4 text-base leading-6">{detailText}</td>
             {showStatus ? <ManagementImpactCell item={item} /> : null}
             <td className="whitespace-nowrap px-2 py-4 text-base leading-6 text-muted-foreground">
@@ -1177,17 +1190,10 @@ type SystemStatusDisplayItem = {
   icon: React.ElementType;
 };
 
-const UNUSED_SYSTEM_STATUS_LABELS = new Set([
-  "待审试剂",
-  "待审耗材",
-  "暂存入库",
-  "逾期借用",
-  "处理积压",
-]);
-const SYSTEM_STATUS_ICON_BY_LABEL: Record<string, React.ElementType> = {
-  启用用户: Users,
-  有效会话: MonitorCheck,
-  今日活跃: Activity,
+const SYSTEM_STATUS_ICON_BY_CODE: Record<string, React.ElementType> = {
+  "system_status.active_users": Users,
+  "system_status.active_sessions": MonitorCheck,
+  "system_status.active_users_today": Activity,
 };
 
 function formatCurrencyValue(value: number | undefined): string {
@@ -1211,16 +1217,14 @@ function getSystemStatusDisplayItems(
   windowStats: AdminDashboardWindowStats,
   showWindowStatsFailureFallback: boolean,
 ): SystemStatusDisplayItem[] {
-  const retainedItems = summary.system_status
-    .map((item) => {
-      const label = getDashboardItemLabelText(item);
-      return {
-        label,
-        value: item.value ?? item.metrics?.value ?? 0,
-        icon: SYSTEM_STATUS_ICON_BY_LABEL[label] ?? Package,
-      };
-    })
-    .filter((item) => !UNUSED_SYSTEM_STATUS_LABELS.has(item.label));
+  const retainedItems = summary.system_status.map((item) => {
+    const code = getDashboardItemCode(item) ?? "";
+    return {
+      label: getDashboardItemLabelText(item),
+      value: item.value ?? item.metrics?.value ?? 0,
+      icon: SYSTEM_STATUS_ICON_BY_CODE[code] ?? Package,
+    };
+  });
   const systemVersion = summary.system_version?.trim() || "-";
 
   return [
@@ -1373,7 +1377,7 @@ function SystemStatusGrid({
           </div>
           <Icon
             aria-hidden="true"
-            className="pointer-events-none absolute -bottom-6 -right-5 size-24 rotate-[-18deg] text-[#edf2f7] dark:text-[#252a32]"
+            className="pointer-events-none absolute -bottom-6 -right-5 size-24 rotate-[-18deg] text-[#edf2f7] dark:text-[#1b1f25]"
           />
         </div>
       ))}

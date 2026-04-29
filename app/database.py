@@ -13,7 +13,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from app.core.config import settings
 from app.db_bootstrap.schema_consistency import check_sqlite_schema_consistency
 from app.db_bootstrap.schema_upgrades import (
-    ensure_sqlite_common_shelf_groups,
+    check_sqlite_common_shelf_groups_consistency,
     ensure_sqlite_common_shelf_location_pinyin_columns,
     ensure_sqlite_compound_structure_cache_name_columns,
     ensure_sqlite_log_timeline_detail_search_text,
@@ -98,7 +98,7 @@ def init_db() -> None:
         ensure_sqlite_common_shelf_location_pinyin_columns(connection)
         ensure_sqlite_log_timeline_detail_search_text(connection)
         ensure_sqlite_compound_structure_cache_name_columns(connection)
-        ensure_sqlite_common_shelf_groups(connection)
+        check_sqlite_common_shelf_groups_consistency(connection)
         ensure_sqlite_performance_indexes(connection)
         ensure_log_timeline_source_delete_triggers(connection)
         cleanup_orphan_log_timeline_rows(connection)

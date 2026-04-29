@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useForm } from "react-hook-form";
 import type { UseFormReturn } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ScanSearch } from "lucide-react";
 
 import {
@@ -15,6 +15,7 @@ import {
 } from "@/api/client";
 import { useReagentCasDuplicateCheck } from "@/hooks/useReagentCasDuplicateCheck";
 import { REAGENT_STATUS_MAP } from "@/lib/constants";
+import { refreshDashboardAfterMutation } from "@/lib/dashboardUtils";
 import { getReagentBrandOptionsQueryOptions } from "@/lib/reagentBrandOptions";
 import {
   defaultConsumableOrderValues,
@@ -718,15 +719,48 @@ export function useCartImportFormController(
   };
 }
 
-function useResetCartImportDeleteConfirmOnItemChange(
-  currentItem: ImportItem | null,
-  setDeleteConfirm: Dispatch<SetStateAction<boolean>>,
+async function refreshCartImportSubmissionCaches(
+  queryClient: QueryClient,
+  orderType: OrderType,
 ) {
-  useEffect(() => {
-    if (currentItem) {
-      setDeleteConfirm(false);
-    }
-  }, [currentItem, setDeleteConfirm]);
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: orderType === "reagent" ? ["reagent-orders"] : ["consumable-orders"],
+    }),
+    refreshDashboardAfterMutation(queryClient),
+  ]);
+}
+
+function handleSuccessfulCartImportSubmit(params: {
+  currentItem: ImportItem;
+  items: ImportItem[];
+  navigate: (path: string) => void | Promise<void>;
+  nextSubmitted: Set<number>;
+  setCurrentIndex: Dispatch<SetStateAction<number>>;
+  setSubmittedIds: Dispatch<SetStateAction<Set<number>>>;
+}) {
+  const {
+    currentItem,
+    items,
+    navigate,
+    nextSubmitted,
+    setCurrentIndex,
+    setSubmittedIds,
+  } = params;
+  nextSubmitted.add(currentItem.id);
+  setSubmittedIds(nextSubmitted);
+  toast.success(`已提交: ${currentItem.name}`);
+
+  const nextPendingIndex = findNextPendingImportIndex(items, nextSubmitted);
+  if (nextPendingIndex >= 0) {
+    setCurrentIndex(nextPendingIndex);
+  }
+
+  if (nextSubmitted.size >= items.length) {
+    toast.success("全部导入完成，即将返回试剂页");
+    clearCartImportBatchStorage();
+    scheduleCartImportReturn(navigate);
+  }
 }
 
 export function useCartImportActions(params: {
@@ -765,21 +799,14 @@ export function useCartImportActions(params: {
     reagentForm,
     consumableForm,
   } = params;
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  useResetCartImportDeleteConfirmOnItemChange(currentItem, setDeleteConfirm);
+  const queryClient = useQueryClient();
 
   const handleDeleteCurrent = useCallback(() => {
     if (!currentItem) {
       return;
     }
 
-    if (!deleteConfirm) {
-      setDeleteConfirm(true);
-      return;
-    }
-
-    setDeleteConfirm(false);
     const nextItems = items.filter((_, index) => index !== currentIndex);
     const nextSubmittedIds = removeSubmittedImportId(submittedIds, currentItem.id);
     setItems(nextItems);
@@ -797,7 +824,6 @@ export function useCartImportActions(params: {
   }, [
     currentIndex,
     currentItem,
-    deleteConfirm,
     items,
     navigate,
     setCurrentIndex,
@@ -811,7 +837,6 @@ export function useCartImportActions(params: {
       return;
     }
 
-    setDeleteConfirm(false);
     setSubmitting(true);
     try {
       const submitSucceeded =
@@ -824,21 +849,15 @@ export function useCartImportActions(params: {
       }
 
       const nextSubmitted = new Set(submittedIds);
-      nextSubmitted.add(currentItem.id);
-      setSubmittedIds(nextSubmitted);
-      toast.success(`已提交: ${currentItem.name}`);
-
-      const nextPendingIndex = findNextPendingImportIndex(items, nextSubmitted);
-      if (nextPendingIndex >= 0) {
-        setCurrentIndex(nextPendingIndex);
-      }
-
-      if (nextSubmitted.size >= items.length) {
-        // 与旧页一致，全部完成后不立即跳走，给用户留出成功反馈时间。
-        toast.success("全部导入完成，即将返回试剂页");
-        clearCartImportBatchStorage();
-        scheduleCartImportReturn(navigate);
-      }
+      await refreshCartImportSubmissionCaches(queryClient, orderType);
+      handleSuccessfulCartImportSubmit({
+        currentItem,
+        items,
+        navigate,
+        nextSubmitted,
+        setCurrentIndex,
+        setSubmittedIds,
+      });
     } catch (error) {
       const detail = extractApiErrorDetail(error);
       const validationErrors = toValidationErrors(detail);
@@ -862,6 +881,7 @@ export function useCartImportActions(params: {
     items,
     navigate,
     orderType,
+    queryClient,
     reagentForm,
     setCurrentIndex,
     setSubmittedIds,
@@ -884,7 +904,6 @@ export function useCartImportActions(params: {
   );
 
   return {
-    deleteConfirm,
     submitting,
     handleDeleteCurrent,
     handleSubmitCurrent,

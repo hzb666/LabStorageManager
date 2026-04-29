@@ -3,9 +3,10 @@ import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch, type UseFormReturn } from "react-hook-form";
 import * as v from "valibot";
-import { AlertTriangle, ArrowRightLeft, Package } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Package, Trash2 } from "lucide-react";
 
 import { BaseForm } from "@/components/BaseForm";
+import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { EditDialogActions } from "@/components/EditDialogActions";
 import { Button } from "@/components/ui/Button";
 import {
@@ -14,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/Dialog";
-import { FilterTable } from "@/components/ui/FilterTable";
+import { FilterTable, type FilterTableProps } from "@/components/ui/FilterTable";
 import { Label } from "@/components/ui/Label";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import MoleculeStructure from "@/components/ui/MoleculeStructure";
@@ -29,6 +30,7 @@ import { toast } from "@/lib/toast";
 import { formatDate, formatDateTime, processNotes, toText } from "@/lib/utils";
 import {
   ReturnFormSchema,
+  SpecificationSchema,
   StockInFormSchema,
   createRemainingQuantitySchema,
   createReturnQuantitySchema,
@@ -51,8 +53,9 @@ import {
   BORROW_SEARCH_FIELDS,
   DASHBOARD_EMPTY_STATUS_OPTIONS,
   buildLocalListData,
+  getDashboardAlertBadgeClassName,
   isPendingStockinOverdue,
-  requestDashboardCountsRefresh,
+  refreshDashboardAfterMutation,
   type DashboardParams,
   type MyBorrowItem,
   type PendingStockinItem,
@@ -60,6 +63,61 @@ import {
 
 type BorrowReturnMode = "used" | "remaining";
 type ReturnForm = UseFormReturn<ReturnFormInputData, unknown, ReturnFormData>;
+const RETURN_ZERO_EPSILON = 0.000_001;
+
+type ReturnSubmissionValues = {
+  return_quantity: string | number;
+  specification?: string;
+  notes?: string;
+};
+
+type ReturnSubmissionResult =
+  | {
+      ok: true;
+      finalQuantity: number;
+      notes?: string;
+      specification?: string;
+    }
+  | {
+      ok: false;
+      field: "return_quantity" | "specification";
+      message: string;
+    };
+
+type ReturnSpecificationResult =
+  | {
+      ok: true;
+      value: string;
+      payloadSpecification?: string;
+    }
+  | {
+      ok: false;
+      field: "specification";
+      message: string;
+    };
+
+type ReturnQuantityResult =
+  | {
+      ok: true;
+      finalQuantity: number;
+    }
+  | {
+      ok: false;
+      field: "return_quantity";
+      message: string;
+    };
+
+type BorrowReturnDialogModel = {
+  selectedBorrow: MyBorrowItem | null;
+  returnMode: BorrowReturnMode;
+  returnForm: ReturnForm;
+  isSubmittingReturn: boolean;
+  isDeletingReturn: boolean;
+  onReturnModeChange: (value: BorrowReturnMode) => void;
+  onSubmit: () => void;
+  onDeleteZeroRemaining: () => void;
+  onOpenChange: (open: boolean) => void;
+};
 
 const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRow({
   item,
@@ -114,58 +172,299 @@ const BorrowDashboardExpandedRow = React.memo(function BorrowDashboardExpandedRo
   );
 });
 
-function getReturnPreviewText(
+function normalizeReturnFinalQuantity(quantity: number): number {
+  return Math.abs(quantity) < RETURN_ZERO_EPSILON ? 0 : quantity;
+}
+
+function parseReturnQuantity(returnQuantity: string | number): number | null {
+  if (typeof returnQuantity === "number") {
+    return Number.isFinite(returnQuantity) ? returnQuantity : null;
+  }
+  const trimmedQuantity = returnQuantity.trim();
+  if (!trimmedQuantity) {
+    return null;
+  }
+  const quantity = Number(trimmedQuantity);
+  return Number.isFinite(quantity) ? quantity : null;
+}
+
+function getReturnFinalQuantity(
   selectedBorrow: MyBorrowItem | null,
   returnMode: BorrowReturnMode,
-  returnQuantity: string,
-): string | null {
+  returnQuantity: string | number,
+): number | null {
   if (!selectedBorrow || !returnQuantity) {
     return null;
   }
 
-  const quantity = parseFloat(returnQuantity) || 0;
-  const formattedQuantity =
-    returnMode === "used"
-      ? Math.max(0, selectedBorrow.remaining_quantity - quantity).toFixed(2)
-      : quantity.toFixed(2);
+  const quantity = parseReturnQuantity(returnQuantity);
+  if (quantity === null) {
+    return null;
+  }
+  if (returnMode === "used") {
+    if (typeof selectedBorrow.remaining_quantity !== "number") {
+      return null;
+    }
+    return normalizeReturnFinalQuantity(selectedBorrow.remaining_quantity - quantity);
+  }
 
-  return `归还后剩余: ${formattedQuantity} ${selectedBorrow.unit} (原借用时剩余量: ${selectedBorrow.remaining_quantity} ${selectedBorrow.unit})`;
+  return normalizeReturnFinalQuantity(quantity);
+}
+
+function getReturnPreviewText(
+  selectedBorrow: MyBorrowItem | null,
+  returnMode: BorrowReturnMode,
+  returnQuantity: string | number,
+  specification: string,
+): string | null {
+  const finalQuantity = getReturnFinalQuantity(selectedBorrow, returnMode, returnQuantity);
+  if (!selectedBorrow || finalQuantity === null) {
+    return null;
+  }
+
+  const unit = resolveSpecificationUnit(specification, selectedBorrow.unit);
+  const remaining = Math.max(0, finalQuantity).toFixed(2);
+  return `归还后剩余: ${remaining} ${unit ?? ""}`.trim();
+}
+
+function canDeleteZeroRemainingBorrow(
+  selectedBorrow: MyBorrowItem | null,
+  returnMode: BorrowReturnMode,
+  values: ReturnSubmissionValues,
+): boolean {
+  return resolveReturnSubmission(selectedBorrow, returnMode, values, true).ok;
+}
+
+function needsReturnSpecification(item: MyBorrowItem | null): boolean {
+  if (!item) {
+    return false;
+  }
+  return !item.specification?.trim() || item.initial_quantity === null
+    || item.initial_quantity === undefined || !item.unit?.trim();
+}
+
+function getInitialReturnMode(item: MyBorrowItem): BorrowReturnMode {
+  if (needsReturnSpecification(item)) {
+    return "remaining";
+  }
+  return typeof item.remaining_quantity === "number" ? "used" : "remaining";
+}
+
+function getBorrowQuantityText(item: MyBorrowItem | null): string {
+  if (!item || typeof item.remaining_quantity !== "number") {
+    return "待补充";
+  }
+  return `${item.remaining_quantity} ${item.unit ?? ""}`.trim();
+}
+
+function getReturnMaxQuantity(
+  item: MyBorrowItem,
+  returnMode: BorrowReturnMode,
+  specification: string,
+): number | null {
+  if (returnMode === "used") {
+    return typeof item.remaining_quantity === "number" ? item.remaining_quantity : null;
+  }
+  const specificationQuantity = resolveSpecificationQuantity(
+    specification,
+    item.initial_quantity,
+  );
+  if (typeof specificationQuantity === "number") {
+    return specificationQuantity;
+  }
+  return typeof item.remaining_quantity === "number" ? item.remaining_quantity : null;
+}
+
+function getReturnValidationMessage(
+  issues: ReadonlyArray<{ message?: string }>,
+  fallback: string,
+): string {
+  return issues[0]?.message || fallback;
+}
+
+function resolveReturnSpecification(
+  selectedBorrow: MyBorrowItem,
+  specification: string | undefined,
+): ReturnSpecificationResult {
+  if (!needsReturnSpecification(selectedBorrow)) {
+    return { ok: true, value: specification ?? "" };
+  }
+
+  const result = v.safeParse(SpecificationSchema, specification);
+  if (!result.success) {
+    return {
+      ok: false,
+      field: "specification",
+      message: getReturnValidationMessage(result.issues, "规格格式无效"),
+    };
+  }
+
+  return {
+    ok: true,
+    value: result.output,
+    payloadSpecification: result.output,
+  };
+}
+
+function getSubmittedReturnFinalQuantity(
+  returnMode: BorrowReturnMode,
+  quantity: number,
+  maxValue: number | null,
+): number {
+  const finalQuantity = returnMode === "remaining" ? quantity : (maxValue ?? 0) - quantity;
+  return normalizeReturnFinalQuantity(finalQuantity);
+}
+
+function resolveReturnQuantity(
+  returnMode: BorrowReturnMode,
+  returnQuantity: string | number,
+  maxValue: number | null,
+): ReturnQuantityResult {
+  if (returnMode === "used" && maxValue === null) {
+    return { ok: false, field: "return_quantity", message: "请填写剩余量" };
+  }
+
+  const fieldName = returnMode === "remaining" ? "剩余量" : "使用量";
+  const result = v.safeParse(
+    createReturnQuantitySchema(fieldName, maxValue ?? Number.MAX_SAFE_INTEGER),
+    returnQuantity,
+  );
+  if (!result.success) {
+    return {
+      ok: false,
+      field: "return_quantity",
+      message: getReturnValidationMessage(result.issues, "输入无效"),
+    };
+  }
+
+  return {
+    ok: true,
+    finalQuantity: getSubmittedReturnFinalQuantity(returnMode, result.output, maxValue),
+  };
+}
+
+function resolveReturnSubmission(
+  selectedBorrow: MyBorrowItem | null,
+  returnMode: BorrowReturnMode,
+  values: ReturnSubmissionValues,
+  requireZeroRemaining = false,
+): ReturnSubmissionResult {
+  if (!selectedBorrow) {
+    return { ok: false, field: "return_quantity", message: "请选择借用记录" };
+  }
+
+  const specification = resolveReturnSpecification(selectedBorrow, values.specification);
+  if (!specification.ok) {
+    return specification;
+  }
+
+  const maxValue = getReturnMaxQuantity(selectedBorrow, returnMode, specification.value);
+  const quantity = resolveReturnQuantity(
+    returnMode,
+    values.return_quantity,
+    maxValue,
+  );
+  if (!quantity.ok) {
+    return quantity;
+  }
+
+  if (requireZeroRemaining && quantity.finalQuantity !== 0) {
+    return { ok: false, field: "return_quantity", message: "最终剩余量为 0 时才能直接删除" };
+  }
+
+  return {
+    ok: true,
+    finalQuantity: quantity.finalQuantity,
+    notes: values.notes,
+    specification: specification.payloadSpecification,
+  };
+}
+
+function useBorrowReturnDialogState(dialog: BorrowReturnDialogModel) {
+  const {
+    selectedBorrow,
+    returnMode,
+    returnForm,
+    onDeleteZeroRemaining,
+  } = dialog;
+  const returnQuantityValue = String(useWatch({
+    control: returnForm.control,
+    name: "return_quantity",
+  }) ?? "");
+  const watchedSpecification = useWatch({
+    control: returnForm.control,
+    name: "specification",
+  });
+  const watchedSpecificationText = String(watchedSpecification ?? "");
+  const requireSpecification = needsReturnSpecification(selectedBorrow);
+  const canUseUsedMode = typeof selectedBorrow?.remaining_quantity === "number";
+  const returnMaxQuantity = selectedBorrow
+    ? getReturnMaxQuantity(selectedBorrow, returnMode, watchedSpecificationText)
+    : null;
+  const returnUnit = resolveSpecificationUnit(
+    watchedSpecificationText,
+    selectedBorrow?.unit,
+  );
+  const returnPreviewText = getReturnPreviewText(
+    selectedBorrow,
+    returnMode,
+    returnQuantityValue,
+    watchedSpecificationText,
+  );
+  const showDeleteButton = canDeleteZeroRemainingBorrow(
+    selectedBorrow,
+    returnMode,
+    {
+      return_quantity: returnQuantityValue,
+      specification: watchedSpecificationText,
+    },
+  );
+  const returnFormFields = useMemo(() => getReturnFormFields(
+    returnMode,
+    returnMaxQuantity ?? 0,
+    returnUnit,
+    requireSpecification,
+  ), [requireSpecification, returnMaxQuantity, returnMode, returnUnit]);
+  const returnDetailFields = useMemo(
+    () => returnFormFields.filter((field) => field.name !== "notes"),
+    [returnFormFields],
+  );
+  const returnNotesFields = useMemo(
+    () => returnFormFields.filter((field) => field.name === "notes"),
+    [returnFormFields],
+  );
+
+  const handleDeleteClick = useCallback(() => {
+    if (!showDeleteButton) return;
+    onDeleteZeroRemaining();
+  }, [onDeleteZeroRemaining, showDeleteButton]);
+
+  return {
+    canUseUsedMode,
+    deleteResetKey: `${selectedBorrow?.inventory_id ?? "none"}:${returnMode}:${returnQuantityValue}:${showDeleteButton}`,
+    handleDeleteClick,
+    requireSpecification,
+    returnDetailFields,
+    returnNotesFields,
+    returnPreviewText,
+    showDeleteButton,
+  };
 }
 
 function DashboardBorrowReturnDialog({
   dialog,
-}: Readonly<{
-  dialog: {
-    selectedBorrow: MyBorrowItem | null;
-    returnMode: BorrowReturnMode;
-    returnForm: ReturnForm;
-    isSubmittingReturn: boolean;
-    onReturnModeChange: (value: BorrowReturnMode) => void;
-    onSubmit: () => void;
-    onOpenChange: (open: boolean) => void;
-  };
-}>) {
+}: Readonly<{ dialog: BorrowReturnDialogModel }>) {
   const {
     selectedBorrow,
     returnMode,
     returnForm,
     isSubmittingReturn,
+    isDeletingReturn,
     onReturnModeChange,
     onSubmit,
     onOpenChange,
   } = dialog;
-  const returnPreviewText = getReturnPreviewText(
-    selectedBorrow,
-    returnMode,
-    String(returnForm.watch("return_quantity") ?? ""),
-  );
-  const returnFormFields = useMemo(() => getReturnFormFields(
-    returnMode,
-    selectedBorrow?.remaining_quantity ?? 0,
-    selectedBorrow?.unit,
-  ), [returnMode, selectedBorrow?.remaining_quantity, selectedBorrow?.unit]);
-  const returnQuantityFields = returnFormFields.slice(0, 1);
-  const returnNotesFields = returnFormFields.slice(1);
+  const dialogState = useBorrowReturnDialogState(dialog);
 
   return (
     <Dialog open={selectedBorrow !== null} onOpenChange={onOpenChange}>
@@ -178,51 +477,74 @@ function DashboardBorrowReturnDialog({
           <div>
             <p>{selectedBorrow?.name}</p>
             <p className="text-muted-foreground">
-              CAS: {selectedBorrow?.cas_number} • 当前剩余 {selectedBorrow?.remaining_quantity} {selectedBorrow?.unit}
+              CAS: {selectedBorrow?.cas_number} • 当前剩余 {getBorrowQuantityText(selectedBorrow)}
             </p>
           </div>
 
-          <div>
-            <RadioGroup
-              value={returnMode}
-              onValueChange={(value) => onReturnModeChange(value as BorrowReturnMode)}
-              className="flex flex-row gap-4"
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="used" id="returnMode-used" />
-                <Label htmlFor="returnMode-used" className="cursor-pointer text-base">填写使用量</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="remaining" id="returnMode-remaining" />
-                <Label htmlFor="returnMode-remaining" className="cursor-pointer text-base">填写剩余量</Label>
-              </div>
-            </RadioGroup>
-          </div>
+          {!dialogState.requireSpecification ? (
+            <div>
+              <RadioGroup
+                value={returnMode}
+                onValueChange={(value) => onReturnModeChange(value as BorrowReturnMode)}
+                className="flex flex-row gap-4"
+              >
+                {dialogState.canUseUsedMode ? (
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="used" id="returnMode-used" />
+                    <Label htmlFor="returnMode-used" className="cursor-pointer text-base">填写使用量</Label>
+                  </div>
+                ) : null}
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="remaining" id="returnMode-remaining" />
+                  <Label htmlFor="returnMode-remaining" className="cursor-pointer text-base">填写剩余量</Label>
+                </div>
+              </RadioGroup>
+            </div>
+          ) : null}
 
           <div className="space-y-4">
             <div className="space-y-1">
-              <BaseForm form={returnForm} fields={returnQuantityFields} layout="stack" />
-              {returnPreviewText ? (
-                <p className="text-sm text-muted-foreground">{returnPreviewText}</p>
+              <BaseForm form={returnForm} fields={dialogState.returnDetailFields} layout="stack" />
+              {dialogState.returnPreviewText ? (
+                <p className="text-sm text-muted-foreground">{dialogState.returnPreviewText}</p>
               ) : null}
             </div>
-            <BaseForm form={returnForm} fields={returnNotesFields} layout="stack" />
+            <BaseForm form={returnForm} fields={dialogState.returnNotesFields} layout="stack" />
           </div>
 
-          <div className="flex gap-3 mt-8">
+          <div className="grid grid-cols-3 gap-2 mt-8">
+            <div>
+              {dialogState.showDeleteButton ? (
+                <ConfirmDeleteButton
+                  variant="destructive"
+                  onConfirm={dialogState.handleDeleteClick}
+                  isLoading={isDeletingReturn}
+                  disabled={isSubmittingReturn}
+                  loadingText="删除中..."
+                  className="w-full px-3"
+                  size="lg"
+                  icon={<Trash2 className="size-4 mr-1.5" />}
+                  resetKey={dialogState.deleteResetKey}
+                />
+              ) : (
+                <span aria-hidden="true" className="block h-10" />
+              )}
+            </div>
             <Button
               variant="modern"
               onClick={() => onOpenChange(false)}
-              className="flex-1"
+              className="w-full px-3"
               size="lg"
+              disabled={isSubmittingReturn || isDeletingReturn}
             >
               取消
             </Button>
             <LoadingButton
               onClick={onSubmit}
               isLoading={isSubmittingReturn}
+              disabled={isDeletingReturn}
               loadingText="处理中..."
-              className="flex-1"
+              className="w-full px-3"
               size="lg"
             >
               确认归还
@@ -367,6 +689,33 @@ function createBorrowDashboardAPI(managementMode: boolean): FilterAPI {
   }
 }
 
+function getBorrowEventItemId(payload: Record<string, unknown>, item?: Record<string, unknown>) {
+  if (typeof payload.id === 'number') return payload.id
+  return typeof item?.id === 'number' ? item.id : null
+}
+
+function createBorrowRealtimeConfig(
+  refreshTables: () => Promise<void>,
+  managementMode: boolean,
+  currentUserId: number | undefined,
+): NonNullable<FilterTableProps["realtime"]> {
+  return {
+    room: 'inventory',
+    eventTypes: INVENTORY_SSE_EVENTS,
+    staleOnly: true,
+    onRefresh: refreshTables,
+    shouldHandleEvent: (event, context) => {
+      const payload = event.data as Record<string, unknown>
+      const item = payload.item as Record<string, unknown> | undefined
+      const itemId = getBorrowEventItemId(payload, item)
+      if (itemId !== null && context.loadedIds.has(itemId)) return true
+      if (managementMode) return true
+      if (!item || typeof currentUserId !== 'number') return false
+      return item.borrower_id === currentUserId || item.last_borrower_id === currentUserId
+    },
+  }
+}
+
 function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): ColumnDef<Record<string, unknown>, unknown>[] {
   return [
     borrowColumnHelper.accessor('name', {
@@ -381,7 +730,7 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
     borrowColumnHelper.accessor('remaining_quantity', {
       header: '借用时剩余量',
       size: 120,
-      cell: (info) => `${info.getValue()} ${info.row.original.unit}`,
+      cell: (info) => getBorrowQuantityText(info.row.original as MyBorrowItem),
     }),
     borrowColumnHelper.accessor('borrow_time', {
       header: '借用时间',
@@ -393,12 +742,12 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
             <span>{formatDateTime(info.getValue())}</span>
             {item.is_overdue ? (
               <span
-                className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive"
-                title="已超期"
-                aria-label="已超期"
+                className={getDashboardAlertBadgeClassName()}
+                title="借用超时"
+                aria-label="借用超时"
               >
                 <AlertTriangle className="size-3" />
-                超期
+                超时
               </span>
             ) : null}
           </div>
@@ -439,6 +788,7 @@ export function DashboardBorrowTab({
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
   const [returnMode, setReturnMode] = useState<BorrowReturnMode>('used')
   const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
+  const [isDeletingReturn, setIsDeletingReturn] = useState(false)
 
   const returnForm = useForm<ReturnFormInputData, unknown, ReturnFormData>({
     resolver: createValibotResolver(ReturnFormSchema),
@@ -452,8 +802,8 @@ export function DashboardBorrowTab({
         queryKey: managementMode ? ['dashboard', 'admin', 'borrows'] : ['dashboard', 'borrows'],
       }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+      refreshDashboardAfterMutation(queryClient),
     ])
-    requestDashboardCountsRefresh()
   }, [managementMode, queryClient])
 
   const borrowDashboardAPI = useMemo(
@@ -463,38 +813,33 @@ export function DashboardBorrowTab({
 
   // 每次打开归还弹窗都强制回到 `used` 模式并清空数量输入，避免沿用上一条记录的表单状态。
   const openReturnModal = useCallback((item: MyBorrowItem) => {
+    const initialReturnMode = getInitialReturnMode(item);
     setSelectedBorrow(item)
-    setReturnMode('used')
-    returnForm.reset({ return_mode: 'used', return_quantity: '', notes: item.notes ?? '' })
+    setReturnMode(initialReturnMode)
+    returnForm.reset({
+      return_mode: initialReturnMode,
+      specification: item.specification ?? "",
+      return_quantity: "",
+      notes: item.notes ?? "",
+    })
   }, [returnForm])
 
   // 提交时按当前模式校验并换算最终剩余量；成功后失效借用/库存查询并刷新统计卡片。
   const handleReturn = returnForm.handleSubmit(async (formData) => {
     if (!selectedBorrow) return
 
-    const inputValue = formData.return_quantity
-    const fieldName = returnMode === 'remaining' ? '剩余量' : '使用量'
-    const maxValue = selectedBorrow.remaining_quantity
-
-    const schema = createReturnQuantitySchema(fieldName, maxValue)
-    const result = v.safeParse(schema, inputValue)
-
-    if (!result.success) {
-      // `used` 和 `remaining` 模式共享输入框，但校验边界不同，错误需要即时切换。
-      returnForm.setError('return_quantity', { message: result.issues[0]?.message || '输入无效' })
+    const result = resolveReturnSubmission(selectedBorrow, returnMode, formData)
+    if (!result.ok) {
+      returnForm.setError(result.field, { message: result.message })
       return
     }
-
-    const numValue = result.output
-    const finalQuantity = returnMode === 'remaining'
-      ? numValue
-      : maxValue - numValue
 
     setIsSubmittingReturn(true)
     try {
       await inventoryAPI.return(selectedBorrow.inventory_id, {
-        remaining_quantity: finalQuantity,
-        notes: formData.notes,
+        remaining_quantity: result.finalQuantity,
+        specification: result.specification,
+        notes: result.notes,
       })
       setSelectedBorrow(null)
       returnForm.reset(defaultReturnValues)
@@ -508,6 +853,38 @@ export function DashboardBorrowTab({
   }, (errors) => {
     console.log('Form validation errors:', errors)
   })
+
+  const handleDeleteZeroRemaining = useCallback(async () => {
+    if (!selectedBorrow) return
+
+    const result = resolveReturnSubmission(
+      selectedBorrow,
+      returnMode,
+      returnForm.getValues(),
+      true,
+    )
+    if (!result.ok) {
+      returnForm.setError(result.field, { message: result.message })
+      return
+    }
+
+    setIsDeletingReturn(true)
+    try {
+      await inventoryAPI.returnDelete(selectedBorrow.inventory_id, {
+        remaining_quantity: 0,
+        specification: result.specification,
+        notes: result.notes,
+      })
+      setSelectedBorrow(null)
+      returnForm.reset(defaultReturnValues)
+      await refreshTables()
+      toast.success('删除成功')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '删除失败'))
+    } finally {
+      setIsDeletingReturn(false)
+    }
+  }, [refreshTables, returnForm, returnMode, selectedBorrow])
 
   // 切换填写模式时清空数量和字段错误，避免把“使用量”的输入带到“剩余量”校验里。
   const handleReturnModeChange = useCallback((value: BorrowReturnMode) => {
@@ -529,7 +906,21 @@ export function DashboardBorrowTab({
     () => createBorrowColumns(openReturnModal),
     [openReturnModal]
   )
-  const returnDialog = { selectedBorrow, returnMode, returnForm, isSubmittingReturn, onReturnModeChange: handleReturnModeChange, onSubmit: () => void handleReturn(), onOpenChange: handleReturnDialogOpenChange }
+  const borrowRealtime = useMemo(
+    () => createBorrowRealtimeConfig(refreshTables, managementMode, currentUser?.id),
+    [currentUser?.id, managementMode, refreshTables],
+  )
+  const returnDialog = {
+    selectedBorrow,
+    returnMode,
+    returnForm,
+    isSubmittingReturn,
+    isDeletingReturn,
+    onReturnModeChange: handleReturnModeChange,
+    onSubmit: () => void handleReturn(),
+    onDeleteZeroRemaining: () => void handleDeleteZeroRemaining(),
+    onOpenChange: handleReturnDialogOpenChange,
+  }
 
   return (
     <>
@@ -537,36 +928,7 @@ export function DashboardBorrowTab({
         api={borrowDashboardAPI}
         queryKey={managementMode ? ['dashboard', 'admin', 'borrows'] : ['dashboard', 'borrows']}
         tableId={managementMode ? 'dashboard-admin-borrows' : 'dashboard-borrows'}
-        realtime={{
-          room: 'inventory',
-          eventTypes: INVENTORY_SSE_EVENTS,
-          staleOnly: true,
-          onRefresh: refreshTables,
-          shouldHandleEvent: (event, context) => {
-            const payload = event.data as Record<string, unknown>
-            const item = payload.item as Record<string, unknown> | undefined
-            let itemId: number | null = null
-            if (typeof payload.id === 'number') {
-              itemId = payload.id
-            } else if (typeof item?.id === 'number') {
-              itemId = item.id
-            }
-
-            if (itemId !== null && context.loadedIds.has(itemId)) {
-              return true
-            }
-
-            if (managementMode) {
-              return true
-            }
-
-            if (!item || typeof currentUser?.id !== 'number') {
-              return false
-            }
-
-            return item.borrower_id === currentUser.id || item.last_borrower_id === currentUser.id
-          },
-        }}
+        realtime={borrowRealtime}
         customColumns={borrowColumns}
         statusOptions={DASHBOARD_EMPTY_STATUS_OPTIONS}
         searchFieldOptions={managementMode ? ADMIN_BORROW_SEARCH_FIELDS : BORROW_SEARCH_FIELDS}
@@ -591,8 +953,8 @@ function renderPendingStockinBadge() {
   return (
     <span
       className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive"
-      title="已超时"
-      aria-label="已超时"
+      title="暂存超时"
+      aria-label="暂存超时"
     >
       <AlertTriangle className="size-3" />
       超时
@@ -715,8 +1077,8 @@ export function DashboardStockinTab({
         queryKey: managementMode ? ['dashboard', 'admin', 'stockin'] : ['dashboard', 'stockin'],
       }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+      refreshDashboardAfterMutation(queryClient),
     ])
-    requestDashboardCountsRefresh()
   }, [managementMode, queryClient])
 
   const pendingStockinDashboardAPI = useMemo(

@@ -172,7 +172,7 @@
 | `borrower_id` | 借用人 | 关联 `users.id` |
 | `borrow_time` | 借出时间 | 默认创建时记录 |
 | `return_time` | 归还时间 | 未归还时为空 |
-| `quantity_borrowed` | 借出数量 | 必填 |
+| `quantity_borrowed` | 借出数量 | 可为 0，用于规格或剩余量未知的历史记录 |
 | `quantity_returned` | 归还数量 | 部分归还时有意义 |
 | `notes` | 备注 | 借还说明 |
 | `created_at` | 记录创建时间 | 审计字段 |

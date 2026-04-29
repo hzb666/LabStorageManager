@@ -119,7 +119,8 @@
 | `POST` | `/api/inventory/{inventory_id}/borrow` | `borrow_item` | 已登录用户 | path: `inventory_id` | `InventoryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py" /> |
 | `GET` | `/api/inventory/{inventory_id}/borrow-history` | `get_borrow_history` | 已登录用户 | path: `inventory_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py" /> |
 | `POST` | `/api/inventory/{inventory_id}/complete-stockin` | `complete_manual_pending_stockin` | 已登录用户 | path: `inventory_id`；body: `ManualPendingStockInRequest` | `InventoryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py" /> |
-| `POST` | `/api/inventory/{inventory_id}/return` | `return_item` | 已登录用户 | path: `inventory_id` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py" /> |
+| `POST` | `/api/inventory/{inventory_id}/return` | `return_item` | 已登录用户 | path: `inventory_id`；body: `InventoryBorrowReturn` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py" /> |
+| `POST` | `/api/inventory/{inventory_id}/return-delete` | `delete_zero_remaining_borrowed_item` | 已登录用户 | path: `inventory_id`；body: `InventoryBorrowReturn` | `—` | `204` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py" /> |
 
 ### 常用货架接口 (`common_shelf`)
 

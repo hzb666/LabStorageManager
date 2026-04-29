@@ -8,6 +8,7 @@ import {
   type ReagentBrandItem,
 } from '@/api/client'
 import { BaseForm } from '@/components/BaseForm'
+import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton'
 import { Button } from '@/components/ui/Button'
 import {
   Dialog,
@@ -46,7 +47,6 @@ interface ReagentBrandEditorDialogProps {
   open: boolean
   editingItem: ReagentBrandItem | null
   form: UseFormReturn<ReagentBrandFormInputData, unknown, ReagentBrandFormData>
-  deleteConfirm: boolean
   isDeleting: boolean
   isSubmitting: boolean
   onOpenChange: (open: boolean) => void
@@ -143,7 +143,6 @@ function ReagentBrandEditorDialog({
   open,
   editingItem,
   form,
-  deleteConfirm,
   isDeleting,
   isSubmitting,
   onOpenChange,
@@ -162,17 +161,17 @@ function ReagentBrandEditorDialog({
           <BaseForm form={form} fields={getReagentBrandFormFields()} layout="stack" />
           <div className="flex items-center justify-between gap-3 pt-4">
             {isEdit ? (
-              <LoadingButton
+              <ConfirmDeleteButton
                 type="button"
                 variant="destructive"
                 size="lg"
                 className="min-w-28"
                 isLoading={isDeleting}
                 disabled={isSubmitting}
-                onClick={() => void onDelete()}
-              >
-                {deleteConfirm ? '确认删除' : '删除'}
-              </LoadingButton>
+                icon={null}
+                onConfirm={onDelete}
+                resetKey={editingItem?.id}
+              />
             ) : <span />}
             <div className="flex justify-end gap-2">
               <Button
@@ -347,7 +346,6 @@ export function ReagentBrandManagementDialogs({
   const queryClient = useQueryClient()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<ReagentBrandItem | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const form = useForm<ReagentBrandFormInputData, unknown, ReagentBrandFormData>({
@@ -362,7 +360,6 @@ export function ReagentBrandManagementDialogs({
   const resetEditor = useCallback(() => {
     setEditorOpen(false)
     setEditingItem(null)
-    setDeleteConfirm(false)
     form.reset(DEFAULT_REAGENT_BRAND_FORM)
   }, [form])
 
@@ -372,7 +369,6 @@ export function ReagentBrandManagementDialogs({
     }
 
     setEditingItem(null)
-    setDeleteConfirm(false)
     form.reset(DEFAULT_REAGENT_BRAND_FORM)
     setEditorOpen(true)
   }, [canWrite, form])
@@ -383,7 +379,6 @@ export function ReagentBrandManagementDialogs({
     }
 
     setEditingItem(item)
-    setDeleteConfirm(false)
     form.reset(buildReagentBrandForm(item))
     setEditorOpen(true)
   }, [canWrite, form])
@@ -393,10 +388,6 @@ export function ReagentBrandManagementDialogs({
       return
     }
     if (!editingItem) {
-      return
-    }
-    if (!deleteConfirm) {
-      setDeleteConfirm(true)
       return
     }
 
@@ -411,7 +402,7 @@ export function ReagentBrandManagementDialogs({
     } finally {
       setIsDeleting(false)
     }
-  }, [canWrite, deleteConfirm, editingItem, refreshBrands, resetEditor])
+  }, [canWrite, editingItem, refreshBrands, resetEditor])
 
   const handleSubmit = useCallback(async () => {
     if (!canWrite) {
@@ -454,7 +445,6 @@ export function ReagentBrandManagementDialogs({
         open={editorOpen}
         editingItem={editingItem}
         form={form}
-        deleteConfirm={deleteConfirm}
         isDeleting={isDeleting}
         isSubmitting={isSubmitting}
         onOpenChange={(nextOpen) => {

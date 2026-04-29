@@ -566,6 +566,7 @@ export const createReturnQuantitySchema = (fieldName: string, maxValue: number) 
 // 归还表单 Schema
 export const ReturnFormSchema = v.object({
   return_mode: v.picklist(['used', 'remaining'], '归还模式不能为空'),
+  specification: v.optional(SpecificationSchema),
   return_quantity: v.pipe(
     v.union([v.string(), v.number()], '数量必须是有效数字'),
     v.transform(parseNumberOrNaN),

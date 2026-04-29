@@ -177,7 +177,7 @@ def _count_pending_reagent_orders_overdue(db: Session, now: datetime) -> int:
         db,
         ReagentOrder,
         ReagentOrder.status == ReagentOrderStatus.PENDING,
-        ReagentOrder.created_at < cutoff,
+        ReagentOrder.updated_at < cutoff,
     )
 
 
@@ -187,7 +187,7 @@ def _count_pending_consumable_orders_overdue(db: Session, now: datetime) -> int:
         db,
         ConsumableOrder,
         ConsumableOrder.status == ConsumableOrderStatus.PENDING,
-        ConsumableOrder.created_at < cutoff,
+        ConsumableOrder.updated_at < cutoff,
     )
 
 
@@ -218,7 +218,7 @@ def _count_long_pending_reagent_orders(db: Session, now: datetime) -> int:
         db,
         ReagentOrder,
         ReagentOrder.status == ReagentOrderStatus.PENDING,
-        ReagentOrder.created_at < cutoff,
+        ReagentOrder.updated_at < cutoff,
     )
 
 
@@ -228,7 +228,7 @@ def _count_long_pending_consumable_orders(db: Session, now: datetime) -> int:
         db,
         ConsumableOrder,
         ConsumableOrder.status == ConsumableOrderStatus.PENDING,
-        ConsumableOrder.created_at < cutoff,
+        ConsumableOrder.updated_at < cutoff,
     )
 
 

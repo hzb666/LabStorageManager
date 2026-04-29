@@ -69,10 +69,13 @@ import {
   buildLocalListData,
   findDashboardColumnIndex,
   flattenGroupedOrders,
+  getDashboardAlertBadgeClassName,
   isApprovedOrderOverdue,
   isPendingApprovalOverdue,
+  refreshDashboardAfterMutation,
   removeApplicantColumn,
   requestDashboardCountsRefresh,
+  type DashboardAlertTone,
   type DashboardParams,
   type DashboardReagentOrder,
 } from "../../lib/dashboardUtils";
@@ -149,7 +152,6 @@ function useReagentEditDialog({
 }>) {
   const [editingReagent, setEditingReagent] =
     useState<DashboardReagentOrder | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [isSubmittingReagent, setIsSubmittingReagent] = useState(false);
 
   const reagentForm = useForm<
@@ -177,7 +179,6 @@ function useReagentEditDialog({
       }
 
       setEditingReagent(item);
-      setDeleteConfirm(false);
       reagentForm.reset(buildReagentFormValues(item));
     },
     [currentUserId, currentUserRole, isAdmin, reagentForm],
@@ -201,7 +202,6 @@ function useReagentEditDialog({
         is_hazardous: formData.is_hazardous,
         notes: processNotes(formData.notes),
       });
-      setDeleteConfirm(false);
       setEditingReagent(null);
       await refreshTables();
       toast.success(
@@ -224,14 +224,8 @@ function useReagentEditDialog({
   const handleDeleteReagent = useCallback(async () => {
     if (!editingReagent) return;
 
-    if (!deleteConfirm) {
-      setDeleteConfirm(true);
-      return;
-    }
-
     try {
       await reagentOrderAPI.delete(editingReagent.id);
-      setDeleteConfirm(false);
       setEditingReagent(null);
       reagentForm.reset(defaultReagentOrderValues);
       await refreshTables();
@@ -239,17 +233,15 @@ function useReagentEditDialog({
     } catch (error) {
       toast.error(getApiErrorMessage(error, "删除失败"));
     }
-  }, [deleteConfirm, editingReagent, reagentForm, refreshTables]);
+  }, [editingReagent, reagentForm, refreshTables]);
 
   const closeReagentDialog = useCallback(() => {
     setEditingReagent(null);
-    setDeleteConfirm(false);
     reagentForm.reset(defaultReagentOrderValues);
   }, [reagentForm]);
 
   return {
     editingReagent,
-    deleteConfirm,
     isSubmittingReagent,
     reagentForm,
     handleReagentEdit,
@@ -614,7 +606,6 @@ function DashboardReagentEditDialog({
 }>) {
   const {
     editingReagent,
-    deleteConfirm,
     reagentForm,
     isSubmittingReagent,
     handleDeleteReagent,
@@ -652,7 +643,6 @@ function DashboardReagentEditDialog({
             mode="edit"
             onCancel={closeReagentDialog}
             onDelete={handleDeleteReagent}
-            deleteConfirm={deleteConfirm}
             submitLabelEdit="保存"
             submitLabelAdd="保存"
             isSubmitting={isSubmittingReagent}
@@ -814,10 +804,14 @@ function DashboardReagentStockinDialog({
 
 const reagentColumnHelper = createColumnHelper<DashboardReagentOrder>();
 
-function renderAlertBadge(label: string, title: string) {
+function renderAlertBadge(
+  label: string,
+  title: string,
+  tone: DashboardAlertTone = "destructive",
+) {
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive"
+      className={getDashboardAlertBadgeClassName(tone)}
       title={title}
       aria-label={title}
     >
@@ -833,11 +827,11 @@ function renderReagentTimeAlertBadges(
 ) {
   return (
     <>
-      {managementMode && isPendingApprovalOverdue(item.status, item.created_at)
-        ? renderAlertBadge("审批超时", "审批超时")
+      {managementMode && isPendingApprovalOverdue(item.status, item.updated_at)
+        ? renderAlertBadge("超时", "审批超时")
         : null}
       {isApprovedOrderOverdue(item.status, item.updated_at)
-        ? renderAlertBadge("到货超时", "到货超时")
+        ? renderAlertBadge("超时", "到货超时", "warning")
         : null}
     </>
   );
@@ -1068,8 +1062,8 @@ export function DashboardReagentTab({
       }),
       queryClient.invalidateQueries({ queryKey: ["reagent-orders"] }),
       queryClient.invalidateQueries({ queryKey: ["inventory"] }),
+      refreshDashboardAfterMutation(queryClient),
     ]);
-    requestDashboardCountsRefresh();
   }, [managementMode, queryClient]);
 
   const reagentDashboardAPI = useMemo(

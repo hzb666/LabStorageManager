@@ -39,7 +39,7 @@ from robot.wecom_aibot.llm_planner import (
 from robot.wecom_aibot.mcp_client import LSMMcpClient
 from robot.wecom_aibot.minimax_web_search import MiniMaxWebSearchClient
 
-CAS_CANDIDATE_PATTERN = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
+CAS_CANDIDATE_PATTERN = re.compile(r"(?<!\d)\d{2,7}-\d{2}-\d(?!\d)")
 INVENTORY_NAME_CANDIDATE_LIMIT = 100
 GENERAL_WEB_SEARCH_KEYWORDS = (
     "联网",
@@ -160,6 +160,21 @@ async def answer_with_llm_plan(
         return ""
     if plan.tool_name == "web_search":
         return "联网搜索只用于辅助识别化学名称或别名对应的 CAS（系统内部），不能干别的。"
+    cas_override = _planned_or_text_cas(text, plan.arguments)
+    if cas_override:
+        override_reply = await _answer_planned_cas_override(
+            mcp_client=mcp_client,
+            llm_planner=llm_planner,
+            web_search_client=web_search_client,
+            search_limit=search_limit,
+            text=text,
+            user_token=user_token,
+            plan=plan,
+            cas_number=cas_override,
+            conversation_context=conversation_context,
+        )
+        if override_reply:
+            return override_reply
     if plan.tool_name == "inventory_search_by_name":
         plan_arguments = _inventory_name_search_arguments(plan.arguments)
         result = await mcp_client.call_tool(plan.tool_name, _with_user_token(plan_arguments, user_token))
@@ -224,6 +239,64 @@ async def answer_with_llm_plan(
         user_text=text,
         conversation_context=conversation_context,
     )
+
+
+def _planned_or_text_cas(text: str, arguments: dict[str, Any]) -> str:
+    candidates = _extract_valid_cas_numbers(
+        "\n".join(
+            [
+                text,
+                _compact_text(arguments),
+            ]
+        )
+    )
+    return candidates[0] if candidates else ""
+
+
+async def _answer_planned_cas_override(
+    *,
+    mcp_client: LSMMcpClient,
+    llm_planner: LSMIntentPlanner | None,
+    web_search_client: MiniMaxWebSearchClient | None,
+    search_limit: int,
+    text: str,
+    user_token: str,
+    plan: LSMToolPlan,
+    cas_number: str,
+    conversation_context: list[dict[str, str]] | None,
+) -> str:
+    if plan.tool_name in {"inventory_search_by_name", "inventory_get_by_cas"}:
+        return await _answer_inventory_by_cas(
+            mcp_client,
+            llm_planner,
+            web_search_client,
+            search_limit,
+            text,
+            cas_number,
+            user_token,
+            conversation_context=conversation_context,
+        )
+    if plan.tool_name in {"reagent_orders_search_by_name", "reagent_orders_search_by_cas"}:
+        return await _answer_reagent_order(
+            mcp_client,
+            llm_planner,
+            search_limit,
+            text,
+            cas_number,
+            user_token,
+            conversation_context=conversation_context,
+        )
+    if plan.tool_name in {"common_shelf_search_by_alias", "common_shelf_search_by_cas"}:
+        return await _answer_common_shelf(
+            mcp_client,
+            llm_planner,
+            search_limit,
+            text,
+            cas_number,
+            user_token,
+            conversation_context=conversation_context,
+        )
+    return ""
 
 
 def _inventory_name_search_arguments(arguments: dict[str, Any]) -> dict[str, Any]:

@@ -307,6 +307,7 @@ export function getConsumableOrderFormFields(): FieldSchema<ConsumableOrderFormI
 // 归还表单默认值
 export const defaultReturnValues: ReturnFormInputData = {
   return_mode: 'used' as const,
+  specification: '',
   return_quantity: '',
   notes: '',
 }
@@ -316,11 +317,22 @@ export const defaultReturnValues: ReturnFormInputData = {
 export function getReturnFormFields(
   mode: 'remaining' | 'used',
   maxQuantity: number,
-  unit?: string
+  unit?: string,
+  requireSpecification = false
 ): FieldSchema<ReturnFormInputData>[] {
   const baseLabel = mode === 'remaining' ? '剩余量' : '使用量'
   const label = unit ? `${baseLabel} (${unit})` : baseLabel
-  return [
+  const fields: FieldSchema<ReturnFormInputData>[] = []
+  if (requireSpecification) {
+    fields.push({
+      name: 'specification' as const,
+      label: '规格',
+      type: 'input' as const,
+      required: true,
+      placeholder: '如: 500ml',
+    })
+  }
+  fields.push(
     {
       name: 'return_quantity' as const,
       label,
@@ -336,7 +348,8 @@ export function getReturnFormFields(
       enableTagToggle: true,
       placeholder: '选填，留空则清空备注',
     },
-  ]
+  )
+  return fields
 }
 
 // ============================================================================

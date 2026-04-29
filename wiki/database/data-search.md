@@ -7,7 +7,7 @@
 SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py) 会在连接建立时强制执行 `PRAGMA journal_mode=WAL`、`PRAGMA foreign_keys=ON`、`PRAGMA synchronous=NORMAL` 和 `PRAGMA busy_timeout=3000`，`init_db()` 启动阶段还会顺序完成：
 
 - `SQLModel.metadata.create_all(engine)`
-- `app/db_bootstrap/schema_upgrades.py` 的兼容字段与启动期回填
+- `app/db_bootstrap/schema_upgrades.py` 的兼容字段、结构绑定回填与常用货架分组一致性检查
 - `ensure_sqlite_performance_indexes`
 - `ensure_sqlite_inventory_fts`
 - `check_sqlite_fts_consistency`

@@ -54,6 +54,7 @@ from app.services.structure_cache_tasks import enqueue_structure_cache_resolutio
 from app.services.inventory_operation_logger import (
     SOURCE_MANUAL_ADD,
     log_inventory_export_operation,
+    log_inventory_delete,
     log_inventory_update,
     log_stock_in,
 )
@@ -564,6 +565,8 @@ def _register_manual_and_dashboard_routes(
                     "inventory_id": item.id,
                     "name": item.name,
                     "cas_number": item.cas_number,
+                    "initial_quantity": item.initial_quantity,
+                    "specification": format_specification(item.initial_quantity, item.unit),
                     "remaining_quantity": item.remaining_quantity,
                     "unit": item.unit,
                     "notes": item.notes,
@@ -603,6 +606,8 @@ def _register_manual_and_dashboard_routes(
                     "inventory_id": item.id,
                     "name": item.name,
                     "cas_number": item.cas_number,
+                    "initial_quantity": item.initial_quantity,
+                    "specification": format_specification(item.initial_quantity, item.unit),
                     "remaining_quantity": item.remaining_quantity,
                     "unit": item.unit,
                     "notes": item.notes,
@@ -874,15 +879,47 @@ def _resolve_borrower_context(
     return actual_borrower_id, actual_borrower_id
 
 
-# 统一借用数量计算，避免在借用端点重复判空与正数校验。
+RETURN_ZERO_REMAINING_DELETE_REASON = "用完"
+
+
+# 统一借用数量计算；历史数据可能缺少规格/剩余量，借用时允许先记为未知数量。
 def _resolve_borrow_quantity(item: Inventory) -> float:
     borrow_quantity = item.remaining_quantity if item.remaining_quantity is not None else item.initial_quantity
-    if borrow_quantity is None or borrow_quantity <= 0:
+    if borrow_quantity is None:
+        return 0
+    if borrow_quantity <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid inventory quantity: cannot borrow item with null or non-positive quantity",
+            detail="Invalid inventory quantity: cannot borrow item with non-positive quantity",
         )
     return borrow_quantity
+
+
+def _inventory_has_specification(item: Inventory) -> bool:
+    return item.initial_quantity is not None and bool((item.unit or "").strip())
+
+
+def _apply_return_specification_if_required(
+    item: Inventory,
+    return_data: InventoryBorrowReturn,
+) -> None:
+    if _inventory_has_specification(item):
+        return
+
+    specification = (return_data.specification or "").strip()
+    if not specification:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="specification is required",
+        )
+
+    try:
+        initial_quantity, unit = parse_specification(specification)
+    except SpecificationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    item.initial_quantity = initial_quantity
+    item.unit = unit
 
 
 # 校验归还请求参数与权限，保证原错误语义和顺序一致。
@@ -904,6 +941,7 @@ def _validate_return_request(item: Inventory, return_data: InventoryBorrowReturn
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="remaining_quantity must be greater than or equal to 0",
         )
+    _apply_return_specification_if_required(item, return_data)
     if item.initial_quantity is not None and return_data.remaining_quantity > item.initial_quantity:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -926,6 +964,23 @@ def _get_latest_active_borrow_log(db: Session, inventory_id: int) -> Optional[Bo
 def _normalize_return_notes(notes: Optional[str]) -> Optional[str]:
     normalized = (notes or "").strip()
     return normalized or None
+
+
+def _append_return_zero_remaining_delete_reason(notes: Optional[str]) -> str:
+    normalized = (notes or "").strip()
+    if normalized == RETURN_ZERO_REMAINING_DELETE_REASON:
+        return normalized
+    if not normalized:
+        return RETURN_ZERO_REMAINING_DELETE_REASON
+    return f"{normalized} {RETURN_ZERO_REMAINING_DELETE_REASON}"
+
+
+def _ensure_zero_remaining_return(return_data: InventoryBorrowReturn) -> None:
+    if return_data.remaining_quantity != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only zero remaining borrowed inventory can be deleted from the return workflow",
+        )
 
 
 # 应用归还后的库存状态变更，并返回低库存提示文案（若有）。
@@ -1043,6 +1098,40 @@ def _register_return_route(
     search_cache: Dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
+    @router.post("/{inventory_id}/return-delete", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_zero_remaining_borrowed_item(
+        inventory_id: int,
+        return_data: InventoryBorrowReturn,
+        request: Request,
+        current_user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[Session, Depends(get_db)],
+    ):
+        item = _get_by_id(db, inventory_id)
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+
+        _validate_return_request(item, return_data, current_user)
+        _ensure_zero_remaining_return(return_data)
+        if "notes" in return_data.model_fields_set:
+            item.notes = _normalize_return_notes(return_data.notes)
+        item.notes = _append_return_zero_remaining_delete_reason(item.notes)
+        log_inventory_delete(
+            db,
+            inventory=item,
+            operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
+        )
+        db.delete(item)
+        db.commit()
+        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+
+        await sse_manager.broadcast(
+            SSERoom.INVENTORY,
+            SSEEventType.INVENTORY_DELETED,
+            {"id": inventory_id},
+            actor_client_id=get_sse_client_id(request),
+        )
+
     # 归还库存项。
     @router.post("/{inventory_id}/return", response_model=dict)
     async def return_item(

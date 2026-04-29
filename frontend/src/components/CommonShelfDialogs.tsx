@@ -80,7 +80,6 @@ export interface CommonShelfDialogController {
     mode: CommonShelfDialogMode
     selectedGroup: CommonShelfGroup | null
     isSubmitting: boolean
-    deleteConfirm: boolean
     editNeedsMergeConfirm: boolean
   }
   forms: {
@@ -486,7 +485,6 @@ function CommonShelfEditDialogContent({
             mode="edit"
             onCancel={() => actions.handleOpenChange(false)}
             onDelete={showDelete ? actions.handleDelete : undefined}
-            deleteConfirm={state.deleteConfirm}
             submitLabelEdit={state.editNeedsMergeConfirm ? '确认合并并保存' : '保存分组'}
             submitLabelAdd="保存分组"
             isSubmitting={state.isSubmitting}

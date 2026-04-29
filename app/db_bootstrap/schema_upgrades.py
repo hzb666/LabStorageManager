@@ -1,4 +1,4 @@
-"""SQLite schema upgrades and startup backfills."""
+"""SQLite schema upgrades and schema-bound backfills."""
 from __future__ import annotations
 
 import logging
@@ -27,74 +27,6 @@ WHERE NOT EXISTS (
       AND existing.brand_normalized = shelf_groups.brand_normalized
       AND existing.specification_normalized = shelf_groups.specification_normalized
 )
-"""
-
-SQLITE_COMMON_SHELF_GROUP_BACKFILL_SQL = """
-INSERT INTO common_shelf_group (
-    cas_number,
-    name_snapshot,
-    brand,
-    brand_normalized,
-    purity,
-    specification_text,
-    spec_quantity,
-    spec_unit,
-    specification_normalized,
-    notes,
-    created_by_id,
-    is_deleted,
-    created_at,
-    updated_at,
-    deleted_at
-)
-SELECT
-    ranked.cas_number,
-    ranked.name_snapshot,
-    ranked.brand,
-    ranked.brand_normalized,
-    NULL,
-    ranked.specification_text,
-    ranked.spec_quantity,
-    ranked.spec_unit,
-    ranked.specification_normalized,
-    NULL,
-    ranked.created_by_id,
-    0,
-    COALESCE(ranked.group_created_at, CURRENT_TIMESTAMP),
-    COALESCE(ranked.group_updated_at, ranked.group_created_at, CURRENT_TIMESTAMP),
-    NULL
-FROM (
-    SELECT
-        common_shelf.*,
-        MIN(common_shelf.created_at) OVER group_window AS group_created_at,
-        MAX(common_shelf.updated_at) OVER group_window AS group_updated_at,
-        ROW_NUMBER() OVER (
-            PARTITION BY
-                common_shelf.cas_number,
-                common_shelf.brand_normalized,
-                common_shelf.specification_normalized
-            ORDER BY
-                common_shelf.updated_at DESC,
-                common_shelf.created_at DESC,
-                common_shelf.id DESC
-        ) AS row_number
-    FROM common_shelf
-    WINDOW group_window AS (
-        PARTITION BY
-            common_shelf.cas_number,
-            common_shelf.brand_normalized,
-            common_shelf.specification_normalized
-    )
-) AS ranked
-WHERE ranked.row_number = 1
-  AND NOT EXISTS (
-      SELECT 1
-      FROM common_shelf_group AS existing
-      WHERE existing.is_deleted = 0
-        AND existing.cas_number = ranked.cas_number
-        AND existing.brand_normalized = ranked.brand_normalized
-        AND existing.specification_normalized = ranked.specification_normalized
-  )
 """
 
 SQLITE_COMMON_SHELF_LOCATION_PINYIN_COLUMN_UPGRADES: tuple[tuple[str, str], ...] = (
@@ -137,28 +69,31 @@ def _quote_sqlite_identifier(identifier: str) -> str:
     return f'"{identifier}"'
 
 
-def ensure_sqlite_common_shelf_groups(connection: Connection) -> None:
-    """Backfill persistent group records from existing bottle rows."""
-    missing_count = connection.execute(
-        text(SQLITE_COMMON_SHELF_GROUP_MISSING_COUNT_SQL)
-    ).scalar_one()
-    if int(missing_count) <= 0:
-        logger.debug("Skipped common shelf group backfill; no missing group records.")
-        return
-
-    result = connection.execute(text(SQLITE_COMMON_SHELF_GROUP_BACKFILL_SQL))
-    rowcount = result.rowcount if result.rowcount is not None and result.rowcount >= 0 else missing_count
-    logger.info(
-        "Backfilled %d common shelf group records; missing_before=%d.",
-        rowcount,
-        missing_count,
-    )
-
-
 def _get_sqlite_table_columns(connection: Connection, table_name: str) -> set[str]:
     table_identifier = _quote_sqlite_identifier(table_name)
     rows = connection.execute(text(f"PRAGMA table_info({table_identifier})")).all()
     return {str(row[1]) for row in rows}
+
+
+def check_sqlite_common_shelf_groups_consistency(connection: Connection) -> int:
+    """Block startup when bottle rows lack active persistent group records."""
+    missing_count = int(
+        connection.execute(text(SQLITE_COMMON_SHELF_GROUP_MISSING_COUNT_SQL)).scalar_one() or 0
+    )
+    if missing_count <= 0:
+        logger.debug("Common shelf group consistency check passed.")
+        return 0
+
+    message = (
+        f"Detected {missing_count} common shelf group identities with bottle rows but no active "
+        "group record. Run `python scripts/backfill_common_shelf_groups.py --apply` before "
+        "starting the backend."
+    )
+    logger.error(
+        "%s",
+        message,
+    )
+    raise RuntimeError(message)
 
 
 def ensure_sqlite_common_shelf_location_pinyin_columns(connection: Connection) -> None:

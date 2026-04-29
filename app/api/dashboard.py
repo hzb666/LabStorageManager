@@ -71,7 +71,6 @@ class DashboardPanelMetrics(BaseModel):
 
 
 class DashboardPanelItemResponse(BaseModel):
-    label: str
     detail: str
     submitter_name: str | None = None
     count: int | None = None
@@ -161,7 +160,6 @@ class DashboardAdminSummaryDataResponse(BaseModel):
     pending_stockin_overdue_count: int
     long_unarrived_approved_reagent_count: int
     long_unconfirmed_approved_consumable_count: int
-    long_pending_order_count: int
     common_stock_alert_count: int
     recent_window_days: int
     is_all_time: bool

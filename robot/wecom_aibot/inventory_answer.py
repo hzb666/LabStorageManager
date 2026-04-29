@@ -9,11 +9,12 @@ from typing import Iterable
 from sqlalchemy import or_
 from sqlmodel import Session, select
 
+from app.core.constants import LOW_STOCK_PERCENT
 from app.database import engine
 from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas
 
-CAS_PATTERN = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
+CAS_PATTERN = re.compile(r"(?<!\d)\d{2,7}-\d{2}-\d(?!\d)")
 HELP_KEYWORDS = ("帮助", "help", "怎么用", "指令")
 LOW_STOCK_KEYWORDS = ("低库存", "快没", "不足", "缺货")
 BORROWED_KEYWORDS = ("借出", "借用中", "谁借", "借走")
@@ -44,7 +45,7 @@ STATUS_LABELS = {
 @dataclass(frozen=True)
 class InventoryAnswerService:
     search_limit: int = 5
-    low_stock_threshold: float = 0.2
+    low_stock_threshold: float = LOW_STOCK_PERCENT
 
     def answer(self, question: str) -> str:
         normalized = question.strip()
@@ -160,4 +161,3 @@ def _format_quantity(value: float | None, unit: str | None) -> str:
         return "剩余量未知"
     amount = int(value) if value == int(value) else value
     return f"剩余 {amount}{unit or ''}"
-

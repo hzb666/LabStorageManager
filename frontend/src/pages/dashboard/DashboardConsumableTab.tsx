@@ -47,10 +47,13 @@ import {
   buildLocalListData,
   findDashboardColumnIndex,
   flattenGroupedOrders,
+  getDashboardAlertBadgeClassName,
   isApprovedOrderOverdue,
   isPendingApprovalOverdue,
+  refreshDashboardAfterMutation,
   removeApplicantColumn,
   requestDashboardCountsRefresh,
+  type DashboardAlertTone,
   type DashboardConsumableOrder,
   type DashboardParams,
 } from "../../lib/dashboardUtils";
@@ -112,7 +115,6 @@ function useDashboardConsumableDialogController({
 }>) {
   const [editingConsumable, setEditingConsumable] =
     useState<DashboardConsumableOrder | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [isSubmittingConsumable, setIsSubmittingConsumable] = useState(false);
 
   const handleConsumableEdit = useCallback(
@@ -130,7 +132,6 @@ function useDashboardConsumableDialogController({
       }
 
       setEditingConsumable(item);
-      setDeleteConfirm(false);
       consumableForm.reset(buildConsumableFormValues(item));
     },
     [consumableForm, currentUserId, currentUserRole, isAdmin],
@@ -150,7 +151,6 @@ function useDashboardConsumableDialogController({
         communication: formData.communication || "",
         notes: processNotes(formData.notes),
       });
-      setDeleteConfirm(false);
       setEditingConsumable(null);
       await refreshTables();
       toast.success(
@@ -181,14 +181,8 @@ function useDashboardConsumableDialogController({
   const handleDeleteConsumable = useCallback(async () => {
     if (!editingConsumable) return;
 
-    if (!deleteConfirm) {
-      setDeleteConfirm(true);
-      return;
-    }
-
     try {
       await consumableOrderAPI.delete(editingConsumable.id);
-      setDeleteConfirm(false);
       setEditingConsumable(null);
       consumableForm.reset(defaultConsumableOrderValues);
       await refreshTables();
@@ -196,11 +190,10 @@ function useDashboardConsumableDialogController({
     } catch (error) {
       toast.error(getApiErrorMessage(error, "删除失败"));
     }
-  }, [consumableForm, deleteConfirm, editingConsumable, refreshTables]);
+  }, [consumableForm, editingConsumable, refreshTables]);
 
   const closeConsumableDialog = useCallback(() => {
     setEditingConsumable(null);
-    setDeleteConfirm(false);
     consumableForm.reset(defaultConsumableOrderValues);
   }, [consumableForm]);
 
@@ -208,7 +201,6 @@ function useDashboardConsumableDialogController({
     handleConsumableEdit,
     consumableEditDialog: {
       editingConsumable,
-      deleteConfirm,
       consumableForm,
       isSubmittingConsumable,
       onDelete: handleDeleteConsumable,
@@ -224,7 +216,6 @@ function DashboardConsumableEditDialog({
 }: Readonly<{
   dialog: {
     editingConsumable: DashboardConsumableOrder | null;
-    deleteConfirm: boolean;
     consumableForm: ReturnType<
       typeof useForm<
         ConsumableOrderFormInputData,
@@ -241,7 +232,6 @@ function DashboardConsumableEditDialog({
 }>) {
   const {
     editingConsumable,
-    deleteConfirm,
     consumableForm,
     isSubmittingConsumable,
     onDelete,
@@ -280,7 +270,6 @@ function DashboardConsumableEditDialog({
             mode="edit"
             onCancel={onClose}
             onDelete={onDelete}
-            deleteConfirm={deleteConfirm}
             submitLabelEdit="保存"
             submitLabelAdd="保存"
             isSubmitting={isSubmittingConsumable}
@@ -294,10 +283,14 @@ function DashboardConsumableEditDialog({
 
 const consumableColumnHelper = createColumnHelper<DashboardConsumableOrder>();
 
-function renderAlertBadge(label: string, title: string) {
+function renderAlertBadge(
+  label: string,
+  title: string,
+  tone: DashboardAlertTone = "destructive",
+) {
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive"
+      className={getDashboardAlertBadgeClassName(tone)}
       title={title}
       aria-label={title}
     >
@@ -313,11 +306,11 @@ function renderConsumableTimeAlertBadges(
 ) {
   return (
     <>
-      {managementMode && isPendingApprovalOverdue(item.status, item.created_at)
-        ? renderAlertBadge("审批超时", "审批超时")
+      {managementMode && isPendingApprovalOverdue(item.status, item.updated_at)
+        ? renderAlertBadge("超时", "审批超时")
         : null}
       {isApprovedOrderOverdue(item.status, item.updated_at)
-        ? renderAlertBadge("收货超时", "收货超时")
+        ? renderAlertBadge("超时", "收货超时", "warning")
         : null}
     </>
   );
@@ -523,8 +516,8 @@ export function DashboardConsumableTab({
           : ["dashboard", "consumables"],
       }),
       queryClient.invalidateQueries({ queryKey: ["consumable-orders"] }),
+      refreshDashboardAfterMutation(queryClient),
     ]);
-    requestDashboardCountsRefresh();
   }, [managementMode, queryClient]);
 
   const consumableDashboardAPI = useMemo(

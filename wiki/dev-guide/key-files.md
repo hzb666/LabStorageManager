@@ -6,7 +6,7 @@
 
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" />：FastAPI 实例、生命周期、中间件、安全头、SSE 上下文、`/cart-import` 重定向和所有路由挂载都在这里收口。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" />：SQLite 引擎、WAL、外键和初始化编排入口。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" />：schema 补齐、性能索引、FTS、schema consistency check 和启动期回填。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" />：schema 补齐、结构绑定回填、性能索引、FTS、schema consistency check 和一致性告警。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/main.tsx" />：前端启动时机、`QueryClient`、cache version bootstrap 和真正挂载 `App` 的入口。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx" />：前端路由树、认证守卫、懒加载页面和全局 Provider 的装配点。
 

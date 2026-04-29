@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import { Trash2 } from 'lucide-react'
 
+import { ConfirmDeleteButton } from '@/components/ConfirmDeleteButton'
 import { Button } from '@/components/ui/Button'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 
@@ -8,7 +8,6 @@ interface EditDialogActionsProps {
   mode: 'edit' | 'add'
   onCancel: () => void
   onDelete?: () => void | Promise<void>
-  deleteConfirm?: boolean
   submitLabelEdit: string
   submitLabelAdd: string
   isSubmitting: boolean
@@ -20,7 +19,6 @@ export function EditDialogActions({
   mode,
   onCancel,
   onDelete,
-  deleteConfirm = false,
   submitLabelEdit,
   submitLabelAdd,
   isSubmitting,
@@ -31,22 +29,9 @@ export function EditDialogActions({
   let leadingArea: ReactNode = null
 
   if (showDelete) {
-    const handleDeleteClick = async () => {
-      try {
-        await onDelete?.()
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.error('Delete failed:', error)
-        }
-      }
-    }
-
     leadingArea = (
       <div className="flex items-center gap-2 order-1">
-        <Button variant="destructive" size="lg" type="button" onClick={() => void handleDeleteClick()}>
-          <Trash2 className="w-4 h-4 mr-1.5" />
-          {deleteConfirm ? '确认删除' : '删除'}
-        </Button>
+        <ConfirmDeleteButton variant="destructive" size="lg" type="button" onConfirm={onDelete} />
       </div>
     )
   } else if (leadingContent) {
