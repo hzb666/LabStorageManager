@@ -145,6 +145,7 @@ export default defineConfig({
           { text: "关键文件索引", link: "/dev-guide/key-files" },
           { text: "开发、部署与代理", link: "/dev-guide/deployment" },
           { text: "运维与排障", link: "/dev-guide/docker-nginx" },
+          { text: "搜索补全建议", link: "/dev-guide/search-completions" },
           { text: "浏览器插件购物车同步", link: "/dev-guide/cart-sync" },
           { text: "术语表", link: "/dev-guide/glossary" },
         ],

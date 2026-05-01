@@ -51,6 +51,14 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 对库存和订单类查询，系统通常先拿到候选 rowid 或 id，再回到 ORM 拉实体，避免把全部业务逻辑塞进单条复杂 SQL。
 
+## 搜索补全建议
+
+搜索补全建议是列表搜索输入框上的辅助能力，不参与真实列表搜索结果查询。真实结果仍由本页前述 SQL、FTS、缓存和排序路径决定。
+
+补全数据保存在 `QUERY_LOG_DIR/query_logs.db` 的独立表中：`search_query_memory` 记录用户或全局搜索记忆，`entity_completion_index` 记录从库存、试剂订单和耗材订单抽取的实体候选，`search_completion_meta` 保存 endpoint 级 stale 标记。写操作只标记对应 endpoint stale，下一次该 endpoint 的补全请求再按需重建建议索引。
+
+开发者细节见 [搜索补全建议](/dev-guide/search-completions)。
+
 ## 普通库存与常用货架
 
 普通库存使用 `Inventory` 模型，常用货架使用 `CommonShelf` 和 `CommonShelfGroup` 模型。两条查询路径不共表，也不共享 FTS 表。普通库存搜索主要由 [app/services/inventory_queries.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/inventory_queries.py) 与 `inventory_fts` 支撑；常用货架搜索主要由 [app/services/common_shelf_queries.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/common_shelf_queries.py)、归一化字段和位置拼音字段支撑。
@@ -100,4 +108,7 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 - [app/services/inventory_queries.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/inventory_queries.py)
 - [app/services/pinyin_utils.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py)
 - [app/services/search_matchers.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/search_matchers.py)
+- [app/services/search_completion_entity_index.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/search_completion_entity_index.py)
+- [app/services/search_completion_ranker.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/search_completion_ranker.py)
+- [app/search_completion_db.py](https://github.com/hzb666/LabStorageManager/blob/main/app/search_completion_db.py)
 - [app/services/sql_utils.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/sql_utils.py)

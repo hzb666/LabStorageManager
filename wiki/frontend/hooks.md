@@ -26,6 +26,7 @@
 | Hook | 职责 |
 | --- | --- |
 | `useReagentCasDuplicateCheck` | 创建试剂订单时进行同 CAS 风险检查 |
+| `useInlineSearchCompletion` | 列表搜索框的内联补全请求、缓存和反馈 |
 | `useRememberedUser` | 记住登录用户名等轻量偏好 |
 | `useErrorLogger` | 统一采集前端异常和 API 错误 |
 
@@ -63,6 +64,10 @@
 ### `useErrorLogger`
 
 该 Hook 将运行时异常、Promise 错误和 API 错误转为统一的错误记录行为，便于页面层保持简洁。
+
+### `useInlineSearchCompletion`
+
+该 Hook 只负责搜索建议状态，不参与真实列表数据查询。`FilterTable` 在配置了 `inlineCompletionEndpoint` 且搜索字段为 `all` 时启用它；单字段搜索不会显示建议，避免补全结果来自其他字段。完整后端和前端协作见 [搜索补全建议](/dev-guide/search-completions)。
 
 ## 改动入口
 
@@ -107,6 +112,7 @@
 - [frontend/src/hooks/useErrorLogger.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useErrorLogger.tsx)
 - [frontend/src/hooks/useFormModal.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useFormModal.tsx)
 - [frontend/src/hooks/useListSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useListSSE.ts)
+- [frontend/src/hooks/useInlineSearchCompletion.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useInlineSearchCompletion.ts)
 - [frontend/src/hooks/useReagentCasDuplicateCheck.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useReagentCasDuplicateCheck.ts)
 - [frontend/src/hooks/useSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts)
 - [frontend/src/hooks/useTableState.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableState.tsx)

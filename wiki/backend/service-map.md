@@ -78,6 +78,8 @@ flowchart TD
 | `order_list_search.py` | 订单列表搜索参数和查询辅助 |
 | `order_status_times.py` | 订单状态时间字段计算 |
 | `search_matchers.py` | 搜索字段分类、子查询合并、匹配逻辑 |
+| `search_completion_entity_index.py` | 搜索补全实体候选索引构建 |
+| `search_completion_ranker.py` | 搜索补全候选排序和置信度判断 |
 | `chemical_name_map_fts.py` | CAS 主数据 FTS 查询 |
 | `common_shelf_queries.py` | 常用货架分组查询、筛选和排序 |
 | `search_query_log_service.py` | 搜索查询日志记录 |
@@ -201,6 +203,9 @@ flowchart TD
 - `inventory_fts.py`
 - `order_fts.py`
 - `sql_utils.py`
+- `search_completion_entity_index.py`
+- `search_completion_ranker.py`
+- 细节见 [搜索补全建议](/dev-guide/search-completions)
 
 ### 订单转库存的实现入口
 

@@ -37,6 +37,7 @@
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py" />：试剂状态枚举、订购原因和规格字段。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order.py" />：耗材状态枚举和搜索相关字段。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/api_utils.py" />：列表页短 TTL 缓存，是排查“数据改了但第一页还是旧的”时必须看的文件。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/search_completions.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/search_completion_db.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/search_completion_entity_index.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/search_completion_ranker.py" />：搜索补全建议的 API、SQLite 表、实体索引和排序入口。
 
 ## 实时同步与缓存一致性
 
@@ -50,6 +51,7 @@
 ## 前端页面基础设施
 
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ui/FilterTable.tsx" />：列表页工具栏、搜索、筛选和表格容器总入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useInlineSearchCompletion.ts" />：列表搜索补全建议的前端请求、缓存和反馈 Hook。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableState.tsx" />：分页、搜索、防抖、模糊搜索、列宽和展开状态。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableUrlState.ts" />：URL 查询参数与表格状态同步。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BaseForm.tsx" />：统一表单渲染外壳。
@@ -89,6 +91,7 @@
 - 到货或入库异常：先看 `reagent_orders_workflow.py`、`inventory.py`、`internal_code.py`
 - 品牌选项异常：先看 `reagent_brands.py`、`reagent_brand_service.py`、`reagentBrandOptions.ts`
 - 耗材列表搜索异常：先看 `consumable_orders.py`、`sqlite_fts.py`、`sqlite_indexes.py`
+- 搜索建议异常：先看 `search_completions.py`、`search_completion_entity_index.py`、`search_completion_ranker.py`、`useInlineSearchCompletion.ts`
 - 结构检索异常：先看 `chem.py`、`structure_cache_workflow.py`、`structure_index.py`
 - 页面数据旧但刷新正常：先看 `api_utils.py`、`events.py`、`useListSSE.ts`
 - 浏览器插件导入失败：先看 `popup.js`、`import-bridge.js`、`cartImportControllers.ts`
@@ -109,6 +112,10 @@
 - [app/api/chem.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py)
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
 - [app/services/api_utils.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/api_utils.py)
+- [app/api/search_completions.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/search_completions.py)
+- [app/search_completion_db.py](https://github.com/hzb666/LabStorageManager/blob/main/app/search_completion_db.py)
+- [app/services/search_completion_entity_index.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/search_completion_entity_index.py)
+- [app/services/search_completion_ranker.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/search_completion_ranker.py)
 - [app/services/internal_code.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py)
 - [app/services/pinyin_utils.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py)
 - [app/services/sse_manager.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py)
@@ -123,6 +130,7 @@
 - [frontend/src/components/BaseForm.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BaseForm.tsx)
 - [frontend/src/components/ui/FilterTable.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ui/FilterTable.tsx)
 - [frontend/src/hooks/useListSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useListSSE.ts)
+- [frontend/src/hooks/useInlineSearchCompletion.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useInlineSearchCompletion.ts)
 - [frontend/src/hooks/useTableState.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableState.tsx)
 - [frontend/src/hooks/useTableUrlState.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTableUrlState.ts)
 - [frontend/src/lib/reagentBrandOptions.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/reagentBrandOptions.ts)

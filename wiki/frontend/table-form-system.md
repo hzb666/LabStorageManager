@@ -6,7 +6,7 @@
 
 - `FilterTable` 是业务页面的通用页面骨架，负责把 `TableFilters`、`DataTable`、分页控制、展开和列宽组合起来
 - `DataTable` 负责表格渲染细节，包括表头与表体联动、列宽调整和虚拟滚动
-- `TableFilters` 负责统一搜索输入、模糊切换、字段选择和状态下拉，并把输入结果交给 `useTableState`
+- `TableFilters` 负责统一搜索输入、模糊切换、字段选择、状态下拉和搜索补全显示，并把输入结果交给 `useTableState`
 
 ## 状态、虚拟滚动与持久化
 
@@ -39,6 +39,7 @@
 ## 改动入口
 
 - 新列表页优先复用 `FilterTable`、`useTableState` 和 `useTableUrlState`
+- 需要搜索建议时，在页面传入 `inlineCompletionEndpoint` 并开启 `enableInlineCompletion`；该能力只在搜索字段为“全部”时生效，详见 [搜索补全建议](/dev-guide/search-completions)
 - 新表单页优先复用 `BaseForm`、`formConfigs.tsx` 和 `validationSchemas.ts`
 - 字段参与实时更新时，再检查 `useListSSE` 的安全 patch 逻辑
 - 需要持久化 UI 偏好时，再确认 `tableId` 命名是否冲突
