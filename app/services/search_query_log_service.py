@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any, Mapping
 
 from app.search_query_log_db import insert_search_log_rows
+from app.search_completion_db import TARGET_ENDPOINTS, get_user_preferences, upsert_query_memory
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +313,53 @@ def _batch_rows(
     ]
 
 
+def _parse_search_field(filters_json: str) -> str | None:
+    try:
+        filters: dict[str, Any] = json.loads(filters_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    field = filters.get("search_field")
+    if field and isinstance(field, str) and field != "all":
+        return field
+    return None
+
+
+def _record_search_memory_from_batch(batch: list[ReadySearchLog]) -> None:
+    seen: set[str] = set()
+    for ready in batch:
+        payload = ready.payload
+        if payload.endpoint not in TARGET_ENDPOINTS:
+            continue
+        if not payload.normalized_query or len(payload.normalized_query) < 2:
+            continue
+
+        dedupe_key = f"{payload.user_id}:{payload.endpoint}:{payload.normalized_query}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        search_field = _parse_search_field(payload.filters_json)
+        try:
+            prefs = get_user_preferences(payload.user_id)
+            if prefs.personalization_enabled:
+                upsert_query_memory(
+                    user_id=payload.user_id,
+                    endpoint=payload.endpoint,
+                    search_field=search_field,
+                    query=payload.query or "",
+                    normalized_query=payload.normalized_query,
+                )
+            upsert_query_memory(
+                user_id=None,
+                endpoint=payload.endpoint,
+                search_field=search_field,
+                query=payload.query or "",
+                normalized_query=payload.normalized_query,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Search memory recording failed for query=%s", payload.normalized_query)
+
+
 def _write_ready_batch(batch: list[ReadySearchLog]) -> None:
     if not batch:
         return
@@ -333,6 +381,8 @@ def _write_ready_batch(batch: list[ReadySearchLog]) -> None:
                 retry_exc,
             )
             return
+
+    _record_search_memory_from_batch(batch)
 
     committed_at_monotonic = time.monotonic()
     with _state_lock:

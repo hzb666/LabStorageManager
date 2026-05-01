@@ -51,6 +51,7 @@ from app.api import (
     inventory,
     reagent_brands,
     reagent_orders,
+    search_completions,
     user_logs,
     user_sessions,
     users,
@@ -66,6 +67,8 @@ from app.services.search_query_log_service import stop_search_query_log_worker, 
 from app.services.sse_manager import sse_manager
 from app.services.structure_index import structure_index
 from app.search_query_log_db import init_query_log_db
+from app.search_completion_db import init_search_completion_db
+from app.services.search_completion_entity_index import rebuild_completion_entity_index
 from sqlmodel import Session
 
 
@@ -338,10 +341,13 @@ async def lifespan(app: FastAPI):
     cleanup_expired_inventory_import_preview_artifacts()
     init_db()
     init_query_log_db()
+    init_search_completion_db()
     if settings.chem_structure_feature_enabled:
         with Session(engine) as db:
             structure_index.rebuild(db)
         logger.info("Structure index rebuilt on startup")
+    with Session(engine) as db:
+        rebuild_completion_entity_index(db)
     start_search_query_log_worker()
     start_archive_scheduler()
     logger.info("Database initialized (WAL mode enabled)")
@@ -623,6 +629,7 @@ app.include_router(common_shelf.router, prefix="/api")
 app.include_router(chemical_name_map.router, prefix="/api")
 app.include_router(reagent_brands.router, prefix="/api")
 app.include_router(chem.router, prefix="/api")
+app.include_router(search_completions.router, prefix="/api")
 
 
 @app.get("/")

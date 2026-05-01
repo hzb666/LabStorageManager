@@ -622,6 +622,8 @@ export function ReagentOrdersPage() {
         searchPlaceholder="搜索名称、CAS号、订购人、订购时间..."
         renderExpandedRow={renderExpandedRow}
         noteField="notes"
+        inlineCompletionEndpoint="/reagent-orders/"
+        enableInlineCompletion
       />
     </div>
   )

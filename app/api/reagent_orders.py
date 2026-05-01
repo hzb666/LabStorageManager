@@ -77,6 +77,10 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.search_completion_db import (
+    REAGENT_ORDER_COMPLETION_ENDPOINT,
+    mark_entity_completion_index_stale,
+)
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.api.reagent_orders_workflow import register_workflow_routes
 
@@ -112,6 +116,13 @@ VALID_REAGENT_SORT_FIELDS = {
     "updated_at",
     *APPLICANT_SORT_KEYS,
 }
+
+
+def _clear_reagent_order_cache() -> None:
+    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    mark_entity_completion_index_stale(REAGENT_ORDER_COMPLETION_ENDPOINT)
+
+
 REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
     'name': [
         ReagentOrder.name,
@@ -388,7 +399,7 @@ async def create_reagent_order(
     )
     db.commit()
     db.refresh(db_order)
-    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    _clear_reagent_order_cache()
     await sse_manager.broadcast(
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_CREATED,
@@ -779,7 +790,7 @@ async def update_reagent_order(
     db.refresh(order)
     
     # 清除列表缓存，确保更新后前端立即看到最新数据
-    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    _clear_reagent_order_cache()
     await sse_manager.broadcast(
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_UPDATED,

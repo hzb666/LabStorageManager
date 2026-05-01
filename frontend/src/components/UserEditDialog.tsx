@@ -9,7 +9,7 @@ import {
 import { useForm, type UseFormReturn } from "react-hook-form";
 import { valibotResolver } from "@hookform/resolvers/valibot";
 import { Loader2, Lock, X } from "lucide-react";
-import { userAdminAPI, authAPI } from "@/api/client";
+import { userAdminAPI, authAPI, searchCompletionAPI } from "@/api/client";
 import { BaseForm } from "@/components/BaseForm";
 import { Button } from "@/components/ui/Button";
 import {
@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/Label";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/Avatar";
+import { Checkbox } from "@/components/ui/Checkbox";
 import {
   Tooltip,
   TooltipContent,
@@ -788,6 +789,9 @@ interface ProfileSectionProps {
   avatarLoading: boolean;
   avatarImageLoaded: boolean;
   editLoading: boolean;
+  personalizationEnabled: boolean;
+  personalizationLoading: boolean;
+  onPersonalizationChange: (checked: boolean) => void;
   onAvatarChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onAvatarDelete: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onAvatarLoad: () => void;
@@ -806,6 +810,9 @@ function ProfileSection({
   avatarLoading,
   avatarImageLoaded,
   editLoading,
+  personalizationEnabled,
+  personalizationLoading,
+  onPersonalizationChange,
   onAvatarChange,
   onAvatarDelete,
   onAvatarLoad,
@@ -816,7 +823,7 @@ function ProfileSection({
 }: Readonly<ProfileSectionProps>) {
   return (
     <>
-      <div className="grid gap-4 space-y-2">
+      <div className="grid gap-4">
         <AvatarSection
           user={user}
           avatarPreview={avatarPreview}
@@ -829,6 +836,30 @@ function ProfileSection({
         />
 
         <BaseForm form={editForm} fields={USER_EDIT_FIELDS} layout="stack" />
+
+        {mode === "profile" && (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="personalization-toggle"
+              checked={personalizationEnabled}
+              disabled={personalizationLoading}
+              onCheckedChange={onPersonalizationChange}
+            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <label
+                  htmlFor="personalization-toggle"
+                  className="text-sm leading-none cursor-pointer select-none"
+                >
+                  允许收集个性化使用信息
+                </label>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-64">
+                开启后系统会记录你的使用习惯以提供个性化体验，关闭后仅使用全局数据。
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
 
         {mode === "admin" && (
           <RoleSelector
@@ -884,6 +915,8 @@ export function UserEditDialog({
   } = useUserEditForms(open, user);
   const [editLoading, setEditLoading] = useState(false);
   const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+  const [personalizationEnabled, setPersonalizationEnabled] = useState(true);
+  const [personalizationLoading, setPersonalizationLoading] = useState(false);
   const {
     avatarPreview,
     avatarLoading,
@@ -894,6 +927,25 @@ export function UserEditDialog({
     handleAvatarDelete,
     handleAvatarUpdate,
   } = useAvatarState(open, user, rememberedUser, updateRememberedUser);
+
+  useEffect(() => {
+    if (!open || mode !== "profile") return
+    searchCompletionAPI.getPreferences()
+      .then((res) => setPersonalizationEnabled(res.data.personalization_enabled))
+      .catch(() => {})
+  }, [open, mode])
+
+  const handlePersonalizationChange = useCallback(async (checked: boolean) => {
+    setPersonalizationLoading(true)
+    try {
+      const res = await searchCompletionAPI.updatePreferences({ personalization_enabled: checked })
+      setPersonalizationEnabled(res.data.personalization_enabled)
+    } catch {
+      toast.error("更新搜索预测设置失败")
+    } finally {
+      setPersonalizationLoading(false)
+    }
+  }, [])
 
   // 关闭弹窗时要同时清理表单与头像本地状态，且上传中禁止关闭以避免“UI 关了但请求还在跑”。
   const handleClose = useCallback(() => {
@@ -956,6 +1008,9 @@ export function UserEditDialog({
             avatarLoading={avatarLoading}
             avatarImageLoaded={avatarImageLoaded}
             editLoading={editLoading}
+            personalizationEnabled={personalizationEnabled}
+            personalizationLoading={personalizationLoading}
+            onPersonalizationChange={handlePersonalizationChange}
             onAvatarChange={handleAvatarChange}
             onAvatarDelete={handleAvatarDelete}
             onAvatarLoad={() => setAvatarImageLoaded(true)}

@@ -65,6 +65,11 @@ from app.services.order_status_times import (
     get_reagent_order_status_times,
 )
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.search_completion_db import (
+    INVENTORY_COMPLETION_ENDPOINT,
+    REAGENT_ORDER_COMPLETION_ENDPOINT,
+    mark_entity_completion_index_stale,
+)
 
 ORDER_NOT_FOUND = "Order not found"
 LIST_CACHE_PREFIX = "list:"
@@ -96,6 +101,11 @@ DASHBOARD_REAGENT_STATUSES = (
     ReagentOrderStatus.APPROVED,
     ReagentOrderStatus.REJECTED,
 )
+
+
+def _clear_reagent_workflow_cache(search_cache: Dict[str, tuple[Any, Any]]) -> None:
+    clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+    mark_entity_completion_index_stale(REAGENT_ORDER_COMPLETION_ENDPOINT)
 
 
 class ReagentWorkflowEditableFields(BaseModel):
@@ -386,6 +396,7 @@ def _clear_inventory_projection_cache() -> None:
     )
 
     clear_cache_by_prefix(INVENTORY_SEARCH_CACHE, prefix=INVENTORY_LIST_CACHE_PREFIX)
+    mark_entity_completion_index_stale(INVENTORY_COMPLETION_ENDPOINT)
 
 
 def _log_stock_in_operations(
@@ -591,7 +602,7 @@ def _register_approval_routes(
 
         db.commit()
         db.refresh(order)
-        clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        _clear_reagent_workflow_cache(search_cache)
         await sse_manager.broadcast(
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
@@ -635,7 +646,7 @@ def _register_approval_routes(
 
         db.commit()
         db.refresh(order)
-        clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        _clear_reagent_workflow_cache(search_cache)
         await sse_manager.broadcast(
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
@@ -736,7 +747,7 @@ def _register_arrival_routes(
             )
             db.commit()
             db.refresh(order)
-            clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+            _clear_reagent_workflow_cache(search_cache)
             await sse_manager.broadcast(
                 SSERoom.REAGENT_ORDERS,
                 SSEEventType.REAGENT_ORDER_UPDATED,
@@ -802,7 +813,7 @@ def _register_arrival_routes(
         )
         db.commit()
         db.refresh(order)
-        clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        _clear_reagent_workflow_cache(search_cache)
         await sse_manager.broadcast(
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
@@ -1110,7 +1121,7 @@ async def _finalize_stock_in_order(
 ) -> None:
     order.status = ReagentOrderStatus.STOCKED
     db.commit()
-    clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+    _clear_reagent_workflow_cache(search_cache)
     await sse_manager.broadcast(
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_UPDATED,
@@ -1184,7 +1195,7 @@ def _register_delete_order_route(
             is_cli=get_request_is_cli(request),
         )
         db.commit()
-        clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
+        _clear_reagent_workflow_cache(search_cache)
         await sse_manager.broadcast(
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_DELETED,

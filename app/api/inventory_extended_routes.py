@@ -68,11 +68,17 @@ from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.shelf_utils import normalize_storage_location
 from app.services.spec_utils import SpecificationError, format_specification, parse_specification
 from app.services.user_utils import batch_get_user_names
+from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT, mark_entity_completion_index_stale
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
 PENDING_STOCKIN_OVERDUE_DAYS = 7
 logger = logging.getLogger(__name__)
+
+
+def _clear_inventory_cache(search_cache: Dict[str, tuple[Any, datetime]], prefix: str) -> None:
+    clear_cache_by_prefix(search_cache, prefix=prefix)
+    mark_entity_completion_index_stale(INVENTORY_COMPLETION_ENDPOINT)
 
 
 def _is_overdue_borrow(updated_at: datetime | None, now: datetime) -> bool:
@@ -456,7 +462,7 @@ def _register_manual_pending_stockin_route(
         db.commit()
         db.refresh(item)
 
-        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        _clear_inventory_cache(search_cache, list_cache_prefix)
         serialized_item = _serialize_inventory_item(db, item)
         await sse_manager.broadcast(
             SSERoom.INVENTORY,
@@ -499,7 +505,7 @@ def _register_manual_and_dashboard_routes(
         for item in created_items:
             db.refresh(item)
 
-        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        _clear_inventory_cache(search_cache, list_cache_prefix)
         serialized_items = _serialize_inventory_items(db, created_items)
         actor_client_id = get_sse_client_id(request)
         for ci, serialized_item in zip(created_items, serialized_items):
@@ -836,7 +842,7 @@ def _register_import_routes(
                 is_cli=get_request_is_cli(request),
             )
             if result["success"] and result["created"] > 0:
-                clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+                _clear_inventory_cache(search_cache, list_cache_prefix)
                 for cas_number in result.get("created_cas_numbers", []):
                     enqueue_structure_cache_resolution(
                         background_tasks,
@@ -1080,7 +1086,7 @@ def _register_borrow_route(
         db.commit()
 
         db.refresh(item)
-        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        _clear_inventory_cache(search_cache, list_cache_prefix)
 
         response = _serialize_inventory_item(db, item)
         await sse_manager.broadcast(
@@ -1123,7 +1129,7 @@ def _register_return_route(
         )
         db.delete(item)
         db.commit()
-        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        _clear_inventory_cache(search_cache, list_cache_prefix)
 
         await sse_manager.broadcast(
             SSERoom.INVENTORY,
@@ -1162,7 +1168,7 @@ def _register_return_route(
             )
         db.commit()
         db.refresh(item)
-        clear_cache_by_prefix(search_cache, prefix=list_cache_prefix)
+        _clear_inventory_cache(search_cache, list_cache_prefix)
         response = _serialize_inventory_item(db, item)
 
         await sse_manager.broadcast(

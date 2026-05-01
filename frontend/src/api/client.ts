@@ -853,6 +853,34 @@ export const reagentBrandAPI = {
   delete: (id: number) => api.delete(`/reagent-brands/${id}`),
 }
 
+// 搜索补全预测 API。
+export interface InlineCompletionResponse {
+  completion: string | null
+  suffix: string | null
+  confidence: number
+  source: string | null
+  personalized: boolean
+}
+
+export interface SearchCompletionPreferences {
+  personalization_enabled: boolean
+}
+
+export const searchCompletionAPI = {
+  getInline: (params: { endpoint: string; field?: string; q: string }) =>
+    api.get<InlineCompletionResponse>('/search-completions/inline', { params }),
+  getPreferences: () =>
+    api.get<SearchCompletionPreferences>('/search-completions/preferences'),
+  updatePreferences: (data: SearchCompletionPreferences) =>
+    api.put<SearchCompletionPreferences>('/search-completions/preferences', data),
+  submitFeedback: (data: {
+    endpoint: string
+    field?: string
+    query: string
+    accepted: boolean
+  }) => api.post('/search-completions/feedback', data),
+}
+
 // 化学信息 API。
 export interface ChemicalInfo {
   cas_number: string

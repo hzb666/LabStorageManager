@@ -12,8 +12,14 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { DataTable } from "@/components/ui/DataTable";
 import { StaleBanner } from "@/components/ui/StaleBanner";
-import { TableEmptyState, TableFilters, TableLoadingState } from "@/components/ui/TableFilters";
+import {
+  TableEmptyState,
+  TableFilters,
+  TableLoadingState,
+  type TableSearchInputProps,
+} from "@/components/ui/TableFilters";
 import { useListSSE } from "@/hooks/useListSSE";
+import { useInlineSearchCompletion } from "@/hooks/useInlineSearchCompletion";
 import {
   DEFAULT_SEARCH_FIELD_OPTIONS,
   DEFAULT_STATUS_OPTIONS,
@@ -76,6 +82,8 @@ export interface FilterTableProps {
   cardClassName?: string;
   emptyText?: string;
   toolbarActions?: React.ReactNode;
+  inlineCompletionEndpoint?: '/inventory/' | '/reagent-orders/' | '/consumable-orders/';
+  enableInlineCompletion?: boolean;
   realtime?: {
     room: string;
     eventTypes: readonly string[];
@@ -738,6 +746,7 @@ function FilterTableControls({
   statusOptions,
   filterClassName,
   toolbarActions,
+  inlineCompletion,
 }: Readonly<{
   filter: ReturnType<typeof useTableState>;
   searchFieldOptions: SearchFieldOption[];
@@ -752,6 +761,7 @@ function FilterTableControls({
   statusOptions: FilterOption[];
   filterClassName?: string;
   toolbarActions?: React.ReactNode;
+  inlineCompletion?: TableSearchInputProps["inlineCompletion"];
 }>) {
   return (
     <TableFilters
@@ -777,6 +787,7 @@ function FilterTableControls({
       showFuzzySearch={showFuzzySearch}
       showMatchMode={showMatchMode}
       actions={toolbarActions}
+      inlineCompletion={inlineCompletion}
     />
   );
 }
@@ -916,6 +927,49 @@ function useFilterTableEffects({
   useSortingResetSignal({ filter, sortingResetSignal });
 }
 
+function useFilterTableInlineCompletion({
+  enabled,
+  endpoint,
+  filter,
+  searchInputDisabled,
+}: Readonly<{
+  enabled?: boolean;
+  endpoint?: FilterTableProps["inlineCompletionEndpoint"];
+  filter: ReturnType<typeof useTableState>;
+  searchInputDisabled?: boolean;
+}>): TableSearchInputProps["inlineCompletion"] | undefined {
+  const isEnabled = Boolean(
+    enabled && endpoint && !searchInputDisabled && filter.searchField === "all",
+  );
+  const inlineCompletion = useInlineSearchCompletion({
+    endpoint: endpoint ?? "",
+    field: filter.searchField,
+    value: filter.searchInput,
+    enabled: isEnabled,
+  });
+
+  if (!isEnabled) {
+    return undefined;
+  }
+
+  return {
+    suffix: inlineCompletion.completion?.suffix ?? null,
+    hidden: inlineCompletion.hidden,
+    onAccept: () => {
+      const accepted = inlineCompletion.onAccept();
+      if (accepted !== filter.searchInput) {
+        filter.applySearchImmediate(accepted);
+        inlineCompletion.submitFeedback(true);
+      }
+      return accepted;
+    },
+    onDismiss: () => {
+      inlineCompletion.onDismiss();
+      inlineCompletion.submitFeedback(false);
+    },
+  };
+}
+
 // 组合筛选栏、表格状态与数据表格渲染，是 FilterTable 的总入口。
 export function FilterTable(props: Readonly<FilterTableProps>) {
   const {
@@ -951,14 +1005,9 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
     enableExpandAll,
     disableExpandedRowAnimation,
     renderExpandedRow,
-    noteField,
-    scrollHeight,
-    className,
-    filterClassName,
-    cardClassName,
-    emptyText,
-    toolbarActions,
-    realtime,
+    noteField, scrollHeight, className, filterClassName, cardClassName,
+    emptyText, toolbarActions, realtime,
+    inlineCompletionEndpoint, enableInlineCompletion,
   } = resolveFilterTableProps(props);
   const location = useLocation();
   const actionRefs = useActionRefs({ onEdit, onBorrowSuccess });
@@ -1019,8 +1068,11 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
 
   const calculatedScrollHeight = getScrollHeight(filter.data.length, scrollHeight);
 
-  // 当列表已下滚时，阻止“展开全部”，避免用户在中段展开后产生强烈跳动。
   const disableExpandAll = shouldDisableExpandAll(filter.isAllExpanded, isTableAtTop);
+
+  const inlineCompletion = useFilterTableInlineCompletion({
+    enabled: enableInlineCompletion, endpoint: inlineCompletionEndpoint, filter, searchInputDisabled,
+  });
 
   return (
     <div className={cn("space-y-6", className)}>
@@ -1038,6 +1090,7 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
         statusOptions={statusOptions}
         filterClassName={filterClassName}
         toolbarActions={toolbarActions}
+        inlineCompletion={inlineCompletion}
       />
 
       <Card className={cn("relative overflow-hidden", cardClassName)}>

@@ -80,6 +80,7 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT, mark_entity_completion_index_stale
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.structure_index import StructureQueryFormat, StructureSearchMode, structure_index
 from app.services.structure_inventory_summary import normalized_inventory_cas_expr
@@ -328,6 +329,7 @@ def _clear_list_cache() -> None:
     # 清理库存列表缓存，确保写操作后读请求拿到最新数据。
 
     cleared_count = clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    mark_entity_completion_index_stale(INVENTORY_COMPLETION_ENDPOINT)
     logger.info(f"Cleared {cleared_count} list cache entries")
 
 

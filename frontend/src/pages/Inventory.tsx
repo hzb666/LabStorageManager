@@ -1109,6 +1109,8 @@ export function InventoryPage() {
         emptyText={structureEditor.structureFilter ? '没有匹配结构的库存' : '暂无数据'}
         noteField="notes"
         renderExpandedRow={renderExpandedRow}
+        inlineCompletionEndpoint="/inventory/"
+        enableInlineCompletion
       />
     </div>
   )

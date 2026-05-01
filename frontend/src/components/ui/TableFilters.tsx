@@ -25,6 +25,7 @@ export interface TableFiltersProps {
   searchInputDisabledValue?: string
   onSearchInputDisabledClear?: () => void
   searchActions?: React.ReactNode
+  inlineCompletion?: TableSearchInputProps['inlineCompletion']
   
   // 模糊搜索
   fuzzySearch: boolean
@@ -59,6 +60,14 @@ export interface TableSearchInputProps {
   onDisabledClear?: () => void
   inputClassName?: string
   containerClassName?: string
+  inlineCompletion?: InlineCompletionConfig
+}
+
+interface InlineCompletionConfig {
+  suffix: string | null
+  hidden: boolean
+  onAccept: () => string
+  onDismiss: () => void
 }
 
 export function TableLoadingState({
@@ -442,6 +451,140 @@ function canClearSearchInput({
   return disabled ? Boolean(disabledValue && onDisabledClear) : Boolean(value)
 }
 
+function hasActiveInlineCompletion(
+  inlineCompletion?: InlineCompletionConfig,
+): inlineCompletion is InlineCompletionConfig & { suffix: string } {
+  return Boolean(inlineCompletion && !inlineCompletion.hidden && inlineCompletion.suffix)
+}
+
+function acceptInlineCompletion({
+  inlineCompletion,
+  onChange,
+  value,
+}: Readonly<{
+  inlineCompletion: InlineCompletionConfig
+  onChange: (value: string) => void
+  value: string
+}>) {
+  const accepted = inlineCompletion.onAccept()
+  if (accepted !== value) {
+    onChange(accepted)
+  }
+}
+
+function isCaretAtSearchEnd(input: HTMLInputElement, value: string) {
+  return input.selectionStart === value.length && input.selectionEnd === value.length
+}
+
+function handleInlineCompletionKeyDown(
+  event: React.KeyboardEvent<HTMLInputElement>,
+  params: Readonly<{
+    inlineCompletion?: InlineCompletionConfig
+    onChange: (value: string) => void
+    value: string
+  }>,
+) {
+  const { inlineCompletion, onChange, value } = params
+  if (!hasActiveInlineCompletion(inlineCompletion)) return
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    inlineCompletion.onDismiss()
+    return
+  }
+
+  if (event.key === 'Tab') {
+    event.preventDefault()
+    acceptInlineCompletion({ inlineCompletion, onChange, value })
+    return
+  }
+
+  if (event.key === 'ArrowRight' && isCaretAtSearchEnd(event.currentTarget, value)) {
+    event.preventDefault()
+    acceptInlineCompletion({ inlineCompletion, onChange, value })
+  }
+}
+
+function SearchInputIcon({
+  showDisabledValueHint,
+}: Readonly<{
+  showDisabledValueHint: boolean
+}>) {
+  return (
+    <Search
+      className={cn(
+        'absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 pointer-events-none',
+        showDisabledValueHint
+          ? 'text-gray-500 dark:text-gray-400'
+          : 'text-muted-foreground',
+      )}
+    />
+  )
+}
+
+function InlineCompletionGhost({
+  inlineCompletion,
+  value,
+  visible,
+}: Readonly<{
+  inlineCompletion?: InlineCompletionConfig
+  value: string
+  visible: boolean
+}>) {
+  if (!visible) return null
+
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        'absolute inset-0 z-[5] pointer-events-none overflow-hidden',
+        'flex items-center',
+      )}
+    >
+      <span className="invisible whitespace-pre pl-9 text-base leading-none">
+        {value}
+      </span>
+      <span className="text-muted-foreground/40 whitespace-pre text-base leading-none select-none">
+        {inlineCompletion?.suffix}
+      </span>
+    </div>
+  )
+}
+
+function SearchInputActions({
+  canClear,
+  disabled,
+  isSearchTooLong,
+  onClear,
+  searchErrorText,
+}: Readonly<{
+  canClear: boolean
+  disabled: boolean
+  isSearchTooLong: boolean
+  onClear: () => void
+  searchErrorText: string
+}>) {
+  return (
+    <div className="absolute right-1 top-1 bottom-1 flex items-center bg-transparent z-10 pointer-events-none">
+      {isSearchTooLong && (
+        <span className="text-sm text-destructive mr-1 whitespace-nowrap pointer-events-auto">
+          {searchErrorText}
+        </span>
+      )}
+      {canClear && (
+        <button
+          type="button"
+          aria-label={disabled ? '清除结构筛选' : '清空搜索'}
+          onClick={onClear}
+          className="text-muted-foreground hover:text-foreground shrink-0 p-1 pointer-events-auto flex items-center justify-center mr-0.5"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  )
+}
+
 // 渲染表格搜索输入框，并处理超长校验与一键清空交互。
 export function TableSearchInput({
   value,
@@ -454,6 +597,7 @@ export function TableSearchInput({
   onDisabledClear,
   inputClassName = '',
   containerClassName = 'relative flex-1 min-w-50',
+  inlineCompletion,
 }: Readonly<TableSearchInputProps>) {
   const displayValue = getSearchDisplayValue({ disabled, disabledValue, value })
   const isSearchTooLong = !disabled && value.length > maxLength
@@ -462,6 +606,7 @@ export function TableSearchInput({
   const inputPaddingClassName = getSearchInputPaddingClassName({ canClear, isSearchTooLong })
   const resolvedPlaceholder = getSearchPlaceholder({ disabled, disabledReason, placeholder })
   const showDisabledValueHint = disabled && Boolean(disabledValue)
+  const showGhost = hasActiveInlineCompletion(inlineCompletion) && !disabled && value.length > 0
   const handleClear = () => {
     if (disabled) {
       onDisabledClear?.()
@@ -470,21 +615,24 @@ export function TableSearchInput({
     onChange('')
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    handleInlineCompletionKeyDown(e, { inlineCompletion, onChange, value })
+  }
+
   return (
     <div className={containerClassName} title={disabled ? disabledReason : undefined}>
-      <Search
-        className={cn(
-          'absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 pointer-events-none',
-          showDisabledValueHint
-            ? 'text-gray-500 dark:text-gray-400'
-            : 'text-muted-foreground',
-        )}
+      <SearchInputIcon showDisabledValueHint={showDisabledValueHint} />
+      <InlineCompletionGhost
+        inlineCompletion={inlineCompletion}
+        value={value}
+        visible={showGhost}
       />
       <Input
         placeholder={resolvedPlaceholder}
         value={displayValue}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKeyDown}
         aria-invalid={isSearchTooLong}
         className={cn(
           'pl-9 text-base w-full inline-flex leading-none outline-none',
@@ -494,23 +642,13 @@ export function TableSearchInput({
           inputPaddingClassName,
         )}
       />
-      <div className="absolute right-1 top-1 bottom-1 flex items-center bg-transparent z-10 pointer-events-none">
-        {isSearchTooLong && (
-          <span className="text-sm text-destructive mr-1 whitespace-nowrap pointer-events-auto">
-            {searchErrorText}
-          </span>
-        )}
-        {canClear && (
-          <button
-            type="button"
-            aria-label={disabled ? '清除结构筛选' : '清空搜索'}
-            onClick={handleClear}
-            className="text-muted-foreground hover:text-foreground shrink-0 p-1 pointer-events-auto flex items-center justify-center mr-0.5"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+      <SearchInputActions
+        canClear={canClear}
+        disabled={disabled}
+        isSearchTooLong={isSearchTooLong}
+        onClear={handleClear}
+        searchErrorText={searchErrorText}
+      />
     </div>
   )
 }
@@ -524,6 +662,7 @@ export function TableFilters({
   searchInputDisabledValue,
   onSearchInputDisabledClear,
   searchActions,
+  inlineCompletion,
   fuzzySearch,
   onFuzzySearchChange,
   showFuzzySearch = true,
@@ -555,6 +694,7 @@ export function TableFilters({
           disabledReason={searchInputDisabledReason}
           disabledValue={searchInputDisabledValue}
           onDisabledClear={onSearchInputDisabledClear}
+          inlineCompletion={inlineCompletion}
         />
         {searchActions && (
           <div className="flex items-center">

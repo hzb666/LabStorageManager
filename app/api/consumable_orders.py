@@ -68,6 +68,10 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.search_completion_db import (
+    CONSUMABLE_ORDER_COMPLETION_ENDPOINT,
+    mark_entity_completion_index_stale,
+)
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 logger = logging.getLogger(__name__)
@@ -110,6 +114,13 @@ DASHBOARD_CONSUMABLE_STATUSES = (
     ConsumableOrderStatus.APPROVED,
     ConsumableOrderStatus.REJECTED,
 )
+
+
+def _clear_consumable_order_cache() -> None:
+    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    mark_entity_completion_index_stale(CONSUMABLE_ORDER_COMPLETION_ENDPOINT)
+
+
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
 VALID_CONSUMABLE_SORT_FIELDS = {
@@ -395,7 +406,7 @@ async def create_consumable_order(
     )
     db.commit()
     db.refresh(db_order)
-    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    _clear_consumable_order_cache()
     await sse_manager.broadcast(
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_CREATED,
@@ -691,7 +702,7 @@ async def update_consumable_order(
     db.commit()
     db.refresh(order)
     
-    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    _clear_consumable_order_cache()
     await sse_manager.broadcast(
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
@@ -740,7 +751,7 @@ async def approve_consumable_order(
     
     db.commit()
     db.refresh(order)
-    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    _clear_consumable_order_cache()
     await sse_manager.broadcast(
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
@@ -784,7 +795,7 @@ async def reject_consumable_order(
     
     db.commit()
     db.refresh(order)
-    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    _clear_consumable_order_cache()
     await sse_manager.broadcast(
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
@@ -842,7 +853,7 @@ async def complete_consumable_order(
     
     db.commit()
     db.refresh(order)
-    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    _clear_consumable_order_cache()
     await sse_manager.broadcast(
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
@@ -974,7 +985,7 @@ async def delete_consumable_order(
     )
 
     db.commit()
-    clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
+    _clear_consumable_order_cache()
     await sse_manager.broadcast(
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_DELETED,

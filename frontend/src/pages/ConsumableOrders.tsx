@@ -381,6 +381,8 @@ export function ConsumableOrdersPage() {
         searchPlaceholder="搜索名称、规格、订购人、订购时间..."
         renderExpandedRow={renderExpandedRow}
         noteField="notes"
+        inlineCompletionEndpoint="/consumable-orders/"
+        enableInlineCompletion
       />
     </div>
   )
