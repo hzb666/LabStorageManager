@@ -376,8 +376,8 @@ def _load_current_session_from_db(
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return bcrypt.checkpw(
-            plain_password.encode('utf-8'),
-            hashed_password.encode('utf-8')
+            plain_password.encode("utf-8"),
+            hashed_password.encode("utf-8")
         )
     except (ValueError, TypeError):
         return False
@@ -385,9 +385,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(
-        password.encode('utf-8'),
+        password.encode("utf-8"),
         bcrypt.gensalt()
-    ).decode('utf-8')
+    ).decode("utf-8")
 
 
 def create_access_token(
@@ -399,7 +399,7 @@ def create_access_token(
     client: str | None = None,
 ) -> str:
     expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
-    
+
     payload = {
         "sub": str(user_id),
         "username": username,
@@ -412,7 +412,7 @@ def create_access_token(
     # `client` 由服务端签发，仅标记 CLI/Web 来源，不授予额外权限。
     if client:
         payload["client"] = client
-    
+
     # 生产环境必须使用 RS256；开发环境可用 HS256 兜底。
     if settings.algorithm == "RS256":
         token = jwt.encode(
@@ -427,7 +427,7 @@ def create_access_token(
             settings.secret_key,
             algorithm=settings.algorithm
         )
-    
+
     return token
 
 
@@ -549,15 +549,14 @@ def is_token_session_active(token_hash: str, *, client_ip: str | None = None) ->
         cached_session = _build_cached_session(token_hash, cached_data)
         if cached_session is None:
             delete_cached_session(token_hash)
+        elif cached_session.expires_at <= now_utc:
+            delete_cached_session(token_hash)
+        elif settings.session_strict_ip and client_ip and cached_session.ip_address != client_ip:
+            delete_cached_session(token_hash)
+        elif cached_data.get("is_active") is False:
+            delete_cached_session(token_hash)
         else:
-            if cached_session.expires_at <= now_utc:
-                delete_cached_session(token_hash)
-            elif settings.session_strict_ip and client_ip and cached_session.ip_address != client_ip:
-                delete_cached_session(token_hash)
-            elif cached_data.get("is_active") is False:
-                delete_cached_session(token_hash)
-            else:
-                return True
+            return True
 
     with Session(engine) as db:
         loaded = _load_user_and_session_by_token_hash(db, token_hash)
@@ -613,7 +612,7 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
-    
+
     return current_user
 
 

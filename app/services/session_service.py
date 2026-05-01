@@ -277,28 +277,28 @@ def finalize_session_refresh(
 def _check_device_limit(db: Session, user_id: int, device_id: str) -> bool:
     if not device_id:
         return True
-    
+
     count_result = db.exec(
         select(func.count(UserSession.id))
         .where(UserSession.user_id == user_id)
         .where(UserSession.device_id != device_id)
     ).one()
     count = _coerce_count(count_result)
-    
+
     return count < settings.max_device_per_user
 
 
 def _check_ip_limit(db: Session, user_id: int, ip_address: str) -> bool:
     if not ip_address:
         return True
-    
+
     unique_ips_result = db.exec(
         select(func.count(func.distinct(UserSession.ip_address)))
         .where(UserSession.user_id == user_id)
         .where(UserSession.ip_address != ip_address)
     ).one()
     unique_ips = _coerce_count(unique_ips_result)
-    
+
     return unique_ips < settings.max_ip_per_user
 
 

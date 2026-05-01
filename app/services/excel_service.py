@@ -64,18 +64,18 @@ MAX_FILE_SIZE = EXCEL_FILE_MAX_BYTES
 BOOLEAN_FALSE_STRINGS = {"false", "0", "no", "n"}
 BOOLEAN_TRUE_STRINGS = {"true", "1", "yes", "y"}
 EXCEL_IMPORT_COLUMN_MAPPING = {
-    'cas_number': ['cas_number', 'cas', 'cas号'],
-    'name': ['name', '名称', '品名'],
-    'english_name': ['english_name', '英文名', 'englishname'],
-    'alias': ['alias', '别名'],
-    'category': ['category', '分类', '类别'],
-    'brand': ['brand', '品牌', '厂商', 'manufacturer'],
-    'specification': ['specification', '规格', 'spec'],
-    'remaining_quantity': ['remaining_quantity', '剩余数量', '剩余量'],
-    'storage_location': ['storage_location', 'location', '位置', '存放位置'],
-    'is_hazardous': ['is_hazardous', '危险品', '是否危险品'],
-    'notes': ['notes', '备注', 'remark'],
-    'created_at': ['created_at', '入库时间', '创建时间', 'stock_in_date'],
+    "cas_number": ["cas_number", "cas", "cas号"],
+    "name": ["name", "名称", "品名"],
+    "english_name": ["english_name", "英文名", "englishname"],
+    "alias": ["alias", "别名"],
+    "category": ["category", "分类", "类别"],
+    "brand": ["brand", "品牌", "厂商", "manufacturer"],
+    "specification": ["specification", "规格", "spec"],
+    "remaining_quantity": ["remaining_quantity", "剩余数量", "剩余量"],
+    "storage_location": ["storage_location", "location", "位置", "存放位置"],
+    "is_hazardous": ["is_hazardous", "危险品", "是否危险品"],
+    "notes": ["notes", "备注", "remark"],
+    "created_at": ["created_at", "入库时间", "创建时间", "stock_in_date"],
 }
 
 
@@ -207,37 +207,37 @@ def _generate_internal_code_with_tracking(
 
 
 def parse_excel_file(file_path: str) -> pd.DataFrame:
-    if file_path.endswith('.csv'):
-        for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312']:
+    if file_path.endswith(".csv"):
+        for encoding in ["utf-8-sig", "utf-8", "gbk", "gb2312"]:
             try:
                 return pd.read_csv(file_path, encoding=encoding)
             except UnicodeDecodeError:
                 continue
-        return pd.read_csv(file_path, encoding='utf-8-sig', encoding_errors='replace')
+        return pd.read_csv(file_path, encoding="utf-8-sig", encoding_errors="replace")
     return pd.read_excel(file_path)
 
 
 def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
-    required_fields = ['cas_number', 'name', 'specification']
-    
+    required_fields = ["cas_number", "name", "specification"]
+
     for field in required_fields:
-        if field not in row or pd.isna(row[field]) or str(row[field]).strip() == '':
+        if field not in row or pd.isna(row[field]) or str(row[field]).strip() == "":
             return False, f"Missing required field: {field}"
-    
-    cas_raw = str(row['cas_number']).strip()
+
+    cas_raw = str(row["cas_number"]).strip()
     normalized_cas = normalize_cas(cas_raw)
     is_valid, error = validate_cas_format(normalized_cas)
-    
+
     if not is_valid:
         return False, f"Invalid CAS format: {error}"
-    
+
     try:
-        spec_value, _ = parse_specification(str(row['specification']))
+        spec_value, _ = parse_specification(str(row["specification"]))
     except ValueError as e:
         return False, f"Invalid specification format: {str(e)}"
 
     # 剩余量不能超过规格解析出的初始量，防止导入后库存状态立刻失真。
-    remaining_raw = row.get('remaining_quantity')
+    remaining_raw = row.get("remaining_quantity")
     if pd.notna(remaining_raw):
         remaining_text = str(remaining_raw).strip()
         if remaining_text:
@@ -251,7 +251,7 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
                     False,
                     f"Invalid remaining_quantity: {remaining_value} cannot exceed initial_quantity {spec_value}",
                 )
-    
+
     return True, None
 
 
@@ -284,7 +284,7 @@ def _validate_required_import_columns(df: pd.DataFrame, normalized_df: pd.DataFr
 
 def _parse_remaining_quantity(row: dict, initial_quantity: float) -> float:
     remaining_qty = initial_quantity
-    remaining_raw = row.get('remaining_quantity')
+    remaining_raw = row.get("remaining_quantity")
     if pd.notna(remaining_raw):
         remaining_text = str(remaining_raw).strip()
         if remaining_text:
@@ -294,16 +294,16 @@ def _parse_remaining_quantity(row: dict, initial_quantity: float) -> float:
 
 def _normalize_import_optional_fields(row: dict, default_storage_location: Optional[str]) -> dict[str, Optional[str]]:
     all_optional_fields = {
-        'storage_location': row.get('storage_location'),
-        'alias': row.get('alias'),
-        'english_name': row.get('english_name'),
-        'category': row.get('category'),
-        'brand': row.get('brand'),
-        'notes': row.get('notes'),
+        "storage_location": row.get("storage_location"),
+        "alias": row.get("alias"),
+        "english_name": row.get("english_name"),
+        "category": row.get("category"),
+        "brand": row.get("brand"),
+        "notes": row.get("notes"),
     }
     normalized_optional = empty_to_none(all_optional_fields, list(all_optional_fields.keys()))
-    normalized_optional['storage_location'] = normalize_storage_location(
-        normalized_optional['storage_location'] or default_storage_location
+    normalized_optional["storage_location"] = normalize_storage_location(
+        normalized_optional["storage_location"] or default_storage_location
     )
     return normalized_optional
 
@@ -330,12 +330,12 @@ def _build_inventory_from_import_row(
     context: ExcelImportContext,
     row: dict,
 ) -> Inventory:
-    normalized_cas = normalize_cas(str(row['cas_number']))
-    spec_value, unit = parse_specification(str(row['specification']))
+    normalized_cas = normalize_cas(str(row["cas_number"]))
+    spec_value, unit = parse_specification(str(row["specification"]))
     initial_quantity = spec_value
     remaining_qty = _parse_remaining_quantity(row, initial_quantity)
     optional_fields = _normalize_import_optional_fields(row, context.default_storage_location)
-    imported_created_at = _parse_import_created_at(row.get('created_at'))
+    imported_created_at = _parse_import_created_at(row.get("created_at"))
     stored_created_at = normalize_to_utc_naive(imported_created_at)
     internal_code = _generate_internal_code_with_tracking(
         context.db,
@@ -343,30 +343,30 @@ def _build_inventory_from_import_row(
         context.sequence_tracker,
         imported_created_at,
     )
-    name = str(row['name']).strip()
+    name = str(row["name"]).strip()
     pinyin_fields = compute_pinyin_fields(
         name=name,
-        category=optional_fields['category'],
-        brand=optional_fields['brand'],
-        storage_location=optional_fields['storage_location'],
+        category=optional_fields["category"],
+        brand=optional_fields["brand"],
+        storage_location=optional_fields["storage_location"],
     )
 
     return Inventory(
         internal_code=internal_code,
         cas_number=normalized_cas,
         name=name,
-        english_name=optional_fields['english_name'],
-        alias=optional_fields['alias'],
-        category=optional_fields['category'],
-        brand=optional_fields['brand'],
-        storage_location=optional_fields['storage_location'],
+        english_name=optional_fields["english_name"],
+        alias=optional_fields["alias"],
+        category=optional_fields["category"],
+        brand=optional_fields["brand"],
+        storage_location=optional_fields["storage_location"],
         initial_quantity=initial_quantity,
         remaining_quantity=remaining_qty,
         remaining_percent=_compute_remaining_percent(remaining_qty, initial_quantity),
         unit=unit,
-        is_hazardous=_parse_boolean(row.get('is_hazardous'), context.default_is_hazardous),
+        is_hazardous=_parse_boolean(row.get("is_hazardous"), context.default_is_hazardous),
         status=InventoryStatus.IN_STOCK,
-        notes=optional_fields['notes'],
+        notes=optional_fields["notes"],
         created_at=stored_created_at,
         created_by_id=context.user_id,
         **pinyin_fields,
@@ -540,7 +540,7 @@ def confirm_inventory_import_from_excel(
 def generate_excel_template() -> bytes:
     # 所有列强制文本格式，避免 Excel 把 CAS 号自动改成日期。
     from io import BytesIO
-    
+
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Font
@@ -575,25 +575,25 @@ def generate_excel_template() -> bytes:
 
     # 定义表头字体样式
     header_font = Font(bold=True)
-    
+
     # 示例数据使用红色字体
     example_font = Font(color=EXCEL_RED_FONT_COLOR)  # 红色
-    
+
     # 写入表头和示例数据，同时设置列格式和列宽（单次遍历优化性能）
     for col_idx, (key, label, example) in enumerate(columns, 1):
         col_letter = get_column_letter(col_idx)
-        
+
         # 设置表头
         header_cell = ws.cell(row=1, column=col_idx, value=label)
         header_cell.font = header_font
         header_cell.alignment = Alignment(horizontal="center", vertical="center")
         header_cell.number_format = FORMAT_TEXT
-        
+
         # 写入示例数据（红色字体）
         example_cell = ws.cell(row=2, column=col_idx, value=example)
         example_cell.font = example_font
         example_cell.number_format = FORMAT_TEXT
-        
+
         # 列样式用于后续新建单元格，已存在的单元格需在上方显式设置
         ws.column_dimensions[col_letter].number_format = FORMAT_TEXT
         ws.column_dimensions[col_letter].width = 15 if key == "cas_number" else 12

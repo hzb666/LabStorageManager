@@ -76,20 +76,20 @@ def _sign_logs_token_payload(payload_part: str) -> str:
 
 def _check_logs_token_rate_limit(admin_user_id: int) -> None:
     redis_client = get_redis()
-    
+
     if redis_client is None:
         # 排查链路不能被 Redis 可用性阻断，缺少限流时退化为放行。
         return
-    
+
     key = redis_key(f"rate_limit:logs_token:{admin_user_id}")
-    
+
     try:
         current = redis_client.get(key)
-        
+
         if current is not None:
             count = int(current)
             ttl = redis_client.ttl(key)
-            
+
             if ttl > 0 and count >= LOG_TOKEN_RATE_LIMIT:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -102,12 +102,12 @@ def _check_logs_token_rate_limit(admin_user_id: int) -> None:
 
 def _record_logs_token_request(admin_user_id: int) -> None:
     redis_client = get_redis()
-    
+
     if redis_client is None:
         return
-    
+
     key = redis_key(f"rate_limit:logs_token:{admin_user_id}")
-    
+
     try:
         pipe = redis_client.pipeline()
         pipe.incr(key)
@@ -880,16 +880,16 @@ def generate_logs_token(
     # 日志 token 会触发跨表聚合查询，仍需基础限流。
     _check_logs_token_rate_limit(current_user.id)
     _record_logs_token_request(current_user.id)
-    
+
     user = get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     token = create_log_token(user_id)
-    
+
     return {
         "token": token,
         "user_id": user_id,

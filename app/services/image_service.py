@@ -137,7 +137,7 @@ def validate_image_size_from_bytes(content: bytes, max_size_mb: float = DEFAULT_
 def validate_image_type(file: UploadFile) -> bool:
     if file.content_type not in settings.allowed_image_types:
         return False
-    
+
     file.file.seek(0)
     header = file.file.read(16)
     file.file.seek(0)
@@ -147,11 +147,11 @@ def validate_image_type(file: UploadFile) -> bool:
 
 def validate_image_size(file: UploadFile, max_size_mb: float = DEFAULT_IMAGE_MAX_MB) -> bool:
     max_size_bytes = int(max_size_mb * 1024 * 1024)
-    
-    file.file.seek(0, 2)  
+
+    file.file.seek(0, 2)
     size = file.file.tell()
-    file.file.seek(0)  
-    
+    file.file.seek(0)
+
     return size <= max_size_bytes
 
 
@@ -200,7 +200,7 @@ def _image_size_error(max_size_mb: float) -> HTTPException:
 
 
 def compress_image(
-    image: Image.Image, 
+    image: Image.Image,
     max_size_kb: int = None,
     max_width: int = None,
     max_height: int = None
@@ -212,26 +212,26 @@ def compress_image(
         max_width = settings.max_image_width
     if max_height is None:
         max_height = settings.max_image_height
-    
+
     image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
-    
+
     if image.mode in ("RGBA", "P") and image.format != "JPEG":
         image = image.convert("RGB")
-    
+
     quality = IMAGE_QUALITY_DEFAULT
     min_quality = IMAGE_QUALITY_MIN
-    
+
     output = io.BytesIO()
-    
+
     while quality >= min_quality:
         output.seek(0)
         image.save(output, format="JPEG", quality=quality, optimize=True)
         size_kb = output.tell() / 1024
-        
+
         if size_kb <= max_size_kb:
             break
         quality -= 5
-    
+
     output.seek(0)
     return Image.open(output)
 
@@ -241,15 +241,15 @@ def save_upload_file(file: UploadFile, subfolder: str = "general") -> str:
     unique_id = str(uuid.uuid4())[:UPLOAD_FILENAME_UUID_PREFIX_LEN]
     timestamp = get_utc_now().strftime(TIMESTAMP_FILENAME_FORMAT)
     filename = f"{timestamp}_{unique_id}{file_ext}"
-    
+
     save_dir = UPLOADS_DIR / subfolder
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / filename
-    
+
     content = file.file.read()
     with open(save_path, "wb") as f:
         f.write(content)
-    
+
     return f"/static/uploads/{subfolder}/{filename}"
 
 
@@ -360,10 +360,10 @@ def save_announcement_image(file: UploadFile) -> str:
     image = _open_verified_image(content)
     unique_id = str(uuid.uuid4())
     filename = f"{unique_id}{IMAGE_OUTPUT_EXTENSION}"
-    
+
     announcement_dir = BASE_DIR / "static" / "announcements"
     announcement_dir.mkdir(parents=True, exist_ok=True)
-    
+
     file_path = announcement_dir / filename
     jpeg_image = _to_jpeg_ready_image(image)
     jpeg_image.save(
@@ -375,5 +375,5 @@ def save_announcement_image(file: UploadFile) -> str:
     if jpeg_image is not image:
         jpeg_image.close()
     image.close()
-    
+
     return f"/static/announcements/{filename}"

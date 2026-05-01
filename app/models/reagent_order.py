@@ -121,7 +121,7 @@ class ReagentOrder(ReagentOrderBase, table=True):
         default_factory=get_utc_now,
         sa_column_kwargs={"onupdate": get_utc_now}
     )
-    
+
     # 拼音排序字段（预计算，使用数据库索引加速排序）
     name_pinyin: Optional[str] = Field(default=None, max_length=200)
     name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
@@ -133,7 +133,7 @@ class ReagentOrder(ReagentOrderBase, table=True):
 
 class ReagentOrderCreate(SQLModel):
     """DTO for creating a new reagent order
-    
+
     前端传入 specification (规格字符串)，后端解析为 initial_quantity + unit
     """
     model_config = ConfigDict(extra="forbid")

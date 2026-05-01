@@ -174,8 +174,8 @@ def _serialize_user_list(
 ) -> list[dict[str, object]]:
     user_responses = []
     for user in users:
-        user_dict = UserResponse.model_validate(user).model_dump(mode='json')
-        user_dict['last_active_at'] = utc_iso_str(last_active_map.get(user.id))
+        user_dict = UserResponse.model_validate(user).model_dump(mode="json")
+        user_dict["last_active_at"] = utc_iso_str(last_active_map.get(user.id))
         user_responses.append(user_dict)
     return user_responses
 
@@ -324,7 +324,7 @@ def _clear_failed_login(client_ip: str) -> None:
 
 def _check_rate_limit(client_ip: str) -> None:
     redis_client = get_redis()
-    
+
     if redis_client is None:
         if settings.use_secure_runtime():
             raise HTTPException(
@@ -333,12 +333,12 @@ def _check_rate_limit(client_ip: str) -> None:
             )
         _check_rate_limit_memory(client_ip)
         return
-    
+
     key = _rate_limit_key(client_ip)
-    
+
     try:
         current = redis_client.get(key)
-        
+
         if current is not None:
             try:
                 attempts = int(current)
@@ -347,7 +347,7 @@ def _check_rate_limit(client_ip: str) -> None:
                 redis_client.delete(key)
                 return
             ttl = redis_client.ttl(key)
-            
+
             if ttl > 0 and attempts >= MAX_LOGIN_ATTEMPTS:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -730,7 +730,7 @@ def login(
         )
         response = {
             "token_type": "bearer",
-            "user": UserResponse.model_validate(result.user).model_dump(mode='json'),
+            "user": UserResponse.model_validate(result.user).model_dump(mode="json"),
             "redis_warning": None,
         }
         json_response = JSONResponse(content=response)
@@ -824,9 +824,9 @@ def logout(
             actor_user_id = session.user_id
             revoked_token_hashes.append(session.token_hash)
             db.delete(session)
-    
+
     response = JSONResponse(content={"message": "Logged out successfully"})
-    
+
     response.delete_cookie(
         key="access_token",
         path="/",
@@ -857,7 +857,7 @@ def logout(
             finalize_revoked_sessions(revoked_token_hashes, reason="logout")
         except Exception:
             logger.exception("Post-commit session side effects failed for logout user_id=%s", actor_user_id)
-    
+
     return response
 
 
@@ -881,13 +881,13 @@ def change_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect old password"
         )
-    
+
     if verify_password(password_request.new_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="New password cannot be the same as old password"
         )
-    
+
     # 在同一事务内提交“密码变更 + 日志 + 会话删除”。
     current_user.password_hash = get_password_hash(password_request.new_password)
     revoked_hashes = stage_revoke_user_sessions(db, current_user.id)
@@ -918,7 +918,7 @@ def change_password(
             finalize_revoked_sessions(revoked_hashes, reason="password_changed")
         except Exception:
             logger.exception("Post-commit session side effects failed for password change user_id=%s", current_user.id)
-    
+
     return {"message": "密码修改成功"}
 
 
@@ -1115,7 +1115,7 @@ def update_user(
     if revoke_reason:
         finalize_revoked_sessions(staged_revoked_hashes, reason=revoke_reason)
     _audit_sensitive_user_update(request, current_user, user, update_data)
-    
+
     return user
 
 
@@ -1132,13 +1132,13 @@ def activate_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     if user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User is already active"
         )
-    
+
     user.is_active = True
     log_user_operation(
         db,
@@ -1162,7 +1162,7 @@ def activate_user(
             target_user_id=user.id,
         ),
     )
-    
+
     return user
 
 
@@ -1227,7 +1227,7 @@ def update_user_role(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     old_role = user.role
     try:
         user.role = UserRole(role)
@@ -1267,7 +1267,7 @@ def update_user_role(
         ),
         detail=f"new_role={user.role.value}",
     )
-    
+
     return user
 
 
@@ -1354,17 +1354,17 @@ def delete_avatar(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot delete avatar for other users"
         )
-    
+
     user = get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     if user.avatar_url:
         delete_file(user.avatar_url, required_subdir="avatars")
-    
+
     user.avatar_url = None
     log_user_operation(
         db,
@@ -1379,7 +1379,7 @@ def delete_avatar(
     )
     db.commit()
     db.refresh(user)
-    
+
     return {"avatar_url": None}
 
 

@@ -32,12 +32,12 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 def get_error_logger() -> logging.Logger:
     """获取错误日志记录器"""
     logger = logging.getLogger("error_logger")
-    
+
     # 避免重复添加handler
     if logger.handlers and not all(isinstance(handler, logging.NullHandler) for handler in logger.handlers):
         return logger
     logger.handlers = [handler for handler in logger.handlers if not isinstance(handler, logging.NullHandler)]
-    
+
     try:
         from app.services.log_queue import get_async_file_logger
 
@@ -58,11 +58,11 @@ def get_error_logger() -> logging.Logger:
 def sanitize_log_content(content: str) -> str:
     """
     对日志内容进行脱敏处理
-    
+
     移除敏感信息如密码、token、密钥等
     """
     sanitized = content
-    
+
     # 替换敏感键值对 - 使用更精确的正则避免误伤
     for keyword in SENSITIVE_KEYWORDS:
         # 匹配 key=value 或 key: value，并尽量避免误伤普通单词。
@@ -73,7 +73,7 @@ def sanitize_log_content(content: str) -> str:
             sanitized,
             flags=re.IGNORECASE
         )
-        
+
         # 替换JSON中的敏感字段
         pattern = rf'"{keyword}"\s*:\s*"[^"]+"'
         sanitized = re.sub(
@@ -82,11 +82,11 @@ def sanitize_log_content(content: str) -> str:
             sanitized,
             flags=re.IGNORECASE
         )
-    
+
     # 替换明显的Base64编码的token（长字符串）
-    pattern = r'(eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)'
-    sanitized = re.sub(pattern, '***JWT_TOKEN***', sanitized)
-    
+    pattern = r"(eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)"
+    sanitized = re.sub(pattern, "***JWT_TOKEN***", sanitized)
+
     return sanitized
 
 
@@ -131,33 +131,33 @@ def _format_error_log_line(line: str) -> str:
 def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
     """
     获取最近的错误日志
-    
+
     Args:
         lines: 返回的日志行数
-    
+
     Returns:
         错误日志列表（已脱敏）
     """
     if not LOG_FILE.exists():
         return []
-    
+
     try:
         with open(LOG_FILE, "r", encoding="utf-8") as f:
             all_lines = f.readlines()
-        
+
         # 只返回最后N行ERROR级别的日志
         error_lines = [
-            line for line in all_lines 
+            line for line in all_lines
             if "[ERROR]" in line
         ]
-        
+
         recent_lines = error_lines[-lines:] if len(error_lines) > lines else error_lines
-        
+
         # 对每行进行脱敏处理
         sanitized_lines = [_format_error_log_line(line) for line in recent_lines]
-        
+
         return sanitized_lines
-        
+
     except Exception as e:
         logger = get_error_logger()
         logger.error(f"Failed to read error logs: {e}")
@@ -167,41 +167,41 @@ def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
 def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
     """
     获取指定时间范围内的错误日志
-    
+
     Args:
         hours: 小时数
-    
+
     Returns:
         错误日志列表（已脱敏）
     """
     if not LOG_FILE.exists():
         return []
-    
+
     try:
         with open(LOG_FILE, "r", encoding="utf-8") as f:
             all_lines = f.readlines()
-        
+
         # 解析时间并过滤
         cutoff_time = datetime.now() - timedelta(hours=hours)
         recent_errors = []
-        
+
         for line in all_lines:
             if "[ERROR]" not in line:
                 continue
-            
+
             try:
                 # 提取时间戳 (格式: 2024-01-01 12:00:00)
                 time_str = line.split("[")[0].strip()
                 log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
-                
+
                 if log_time >= cutoff_time:
                     recent_errors.append(_format_error_log_line(line))
             except (ValueError, IndexError):
                 # 时间解析失败时返回该行
                 recent_errors.append(_format_error_log_line(line))
-        
+
         return recent_errors
-        
+
     except Exception as e:
         logger = get_error_logger()
         logger.error(f"Failed to read error logs: {e}")
@@ -211,13 +211,13 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
 def log_error(message: str, exc_info: Optional[Exception] = None) -> None:
     """
     记录错误日志
-    
+
     Args:
         message: 错误消息
         exc_info: 异常信息（可选）
     """
     logger = get_error_logger()
-    
+
     if exc_info:
         logger.error(message, exc_info=True)
     else:
@@ -227,45 +227,45 @@ def log_error(message: str, exc_info: Optional[Exception] = None) -> None:
 def clear_old_logs(days: int = 7) -> int:
     """
     清理旧的日志文件
-    
+
     Args:
         days: 保留天数
-    
+
     Returns:
         删除的日志行数
     """
     if not LOG_FILE.exists():
         return 0
-    
+
     try:
         with open(LOG_FILE, "r", encoding="utf-8") as f:
             all_lines = f.readlines()
-        
+
         cutoff_time = datetime.now() - timedelta(days=days)
         remaining_lines = []
         deleted_count = 0
-        
+
         for line in all_lines:
             if "[ERROR]" not in line:
                 remaining_lines.append(line)
                 continue
-            
+
             try:
                 time_str = line.split("[")[0].strip()
                 log_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-                
+
                 if log_time >= cutoff_time:
                     remaining_lines.append(line)
                 else:
                     deleted_count += 1
             except (ValueError, IndexError):
                 remaining_lines.append(line)
-        
+
         with open(LOG_FILE, "w", encoding="utf-8") as f:
             f.writelines(remaining_lines)
-        
+
         return deleted_count
-        
+
     except Exception as e:
         logger = get_error_logger()
         logger.error(f"Failed to clear old logs: {e}")

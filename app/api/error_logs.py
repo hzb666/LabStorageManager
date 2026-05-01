@@ -38,10 +38,10 @@ def get_error_logs(
 ) -> ErrorLogsResponse:
     """
     获取后端错误日志
-    
+
     - **hours**: 获取最近多少小时内的日志（默认24小时，最大168小时=7天）
     - **lines**: 最多返回多少行日志（默认100行，最大1000行）
-    
+
     需要管理员权限
     """
     # 检查管理员权限
@@ -50,10 +50,10 @@ def get_error_logs(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin permission required"
         )
-    
+
     # 获取日志
     logs = get_error_logs_since(hours=hours) if hours else get_recent_error_logs(lines=lines)
-    
+
     return ErrorLogsResponse(
         logs=logs,
         count=len(logs)

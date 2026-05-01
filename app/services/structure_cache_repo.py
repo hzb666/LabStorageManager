@@ -93,7 +93,7 @@ def count_structure_cache_by_status(db: Session) -> list[StructureCacheStatusCou
     statement = select(CompoundStructureCache.status, func.count()).group_by(
         CompoundStructureCache.status
     )
-    counts = {status: 0 for status in CompoundStructureStatus}
+    counts = dict.fromkeys(CompoundStructureStatus, 0)
     for status_value, count_value in db.exec(statement).all():
         counts[CompoundStructureStatus(status_value)] = int(count_value)
     return [

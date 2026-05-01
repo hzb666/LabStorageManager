@@ -260,8 +260,7 @@ def list_group_locations(
             continue
 
         current["bottle_count"] = int(current["bottle_count"]) + 1
-        if created_at < current["oldest_created_at"]:
-            current["oldest_created_at"] = created_at
+        current["oldest_created_at"] = min(current["oldest_created_at"], created_at)
         if current["storage_location"] in {None, ""} and item.storage_location:
             current["storage_location"] = item.storage_location
 

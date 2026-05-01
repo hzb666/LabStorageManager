@@ -38,10 +38,10 @@ router = APIRouter(prefix="/chemical-info", tags=["Chemical Info"])
 
 # 随机 User-Agent 池
 USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
 # 简单内存缓存（带大小限制的 LRU）
@@ -57,10 +57,10 @@ _ALLOWED_OUTBOUND_HOSTS = {
 
 def _get_headers() -> Dict[str, str]:
     return {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Connection': 'keep-alive',
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Connection": "keep-alive",
     }
 
 
@@ -139,18 +139,18 @@ def _remaining_timeout(deadline: float) -> Optional[float]:
 
 
 def _parse_chinese_name(content: str) -> Optional[str]:
-    if '404' in content[:500] or 'File Not Found' in content[:500]:
+    if "404" in content[:500] or "File Not Found" in content[:500]:
         return None
 
-    match = re.search(r'<h1[^>]*>\s*([^<\n]+?)\s*<br>', content)
+    match = re.search(r"<h1[^>]*>\s*([^<\n]+?)\s*<br>", content)
     if match:
         return match.group(1).strip()
 
-    match = re.search(r'<title>\s*CAS 登录号：([^,]+),\s*([^,]+),\s*([^-]+)\s*- chemBlink', content)
+    match = re.search(r"<title>\s*CAS 登录号：([^,]+),\s*([^,]+),\s*([^-]+)\s*- chemBlink", content)
     if match:
         return match.group(2).strip()
 
-    match = re.search(r'产品名称</td>\s*<td>([^<]+)</td>', content)
+    match = re.search(r"产品名称</td>\s*<td>([^<]+)</td>", content)
     if match:
         return match.group(1).strip()
 
@@ -163,8 +163,8 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
         return None
 
     cached = _get_cached(cas)
-    if cached and cached.get('chinese_name'):
-        return cached['chinese_name']
+    if cached and cached.get("chinese_name"):
+        return cached["chinese_name"]
 
     urls = [
         f"https://www.chemblink.com/zh/products/{cas}C.htm",
@@ -177,7 +177,7 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
         try:
             response = _safe_get(url, timeout=3)
             if response.status_code == 200:
-                content = response.content.decode('utf-8', errors='ignore')
+                content = response.content.decode("utf-8", errors="ignore")
                 return _parse_chinese_name(content)
         except Exception as e:
             logger.warning(f"Failed to query chemblink {url} for CAS {cas}: {e}")
@@ -197,9 +197,9 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
 
 
 def _extract_iupac_name(data: Dict[str, Any]) -> Optional[str]:
-    properties = data.get('PropertyTable', {}).get('Properties', [])
-    if properties and properties[0].get('IUPACName'):
-        return properties[0]['IUPACName']
+    properties = data.get("PropertyTable", {}).get("Properties", [])
+    if properties and properties[0].get("IUPACName"):
+        return properties[0]["IUPACName"]
     return None
 
 
@@ -238,7 +238,7 @@ def _query_pubchem_fallback(cas: str, encoded_cas: str) -> tuple[Optional[str], 
             if cid_response.status_code != 200:
                 failure_reason = f"补充 CID 查询 HTTP {cid_response.status_code}"
             else:
-                cids = cid_response.json().get('IdentifierList', {}).get('CID', [])
+                cids = cid_response.json().get("IdentifierList", {}).get("CID", [])
                 if not cids:
                     failure_reason = "补充 CID 查询成功但未返回 CID"
                 else:
@@ -272,10 +272,10 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
     cas = str(cas_number).strip()
     if not cas:
         return None, None
-    
+
     cached = _get_cached(cas)
-    if cached and cached.get('english_name'):
-        return cached['english_name'], None
+    if cached and cached.get("english_name"):
+        return cached["english_name"], None
 
     encoded_cas = quote(cas, safe="")
 
@@ -456,14 +456,14 @@ def _resolve_and_store_missing_names(
 def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Optional[str]:
     if not text:
         return None
-    
+
     if not settings.niutrans_appid or not settings.niutrans_apikey:
         logger.warning("Niutrans API credentials not configured")
         return None
-    
+
     try:
         timestamp = str(int(time.time() * 1000))
-        
+
         params = {
             "appId": settings.niutrans_appid,
             "from": from_lang,
@@ -471,17 +471,17 @@ def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Opt
             "srcText": text,
             "timestamp": timestamp
         }
-        
+
         sorted_params = sorted(list(params.items()) + [("apikey", settings.niutrans_apikey)], key=lambda x: x[0])
         param_str = "&".join([f"{key}={value}" for key, value in sorted_params])
-        
+
         auth_str = hashlib.md5(param_str.encode("utf-8")).hexdigest()
-        
+
         params["authStr"] = auth_str
-        
+
         url = "https://api.niutrans.com/v2/text/translate"
         response = _safe_post(url, data=params, timeout=2)
-        
+
         if response.status_code == 200:
             result = response.json()
             if "tgtText" in result:
@@ -490,10 +490,10 @@ def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Opt
                 logger.warning(f"Niutrans API error: {result.get('errorCode')} - {result.get('errorMsg')}")
         else:
             logger.warning(f"Niutrans API request failed with status {response.status_code}")
-    
+
     except Exception as e:
         logger.warning(f"Failed to translate text via niutrans: {e}")
-    
+
     return None
 
 

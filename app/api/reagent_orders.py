@@ -124,31 +124,31 @@ def _clear_reagent_order_cache() -> None:
 
 
 REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
-    'name': [
+    "name": [
         ReagentOrder.name,
         ReagentOrder.name_pinyin,
         ReagentOrder.name_pinyin_initials,
     ],
-    'cas': [ReagentOrder.cas_number],
-    'cas_number': [ReagentOrder.cas_number],
-    'brand': [
+    "cas": [ReagentOrder.cas_number],
+    "cas_number": [ReagentOrder.cas_number],
+    "brand": [
         ReagentOrder.brand,
         ReagentOrder.brand_pinyin,
         ReagentOrder.brand_pinyin_initials,
     ],
-    'created_at': [ReagentOrder.created_at],
-    'category': [
+    "created_at": [ReagentOrder.created_at],
+    "category": [
         ReagentOrder.category,
         ReagentOrder.category_pinyin,
         ReagentOrder.category_pinyin_initials,
     ],
 }
 REAGENT_ORDER_SEARCH_FTS_FIELD_MAP = {
-    'name': ["name", "name_pinyin", "name_pinyin_initials"],
-    'cas': ["cas_number"],
-    'cas_number': ["cas_number"],
-    'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
-    'category': ["category", "category_pinyin", "category_pinyin_initials"],
+    "name": ["name", "name_pinyin", "name_pinyin_initials"],
+    "cas": ["cas_number"],
+    "cas_number": ["cas_number"],
+    "brand": ["brand", "brand_pinyin", "brand_pinyin_initials"],
+    "category": ["category", "category_pinyin", "category_pinyin_initials"],
 }
 REAGENT_ORDER_SEARCH_CONFIG = OrderListSearchConfig(
     id_column=ReagentOrder.id,
@@ -296,7 +296,7 @@ def _apply_reagent_order_filters(
         log_label="Reagent order",
     )
 
-    if search_field and search_field != 'all':
+    if search_field and search_field != "all":
         single_field_filtered, matched = apply_order_list_single_field_search(
             base,
             config=REAGENT_ORDER_SEARCH_CONFIG,
@@ -339,13 +339,13 @@ async def create_reagent_order(
     # 标准化 CAS 号。
     normalized_cas = normalize_cas(order.cas_number)
     is_valid, error = validate_cas_format(normalized_cas)
-    
+
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid CAS format: {error}"
         )
-    
+
     # 解析规格得到初始量和单位。
     try:
         initial_quantity, unit = parse_specification(order.specification)
@@ -358,26 +358,26 @@ async def create_reagent_order(
     # order_reason 已在模型层验证（枚举类型），直接使用
 
     # 处理可选字段：空字符串和纯空格转为 None
-    optional_string_fields = ['english_name', 'alias', 'category', 'purity', 'notes']
+    optional_string_fields = ["english_name", "alias", "category", "purity", "notes"]
     normalized = empty_to_none(order.model_dump(), optional_string_fields)
     normalized_brand = _ensure_required_brand(order.brand)
 
     # 计算拼音字段
     pinyin_fields = compute_pinyin_fields(
-        name=normalized.get('name', order.name),
-        category=normalized.get('category'),
+        name=normalized.get("name", order.name),
+        category=normalized.get("category"),
         brand=normalized_brand,
     )
 
     # 创建订单记录。
     db_order = ReagentOrder(
         cas_number=normalized_cas,
-        name=normalized.get('name', order.name),
-        english_name=normalized.get('english_name'),
-        alias=normalized.get('alias'),
-        category=normalized.get('category'),
+        name=normalized.get("name", order.name),
+        english_name=normalized.get("english_name"),
+        alias=normalized.get("alias"),
+        category=normalized.get("category"),
         brand=normalized_brand,
-        purity=normalized.get('purity'),
+        purity=normalized.get("purity"),
         initial_quantity=initial_quantity,
         unit=unit,
         quantity=order.quantity,
@@ -385,10 +385,10 @@ async def create_reagent_order(
         order_reason=order.order_reason,
         is_hazardous=order.is_hazardous,
         applicant_id=current_user.id,
-        notes=normalized.get('notes'),
+        notes=normalized.get("notes"),
         **pinyin_fields,
     )
-    
+
     db.add(db_order)
     db.flush()
     log_reagent_order_create(
@@ -410,7 +410,7 @@ async def create_reagent_order(
         db_order.cas_number,
         reason="reagent_order.create",
     )
-    
+
     return db_order
 
 
@@ -466,18 +466,18 @@ def list_reagent_orders(
 
     # 排序处理
     sort_field_map = {
-        'cas_number': ReagentOrder.cas_number,
-        'name': ReagentOrder.name,
-        'name_pinyin': ReagentOrder.name_pinyin,
-        'category': ReagentOrder.category,
-        'brand': ReagentOrder.brand,
-        'brand_pinyin': ReagentOrder.brand_pinyin,
-        'quantity': ReagentOrder.quantity,
-        'price': ReagentOrder.price,
-        'status': ReagentOrder.status,
-        'order_reason': ReagentOrder.order_reason,
-        'created_at': ReagentOrder.created_at,
-        'updated_at': ReagentOrder.updated_at,
+        "cas_number": ReagentOrder.cas_number,
+        "name": ReagentOrder.name,
+        "name_pinyin": ReagentOrder.name_pinyin,
+        "category": ReagentOrder.category,
+        "brand": ReagentOrder.brand,
+        "brand_pinyin": ReagentOrder.brand_pinyin,
+        "quantity": ReagentOrder.quantity,
+        "price": ReagentOrder.price,
+        "status": ReagentOrder.status,
+        "order_reason": ReagentOrder.order_reason,
+        "created_at": ReagentOrder.created_at,
+        "updated_at": ReagentOrder.updated_at,
     }
 
     # 处理申请人排序（需要 JOIN User 表）
@@ -514,9 +514,9 @@ def list_reagent_orders(
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
 
-    order_direction = sort_order.lower() if sort_order else 'desc'
+    order_direction = sort_order.lower() if sort_order else "desc"
 
-    if sort_by == 'cas_number':
+    if sort_by == "cas_number":
         order_expr = order_with_special_last(order_column, BIOLOGICAL_REAGENT_CAS, order_direction)
     else:
         order_expr = order_with_nulls_last(order_column, order_direction)
@@ -785,10 +785,10 @@ async def update_reagent_order(
         actor_user_id=current_user.id,
         is_cli=get_request_is_cli(request),
     )
-    
+
     db.commit()
     db.refresh(order)
-    
+
     # 清除列表缓存，确保更新后前端立即看到最新数据
     _clear_reagent_order_cache()
     await sse_manager.broadcast(
@@ -802,7 +802,7 @@ async def update_reagent_order(
             order.cas_number,
             reason="reagent_order.update",
         )
-    
+
     return _serialize_reagent_order(order, db)
 
 
@@ -851,7 +851,7 @@ def _normalize_reagent_order_update_data(order_update: ReagentOrderUpdate) -> di
             update_data["initial_quantity"] = initial_quantity
             update_data["unit"] = unit
 
-    optional_string_fields = ['english_name', 'alias', 'category', 'brand', 'purity', 'unit', 'notes']
+    optional_string_fields = ["english_name", "alias", "category", "brand", "purity", "unit", "notes"]
     normalized_strings = empty_to_none(update_data, optional_string_fields)
     for field in optional_string_fields:
         if field in update_data:
@@ -878,12 +878,12 @@ def _apply_reagent_order_pinyin_updates(order: ReagentOrder, *, update_data: dic
     category = update_data.get("category", order.category)
     brand = update_data.get("brand", order.brand)
     pinyin_fields = compute_pinyin_fields(name=name, category=category, brand=brand)
-    update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
-    update_data['name_pinyin_initials'] = pinyin_fields.get('name_pinyin_initials')
-    update_data['category_pinyin'] = pinyin_fields.get('category_pinyin')
-    update_data['category_pinyin_initials'] = pinyin_fields.get('category_pinyin_initials')
-    update_data['brand_pinyin'] = pinyin_fields.get('brand_pinyin')
-    update_data['brand_pinyin_initials'] = pinyin_fields.get('brand_pinyin_initials')
+    update_data["name_pinyin"] = pinyin_fields.get("name_pinyin")
+    update_data["name_pinyin_initials"] = pinyin_fields.get("name_pinyin_initials")
+    update_data["category_pinyin"] = pinyin_fields.get("category_pinyin")
+    update_data["category_pinyin_initials"] = pinyin_fields.get("category_pinyin_initials")
+    update_data["brand_pinyin"] = pinyin_fields.get("brand_pinyin")
+    update_data["brand_pinyin_initials"] = pinyin_fields.get("brand_pinyin_initials")
 
 
 register_workflow_routes(router, SEARCH_CACHE)

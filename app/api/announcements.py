@@ -445,7 +445,7 @@ async def upload_announcement_image(
             status_code=413,
             detail=f"Storage limit exceeded. Maximum storage: {storage_info['max_mb']}MB"
         )
-        
+
     # 使用带有格式和大小校验的函数
     image_url = save_announcement_image(file)
     _log_announcement_operation(

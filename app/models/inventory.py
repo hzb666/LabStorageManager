@@ -126,7 +126,7 @@ class Inventory(InventoryBase, table=True):
         default_factory=get_utc_now,
         sa_column_kwargs={"onupdate": get_utc_now}
     )
-    
+
     # 拼音排序字段（预计算，使用数据库索引加速排序）
     name_pinyin: Optional[str] = Field(default=None, max_length=200)
     name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)

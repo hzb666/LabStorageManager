@@ -134,19 +134,19 @@ VALID_CONSUMABLE_SORT_FIELDS = {
     *APPLICANT_SORT_KEYS,
 }
 CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP = {
-    'name': [
+    "name": [
         ConsumableOrder.name,
         ConsumableOrder.name_pinyin,
         ConsumableOrder.name_pinyin_initials,
     ],
-    'specification': [ConsumableOrder.specification],
-    'created_at': [ConsumableOrder.created_at],
-    'communication': [ConsumableOrder.communication],
+    "specification": [ConsumableOrder.specification],
+    "created_at": [ConsumableOrder.created_at],
+    "communication": [ConsumableOrder.communication],
 }
 CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP = {
-    'name': ["name", "name_pinyin", "name_pinyin_initials"],
-    'specification': ["specification"],
-    'communication': ["communication"],
+    "name": ["name", "name_pinyin", "name_pinyin_initials"],
+    "specification": ["specification"],
+    "communication": ["communication"],
 }
 CONSUMABLE_ORDER_SEARCH_CONFIG = OrderListSearchConfig(
     id_column=ConsumableOrder.id,
@@ -338,7 +338,7 @@ def _apply_consumable_order_filters(
         log_label="Consumable order",
     )
 
-    if search_field and search_field != 'all':
+    if search_field and search_field != "all":
         single_field_filtered, matched = apply_order_list_single_field_search(
             base,
             config=CONSUMABLE_ORDER_SEARCH_CONFIG,
@@ -377,25 +377,25 @@ async def create_consumable_order(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Public account cannot create orders")
 
     # 处理可选字段：空字符串和纯空格转为 None
-    optional_string_fields = ['english_name', 'product_number', 'unit', 'communication', 'notes']
+    optional_string_fields = ["english_name", "product_number", "unit", "communication", "notes"]
     normalized = empty_to_none(order.model_dump(), optional_string_fields)
 
-    pinyin_fields = compute_pinyin_fields(name=normalized.get('name', order.name))
+    pinyin_fields = compute_pinyin_fields(name=normalized.get("name", order.name))
 
     db_order = ConsumableOrder(
-        name=normalized.get('name', order.name),
-        english_name=normalized.get('english_name'),
-        product_number=normalized.get('product_number'),
+        name=normalized.get("name", order.name),
+        english_name=normalized.get("english_name"),
+        product_number=normalized.get("product_number"),
         specification=order.specification,
-        unit=normalized.get('unit'),
+        unit=normalized.get("unit"),
         quantity=order.quantity,
         price=order.price,
-        communication=normalized.get('communication'),
-        notes=normalized.get('notes'),
+        communication=normalized.get("communication"),
+        notes=normalized.get("notes"),
         applicant_id=current_user.id,
         **pinyin_fields,
     )
-    
+
     db.add(db_order)
     db.flush()
     log_consumable_order_create(
@@ -412,7 +412,7 @@ async def create_consumable_order(
         SSEEventType.CONSUMABLE_ORDER_CREATED,
         {"id": db_order.id, "item": _serialize_consumable_order(db_order, db)},
     )
-    
+
     return db_order
 
 
@@ -468,13 +468,13 @@ def list_consumable_orders(
 
     # 排序处理
     sort_field_map = {
-        'name': ConsumableOrder.name,
-        'name_pinyin': ConsumableOrder.name_pinyin,
-        'quantity': ConsumableOrder.quantity,
-        'price': ConsumableOrder.price,
-        'status': ConsumableOrder.status,
-        'created_at': ConsumableOrder.created_at,
-        'updated_at': ConsumableOrder.updated_at,
+        "name": ConsumableOrder.name,
+        "name_pinyin": ConsumableOrder.name_pinyin,
+        "quantity": ConsumableOrder.quantity,
+        "price": ConsumableOrder.price,
+        "status": ConsumableOrder.status,
+        "created_at": ConsumableOrder.created_at,
+        "updated_at": ConsumableOrder.updated_at,
     }
 
     # 处理申请人排序（需要 JOIN User 表）
@@ -511,7 +511,7 @@ def list_consumable_orders(
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
 
-    order_direction = sort_order.lower() if sort_order else 'desc'
+    order_direction = sort_order.lower() if sort_order else "desc"
 
     order_expr = order_with_nulls_last(order_column, order_direction)
 
@@ -665,22 +665,22 @@ async def update_consumable_order(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Status must be changed via workflow endpoints",
         )
-    
+
     optional_string_fields = [
-        'english_name', 'product_number', 'unit', 'communication', 'notes',
+        "english_name", "product_number", "unit", "communication", "notes",
     ]
     normalized_strings = empty_to_none(update_data, optional_string_fields)
     for field in optional_string_fields:
         if field in update_data:
             update_data[field] = normalized_strings[field]
-    
+
     # name 更新后重新计算拼音字段（当前写入 name_pinyin）。
     if "name" in update_data:
         name = update_data.get("name")
         pinyin_fields = compute_pinyin_fields(name=name)
         # ConsumableOrder 写入名称拼音搜索字段。
-        update_data['name_pinyin'] = pinyin_fields.get('name_pinyin')
-        update_data['name_pinyin_initials'] = pinyin_fields.get('name_pinyin_initials')
+        update_data["name_pinyin"] = pinyin_fields.get("name_pinyin")
+        update_data["name_pinyin_initials"] = pinyin_fields.get("name_pinyin_initials")
     should_resubmit = order.status in {
         ConsumableOrderStatus.APPROVED,
         ConsumableOrderStatus.REJECTED,
@@ -698,17 +698,17 @@ async def update_consumable_order(
         actor_user_id=current_user.id,
         is_cli=get_request_is_cli(request),
     )
-    
+
     db.commit()
     db.refresh(order)
-    
+
     _clear_consumable_order_cache()
     await sse_manager.broadcast(
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
     )
-    
+
     return _serialize_consumable_order(order, db)
 
 
@@ -726,7 +726,7 @@ async def approve_consumable_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ORDER_NOT_FOUND
         )
-    
+
     if order.status not in CONSUMABLE_ORDER_APPROVABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -748,7 +748,7 @@ async def approve_consumable_order(
         actor_user_id=current_user.id,
         is_cli=get_request_is_cli(request),
     )
-    
+
     db.commit()
     db.refresh(order)
     _clear_consumable_order_cache()
@@ -757,7 +757,7 @@ async def approve_consumable_order(
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
     )
-    
+
     return order
 
 
@@ -792,7 +792,7 @@ async def reject_consumable_order(
         actor_user_id=current_user.id,
         is_cli=get_request_is_cli(request),
     )
-    
+
     db.commit()
     db.refresh(order)
     _clear_consumable_order_cache()
@@ -801,7 +801,7 @@ async def reject_consumable_order(
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
     )
-    
+
     return order
 
 
@@ -820,14 +820,14 @@ async def complete_consumable_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ORDER_NOT_FOUND
         )
-    
+
     # 仅申请人或管理员可完成订单。
     if order.applicant_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the order applicant or admin can complete this order"
         )
-    
+
     if order.status != ConsumableOrderStatus.APPROVED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -850,7 +850,7 @@ async def complete_consumable_order(
         actor_user_id=current_user.id,
         is_cli=get_request_is_cli(request),
     )
-    
+
     db.commit()
     db.refresh(order)
     _clear_consumable_order_cache()
@@ -859,7 +859,7 @@ async def complete_consumable_order(
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
     )
-    
+
     return {
         "message": "耗材订单已完成",
         "order_id": order.id,
@@ -886,7 +886,7 @@ def _build_consumable_dashboard_groups(
             "order_id": order.id,
             "name": order.name,
             "english_name": order.english_name,
-            "specification": getattr(order, 'specification', '') or '',
+            "specification": getattr(order, "specification", "") or "",
             "unit": order.unit,
             "quantity": order.quantity,
             "price": order.price,

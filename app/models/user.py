@@ -27,11 +27,11 @@ class UserBase(SQLModel):
     """Base user model with common fields"""
     username: str = Field(unique=True, index=True, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
 
-    @field_validator('username')
+    @field_validator("username")
     @classmethod
     def validate_username(cls, v: str) -> str:
-        if not re.match(r'^\w+$', v, flags=re.ASCII):
-            raise ValueError('用户名只能包含字母、数字和下划线')
+        if not re.match(r"^\w+$", v, flags=re.ASCII):
+            raise ValueError("用户名只能包含字母、数字和下划线")
         return v
 
     full_name: str = Field(max_length=100)
@@ -89,15 +89,15 @@ class UserUpdate(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     username: Optional[str] = Field(None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
-    
+
     # 添加 username 格式验证
-    @field_validator('username')
+    @field_validator("username")
     @classmethod
     def validate_username(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not re.match(r'^\w+$', v, flags=re.ASCII):
-            raise ValueError('用户名只能包含字母，数字和下划线')
+        if v is not None and not re.match(r"^\w+$", v, flags=re.ASCII):
+            raise ValueError("用户名只能包含字母，数字和下划线")
         return v
-    
+
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     is_active: Optional[bool] = None
     role: Optional[UserRole] = None

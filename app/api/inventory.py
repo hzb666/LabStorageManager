@@ -98,15 +98,15 @@ INVENTORY_NOT_FOUND = "Inventory item not found"
 # ==================== 搜索缓存 ====================
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
 INVENTORY_SEARCH_SQL_FIELD_MAP = {
-    'name': [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
-    'cas_number': [Inventory.cas_number],
-    'storage_location': [
+    "name": [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
+    "cas_number": [Inventory.cas_number],
+    "storage_location": [
         Inventory.storage_location,
         Inventory.storage_location_pinyin,
         Inventory.storage_location_pinyin_initials,
     ],
-    'brand': [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
-    'category': [
+    "brand": [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
+    "category": [
         Inventory.category,
         Inventory.category_pinyin,
         Inventory.category_pinyin_initials,
@@ -114,27 +114,27 @@ INVENTORY_SEARCH_SQL_FIELD_MAP = {
 }
 
 VALID_INVENTORY_SORT_FIELDS = {
-    'cas_number',
-    'name',
-    'category',
-    'storage_location',
-    'brand',
-    'remaining_quantity',
-    'remaining_percent',
-    'initial_quantity',
-    'status',
-    'created_at',
+    "cas_number",
+    "name",
+    "category",
+    "storage_location",
+    "brand",
+    "remaining_quantity",
+    "remaining_percent",
+    "initial_quantity",
+    "status",
+    "created_at",
 }
 INVENTORY_SEARCH_FTS_FIELD_MAP = {
-    'name': ["name", "name_pinyin", "name_pinyin_initials"],
-    'cas_number': ["cas_number"],
-    'storage_location': [
+    "name": ["name", "name_pinyin", "name_pinyin_initials"],
+    "cas_number": ["cas_number"],
+    "storage_location": [
         "storage_location",
         "storage_location_pinyin",
         "storage_location_pinyin_initials",
     ],
-    'brand': ["brand", "brand_pinyin", "brand_pinyin_initials"],
-    'category': ["category", "category_pinyin", "category_pinyin_initials"],
+    "brand": ["brand", "brand_pinyin", "brand_pinyin_initials"],
+    "category": ["category", "category_pinyin", "category_pinyin_initials"],
 }
 VISIBLE_STRUCTURE_STATUSES = (
     InventoryStatus.IN_STOCK,
@@ -377,7 +377,7 @@ def _build_inventory_all_fts_subquery(search_value: str):
     try:
         return build_inventory_fts_rowid_subquery(
             search_value=search_value,
-            search_field='all',
+            search_field="all",
             field_map=INVENTORY_SEARCH_FTS_FIELD_MAP,
         )
     except InventoryFTSError as exc:
@@ -398,7 +398,7 @@ def _apply_inventory_single_field_search(
 ):
     # 处理指定字段搜索，优先命中精确 CAS 和 FTS，再回退到 LIKE。
 
-    if search_field == 'cas_number' and (
+    if search_field == "cas_number" and (
         cas_exact_or_prefix or match_mode == TextMatchMode.EXACT
     ):
         return base.where(
@@ -487,7 +487,7 @@ def _build_inventory_all_like_subquery(
     ]
     text_fields = collect_search_fields(
         INVENTORY_SEARCH_SQL_FIELD_MAP,
-        exclude_keys={'cas_number'},
+        exclude_keys={"cas_number"},
     )
     if text_fields:
         all_candidates.append(
@@ -516,7 +516,7 @@ def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
 
     cas_mode, _ = classify_cas_search(search_value, fuzzy=options.fuzzy)
     cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
-    is_all_field = not options.search_field or options.search_field == 'all'
+    is_all_field = not options.search_field or options.search_field == "all"
     if is_all_field:
         return _apply_inventory_all_field_search(
             filtered,
@@ -543,8 +543,8 @@ def _apply_inventory_like_filters(
     fuzzy: bool,
     match_mode: TextMatchMode,
 ):
-    if search_field and search_field != 'all' and search_field in INVENTORY_SEARCH_SQL_FIELD_MAP:
-        if search_field == 'cas_number':
+    if search_field and search_field != "all" and search_field in INVENTORY_SEARCH_SQL_FIELD_MAP:
+        if search_field == "cas_number":
             return base.where(
                 build_cas_search_clause(
                     Inventory.cas_number,
@@ -567,7 +567,7 @@ def _apply_inventory_like_filters(
 
     all_clauses = []
     for field_key, fields in INVENTORY_SEARCH_SQL_FIELD_MAP.items():
-        if field_key == 'cas_number':
+        if field_key == "cas_number":
             all_clauses.append(
                 build_cas_search_clause(
                     Inventory.cas_number,
@@ -597,39 +597,39 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
     )
 
     pinyin_sort_field_map = {
-        'name': Inventory.name_pinyin,
-        'category': Inventory.category_pinyin,
-        'brand': Inventory.brand_pinyin,
-        'storage_location': Inventory.storage_location_pinyin,
+        "name": Inventory.name_pinyin,
+        "category": Inventory.category_pinyin,
+        "brand": Inventory.brand_pinyin,
+        "storage_location": Inventory.storage_location_pinyin,
     }
 
     sort_field_map = {
-        'cas_number': Inventory.cas_number,
-        'name': Inventory.name,
-        'category': Inventory.category,
-        'storage_location': Inventory.storage_location,
-        'brand': Inventory.brand,
-        'remaining_quantity': Inventory.remaining_quantity,
+        "cas_number": Inventory.cas_number,
+        "name": Inventory.name,
+        "category": Inventory.category,
+        "storage_location": Inventory.storage_location,
+        "brand": Inventory.brand,
+        "remaining_quantity": Inventory.remaining_quantity,
         # 对历史数据做兜底：当存储列为空时，实时按 remaining/initial 计算用于排序。
-        'remaining_percent': func.coalesce(Inventory.remaining_percent, computed_remaining_percent),
-        'initial_quantity': Inventory.initial_quantity,
-        'status': Inventory.status,
-        'created_at': Inventory.created_at,
+        "remaining_percent": func.coalesce(Inventory.remaining_percent, computed_remaining_percent),
+        "initial_quantity": Inventory.initial_quantity,
+        "status": Inventory.status,
+        "created_at": Inventory.created_at,
     }
 
-    sort_direction = sort_order.lower() if sort_order else 'desc'
-    pinyin_sort_fields = {'name', 'category', 'brand', 'storage_location'}
+    sort_direction = sort_order.lower() if sort_order else "desc"
+    pinyin_sort_fields = {"name", "category", "brand", "storage_location"}
 
     if sort_by in pinyin_sort_fields:
         order_column = pinyin_sort_field_map.get(sort_by)
         # 索引优先：避免使用 `field IS NULL` 表达式，给 SQLite 机会走复合索引排序
-        if sort_direction == 'asc':
+        if sort_direction == "asc":
             return (order_column.asc(),)
         return (order_column.desc(),)
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
 
-    if sort_by == 'cas_number':
+    if sort_by == "cas_number":
         return order_with_special_last(order_column, BIOLOGICAL_REAGENT_CAS, sort_direction)
 
     return order_with_nulls_last(order_column, sort_direction)
@@ -687,28 +687,28 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
     # 规范化库存更新载荷并处理规格字段，返回是否更新了规格。
 
     specification_updated = False
-    optional_string_fields = ['storage_location', 'category', 'english_name', 'alias', 'purity', 'notes']
+    optional_string_fields = ["storage_location", "category", "english_name", "alias", "purity", "notes"]
     for field in optional_string_fields:
-        if field in update_data and update_data[field] == '':
+        if field in update_data and update_data[field] == "":
             update_data[field] = None
 
-    if 'cas_number' in update_data and update_data['cas_number']:
-        normalized_cas = normalize_cas(update_data['cas_number'])
+    if "cas_number" in update_data and update_data["cas_number"]:
+        normalized_cas = normalize_cas(update_data["cas_number"])
         if normalized_cas:
-            update_data['cas_number'] = normalized_cas
+            update_data["cas_number"] = normalized_cas
 
-    if 'storage_location' in update_data:
-        normalized_storage = normalize_storage_location(update_data['storage_location'])
-        update_data['storage_location'] = normalized_storage
+    if "storage_location" in update_data:
+        normalized_storage = normalize_storage_location(update_data["storage_location"])
+        update_data["storage_location"] = normalized_storage
 
-    if 'specification' in update_data:
-        spec_str = update_data['specification']
+    if "specification" in update_data:
+        spec_str = update_data["specification"]
         if spec_str:
             quantity, unit = parse_specification(spec_str)
             item.initial_quantity = quantity
             item.unit = unit
             specification_updated = True
-        update_data.pop('specification')
+        update_data.pop("specification")
 
     return specification_updated
 
@@ -716,11 +716,11 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
 def _ensure_inventory_required_brand(item: Inventory, update_data: dict) -> None:
     # 库存列表编辑后必须写入有效品牌，兼容旧数据并阻止保存空品牌。
 
-    effective_brand = update_data.get('brand', item.brand)
+    effective_brand = update_data.get("brand", item.brand)
     if not isinstance(effective_brand, str) or not effective_brand.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
-    if 'brand' in update_data:
-        update_data['brand'] = effective_brand.strip()
+    if "brand" in update_data:
+        update_data["brand"] = effective_brand.strip()
 
 
 # 先注册具名和扩展路由，保持路径优先级。
@@ -961,13 +961,13 @@ async def update_inventory(
 def _validate_inventory_update_cas(update_data: dict) -> None:
     # 校验并标准化更新载荷中的 CAS，确保写入格式稳定且合法。
 
-    if 'cas_number' not in update_data or not update_data['cas_number']:
+    if "cas_number" not in update_data or not update_data["cas_number"]:
         return
-    normalized_cas = normalize_cas(update_data['cas_number'])
+    normalized_cas = normalize_cas(update_data["cas_number"])
     is_valid, error_msg = validate_cas_format(normalized_cas)
     if not is_valid:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CAS number: {error_msg}")
-    update_data['cas_number'] = normalized_cas
+    update_data["cas_number"] = normalized_cas
 
 
 def _apply_inventory_remaining_quantity_update(
@@ -978,7 +978,7 @@ def _apply_inventory_remaining_quantity_update(
 ) -> None:
     # 处理剩余量与状态联动，保证数量边界和剩余比例语义一致。
 
-    if 'remaining_quantity' not in update_data:
+    if "remaining_quantity" not in update_data:
         if specification_updated:
             if (
                 item.remaining_quantity is not None
@@ -995,7 +995,7 @@ def _apply_inventory_remaining_quantity_update(
             item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
         return
 
-    new_remaining = update_data['remaining_quantity']
+    new_remaining = update_data["remaining_quantity"]
     initial_quantity = item.initial_quantity
     if (
         new_remaining is not None
@@ -1020,7 +1020,7 @@ def _apply_inventory_remaining_quantity_update(
 def _apply_inventory_pinyin_updates(item: Inventory, *, update_data: dict) -> None:
     # 在关键展示字段变更后重算拼音索引，保持搜索和排序结果正确。
 
-    if not any(field in update_data for field in ['name', 'category', 'brand', 'storage_location']):
+    if not any(field in update_data for field in ["name", "category", "brand", "storage_location"]):
         return
     pinyin_fields = compute_pinyin_fields(
         name=item.name,

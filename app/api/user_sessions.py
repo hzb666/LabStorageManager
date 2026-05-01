@@ -143,7 +143,7 @@ def delete_session(
         .where(UserSession.id == session_id)
         .where(UserSession.user_id == current_user.id)
     ).first()
-    
+
     if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -166,7 +166,7 @@ def delete_session(
     )
     db.commit()
     finalize_revoked_sessions([token_hash], reason="session_kicked")
-    
+
     return {"message": "Session deleted successfully"}
 
 
@@ -208,7 +208,7 @@ def refresh_session(
     current_user, current_session = current
     # 重新从数据库取当前会话，避免依赖依赖项里已过期的快照。
     session = db.get(UserSession, current_session.id)
-    
+
     if not session:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -218,7 +218,7 @@ def refresh_session(
                 "WWW-Authenticate": "Bearer",
             },
         )
-    
+
     before_snapshot = _build_session_snapshot(session)
     user_role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
     access_token = create_access_token(

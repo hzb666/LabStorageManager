@@ -566,7 +566,7 @@ async def security_headers_middleware(
 ) -> Response:
     """
     Attach security headers to every response, including short-circuit responses.
-    
+
     Must be defined LAST (after other middlewares) to ensure it wraps all response paths
     and adds CSP/HSTS/XFO headers to upload rejection (400/413), HTTPS redirects (307),
     and CSRF failures (403).

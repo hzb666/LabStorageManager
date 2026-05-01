@@ -186,7 +186,7 @@ def generate_internal_code(
 ) -> list[str]:
     """
     Generate internal codes for inventory items
-    
+
     Args:
         session: Database session
         cas_number: Normalized CAS number (e.g., "64-17-5")
@@ -202,7 +202,7 @@ def generate_internal_code(
         raise ValueError("quantity must be greater than 0")
     if quantity > INTERNAL_CODE_MAX_SEQUENCE:
         raise ValueError(f"quantity exceeds max sequence capacity: {INTERNAL_CODE_MAX_SEQUENCE}")
-    
+
     date_str = _date_fragment(created_at)
     prefix = build_internal_code_prefix(cas_number, created_at=created_at)
     try:

@@ -20,7 +20,7 @@ class UserSession(SQLModel, table=True):
         Index("ix_user_sessions_user_ip", "user_id", "ip_address"),
         Index("ix_user_sessions_expires_at", "expires_at"),
     )
-    
+
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", description="User ID")
     device_id: str = Field(description="Device unique identifier (UUID)")

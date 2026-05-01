@@ -69,20 +69,20 @@ def compute_pinyin_fields(
     storage_location_pinyin, storage_location_initials = to_pinyin_parts(storage_location)
 
     result = {
-        'name_pinyin': truncate(name_pinyin) if name else None,
-        'name_pinyin_initials': truncate(name_initials) if name else None,
-        'category_pinyin': truncate(category_pinyin) if category else None,
-        'category_pinyin_initials': truncate(category_initials) if category else None,
-        'brand_pinyin': truncate(brand_pinyin) if brand else None,
-        'brand_pinyin_initials': truncate(brand_initials) if brand else None,
-        'storage_location_pinyin': truncate(storage_location_pinyin) if storage_location else None,
-        'storage_location_pinyin_initials': truncate(storage_location_initials) if storage_location else None,
+        "name_pinyin": truncate(name_pinyin) if name else None,
+        "name_pinyin_initials": truncate(name_initials) if name else None,
+        "category_pinyin": truncate(category_pinyin) if category else None,
+        "category_pinyin_initials": truncate(category_initials) if category else None,
+        "brand_pinyin": truncate(brand_pinyin) if brand else None,
+        "brand_pinyin_initials": truncate(brand_initials) if brand else None,
+        "storage_location_pinyin": truncate(storage_location_pinyin) if storage_location else None,
+        "storage_location_pinyin_initials": truncate(storage_location_initials) if storage_location else None,
     }
 
     # full_name 只用于用户排序和检索，不和物料字段混在一起。
     if full_name:
         full_name_pinyin, full_name_initials = to_pinyin_parts(full_name)
-        result['full_name_pinyin'] = truncate(full_name_pinyin)
-        result['full_name_pinyin_initials'] = truncate(full_name_initials)
+        result["full_name_pinyin"] = truncate(full_name_pinyin)
+        result["full_name_pinyin_initials"] = truncate(full_name_initials)
 
     return result
