@@ -21,6 +21,22 @@ PROCESS_TIMEOUT_GRACE_SECONDS = 2.0
 CLI_TOKEN_ENV = "LSM_CLI_TOKEN"
 MAX_SAFE_ERROR_TEXT_LENGTH = 120
 SAFE_ERROR_CODE_PATTERN = re.compile(r"^[A-Z0-9_:-]{1,80}$")
+CHILD_PROCESS_ENV_ALLOWLIST = (
+    "PATH",
+    "PATHEXT",
+    "SystemRoot",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+)
 SENSITIVE_VALUE_PATTERN = re.compile(
     r"(sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]+|eyJ[A-Za-z0-9_-]{20,}\.)",
     re.IGNORECASE,
@@ -204,12 +220,20 @@ def _build_command(args: list[str], *, base_url: str, timeout_seconds: float) ->
 
 def _build_subprocess_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
     env = {
-        **os.environ,
-        "PYTHONIOENCODING": "utf-8",
-        "PYTHONPATH": str(REPO_ROOT),
+        name: value
+        for name in CHILD_PROCESS_ENV_ALLOWLIST
+        if (value := os.getenv(name))
     }
-    env.pop(CLI_TOKEN_ENV, None)
-    env.update(extra_env or {})
+    safe_home = str(Path(tempfile.gettempdir()) / "lsm-mcp-cli-home")
+    env.update(
+        {
+            "APPDATA": safe_home,
+            "HOME": safe_home,
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": str(REPO_ROOT),
+        }
+    )
+    env.update({key: str(value) for key, value in (extra_env or {}).items()})
     return env
 
 

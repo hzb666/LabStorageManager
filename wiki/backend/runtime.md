@@ -48,7 +48,7 @@
 
 ## Redis 与断路器
 
-[app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py) 提供全局 Redis 客户端和简易断路器。`get_redis()` 在最近一次错误后的冷却期内会直接返回 `None`，连接成功时会先 `ping()` 以确认可用性。所有键都通过 `redis_key()` 加上 `settings.redis_key_prefix`，避免命名空间冲突。
+[app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py) 提供全局 Redis 客户端和简易断路器。`get_redis()` 在最近一次错误后的冷却期内会直接返回 `None`，连接成功时会先 `ping()` 以确认可用性。连接池上限由 `settings.redis_max_connections` 控制，默认 100。所有键都通过 `redis_key()` 加上 `settings.redis_key_prefix`，避免命名空间冲突。
 
 Redis 相关封装主要承担三件事：
 

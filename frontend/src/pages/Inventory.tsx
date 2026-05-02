@@ -632,6 +632,7 @@ function StructureDialogFallback({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={contentClassName ?? "flex h-48 max-w-md items-center justify-center"}>
+        <DialogTitle className="sr-only">结构搜索加载中</DialogTitle>
         <Loader2 className="size-8 animate-spin text-muted-foreground" />
       </DialogContent>
     </Dialog>

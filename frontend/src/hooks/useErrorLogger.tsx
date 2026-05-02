@@ -1,5 +1,5 @@
 /** 前端错误日志收集 Hook。 */
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { api } from '@/api/client'
 import {
   formatLocalDateTimeWithSeconds,
@@ -50,6 +50,12 @@ interface GetLogsContentOptions {
   timeConfig?: BugReportTimeConfig
 }
 
+type ErrorLogListener = () => void
+
+let errorLogsStore: ErrorLogEntry[] = []
+let errorLoggerInstalled = false
+const errorLogListeners = new Set<ErrorLogListener>()
+
 // 获取浏览器信息
 function getBrowserInfo(): string {
   const ua = navigator.userAgent
@@ -93,150 +99,138 @@ interface UseErrorLoggerReturn {
   getLogsContent: (options?: GetLogsContentOptions) => string
 }
 
-function useMountedRef() {
-  const isMountedRef = useRef(true)
+function subscribeErrorLogs(listener: ErrorLogListener): () => void {
+  errorLogListeners.add(listener)
+  return () => {
+    errorLogListeners.delete(listener)
+  }
+}
 
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false
+function getErrorLogsSnapshot(): ErrorLogEntry[] {
+  return errorLogsStore
+}
+
+function notifyErrorLogListeners(): void {
+  errorLogListeners.forEach(listener => listener())
+}
+
+function addErrorLog(entry: Omit<ErrorLogEntry, 'timestamp'>): void {
+  const newEntry: ErrorLogEntry = {
+    ...entry,
+    timestamp: new Date().toISOString(),
+  }
+  errorLogsStore = [...errorLogsStore, newEntry].slice(-MAX_ERROR_LOGS)
+  notifyErrorLogListeners()
+}
+
+function clearErrorLogsStore(): void {
+  errorLogsStore = []
+  notifyErrorLogListeners()
+}
+
+function formatConsoleArg(arg: unknown): string {
+  if (arg instanceof Error) {
+    return arg.message
+  }
+  if (typeof arg !== 'object' || arg === null) {
+    return String(arg)
+  }
+  try {
+    return JSON.stringify(arg)
+  } catch {
+    return Object.prototype.toString.call(arg)
+  }
+}
+
+function shouldRecordConsoleError(message: string): boolean {
+  return !message.includes('ReactDOM.render')
+    && !message.includes('Download the React DevTools')
+}
+
+function ensureErrorLoggerInstalled(): void {
+  if (errorLoggerInstalled) {
+    return
+  }
+  errorLoggerInstalled = true
+
+  const originalError = console.error
+  console.error = (...args: unknown[]) => {
+    const message = args.map(formatConsoleArg).join(' ')
+
+    if (shouldRecordConsoleError(message)) {
+      const entry = {
+        type: 'console',
+        message,
+        stack: args.find(arg => arg instanceof Error)?.stack,
+      } satisfies Omit<ErrorLogEntry, 'timestamp'>
+      queueMicrotask(() => addErrorLog(entry))
     }
-  }, [isMountedRef])
 
-  return isMountedRef
+    originalError.apply(console, args)
+  }
+
+  window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+    const error = event.reason
+    addErrorLog({
+      type: 'unhandled',
+      message: error?.message || String(error),
+      stack: error?.stack,
+    })
+  })
+
+  window.addEventListener('error', (event: ErrorEvent) => {
+    addErrorLog({
+      type: 'console',
+      message: event.message,
+      stack: event.error?.stack,
+    })
+  })
+
+  api.interceptors.request.use(
+    (config) => config,
+    (error) => {
+      addErrorLog({
+        type: 'network',
+        message: `Request failed: ${error.message}`,
+        url: error.config?.url,
+      })
+      return Promise.reject(error)
+    }
+  )
+
+  api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      const status = error.response?.status
+      const url = error.config?.url
+
+      addErrorLog({
+        type: 'network',
+        message: `API Error ${status}: ${error.message}`,
+        url,
+        status,
+      })
+
+      return Promise.reject(error)
+    }
+  )
 }
 
 export function useErrorLogger(): UseErrorLoggerReturn {
-  const [errorLogs, setErrorLogs] = useState<ErrorLogEntry[]>([])
-  const isMountedRef = useMountedRef()
+  const errorLogs = useSyncExternalStore(
+    subscribeErrorLogs,
+    getErrorLogsSnapshot,
+    getErrorLogsSnapshot,
+  )
   const user = useAuthStore((state) => state.user)
-  
-  // 添加错误日志
-  const addErrorLog = useCallback((entry: Omit<ErrorLogEntry, 'timestamp'>) => {
-    if (!isMountedRef.current) {
-      return
-    }
 
-    const newEntry: ErrorLogEntry = {
-      ...entry,
-      timestamp: new Date().toISOString(),
-    }
-    
-    setErrorLogs(prev => {
-      const newLogs = [...prev, newEntry]
-      // 保持最大数量限制
-      if (newLogs.length > MAX_ERROR_LOGS) {
-        return newLogs.slice(-MAX_ERROR_LOGS)
-      }
-      return newLogs
-    })
-  }, [isMountedRef])
-  
-  // 捕获console.error
   useEffect(() => {
-    const originalError = console.error
-    
-    console.error = (...args: unknown[]) => {
-      // 避免重复记录React错误
-      const message = args.map(arg => {
-        if (arg instanceof Error) return arg.message
-        if (typeof arg === 'object') return JSON.stringify(arg)
-        return String(arg)
-      }).join(' ')
-      
-      // 过滤掉一些常见的无关错误
-      if (!message.includes('ReactDOM.render') && 
-          !message.includes('Download the React DevTools')) {
-        const entry = {
-          type: 'console',
-          message,
-          stack: args.find(arg => arg instanceof Error)?.stack,
-        } satisfies Omit<ErrorLogEntry, 'timestamp'>
-        queueMicrotask(() => addErrorLog(entry))
-      }
-      
-      originalError.apply(console, args)
-    }
-    
-    return () => {
-      console.error = originalError
-    }
-  }, [addErrorLog])
-  
-  // 捕获未处理的Promise拒绝
-  useEffect(() => {
-    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      const error = event.reason
-      addErrorLog({
-        type: 'unhandled',
-        message: error?.message || String(error),
-        stack: error?.stack,
-      })
-    }
-    
-    window.addEventListener('unhandledrejection', handleUnhandledRejection)
-    
-    return () => {
-      window.removeEventListener('unhandledrejection', handleUnhandledRejection)
-    }
-  }, [addErrorLog])
-  
-  // 捕获全局错误
-  useEffect(() => {
-    const handleError = (event: ErrorEvent) => {
-      addErrorLog({
-        type: 'console',
-        message: event.message,
-        stack: event.error?.stack,
-      })
-    }
-    
-    window.addEventListener('error', handleError)
-    
-    return () => {
-      window.removeEventListener('error', handleError)
-    }
-  }, [addErrorLog])
-  
-  // 拦截API请求错误
-  useEffect(() => {
-    const originalRequest = api.interceptors.request.use(
-      (config) => config,
-      (error) => {
-        addErrorLog({
-          type: 'network',
-          message: `Request failed: ${error.message}`,
-          url: error.config?.url,
-        })
-        return Promise.reject(error)
-      }
-    )
-    
-    const originalResponse = api.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        const status = error.response?.status
-        const url = error.config?.url
-        
-        addErrorLog({
-          type: 'network',
-          message: `API Error ${status}: ${error.message}`,
-          url,
-          status,
-        })
-        
-        return Promise.reject(error)
-      }
-    )
-    
-    return () => {
-      api.interceptors.request.eject(originalRequest)
-      api.interceptors.response.eject(originalResponse)
-    }
-  }, [addErrorLog])
+    ensureErrorLoggerInstalled()
+  }, [])
   
   // 清除日志
   const clearLogs = useCallback(() => {
-    setErrorLogs([])
+    clearErrorLogsStore()
   }, [])
   
   // 获取日志内容

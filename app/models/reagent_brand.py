@@ -4,12 +4,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
+
+
+def _strip_brand_name(value: object) -> object:
+    return value.strip() if isinstance(value, str) else value
 
 
 class ReagentBrand(SQLModel, table=True):
@@ -48,6 +52,11 @@ class ReagentBrandCreate(SQLModel):
 
     name: str = Field(max_length=100)
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value: object) -> object:
+        return _strip_brand_name(value)
+
 
 class ReagentBrandUpdate(SQLModel):
     """Update payload for reagent brand master data."""
@@ -55,6 +64,11 @@ class ReagentBrandUpdate(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(max_length=100)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value: object) -> object:
+        return _strip_brand_name(value)
 
 
 class ReagentBrandResponse(BaseResponse):

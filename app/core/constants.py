@@ -169,6 +169,10 @@ class SSERoom:
 
 
 # SSE 运行时参数。
+# 单进程 SSE 客户端上限：防止异常重连或僵尸连接无限占用内存。
+SSE_MAX_CLIENTS = 200
+# 单进程 SSE 房间上限：当前房间来自固定枚举，保留上限作为防御边界。
+SSE_MAX_ROOMS = 16
 # 单连接待发送队列上限：超过后触发慢连接治理逻辑
 SSE_CLIENT_QUEUE_MAXSIZE = 200
 # 单房间 replay 缓冲上限：用于连接恢复时补发最近事件

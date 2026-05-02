@@ -27,6 +27,7 @@ cp .env.example .env
 如果使用 `RS256`，还需要准备 RSA 私钥与公钥；若开发环境暂时改用 `HS256`，必须同时提供高熵 `SECRET_KEY`。
 
 Redis 仅监听 `127.0.0.1` 或 Compose 内网时，`REDIS_PASSWORD` 可以留空；Redis 对外监听或跨机器访问时必须设置强密码。
+默认登录态为 7 天：`ACCESS_TOKEN_EXPIRE_MINUTES=10080`，`SESSION_EXPIRE_HOURS=168`。单个后端进程的 Redis 连接池上限由 `REDIS_MAX_CONNECTIONS` 控制，默认 100。
 
 ### 启动后端
 

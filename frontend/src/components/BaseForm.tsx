@@ -326,9 +326,7 @@ function renderInputField<T extends FieldValues>({
       id={fieldId}
       type={field.type === "number" ? "number" : field.inputType || "text"}
       value={controllerField.value ?? ""}
-      onChange={(event) => {
-        controllerField.onChange(event.target.value)
-      }}
+      onValueChange={controllerField.onChange}
       placeholder={field.placeholder}
       disabled={isDisabled}
       readOnly={isReadOnly}

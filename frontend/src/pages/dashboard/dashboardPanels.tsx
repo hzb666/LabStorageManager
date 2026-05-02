@@ -1278,8 +1278,8 @@ function SystemStatusWindowControl({
   const handleSliderChange = (value: number[]) => {
     onWindowDaysChange(clampDashboardWindowDays(value[0] ?? windowDays));
   };
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    onWindowDaysChange(clampDashboardWindowDays(Number(event.target.value)));
+  const handleInputChange = (value: string) => {
+    onWindowDaysChange(clampDashboardWindowDays(Number(value)));
   };
 
   return (
@@ -1307,7 +1307,7 @@ function SystemStatusWindowControl({
           step={1}
           value={windowDays}
           disabled={allTime}
-          onChange={handleInputChange}
+          onValueChange={handleInputChange}
           styles={{
             stepper: {
               wrapper:

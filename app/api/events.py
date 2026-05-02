@@ -18,7 +18,7 @@ from app.core.time_utils import get_utc_now
 from app.models.user import User
 from app.models.user_session import UserSession
 from app.api.deps import get_current_session
-from app.services.sse_manager import SSESubscriptionRequest, sse_manager
+from app.services.sse_manager import SSECapacityError, SSESubscriptionRequest, sse_manager
 
 router = APIRouter(tags=["Events"])
 SSE_SESSION_REVALIDATE_SECONDS = 15
@@ -118,16 +118,22 @@ async def sse_events(
     )
 
     client_id = sse_manager.new_client_id()
-    client = await sse_manager.subscribe(
-        SSESubscriptionRequest(
-            client_id=client_id,
-            rooms=rooms,
-            last_seq_by_room=last_seq_by_room,
-            user_id=current_user.id,
-            session_id=current_session.id,
-            token_hash=current_session.token_hash,
+    try:
+        client = await sse_manager.subscribe(
+            SSESubscriptionRequest(
+                client_id=client_id,
+                rooms=rooms,
+                last_seq_by_room=last_seq_by_room,
+                user_id=current_user.id,
+                session_id=current_session.id,
+                token_hash=current_session.token_hash,
+            )
         )
-    )
+    except SSECapacityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SSE connection capacity reached",
+        ) from exc
     await sse_manager.start_listener()
 
     async def event_generator():

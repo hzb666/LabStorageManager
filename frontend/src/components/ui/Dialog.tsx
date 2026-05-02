@@ -1,104 +1,89 @@
 import * as React from "react"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { Button } from "@/components/ui/Button"
 import { cn } from "@/lib/utils"
 
-const LOCKED_SCROLL_OVERFLOW = "hidden"
-const NO_ACTIVE_SCROLL_LOCKS = 0
-
-let activeScrollLocks = NO_ACTIVE_SCROLL_LOCKS
-let previousBodyOverflow = ""
-let previousDocumentOverflow = ""
-
-function lockBackgroundScroll() {
-  if (activeScrollLocks === NO_ACTIVE_SCROLL_LOCKS) {
-    previousBodyOverflow = document.body.style.overflow
-    previousDocumentOverflow = document.documentElement.style.overflow
-    document.body.style.overflow = LOCKED_SCROLL_OVERFLOW
-    document.documentElement.style.overflow = LOCKED_SCROLL_OVERFLOW
-  }
-
-  activeScrollLocks += 1
-  return unlockBackgroundScroll
-}
-
-function unlockBackgroundScroll() {
-  activeScrollLocks = Math.max(NO_ACTIVE_SCROLL_LOCKS, activeScrollLocks - 1)
-  if (activeScrollLocks > NO_ACTIVE_SCROLL_LOCKS) return
-
-  document.body.style.overflow = previousBodyOverflow
-  document.documentElement.style.overflow = previousDocumentOverflow
-  previousBodyOverflow = ""
-  previousDocumentOverflow = ""
-}
-
-function useBackgroundScrollLock(open: boolean) {
-  React.useEffect(() => {
-    if (!open) return undefined
-
-    // 页面滚动可能挂在 body 或 html，两个节点同步加锁。
-    return lockBackgroundScroll()
-  }, [open])
-}
-
-interface DialogProps {
+interface DialogMountContextValue {
+  keepMounted: boolean
   open: boolean
-  onOpenChange: (open: boolean) => void
-  children: React.ReactNode
+}
+
+const DialogMountContext = React.createContext<DialogMountContextValue>({
+  keepMounted: false,
+  open: false,
+})
+
+interface DialogProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root> {
   keepMounted?: boolean
 }
 
-export function Dialog({ open, onOpenChange, children, keepMounted = false }: DialogProps) {
-  useBackgroundScrollLock(open)
-
-  if (!open && !keepMounted) return null
-
+export function Dialog({ open = false, keepMounted = false, children, ...props }: DialogProps) {
   return (
-    <div
-      className={cn(
-        "fixed inset-0 z-50 flex items-center justify-center",
-        !open && "invisible pointer-events-none",
-      )}
-      aria-hidden={!open}
-    >
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/50"
-          // 点击遮罩关闭弹窗，保持全局交互一致。
-          onClick={() => onOpenChange(false)}
-        />
-      )}
-      {children}
-    </div>
+    <DialogMountContext.Provider value={{ keepMounted, open }}>
+      <DialogPrimitive.Root open={open} {...props}>
+        {children}
+      </DialogPrimitive.Root>
+    </DialogMountContext.Provider>
   )
 }
 
-interface DialogContentProps {
+interface DialogContentProps
+  extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   children: React.ReactNode
-  className?: string
 }
 
-export function DialogContent({ children, className }: DialogContentProps) {
+export const DialogContent = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  DialogContentProps
+>(({ children, className, ...props }, ref) => {
+  const { keepMounted, open } = React.useContext(DialogMountContext)
+  const forceMount = keepMounted ? true : undefined
+
   return (
-    <div
-      className={cn(
-        // max-h + overflow 兜住长表单，移动端超出可视区域仍可滚动。
-        "w-[90%] md:w-auto md:min-w-md relative bg-card rounded-lg p-6 max-h-[90vh] overflow-y-auto shadow-lg border border-border text-popover-foreground",
-        className
-      )}
-    >
-      {children}
-    </div>
+    <DialogPrimitive.Portal forceMount={forceMount}>
+      <DialogPrimitive.Overlay
+        forceMount={forceMount}
+        className={cn(
+          "fixed inset-0 z-50 bg-black/50",
+          keepMounted && !open && "hidden"
+        )}
+      />
+      <DialogPrimitive.Content
+        ref={ref}
+        forceMount={forceMount}
+        className={cn(
+          "fixed left-1/2 top-1/2 z-50 w-[90%] max-h-[90vh] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-border bg-card p-6 text-popover-foreground shadow-lg md:w-auto md:min-w-md",
+          keepMounted && !open && "hidden pointer-events-none",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Portal>
   )
-}
+})
 
-export function DialogHeader({ children, className }: { children: React.ReactNode; className?: string }) {
+DialogContent.displayName = "DialogContent"
+
+export function DialogHeader({
+  children,
+  className,
+}: Readonly<{ children: React.ReactNode; className?: string }>) {
   return <div className={cn(className)}>{children}</div>
 }
 
-export function DialogTitle({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <h2 className={cn("font-bold text-2xl flex items-center gap-2 mb-8", className)}>{children}</h2>
+export function DialogTitle({
+  children,
+  className,
+}: Readonly<{ children: React.ReactNode; className?: string }>) {
+  return (
+    <DialogPrimitive.Title className={cn("font-bold text-2xl flex items-center gap-2 mb-8", className)}>
+      {children}
+    </DialogPrimitive.Title>
+  )
 }
 
 export function DialogCloseButton({
@@ -108,19 +93,36 @@ export function DialogCloseButton({
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <Button
-      type={type}
-      variant="ghost"
-      size="icon"
-      className={cn("absolute right-4 top-4 p-1 size-8", className)}
-      aria-label={ariaLabel}
-      {...props}
-    >
-      <X className="size-4" />
-    </Button>
+    <DialogPrimitive.Close asChild>
+      <Button
+        type={type}
+        variant="ghost"
+        size="icon"
+        className={cn("absolute right-4 top-4 p-1 size-8", className)}
+        aria-label={ariaLabel}
+        {...props}
+      >
+        <X className="size-4" />
+      </Button>
+    </DialogPrimitive.Close>
   )
 }
 
-export function DialogTrigger({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
-  return <div onClick={onClick}>{children}</div>
+export function DialogTrigger({
+  children,
+  onClick,
+}: Readonly<{ children: React.ReactNode; onClick?: () => void }>) {
+  if (React.isValidElement(children)) {
+    return (
+      <DialogPrimitive.Trigger asChild onClick={onClick}>
+        {children}
+      </DialogPrimitive.Trigger>
+    )
+  }
+
+  return (
+    <DialogPrimitive.Trigger onClick={onClick}>
+      {children}
+    </DialogPrimitive.Trigger>
+  )
 }

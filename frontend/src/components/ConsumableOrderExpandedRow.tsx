@@ -26,7 +26,7 @@ export const ConsumableOrderExpandedRow = React.memo(function ConsumableOrderExp
       <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 flex-1">
         <div><span>英文名称：</span>{item.english_name || '-'}</div>
         <div><span>货号：</span>{toText(item.product_number) || '-'}</div>
-        <div><span>价格：</span>{item.price || '-'}</div>
+        <div><span>价格：</span>{item.price ?? '-'}</div>
         {showExtraFields && (
           <>
             <div><span>申购时间：</span>{item.created_at ? formatDate(item.created_at) : '-'}</div>

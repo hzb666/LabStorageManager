@@ -105,6 +105,7 @@ export function AnnouncementDetail({ announcement, open, onOpenChange }: Readonl
         }}
       >
         <DialogContent className="max-w-none! w-auto bg-transparent border-none p-0 shadow-none max-h-[90vh] flex items-center justify-center">
+          <DialogTitle className="sr-only">图片预览</DialogTitle>
           {selectedImageIndex !== null && announcement?.images?.[selectedImageIndex] && (
             <img
               src={getFullImageUrl(announcement.images[selectedImageIndex])}

@@ -35,6 +35,7 @@ export interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElem
   tag?: string
   enableTagToggle?: boolean
   prefixButton?: PrefixButtonConfig
+  onValueChange?: (value: string) => void
   styles?: Partial<InputStyles>
 }
 
@@ -311,6 +312,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       prefixButton,
       value,
       onChange,
+      onValueChange,
       styles: customStyles,
       ...props
     },
@@ -323,39 +325,42 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
     const { activeConfig, DefaultIcon, displayValue, isActive, isControlled, isNumber } =
       getInputValueState(type, value, enableTagToggle, tag)
 
-    // 输入框里只展示纯文本，真正对外回传时再按当前 tag 状态重组值，避免 UI 和存储格式耦在一起。
-    const emitChange = (nextPlainText: string, shouldHaveTag: boolean) => {
+    // 输入框里只展示纯文本，真正对外回传时再按当前 tag 状态重组值，避免伪造 React 事件。
+    const emitValue = (nextPlainText: string, shouldHaveTag: boolean) => {
       const finalValue = shouldHaveTag ? `${tag}${nextPlainText}` : nextPlainText
-      onChange?.({
-        target: { ...props, value: finalValue },
-      } as unknown as React.ChangeEvent<HTMLInputElement>)
+      onValueChange?.(finalValue)
     }
 
     // 标签模式下，显示值和最终存储值是两套表示，这里负责把它们重新对齐。
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!enableTagToggle) {
-        return onChange?.(e)
+        if (onValueChange) {
+          onValueChange(e.target.value)
+          return
+        }
+        onChange?.(e)
+        return
       }
 
       const nextValue = e.target.value
 
       if (nextValue === "") {
-        emitChange("", false)
+        emitValue("", false)
         return
       }
 
       if (!isActive && nextValue.includes(tag)) {
-        emitChange(nextValue.replace(tag, ""), true)
+        emitValue(nextValue.replace(tag, ""), true)
         return
       }
 
-      emitChange(nextValue, isActive)
+      emitValue(nextValue, isActive)
     }
 
     // 切标签只改存储前缀，不重写当前可见文本，避免用户刚输入的内容被清空。
     const handleStatusToggle = (e: React.MouseEvent) => {
       e.preventDefault()
-      emitChange(displayValue, !isActive)
+      emitValue(displayValue, !isActive)
     }
 
     // 数字步进先兜底异常输入，再做 min/max 钳制，避免空值或脏值把步进器带坏。
@@ -363,7 +368,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       const parsedValue = displayValue === "" ? 0 : Number(displayValue)
       const currentNum = Number.isFinite(parsedValue) ? parsedValue : 0
       const nextValue = Math.max(numMin, Math.min(numMax, currentNum + delta))
-      emitChange(String(nextValue), isActive)
+      emitValue(String(nextValue), isActive)
     }
 
     return (

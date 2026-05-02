@@ -121,7 +121,7 @@ export function Pagination({ currentPage, totalPages, pageSize, onPageChange, on
             min={1}
             max={totalPages}
             value={jumpPage}
-            onChange={(e) => setJumpPage(e.target.value)}
+            onValueChange={setJumpPage}
             onKeyDown={handleKeyDown}
             placeholder={String(currentPage)}
             className="h-9 w-20 text-base pl-3 pr-8"

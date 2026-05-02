@@ -210,7 +210,7 @@ npm run dev
 | `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署设为 true；本地开发或无可信反代时设为 false |
 | `CACHE_VERSION` | `0.1.0` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | 登录态默认 7 天 |
-| `SESSION_EXPIRE_HOURS` | `72` | 会话有效期 |
+| `SESSION_EXPIRE_HOURS` | `168` | 会话有效期，默认 7 天 |
 | `MAX_IP_PER_USER` | `5` | 每个用户允许的最大 IP 数 |
 | `MAX_DEVICE_PER_USER` | `10` | 每个用户允许的最大设备数 |
 | `CLI_RATE_LIMIT_COUNT` | `60` | CLI API 单窗口请求次数 |
@@ -222,6 +222,7 @@ npm run dev
 | `REDIS_DB` | `1` | Redis 逻辑库 |
 | `REDIS_PASSWORD` | 空 | Redis 仅监听本机时可留空；对外监听时必须设置 |
 | `REDIS_KEY_PREFIX` | `lsm` | Redis key 前缀 |
+| `REDIS_MAX_CONNECTIONS` | `100` | 单个后端进程的 Redis 连接池上限 |
 
 ### 日志归档
 

@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from pydantic import ConfigDict
 from sqlalchemy import Column, Enum as SAEnum, Index
 from sqlmodel import Field, SQLModel
 
@@ -79,6 +80,8 @@ class ChemicalNameMap(ChemicalNameMapBase, table=True):
 
 class ChemicalNameMapCreate(SQLModel):
     """Create payload for CAS master data."""
+
+    model_config = ConfigDict(extra="forbid")
 
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)

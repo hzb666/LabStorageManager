@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # 会话与设备设置（含 IP 限制）
     max_ip_per_user: int = Field(default=5, description="Max distinct IPs per user")
     max_device_per_user: int = Field(default=10, description="Max devices per user")
-    session_expire_hours: int = Field(default=72, description="Session expiration hours (3 days)")
+    session_expire_hours: int = Field(default=7 * 24, description="Session expiration hours (7 days)")
     session_strict_ip: bool = Field(default=False, description="Whether to enforce IP consistency")
 
     # 公告设置
@@ -133,6 +133,11 @@ class Settings(BaseSettings):
     redis_db: int = Field(default=0, description="Redis database number")
     redis_password: Optional[str] = Field(default=None, description="Redis password")
     redis_key_prefix: str = Field(default="lsm", description="Redis key prefix for app namespace")
+    redis_max_connections: int = Field(
+        default=100,
+        ge=1,
+        description="Maximum Redis connections per application process",
+    )
 
     # 化学结构缓存与检索
     chem_structure_feature_enabled: bool = Field(

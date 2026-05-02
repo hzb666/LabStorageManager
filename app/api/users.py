@@ -68,6 +68,7 @@ from app.services.session_service import (
     stage_revoke_user_sessions,
     sync_session_cache,
     LOGIN_ATTEMPTS,
+    prune_login_attempts,
     _login_attempts_lock,
 )
 from app.services.audit_logger import AuditEventContext, log_audit_event
@@ -386,6 +387,7 @@ def _record_failed_login(client_ip: str) -> None:
 
 def _check_rate_limit_memory(client_ip: str) -> None:
     current_time = time.time()
+    prune_login_attempts(current_time)
     with _login_attempts_lock:
         attempts_data = LOGIN_ATTEMPTS.get(client_ip)
         if attempts_data is None:
@@ -405,6 +407,7 @@ def _check_rate_limit_memory(client_ip: str) -> None:
 
 def _record_failed_login_memory(client_ip: str) -> None:
     current_time = time.time()
+    prune_login_attempts(current_time)
     with _login_attempts_lock:
         if client_ip not in LOGIN_ATTEMPTS:
             LOGIN_ATTEMPTS[client_ip] = (1, current_time)
@@ -451,6 +454,12 @@ class CLILoginResponse(BaseModel):
     expires_in: int
     user: UserResponse
     redis_warning: Optional[str] = None
+
+
+def _get_cli_token_expires_in_seconds() -> int:
+    jwt_seconds = settings.access_token_expire_minutes * 60
+    session_seconds = settings.session_expire_hours * SECONDS_PER_HOUR
+    return min(jwt_seconds, session_seconds)
 
 
 def _finalize_expired_login_cleanup(expired_token_hashes: list[str]) -> None:
@@ -782,7 +791,7 @@ def login_cli_token(
         response = CLILoginResponse(
             access_token=result.access_token,
             token_type="bearer",
-            expires_in=settings.access_token_expire_minutes * 60,
+            expires_in=_get_cli_token_expires_in_seconds(),
             user=UserResponse.model_validate(result.user),
             redis_warning=result.redis_warning,
         )

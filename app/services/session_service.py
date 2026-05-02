@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.constants import (
     ANONYMOUS_DEVICE_PREFIX,
     ANONYMOUS_DEVICE_TOKEN_HEX_LENGTH,
+    LOGIN_WINDOW_SECONDS,
     SECONDS_PER_HOUR,
     UNKNOWN_DEVICE,
 )
@@ -50,6 +51,39 @@ class StagedSessionRefresh:
 
 LOGIN_ATTEMPTS: Dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次失败时间)
 _login_attempts_lock = threading.Lock()  # 线程锁，保护并发访问
+_login_attempts_last_sweep = 0.0
+
+LOGIN_ATTEMPTS_SWEEP_INTERVAL_SECONDS = 60
+LOGIN_ATTEMPTS_MAX_KEYS = 4096
+
+
+def prune_login_attempts(current_time: float) -> None:
+    global _login_attempts_last_sweep
+
+    with _login_attempts_lock:
+        should_sweep = (
+            current_time - _login_attempts_last_sweep
+            >= LOGIN_ATTEMPTS_SWEEP_INTERVAL_SECONDS
+            or len(LOGIN_ATTEMPTS) > LOGIN_ATTEMPTS_MAX_KEYS
+        )
+        if not should_sweep:
+            return
+
+        expired_ips = [
+            ip
+            for ip, (_, first_attempt) in LOGIN_ATTEMPTS.items()
+            if current_time - first_attempt >= LOGIN_WINDOW_SECONDS
+        ]
+        for ip in expired_ips:
+            LOGIN_ATTEMPTS.pop(ip, None)
+
+        if len(LOGIN_ATTEMPTS) > LOGIN_ATTEMPTS_MAX_KEYS:
+            overflow = len(LOGIN_ATTEMPTS) - LOGIN_ATTEMPTS_MAX_KEYS
+            oldest_ips = sorted(LOGIN_ATTEMPTS, key=lambda ip: LOGIN_ATTEMPTS[ip][1])[:overflow]
+            for ip in oldest_ips:
+                LOGIN_ATTEMPTS.pop(ip, None)
+
+        _login_attempts_last_sweep = current_time
 
 
 def _coerce_count(value: object) -> int:

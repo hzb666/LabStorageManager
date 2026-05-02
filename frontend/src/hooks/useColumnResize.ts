@@ -1,5 +1,5 @@
 /** 列宽拖拽调整 Hook。 */
-import { useRef, useCallback, useState } from 'react'
+import { useRef, useCallback, useEffect, useState } from 'react'
 import type { Table as TableType, Header, Column } from '@tanstack/react-table'
 
 interface UseColumnResizeOptions<TData> {
@@ -56,11 +56,19 @@ export function useColumnResize<TData>({
 }: UseColumnResizeOptions<TData>) {
   const [resizingColId, setResizingColId] = useState<string | null>(null)
   const rAFRef = useRef<number | null>(null)
+  const cleanupRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => () => {
+    cleanupRef.current?.()
+    cleanupRef.current = null
+  }, [])
 
   // 接管表头拖拽事件，并把像素偏移换算成左右两列的权重变化。
   const handleCustomResize = useCallback((e: React.MouseEvent | React.TouchEvent, header: Header<TData, unknown>) => {
     e.preventDefault()
     e.stopPropagation()
+    cleanupRef.current?.()
+    cleanupRef.current = null
 
     const currentIndex = visibleColumns.findIndex((c) => c.id === header.column.id)
     const leftCol = visibleColumns[currentIndex]
@@ -114,20 +122,31 @@ export function useColumnResize<TData>({
       })
     }
 
-    // 在拖拽结束时移除全局监听并清理当前调整状态。
-    const onUp = () => {
-      if (rAFRef.current) cancelAnimationFrame(rAFRef.current)
+    function cleanupResize() {
+      if (rAFRef.current) {
+        cancelAnimationFrame(rAFRef.current)
+        rAFRef.current = null
+      }
       setResizingColId(null)
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
       document.removeEventListener('touchmove', onMove)
       document.removeEventListener('touchend', onUp)
+      document.removeEventListener('touchcancel', onUp)
+      cleanupRef.current = null
+    }
+
+    // 在拖拽结束时移除全局监听并清理当前调整状态。
+    function onUp() {
+      cleanupResize()
     }
 
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     document.addEventListener('touchmove', onMove, { passive: false })
     document.addEventListener('touchend', onUp)
+    document.addEventListener('touchcancel', onUp)
+    cleanupRef.current = cleanupResize
   }, [visibleColumns, totalWeight, minTableWidth, table, bodyScrollRef])
 
   return { resizingColId, handleCustomResize }

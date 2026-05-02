@@ -115,7 +115,7 @@ function createConsumableOrderFormValues(item: ConsumableOrder): ConsumableOrder
     unit: item.unit || '',
     quantity: item.quantity || 1,
     product_number: item.product_number || '',
-    price: item.price || undefined,
+    price: item.price ?? undefined,
     communication: item.communication || '',
     notes: item.notes || '',
   }

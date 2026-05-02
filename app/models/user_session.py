@@ -10,6 +10,13 @@ from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 
+DEVICE_ID_MAX_LENGTH = 128
+DEVICE_NAME_MAX_LENGTH = 200
+IP_ADDRESS_MAX_LENGTH = 64
+USER_AGENT_MAX_LENGTH = 2048
+TOKEN_HASH_MAX_LENGTH = 128
+
+
 class UserSession(SQLModel, table=True):
     """User session model for device and IP login management"""
     __tablename__ = "user_sessions"
@@ -23,12 +30,31 @@ class UserSession(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", description="User ID")
-    device_id: str = Field(description="Device unique identifier (UUID)")
-    device_name: str = Field(description="Device name parsed from User-Agent")
-    ip_address: str = Field(description="Initial login IP address")
-    last_ip_address: str = Field(description="Last active IP address")
-    user_agent: str = Field(description="Full User-Agent string")
-    token_hash: str = Field(index=True, description="SHA-256 hash of JWT token")
+    device_id: str = Field(
+        max_length=DEVICE_ID_MAX_LENGTH,
+        description="Device unique identifier (UUID)",
+    )
+    device_name: str = Field(
+        max_length=DEVICE_NAME_MAX_LENGTH,
+        description="Device name parsed from User-Agent",
+    )
+    ip_address: str = Field(
+        max_length=IP_ADDRESS_MAX_LENGTH,
+        description="Initial login IP address",
+    )
+    last_ip_address: str = Field(
+        max_length=IP_ADDRESS_MAX_LENGTH,
+        description="Last active IP address",
+    )
+    user_agent: str = Field(
+        max_length=USER_AGENT_MAX_LENGTH,
+        description="Full User-Agent string",
+    )
+    token_hash: str = Field(
+        index=True,
+        max_length=TOKEN_HASH_MAX_LENGTH,
+        description="SHA-256 hash of JWT token",
+    )
     created_at: datetime = Field(default_factory=get_utc_now, description="First login time")
     last_active_at: datetime = Field(
         default_factory=get_utc_now,

@@ -1,4 +1,5 @@
 """后端错误日志收集服务。"""
+from collections import deque
 import logging
 import re
 from pathlib import Path
@@ -128,6 +129,10 @@ def _format_error_log_line(line: str) -> str:
     return sanitize_log_content(_convert_log_timestamp_to_display_time(line))
 
 
+def _is_error_log_line(line: str) -> bool:
+    return "[ERROR]" in line
+
+
 def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
     """
     获取最近的错误日志
@@ -142,16 +147,14 @@ def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
         return []
 
     try:
+        if lines <= 0:
+            return []
+
+        recent_lines: deque[str] = deque(maxlen=lines)
         with open(LOG_FILE, "r", encoding="utf-8") as f:
-            all_lines = f.readlines()
-
-        # 只返回最后N行ERROR级别的日志
-        error_lines = [
-            line for line in all_lines
-            if "[ERROR]" in line
-        ]
-
-        recent_lines = error_lines[-lines:] if len(error_lines) > lines else error_lines
+            for line in f:
+                if _is_error_log_line(line):
+                    recent_lines.append(line)
 
         # 对每行进行脱敏处理
         sanitized_lines = [_format_error_log_line(line) for line in recent_lines]
@@ -178,27 +181,25 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
         return []
 
     try:
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            all_lines = f.readlines()
-
         # 解析时间并过滤
         cutoff_time = datetime.now() - timedelta(hours=hours)
         recent_errors = []
 
-        for line in all_lines:
-            if "[ERROR]" not in line:
-                continue
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                if not _is_error_log_line(line):
+                    continue
 
-            try:
-                # 提取时间戳 (格式: 2024-01-01 12:00:00)
-                time_str = line.split("[")[0].strip()
-                log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
+                try:
+                    # 提取时间戳 (格式: 2024-01-01 12:00:00)
+                    time_str = line.split("[")[0].strip()
+                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
 
-                if log_time >= cutoff_time:
+                    if log_time >= cutoff_time:
+                        recent_errors.append(_format_error_log_line(line))
+                except (ValueError, IndexError):
+                    # 时间解析失败时返回该行
                     recent_errors.append(_format_error_log_line(line))
-            except (ValueError, IndexError):
-                # 时间解析失败时返回该行
-                recent_errors.append(_format_error_log_line(line))
 
         return recent_errors
 
@@ -238,31 +239,31 @@ def clear_old_logs(days: int = 7) -> int:
         return 0
 
     try:
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            all_lines = f.readlines()
-
         cutoff_time = datetime.now() - timedelta(days=days)
-        remaining_lines = []
         deleted_count = 0
+        tmp_file = LOG_FILE.with_suffix(f"{LOG_FILE.suffix}.tmp")
 
-        for line in all_lines:
-            if "[ERROR]" not in line:
-                remaining_lines.append(line)
-                continue
+        with (
+            open(LOG_FILE, "r", encoding="utf-8") as source,
+            open(tmp_file, "w", encoding="utf-8") as target,
+        ):
+            for line in source:
+                if not _is_error_log_line(line):
+                    target.write(line)
+                    continue
 
-            try:
-                time_str = line.split("[")[0].strip()
-                log_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+                try:
+                    time_str = line.split("[")[0].strip()
+                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
 
-                if log_time >= cutoff_time:
-                    remaining_lines.append(line)
-                else:
-                    deleted_count += 1
-            except (ValueError, IndexError):
-                remaining_lines.append(line)
+                    if log_time >= cutoff_time:
+                        target.write(line)
+                    else:
+                        deleted_count += 1
+                except (ValueError, IndexError):
+                    target.write(line)
 
-        with open(LOG_FILE, "w", encoding="utf-8") as f:
-            f.writelines(remaining_lines)
+        tmp_file.replace(LOG_FILE)
 
         return deleted_count
 

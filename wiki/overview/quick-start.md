@@ -36,6 +36,7 @@ cp .env.example .env
 - `PUBLIC_KEY_PATH`
 
 Redis 仅监听本机或 Compose 内网时，`REDIS_PASSWORD` 可以留空。
+默认登录态为 7 天：`ACCESS_TOKEN_EXPIRE_MINUTES=10080`，`SESSION_EXPIRE_HOURS=168`。单个后端进程的 Redis 连接池上限由 `REDIS_MAX_CONNECTIONS` 控制，默认 100。
 
 本地 `.env.example` 默认使用 `sqlite:///./lab_inventory.db` 和 `logs`。Docker Compose 会覆盖为 `/data/lab_inventory.db` 和 `/data/logs`，上传资源目录对应 `/data/static`，外部访问路径是 `/static/`。
 

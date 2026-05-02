@@ -16,6 +16,8 @@ from app.core.constants import (
     SSE_CLIENT_ID_TOKEN_HEX_LENGTH,
     SSE_CLIENT_QUEUE_MAXSIZE,
     SSE_HEARTBEAT_SECONDS,
+    SSE_MAX_CLIENTS,
+    SSE_MAX_ROOMS,
     SSE_ORIGIN_TOKEN_HEX_LENGTH,
     SSE_REPLAY_BUFFER_MAX_EVENTS,
     SSE_REDIS_GET_MESSAGE_TIMEOUT_SECONDS,
@@ -29,6 +31,10 @@ from app.core.time_utils import get_utc_now, utc_iso_str
 from app.services.sse_redis import redis_pubsub
 
 logger = logging.getLogger(__name__)
+
+
+class SSECapacityError(RuntimeError):
+    """Raised when the local SSE manager refuses a subscription by capacity policy."""
 
 
 @dataclass
@@ -96,6 +102,8 @@ class SSEManager:
     async def get_room(self, room: str) -> SSERoom:
         async with self._manager_lock:
             if room not in self._rooms:
+                if len(self._rooms) >= SSE_MAX_ROOMS:
+                    raise SSECapacityError("SSE room limit reached")
                 self._rooms[room] = SSERoom(name=room)
             return self._rooms[room]
 
@@ -115,10 +123,18 @@ class SSEManager:
             client.last_seq_by_room[room] = max(0, int(request.last_seq_by_room.get(room, 0)))
 
         async with self._manager_lock:
-            self._clients[request.client_id] = client
+            is_new_client = request.client_id not in self._clients
+            if is_new_client and len(self._clients) >= SSE_MAX_CLIENTS:
+                raise SSECapacityError("SSE client limit reached")
 
-        for room in normalized_rooms:
-            local_room = await self.get_room(room)
+            new_rooms = [room for room in normalized_rooms if room not in self._rooms]
+            if len(self._rooms) + len(new_rooms) > SSE_MAX_ROOMS:
+                raise SSECapacityError("SSE room limit reached")
+
+            self._clients[request.client_id] = client
+            local_rooms = [self._rooms.setdefault(room, SSERoom(name=room)) for room in normalized_rooms]
+
+        for local_room in local_rooms:
             async with local_room.lock:
                 local_room.clients.add(request.client_id)
 

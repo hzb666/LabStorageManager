@@ -51,6 +51,7 @@ def get_redis() -> Optional[redis.Redis]:
             db=settings.redis_db,
             password=settings.redis_password if settings.redis_password else None,
             decode_responses=True,
+            max_connections=settings.redis_max_connections,
             socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
             socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
         )

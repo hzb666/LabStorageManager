@@ -293,8 +293,11 @@ export const ONE_DAY_MS = 24 * 60 * 60 * 1000
 // 公告关闭时长 (24小时)
 export const ANNOUNCEMENT_CLOSED_DURATION_MS = ONE_DAY_MS
 
-// 登录态过期时长 (3天)
-export const AUTH_STORAGE_EXPIRY_MS = 3 * ONE_DAY_MS
+// 登录态过期时长 (7天)
+export const AUTH_STORAGE_EXPIRY_MS = 7 * ONE_DAY_MS
+
+// UI 偏好过期时长，不与登录态绑定
+export const UI_STORAGE_EXPIRY_MS = 30 * ONE_DAY_MS
 
 // 字体加载超时 (1秒)
 export const FONT_TIMEOUT_MS = 1000

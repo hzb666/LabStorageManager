@@ -15,7 +15,7 @@
 
 ## JWT 与会话生命周期
 
-`create_access_token` 会在 payload 中写入 `sub`、`username`、`role`、`username_version`、`type`、`iat` 和 `exp`，过期时间由 `settings.access_token_expire_minutes` 决定。`decode_token` 统一走 `jose.jwt`，任何 `JWTError` 都会转成 401。
+`create_access_token` 会在 payload 中写入 `sub`、`username`、`role`、`username_version`、`type`、`iat` 和 `exp`，过期时间由 `settings.access_token_expire_minutes` 决定，默认 10080 分钟。会话有效期由 `settings.session_expire_hours` 决定，默认 168 小时。`decode_token` 统一走 `jose.jwt`，任何 `JWTError` 都会转成 401。
 
 `get_current_user` 的判定顺序比较固定：
 

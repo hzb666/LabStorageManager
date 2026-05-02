@@ -47,7 +47,6 @@ function PasswordInput({
           onBlur={(event) => {
             setIsFocused(false)
             setIsCapsLockOn(false)
-            setIsCapsLockOn(false)
             onBlur?.(event)
           }}
           onKeyDown={(event) => {
