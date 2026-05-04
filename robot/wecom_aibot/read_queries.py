@@ -10,7 +10,7 @@ from robot.wecom_aibot.common_shelf_decider import (
     common_shelf_category_from_name_map,
     has_name_map_records,
 )
-from robot.wecom_aibot.formatters import build_safe_facts, format_tool_result
+from robot.wecom_aibot.formatters import build_safe_facts, format_safe_facts, format_tool_result
 from robot.wecom_aibot.intent_utils import (
     COMMON_SHELF_KEYWORDS,
     CONSUMABLE_ORDER_KEYWORDS,
@@ -27,13 +27,17 @@ from robot.wecom_aibot.intent_utils import (
 )
 from robot.wecom_aibot.llm_planner import (
     ACTION_CALL_TOOL,
+    ACTION_FINAL,
     ACTION_HELP,
     ACTION_REPLY,
     ACTION_START_BORROW,
     ACTION_START_RETURN,
     LSMIntentPlanner,
+    LSMReadToolStep,
     LSMToolPlan,
+    READ_ONLY_TOOLS,
     UNSUPPORTED_MCP_REPLY,
+    build_read_tool_specs,
     is_safe_llm_reply,
 )
 from robot.wecom_aibot.mcp_client import LSMMcpClient
@@ -41,6 +45,7 @@ from robot.wecom_aibot.minimax_web_search import MiniMaxWebSearchClient
 
 CAS_CANDIDATE_PATTERN = re.compile(r"(?<!\d)\d{2,7}-\d{2}-\d(?!\d)")
 INVENTORY_NAME_CANDIDATE_LIMIT = 100
+READ_TOOL_LOOP_MAX_CALLS = 6
 GENERAL_WEB_SEARCH_KEYWORDS = (
     "联网",
     "网络",
@@ -149,15 +154,20 @@ async def answer_with_llm_plan(
         plan = await llm_planner.plan(text, conversation_context=conversation_context)
     if plan is None:
         return ""
-    if plan.action == ACTION_HELP:
-        return help_text()
-    if plan.action == ACTION_REPLY:
-        reply = plan.reply or help_text()
-        return reply if is_safe_llm_reply(reply) else UNSUPPORTED_MCP_REPLY
-    if plan.action in {ACTION_START_BORROW, ACTION_START_RETURN}:
-        return ""
-    if plan.action != ACTION_CALL_TOOL or plan.arguments is None:
-        return ""
+    non_tool_reply = _non_tool_plan_reply(plan)
+    if non_tool_reply is not None:
+        return non_tool_reply
+    read_loop_reply = await answer_with_read_tool_loop(
+        mcp_client=mcp_client,
+        llm_planner=llm_planner,
+        search_limit=search_limit,
+        text=text,
+        user_token=user_token,
+        initial_plan=plan,
+        conversation_context=conversation_context,
+    )
+    if read_loop_reply:
+        return read_loop_reply
     if plan.tool_name == "web_search":
         return "联网搜索只用于辅助识别化学名称或别名对应的 CAS（系统内部），不能干别的。"
     cas_override = _planned_or_text_cas(text, plan.arguments)
@@ -239,6 +249,175 @@ async def answer_with_llm_plan(
         user_text=text,
         conversation_context=conversation_context,
     )
+
+
+def _non_tool_plan_reply(plan: LSMToolPlan) -> str | None:
+    if plan.action == ACTION_HELP:
+        return help_text()
+    if plan.action == ACTION_REPLY:
+        reply = plan.reply or help_text()
+        return reply if is_safe_llm_reply(reply) else UNSUPPORTED_MCP_REPLY
+    if plan.action in {ACTION_START_BORROW, ACTION_START_RETURN}:
+        return ""
+    if plan.action != ACTION_CALL_TOOL or plan.arguments is None:
+        return ""
+    return None
+
+
+async def answer_with_read_tool_loop(
+    *,
+    mcp_client: LSMMcpClient,
+    llm_planner: LSMIntentPlanner | None,
+    search_limit: int,
+    text: str,
+    user_token: str,
+    initial_plan: LSMToolPlan | None = None,
+    conversation_context: list[dict[str, str]] | None = None,
+) -> str:
+    planner = getattr(llm_planner, "plan_read_step", None)
+    if planner is None:
+        return ""
+    observations: list[dict[str, Any]] = []
+    if initial_plan is not None:
+        initial_step = _read_step_from_plan(initial_plan)
+        if initial_step is None:
+            return ""
+        await _append_read_observation(
+            observations=observations,
+            mcp_client=mcp_client,
+            user_token=user_token,
+            step=initial_step,
+            search_limit=search_limit,
+        )
+    tool_specs = build_read_tool_specs()
+    for _ in range(READ_TOOL_LOOP_MAX_CALLS - len(observations)):
+        step = await planner(
+            text,
+            tool_specs=tool_specs,
+            observations=observations,
+            conversation_context=conversation_context,
+        )
+        if not isinstance(step, LSMReadToolStep):
+            return ""
+        if step.action == ACTION_FINAL:
+            return step.final_reply if is_safe_llm_reply(step.final_reply) else UNSUPPORTED_MCP_REPLY
+        if step.action != ACTION_CALL_TOOL:
+            return ""
+        if step.tool_name not in READ_ONLY_TOOLS:
+            return ""
+        await _append_read_observation(
+            observations=observations,
+            mcp_client=mcp_client,
+            user_token=user_token,
+            step=step,
+            search_limit=search_limit,
+        )
+    return _last_observation_text(observations)
+
+
+def _read_step_from_plan(plan: LSMToolPlan) -> LSMReadToolStep | None:
+    if plan.action != ACTION_CALL_TOOL or plan.arguments is None:
+        return None
+    if plan.tool_name not in READ_ONLY_TOOLS:
+        return None
+    return LSMReadToolStep(
+        action=ACTION_CALL_TOOL,
+        tool_name=plan.tool_name,
+        arguments=plan.arguments,
+    )
+
+
+async def _append_read_observation(
+    *,
+    observations: list[dict[str, Any]],
+    mcp_client: LSMMcpClient,
+    user_token: str,
+    step: LSMReadToolStep,
+    search_limit: int,
+) -> None:
+    arguments = _normalize_read_tool_arguments(
+        step.tool_name,
+        step.arguments or {},
+        search_limit=search_limit,
+    )
+    result = await _raw_call(mcp_client, step.tool_name, arguments, user_token)
+    title = _read_tool_title(step.tool_name, arguments)
+    empty_text = _read_tool_empty_text(step.tool_name)
+    facts = build_safe_facts(result, title=title, empty_text=empty_text)
+    observations.append(
+        {
+            "tool_name": step.tool_name,
+            "arguments": arguments,
+            "facts": facts,
+            "text": format_safe_facts(facts),
+        }
+    )
+
+
+def _normalize_read_tool_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    search_limit: int,
+) -> dict[str, Any]:
+    normalized = dict(arguments)
+    if tool_name == "inventory_search_by_name":
+        normalized.setdefault("limit", INVENTORY_NAME_CANDIDATE_LIMIT)
+    if tool_name in {
+        "inventory_list_low_stock",
+        "reagent_orders_search_by_name",
+        "reagent_orders_search_by_cas",
+        "consumable_orders_search_by_name",
+        "common_shelf_search_by_alias",
+        "common_shelf_search_by_cas",
+        "chemical_name_map_search",
+        "chemical_name_map_search_by_cas",
+    }:
+        normalized.setdefault("limit", search_limit)
+    return normalized
+
+
+def _read_tool_title(tool_name: str, arguments: dict[str, Any]) -> str:
+    keyword = str(arguments.get("keyword") or arguments.get("cas_number") or "").strip()
+    labels = {
+        "lab_storage_manager_help": "工具目录",
+        "inventory_search_by_name": "库存查询结果",
+        "inventory_get_by_cas": "库存 CAS 查询结果",
+        "inventory_get_by_id": "库存详情",
+        "inventory_list_low_stock": "低库存记录",
+        "inventory_my_borrows": "我的借用",
+        "inventory_pending_stockin": "我的暂存/待补全入库",
+        "reagent_orders_search_by_name": "试剂订单查询结果",
+        "reagent_orders_search_by_cas": "试剂订单 CAS 查询结果",
+        "reagent_orders_get_cas_overview": "试剂 CAS 概览",
+        "reagent_orders_get_by_id": "试剂订单详情",
+        "reagent_orders_my": "我的试剂订单",
+        "consumable_orders_search_by_name": "耗材订单查询结果",
+        "consumable_orders_get_by_id": "耗材订单详情",
+        "consumable_orders_my": "我的耗材订单",
+        "common_shelf_search_by_alias": "常用货架查询结果",
+        "common_shelf_search_by_cas": "常用货架 CAS 查询结果",
+        "common_shelf_locations": "常用货架位置详情",
+        "chemical_name_map_search": "CAS 主数据查询结果",
+        "chemical_name_map_search_by_cas": "CAS 主数据查询结果",
+    }
+    title = labels.get(tool_name, "查询结果")
+    return f"“{keyword}”{title}" if keyword else title
+
+
+def _read_tool_empty_text(tool_name: str) -> str:
+    if tool_name.startswith("common_shelf"):
+        return "常用货架没有查到匹配记录。"
+    if tool_name.startswith("chemical_name_map"):
+        return "CAS 主数据没有查到匹配记录。"
+    return "没有查到匹配记录。"
+
+
+def _last_observation_text(observations: list[dict[str, Any]]) -> str:
+    if not observations:
+        return ""
+    text = observations[-1].get("text")
+    return text if isinstance(text, str) else ""
 
 
 def _planned_or_text_cas(text: str, arguments: dict[str, Any]) -> str:
@@ -408,6 +587,16 @@ async def answer_read_query(
     user_token: str,
     conversation_context: list[dict[str, str]] | None = None,
 ) -> str:
+    read_loop_reply = await answer_with_read_tool_loop(
+        mcp_client=mcp_client,
+        llm_planner=llm_planner,
+        search_limit=search_limit,
+        text=text,
+        user_token=user_token,
+        conversation_context=conversation_context,
+    )
+    if read_loop_reply:
+        return read_loop_reply
     cas_number = extract_cas(text)
     use_priority_fallback = _should_use_priority_read_fallback(text)
     if use_priority_fallback and has_any(text, MY_BORROW_KEYWORDS):
@@ -782,26 +971,17 @@ async def _maybe_common_shelf_fallback(
 ) -> str:
     if not _is_empty_success_result(inventory_result):
         return ""
-    name_map_result = await _search_chemical_name_map(
-        mcp_client,
-        query=query,
-        cas_number=cas_number,
-        user_token=user_token,
-    )
     cas_resolution_allowed: bool | None = None
-    if _should_try_by_master_data(name_map_result):
-        return await _answer_common_shelf_fallback(
+    should_try = await _ask_llm_for_common_shelf(llm_planner, text, query, cas_number)
+    if should_try is True:
+        name_map_result = await _search_chemical_name_map(
             mcp_client,
-            search_limit,
-            query,
-            cas_number,
-            user_token,
-            llm_planner=llm_planner,
-            user_text=text,
+            query=query,
+            cas_number=cas_number,
+            user_token=user_token,
         )
-    if has_name_map_records(name_map_result):
         resolved_cas = _first_valid_cas_from_name_map(name_map_result)
-        if resolved_cas and not cas_number:
+        if resolved_cas and not cas_number and has_name_map_records(name_map_result):
             return await _answer_with_resolved_cas(
                 mcp_client=mcp_client,
                 llm_planner=llm_planner,
@@ -812,9 +992,15 @@ async def _maybe_common_shelf_fallback(
                 user_token=user_token,
                 source_text="CAS 主数据识别 CAS",
             )
-        cas_resolution_allowed = await _should_continue_cas_resolution(llm_planner, text, query)
-        if not cas_resolution_allowed:
-            return ""
+        return await _answer_common_shelf_fallback(
+            mcp_client,
+            search_limit,
+            query,
+            cas_number,
+            user_token,
+            llm_planner=llm_planner,
+            user_text=text,
+        )
     if not cas_number:
         cas_fallback = await _try_resolve_cas_with_knowledge(
             mcp_client=mcp_client,
@@ -838,17 +1024,6 @@ async def _maybe_common_shelf_fallback(
         )
         if cas_fallback:
             return cas_fallback
-    should_try = await _ask_llm_for_common_shelf(llm_planner, text, query, cas_number)
-    if should_try is True:
-        return await _answer_common_shelf_fallback(
-            mcp_client,
-            search_limit,
-            query,
-            cas_number,
-            user_token,
-            llm_planner=llm_planner,
-            user_text=text,
-        )
     return ""
 
 

@@ -12,9 +12,12 @@ from typing import Any, Literal
 
 import requests
 
+from lsm_mcp.help_catalog import TOOL_CATALOG
+
 logger = logging.getLogger(__name__)
 
 ACTION_CALL_TOOL = "call_tool"
+ACTION_FINAL = "final"
 ACTION_HELP = "help"
 ACTION_REPLY = "reply"
 ACTION_START_BORROW = "start_borrow"
@@ -24,22 +27,29 @@ UNSUPPORTED_MCP_REPLY = (
     "当前机器人只开放查询、绑定、借用和归还；"
     "其他操作请到 LabStorageManager 网页端处理。"
 )
-ALLOWED_TOOLS = {
+READ_ONLY_TOOLS = {
     "lab_storage_manager_help",
     "inventory_search_by_name",
     "inventory_get_by_cas",
+    "inventory_get_by_id",
     "inventory_list_low_stock",
     "inventory_my_borrows",
     "inventory_pending_stockin",
     "reagent_orders_search_by_name",
     "reagent_orders_search_by_cas",
     "reagent_orders_get_cas_overview",
+    "reagent_orders_get_by_id",
     "reagent_orders_my",
     "consumable_orders_search_by_name",
+    "consumable_orders_get_by_id",
     "consumable_orders_my",
     "common_shelf_search_by_alias",
     "common_shelf_search_by_cas",
+    "common_shelf_locations",
+    "chemical_name_map_search",
+    "chemical_name_map_search_by_cas",
 }
+ALLOWED_TOOLS = READ_ONLY_TOOLS
 NAME_SEARCH_TOOLS = {
     "inventory_search_by_name",
     "reagent_orders_search_by_name",
@@ -50,17 +60,23 @@ REQUIRED_ARGUMENTS = {
     "lab_storage_manager_help": (),
     "inventory_search_by_name": ("keyword",),
     "inventory_get_by_cas": ("cas_number",),
+    "inventory_get_by_id": ("inventory_id",),
     "inventory_list_low_stock": (),
     "inventory_my_borrows": (),
     "inventory_pending_stockin": (),
     "reagent_orders_search_by_name": ("keyword",),
     "reagent_orders_search_by_cas": ("cas_number",),
     "reagent_orders_get_cas_overview": ("cas_number",),
+    "reagent_orders_get_by_id": ("order_id",),
     "reagent_orders_my": (),
     "consumable_orders_search_by_name": ("keyword",),
+    "consumable_orders_get_by_id": ("order_id",),
     "consumable_orders_my": (),
     "common_shelf_search_by_alias": ("keyword",),
     "common_shelf_search_by_cas": ("cas_number",),
+    "common_shelf_locations": ("group_key",),
+    "chemical_name_map_search": ("keyword",),
+    "chemical_name_map_search_by_cas": ("cas_number",),
 }
 OPTIONAL_ARGUMENTS = {
     "lab_storage_manager_help": ("topic",),
@@ -71,6 +87,8 @@ OPTIONAL_ARGUMENTS = {
     "consumable_orders_search_by_name": ("limit", "exact"),
     "common_shelf_search_by_alias": ("limit",),
     "common_shelf_search_by_cas": ("limit",),
+    "chemical_name_map_search": ("limit",),
+    "chemical_name_map_search_by_cas": ("limit",),
 }
 FORBIDDEN_REPLY_TERMS = (
     "internal_code",
@@ -165,6 +183,14 @@ class LSMToolPlan:
     title: str = "查询结果"
     empty_text: str = "没有查到匹配记录。"
     reply: str = ""
+
+
+@dataclass(frozen=True)
+class LSMReadToolStep:
+    action: str
+    tool_name: str = ""
+    arguments: dict[str, Any] | None = None
+    final_reply: str = ""
 
 
 @dataclass(frozen=True)
@@ -330,6 +356,30 @@ class LSMIntentPlanner:
             failure_event="wecom_aibot_cas_resolution_decision_failed",
         )
         return _parse_cas_resolution_decision(output_text) if output_text else None
+
+    async def plan_read_step(
+        self,
+        user_text: str,
+        *,
+        tool_specs: list[dict[str, Any]],
+        observations: list[dict[str, Any]],
+        conversation_context: list[dict[str, str]] | None = None,
+    ) -> LSMReadToolStep | None:
+        payload = _build_read_step_payload(
+            model=self.model,
+            api_style=self.api_style,
+            user_text=user_text,
+            tool_specs=tool_specs,
+            observations=observations,
+            conversation_context=conversation_context,
+            max_output_tokens=min(self.max_output_tokens, 500),
+        )
+        output_text = await self._request_output_text(
+            payload=payload,
+            timeout_event="wecom_aibot_read_tool_loop_timeout",
+            failure_event="wecom_aibot_read_tool_loop_failed",
+        )
+        return _parse_read_tool_step(output_text) if output_text else None
 
     async def filter_inventory_name_candidates(
         self,
@@ -698,6 +748,46 @@ def _build_reply_polish_payload(
     }
 
 
+def _build_read_step_payload(
+    *,
+    model: str,
+    api_style: Literal["responses", "chat_completions"],
+    user_text: str,
+    tool_specs: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    conversation_context: list[dict[str, str]] | None,
+    max_output_tokens: int,
+) -> dict[str, Any]:
+    instructions = _read_step_instructions()
+    user_content = json.dumps(
+        {
+            "current_user_text": user_text,
+            "conversation_context": _compact_conversation_context(conversation_context),
+            "available_tools": tool_specs,
+            "observations": observations,
+        },
+        ensure_ascii=False,
+    )
+    if api_style == "chat_completions":
+        return {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": user_content},
+            ],
+            "max_tokens": max_output_tokens,
+            "temperature": 0,
+            "stream": False,
+        }
+    return {
+        "model": model,
+        "instructions": instructions,
+        "input": [{"role": "user", "content": user_content}],
+        "max_output_tokens": max_output_tokens,
+        "store": False,
+    }
+
+
 def _build_inventory_name_filter_payload(
     *,
     model: str,
@@ -868,40 +958,16 @@ def _instructions(search_limit: int) -> str:
     return (
         "你是 LabStorageManager 企业微信机器人意图规划器。"
         "只输出 JSON object，不输出 Markdown。"
-        "输入可能包含 current_user_text 和 conversation_context；"
-        "conversation_context 只是最近短期上下文，用于理解代词、省略和延续问题。"
-        "当前消息优先级最高，上下文只是低优先级辅助信号。"
-        "每条上下文带 recency_weight，数值越大越近；越旧权重越低。"
-        "只有当前消息和某条上下文有具体关联时才引用上下文，"
-        "例如明确代词指代、同一化学品/订单/借用流程或用户继续追问上一轮结果。"
-        "如果用户明显提出新的任务、对象或查询主题，要忽略无关上下文，按当前消息处理。"
-        "不要把上下文当作查询结果，也不要直接根据上下文回答库存事实；"
-        "涉及库存、订单、借用、暂存时，优先用工具或确认流程获取事实，避免编造结果。"
-        "你可以选择只读查询工具，或选择开始借用/开始归还流程。"
-        "开始借用/开始归还只会进入候选展示和人工确认，不能直接执行写操作。"
-        "不能执行入库、下单、更新或删除。"
-        "不要使用或暴露内部编码，用户通常不知道内部码。"
-        "用户表达明确要领取、借用或实际使用某个库存时，可以选择 start_borrow；"
-        "如果只是询问用法、建议、是否有库存或在讨论概念，不要仅因出现“用/借”等词进入流程。"
-        "用户明确表达归还、登记消耗量或登记归还后剩余量时，可以选择 start_return；"
-        "如果数量、对象或动作含义不清，可以澄清或先查询候选，不要强行进入流程。"
-        "用户问库存、还有吗、在哪里时，根据语义选择库存名称、CAS、常用货架、"
-        "个人记录、订单查询或澄清回复；不要被单个关键词固定到某个工具。"
-        "用户问个人相关借用、暂存、待入库或订单时，结合完整语义选择个人记录工具；"
-        "如果同时给出具体化学品或订单对象，可以查询对应对象而不是只按“我的”固定路由。"
-        "库存名称查询的 keyword 应是用于召回候选的搜索词，而不是必须照抄用户原话；"
-        "用户给出位置、取代、衍生物、类似物、不规范写法或宽泛结构描述时，"
-        "优先选择能召回候选的核心名称、主体名称、通用名、英文名或等价别名，"
-        "候选是否符合用户原始限定由系统在查询后再筛选。"
-        "库存、试剂订单、耗材订单的名称搜索默认是包含搜索；"
-        "exact=true 只适合用户明确要求名称完整一致、精确匹配或完全等于某名称的情况。"
-        "对位、邻位、间位、取代、衍生物、类似物、带某基团等化学修饰描述"
-        "更像宽泛筛选或澄清条件，不等同于 exact=true。"
-        "CAS 查询和常用货架查询不需要 exact 参数。"
-        "如果用户要求允许工具以外的 MCP 能力，必须用 reply 明确说明暂不支持，"
-        "不要编造工具名。"
-        "不要把联网搜索规划成直接回复用户的 MCP 工具；网络搜索只能由系统内部"
-        "用于名称或别名解析 CAS，不能干别的。解析出 CAS 后必须回到 LSM 数据查询。"
+        "你的职责是做入口分流，不要替后续只读查询规划固定搜索路线。"
+        "current_user_text 优先；conversation_context 只用于明确指代、省略或连续追问。"
+        "不要把上下文当作事实来源，也不要直接回答库存、订单、借用或常用货架事实。"
+        "只读查询请选择最接近的只读工具；后续系统会让只读 planner 自主多步查询。"
+        "明确要领取、借用或实际使用库存时返回 start_borrow；"
+        "明确要归还、登记消耗量或登记剩余量时返回 start_return。"
+        "start_borrow/start_return 只进入候选展示和人工确认，不能直接写入。"
+        "不能执行入库、下单、更新、删除或其他写操作。"
+        "不要要求或暴露 token、密码、密钥、内部 ID、内部编码、原始错误或 MCP/API 细节。"
+        "如果请求超出工具能力，用 reply 简短说明暂不支持；不要编造工具名。"
         f"允许工具：{tools}。"
         "输出格式之一："
         '{"action":"call_tool","tool_name":"工具名","arguments":{},"title":"中文标题",'
@@ -932,69 +998,70 @@ def _context_reset_instructions() -> str:
 
 def _common_shelf_decision_instructions() -> str:
     return (
-        "你判断一个实验室查询词是否值得在常用货架中继续查询。"
+        "你只判断空库存结果后是否值得补查常用/公共货架。"
         "只输出 JSON object，不输出 Markdown。"
-        "系统已经先查过普通库存且没有命中；你只判断是否补查常用货架。"
-        "常用货架倾向保存实验室常备、通用、多人共用或常被别名/简称询问的物品。"
-        "不要只按固定类别判断；如果查询词可能是常备试剂、溶剂、酸碱盐、材料、"
-        "常见别名、英文名或简称，可以返回 true 让系统补查。"
-        "只有当查询词明显不是货架物品、明显是账号/帮助/订单动作、或极可能需要"
-        "个人记录/订单/澄清而非货架查询时，返回 false。"
+        "如果查询词可能是实验室常备、共用、别名/简称或公共架物品，返回 true。"
+        "明显不是货架物品、是账号/帮助/写操作/订单个人记录等场景，返回 false。"
         '输出格式：{"try_common_shelf":true} 或 {"try_common_shelf":false}。'
     )
 
 
 def _cas_resolution_instructions() -> str:
     return (
-        "你只负责判断搜索结果里的候选 CAS 哪一个对应用户给出的化学名称或别名。"
+        "你只从搜索结果候选中选择最匹配用户查询词的 CAS。"
         "只输出 JSON object，不输出 Markdown。"
-        "遇到缩写、名称别名、英文名、商品常用名或不规范写法时，要积极从搜索结果中"
-        "识别最匹配的 CAS；类别不限，但仍只能选择搜索结果里明确支持的候选。"
-        "如果候选 CAS 明确对应查询词，返回该 CAS；如果不确定，返回空字符串。"
-        "不要臆造候选列表之外的 CAS。"
+        "只能选择候选结果明确支持的 CAS；不确定或候选不足时返回空字符串。"
         '输出格式：{"cas_number":"64-17-5"} 或 {"cas_number":""}。'
     )
 
 
 def _cas_knowledge_instructions() -> str:
     return (
-        "你只负责用通用化学知识判断用户给出的化学名称或别名是否有明确 CAS。"
+        "你只用非常确定的通用化学知识判断查询词是否有明确 CAS。"
         "只输出 JSON object，不输出 Markdown。"
-        "只要对某个化学名称、英文名、别名、商品常用名或缩写非常确定，就可以返回 CAS；"
-        "类别不限于常见缩写、配体、催化剂或金属配合物。"
-        "配体、催化剂、膦配体、金属配合物和商品化催化剂经常存在别名或缩写；"
-        "如果不能非常确定，不要猜，返回空字符串，交由受限 CAS 联网搜索辅助。"
-        "如果非常确定，返回 CAS；如果不确定、名称有歧义或不是化学品，返回空字符串。"
-        "不要解释，不要联网，不要猜测。"
+        "非常确定才返回 CAS；有歧义、不确定或不是化学品时返回空字符串。"
+        "不要解释，不要猜测。"
         '输出格式：{"cas_number":"64-17-5"} 或 {"cas_number":""}。'
     )
 
 
 def _cas_resolution_decision_instructions() -> str:
     return (
-        "你只判断是否值得继续为用户查询词寻找 CAS。"
+        "你只判断空库存结果后是否值得继续为查询词寻找 CAS。"
         "只输出 JSON object，不输出 Markdown。"
-        "系统已经先查过普通库存和 CAS 主数据，但没有得到可用库存或 CAS。"
-        "如果查询词可能是化学品、试剂、材料、名称别名、英文名、商品常用名、"
-        "缩写或不规范写法，倾向返回 true，让系统用受限联网搜索只找 CAS。"
-        "配体、催化剂、膦配体、金属配合物、金属催化剂和商品化催化剂"
-        "更可能需要通过联网确认 CAS，除非明显不是用户要查的实验室物品，否则更应返回 true。"
-        "只有当查询词明显是系统命令、账号/登录/帮助、纯订单或库存动作词、"
-        "普通闲聊、人名、地点、品牌泛称或非化学问题时，返回 false。"
+        "如果查询词可能是化学品、试剂、材料、别名、英文名、商品名或缩写，返回 true。"
+        "明显是系统命令、账号/帮助、写操作、普通闲聊或非化学问题时返回 false。"
         "不需要给 CAS，也不要解释。"
         '输出格式：{"try_cas_resolution":true} 或 {"try_cas_resolution":false}。'
     )
 
 
+def _read_step_instructions() -> str:
+    return (
+        "你是 LabStorageManager 企业微信机器人只读查询规划器。"
+        "只输出 JSON object，不输出 Markdown。"
+        "根据 available_tools 自主规划下一步只读工具；也可以在信息足够时 final。"
+        "available_tools 是工具名、用途和入参的唯一依据；不要编造工具或参数。"
+        "observations 是已执行工具的安全结果；最终回复只能依据 observations。"
+        "不得编造库存、位置、数量、订单状态、借用人或常用货架信息。"
+        "不要要求或输出 user_token、密码、密钥、内部 ID、内部编码、原始错误、MCP/API 细节。"
+        "登录、绑定、借用、归还和所有写操作不属于这个循环；遇到这些意图就 final。"
+        "复杂查询可以自行拆解、召回候选并基于名称/英文名/别名筛选。"
+        "chemical_name_map 只服务常用/公共货架路径，不是普通库存的通用 CAS 解析库。"
+        "需要 CAS 时优先使用已查到的事实；没有事实时不要臆造。"
+        "如果还需要查工具，输出："
+        '{"action":"call_tool","tool_name":"工具名","arguments":{...}}。'
+        "如果已经能回答或应停止，输出："
+        '{"action":"final","final_reply":"简短中文回复"}。'
+    )
+
+
 def _inventory_name_filter_instructions() -> str:
     return (
-        "你只负责根据用户原始问题，从库存名称搜索候选中选择可能符合条件的记录。"
+        "你只从库存名称搜索候选中选择可能符合用户原始问题的记录。"
         "只输出 JSON object，不输出 Markdown。"
-        "只能依据候选里的名称、英文名和别名判断，不要使用 CAS 或库存数量做化学推断。"
-        "如果用户有对位、邻位、间位、取代、衍生物、类似物等限定，"
-        "优先保留名称上可能符合这些限定的候选；明显不符合的候选不要选。"
-        "如果用户只是普通名称查询，没有额外限定，选择最相关的候选。"
-        "最多选择 10 个，按相关性排序；如果没有可能符合的候选，返回空数组。"
+        "只能依据候选里的名称、英文名和别名判断，不要用库存数量或臆测补事实。"
+        "选择最多 10 个，按相关性排序；没有可能符合的候选则返回空数组。"
         '输出格式：{"selected_indices":[1,3]}，索引来自候选的 index 字段。'
     )
 
@@ -1181,6 +1248,41 @@ def _parse_cas_resolution_decision(text: str) -> bool | None:
     return decision if isinstance(decision, bool) else None
 
 
+def _parse_read_tool_step(text: str) -> LSMReadToolStep | None:
+    raw = _extract_json_object_text(text)
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    action = payload.get("action")
+    if action == ACTION_FINAL:
+        reply = _text_or_default(payload.get("final_reply") or payload.get("reply"), "")
+        if not reply:
+            return None
+        return LSMReadToolStep(
+            action=ACTION_FINAL,
+            final_reply=reply if is_safe_llm_reply(reply) else UNSUPPORTED_MCP_REPLY,
+        )
+    if action != ACTION_CALL_TOOL:
+        return None
+    tool_name = payload.get("tool_name")
+    arguments = payload.get("arguments")
+    if tool_name not in READ_ONLY_TOOLS or not isinstance(arguments, dict):
+        return None
+    normalized_arguments = _normalize_tool_arguments(tool_name, arguments)
+    if normalized_arguments is None:
+        return None
+    return LSMReadToolStep(
+        action=ACTION_CALL_TOOL,
+        tool_name=tool_name,
+        arguments=normalized_arguments,
+    )
+
+
 def _parse_inventory_name_filter_selection(text: str, candidate_count: int) -> list[int] | None:
     raw = _extract_json_object_text(text)
     if not raw:
@@ -1359,6 +1461,12 @@ def _normalize_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict
         _move_first_available(normalized, "keyword", "input", "query", "name", "text")
     if "cas_number" in allowed_keys:
         _move_first_available(normalized, "cas_number", "cas", "casNumber", "CAS")
+    if "inventory_id" in allowed_keys:
+        _move_first_available(normalized, "inventory_id", "id", "inventoryId")
+    if "order_id" in allowed_keys:
+        _move_first_available(normalized, "order_id", "id", "orderId")
+    if "group_key" in allowed_keys:
+        _move_first_available(normalized, "group_key", "groupKey")
     if tool_name in NAME_SEARCH_TOOLS:
         _normalize_optional_bool(normalized, "exact")
     if any(not _is_non_empty_argument(normalized.get(key)) for key in required):
@@ -1454,3 +1562,23 @@ def is_safe_llm_reply(reply: str) -> bool:
     if IMPLEMENTATION_REPLY_PATTERN.search(reply):
         return False
     return not SENSITIVE_REPLY_PATTERN.search(reply)
+
+
+def build_read_tool_specs() -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for item in TOOL_CATALOG:
+        name = item.get("name")
+        if name not in READ_ONLY_TOOLS:
+            continue
+        specs.append(
+            {
+                "name": name,
+                "arguments": {
+                    "required": list(REQUIRED_ARGUMENTS.get(str(name), ())),
+                    "optional": list(OPTIONAL_ARGUMENTS.get(str(name), ())),
+                },
+                "description": item.get("description") or item.get("robot") or "",
+                "write": False,
+            }
+        )
+    return specs
