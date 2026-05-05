@@ -67,8 +67,10 @@ import {
   type ManagementCardItem,
 } from "./dashboardData";
 
-function getPanelToneClassName(tone?: string) {
-  if (tone === "high") {
+type PanelTone = "high" | "alert" | "medium" | "warning" | "success" | "sky" | "violet" | "low" | "neutral";
+
+function getPanelToneClassName(tone?: PanelTone) {
+  if (tone === "high" || tone === "alert") {
     return "bg-destructive/10 text-destructive";
   }
   if (tone === "medium" || tone === "warning") {
@@ -77,7 +79,57 @@ function getPanelToneClassName(tone?: string) {
   if (tone === "success") {
     return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
   }
+  if (tone === "sky") {
+    return "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300";
+  }
+  if (tone === "violet") {
+    return "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300";
+  }
   return "bg-muted text-muted-foreground";
+}
+
+function DashboardBadge({
+  tone,
+  icon: Icon,
+  children,
+}: Readonly<{
+  tone?: PanelTone;
+  icon?: React.ElementType;
+  children: React.ReactNode;
+}>) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-normal leading-6",
+        getPanelToneClassName(tone),
+      )}
+    >
+      {Icon ? <Icon className="size-3" /> : null}
+      {children}
+    </span>
+  );
+}
+
+function DashboardTimeCell({ text }: Readonly<{ text: string }>) {
+  return (
+    <td className="whitespace-nowrap px-2 py-4 text-base leading-6 text-muted-foreground">
+      {text}
+    </td>
+  );
+}
+
+function DashboardBadgeCell({
+  tone,
+  children,
+}: Readonly<{
+  tone?: PanelTone;
+  children: React.ReactNode;
+}>) {
+  return (
+    <td className="px-2 py-3.5">
+      <DashboardBadge tone={tone}>{children}</DashboardBadge>
+    </td>
+  );
 }
 
 function getSeverityLabel(severity?: string) {
@@ -480,32 +532,18 @@ function ManagementImpactCell({
   const stockAlertRemainingText = getStockAlertRemainingText(item);
   if (stockAlertRemainingText) {
     return (
-      <td className="px-2 py-3.5">
-        <span
-          className={cn(
-            "inline-flex h-7 items-center rounded-md px-2 text-base font-normal leading-6",
-            getPanelToneClassName(item.severity),
-          )}
-        >
-          {stockAlertRemainingText}
-        </span>
-      </td>
+      <DashboardBadgeCell tone={item.severity}>
+        {stockAlertRemainingText}
+      </DashboardBadgeCell>
     );
   }
 
   const count = getDashboardItemCount(item);
   return (
-    <td className="px-2 py-3.5">
-      <span
-        className={cn(
-          "inline-flex h-7 items-center rounded-md px-2 text-base font-normal leading-6",
-          getPanelToneClassName(item.severity),
-        )}
-      >
-        {getDashboardItemImpactText(item) ??
-          (count !== null ? `${count} 项` : getSeverityLabel(item.severity))}
-      </span>
-    </td>
+    <DashboardBadgeCell tone={item.severity}>
+      {getDashboardItemImpactText(item) ??
+        (count !== null ? `${count} 项` : getSeverityLabel(item.severity))}
+    </DashboardBadgeCell>
   );
 }
 
@@ -549,23 +587,14 @@ function ManagementRiskTable({
             key={getDashboardPanelItemKey(item, index, "management-risk")}
             {...getManagementRowInteraction(item, onTabChange)}
           >
-            <td className="px-2 py-3.5">
-              <span
-                className={cn(
-                  "inline-flex h-7 items-center rounded-md px-2 text-base font-normal leading-6",
-                  getPanelToneClassName(item.severity),
-                )}
-              >
-                {labelText}
-              </span>
-            </td>
+            <DashboardBadgeCell tone={item.severity}>
+              {labelText}
+            </DashboardBadgeCell>
             {showContent ? (
               <td className="truncate px-2 py-4 text-base leading-6">{detailText}</td>
             ) : null}
             <ManagementImpactCell item={item} />
-            <td className="whitespace-nowrap px-2 py-4 text-base leading-6 text-muted-foreground">
-              {getPanelTimeText(item.created_at)}
-            </td>
+            <DashboardTimeCell text={getPanelTimeText(item.created_at)} />
           </tr>
         );
       })}
@@ -597,16 +626,9 @@ function ManagementRiskDetailTable({
           key={getDashboardPanelItemKey(item, index, "management-risk-detail")}
           {...getManagementRowInteraction(item, onTabChange)}
         >
-          <td className="px-2 py-3.5">
-            <span
-              className={cn(
-                "inline-flex h-7 items-center rounded-md px-2 text-base font-normal leading-6",
-                getPanelToneClassName(item.severity),
-              )}
-            >
-              {getDashboardRiskCategoryText(item)}
-            </span>
-          </td>
+          <DashboardBadgeCell tone={item.severity}>
+            {getDashboardRiskCategoryText(item)}
+          </DashboardBadgeCell>
           <td className="truncate px-2 py-4 text-base font-normal leading-6">
             {getDashboardRiskNameText(item)}
           </td>
@@ -935,19 +957,6 @@ function getBoardAnnouncementLookupKey(title: string, createdAt?: string): strin
   return `${title}::${createdAt ?? ""}`;
 }
 
-function getRecentItemCategoryClassName(category: string) {
-  if (category === "试剂到货") {
-    return "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300";
-  }
-  if (category === "订单入库") {
-    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
-  }
-  if (category === "耗材到货") {
-    return "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300";
-  }
-  return "bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300";
-}
-
 function DashboardBoardItemTable({
   items,
   emptyText,
@@ -987,27 +996,24 @@ function DashboardBoardItemTable({
             key={getDashboardPanelItemKey(item, index, "board-item")}
             {...getManagementRowInteraction(item, onTabChange)}
           >
-            <td className="px-2 py-3.5">
-              <span
-                className={cn(
-                  "inline-flex h-7 items-center rounded-md px-2 text-base font-normal leading-6",
-                  getPanelToneClassName(item.severity),
-                )}
-              >
-                {labelText}
-              </span>
-            </td>
+            <DashboardBadgeCell tone={item.severity}>
+              {labelText}
+            </DashboardBadgeCell>
             <td className="truncate px-2 py-4 text-base leading-6">{detailText}</td>
             {showStatus ? <ManagementImpactCell item={item} /> : null}
-            <td className="whitespace-nowrap px-2 py-4 text-base leading-6 text-muted-foreground">
-              {getPanelTimeText(item.created_at)}
-            </td>
+            <DashboardTimeCell text={getPanelTimeText(item.created_at)} />
           </tr>
         );
       })}
     </ManagementTableShell>
   );
 }
+
+const RECENT_ITEM_TONE: Record<string, PanelTone> = {
+  "试剂到货": "sky",
+  "订单入库": "success",
+  "耗材到货": "violet",
+};
 
 function DashboardRecentItemsTable({
   items,
@@ -1034,19 +1040,10 @@ function DashboardRecentItemsTable({
             <td className="truncate px-2 py-4 text-base font-normal leading-6">
               {detailText}
             </td>
-            <td className="px-2 py-3.5">
-              <span
-                className={cn(
-                  "inline-flex h-7 items-center rounded-md px-2 text-base font-normal leading-6",
-                  getRecentItemCategoryClassName(labelText),
-                )}
-              >
-                {labelText}
-              </span>
-            </td>
-            <td className="whitespace-nowrap px-2 py-4 text-base leading-6 text-muted-foreground">
-              {getPanelTimeText(item.created_at)}
-            </td>
+            <DashboardBadgeCell tone={RECENT_ITEM_TONE[labelText]}>
+              {labelText}
+            </DashboardBadgeCell>
+            <DashboardTimeCell text={getPanelTimeText(item.created_at)} />
           </tr>
         );
       })}
@@ -1086,9 +1083,7 @@ function DashboardBoardOverviewTable({
             </td>
             <td className="px-2 py-4 text-base leading-6">{labelText}</td>
             <ManagementImpactCell item={item} />
-            <td className="whitespace-nowrap px-2 py-4 text-base leading-6 text-muted-foreground">
-              {getPanelTimeText(item.created_at)}
-            </td>
+            <DashboardTimeCell text={getPanelTimeText(item.created_at)} />
           </tr>
         );
       })}
@@ -1158,9 +1153,7 @@ function DashboardAnnouncementTable({
               <td className="truncate px-2 py-4 text-base leading-6">
                 {item.submitter_name || "-"}
               </td>
-              <td className="whitespace-nowrap px-2 py-4 text-base leading-6 text-muted-foreground">
-                {getAnnouncementPanelTimeText(item.created_at)}
-              </td>
+              <DashboardTimeCell text={getAnnouncementPanelTimeText(item.created_at)} />
             </tr>
           );
         })}
@@ -1427,7 +1420,7 @@ function StatCard({
       onKeyDown={handleKeyDown}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+        <CardTitle className="flex min-w-0 flex-wrap items-center gap-2 text-base">
           <span>{title}</span>
           {titleSuffix}
         </CardTitle>
@@ -1685,19 +1678,6 @@ function PublicDashboardPanel({
   );
 }
 
-function getRowAlertBadge(label: string): React.ReactNode {
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive"
-      title={label}
-      aria-label={label}
-    >
-      <AlertTriangle className="size-3" />
-      {label}
-    </span>
-  );
-}
-
 function ManagementTodoTable({
   items,
   onTabChange,
@@ -1733,7 +1713,9 @@ function ManagementTodoTable({
             <td className="px-2 py-4 text-base leading-6 text-muted-foreground">
               <div className="flex items-center gap-2 whitespace-nowrap">
                 <span>{getPanelTimeText(item.created_at)}</span>
-                {item.is_overdue ? getRowAlertBadge("超时") : null}
+                {item.is_overdue ? (
+                  <DashboardBadge tone="alert" icon={AlertTriangle}>超时</DashboardBadge>
+                ) : null}
               </div>
             </td>
           </tr>

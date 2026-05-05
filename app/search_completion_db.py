@@ -488,6 +488,49 @@ def clear_entity_completion_index(endpoint: str | None = None) -> None:
         connection.commit()
 
 
+def replace_entity_completions_for_entity(
+    endpoint: str,
+    entity_type: str,
+    entity_id: str,
+    rows: list[tuple[str, str, str, str, str, str, str | None, float]],
+) -> None:
+    with _open_connection() as connection:
+        connection.execute(
+            """
+            DELETE FROM entity_completion_index
+            WHERE endpoint = ? AND entity_type = ? AND entity_id = ?
+            """,
+            (endpoint, entity_type, entity_id),
+        )
+        if rows:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO entity_completion_index
+                    (endpoint, field, value, normalized_value, entity_type, entity_id,
+                     display_meta, operational_score, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                rows,
+            )
+        connection.commit()
+
+
+def delete_entity_completions_for_entity(
+    endpoint: str,
+    entity_type: str,
+    entity_id: str,
+) -> None:
+    with _open_connection() as connection:
+        connection.execute(
+            """
+            DELETE FROM entity_completion_index
+            WHERE endpoint = ? AND entity_type = ? AND entity_id = ?
+            """,
+            (endpoint, entity_type, entity_id),
+        )
+        connection.commit()
+
+
 def bulk_insert_entity_completions(
     rows: list[tuple[str, str, str, str, str, str, str | None, float]],
 ) -> None:

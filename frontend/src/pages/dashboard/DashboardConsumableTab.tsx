@@ -377,7 +377,7 @@ function createConsumableColumns({
       cell: (info) => {
         const item = info.row.original as DashboardConsumableOrder;
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span>{formatDate(info.getValue() as string)}</span>
             {renderConsumableTimeAlertBadges(item, managementMode)}
           </div>

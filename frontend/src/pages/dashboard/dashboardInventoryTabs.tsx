@@ -738,7 +738,7 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
       cell: (info) => {
         const item = info.row.original as MyBorrowItem
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span>{formatDateTime(info.getValue())}</span>
             {item.is_overdue ? (
               <span
@@ -1015,7 +1015,7 @@ function createStockinColumns(
         const item = info.row.original as PendingStockinItem
         const showOverdue = item.is_overdue ?? isPendingStockinOverdue(item.stockin_time)
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span>{formatDateTime(info.getValue())}</span>
             {showOverdue ? renderPendingStockinBadge() : null}
           </div>

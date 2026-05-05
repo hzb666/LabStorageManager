@@ -980,7 +980,7 @@ function createReagentColumns({
       cell: (info) => {
         const item = info.row.original as DashboardReagentOrder;
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span>{formatDate(info.getValue() as string)}</span>
             {renderReagentTimeAlertBadges(item, managementMode)}
           </div>

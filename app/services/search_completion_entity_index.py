@@ -16,7 +16,9 @@ from app.search_completion_db import (
     bulk_insert_entity_completions,
     clear_entity_completion_index_stale,
     clear_entity_completion_index,
+    delete_entity_completions_for_entity,
     is_entity_completion_index_stale,
+    replace_entity_completions_for_entity,
 )
 from app.services.sql_utils import normalize_search_term
 
@@ -240,3 +242,93 @@ def rebuild_completion_entity_index(db: Session, endpoint: str | None = None) ->
 def rebuild_completion_entity_index_if_stale(db: Session, endpoint: str) -> None:
     if is_entity_completion_index_stale(endpoint):
         rebuild_completion_entity_index(db, endpoint)
+
+
+# ---------- 增量同步（单条记录） ----------
+
+
+def sync_inventory_entity_completions(item: Inventory) -> None:
+    entity_id = str(item.id)
+    score = _INVENTORY_STATUS_SCORE.get(item.status.value, 0.5)
+    rows: list[EntityRow] = []
+    for field, value in [
+        ("name", item.name),
+        ("cas_number", item.cas_number),
+        ("storage_location", item.storage_location),
+        ("brand", item.brand),
+        ("category", item.category),
+    ]:
+        if not value:
+            continue
+        rows.append((
+            INVENTORY_COMPLETION_ENDPOINT, field, value, _normalize(value),
+            "inventory", entity_id, None, score,
+        ))
+    replace_entity_completions_for_entity(
+        INVENTORY_COMPLETION_ENDPOINT, "inventory", entity_id, rows,
+    )
+
+
+def delete_inventory_entity_completions(inventory_id: int) -> None:
+    delete_entity_completions_for_entity(
+        INVENTORY_COMPLETION_ENDPOINT, "inventory", str(inventory_id),
+    )
+
+
+def sync_reagent_order_entity_completions(
+    order: ReagentOrder, applicant_name: str | None = None, db: Session | None = None,
+) -> None:
+    if applicant_name is None and order.applicant_id and db is not None:
+        applicant_name = _resolve_user_names(db, {order.applicant_id}).get(order.applicant_id)
+    entity_id = str(order.id)
+    score = _REAGENT_STATUS_SCORE.get(order.status.value, 0.5)
+    rows: list[EntityRow] = []
+    for field, value in [
+        ("name", order.name),
+        ("cas_number", order.cas_number),
+        ("brand", order.brand),
+        ("category", order.category),
+    ]:
+        if not value:
+            continue
+        rows.append((
+            REAGENT_ORDER_COMPLETION_ENDPOINT, field, value, _normalize(value),
+            "reagent_order", entity_id, None, score,
+        ))
+    if applicant_name:
+        rows.append((
+            REAGENT_ORDER_COMPLETION_ENDPOINT, "applicant", applicant_name,
+            _normalize(applicant_name), "reagent_order", entity_id, None, score,
+        ))
+    replace_entity_completions_for_entity(
+        REAGENT_ORDER_COMPLETION_ENDPOINT, "reagent_order", entity_id, rows,
+    )
+
+
+def sync_consumable_order_entity_completions(
+    order: ConsumableOrder, applicant_name: str | None = None, db: Session | None = None,
+) -> None:
+    if applicant_name is None and order.applicant_id and db is not None:
+        applicant_name = _resolve_user_names(db, {order.applicant_id}).get(order.applicant_id)
+    entity_id = str(order.id)
+    score = _CONSUMABLE_STATUS_SCORE.get(order.status.value, 0.5)
+    rows: list[EntityRow] = []
+    for field, value in [
+        ("name", order.name),
+        ("specification", order.specification),
+        ("communication", order.communication),
+    ]:
+        if not value:
+            continue
+        rows.append((
+            CONSUMABLE_ORDER_COMPLETION_ENDPOINT, field, value, _normalize(value),
+            "consumable_order", entity_id, None, score,
+        ))
+    if applicant_name:
+        rows.append((
+            CONSUMABLE_ORDER_COMPLETION_ENDPOINT, "applicant", applicant_name,
+            _normalize(applicant_name), "consumable_order", entity_id, None, score,
+        ))
+    replace_entity_completions_for_entity(
+        CONSUMABLE_ORDER_COMPLETION_ENDPOINT, "consumable_order", entity_id, rows,
+    )

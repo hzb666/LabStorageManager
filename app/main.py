@@ -67,8 +67,8 @@ from app.services.search_query_log_service import stop_search_query_log_worker, 
 from app.services.sse_manager import sse_manager
 from app.services.structure_index import structure_index
 from app.search_query_log_db import init_query_log_db
-from app.search_completion_db import init_search_completion_db
-from app.services.search_completion_entity_index import rebuild_completion_entity_index
+from app.search_completion_db import TARGET_ENDPOINTS, init_search_completion_db
+from app.services.search_completion_entity_index import rebuild_completion_entity_index_if_stale
 from sqlmodel import Session
 
 
@@ -347,7 +347,8 @@ async def lifespan(app: FastAPI):
             structure_index.rebuild(db)
         logger.info("Structure index rebuilt on startup")
     with Session(engine) as db:
-        rebuild_completion_entity_index(db)
+        for ep in TARGET_ENDPOINTS:
+            rebuild_completion_entity_index_if_stale(db, ep)
     start_search_query_log_worker()
     start_archive_scheduler()
     logger.info("Database initialized (WAL mode enabled)")

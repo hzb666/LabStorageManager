@@ -80,7 +80,10 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
-from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT, mark_entity_completion_index_stale
+from app.services.search_completion_entity_index import (
+    delete_inventory_entity_completions,
+    sync_inventory_entity_completions,
+)
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.structure_index import StructureQueryFormat, StructureSearchMode, structure_index
 from app.services.structure_inventory_summary import normalized_inventory_cas_expr
@@ -325,11 +328,17 @@ def _get_by_id(db: Session, inventory_id: int) -> Optional[Inventory]:
     return get_regular_inventory_by_id(db, inventory_id)
 
 
-def _clear_list_cache() -> None:
+def _clear_list_cache(
+    item: Inventory | None = None, *, is_delete: bool = False,
+) -> None:
     # 清理库存列表缓存，确保写操作后读请求拿到最新数据。
 
     cleared_count = clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
-    mark_entity_completion_index_stale(INVENTORY_COMPLETION_ENDPOINT)
+    if item is not None:
+        if is_delete:
+            delete_inventory_entity_completions(item.id)
+        else:
+            sync_inventory_entity_completions(item)
     logger.info(f"Cleared {cleared_count} list cache entries")
 
 
@@ -940,7 +949,7 @@ async def update_inventory(
 
     db.commit()
     db.refresh(item)
-    _clear_list_cache()
+    _clear_list_cache(item)
 
     response = _attach_user_names(db, [item])[0]
     await sse_manager.broadcast(
@@ -1064,7 +1073,7 @@ async def delete_inventory(
         is_cli=get_request_is_cli(request),
     )
     db.commit()
-    _clear_list_cache()
+    _clear_list_cache(item, is_delete=True)
     await sse_manager.broadcast(
         SSERoom.INVENTORY,
         SSEEventType.INVENTORY_DELETED,
