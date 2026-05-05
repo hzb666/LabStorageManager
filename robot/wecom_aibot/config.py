@@ -97,7 +97,7 @@ class WecomAibotSettings(BaseSettings):
         validation_alias=AliasChoices("WECOM_AIBOT_LLM_RESPONSES_URL", "OPENAI_RESPONSES_URL"),
     )
     llm_timeout_seconds: float = Field(default=8.0, ge=1, le=60)
-    llm_max_output_tokens: int = Field(default=400, ge=64, le=2000)
+    llm_max_output_tokens: int = Field(default=2000, ge=64, le=4096)
 
     @field_validator(
         "bot_id",

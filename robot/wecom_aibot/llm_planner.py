@@ -260,7 +260,7 @@ class LSMIntentPlanner:
             api_style=self.api_style,
             user_text=user_text,
             conversation_context=conversation_context,
-            max_output_tokens=min(self.max_output_tokens, 120),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -282,7 +282,7 @@ class LSMIntentPlanner:
             user_text=user_text,
             query=query,
             cas_number=cas_number,
-            max_output_tokens=min(self.max_output_tokens, 160),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -308,7 +308,7 @@ class LSMIntentPlanner:
             query=query,
             candidates=candidates,
             search_summary=search_summary,
-            max_output_tokens=min(self.max_output_tokens, 240),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -328,7 +328,7 @@ class LSMIntentPlanner:
             api_style=self.api_style,
             user_text=user_text,
             query=query,
-            max_output_tokens=min(self.max_output_tokens, 160),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -348,7 +348,7 @@ class LSMIntentPlanner:
             api_style=self.api_style,
             user_text=user_text,
             query=query,
-            max_output_tokens=min(self.max_output_tokens, 120),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -372,7 +372,7 @@ class LSMIntentPlanner:
             tool_specs=tool_specs,
             observations=observations,
             conversation_context=conversation_context,
-            max_output_tokens=min(self.max_output_tokens, 500),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -396,7 +396,7 @@ class LSMIntentPlanner:
             user_text=user_text,
             search_keyword=search_keyword,
             candidates=candidates,
-            max_output_tokens=min(self.max_output_tokens, 220),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -416,7 +416,7 @@ class LSMIntentPlanner:
             api_style=self.api_style,
             user_text=user_text,
             conversation_context=conversation_context,
-            max_output_tokens=min(self.max_output_tokens, 180),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -446,7 +446,7 @@ class LSMIntentPlanner:
             initial_quantity=initial_quantity,
             target_unit=target_unit,
             conversation_context=conversation_context,
-            max_output_tokens=min(self.max_output_tokens, 180),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,
@@ -470,7 +470,7 @@ class LSMIntentPlanner:
             user_text=user_text,
             facts_text=facts_text,
             conversation_context=conversation_context,
-            max_output_tokens=min(self.max_output_tokens, 600),
+            max_output_tokens=self.max_output_tokens,
         )
         output_text = await self._request_output_text(
             payload=payload,

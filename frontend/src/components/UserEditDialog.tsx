@@ -849,7 +849,7 @@ function ProfileSection({
               <TooltipTrigger asChild>
                 <label
                   htmlFor="personalization-toggle"
-                  className="text-sm leading-none cursor-pointer select-none"
+                  className="text-base leading-none cursor-pointer select-none"
                 >
                   允许收集个性化使用信息
                 </label>

@@ -697,11 +697,6 @@ def _build_inventory_risk_item(
     )
 
 
-def _risk_sort_key(item: dict[str, Any]) -> tuple[int, str]:
-    severity_rank = 0 if item.get("severity") == "high" else 1
-    return (severity_rank, item.get("created_at") or "")
-
-
 def _get_risk_items(
     db: Session,
     now: datetime,
@@ -721,7 +716,7 @@ def _get_risk_items(
             ReagentOrder.status == ReagentOrderStatus.PENDING,
             ReagentOrder.updated_at < long_pending_cutoff,
         )
-        .order_by(ReagentOrder.updated_at.asc()),
+        .order_by(ReagentOrder.updated_at.desc()),
         limit,
     )
     consumable_pending_orders = _exec_dashboard_limited(
@@ -731,7 +726,7 @@ def _get_risk_items(
             ConsumableOrder.status == ConsumableOrderStatus.PENDING,
             ConsumableOrder.updated_at < long_pending_cutoff,
         )
-        .order_by(ConsumableOrder.updated_at.asc()),
+        .order_by(ConsumableOrder.updated_at.desc()),
         limit,
     )
     reagent_unarrived_orders = _exec_dashboard_limited(
@@ -741,7 +736,7 @@ def _get_risk_items(
             ReagentOrder.status == ReagentOrderStatus.APPROVED,
             ReagentOrder.updated_at < long_unarrived_cutoff,
         )
-        .order_by(ReagentOrder.updated_at.asc()),
+        .order_by(ReagentOrder.updated_at.desc()),
         limit,
     )
     consumable_unconfirmed_orders = _exec_dashboard_limited(
@@ -751,7 +746,7 @@ def _get_risk_items(
             ConsumableOrder.status == ConsumableOrderStatus.APPROVED,
             ConsumableOrder.updated_at < long_unarrived_cutoff,
         )
-        .order_by(ConsumableOrder.updated_at.asc()),
+        .order_by(ConsumableOrder.updated_at.desc()),
         limit,
     )
     pending_stockin_items = _exec_dashboard_limited(
@@ -762,7 +757,7 @@ def _get_risk_items(
             Inventory.temporary_keeper_id.is_not(None),
             Inventory.created_at < pending_stockin_cutoff,
         )
-        .order_by(Inventory.created_at.asc()),
+        .order_by(Inventory.created_at.desc()),
         limit,
     )
     overdue_borrow_items = _exec_dashboard_limited(
@@ -772,7 +767,7 @@ def _get_risk_items(
             Inventory.status == InventoryStatus.BORROWED,
             Inventory.updated_at < overdue_borrow_cutoff,
         )
-        .order_by(Inventory.updated_at.asc()),
+        .order_by(Inventory.updated_at.desc()),
         limit,
     )
     user_ids: set[int | None] = set()
@@ -849,7 +844,7 @@ def _get_risk_items(
         )
         for item in overdue_borrow_items
     )
-    sorted_risks = sorted(risks, key=_risk_sort_key)
+    sorted_risks = sorted(risks, key=lambda item: item.get("created_at") or "", reverse=True)
     if limit is None:
         return sorted_risks
     return sorted_risks[:limit]
