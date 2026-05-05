@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
-import * as v from "valibot";
+import { safeParse } from "valibot";
 import { AlertTriangle, Check, FlaskConical, PackageCheck, Warehouse, X } from "lucide-react";
 
 import { BaseForm } from "@/components/BaseForm";
@@ -326,7 +326,7 @@ function validateWorkflowRemainingQuantity(
   if (typeof maxValue !== "number") return true;
 
   const check = createRemainingQuantitySchema("剩余量", maxValue);
-  const parsed = v.safeParse(check, fields.remaining_quantity);
+  const parsed = safeParse(check, fields.remaining_quantity);
   if (parsed.success) return true;
 
   setError(parsed.issues[0]?.message || "输入不合法");

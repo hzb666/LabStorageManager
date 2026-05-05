@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import calendar
 import sqlite3
 import sys
 import uuid
@@ -15,7 +14,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import settings
-from app.core.time_utils import get_utc_now
+from app.core.time_utils import get_utc_now, format_sqlite_datetime, subtract_months
 from app.search_query_log_db import QUERY_LOG_DB_PATH
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -59,23 +58,8 @@ def _quote_identifier(name: str) -> str:
     return f'"{name}"'
 
 
-def _format_sqlite_datetime(value: datetime) -> str:
-    return value.isoformat(sep=" ")
-
-
-def _subtract_months(value: datetime, months: int) -> datetime:
-    month = value.month - months
-    year = value.year
-    while month <= 0:
-        month += 12
-        year -= 1
-    last_day = calendar.monthrange(year, month)[1]
-    day = min(value.day, last_day)
-    return value.replace(year=year, month=month, day=day)
-
-
 def _resolve_cutoff(now: datetime) -> datetime:
-    return _subtract_months(now, ARCHIVE_MONTHS)
+    return subtract_months(now, ARCHIVE_MONTHS)
 
 
 def _resolve_output_dir(output_dir: str) -> Path:
@@ -150,7 +134,7 @@ def _count_archivable_rows(
         FROM {_quote_identifier(config.table_name)}
         WHERE {_quote_identifier(config.time_column)} < ?
         """,
-        (_format_sqlite_datetime(cutoff),),
+        (format_sqlite_datetime(cutoff),),
     ).fetchone()
     return int(row[0]) if row is not None else 0
 
@@ -192,7 +176,7 @@ def _copy_table_rows(
     columns = _get_table_columns(source, config.table_name)
     quoted_columns = ", ".join(_quote_identifier(column) for column in columns)
     placeholders = ", ".join("?" for _ in columns)
-    cutoff_value = _format_sqlite_datetime(cutoff)
+    cutoff_value = format_sqlite_datetime(cutoff)
 
     read_cursor = source.execute(
         f"""
@@ -231,12 +215,12 @@ def _insert_archive_meta_rows(
     payload = [
         (
             batch_id,
-            _format_sqlite_datetime(archived_at),
+            format_sqlite_datetime(archived_at),
             source_db_path_value,
             archive_db_path_value,
             result.table_name,
             QUERY_LOG_TABLE_MAP[result.logical_name].time_column,
-            _format_sqlite_datetime(cutoff),
+            format_sqlite_datetime(cutoff),
             result.archived_rows,
         )
         for result in results
@@ -264,7 +248,7 @@ def _delete_archived_rows(
     plans: list[TableArchivePlan],
     cutoff: datetime,
 ) -> list[ArchiveResult]:
-    cutoff_value = _format_sqlite_datetime(cutoff)
+    cutoff_value = format_sqlite_datetime(cutoff)
     results: list[ArchiveResult] = []
     connection.execute("BEGIN IMMEDIATE")
     try:
@@ -336,7 +320,7 @@ def _print_plan_summary(
     archive_path: Path | None,
 ) -> None:
     print(f"dry_run={str(dry_run).lower()}")
-    print(f"cutoff={_format_sqlite_datetime(cutoff)}")
+    print(f"cutoff={format_sqlite_datetime(cutoff)}")
     if archive_path is not None:
         print(f"archive_path={archive_path}")
     for plan in plans:

@@ -29,7 +29,6 @@ from app.core.time_utils import get_utc_now
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import (
     normalize_search_term,
     order_with_nulls_last,
@@ -39,6 +38,7 @@ from app.services.api_utils import (
     clear_cache_by_prefix,
     get_cached_result,
     normalize_pagination,
+    serialize_inventory_items,
     set_cached_result,
 )
 from app.services.inventory_fts import (
@@ -65,7 +65,7 @@ from app.services.search_matchers import (
     combine_or_clauses,
     union_id_subqueries,
 )
-from app.services.spec_utils import parse_specification, SpecificationError, format_specification
+from app.services.spec_utils import parse_specification, SpecificationError
 from app.services.inventory_operation_logger import (
     log_inventory_delete,
     log_inventory_update,
@@ -340,15 +340,6 @@ def _clear_list_cache(
         else:
             sync_inventory_entity_completions(item)
     logger.info(f"Cleared {cleared_count} list cache entries")
-
-
-def _add_specification(item_dict: dict) -> dict:
-    # 为响应补充规格展示字段，避免前端重复拼接。
-
-    initial = item_dict.get("initial_quantity", 0)
-    unit = item_dict.get("unit", "")
-    item_dict["specification"] = format_specification(initial, unit)
-    return item_dict
 
 
 def _apply_inventory_static_filters(base, *, options: InventoryFilterOptions):
@@ -652,33 +643,6 @@ def _build_structure_order_expr(structure_cas_numbers: tuple[str, ...] | None):
     return case(order_map, value=normalized_inventory_cas_expr(), else_=len(order_map)).asc()
 
 
-def _attach_user_names(db: Session, items: list[Inventory]) -> list[dict]:
-    # 批量补充借用人等用户名称，避免逐行查询导致额外开销。
-
-    user_ids = set()
-    for item in items:
-        if item.borrower_id:
-            user_ids.add(item.borrower_id)
-        if item.last_borrower_id:
-            user_ids.add(item.last_borrower_id)
-        if item.created_by_id:
-            user_ids.add(item.created_by_id)
-        if item.temporary_keeper_id:
-            user_ids.add(item.temporary_keeper_id)
-
-    users_map = batch_get_user_names(db, user_ids)
-    result_data = []
-    for item in items:
-        item_dict = InventoryResponse.model_validate(item).model_dump(mode="json")
-        item_dict = _add_specification(item_dict)
-        item_dict["borrower_name"] = users_map.get(item.borrower_id)
-        item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
-        item_dict["created_by_name"] = users_map.get(item.created_by_id)
-        item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
-        result_data.append(item_dict)
-    return result_data
-
-
 def _attach_structure_matched_smiles(
     items: list[dict],
     smiles_by_cas: Mapping[str, str],
@@ -838,7 +802,7 @@ def list_inventory(
         items = []
 
     result_data = _attach_structure_matched_smiles(
-        _attach_user_names(db, items),
+        serialize_inventory_items(db, items),
         _resolve_inventory_structure_smiles_by_cas(filter_options),
     )
 
@@ -898,7 +862,7 @@ def get_inventory(inventory_id: int, db: DBSession):
     item = _get_by_id(db, inventory_id)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
-    return _attach_user_names(db, [item])[0]
+    return serialize_inventory_items(db, [item])[0]
 
 
 @router.put("/{inventory_id}", response_model=InventoryResponse, dependencies=[Depends(get_current_user)])
@@ -951,7 +915,7 @@ async def update_inventory(
     db.refresh(item)
     _clear_list_cache(item)
 
-    response = _attach_user_names(db, [item])[0]
+    response = serialize_inventory_items(db, [item])[0]
     await sse_manager.broadcast(
         SSERoom.INVENTORY,
         SSEEventType.INVENTORY_UPDATED,

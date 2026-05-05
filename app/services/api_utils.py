@@ -2,7 +2,11 @@
 
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
+
+from sqlmodel import Session
+
 from app.core.constants import CACHE_MAX_ITEMS, CACHE_PRUNE_COUNT, MAX_PAGE_SIZE
+from app.services.spec_utils import format_specification
 
 
 CacheStore = Dict[str, tuple[Any, datetime]]
@@ -75,4 +79,49 @@ def empty_to_none(obj: Any, fields: Optional[list[str]] = None) -> dict:
             result[field] = None if not stripped else stripped
         else:
             result[field] = value
+    return result
+
+
+def normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    # 规范化可选文本：strip 后空字符串转 None。
+    if value is None:
+        return None
+    stripped = str(value).strip()
+    return stripped or None
+
+
+def add_inventory_specification(item_dict: dict) -> dict:
+    # 为库存/订单响应补充规格展示字段。
+    initial = item_dict.get("initial_quantity", 0)
+    unit = item_dict.get("unit", "")
+    item_dict["specification"] = format_specification(initial, unit)
+    return item_dict
+
+
+def serialize_inventory_items(db: Session, items: list) -> list[dict[str, Any]]:
+    # 库存列表通用序列化：批量补充用户名和规格字段。
+    from app.models.inventory import InventoryResponse
+    from app.services.user_utils import batch_get_user_names
+
+    user_ids: set[int] = set()
+    for item in items:
+        if item.borrower_id:
+            user_ids.add(item.borrower_id)
+        if item.last_borrower_id:
+            user_ids.add(item.last_borrower_id)
+        if item.created_by_id:
+            user_ids.add(item.created_by_id)
+        if item.temporary_keeper_id:
+            user_ids.add(item.temporary_keeper_id)
+
+    users_map = batch_get_user_names(db, user_ids)
+    result: list[dict[str, Any]] = []
+    for item in items:
+        item_dict = InventoryResponse.model_validate(item).model_dump(mode="json")
+        item_dict["specification"] = format_specification(item.initial_quantity, item.unit)
+        item_dict["borrower_name"] = users_map.get(item.borrower_id)
+        item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
+        item_dict["created_by_name"] = users_map.get(item.created_by_id)
+        item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
+        result.append(item_dict)
     return result

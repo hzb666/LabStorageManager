@@ -22,11 +22,11 @@ from app.core.constants import (
     LOG_TOKEN_EXPIRE_HOURS,
     LOG_TOKEN_RATE_LIMIT,
     LOG_TOKEN_RATE_WINDOW,
-    MAX_PAGE_SIZE,
     SECONDS_PER_HOUR,
 )
 from app.core.time_utils import utc_iso_str
 from app.database import DBSession
+from app.services.api_utils import normalize_pagination
 from app.models.user_session import UserSession
 from app.models.user import User, UserRole
 from app.search_query_log_db import (
@@ -283,10 +283,6 @@ def _ensure_user_logs_access(current_user: User, target_user_id: int) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot access other user's logs"
         )
-
-
-def _normalize_logs_pagination(skip: int, limit: int) -> tuple[int, int]:
-    return max(skip, 0), max(0, min(limit, MAX_PAGE_SIZE))
 
 
 def _append_candidate(
@@ -906,7 +902,7 @@ def get_user_logs(
 ):
     user_id, user = _resolve_logs_query_user(request.token, db)
     _ensure_user_logs_access(current_user, user_id)
-    skip, limit = _normalize_logs_pagination(request.skip, request.limit)
+    skip, limit = normalize_pagination(request.skip, request.limit)
 
     # 保持既有语义：limit=0 只返回用户信息，不触发聚合查询。
     if limit == 0:

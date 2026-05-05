@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { api } from '@/api/client'
 import {
-  formatLocalDateTimeWithSeconds,
+  formatDateTimeWithSeconds,
   formatUtcOffsetDateTimeWithSeconds,
   getLocalTimeZoneLabel,
 } from '@/lib/utils'
@@ -87,7 +87,7 @@ export function getUserEnvironment(): UserEnvironment {
     screen: `${window.screen.width}x${window.screen.height}`,
     userAgent: navigator.userAgent,
     currentUrl: window.location.href,
-    timestamp: formatLocalDateTimeWithSeconds(now),
+    timestamp: formatDateTimeWithSeconds(now),
     timeZone: getLocalTimeZoneLabel(now),
   }
 }
@@ -241,7 +241,7 @@ export function useErrorLogger(): UseErrorLoggerReturn {
     const reportTimeZone = options?.timeConfig?.displayTimeZone ?? getLocalTimeZoneLabel(reportTime)
     const formatReportTime = (value: string | Date): string => {
       if (!options?.timeConfig) {
-        return formatLocalDateTimeWithSeconds(value)
+        return formatDateTimeWithSeconds(value)
       }
       return formatUtcOffsetDateTimeWithSeconds(value, options.timeConfig.displayUtcOffset)
     }

@@ -284,7 +284,7 @@ function TableFilterExtraControls({
   }
 
   return (
-    <div className="flex flex-wrap gap-2 items-center justify-between w-full sm:w-auto">
+    <div className="flex flex-wrap gap-2 items-center justify-between shrink-0">
       {showFuzzySearch && (
         <TooltipCheckbox tooltip="忽略空格、连字符、下划线等格式差异">
           <label
@@ -596,7 +596,7 @@ export function TableSearchInput({
   disabledValue,
   onDisabledClear,
   inputClassName = '',
-  containerClassName = 'relative flex-1 min-w-50',
+  containerClassName = 'relative flex-1 min-w-70',
   inlineCompletion,
 }: Readonly<TableSearchInputProps>) {
   const displayValue = getSearchDisplayValue({ disabled, disabledValue, value })
@@ -684,8 +684,8 @@ export function TableFilters({
   }, [searchField, searchFieldOptions, searchPlaceholder])
 
   return (
-    <div className={`flex flex-col sm:flex-row gap-3 items-stretch sm:items-center ${className}`}>
-      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+    <div className={`flex flex-wrap gap-3 items-center ${className}`}>
+      <div className="flex min-w-70 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
         <TableSearchInput
           value={searchInput}
           onChange={onSearchInputChange}

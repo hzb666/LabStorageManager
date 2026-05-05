@@ -75,8 +75,7 @@ import {
   toValidationErrors,
 } from '@/lib/validationSchemas'
 import {
-  downloadBlobResponse,
-  formatChinaDateForFilename,
+  exportAndDownload,
   formatDate,
   processNotes,
 } from '@/lib/utils'
@@ -1259,8 +1258,7 @@ function useCommonShelfPageController(): CommonShelfPageController {
 
   const handleExport = useCallback(async () => {
     try {
-      const response = await commonShelfAPI.exportCommonShelf()
-      downloadBlobResponse(response, `common_shelf_export_${formatChinaDateForFilename()}.xlsx`)
+      await exportAndDownload(() => commonShelfAPI.exportCommonShelf(), 'common_shelf_export')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '导出失败'))
     }

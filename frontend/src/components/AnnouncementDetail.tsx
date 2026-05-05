@@ -17,7 +17,7 @@ export function AnnouncementDetail({ announcement, open, onOpenChange }: Readonl
   const hasImages = Boolean(announcement?.images && announcement.images.length > 0)
   
   const formattedContent = (announcement?.content || '').split('\n').map((line, index) => (
-    <p key={index} className="mb-2">
+    <p key={`${line}-${index}`} className="mb-2">
       {line || <br />}
     </p>
   ))
@@ -65,7 +65,7 @@ export function AnnouncementDetail({ announcement, open, onOpenChange }: Readonl
                         const fullImageUrl = getFullImageUrl(image)
                         return (
                           <div
-                            key={index}
+                            key={`${fullImageUrl}-${index}`}
                             className="relative aspect-square w-full rounded-lg overflow-hidden border border-border cursor-pointer group bg-muted animate-pulse"
                             onClick={() => setSelectedImageIndex(index)}
                           >

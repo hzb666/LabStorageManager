@@ -21,7 +21,7 @@ import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI, ConsumableOrderStatus } from '@/api/client'
-import { downloadBlobResponse, formatChinaDateForFilename, processNotes } from '@/lib/utils'
+import { exportAndDownload, processNotes } from '@/lib/utils'
 import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import {
   ConsumableOrderSchema,
@@ -308,8 +308,7 @@ export function ConsumableOrdersPage() {
 
   const handleExport = useCallback(async () => {
     try {
-      const response = await consumableOrderAPI.exportOrders()
-      downloadBlobResponse(response, `consumable_orders_export_${formatChinaDateForFilename()}.xlsx`)
+      await exportAndDownload(() => consumableOrderAPI.exportOrders(), 'consumable_orders_export')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '导出失败'))
     }

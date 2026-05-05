@@ -31,7 +31,7 @@ import {
   ReagentOrderReason,
   ReagentOrderStatus,
 } from '@/api/client'
-import { downloadBlobResponse, formatChinaDateForFilename, processNotes } from '@/lib/utils'
+import { exportAndDownload, processNotes } from '@/lib/utils'
 import { ReagentOrderExpandedRow } from '@/components/ReagentOrderExpandedRow'
 import {
   ReagentCasDuplicateWarning,
@@ -522,8 +522,7 @@ export function ReagentOrdersPage() {
 
   const handleExport = useCallback(async () => {
     try {
-      const response = await reagentOrderAPI.exportOrders()
-      downloadBlobResponse(response, `reagent_orders_${formatChinaDateForFilename()}.xlsx`)
+      await exportAndDownload(() => reagentOrderAPI.exportOrders(), 'reagent_orders')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '导出失败'))
     }

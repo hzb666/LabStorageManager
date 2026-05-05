@@ -16,6 +16,7 @@ from app.models.compound_structure import (
     StructureCacheStatusCount,
 )
 from app.models.inventory import Inventory
+from app.services.api_utils import normalize_optional_text
 from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS, normalize_cas
 
 
@@ -57,13 +58,6 @@ def _serialize_candidates(candidates: Sequence[Mapping[str, Any]] | None) -> str
     if not candidates:
         return None
     return json.dumps(list(candidates), ensure_ascii=False, separators=(",", ":"))
-
-
-def _normalize_optional_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 def get_structure_cache(
@@ -117,7 +111,7 @@ def _apply_structure_cache_payload(
     cache.inchikey = payload.inchikey
     cache.molecular_formula = payload.molecular_formula
     cache.molecular_weight = payload.molecular_weight
-    if english_name := _normalize_optional_text(payload.english_name):
+    if english_name := normalize_optional_text(payload.english_name):
         cache.english_name = english_name
         cache.name_last_resolved_at = now
     cache.confidence = payload.confidence
@@ -169,13 +163,13 @@ def upsert_structure_cache_names(
         db.add(existing)
 
     now = get_utc_now()
-    if english_name := _normalize_optional_text(payload.english_name):
+    if english_name := normalize_optional_text(payload.english_name):
         existing.english_name = english_name
-    if chinese_name := _normalize_optional_text(payload.chinese_name):
+    if chinese_name := normalize_optional_text(payload.chinese_name):
         existing.chinese_name = chinese_name
         existing.chinese_name_is_translated = payload.chinese_name_is_translated
 
-    existing.name_error_message = _normalize_optional_text(payload.name_error_message)
+    existing.name_error_message = normalize_optional_text(payload.name_error_message)
     existing.name_last_resolved_at = now
     existing.updated_at = now
     return existing

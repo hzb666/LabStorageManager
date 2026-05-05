@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch, type UseFormReturn } from "react-hook-form";
-import * as v from "valibot";
+import { safeParse } from "valibot";
 import { AlertTriangle, ArrowRightLeft, Package, Trash2 } from "lucide-react";
 
 import { BaseForm } from "@/components/BaseForm";
@@ -290,7 +290,7 @@ function resolveReturnSpecification(
     return { ok: true, value: specification ?? "" };
   }
 
-  const result = v.safeParse(SpecificationSchema, specification);
+  const result = safeParse(SpecificationSchema, specification);
   if (!result.success) {
     return {
       ok: false,
@@ -325,7 +325,7 @@ function resolveReturnQuantity(
   }
 
   const fieldName = returnMode === "remaining" ? "剩余量" : "使用量";
-  const result = v.safeParse(
+  const result = safeParse(
     createReturnQuantitySchema(fieldName, maxValue ?? Number.MAX_SAFE_INTEGER),
     returnQuantity,
   );
@@ -1102,7 +1102,7 @@ export function DashboardStockinTab({
     )
     if (typeof maxValue === 'number') {
       const check = createRemainingQuantitySchema('剩余量', maxValue)
-      const parsed = v.safeParse(check, remaining)
+      const parsed = safeParse(check, remaining)
       if (!parsed.success) {
         stockinForm.setError('remaining_quantity', { message: parsed.issues[0]?.message || '输入不合法' })
         return

@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from pydantic import BaseModel
 
 from app.core.auth import CurrentSession, CurrentUser, NonPublicUser, get_current_user
-from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, SSEEventType, SSERoom
+from app.core.constants import DEFAULT_PAGE_SIZE, SSEEventType, SSERoom
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.core.time_utils import get_utc_now
 from app.database import DBSession
@@ -30,6 +30,7 @@ from app.services.common_shelf_creation import (
     normalize_brand_for_group,
     normalize_specification_for_group,
 )
+from app.services.api_utils import normalize_optional_text, normalize_pagination
 from app.services.cas_utils import normalize_cas
 from app.services.common_shelf_group_records import (
     get_active_common_shelf_group,
@@ -124,16 +125,8 @@ def _build_manual_create_group_fields(payload: CommonShelfManualCreate) -> Commo
     )
 
 
-def _resolve_pagination(skip: int, limit: int) -> tuple[int, int]:
-    return max(skip, 0), max(0, min(limit, MAX_PAGE_SIZE))
-
-
-def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
-    return (value or "").strip() or None
-
-
 def _normalize_required_brand(value: Optional[str]) -> str:
-    normalized = _normalize_optional_text(value)
+    normalized = normalize_optional_text(value)
     if normalized is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
     return normalized
@@ -199,7 +192,7 @@ def list_common_shelf_groups(
     _current_user, session = current_session
     started = time.perf_counter()
     include_search_options = bool(query.search and len(query.search.strip()) >= 2)
-    skip, limit = _resolve_pagination(query.skip, query.limit)
+    skip, limit = normalize_pagination(query.skip, query.limit)
     result = list_grouped_common_shelf(
         db,
         options=CommonShelfGroupListOptions(
@@ -479,7 +472,7 @@ async def update_common_shelf_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CommonShelf item not found")
 
     before_item = CommonShelf.model_validate(item)
-    item.purity = _normalize_optional_text(payload.purity)
+    item.purity = normalize_optional_text(payload.purity)
     item.storage_location = normalize_storage_location(payload.storage_location)
     item.storage_location_normalized = (
         item.storage_location.casefold() if item.storage_location is not None else None
@@ -489,7 +482,7 @@ async def update_common_shelf_item(
     item.storage_location_pinyin_initials = pinyin_fields.get(
         "storage_location_pinyin_initials"
     )
-    item.notes = _normalize_optional_text(payload.notes)
+    item.notes = normalize_optional_text(payload.notes)
     touch_common_shelf_group(
         db,
         cas_number=group_fields.cas_number,

@@ -7,7 +7,6 @@ from sqlmodel import Session, select
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
-from app.models.user import User
 from app.search_completion_db import (
     CONSUMABLE_ORDER_COMPLETION_ENDPOINT,
     INVENTORY_COMPLETION_ENDPOINT,
@@ -21,6 +20,7 @@ from app.search_completion_db import (
     replace_entity_completions_for_entity,
 )
 from app.services.sql_utils import normalize_search_term
+from app.services.user_utils import batch_get_user_names
 
 logger = logging.getLogger(__name__)
 
@@ -54,16 +54,6 @@ _CONSUMABLE_STATUS_SCORE: dict[str, float] = {
 
 def _normalize(value: str | None) -> str:
     return normalize_search_term(value or "").casefold()
-
-
-def _resolve_user_names(db: Session, user_ids: set[int]) -> dict[int, str]:
-    if not user_ids:
-        return {}
-    rows = db.exec(select(User.id, User.full_name, User.username).where(User.id.in_(user_ids)))
-    return {
-        uid: (full_name or username or "")
-        for uid, full_name, username in rows
-    }
 
 
 def _build_inventory_rows(items: list[Inventory]) -> list[EntityRow]:
@@ -189,7 +179,7 @@ def _build_reagent_index(db: Session) -> tuple[list[EntityRow], int]:
     for order in reagent_orders:
         if order.applicant_id:
             user_ids.add(order.applicant_id)
-    user_names = _resolve_user_names(db, user_ids)
+    user_names = batch_get_user_names(db, user_ids)
     return _build_reagent_rows(reagent_orders, user_names), len(reagent_orders)
 
 
@@ -199,7 +189,7 @@ def _build_consumable_index(db: Session) -> tuple[list[EntityRow], int]:
     for order in consumable_orders:
         if order.applicant_id:
             user_ids.add(order.applicant_id)
-    user_names = _resolve_user_names(db, user_ids)
+    user_names = batch_get_user_names(db, user_ids)
     return _build_consumable_rows(consumable_orders, user_names), len(consumable_orders)
 
 
@@ -279,7 +269,7 @@ def sync_reagent_order_entity_completions(
     order: ReagentOrder, applicant_name: str | None = None, db: Session | None = None,
 ) -> None:
     if applicant_name is None and order.applicant_id and db is not None:
-        applicant_name = _resolve_user_names(db, {order.applicant_id}).get(order.applicant_id)
+        applicant_name = batch_get_user_names(db, {order.applicant_id}).get(order.applicant_id)
     entity_id = str(order.id)
     score = _REAGENT_STATUS_SCORE.get(order.status.value, 0.5)
     rows: list[EntityRow] = []
@@ -309,7 +299,7 @@ def sync_consumable_order_entity_completions(
     order: ConsumableOrder, applicant_name: str | None = None, db: Session | None = None,
 ) -> None:
     if applicant_name is None and order.applicant_id and db is not None:
-        applicant_name = _resolve_user_names(db, {order.applicant_id}).get(order.applicant_id)
+        applicant_name = batch_get_user_names(db, {order.applicant_id}).get(order.applicant_id)
     entity_id = str(order.id)
     score = _CONSUMABLE_STATUS_SCORE.get(order.status.value, 0.5)
     rows: list[EntityRow] = []

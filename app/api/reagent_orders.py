@@ -46,6 +46,7 @@ from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import order_with_nulls_last
 from app.services.sql_utils import order_with_special_last
 from app.services.api_utils import (
+    add_inventory_specification,
     clear_cache_by_prefix,
     empty_to_none,
     get_cached_result,
@@ -238,18 +239,10 @@ def _ensure_required_brand(brand: Optional[str]) -> str:
     return normalized_brand
 
 
-def _add_specification(item_dict: dict) -> dict:
-    # 为订单响应补充计算后的规格字段。
-    initial = item_dict.get("initial_quantity", 0)
-    unit = item_dict.get("unit", "")
-    item_dict["specification"] = format_specification(initial, unit)
-    return item_dict
-
-
 def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]:
     users_map = batch_get_user_names(db, {order.applicant_id} if order.applicant_id else set())
     status_times = get_reagent_order_status_times(db, [order])
-    return _add_specification({
+    return add_inventory_specification({
         **ReagentOrderResponse.model_validate(order).model_dump(mode="json"),
         **get_order_status_time_fields(status_times, order),
         "applicant_name": users_map.get(order.applicant_id, ""),
@@ -538,7 +531,7 @@ def list_reagent_orders(
 
     result = {
         "data": [
-            _add_specification({
+            add_inventory_specification({
                 **ReagentOrderResponse.model_validate(o).model_dump(),
                 **get_order_status_time_fields(status_times, o),
                 "applicant_name": users_map.get(o.applicant_id, ""),
@@ -590,20 +583,20 @@ def export_reagent_orders(
     current_user: CurrentUser,
 ):
     enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_REAGENT_ORDERS)
-    # 导出试剂订单 XLSX 文件。
     from app.services.xlsx_export import export_reagent_orders_xlsx
+    from app.services.export_batch import batch_fetch_all
 
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
-    orders = db.exec(statement).all()
+    result = batch_fetch_all(db, statement)
 
-    # 查询所有订购人ID用于导出
-    all_applicant_ids = {o.applicant_id for o in orders if o.applicant_id}
+    all_applicant_ids = {o.applicant_id for o in result.items if o.applicant_id}
     all_users_map = batch_get_user_names(db, all_applicant_ids) if all_applicant_ids else {}
 
-    response = export_reagent_orders_xlsx(orders, all_users_map)
+    response = export_reagent_orders_xlsx(result.items, all_users_map)
+    result.apply_truncation_headers(response)
     log_reagent_order_export(
         db,
-        exported_count=len(orders),
+        exported_count=len(result.items),
         actor_user_id=current_user.id,
         is_cli=get_request_is_cli(request),
     )

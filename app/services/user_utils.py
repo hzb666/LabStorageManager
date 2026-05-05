@@ -24,5 +24,5 @@ def batch_get_user_names(db: Session, user_ids: Set[Optional[int]]) -> Dict[int,
     if not valid_ids:
         return {}
 
-    users = db.exec(select(User).where(User.id.in_(valid_ids))).all()
-    return {u.id: u.full_name or u.username for u in users}
+    users = db.exec(select(User.id, User.full_name, User.username).where(User.id.in_(valid_ids))).all()
+    return {uid: (full_name or username or "") for uid, full_name, username in users}

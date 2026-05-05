@@ -4,6 +4,7 @@ import { twMerge } from "tailwind-merge"
 import { buildBackendUrl } from "./apiConfig"
 import { inputConfigs } from "./inputConfigs"
 import { getStoredDisplayUtcOffset } from './runtimeTimeConfig'
+import { toast } from './toast'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -198,10 +199,6 @@ export function formatDateTimeWithSeconds(date: string | Date): string {
   return formatLocalDateTimeValue(date, true)
 }
 
-export function formatLocalDateTimeWithSeconds(date: string | Date): string {
-  return formatLocalDateTimeValue(date, true)
-}
-
 export function getLocalTimeZoneLabel(date: string | Date = new Date()): string {
   const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const offsetLabel = getUtcOffsetLabel(new Date(date))
@@ -252,14 +249,6 @@ export function formatDisplayDateTimeForFilename(date = new Date()): string {
   }
 
   return formatLocalDateTimeForFilename(date)
-}
-
-export function formatChinaDateForFilename(date = new Date()): string {
-  return formatDisplayDateForFilename(date)
-}
-
-export function formatChinaDateTimeForFilename(date = new Date()): string {
-  return formatDisplayDateTimeForFilename(date)
 }
 
 export function truncate(str: string, length: number): string {
@@ -383,5 +372,20 @@ export function downloadBlobResponse(
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
+}
+
+export async function exportAndDownload(
+  apiCall: () => Promise<AxiosResponse<Blob>>,
+  filePrefix: string,
+): Promise<void> {
+  const response = await apiCall()
+  downloadBlobResponse(response, `${filePrefix}_${formatDisplayDateForFilename()}.xlsx`)
+
+  const truncated = response.headers?.['x-export-truncated']
+  const totalCount = response.headers?.['x-export-total-count']
+  const exportedCount = response.headers?.['x-export-exported-count']
+  if (truncated === 'true') {
+    toast.warning(`数据量过大（共${totalCount}条），已截断导出最新${exportedCount}条数据`)
+  }
 }
 

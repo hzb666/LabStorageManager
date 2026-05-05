@@ -373,8 +373,8 @@ function ImportErrorPanel({
             </tr>
           </thead>
           <tbody>
-            {errors.slice(0, 50).map((errorItem, index) => (
-              <tr key={index} className="border-t border-border">
+            {errors.slice(0, 50).map((errorItem) => (
+              <tr key={errorItem.row} className="border-t border-border">
                 <td className="px-4 py-2 text-sm">{errorItem.row}</td>
                 <td className="px-4 py-2 text-destructive text-sm">{errorItem.error}</td>
               </tr>

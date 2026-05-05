@@ -20,7 +20,7 @@ import { useAuthStore } from '@/store/useStore'
 import { setBugButtonHiddenUntil } from '@/lib/storage/appUiStorage'
 import {
   formatLocalDateTimeForFilename,
-  formatLocalDateTimeWithSeconds,
+  formatDateTimeWithSeconds,
   formatUtcOffsetDateTimeForFilename,
   formatUtcOffsetDateTimeWithSeconds,
   getLocalTimeZoneLabel,
@@ -114,7 +114,7 @@ export function BugReportButton({
 
       const reportTimeText = timeConfig
         ? formatUtcOffsetDateTimeWithSeconds(reportTime, timeConfig.displayUtcOffset)
-        : formatLocalDateTimeWithSeconds(reportTime)
+        : formatDateTimeWithSeconds(reportTime)
       const reportTimeZone = timeConfig?.displayTimeZone ?? getLocalTimeZoneLabel(reportTime)
 
       // 3. 生成前端日志主体

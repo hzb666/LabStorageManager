@@ -37,7 +37,7 @@ from app.models.inventory import (
     ManualInventoryCreate,
 )
 from app.models.user import User, UserRole
-from app.services.api_utils import clear_cache_by_prefix, empty_to_none
+from app.services.api_utils import clear_cache_by_prefix, empty_to_none, serialize_inventory_items
 from app.services.cas_utils import normalize_cas, is_special_cas_value
 from app.services.xlsx_export import export_inventory_xlsx
 from app.services.excel_service import ALLOWED_EXTENSIONS, validate_uploaded_file
@@ -188,40 +188,8 @@ def _find_by_code(db: Session, code: str) -> Optional[Inventory]:
     return db.exec(statement).first()
 
 
-def _add_specification(item_dict: dict) -> dict:
-    initial = item_dict.get("initial_quantity", 0)
-    unit = item_dict.get("unit", "")
-    item_dict["specification"] = format_specification(initial, unit)
-    return item_dict
-
-
-def _serialize_inventory_items(db: Session, items: list[Inventory]) -> list[dict[str, Any]]:
-    user_ids = set()
-    for item in items:
-        if item.borrower_id:
-            user_ids.add(item.borrower_id)
-        if item.last_borrower_id:
-            user_ids.add(item.last_borrower_id)
-        if item.created_by_id:
-            user_ids.add(item.created_by_id)
-        if item.temporary_keeper_id:
-            user_ids.add(item.temporary_keeper_id)
-
-    users_map = batch_get_user_names(db, user_ids)
-    serialized_items: list[dict[str, Any]] = []
-    for item in items:
-        item_dict = InventoryResponse.model_validate(item).model_dump(mode="json")
-        item_dict = _add_specification(item_dict)
-        item_dict["borrower_name"] = users_map.get(item.borrower_id)
-        item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
-        item_dict["created_by_name"] = users_map.get(item.created_by_id)
-        item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
-        serialized_items.append(item_dict)
-    return serialized_items
-
-
 def _serialize_inventory_item(db: Session, item: Inventory) -> dict[str, Any]:
-    return _serialize_inventory_items(db, [item])[0]
+    return serialize_inventory_items(db, [item])[0]
 
 
 def _ensure_manual_pending_stockin_access(item: Inventory, current_user: User) -> None:
@@ -430,18 +398,22 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         db: DBSession,
     ):
         enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_INVENTORY)
-        # 导出库存工作簿，仅包含常规库存。
+        from app.services.export_batch import batch_fetch_all
+
         statement = regular_inventory_query().order_by(Inventory.created_at.desc())
-        items = db.exec(statement).all()
+        result = batch_fetch_all(db, statement)
+
         log_inventory_export_operation(
             db,
             operator_id=current_user.id,
-            exported_count=len(items),
+            exported_count=len(result.items),
             is_cli=get_request_is_cli(request),
         )
         db.commit()
 
-        return export_inventory_xlsx(items)
+        response = export_inventory_xlsx(result.items)
+        result.apply_truncation_headers(response)
+        return response
 
 
 def _register_manual_pending_stockin_route(
@@ -524,7 +496,7 @@ def _register_manual_and_dashboard_routes(
             db.refresh(item)
 
         _clear_inventory_cache(search_cache, list_cache_prefix, items=created_items)
-        serialized_items = _serialize_inventory_items(db, created_items)
+        serialized_items = serialize_inventory_items(db, created_items)
         actor_client_id = get_sse_client_id(request)
         for ci, serialized_item in zip(created_items, serialized_items):
             await sse_manager.broadcast(

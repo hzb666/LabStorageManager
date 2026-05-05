@@ -1,3 +1,4 @@
+import calendar
 from datetime import datetime, time, timedelta, timezone
 
 from app.core.config import settings
@@ -135,6 +136,21 @@ def utc_iso_str(dt: datetime | None) -> str | None:
     if normalized is None:
         return None
     return normalized.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def format_sqlite_datetime(value: datetime) -> str:
+    return value.isoformat(sep=" ")
+
+
+def subtract_months(value: datetime, months: int) -> datetime:
+    month = value.month - months
+    year = value.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(value.day, last_day)
+    return value.replace(year=year, month=month, day=day)
 
 
 def parse_utc_datetime(value: object) -> datetime | None:

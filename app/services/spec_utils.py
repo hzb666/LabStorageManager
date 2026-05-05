@@ -30,7 +30,7 @@ class SpecificationError(ValueError):
     pass
 
 
-def format_specification(initial_quantity: Optional[float], unit: str) -> Optional[str]:
+def format_specification(initial_quantity: Optional[float], unit: Optional[str]) -> Optional[str]:
     """
     Format specification from initial_quantity and unit.
 
@@ -51,13 +51,12 @@ def format_specification(initial_quantity: Optional[float], unit: str) -> Option
         return None
 
     # 将单位标准化为展示形式，例如 ml -> mL。
-    normalized_unit = UNIT_CANONICAL.get(unit.lower(), unit)
+    normalized_unit = UNIT_CANONICAL.get(unit.lower(), unit) if unit else ""
 
     # 整数不显示小数，浮点数带小数。
-    if initial_quantity == int(initial_quantity):
-        formatted = f"{int(initial_quantity)} {normalized_unit}"
-    else:
-        formatted = f"{float(initial_quantity)} {normalized_unit}"
+    formatted = f"{int(initial_quantity)}" if initial_quantity == int(initial_quantity) else f"{float(initial_quantity)}"
+    if normalized_unit:
+        formatted = f"{formatted} {normalized_unit}"
 
     return formatted
 

@@ -30,8 +30,7 @@ import type {
 import type { ManualStructureEditTarget } from '@/components/chem/StructureSearchDialog'
 import { isStructureSearchFeatureEnabled } from '@/lib/apiConfig'
 import {
-  downloadBlobResponse,
-  formatChinaDateForFilename,
+  exportAndDownload,
   formatDate,
   processNotes,
 } from '@/lib/utils'
@@ -1006,8 +1005,7 @@ export function InventoryPage() {
 
   const handleExport = useCallback(async () => {
     try {
-      const response = await inventoryAPI.exportInventory()
-      downloadBlobResponse(response, `inventory_export_${formatChinaDateForFilename()}.xlsx`)
+      await exportAndDownload(() => inventoryAPI.exportInventory(), 'inventory_export')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '导出失败'))
     }

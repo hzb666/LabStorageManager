@@ -13,6 +13,7 @@ from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
 from app.core.time_utils import utc_iso_str
 from app.database import DBSession
+from app.services.api_utils import normalize_optional_text
 from app.models.chemical_name_map import (
     ChemicalNameMap,
     ChemicalNameMapCreate,
@@ -44,13 +45,6 @@ class ChemicalNameMapListResponse(BaseModel):
     total: int
     skip: int
     limit: int
-
-
-def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    stripped = value.strip()
-    return stripped or None
 
 
 def _validate_cas_number(raw_cas_number: str) -> str:
@@ -92,13 +86,13 @@ def _apply_name_map_payload(
         target.name = normalized_name
 
     if english_name is not None:
-        target.english_name = _normalize_optional_text(english_name)
+        target.english_name = normalize_optional_text(english_name)
     if alias_1 is not None:
-        target.alias_1 = _normalize_optional_text(alias_1)
+        target.alias_1 = normalize_optional_text(alias_1)
     if alias_2 is not None:
-        target.alias_2 = _normalize_optional_text(alias_2)
+        target.alias_2 = normalize_optional_text(alias_2)
     if alias_3 is not None:
-        target.alias_3 = _normalize_optional_text(alias_3)
+        target.alias_3 = normalize_optional_text(alias_3)
 
     name_pinyin, name_initials = to_pinyin_parts(target.name)
     alias_1_pinyin, alias_1_initials = to_pinyin_parts(target.alias_1)

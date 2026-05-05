@@ -22,9 +22,9 @@ from app.models.reagent_order import (
     ReagentOrderStatus,
 )
 from app.models.common_shelf import CommonShelf
-from app.models.inventory import Inventory, InventoryResponse, InventoryStatus
+from app.models.inventory import Inventory, InventoryStatus
 from app.core.constants import SSEEventType, SSERoom
-from app.services.api_utils import clear_cache_by_prefix, empty_to_none
+from app.services.api_utils import clear_cache_by_prefix, empty_to_none, serialize_inventory_items
 from app.services.cas_utils import normalize_cas
 from app.services.common_shelf_creation import (
     create_common_shelf_items_from_order,
@@ -256,31 +256,6 @@ def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]
         **get_order_status_time_fields(status_times, order),
         "applicant_name": users_map.get(order.applicant_id, ""),
     }
-
-
-def _serialize_inventory_items(db: Session, items: list[Inventory]) -> list[dict[str, Any]]:
-    user_ids = set()
-    for item in items:
-        if item.borrower_id:
-            user_ids.add(item.borrower_id)
-        if item.last_borrower_id:
-            user_ids.add(item.last_borrower_id)
-        if item.created_by_id:
-            user_ids.add(item.created_by_id)
-        if item.temporary_keeper_id:
-            user_ids.add(item.temporary_keeper_id)
-
-    users_map = batch_get_user_names(db, user_ids)
-    serialized_items: list[dict[str, Any]] = []
-    for item in items:
-        item_dict = InventoryResponse.model_validate(item).model_dump(mode="json")
-        item_dict["specification"] = format_specification(item.initial_quantity, item.unit)
-        item_dict["borrower_name"] = users_map.get(item.borrower_id)
-        item_dict["last_borrower_name"] = users_map.get(item.last_borrower_id)
-        item_dict["created_by_name"] = users_map.get(item.created_by_id)
-        item_dict["temporary_keeper_name"] = users_map.get(item.temporary_keeper_id)
-        serialized_items.append(item_dict)
-    return serialized_items
 
 
 def _normalize_workflow_order_updates(payload: ReagentWorkflowEditableFields) -> dict[str, Any]:
@@ -533,7 +508,7 @@ async def _broadcast_inventory_projection_events(
     if not items:
         return
 
-    serialized_items = _serialize_inventory_items(db, items)
+    serialized_items = serialize_inventory_items(db, items)
     for item, serialized_item in zip(items, serialized_items):
         event_type = SSEEventType.INVENTORY_CREATED if created else SSEEventType.INVENTORY_UPDATED
         await sse_manager.broadcast(SSERoom.INVENTORY, event_type, {"id": item.id, "item": serialized_item})
