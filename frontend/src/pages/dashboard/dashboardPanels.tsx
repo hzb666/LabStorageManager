@@ -69,11 +69,29 @@ import {
 
 type PanelTone = "high" | "alert" | "medium" | "warning" | "success" | "sky" | "violet" | "low" | "neutral";
 
-function getPanelToneClassName(tone?: PanelTone) {
-  if (tone === "high" || tone === "alert") {
+type DashboardBadgeVariant = "category" | "filled" | "urgent";
+
+const DASHBOARD_BADGE_BASE_CLASS =
+  "inline-flex h-7 items-center rounded-md px-2 text-sm font-normal leading-6";
+const DASHBOARD_BADGE_DOT_CLASS = "size-1.5 shrink-0 rounded-full";
+
+function isHighUrgencyTone(tone?: PanelTone) {
+  return tone === "high" || tone === "alert";
+}
+
+function isMediumUrgencyTone(tone?: PanelTone) {
+  return tone === "medium" || tone === "warning";
+}
+
+function isUrgencyTone(tone?: PanelTone) {
+  return isHighUrgencyTone(tone) || isMediumUrgencyTone(tone);
+}
+
+function getFilledToneClassName(tone?: PanelTone) {
+  if (isHighUrgencyTone(tone)) {
     return "bg-destructive/10 text-destructive";
   }
-  if (tone === "medium" || tone === "warning") {
+  if (isMediumUrgencyTone(tone)) {
     return "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
   }
   if (tone === "success") {
@@ -88,22 +106,69 @@ function getPanelToneClassName(tone?: PanelTone) {
   return "bg-muted text-muted-foreground";
 }
 
+function getCategoryToneClassName(tone?: PanelTone) {
+  if (isUrgencyTone(tone)) {
+    return "text-black dark:text-zinc-100";
+  }
+  return getFilledToneClassName(tone);
+}
+
+function getUrgentToneClassName(tone?: PanelTone) {
+  if (isHighUrgencyTone(tone)) {
+    return getFilledToneClassName(tone);
+  }
+  return getCategoryToneClassName(tone);
+}
+
+function getPanelToneDotClassName(tone?: PanelTone) {
+  if (isHighUrgencyTone(tone)) {
+    return "bg-destructive";
+  }
+  if (isMediumUrgencyTone(tone)) {
+    return "bg-amber-500 dark:bg-amber-400";
+  }
+  return null;
+}
+
+function getDashboardBadgeToneClassName(
+  tone: PanelTone | undefined,
+  variant: DashboardBadgeVariant,
+) {
+  if (variant === "urgent") {
+    return getUrgentToneClassName(tone);
+  }
+  if (variant === "filled") {
+    return getFilledToneClassName(tone);
+  }
+  return getCategoryToneClassName(tone);
+}
+
 function DashboardBadge({
   tone,
   icon: Icon,
+  variant = "category",
   children,
 }: Readonly<{
   tone?: PanelTone;
   icon?: React.ElementType;
+  variant?: DashboardBadgeVariant;
   children: React.ReactNode;
 }>) {
+  const showToneDot = variant === "category";
+  const dotClassName = showToneDot ? getPanelToneDotClassName(tone) : null;
+  const toneClassName = getDashboardBadgeToneClassName(tone, variant);
+
   return (
     <span
       className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-normal leading-6",
-        getPanelToneClassName(tone),
+        DASHBOARD_BADGE_BASE_CLASS,
+        dotClassName ? "gap-2" : "gap-1",
+        toneClassName,
       )}
     >
+      {dotClassName ? (
+        <span className={cn(DASHBOARD_BADGE_DOT_CLASS, dotClassName)} />
+      ) : null}
       {Icon ? <Icon className="size-3" /> : null}
       {children}
     </span>
@@ -120,14 +185,18 @@ function DashboardTimeCell({ text }: Readonly<{ text: string }>) {
 
 function DashboardBadgeCell({
   tone,
+  variant,
   children,
 }: Readonly<{
   tone?: PanelTone;
+  variant?: DashboardBadgeVariant;
   children: React.ReactNode;
 }>) {
   return (
     <td className="px-2 py-3.5">
-      <DashboardBadge tone={tone}>{children}</DashboardBadge>
+      <DashboardBadge tone={tone} variant={variant}>
+        {children}
+      </DashboardBadge>
     </td>
   );
 }
@@ -514,7 +583,11 @@ function getDashboardItemCount(item: AdminDashboardPanelItem): number | null {
 
 function ManagementImpactCell({
   item,
-}: Readonly<{ item: AdminDashboardPanelItem }>) {
+  badgeVariant,
+}: Readonly<{
+  item: AdminDashboardPanelItem;
+  badgeVariant?: DashboardBadgeVariant;
+}>) {
   if (hasInventoryStockQuantity(item)) {
     return (
       <td className="px-2 py-3.5">
@@ -532,7 +605,7 @@ function ManagementImpactCell({
   const stockAlertRemainingText = getStockAlertRemainingText(item);
   if (stockAlertRemainingText) {
     return (
-      <DashboardBadgeCell tone={item.severity}>
+      <DashboardBadgeCell tone={item.severity} variant="filled">
         {stockAlertRemainingText}
       </DashboardBadgeCell>
     );
@@ -540,7 +613,7 @@ function ManagementImpactCell({
 
   const count = getDashboardItemCount(item);
   return (
-    <DashboardBadgeCell tone={item.severity}>
+    <DashboardBadgeCell tone={item.severity} variant={badgeVariant}>
       {getDashboardItemImpactText(item) ??
         (count !== null ? `${count} 项` : getSeverityLabel(item.severity))}
     </DashboardBadgeCell>
@@ -1082,7 +1155,7 @@ function DashboardBoardOverviewTable({
               {detailText}
             </td>
             <td className="px-2 py-4 text-base leading-6">{labelText}</td>
-            <ManagementImpactCell item={item} />
+            <ManagementImpactCell item={item} badgeVariant="filled" />
             <DashboardTimeCell text={getPanelTimeText(item.created_at)} />
           </tr>
         );
@@ -1714,7 +1787,9 @@ function ManagementTodoTable({
               <div className="flex items-center gap-2 whitespace-nowrap">
                 <span>{getPanelTimeText(item.created_at)}</span>
                 {item.is_overdue ? (
-                  <DashboardBadge tone="alert" icon={AlertTriangle}>超时</DashboardBadge>
+                  <DashboardBadge tone="alert" icon={AlertTriangle} variant="urgent">
+                    超时
+                  </DashboardBadge>
                 ) : null}
               </div>
             </td>
