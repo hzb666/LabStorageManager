@@ -15,11 +15,54 @@ from app.services.sql_utils import normalize_field_sql, normalize_search_term
 CAS_PREFIX_PATTERN = re.compile(r"^[0-9-]{1,50}$")
 DATE_DIGITS_PATTERN = re.compile(r"[^0-9]")
 TRIGRAM_FTS_MIN_LEN = 3
+SQL_IN_CHUNK_SIZE = 500
 PRECOMPUTED_LOWERCASE_FIELD_SUFFIXES = (
     "_pinyin",
     "_pinyin_initials",
     "_initials",
 )
+
+SEARCH_MULTI_DELIMITER = "&&"
+
+
+def split_exact_cas_search_terms(search: Optional[str]) -> list[str]:
+    """Split && CAS search input into unique normalized CAS terms."""
+    if not search or SEARCH_MULTI_DELIMITER not in search:
+        return []
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw_term in search.strip().split(SEARCH_MULTI_DELIMITER):
+        normalized = normalize_cas(raw_term)
+        if not normalized or normalized in seen:
+            continue
+        terms.append(normalized)
+        seen.add(normalized)
+    return terms
+
+
+def build_multi_search_log_meta(search: Optional[str], *, enabled: bool) -> dict[str, Any]:
+    if not enabled:
+        return {}
+    terms = split_exact_cas_search_terms(search)
+    if len(terms) <= 1:
+        return {}
+    return {
+        "search_operator": "multi",
+        "search_terms": terms,
+        "search_terms_count": len(terms),
+    }
+
+
+def build_chunked_in_clause(field, values: Sequence[str], *, chunk_size: int = SQL_IN_CHUNK_SIZE):
+    """Build an IN clause split into chunks to avoid SQLite parameter limits."""
+    chunks = [
+        tuple(values[index:index + chunk_size])
+        for index in range(0, len(values), chunk_size)
+    ]
+    if not chunks:
+        return sql_false()
+    return combine_or_clauses(field.in_(chunk) for chunk in chunks)
 
 
 class CASSearchMode(str, Enum):

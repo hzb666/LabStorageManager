@@ -9,6 +9,7 @@ import type { ListResponseData } from '@/hooks/useTableState'
 import {
   DEFAULT_SEARCH_MATCH_MODE,
   matchesSearchText,
+  splitAndSearchTerms,
   type SearchMatchMode,
 } from '@/lib/searchMatchMode'
 import { useSSEStore } from '@/store/sseStore'
@@ -89,6 +90,10 @@ function containsAnyField(data: AnyRecord, fields: string[]): boolean {
   return fields.some((field) => Object.prototype.hasOwnProperty.call(data, field))
 }
 
+function isCasSearchField(field: string): boolean {
+  return field === 'cas' || field === 'cas_number'
+}
+
 function matchesStatusFilter(item: AnyRecord, context: ListSSEContext): boolean {
   const statusFilter = normalizeText(context.statusFilter)
   if (!statusFilter || statusFilter === 'all') {
@@ -108,13 +113,24 @@ function matchesSearchFilter(item: AnyRecord, context: ListSSEContext): boolean 
       ? context.searchFields
       : Object.keys(item)
 
+  if (
+    keyword.includes('&&') &&
+    context.searchFields.length === 1 &&
+    isCasSearchField(context.searchFields[0])
+  ) {
+    const terms = splitAndSearchTerms(keyword)
+    return terms.some((term) =>
+      matchesSearchText(item.cas_number, term, 'exact', false),
+    )
+  }
+
   return fields.some((field) =>
     matchesSearchText(
       item[field],
       keyword,
       context.matchMode ?? DEFAULT_SEARCH_MATCH_MODE,
       context.fuzzySearch,
-    )
+    ),
   )
 }
 

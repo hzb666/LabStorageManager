@@ -45,3 +45,11 @@ export function matchesSearchText(
 export function containsSearchText(value: unknown, keyword: string, fuzzy = false): boolean {
   return matchesSearchText(value, keyword, SEARCH_MATCH_MODES.CONTAINS, fuzzy)
 }
+
+
+export function splitAndSearchTerms(keyword: string): string[] {
+  return keyword
+    .split("&&")
+    .map((term) => term.trim())
+    .filter(Boolean)
+}

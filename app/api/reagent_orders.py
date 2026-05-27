@@ -5,6 +5,7 @@ from typing import Annotated, Optional, Dict, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
+from sqlalchemy import case
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
@@ -39,8 +40,11 @@ from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
+    build_chunked_in_clause,
+    build_multi_search_log_meta,
     build_applicant_id_subquery,
     classify_cas_search,
+    split_exact_cas_search_terms,
 )
 from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import order_with_nulls_last
@@ -169,7 +173,7 @@ class ReagentOrderListQuery(BaseModel):
     skip: int = 0
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
     status_filter: Optional[ReagentOrderStatus] = None
-    search: Optional[str] = Query(default=None, max_length=100)
+    search: Optional[str] = Query(default=None, max_length=20_000)
     search_field: Optional[str] = None
     fuzzy: bool = False
     match_mode: TextMatchMode = TextMatchMode.CONTAINS
@@ -253,30 +257,23 @@ def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder
     return db.get(ReagentOrder, order_id)
 
 
-def _apply_reagent_order_filters(
+def _apply_reagent_order_search_term(
     base,
-    status_filter: Optional[ReagentOrderStatus],
-    search: Optional[str],
+    *,
+    search_value: str,
     search_field: Optional[str],
     fuzzy: bool,
     match_mode: TextMatchMode,
 ):
-    # 应用试剂订单列表筛选，保持搜索语义并降低主流程复杂度。
-
-    if status_filter:
-        base = base.where(ReagentOrder.status == status_filter)
-
-    search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
-    if not search_value:
-        return base
-
     applicant_id_subquery = build_applicant_id_subquery(
         search_value,
         fuzzy=fuzzy,
         match_mode=match_mode,
     )
+
     cas_mode, _ = classify_cas_search(search_value, fuzzy=fuzzy)
     cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
+
     fts_state = build_order_list_fts_state(
         config=REAGENT_ORDER_SEARCH_CONFIG,
         fts_table="reagent_order_fts",
@@ -312,9 +309,54 @@ def _apply_reagent_order_filters(
         applicant_id_subquery=applicant_id_subquery,
         fts_rowid_subquery=fts_state.fts_rowid_subquery,
     )
+
     if all_search_clause is None:
         return base
+
     return base.where(all_search_clause)
+
+
+def _get_reagent_order_multi_cas_terms(
+    search: Optional[str],
+    search_field: Optional[str],
+) -> list[str]:
+    if search_field not in REAGENT_ORDER_CAS_SEARCH_KEYS:
+        return []
+    return split_exact_cas_search_terms(search)
+
+
+def _apply_reagent_order_filters(
+    base,
+    status_filter: Optional[ReagentOrderStatus],
+    search: Optional[str],
+    search_field: Optional[str],
+    fuzzy: bool,
+    match_mode: TextMatchMode,
+):
+    if status_filter:
+        base = base.where(ReagentOrder.status == status_filter)
+
+    multi_cas_terms = _get_reagent_order_multi_cas_terms(search, search_field)
+    if multi_cas_terms:
+        return base.where(build_chunked_in_clause(ReagentOrder.cas_number, multi_cas_terms))
+
+    search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
+    if not search_value:
+        return base
+    return _apply_reagent_order_search_term(
+        base,
+        search_value=search_value,
+        search_field=search_field,
+        fuzzy=fuzzy,
+        match_mode=match_mode,
+    )
+
+
+def _build_reagent_order_multi_cas_order_expr(cas_terms: list[str]):
+    if not cas_terms:
+        return None
+    order_map = {cas_number: index for index, cas_number in enumerate(cas_terms)}
+    return case(order_map, value=ReagentOrder.cas_number, else_=len(order_map)).asc()
 
 
 @router.post("/", response_model=ReagentOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -508,11 +550,15 @@ def list_reagent_orders(
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
 
     order_direction = sort_order.lower() if sort_order else "desc"
+    multi_cas_terms = _get_reagent_order_multi_cas_terms(search, search_field)
+    multi_cas_order_expr = _build_reagent_order_multi_cas_order_expr(multi_cas_terms)
 
     if sort_by == "cas_number":
         order_expr = order_with_special_last(order_column, BIOLOGICAL_REAGENT_CAS, order_direction)
     else:
         order_expr = order_with_nulls_last(order_column, order_direction)
+    if multi_cas_order_expr is not None:
+        order_expr = (multi_cas_order_expr, *order_expr)
 
     secondary_order = ReagentOrder.created_at.desc()
 
@@ -563,7 +609,10 @@ def list_reagent_orders(
             search_field=search_field if include_search_options else None,
             fuzzy=fuzzy if include_search_options else False,
             match_mode=match_mode if include_search_options else None,
-            extra_filters={"status_filter": status_filter},
+            extra_filters={
+                "status_filter": status_filter,
+                **build_multi_search_log_meta(search, enabled=bool(multi_cas_terms)),
+            },
         ),
         has_effective_filter=bool(status_filter),
         sort=build_search_log_sort(sort_by=sort_by, sort_order=sort_order),

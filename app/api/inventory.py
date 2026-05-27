@@ -58,11 +58,14 @@ from app.services.inventory_state_guards import (
 from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
+    build_chunked_in_clause,
     build_cas_search_clause,
     build_text_search_clause,
     classify_cas_search,
     collect_search_fields,
     combine_or_clauses,
+    build_multi_search_log_meta,
+    split_exact_cas_search_terms,
     union_id_subqueries,
 )
 from app.services.spec_utils import parse_specification, SpecificationError
@@ -100,8 +103,10 @@ INVENTORY_NOT_FOUND = "Inventory item not found"
 
 # ==================== 搜索缓存 ====================
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
+INVENTORY_CAS_SEARCH_KEYS = frozenset({"cas", "cas_number"})
 INVENTORY_SEARCH_SQL_FIELD_MAP = {
     "name": [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
+    "cas": [Inventory.cas_number],
     "cas_number": [Inventory.cas_number],
     "storage_location": [
         Inventory.storage_location,
@@ -130,6 +135,7 @@ VALID_INVENTORY_SORT_FIELDS = {
 }
 INVENTORY_SEARCH_FTS_FIELD_MAP = {
     "name": ["name", "name_pinyin", "name_pinyin_initials"],
+    "cas": ["cas_number"],
     "cas_number": ["cas_number"],
     "storage_location": [
         "storage_location",
@@ -173,7 +179,7 @@ class InventoryListQuery(BaseModel):
     status_filter: Optional[InventoryStatus] = None
     cas_filter: Optional[str] = None
     hazardous_only: bool = False
-    search: Optional[str] = Query(default=None, max_length=100)
+    search: Optional[str] = Query(default=None, max_length=20_000)
     search_field: Optional[str] = None
     fuzzy: bool = False
     match_mode: TextMatchMode = TextMatchMode.CONTAINS
@@ -371,6 +377,13 @@ def _normalize_inventory_search_value(options: InventoryFilterOptions) -> Option
     return raw_search
 
 
+def _get_inventory_multi_cas_terms(options: InventoryFilterOptions) -> list[str]:
+    if options.search_field not in INVENTORY_CAS_SEARCH_KEYS:
+        return []
+    return split_exact_cas_search_terms(options.search)
+
+
+
 def _build_inventory_all_fts_subquery(search_value: str):
     # 构建库存 ALL 模式 FTS 子查询，失败时返回 None 并走 LIKE 回退。
 
@@ -398,7 +411,7 @@ def _apply_inventory_single_field_search(
 ):
     # 处理指定字段搜索，优先命中精确 CAS 和 FTS，再回退到 LIKE。
 
-    if search_field == "cas_number" and (
+    if search_field in INVENTORY_CAS_SEARCH_KEYS and (
         cas_exact_or_prefix or match_mode == TextMatchMode.EXACT
     ):
         return base.where(
@@ -487,7 +500,7 @@ def _build_inventory_all_like_subquery(
     ]
     text_fields = collect_search_fields(
         INVENTORY_SEARCH_SQL_FIELD_MAP,
-        exclude_keys={"cas_number"},
+        exclude_keys=set(INVENTORY_CAS_SEARCH_KEYS),
     )
     if text_fields:
         all_candidates.append(
@@ -506,32 +519,52 @@ def _build_inventory_all_like_subquery(
     return union_id_subqueries(all_candidates)
 
 
-def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
-    # 统一应用库存列表筛选，保持搜索语义同时降低主流程复杂度。
-
-    filtered = _apply_inventory_static_filters(base, options=options)
-    search_value = _normalize_inventory_search_value(options)
-    if not search_value:
-        return filtered
-
+def _apply_inventory_search_term(
+    base,
+    *,
+    options: InventoryFilterOptions,
+    search_value: str,
+):
     cas_mode, _ = classify_cas_search(search_value, fuzzy=options.fuzzy)
     cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
     is_all_field = not options.search_field or options.search_field == "all"
+
     if is_all_field:
         return _apply_inventory_all_field_search(
-            filtered,
+            base,
             search_value=search_value,
             fuzzy=options.fuzzy,
             match_mode=options.match_mode,
             cas_exact_or_prefix=cas_exact_or_prefix,
         )
+
     return _apply_inventory_single_field_search(
-        filtered,
+        base,
         search_field=options.search_field,
         search_value=search_value,
         fuzzy=options.fuzzy,
         match_mode=options.match_mode,
         cas_exact_or_prefix=cas_exact_or_prefix,
+    )
+
+
+def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
+    # 统一应用库存列表筛选，保持搜索语义同时降低主流程复杂度。
+
+    filtered = _apply_inventory_static_filters(base, options=options)
+    multi_cas_terms = _get_inventory_multi_cas_terms(options)
+    if multi_cas_terms:
+        return filtered.where(
+            build_chunked_in_clause(normalized_inventory_cas_expr(), multi_cas_terms)
+        )
+
+    search_value = _normalize_inventory_search_value(options)
+    if not search_value:
+        return filtered
+    return _apply_inventory_search_term(
+        filtered,
+        options=options,
+        search_value=search_value,
     )
 
 
@@ -544,7 +577,7 @@ def _apply_inventory_like_filters(
     match_mode: TextMatchMode,
 ):
     if search_field and search_field != "all" and search_field in INVENTORY_SEARCH_SQL_FIELD_MAP:
-        if search_field == "cas_number":
+        if search_field in INVENTORY_CAS_SEARCH_KEYS:
             return base.where(
                 build_cas_search_clause(
                     Inventory.cas_number,
@@ -576,6 +609,8 @@ def _apply_inventory_like_filters(
                     match_mode=match_mode,
                 )
             )
+            continue
+        if field_key in INVENTORY_CAS_SEARCH_KEYS:
             continue
         all_clauses.extend(
             build_text_search_clause(
@@ -640,6 +675,13 @@ def _build_structure_order_expr(structure_cas_numbers: tuple[str, ...] | None):
     if not structure_cas_numbers:
         return None
     order_map = {cas_number: index for index, cas_number in enumerate(structure_cas_numbers)}
+    return case(order_map, value=normalized_inventory_cas_expr(), else_=len(order_map)).asc()
+
+
+def _build_inventory_multi_cas_order_expr(cas_terms: list[str]):
+    if not cas_terms:
+        return None
+    order_map = {cas_number: index for index, cas_number in enumerate(cas_terms)}
     return case(order_map, value=normalized_inventory_cas_expr(), else_=len(order_map)).asc()
 
 
@@ -782,15 +824,21 @@ def list_inventory(
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
 
+    multi_cas_terms = _get_inventory_multi_cas_terms(filter_options)
+    multi_cas_order_expr = _build_inventory_multi_cas_order_expr(multi_cas_terms)
     structure_order_expr = (
         _build_structure_order_expr(filter_options.structure_cas_numbers)
-        if has_structure_filter and not sort_by
+        if has_structure_filter and not sort_by and multi_cas_order_expr is None
         else None
     )
     order_expr = (
-        (structure_order_expr,)
-        if structure_order_expr is not None
-        else _build_inventory_order_expr(sort_by, sort_order)
+        (multi_cas_order_expr, *_build_inventory_order_expr(sort_by, sort_order))
+        if multi_cas_order_expr is not None
+        else (
+            (structure_order_expr,)
+            if structure_order_expr is not None
+            else _build_inventory_order_expr(sort_by, sort_order)
+        )
     )
 
     secondary_order = Inventory.created_at.desc()
@@ -841,6 +889,10 @@ def list_inventory(
                 "structure_query": structure_query,
                 "structure_query_format": structure_query_format,
                 "structure_only_in_stock": structure_only_in_stock,
+                **build_multi_search_log_meta(
+                    search,
+                    enabled=bool(multi_cas_terms),
+                ),
             },
         ),
         has_effective_filter=bool(
