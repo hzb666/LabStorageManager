@@ -9,6 +9,7 @@ import type { ListResponseData } from '@/hooks/useTableState'
 import {
   DEFAULT_SEARCH_MATCH_MODE,
   matchesSearchText,
+  splitAndSearchTerms,
   type SearchMatchMode,
 } from '@/lib/searchMatchMode'
 import { useSSEStore } from '@/store/sseStore'
@@ -98,8 +99,8 @@ function matchesStatusFilter(item: AnyRecord, context: ListSSEContext): boolean 
 }
 
 function matchesSearchFilter(item: AnyRecord, context: ListSSEContext): boolean {
-  const keyword = normalizeText(context.searchKeyword)
-  if (!keyword) {
+  const terms = splitAndSearchTerms(normalizeText(context.searchKeyword))
+  if (terms.length === 0) {
     return true
   }
 
@@ -108,13 +109,15 @@ function matchesSearchFilter(item: AnyRecord, context: ListSSEContext): boolean 
       ? context.searchFields
       : Object.keys(item)
 
-  return fields.some((field) =>
-    matchesSearchText(
-      item[field],
-      keyword,
-      context.matchMode ?? DEFAULT_SEARCH_MATCH_MODE,
-      context.fuzzySearch,
-    )
+  return terms.some((term) =>
+    fields.some((field) =>
+      matchesSearchText(
+        item[field],
+        term,
+        context.matchMode ?? DEFAULT_SEARCH_MATCH_MODE,
+        context.fuzzySearch,
+      ),
+    ),
   )
 }
 

@@ -938,8 +938,14 @@ function useFilterTableInlineCompletion({
   filter: ReturnType<typeof useTableState>;
   searchInputDisabled?: boolean;
 }>): TableSearchInputProps["inlineCompletion"] | undefined {
+  const isAndSearch = filter.searchInput.includes("&&")
+
   const isEnabled = Boolean(
-    enabled && endpoint && !searchInputDisabled && filter.searchField === "all",
+    enabled &&
+      endpoint &&
+      !searchInputDisabled &&
+      filter.searchField === "all" &&
+      !isAndSearch,
   );
   const inlineCompletion = useInlineSearchCompletion({
     endpoint: endpoint ?? "",

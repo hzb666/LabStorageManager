@@ -22,6 +22,39 @@ PRECOMPUTED_LOWERCASE_FIELD_SUFFIXES = (
 )
 
 
+
+SEARCH_AND_DELIMITER = "&&"
+
+
+def split_and_search_terms(search: Optional[str], *, fuzzy: bool) -> list[str]:
+    """Split search input by &&. Empty segments are ignored."""
+    if not search:
+        return []
+
+    raw_terms = [term.strip() for term in search.strip().split(SEARCH_AND_DELIMITER)]
+    terms: list[str] = []
+
+    for raw_term in raw_terms:
+        if not raw_term:
+            continue
+        normalized = normalize_search_term(raw_term) if fuzzy else raw_term
+        if normalized:
+            terms.append(normalized)
+
+    return terms
+
+
+def build_and_search_log_meta(search: Optional[str], *, fuzzy: bool) -> dict[str, Any]:
+    terms = split_and_search_terms(search, fuzzy=fuzzy)
+    if len(terms) <= 1:
+        return {}
+    return {
+        "search_operator": "multi",
+        "search_terms": terms,
+        "search_terms_count": len(terms),
+    }
+
+
 class CASSearchMode(str, Enum):
     EXACT = "exact"
     PREFIX = "prefix"

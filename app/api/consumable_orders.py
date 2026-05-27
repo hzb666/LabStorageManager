@@ -31,7 +31,10 @@ from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     TextMatchMode,
+    build_and_search_log_meta,
     build_applicant_id_subquery,
+    split_and_search_terms,
+    union_id_subqueries,
 )
 from app.services.sql_utils import order_with_nulls_last
 from app.services.api_utils import (
@@ -46,7 +49,6 @@ from app.services.order_list_search import (
     apply_order_list_single_field_search,
     build_order_list_all_search_clause,
     build_order_list_fts_state,
-    normalize_order_list_search_value,
 )
 from app.services.sse_manager import sse_manager
 from app.services.export_rate_limit import EXPORT_SCOPE_CONSUMABLE_ORDERS, enforce_export_rate_limit
@@ -298,28 +300,20 @@ def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[Consumabl
     return db.get(ConsumableOrder, order_id)
 
 
-def _apply_consumable_order_filters(
+def _apply_consumable_order_search_term(
     base,
-    status_filter: Optional[ConsumableOrderStatus],
-    search: Optional[str],
+    *,
+    search_value: str,
     search_field: Optional[str],
     fuzzy: bool,
     match_mode: TextMatchMode,
 ):
-    # 应用耗材订单列表筛选，保持搜索语义并降低主流程复杂度。
-
-    if status_filter:
-        base = base.where(ConsumableOrder.status == status_filter)
-
-    search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
-    if not search_value:
-        return base
-
     applicant_id_subquery = build_applicant_id_subquery(
         search_value,
         fuzzy=fuzzy,
         match_mode=match_mode,
     )
+
     fts_state = build_order_list_fts_state(
         config=CONSUMABLE_ORDER_SEARCH_CONFIG,
         fts_table="consumable_order_fts",
@@ -354,9 +348,43 @@ def _apply_consumable_order_filters(
         applicant_id_subquery=applicant_id_subquery,
         fts_rowid_subquery=fts_state.fts_rowid_subquery,
     )
+
     if all_search_clause is None:
         return base
+
     return base.where(all_search_clause)
+
+
+def _apply_consumable_order_filters(
+    base,
+    status_filter: Optional[ConsumableOrderStatus],
+    search: Optional[str],
+    search_field: Optional[str],
+    fuzzy: bool,
+    match_mode: TextMatchMode,
+):
+    if status_filter:
+        base = base.where(ConsumableOrder.status == status_filter)
+
+    search_values = split_and_search_terms(search, fuzzy=fuzzy)
+    if not search_values:
+        return base
+
+    term_subqueries = []
+    for search_value in search_values:
+        term_filtered = _apply_consumable_order_search_term(
+            base,
+            search_value=search_value,
+            search_field=search_field,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        )
+        term_subqueries.append(select(ConsumableOrder.id).select_from(term_filtered.subquery()))
+
+    merged_subquery = union_id_subqueries(term_subqueries)
+    if merged_subquery is None:
+        return base
+    return base.where(ConsumableOrder.id.in_(merged_subquery))
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -558,7 +586,10 @@ def list_consumable_orders(
             search_field=search_field if include_search_options else None,
             fuzzy=fuzzy if include_search_options else False,
             match_mode=match_mode if include_search_options else None,
-            extra_filters={"status_filter": status_filter},
+            extra_filters={
+                "status_filter": status_filter,
+                **build_and_search_log_meta(search, fuzzy=fuzzy),
+            },
         ),
         has_effective_filter=bool(status_filter),
         sort=build_search_log_sort(sort_by=sort_by, sort_order=sort_order),
