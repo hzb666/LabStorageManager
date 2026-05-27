@@ -31,10 +31,7 @@ from app.services.user_utils import batch_get_user_names
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     TextMatchMode,
-    build_and_search_log_meta,
     build_applicant_id_subquery,
-    split_and_search_terms,
-    union_id_subqueries,
 )
 from app.services.sql_utils import order_with_nulls_last
 from app.services.api_utils import (
@@ -49,6 +46,7 @@ from app.services.order_list_search import (
     apply_order_list_single_field_search,
     build_order_list_all_search_clause,
     build_order_list_fts_state,
+    normalize_order_list_search_value,
 )
 from app.services.sse_manager import sse_manager
 from app.services.export_rate_limit import EXPORT_SCOPE_CONSUMABLE_ORDERS, enforce_export_rate_limit
@@ -366,25 +364,16 @@ def _apply_consumable_order_filters(
     if status_filter:
         base = base.where(ConsumableOrder.status == status_filter)
 
-    search_values = split_and_search_terms(search, fuzzy=fuzzy)
-    if not search_values:
+    search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
+    if not search_value:
         return base
-
-    term_subqueries = []
-    for search_value in search_values:
-        term_filtered = _apply_consumable_order_search_term(
-            base,
-            search_value=search_value,
-            search_field=search_field,
-            fuzzy=fuzzy,
-            match_mode=match_mode,
-        )
-        term_subqueries.append(select(ConsumableOrder.id).select_from(term_filtered.subquery()))
-
-    merged_subquery = union_id_subqueries(term_subqueries)
-    if merged_subquery is None:
-        return base
-    return base.where(ConsumableOrder.id.in_(merged_subquery))
+    return _apply_consumable_order_search_term(
+        base,
+        search_value=search_value,
+        search_field=search_field,
+        fuzzy=fuzzy,
+        match_mode=match_mode,
+    )
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -588,7 +577,6 @@ def list_consumable_orders(
             match_mode=match_mode if include_search_options else None,
             extra_filters={
                 "status_filter": status_filter,
-                **build_and_search_log_meta(search, fuzzy=fuzzy),
             },
         ),
         has_effective_filter=bool(status_filter),

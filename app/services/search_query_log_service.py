@@ -13,7 +13,7 @@ from typing import Any, Mapping
 
 from app.search_query_log_db import insert_search_log_rows
 from app.search_completion_db import TARGET_ENDPOINTS, get_user_preferences, upsert_query_memory
-from app.services.search_matchers import split_and_search_terms
+from app.services.search_matchers import split_exact_cas_search_terms
 
 logger = logging.getLogger(__name__)
 
@@ -322,11 +322,6 @@ def _parse_filters_json(filters_json: str) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _parse_fuzzy(filters_json: str) -> bool:
-    filters = _parse_filters_json(filters_json)
-    return bool(filters.get("fuzzy"))
-
-
 def _parse_search_field(filters_json: str) -> str | None:
     filters = _parse_filters_json(filters_json)
     field = filters.get("search_field")
@@ -357,14 +352,18 @@ def _record_split_and_query_memory(payload: SearchLogPayload) -> bool:
     if not payload.query or "&&" not in payload.query:
         return False
 
-    fuzzy = _parse_fuzzy(payload.filters_json)
-    terms = split_and_search_terms(payload.query, fuzzy=fuzzy)
+    search_field = _parse_search_field(payload.filters_json)
+    if payload.endpoint not in {"/inventory/", "/reagent-orders/"}:
+        return False
+    if search_field not in {"cas", "cas_number"}:
+        return False
+
+    terms = split_exact_cas_search_terms(payload.query)
     terms = [term for term in terms if len(term) >= 2]
 
     if not terms:
         return True
 
-    search_field = _parse_search_field(payload.filters_json)
     prefs = get_user_preferences(payload.user_id)
 
     for term in terms:

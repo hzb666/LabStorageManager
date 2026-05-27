@@ -90,6 +90,10 @@ function containsAnyField(data: AnyRecord, fields: string[]): boolean {
   return fields.some((field) => Object.prototype.hasOwnProperty.call(data, field))
 }
 
+function isCasSearchField(field: string): boolean {
+  return field === 'cas' || field === 'cas_number'
+}
+
 function matchesStatusFilter(item: AnyRecord, context: ListSSEContext): boolean {
   const statusFilter = normalizeText(context.statusFilter)
   if (!statusFilter || statusFilter === 'all') {
@@ -99,8 +103,8 @@ function matchesStatusFilter(item: AnyRecord, context: ListSSEContext): boolean 
 }
 
 function matchesSearchFilter(item: AnyRecord, context: ListSSEContext): boolean {
-  const terms = splitAndSearchTerms(normalizeText(context.searchKeyword))
-  if (terms.length === 0) {
+  const keyword = normalizeText(context.searchKeyword)
+  if (!keyword) {
     return true
   }
 
@@ -109,14 +113,23 @@ function matchesSearchFilter(item: AnyRecord, context: ListSSEContext): boolean 
       ? context.searchFields
       : Object.keys(item)
 
-  return terms.some((term) =>
-    fields.some((field) =>
-      matchesSearchText(
-        item[field],
-        term,
-        context.matchMode ?? DEFAULT_SEARCH_MATCH_MODE,
-        context.fuzzySearch,
-      ),
+  if (
+    keyword.includes('&&') &&
+    context.searchFields.length === 1 &&
+    isCasSearchField(context.searchFields[0])
+  ) {
+    const terms = splitAndSearchTerms(keyword)
+    return terms.some((term) =>
+      matchesSearchText(item.cas_number, term, 'exact', false),
+    )
+  }
+
+  return fields.some((field) =>
+    matchesSearchText(
+      item[field],
+      keyword,
+      context.matchMode ?? DEFAULT_SEARCH_MATCH_MODE,
+      context.fuzzySearch,
     ),
   )
 }
