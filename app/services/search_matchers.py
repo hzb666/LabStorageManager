@@ -49,7 +49,7 @@ def build_and_search_log_meta(search: Optional[str], *, fuzzy: bool) -> dict[str
     if len(terms) <= 1:
         return {}
     return {
-        "search_operator": "and",
+        "search_operator": "multi",
         "search_terms": terms,
         "search_terms_count": len(terms),
     }

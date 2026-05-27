@@ -109,7 +109,7 @@ function matchesSearchFilter(item: AnyRecord, context: ListSSEContext): boolean 
       ? context.searchFields
       : Object.keys(item)
 
-  return terms.every((term) =>
+  return terms.some((term) =>
     fields.some((field) =>
       matchesSearchText(
         item[field],

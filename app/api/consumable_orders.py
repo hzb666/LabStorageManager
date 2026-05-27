@@ -368,16 +368,21 @@ def _apply_consumable_order_filters(
     if not search_values:
         return base
 
+    term_subqueries = []
     for search_value in search_values:
-        base = _apply_consumable_order_search_term(
+        term_filtered = _apply_consumable_order_search_term(
             base,
             search_value=search_value,
             search_field=search_field,
             fuzzy=fuzzy,
             match_mode=match_mode,
         )
+        term_subqueries.append(select(ConsumableOrder.id).select_from(term_filtered.subquery()))
 
-    return base
+    merged_subquery = union_id_subqueries(term_subqueries)
+    if merged_subquery is None:
+        return base
+    return base.where(ConsumableOrder.id.in_(merged_subquery))
 
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)

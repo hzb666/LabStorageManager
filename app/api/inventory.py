@@ -533,14 +533,19 @@ def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
     if not search_values:
         return filtered
 
+    term_subqueries = []
     for search_value in search_values:
-        filtered = _apply_inventory_search_term(
+        term_filtered = _apply_inventory_search_term(
             filtered,
             options=options,
             search_value=search_value,
         )
+        term_subqueries.append(select(Inventory.id).select_from(term_filtered.subquery()))
 
-    return filtered
+    merged_subquery = union_id_subqueries(term_subqueries)
+    if merged_subquery is None:
+        return filtered
+    return filtered.where(Inventory.id.in_(merged_subquery))
 
 
 def _apply_inventory_like_filters(
