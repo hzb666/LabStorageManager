@@ -313,15 +313,75 @@ def _batch_rows(
     ]
 
 
-def _parse_search_field(filters_json: str) -> str | None:
+def _parse_filters_json(filters_json: str) -> dict[str, Any]:
     try:
-        filters: dict[str, Any] = json.loads(filters_json)
+        parsed = json.loads(filters_json)
     except (json.JSONDecodeError, TypeError):
-        return None
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _parse_fuzzy(filters_json: str) -> bool:
+    filters = _parse_filters_json(filters_json)
+    return bool(filters.get("fuzzy"))
+
+
+def _parse_search_field(filters_json: str) -> str | None:
+    filters = _parse_filters_json(filters_json)
     field = filters.get("search_field")
     if field and isinstance(field, str) and field != "all":
         return field
     return None
+
+
+
+
+def _upsert_query_memory_for_scope(
+    *,
+    user_id: int | None,
+    payload: SearchLogPayload,
+    search_field: str | None,
+    query: str,
+) -> None:
+    upsert_query_memory(
+        user_id=user_id,
+        endpoint=payload.endpoint,
+        search_field=search_field,
+        query=query,
+        normalized_query=query,
+    )
+
+
+def _record_split_and_query_memory(payload: SearchLogPayload) -> bool:
+    if not payload.query or "&&" not in payload.query:
+        return False
+
+    fuzzy = _parse_fuzzy(payload.filters_json)
+    terms = split_and_search_terms(payload.query, fuzzy=fuzzy)
+    terms = [term for term in terms if len(term) >= 2]
+
+    if not terms:
+        return True
+
+    search_field = _parse_search_field(payload.filters_json)
+    prefs = get_user_preferences(payload.user_id)
+
+    for term in terms:
+        if prefs.personalization_enabled:
+            _upsert_query_memory_for_scope(
+                user_id=payload.user_id,
+                payload=payload,
+                search_field=search_field,
+                query=term,
+            )
+        _upsert_query_memory_for_scope(
+            user_id=None,
+            payload=payload,
+            search_field=search_field,
+            query=term,
+        )
+
+    return True
 
 
 def _record_search_memory_from_batch(batch: list[ReadySearchLog]) -> None:
@@ -338,23 +398,30 @@ def _record_search_memory_from_batch(batch: list[ReadySearchLog]) -> None:
             continue
         seen.add(dedupe_key)
 
-        search_field = _parse_search_field(payload.filters_json)
         try:
+            if _record_split_and_query_memory(payload):
+                continue
+
+            query = payload.query.strip() if payload.query else ""
+            if len(query) < 2:
+                continue
+
+            search_field = _parse_search_field(payload.filters_json)
             prefs = get_user_preferences(payload.user_id)
+
             if prefs.personalization_enabled:
-                upsert_query_memory(
+                _upsert_query_memory_for_scope(
                     user_id=payload.user_id,
-                    endpoint=payload.endpoint,
+                    payload=payload,
                     search_field=search_field,
-                    query=payload.query or "",
-                    normalized_query=payload.normalized_query,
+                    query=query,
                 )
-            upsert_query_memory(
+
+            _upsert_query_memory_for_scope(
                 user_id=None,
-                endpoint=payload.endpoint,
+                payload=payload,
                 search_field=search_field,
-                query=payload.query or "",
-                normalized_query=payload.normalized_query,
+                query=query,
             )
         except Exception:  # noqa: BLE001
             logger.debug("Search memory recording failed for query=%s", payload.normalized_query)

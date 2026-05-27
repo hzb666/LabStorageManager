@@ -63,6 +63,8 @@ from app.services.search_matchers import (
     classify_cas_search,
     collect_search_fields,
     combine_or_clauses,
+    split_and_search_terms,
+    build_and_search_log_meta,
     union_id_subqueries,
 )
 from app.services.spec_utils import parse_specification, SpecificationError
@@ -358,18 +360,6 @@ def _apply_inventory_static_filters(base, *, options: InventoryFilterOptions):
     return base
 
 
-def _normalize_inventory_search_value(options: InventoryFilterOptions) -> Optional[str]:
-    # 标准化搜索词，统一处理 fuzzy 场景和空白输入。
-
-    if not options.search:
-        return None
-    raw_search = options.search.strip()
-    if not raw_search:
-        return None
-    if options.fuzzy:
-        return normalize_search_term(raw_search)
-    return raw_search
-
 
 def _build_inventory_all_fts_subquery(search_value: str):
     # 构建库存 ALL 模式 FTS 子查询，失败时返回 None 并走 LIKE 回退。
@@ -506,33 +496,51 @@ def _build_inventory_all_like_subquery(
     return union_id_subqueries(all_candidates)
 
 
-def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
-    # 统一应用库存列表筛选，保持搜索语义同时降低主流程复杂度。
-
-    filtered = _apply_inventory_static_filters(base, options=options)
-    search_value = _normalize_inventory_search_value(options)
-    if not search_value:
-        return filtered
-
+def _apply_inventory_search_term(
+    base,
+    *,
+    options: InventoryFilterOptions,
+    search_value: str,
+):
     cas_mode, _ = classify_cas_search(search_value, fuzzy=options.fuzzy)
     cas_exact_or_prefix = cas_mode in (CASSearchMode.EXACT, CASSearchMode.PREFIX)
     is_all_field = not options.search_field or options.search_field == "all"
+
     if is_all_field:
         return _apply_inventory_all_field_search(
-            filtered,
+            base,
             search_value=search_value,
             fuzzy=options.fuzzy,
             match_mode=options.match_mode,
             cas_exact_or_prefix=cas_exact_or_prefix,
         )
+
     return _apply_inventory_single_field_search(
-        filtered,
+        base,
         search_field=options.search_field,
         search_value=search_value,
         fuzzy=options.fuzzy,
         match_mode=options.match_mode,
         cas_exact_or_prefix=cas_exact_or_prefix,
     )
+
+
+def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
+    # 统一应用库存列表筛选，保持搜索语义同时降低主流程复杂度。
+
+    filtered = _apply_inventory_static_filters(base, options=options)
+    search_values = split_and_search_terms(options.search, fuzzy=options.fuzzy)
+    if not search_values:
+        return filtered
+
+    for search_value in search_values:
+        filtered = _apply_inventory_search_term(
+            filtered,
+            options=options,
+            search_value=search_value,
+        )
+
+    return filtered
 
 
 def _apply_inventory_like_filters(
@@ -841,6 +849,7 @@ def list_inventory(
                 "structure_query": structure_query,
                 "structure_query_format": structure_query_format,
                 "structure_only_in_stock": structure_only_in_stock,
+                **build_and_search_log_meta(search, fuzzy=fuzzy),
             },
         ),
         has_effective_filter=bool(
