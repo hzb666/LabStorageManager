@@ -13,6 +13,7 @@ from typing import Any, Mapping
 
 from app.search_query_log_db import insert_search_log_rows
 from app.search_completion_db import TARGET_ENDPOINTS, get_user_preferences, upsert_query_memory
+from app.services.search_matchers import split_and_search_terms
 
 logger = logging.getLogger(__name__)
 

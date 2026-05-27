@@ -39,8 +39,11 @@ from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
+    build_and_search_log_meta,
     build_applicant_id_subquery,
     classify_cas_search,
+    split_and_search_terms,
+    union_id_subqueries,
 )
 from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import order_with_nulls_last
@@ -58,7 +61,6 @@ from app.services.order_list_search import (
     apply_order_list_single_field_search,
     build_order_list_all_search_clause,
     build_order_list_fts_state,
-    normalize_order_list_search_value,
 )
 from app.services.inventory_queries import regular_inventory_query
 from app.services.sse_manager import sse_manager

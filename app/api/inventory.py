@@ -30,7 +30,6 @@ from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.sql_utils import (
-    normalize_search_term,
     order_with_nulls_last,
     order_with_special_last,
 )
