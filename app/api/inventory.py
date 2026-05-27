@@ -103,10 +103,9 @@ INVENTORY_NOT_FOUND = "Inventory item not found"
 
 # ==================== 搜索缓存 ====================
 SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
-INVENTORY_CAS_SEARCH_KEYS = frozenset({"cas", "cas_number"})
+INVENTORY_CAS_SEARCH_KEYS = frozenset({"cas_number"})
 INVENTORY_SEARCH_SQL_FIELD_MAP = {
     "name": [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
-    "cas": [Inventory.cas_number],
     "cas_number": [Inventory.cas_number],
     "storage_location": [
         Inventory.storage_location,
@@ -135,7 +134,6 @@ VALID_INVENTORY_SORT_FIELDS = {
 }
 INVENTORY_SEARCH_FTS_FIELD_MAP = {
     "name": ["name", "name_pinyin", "name_pinyin_initials"],
-    "cas": ["cas_number"],
     "cas_number": ["cas_number"],
     "storage_location": [
         "storage_location",

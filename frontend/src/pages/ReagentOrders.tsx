@@ -125,7 +125,7 @@ const REAGENT_ORDER_STATUS_OPTIONS = [
 // 试剂订单搜索字段选项
 const REAGENT_SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
-  { value: 'cas', label: 'CAS号' },
+  { value: 'cas_number', label: 'CAS号' },
   { value: 'name', label: '名称' },
   { value: 'category', label: '分类' },
   { value: 'brand', label: '品牌' },
@@ -134,7 +134,6 @@ const REAGENT_SEARCH_FIELD_OPTIONS = [
 ]
 
 const REAGENT_SSE_SEARCH_FIELD_MAP = {
-  cas: ['cas_number'],
   applicant: ['applicant_name'],
 } satisfies Partial<Record<string, string[]>>
 
@@ -577,7 +576,7 @@ export function ReagentOrdersPage() {
               <ReagentCasDuplicateWarning
                 casWarning={dialogController.casWarning}
                 className="mt-4 -mb-2 rounded-md bg-orange-50 p-3 dark:bg-orange-950"
-                onOpenOrders={() => dialogController.navigateToCasSearch('/reagents', 'cas')}
+                onOpenOrders={() => dialogController.navigateToCasSearch('/reagents', 'cas_number')}
                 onOpenInventory={() => dialogController.navigateToCasSearch('/inventory', 'cas_number')}
                 getOrderStatusLabel={getReagentOrderStatusLabel}
               />
