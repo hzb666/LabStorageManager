@@ -326,6 +326,13 @@ function getDashboardItemImpactCode(item: AdminDashboardPanelItem): string | und
   return item.codes?.impact_code ?? undefined;
 }
 
+function getDashboardItemBadgeTone(item: AdminDashboardPanelItem): PanelTone | undefined {
+  if (getDashboardItemCode(item) === "stock_alert.inventory_low") {
+    return "warning";
+  }
+  return item.severity;
+}
+
 function isDashboardRiskCode(code: string | undefined): boolean {
   return code?.startsWith("risk.") ?? false;
 }
@@ -660,7 +667,7 @@ function ManagementRiskTable({
             key={getDashboardPanelItemKey(item, index, "management-risk")}
             {...getManagementRowInteraction(item, onTabChange)}
           >
-            <DashboardBadgeCell tone={item.severity}>
+            <DashboardBadgeCell tone={getDashboardItemBadgeTone(item)}>
               {labelText}
             </DashboardBadgeCell>
             {showContent ? (
@@ -699,7 +706,7 @@ function ManagementRiskDetailTable({
           key={getDashboardPanelItemKey(item, index, "management-risk-detail")}
           {...getManagementRowInteraction(item, onTabChange)}
         >
-          <DashboardBadgeCell tone={item.severity}>
+          <DashboardBadgeCell tone={getDashboardItemBadgeTone(item)}>
             {getDashboardRiskCategoryText(item)}
           </DashboardBadgeCell>
           <td className="truncate px-2 py-4 text-base font-normal leading-6">
@@ -1069,7 +1076,7 @@ function DashboardBoardItemTable({
             key={getDashboardPanelItemKey(item, index, "board-item")}
             {...getManagementRowInteraction(item, onTabChange)}
           >
-            <DashboardBadgeCell tone={item.severity}>
+            <DashboardBadgeCell tone={getDashboardItemBadgeTone(item)}>
               {labelText}
             </DashboardBadgeCell>
             <td className="truncate px-2 py-4 text-base leading-6">{detailText}</td>

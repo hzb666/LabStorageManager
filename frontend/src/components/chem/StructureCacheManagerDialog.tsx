@@ -936,7 +936,7 @@ export function StructureCacheManagerDialog(props: Readonly<StructureCacheManage
   return (
     <>
       <Dialog open={open} onOpenChange={manager.onDialogOpenChange}>
-        <DialogContent className="w-[98vw] max-w-[96rem] p-4 md:p-6">
+        <DialogContent className="min-h-[32rem] !w-[98vw] !max-w-[96rem] p-4 md:p-6">
           <div className="flex flex-col gap-4">
             <DialogHeader className="shrink-0">
               <DialogTitle className="mb-0 pr-10">结构缓存管理</DialogTitle>

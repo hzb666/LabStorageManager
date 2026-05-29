@@ -11,9 +11,13 @@ import {
   SEARCH_MATCH_MODES,
   type SearchMatchMode,
 } from '@/lib/searchMatchMode'
+import {
+  SEARCH_INPUT_MAX_LENGTH,
+  getEffectiveSearchMaxLength,
+} from '@/lib/searchLimits'
 import { cn } from '@/lib/utils'
 
-export const SEARCH_MAX_LENGTH = 100
+export const SEARCH_MAX_LENGTH = SEARCH_INPUT_MAX_LENGTH
 const DEFAULT_SEARCH_FIELD_ALL_VALUE = 'all'
 
 export interface TableFiltersProps {
@@ -689,6 +693,7 @@ export function TableFilters({
         <TableSearchInput
           value={searchInput}
           onChange={onSearchInputChange}
+          maxLength={getEffectiveSearchMaxLength(searchInput, searchField)}
           placeholder={resolvedSearchPlaceholder}
           disabled={searchInputDisabled}
           disabledReason={searchInputDisabledReason}

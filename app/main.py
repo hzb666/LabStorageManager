@@ -49,6 +49,7 @@ from app.api import (
     error_logs,
     events,
     inventory,
+    procedure_inventory_search,
     reagent_brands,
     reagent_orders,
     search_completions,
@@ -617,6 +618,7 @@ if STATIC_DIR.exists():
 app.include_router(users.router, prefix="/api")
 app.include_router(user_logs.router, prefix="/api")
 app.include_router(inventory.router, prefix="/api")
+app.include_router(procedure_inventory_search.router, prefix="/api")
 app.include_router(reagent_orders.router, prefix="/api")
 app.include_router(consumable_orders.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")

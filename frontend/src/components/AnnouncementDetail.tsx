@@ -1,8 +1,13 @@
 import { useState } from 'react'
-import { Pin, X, ZoomIn } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import { Pin, ZoomIn } from 'lucide-react'
+import {
+  Dialog,
+  DialogCloseButton,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/Dialog'
 import { type Announcement } from '@/api/client'
-import { Button } from './ui/Button'
 import { formatDateTime, getFullImageUrl } from '@/lib/utils'
 
 interface AnnouncementDetailProps {
@@ -37,13 +42,11 @@ export function AnnouncementDetail({ announcement, open, onOpenChange }: Readonl
                   {announcement.is_pinned && <Pin className="size-4 text-amber-600 dark:text-amber-500 shrink-0" />}
                   <span className="wrap-break-word">{announcement.title}</span>
                 </DialogTitle>
-                <Button
-                  variant="ghost"
-                  className="absolute right-4 top-4 p-1 size-8"
+                <DialogCloseButton
+                  className="right-3 top-3"
+                  aria-label="关闭公告详情"
                   onClick={() => onOpenChange(false)}
-                >
-                  <X className="w-4 h-4" />
-                </Button>
+                />
               </DialogHeader>
 
               <div className="space-y-4 mt-2">

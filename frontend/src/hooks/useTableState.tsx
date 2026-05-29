@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- Hook utility module exports shared table helpers. */
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query'
@@ -16,6 +17,10 @@ import {
   DEFAULT_SEARCH_MATCH_MODE,
   type SearchMatchMode,
 } from '@/lib/searchMatchMode'
+import {
+  SEARCH_INPUT_MAX_LENGTH,
+  getEffectiveSearchMaxLength,
+} from '@/lib/searchLimits'
 
 export interface ListResponseData {
   data: unknown[]
@@ -121,7 +126,7 @@ export const DEFAULT_SEARCH_FIELD_OPTIONS: SearchFieldOption[] = [
   { value: 'category', label: '分类' },
 ]
 
-export const SEARCH_MAX_LENGTH = 100
+export const SEARCH_MAX_LENGTH = SEARCH_INPUT_MAX_LENGTH
 
 type FilterStateOptions = {
   defaultStatus: string
@@ -318,16 +323,17 @@ function useFilterState(options: FilterStateOptions) {
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      const searchMaxLength = getEffectiveSearchMaxLength(searchInput, searchField)
       const shouldSync =
         globalFilter !== normalizedSearchInput &&
-        searchInput.length <= SEARCH_MAX_LENGTH
+        searchInput.length <= searchMaxLength
       if (shouldSync) {
         setGlobalFilter(normalizedSearchInput)
       }
     }, debounceMs)
 
     return () => clearTimeout(timer)
-  }, [searchInput, normalizedSearchInput, globalFilter, debounceMs])
+  }, [searchInput, normalizedSearchInput, globalFilter, searchField, debounceMs])
 
   // 处理搜索输入变化，并在清空时立即同步全局筛选。
   const handleSearchInputChange = useCallback(
@@ -343,14 +349,15 @@ function useFilterState(options: FilterStateOptions) {
   // URL 直达和地址栏回流都要立刻生效，不能再额外等一轮输入防抖。
   const applySearchImmediate = useCallback((value: string, field?: string) => {
     const nextValue = value.trim()
+    const nextField = field ?? searchField
     setSearchInput(nextValue)
-    if (nextValue.length <= SEARCH_MAX_LENGTH) {
+    if (nextValue.length <= getEffectiveSearchMaxLength(nextValue, nextField)) {
       setGlobalFilter(nextValue)
     }
     if (field !== undefined) {
       setSearchField(field)
     }
-  }, [])
+  }, [searchField])
 
   // 对外暴露排序更新器，保持兼容 React Table 回调签名。
   const handleSortingChange = useCallback(

@@ -5,6 +5,7 @@ import { cn, getFullImageUrl } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { AnnouncementBanner } from '@/components/AnnouncementBanner'
 import { AnnouncementButton } from '@/components/AnnouncementButton'
+import { ProcedureInventorySearchButton } from '@/components/ProcedureInventorySearchButton'
 import { announcementAPI, type Announcement } from '@/api/client'
 import {
   LayoutDashboard,
@@ -728,7 +729,8 @@ function LayoutHeader({
       )}
 
       <AnnouncementBanner announcements={announcements} />
-      <div className="hidden md:block">
+      <div className="hidden md:flex items-center gap-1">
+        <ProcedureInventorySearchButton />
         <AnnouncementButton announcements={announcements} />
       </div>
 
@@ -741,6 +743,7 @@ function LayoutHeader({
         >
           {theme === 'dark' ? <Sun className="size-5" /> : <Moon className="size-5" />}
         </Button>
+        <ProcedureInventorySearchButton />
         <AnnouncementButton announcements={announcements} />
       </div>
     </header>

@@ -448,6 +448,96 @@ export interface InventoryReturnPayload {
   notes?: string
 }
 
+export interface ProcedureInventoryItem {
+  id: number
+  cas_number: string
+  name: string
+  brand?: string | null
+  storage_location?: string | null
+  remaining_quantity?: number | null
+  initial_quantity?: number | null
+  unit?: string | null
+  status?: string
+  specification?: string | null
+}
+
+export interface ProcedureResolvedReagent {
+  name: string
+  query_name?: string | null
+  cas_number: string
+  cas_numbers: string[]
+  pubchem_cid?: number | null
+  pubchem_name?: string | null
+  reason?: string | null
+  inventory_count: number
+}
+
+export interface ProcedureUnresolvedReagent {
+  name: string
+  query_name?: string | null
+  reason: string
+}
+
+export type ProcedureAnalysisStatus = 'resolved' | 'unresolved' | 'common' | 'generic'
+
+export interface ProcedureAnalyzedReagent {
+  name: string
+  pubchem_query_name?: string | null
+  status: ProcedureAnalysisStatus
+  cas_number?: string | null
+  cas_numbers?: string[]
+  reason?: string | null
+  pubchem_cid?: number | null
+  inventory_count: number
+}
+
+export interface ProcedureLLMReagent {
+  name: string
+  pubchem_query_name?: string | null
+  should_query_pubchem: boolean
+  evidence?: string | null
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export interface ProcedureInventoryExtractionResponse {
+  rejected: boolean
+  message?: string | null
+  formatted_text: string
+  reagents: ProcedureLLMReagent[]
+  analysis_items: ProcedureAnalyzedReagent[]
+}
+
+export interface ProcedureInventoryGroup {
+  cas_number: string
+  reagent_names: string[]
+  items: ProcedureInventoryItem[]
+}
+
+export interface ProcedureInventorySearchResponse {
+  rejected: boolean
+  message?: string | null
+  formatted_text: string
+  cas_query: string
+  analysis_items: ProcedureAnalyzedReagent[]
+  resolved: ProcedureResolvedReagent[]
+  unresolved: ProcedureUnresolvedReagent[]
+  inventory_groups: ProcedureInventoryGroup[]
+}
+
+export const procedureInventorySearchAPI = {
+  extract: (text: string) =>
+    api.post<ProcedureInventoryExtractionResponse>('/procedure-inventory-search/extract', { text }),
+  resolve: (data: ProcedureInventoryExtractionResponse) =>
+    api.post<ProcedureInventorySearchResponse>('/procedure-inventory-search/resolve', {
+      rejected: data.rejected,
+      message: data.message,
+      formatted_text: data.formatted_text,
+      reagents: data.reagents,
+    }),
+  search: (text: string) =>
+    api.post<ProcedureInventorySearchResponse>('/procedure-inventory-search', { text }),
+}
+
 // 库存 API。
 export const inventoryAPI = {
   list: (params?: PaginationParams & {

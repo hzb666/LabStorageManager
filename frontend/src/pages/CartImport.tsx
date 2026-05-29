@@ -262,7 +262,7 @@ function CartImportFormPanel(
           <ReagentCasDuplicateWarning
             casWarning={casWarning}
             className="mb-4 rounded-md bg-orange-50 p-3 dark:bg-orange-950"
-            onOpenOrders={() => navigateToCasSearch("/reagents", "cas")}
+            onOpenOrders={() => navigateToCasSearch("/reagents", "cas_number")}
             onOpenInventory={() =>
               navigateToCasSearch("/inventory", "cas_number")
             }

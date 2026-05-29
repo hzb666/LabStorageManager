@@ -90,10 +90,6 @@ function containsAnyField(data: AnyRecord, fields: string[]): boolean {
   return fields.some((field) => Object.prototype.hasOwnProperty.call(data, field))
 }
 
-function isCasSearchField(field: string): boolean {
-  return field === 'cas' || field === 'cas_number'
-}
-
 function matchesStatusFilter(item: AnyRecord, context: ListSSEContext): boolean {
   const statusFilter = normalizeText(context.statusFilter)
   if (!statusFilter || statusFilter === 'all') {
@@ -115,8 +111,7 @@ function matchesSearchFilter(item: AnyRecord, context: ListSSEContext): boolean 
 
   if (
     keyword.includes('&&') &&
-    context.searchFields.length === 1 &&
-    isCasSearchField(context.searchFields[0])
+    context.searchFields.includes('cas_number')
   ) {
     const terms = splitAndSearchTerms(keyword)
     return terms.some((term) =>

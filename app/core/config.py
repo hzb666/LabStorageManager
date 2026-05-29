@@ -198,6 +198,17 @@ class Settings(BaseSettings):
     niutrans_appid: str = Field(default="", description="Niutrans API appId")
     niutrans_apikey: str = Field(default="", description="Niutrans API key")
 
+    # OpenAI-compatible LLM API for procedure reagent extraction
+    llm_enabled: bool = Field(default=False, description="Enable external LLM features")
+    llm_api_base_url: str = Field(default="", description="OpenAI-compatible API base URL")
+    llm_api_key: str = Field(default="", description="OpenAI-compatible API key")
+    llm_model: str = Field(default="", description="Model name for procedure extraction")
+    llm_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="HTTP timeout for LLM API calls",
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

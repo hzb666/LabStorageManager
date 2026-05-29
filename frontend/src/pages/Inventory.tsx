@@ -4,6 +4,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import type { UseFormReturn, FieldErrors } from 'react-hook-form'
+import { useSearchParams } from 'react-router-dom'
 
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
@@ -13,6 +14,7 @@ import { toast } from '@/lib/toast'
 import { BaseForm } from '@/components/BaseForm'
 import { BorrowDialog } from '@/components/BorrowDialog'
 import { EditDialogActions } from '@/components/EditDialogActions'
+import { ProcedureInventoryAnalysisPanel } from '@/components/ProcedureInventoryAnalysisPanel'
 import useDialogState from '@/hooks/useDialogState'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { FilterTable } from '@/components/ui/FilterTable'
@@ -20,7 +22,7 @@ import type { FilterTableQueryDataReadyContext } from '@/components/ui/FilterTab
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
 import type { FilterAPI } from '@/hooks/useTableState'
 
-import { inventoryAPI, chemicalAPI } from '@/api/client'
+import { inventoryAPI, chemicalAPI, type ProcedureInventorySearchResponse } from '@/api/client'
 import type {
   CompoundStructureCache,
   StructureQueryFormat,
@@ -47,6 +49,7 @@ import {
   toValidationErrors,
   normalizeApiErrorMessage,
 } from '@/lib/validationSchemas'
+import { SEARCH_MATCH_MODES } from '@/lib/searchMatchMode'
 import type { InventoryFormData, InventoryFormInputData } from '@/lib/validationSchemas'
 import { getInventoryTableColumns } from '@/lib/tableConfigs'
 import { UserRoles, type UserRole } from '@/lib/constants'
@@ -55,6 +58,7 @@ import { refreshDashboardAfterMutation } from '@/lib/dashboardUtils'
 import { useAuthStore } from '@/store/useStore'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 import { canWriteNonPublicData } from '@/lib/permissions'
+import { getProcedureInventorySearchResult } from '@/lib/storage/procedureInventorySearchStorage'
 
 import { defaultInventoryValues, enhanceCasLookupField, getInventoryFormFields } from '@/lib/formConfigs'
 
@@ -130,6 +134,7 @@ const structureSearchEnabled = isStructureSearchFeatureEnabled()
 const STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS = 2500
 const STRUCTURE_SEARCH_TABLE_READY_TIMEOUT_MS = 5000
 const STRUCTURE_SEARCH_TEXT_DISABLED_MESSAGE = '请清除结构搜索后再进行文字搜索'
+const PROCEDURE_AVAILABILITY_PAGE_SIZE = 100
 
 function createInventoryFormValues(item: InventoryItem): InventoryFormInputData {
   const remainingQty = item.remaining_quantity
@@ -154,6 +159,87 @@ function createInventoryFormValues(item: InventoryItem): InventoryFormInputData 
 function resolveInventoryInitialQuantity(editingItem: InventoryItem, specification: string | undefined): number {
   const parsedValue = specification ? parseSpecification(specification) : null
   return parsedValue ?? editingItem.initial_quantity
+}
+
+function useProcedureInventoryAvailability(result: ProcedureInventorySearchResponse | null) {
+  const casQuery = result?.cas_query?.trim() ?? ''
+  const query = useQuery({
+    queryKey: ['procedure-inventory-availability', casQuery],
+    queryFn: () => fetchProcedureInventoryFoundCasNumbers(casQuery),
+    enabled: casQuery.length > 0,
+    staleTime: 30_000,
+  })
+
+  return {
+    foundCasNumbers: query.data ?? [],
+    isError: query.isError,
+    isLoading: casQuery.length > 0 && (query.isLoading || query.isFetching),
+  }
+}
+
+async function fetchProcedureInventoryFoundCasNumbers(casQuery: string): Promise<string[]> {
+  const targetCasNumbers = new Set(splitCasQuery(casQuery))
+  const foundCasNumbers = new Set<string>()
+  let skip = 0
+  let total = 0
+
+  do {
+    const response = await inventoryAPI.list({
+      search: casQuery,
+      search_field: 'cas_number',
+      match_mode: SEARCH_MATCH_MODES.EXACT,
+      skip,
+      limit: PROCEDURE_AVAILABILITY_PAGE_SIZE,
+    })
+    const page = response.data as InventoryAvailabilityPage
+    collectFoundCasNumbers(page.data, targetCasNumbers, foundCasNumbers)
+    if (foundCasNumbers.size >= targetCasNumbers.size) {
+      break
+    }
+    total = Number(page.total ?? 0)
+    skip += Number(page.limit ?? PROCEDURE_AVAILABILITY_PAGE_SIZE)
+  } while (skip < total)
+
+  return Array.from(foundCasNumbers)
+}
+
+interface InventoryAvailabilityPage {
+  data?: unknown[]
+  limit?: number
+  total?: number
+}
+
+function splitCasQuery(casQuery: string): string[] {
+  return casQuery
+    .split('&&')
+    .map(normalizeCasForCompare)
+    .filter(Boolean)
+}
+
+function collectFoundCasNumbers(
+  rows: unknown[] | undefined,
+  targetCasNumbers: Set<string>,
+  foundCasNumbers: Set<string>,
+) {
+  if (!Array.isArray(rows)) {
+    return
+  }
+  rows.forEach((row) => {
+    const casNumber = normalizeCasForCompare(getInventoryRowCasNumber(row))
+    if (targetCasNumbers.has(casNumber)) {
+      foundCasNumbers.add(casNumber)
+    }
+  })
+}
+
+function getInventoryRowCasNumber(row: unknown): string {
+  return typeof row === 'object' && row !== null && 'cas_number' in row
+    ? String((row as { cas_number?: unknown }).cas_number ?? '')
+    : ''
+}
+
+function normalizeCasForCompare(value: string): string {
+  return value.trim().toUpperCase()
 }
 
 function validateInventoryRemainingQuantity(params: {
@@ -794,7 +880,7 @@ function StructureCacheManagerEntry({
         <React.Suspense
           fallback={(
             <StructureDialogFallback
-              contentClassName="flex min-h-[32rem] w-[98vw] max-w-[96rem] items-center justify-center p-4 md:p-6"
+              contentClassName="flex min-h-[32rem] !w-[98vw] !max-w-[96rem] items-center justify-center p-4 md:p-6"
               open={open}
               onOpenChange={setOpen}
             />
@@ -977,9 +1063,16 @@ function useInventoryBorrowController({
 
 export function InventoryPage() {
   const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
   const currentUser = useAuthStore((state) => state.user)
   const canManageInventory = canWriteNonPublicData(currentUser?.role)
   const structureEditor = useInventoryStructureEditor()
+  const procedureSearchId = searchParams.get('procedureSearchId')
+  const procedureSearchResult = useMemo(
+    () => getProcedureInventorySearchResult(procedureSearchId),
+    [procedureSearchId],
+  )
+  const procedureInventoryAvailability = useProcedureInventoryAvailability(procedureSearchResult)
   const {
     handleClearStructureFilter,
     structureFilter,
@@ -1056,6 +1149,10 @@ export function InventoryPage() {
         dialogController={dialogController}
         onExport={handleExport}
         structureEditor={structureEditor}
+      />
+      <ProcedureInventoryAnalysisPanel
+        inventoryAvailability={procedureInventoryAvailability}
+        result={procedureSearchResult}
       />
       <InventoryFormDialog canDeleteInventory={canManageInventory} dialogController={dialogController} />
       <BorrowDialog

@@ -355,7 +355,7 @@ def _record_split_and_query_memory(payload: SearchLogPayload) -> bool:
     search_field = _parse_search_field(payload.filters_json)
     if payload.endpoint not in {"/inventory/", "/reagent-orders/"}:
         return False
-    if search_field not in {"cas", "cas_number"}:
+    if search_field != "cas_number":
         return False
 
     terms = split_exact_cas_search_terms(payload.query)

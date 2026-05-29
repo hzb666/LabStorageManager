@@ -102,7 +102,7 @@ REAGENT_ORDER_ADMIN_EDITABLE_STATUSES = frozenset(
 )
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
 APPLICANT_SEARCH_KEYS = {"applicant", "applicant_name"}
-REAGENT_ORDER_CAS_SEARCH_KEYS = frozenset({"cas", "cas_number"})
+REAGENT_ORDER_CAS_SEARCH_KEYS = frozenset({"cas_number"})
 VALID_REAGENT_SORT_FIELDS = {
     "cas_number",
     "name",
@@ -134,7 +134,6 @@ REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
         ReagentOrder.name_pinyin,
         ReagentOrder.name_pinyin_initials,
     ],
-    "cas": [ReagentOrder.cas_number],
     "cas_number": [ReagentOrder.cas_number],
     "brand": [
         ReagentOrder.brand,
@@ -150,7 +149,6 @@ REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
 }
 REAGENT_ORDER_SEARCH_FTS_FIELD_MAP = {
     "name": ["name", "name_pinyin", "name_pinyin_initials"],
-    "cas": ["cas_number"],
     "cas_number": ["cas_number"],
     "brand": ["brand", "brand_pinyin", "brand_pinyin_initials"],
     "category": ["category", "category_pinyin", "category_pinyin_initials"],
@@ -320,7 +318,7 @@ def _get_reagent_order_multi_cas_terms(
     search: Optional[str],
     search_field: Optional[str],
 ) -> list[str]:
-    if search_field not in REAGENT_ORDER_CAS_SEARCH_KEYS:
+    if search_field not in REAGENT_ORDER_CAS_SEARCH_KEYS and search_field not in {None, "all"}:
         return []
     return split_exact_cas_search_terms(search)
 
