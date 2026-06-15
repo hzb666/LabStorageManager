@@ -82,9 +82,9 @@ temp/
 
 # OS
 .DS_Store
+Thumbs.db
 
-# JWT
-Thumbs.db RSA Keys (never commit these!)
+# RSA Keys (never commit these!)
 .keys/
 private.pem
 public.pem
@@ -99,16 +99,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Template/External projects (do not commit)
-shadcn-admin/
-
 # Docs subdirectories
 docs/
 BUGS.md
 
-# Tests
-tests/
-scripts/
+# Local script data
+scripts/local/
 /lsm_mcp_selftest.py
 /robot/**/*_selftest.py
 /robot/**/test_*.py
