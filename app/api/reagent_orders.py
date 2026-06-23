@@ -41,9 +41,12 @@ from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
     build_chunked_in_clause,
+    build_segmented_search_log_meta,
+    build_text_same_field_segmented_clause,
     build_multi_search_log_meta,
     build_applicant_id_subquery,
     classify_cas_search,
+    split_segmented_search_terms,
     split_exact_cas_search_terms,
 )
 from app.services.user_utils import batch_get_user_names
@@ -146,6 +149,11 @@ REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
         ReagentOrder.category_pinyin,
         ReagentOrder.category_pinyin_initials,
     ],
+}
+REAGENT_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS = {
+    "name": REAGENT_ORDER_SEARCH_SQL_FIELD_MAP["name"],
+    "brand": REAGENT_ORDER_SEARCH_SQL_FIELD_MAP["brand"],
+    "category": REAGENT_ORDER_SEARCH_SQL_FIELD_MAP["category"],
 }
 REAGENT_ORDER_SEARCH_FTS_FIELD_MAP = {
     "name": ["name", "name_pinyin", "name_pinyin_initials"],
@@ -323,6 +331,47 @@ def _get_reagent_order_multi_cas_terms(
     return split_exact_cas_search_terms(search)
 
 
+def _get_reagent_order_segmented_terms(
+    search: Optional[str],
+    search_field: Optional[str],
+    match_mode: TextMatchMode,
+) -> list[str]:
+    disabled = (
+        search_field is not None
+        and search_field != "all"
+        and search_field not in REAGENT_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS
+    )
+    return split_segmented_search_terms(search, match_mode=match_mode, disabled=disabled)
+
+
+def _get_reagent_order_segmented_field_groups(search_field: Optional[str]):
+    if search_field and search_field != "all":
+        fields = REAGENT_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS.get(search_field)
+        return [fields] if fields else []
+    return list(REAGENT_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS.values())
+
+
+def _apply_reagent_order_segmented_search(
+    base,
+    *,
+    search_field: Optional[str],
+    terms: list[str],
+    fuzzy: bool,
+    match_mode: TextMatchMode,
+):
+    field_groups = _get_reagent_order_segmented_field_groups(search_field)
+    if not field_groups:
+        return base
+    return base.where(
+        build_text_same_field_segmented_clause(
+            field_groups,
+            terms,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        )
+    )
+
+
 def _apply_reagent_order_filters(
     base,
     status_filter: Optional[ReagentOrderStatus],
@@ -330,6 +379,7 @@ def _apply_reagent_order_filters(
     search_field: Optional[str],
     fuzzy: bool,
     match_mode: TextMatchMode,
+    segmented_terms: list[str] | None = None,
 ):
     if status_filter:
         base = base.where(ReagentOrder.status == status_filter)
@@ -337,6 +387,20 @@ def _apply_reagent_order_filters(
     multi_cas_terms = _get_reagent_order_multi_cas_terms(search, search_field)
     if multi_cas_terms:
         return base.where(build_chunked_in_clause(ReagentOrder.cas_number, multi_cas_terms))
+
+    terms = (
+        segmented_terms
+        if segmented_terms is not None
+        else _get_reagent_order_segmented_terms(search, search_field, match_mode)
+    )
+    if terms:
+        return _apply_reagent_order_segmented_search(
+            base,
+            search_field=search_field,
+            terms=terms,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        )
 
     search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
     if not search_value:
@@ -470,6 +534,11 @@ def list_reagent_orders(
     if sort_by and sort_by not in VALID_REAGENT_SORT_FIELDS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
 
+    try:
+        segmented_terms = _get_reagent_order_segmented_terms(search, search_field, match_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = (
         f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:"
@@ -531,6 +600,7 @@ def list_reagent_orders(
             search_field,
             fuzzy,
             match_mode,
+            segmented_terms,
         )
 
         order_column = func.coalesce(User.full_name_pinyin, User.full_name)
@@ -542,6 +612,7 @@ def list_reagent_orders(
             search_field,
             fuzzy,
             match_mode,
+            segmented_terms,
         )
         order_column = sort_field_map.get(sort_by, ReagentOrder.created_at)
 
@@ -610,6 +681,10 @@ def list_reagent_orders(
             extra_filters={
                 "status_filter": status_filter,
                 **build_multi_search_log_meta(search, enabled=bool(multi_cas_terms)),
+                **build_segmented_search_log_meta(
+                    segmented_terms,
+                    enabled=bool(segmented_terms) and not multi_cas_terms,
+                ),
             },
         ),
         has_effective_filter=bool(status_filter),

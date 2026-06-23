@@ -60,11 +60,14 @@ from app.services.search_matchers import (
     TextMatchMode,
     build_chunked_in_clause,
     build_cas_search_clause,
+    build_segmented_search_log_meta,
+    build_text_same_field_segmented_clause,
     build_text_search_clause,
     classify_cas_search,
     collect_search_fields,
     combine_or_clauses,
     build_multi_search_log_meta,
+    split_segmented_search_terms,
     split_exact_cas_search_terms,
     union_id_subqueries,
 )
@@ -118,6 +121,12 @@ INVENTORY_SEARCH_SQL_FIELD_MAP = {
         Inventory.category_pinyin,
         Inventory.category_pinyin_initials,
     ],
+}
+INVENTORY_SEGMENTED_SEARCH_FIELD_GROUPS = {
+    "name": INVENTORY_SEARCH_SQL_FIELD_MAP["name"],
+    "brand": INVENTORY_SEARCH_SQL_FIELD_MAP["brand"],
+    "category": INVENTORY_SEARCH_SQL_FIELD_MAP["category"],
+    "storage_location": INVENTORY_SEARCH_SQL_FIELD_MAP["storage_location"],
 }
 
 VALID_INVENTORY_SORT_FIELDS = {
@@ -381,6 +390,46 @@ def _get_inventory_multi_cas_terms(options: InventoryFilterOptions) -> list[str]
     return split_exact_cas_search_terms(options.search)
 
 
+def _get_inventory_segmented_terms(options: InventoryFilterOptions) -> list[str]:
+    search_field = options.search_field
+    disabled = (
+        search_field is not None
+        and search_field != "all"
+        and search_field not in INVENTORY_SEGMENTED_SEARCH_FIELD_GROUPS
+    )
+    return split_segmented_search_terms(
+        options.search,
+        match_mode=options.match_mode,
+        disabled=disabled,
+    )
+
+
+def _get_inventory_segmented_field_groups(search_field: Optional[str]):
+    if search_field and search_field != "all":
+        fields = INVENTORY_SEGMENTED_SEARCH_FIELD_GROUPS.get(search_field)
+        return [fields] if fields else []
+    return list(INVENTORY_SEGMENTED_SEARCH_FIELD_GROUPS.values())
+
+
+def _apply_inventory_segmented_search(
+    base,
+    *,
+    options: InventoryFilterOptions,
+    terms: list[str],
+):
+    field_groups = _get_inventory_segmented_field_groups(options.search_field)
+    if not field_groups:
+        return base
+    return base.where(
+        build_text_same_field_segmented_clause(
+            field_groups,
+            terms,
+            fuzzy=options.fuzzy,
+            match_mode=options.match_mode,
+        )
+    )
+
+
 
 def _build_inventory_all_fts_subquery(search_value: str):
     # 构建库存 ALL 模式 FTS 子查询，失败时返回 None 并走 LIKE 回退。
@@ -546,7 +595,12 @@ def _apply_inventory_search_term(
     )
 
 
-def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
+def _apply_inventory_filters(
+    base,
+    *,
+    options: InventoryFilterOptions,
+    segmented_terms: list[str] | None = None,
+):
     # 统一应用库存列表筛选，保持搜索语义同时降低主流程复杂度。
 
     filtered = _apply_inventory_static_filters(base, options=options)
@@ -554,6 +608,14 @@ def _apply_inventory_filters(base, *, options: InventoryFilterOptions):
     if multi_cas_terms:
         return filtered.where(
             build_chunked_in_clause(normalized_inventory_cas_expr(), multi_cas_terms)
+        )
+
+    terms = segmented_terms if segmented_terms is not None else _get_inventory_segmented_terms(options)
+    if terms:
+        return _apply_inventory_segmented_search(
+            filtered,
+            options=options,
+            terms=terms,
         )
 
     search_value = _normalize_inventory_search_value(options)
@@ -815,10 +877,15 @@ def list_inventory(
                 "limit": limit,
             }
 
-    base = _apply_inventory_filters(
-        regular_inventory_query(),
-        options=filter_options,
-    )
+    try:
+        segmented_terms = _get_inventory_segmented_terms(filter_options)
+        base = _apply_inventory_filters(
+            regular_inventory_query(),
+            options=filter_options,
+            segmented_terms=segmented_terms,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
 
@@ -890,6 +957,10 @@ def list_inventory(
                 **build_multi_search_log_meta(
                     search,
                     enabled=bool(multi_cas_terms),
+                ),
+                **build_segmented_search_log_meta(
+                    segmented_terms,
+                    enabled=bool(segmented_terms) and not multi_cas_terms,
                 ),
             },
         ),

@@ -82,6 +82,8 @@ def get_inline_completion_endpoint(
         return InlineCompletionResponse()
     if len(q.strip()) < 1:
         return InlineCompletionResponse()
+    if " " in q:
+        return InlineCompletionResponse()
 
     rebuild_completion_entity_index_if_stale(db, endpoint)
 

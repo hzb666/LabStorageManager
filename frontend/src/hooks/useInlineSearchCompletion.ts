@@ -75,7 +75,8 @@ export function useInlineSearchCompletion({
 
   const trimmed = value.trim()
   const normalizedPrefix = trimmed.toLowerCase()
-  const isActive = enabled && field === ALL_SEARCH_FIELD
+  const hasSegmentSpace = value.includes(' ')
+  const isActive = enabled && field === ALL_SEARCH_FIELD && !hasSegmentSpace
   const cacheKey = buildCacheKey(endpoint, field, normalizedPrefix)
   const completion = useMemo(() => {
     if (!isActive || normalizedPrefix.length < minLength) {

@@ -36,6 +36,7 @@ from app.core.request_utils import (
     reset_current_sse_client_id,
     set_current_sse_client_id,
 )
+from app.core.sentry_monitoring import init_sentry
 from app.core.time_utils import get_display_timezone_label
 from app.database import engine, init_db
 from app.api import (
@@ -177,6 +178,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+init_sentry()
 
 if settings.use_secure_runtime():
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

@@ -2,8 +2,9 @@ import path from "path"
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib'
+import { sentryVitePlugin } from '@sentry/vite-plugin'
 import react from '@vitejs/plugin-react'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, type Plugin, type PluginOption } from 'vite'
 
 const chunkGroups: Record<string, string[]> = {
   'vendor-react': ['react', 'react-dom', 'react-router-dom'],
@@ -35,6 +36,9 @@ const gzipAsync = promisify(gzip)
 const brotliCompressAsync = promisify(brotliCompress)
 const COMPRESSIBLE_ASSET_RE = /\.(?:js|mjs|css|html|json|svg|wasm)$/i
 const MIN_COMPRESS_SIZE = 1024
+const uploadSentrySourceMaps = Boolean(
+  process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
+)
 
 async function collectFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true })
@@ -91,12 +95,29 @@ function createDualCompressionPlugin(): Plugin {
   }
 }
 
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [
+function createPlugins(): PluginOption[] {
+  const plugins: PluginOption[] = [
     react(),
     createDualCompressionPlugin(),
-  ],
+  ]
+
+  if (uploadSentrySourceMaps) {
+    plugins.push(sentryVitePlugin({
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      sourcemaps: {
+        filesToDeleteAfterUpload: ['dist/**/*.map'],
+      },
+    }))
+  }
+
+  return plugins
+}
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: createPlugins(),
   define: {
     global: 'globalThis',
   },
@@ -116,8 +137,8 @@ export default defineConfig({
     cssMinify: true,
     // 启用代码压缩
     minify: 'esbuild',
-    // 生产环境关闭 sourcemap
-    sourcemap: false,
+    // 仅在上传到 Sentry 时生成隐藏 sourcemap；上传后删除 .map 文件。
+    sourcemap: uploadSentrySourceMaps ? 'hidden' : false,
     // 块大小警告限制
     chunkSizeWarningLimit: 500,
     rolldownOptions: {

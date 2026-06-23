@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -10,10 +11,16 @@ from fastapi import HTTPException, status
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
-from app.core.config import settings
+from app.core.config import (
+    LLM_RESPONSE_FORMAT_JSON_OBJECT,
+    LLM_RESPONSE_FORMAT_JSON_SCHEMA,
+    LLM_RESPONSE_FORMAT_TEXT,
+    settings,
+)
 from app.models.chemical_name_map import ChemicalNameMap
 from app.services.procedure_inventory_models import ProcedureLLMExtraction, ProcedureLLMReagent
 
+logger = logging.getLogger(__name__)
 COMMON_NAME_JOINER = "; "
 PROCEDURE_REAGENT_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -85,6 +92,28 @@ def extract_reagents_with_llm(text: str, common_names: list[str]) -> ProcedureLL
     payload = _build_llm_payload(text, common_names)
     headers = {"Authorization": f"Bearer {settings.llm_api_key}", "Content-Type": "application/json"}
     url = f"{settings.llm_api_base_url.rstrip('/')}/chat/completions"
+    retry_count = settings.llm_parse_retry_count
+    for attempt in range(retry_count + 1):
+        response_payload = _post_llm_request(url, headers, payload)
+        try:
+            return _parse_llm_response(response_payload)
+        except HTTPException as exc:
+            if attempt >= retry_count or not _is_retryable_parse_error(exc):
+                raise
+            logger.warning(
+                "procedure_llm_parse_retry attempt=%s max_retries=%s detail=%s",
+                attempt + 1,
+                retry_count,
+                exc.detail,
+            )
+    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应不是有效 JSON")
+
+
+def _post_llm_request(
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
     try:
         with httpx.Client(timeout=settings.llm_timeout_seconds) as client:
             response = client.post(url, headers=headers, json=payload)
@@ -96,7 +125,11 @@ def extract_reagents_with_llm(text: str, common_names: list[str]) -> ProcedureLL
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 请求失败") from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应格式错误") from exc
-    return _parse_llm_response(response_payload)
+    return response_payload
+
+
+def _is_retryable_parse_error(exc: HTTPException) -> bool:
+    return exc.status_code == status.HTTP_502_BAD_GATEWAY
 
 
 def filter_extracted_reagents(
@@ -160,22 +193,38 @@ GENERIC_REAGENT_NAME_SET = frozenset(
 
 
 def _build_llm_payload(text: str, common_names: list[str]) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "model": settings.llm_model,
-        "temperature": 0,
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "procedure_reagent_extraction",
-                "strict": True,
-                "schema": PROCEDURE_REAGENT_RESPONSE_SCHEMA,
-            },
-        },
+        "temperature": settings.llm_temperature,
+        "max_completion_tokens": settings.llm_max_completion_tokens,
+        "response_format": _build_llm_response_format(),
         "messages": [
             {"role": "system", "content": _build_system_prompt(common_names)},
             {"role": "user", "content": text},
         ],
     }
+    thinking_type = settings.llm_thinking_type.strip()
+    if thinking_type:
+        payload["thinking"] = {"type": thinking_type}
+    return payload
+
+
+def _build_llm_response_format() -> dict[str, Any]:
+    response_format = settings.llm_response_format
+    if response_format == LLM_RESPONSE_FORMAT_JSON_SCHEMA:
+        return {
+            "type": LLM_RESPONSE_FORMAT_JSON_SCHEMA,
+            "json_schema": {
+                "name": "procedure_reagent_extraction",
+                "strict": True,
+                "schema": PROCEDURE_REAGENT_RESPONSE_SCHEMA,
+            },
+        }
+    if response_format == LLM_RESPONSE_FORMAT_JSON_OBJECT:
+        return {"type": LLM_RESPONSE_FORMAT_JSON_OBJECT}
+    if response_format == LLM_RESPONSE_FORMAT_TEXT:
+        return {"type": LLM_RESPONSE_FORMAT_TEXT}
+    raise HTTPException(status_code=500, detail="LLM 响应格式配置错误")
 
 
 def _build_system_prompt(common_names: list[str]) -> str:
@@ -205,6 +254,7 @@ Extraction rules:
 
 JSON output rules:
 - Return exactly one JSON object.
+- Return valid JSON only, without markdown fences, comments, or explanation text.
 - Use exactly these top-level keys: is_experimental_procedure, rejection_reason, reagents.
 - Do not use alternative keys such as reagent_names, chemicals, compounds, or items.
 - Each reagents item must use exactly these keys: name, pubchem_query_name, should_query_pubchem, evidence, confidence.
@@ -217,12 +267,33 @@ JSON output rules:
 Common-name exclusion context:
 {common_context}
 
+Example JSON object:
+{{
+  "is_experimental_procedure": true,
+  "rejection_reason": null,
+  "reagents": [
+    {{
+      "name": "triethylamine",
+      "pubchem_query_name": "triethylamine",
+      "should_query_pubchem": true,
+      "evidence": "triethylamine was added",
+      "confidence": "high"
+    }}
+  ]
+}}
+
 Return data according to the provided JSON schema.
 """
 
 
 def _parse_llm_response(payload: dict[str, Any]) -> ProcedureLLMExtraction:
-    content = payload.get("choices", [{}])[0].get("message", {}).get("content")
+    choices = payload.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices else {}
+    if not isinstance(choice, dict):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应格式错误")
+    if choice.get("finish_reason") == "length":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应被截断")
+    content = choice.get("message", {}).get("content")
     if not isinstance(content, str):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应格式错误")
     try:

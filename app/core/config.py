@@ -30,6 +30,17 @@ ARCHIVE_WEEKDAY_ALIASES = {
     "sun": 6,
     "sunday": 6,
 }
+LLM_RESPONSE_FORMAT_JSON_OBJECT = "json_object"
+LLM_RESPONSE_FORMAT_JSON_SCHEMA = "json_schema"
+LLM_RESPONSE_FORMAT_TEXT = "text"
+LLM_RESPONSE_FORMAT_VALUES = frozenset(
+    {
+        LLM_RESPONSE_FORMAT_JSON_OBJECT,
+        LLM_RESPONSE_FORMAT_JSON_SCHEMA,
+        LLM_RESPONSE_FORMAT_TEXT,
+    }
+)
+DEFAULT_LLM_MAX_COMPLETION_TOKENS = 50_000
 
 
 class Settings(BaseSettings):
@@ -208,6 +219,48 @@ class Settings(BaseSettings):
         gt=0,
         description="HTTP timeout for LLM API calls",
     )
+    llm_response_format: str = Field(
+        default=LLM_RESPONSE_FORMAT_JSON_OBJECT,
+        description="LLM response format: json_object, json_schema, or text",
+    )
+    llm_temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature for LLM extraction",
+    )
+    llm_max_completion_tokens: int = Field(
+        default=DEFAULT_LLM_MAX_COMPLETION_TOKENS,
+        ge=1,
+        description="Maximum generated tokens for LLM extraction",
+    )
+    llm_thinking_type: str = Field(
+        default="disabled",
+        description="Optional thinking.type value for providers such as MiMo; blank omits it",
+    )
+    llm_parse_retry_count: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Retry count after parseable HTTP responses with invalid LLM JSON",
+    )
+
+    # Sentry application monitoring
+    sentry_dsn: str = Field(default="", description="Sentry DSN for backend error reporting")
+    sentry_environment: str = Field(
+        default="",
+        description="Sentry environment name; falls back to ENV when blank",
+    )
+    sentry_traces_sample_rate: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Sentry backend performance tracing sample rate",
+    )
+    sentry_send_default_pii: bool = Field(
+        default=False,
+        description="Whether Sentry may send default personally identifiable request data",
+    )
 
     class Config:
         env_file = ".env"
@@ -256,6 +309,30 @@ class Settings(BaseSettings):
         if stripped.isdigit():
             return int(stripped)
         raise ValueError("ARCHIVE_RUN_WEEKDAY must use 0-6 or weekday name")
+
+    @field_validator("llm_response_format", mode="before")
+    @classmethod
+    def parse_llm_response_format(cls, value: Any) -> str | Any:
+        if value is None:
+            return LLM_RESPONSE_FORMAT_JSON_OBJECT
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        if not normalized:
+            return LLM_RESPONSE_FORMAT_JSON_OBJECT
+        if normalized not in LLM_RESPONSE_FORMAT_VALUES:
+            allowed = ", ".join(sorted(LLM_RESPONSE_FORMAT_VALUES))
+            raise ValueError(f"LLM_RESPONSE_FORMAT must be one of: {allowed}")
+        return normalized
+
+    @field_validator("llm_thinking_type", mode="before")
+    @classmethod
+    def parse_llm_thinking_type(cls, value: Any) -> str | Any:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            return value
+        return value.strip().lower()
 
     @field_validator("display_utc_offset", mode="before")
     @classmethod

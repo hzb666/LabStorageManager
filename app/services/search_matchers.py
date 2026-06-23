@@ -23,6 +23,8 @@ PRECOMPUTED_LOWERCASE_FIELD_SUFFIXES = (
 )
 
 SEARCH_MULTI_DELIMITER = "&&"
+SEGMENTED_SEARCH_SPLIT_RE = re.compile(r" +")
+SEGMENTED_SEARCH_MAX_TERMS = 8
 
 
 def split_exact_cas_search_terms(search: Optional[str]) -> list[str]:
@@ -51,6 +53,22 @@ def build_multi_search_log_meta(search: Optional[str], *, enabled: bool) -> dict
         "search_operator": "multi",
         "search_terms": terms,
         "search_terms_count": len(terms),
+    }
+
+
+def build_segmented_search_log_meta(
+    terms: Sequence[str],
+    *,
+    enabled: bool,
+) -> dict[str, Any]:
+    if not enabled or len(terms) <= 1:
+        return {}
+    return {
+        "search_operator": "segmented_and",
+        "search_terms": list(terms),
+        "search_terms_count": len(terms),
+        "search_splitter": "ascii_space",
+        "same_field": True,
     }
 
 
@@ -86,6 +104,57 @@ def combine_or_clauses(clauses: Iterable[Any]):
     for clause in clauses_list[1:]:
         expr = expr | clause
     return expr
+
+
+def combine_and_clauses(clauses: Iterable[Any]):
+    """Combine SQLAlchemy clauses with AND."""
+    clauses_list = list(clauses)
+    if not clauses_list:
+        raise ValueError("At least one clause is required")
+
+    expr = clauses_list[0]
+    for clause in clauses_list[1:]:
+        expr = expr & clause
+    return expr
+
+
+def split_segmented_search_terms(
+    search: Optional[str],
+    *,
+    match_mode: "TextMatchMode",
+    disabled: bool = False,
+) -> list[str]:
+    """Split ordinary ASCII-space segmented search terms.
+
+    ASCII space is query syntax for same-field AND. Other whitespace-like
+    characters stay inside terms so fuzzy normalization can treat them as
+    formatting noise instead of query syntax.
+    """
+    if disabled or not search:
+        return []
+    if SEARCH_MULTI_DELIMITER in search:
+        return []
+    if match_mode == TextMatchMode.EXACT:
+        return []
+
+    raw = search.strip()
+    if " " not in raw:
+        return []
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for part in SEGMENTED_SEARCH_SPLIT_RE.split(raw):
+        term = part.strip()
+        if not term or term in seen:
+            continue
+        terms.append(term)
+        seen.add(term)
+
+    if len(terms) <= 1:
+        return []
+    if len(terms) > SEGMENTED_SEARCH_MAX_TERMS:
+        raise ValueError(f"Segmented search supports at most {SEGMENTED_SEARCH_MAX_TERMS} terms")
+    return terms
 
 
 def collect_search_fields(
@@ -164,8 +233,40 @@ def build_text_search_clause(
 
     pattern = f"%{search_value}%"
     if fuzzy:
+        pattern = f"%{normalize_search_term(search_value)}%"
         return normalize_field_sql(column).ilike(pattern)
     return column.ilike(pattern)
+
+
+def build_text_same_field_segmented_clause(
+    field_groups: Sequence[Sequence[Any]],
+    terms: Sequence[str],
+    *,
+    fuzzy: bool,
+    match_mode: TextMatchMode = TextMatchMode.CONTAINS,
+):
+    """Build same-field-group AND search while OR-ing field groups.
+
+    Within one business field group, each term must match at least one
+    representation of that field. Different business field groups are OR-ed.
+    """
+    group_clauses = []
+    for fields in field_groups:
+        per_term_clauses = []
+        for term in terms:
+            per_term_clauses.append(
+                combine_or_clauses(
+                    build_text_search_clause(
+                        field,
+                        term,
+                        fuzzy=fuzzy,
+                        match_mode=match_mode,
+                    )
+                    for field in fields
+                )
+            )
+        group_clauses.append(combine_and_clauses(per_term_clauses))
+    return combine_or_clauses(group_clauses)
 
 
 def classify_cas_search(search_value: str, *, fuzzy: bool) -> tuple[CASSearchMode, str]:

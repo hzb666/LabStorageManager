@@ -32,6 +32,9 @@ from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_matchers import (
     TextMatchMode,
     build_applicant_id_subquery,
+    build_segmented_search_log_meta,
+    build_text_same_field_segmented_clause,
+    split_segmented_search_terms,
 )
 from app.services.sql_utils import order_with_nulls_last
 from app.services.api_utils import (
@@ -142,6 +145,11 @@ CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP = {
     "specification": [ConsumableOrder.specification],
     "created_at": [ConsumableOrder.created_at],
     "communication": [ConsumableOrder.communication],
+}
+CONSUMABLE_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS = {
+    "name": CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP["name"],
+    "specification": CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP["specification"],
+    "communication": CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP["communication"],
 }
 CONSUMABLE_ORDER_SEARCH_FTS_FIELD_MAP = {
     "name": ["name", "name_pinyin", "name_pinyin_initials"],
@@ -360,9 +368,24 @@ def _apply_consumable_order_filters(
     search_field: Optional[str],
     fuzzy: bool,
     match_mode: TextMatchMode,
+    segmented_terms: list[str] | None = None,
 ):
     if status_filter:
         base = base.where(ConsumableOrder.status == status_filter)
+
+    terms = (
+        segmented_terms
+        if segmented_terms is not None
+        else _get_consumable_order_segmented_terms(search, search_field, match_mode)
+    )
+    if terms:
+        return _apply_consumable_order_segmented_search(
+            base,
+            search_field=search_field,
+            terms=terms,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        )
 
     search_value = normalize_order_list_search_value(search, fuzzy=fuzzy)
     if not search_value:
@@ -373,6 +396,47 @@ def _apply_consumable_order_filters(
         search_field=search_field,
         fuzzy=fuzzy,
         match_mode=match_mode,
+    )
+
+
+def _get_consumable_order_segmented_terms(
+    search: Optional[str],
+    search_field: Optional[str],
+    match_mode: TextMatchMode,
+) -> list[str]:
+    disabled = (
+        search_field is not None
+        and search_field != "all"
+        and search_field not in CONSUMABLE_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS
+    )
+    return split_segmented_search_terms(search, match_mode=match_mode, disabled=disabled)
+
+
+def _get_consumable_order_segmented_field_groups(search_field: Optional[str]):
+    if search_field and search_field != "all":
+        fields = CONSUMABLE_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS.get(search_field)
+        return [fields] if fields else []
+    return list(CONSUMABLE_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS.values())
+
+
+def _apply_consumable_order_segmented_search(
+    base,
+    *,
+    search_field: Optional[str],
+    terms: list[str],
+    fuzzy: bool,
+    match_mode: TextMatchMode,
+):
+    field_groups = _get_consumable_order_segmented_field_groups(search_field)
+    if not field_groups:
+        return base
+    return base.where(
+        build_text_same_field_segmented_clause(
+            field_groups,
+            terms,
+            fuzzy=fuzzy,
+            match_mode=match_mode,
+        )
     )
 
 
@@ -450,6 +514,11 @@ def list_consumable_orders(
     if sort_by and sort_by not in VALID_CONSUMABLE_SORT_FIELDS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
 
+    try:
+        segmented_terms = _get_consumable_order_segmented_terms(search, search_field, match_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     # 生成缓存key（包含所有搜索参数，包括分页和排序）
     cache_key = (
         f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:"
@@ -506,6 +575,7 @@ def list_consumable_orders(
             search_field,
             fuzzy,
             match_mode,
+            segmented_terms,
         )
 
         order_column = func.coalesce(User.full_name_pinyin, User.full_name)
@@ -517,6 +587,7 @@ def list_consumable_orders(
             search_field,
             fuzzy,
             match_mode,
+            segmented_terms,
         )
         order_column = sort_field_map.get(sort_by, ConsumableOrder.created_at)
 
@@ -577,6 +648,10 @@ def list_consumable_orders(
             match_mode=match_mode if include_search_options else None,
             extra_filters={
                 "status_filter": status_filter,
+                **build_segmented_search_log_meta(
+                    segmented_terms,
+                    enabled=bool(segmented_terms),
+                ),
             },
         ),
         has_effective_filter=bool(status_filter),

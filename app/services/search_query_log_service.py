@@ -89,6 +89,16 @@ def _normalize_metadata_value(value: Any) -> Any | None:
         return normalized or None
     if isinstance(value, (int, float)):
         return value
+    if isinstance(value, Mapping):
+        normalized_mapping = _normalize_metadata_mapping(value)
+        return normalized_mapping or None
+    if isinstance(value, (list, tuple)):
+        normalized_items = [
+            normalized_item
+            for item in value
+            if (normalized_item := _normalize_metadata_value(item)) is not None
+        ]
+        return normalized_items or None
     return str(value)
 
 
@@ -355,7 +365,7 @@ def _record_split_and_query_memory(payload: SearchLogPayload) -> bool:
     search_field = _parse_search_field(payload.filters_json)
     if payload.endpoint not in {"/inventory/", "/reagent-orders/"}:
         return False
-    if search_field != "cas_number":
+    if search_field not in {None, "cas_number"}:
         return False
 
     terms = split_exact_cas_search_terms(payload.query)
@@ -404,6 +414,8 @@ def _record_search_memory_from_batch(batch: list[ReadySearchLog]) -> None:
 
             query = payload.query.strip() if payload.query else ""
             if len(query) < 2:
+                continue
+            if " " in query:
                 continue
 
             search_field = _parse_search_field(payload.filters_json)

@@ -38,6 +38,7 @@ redis = "^7.4.0"
 mcp = {extras = ["cli"], version = "^1.27.0"}
 rdkit = "^2026.3.1"
 httpx = "^0.28.1"
+sentry-sdk = {extras = ["fastapi"], version = "^2.63.0"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"

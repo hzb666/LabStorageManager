@@ -6,6 +6,7 @@ import '@/lib/browserProcessShim'
 import './index.css'
 import { applyAppZoom } from '@/lib/appZoom'
 import { bootstrapCacheVersion } from '@/lib/cacheVersionBootstrap'
+import { initSentry } from '@/lib/sentry'
 
 if (import.meta.env.DEV) {
   const LSM_BANNER = [
@@ -26,6 +27,8 @@ if (import.meta.env.DEV) {
     'color: #3b82f6; font-weight: bold; font-family: "Courier New", Courier, monospace; font-size: 12px; line-height: 12px;'
   )
 }
+
+initSentry()
 
 // 2. 创建一个 QueryClient 实例
 const queryClient = new QueryClient({
