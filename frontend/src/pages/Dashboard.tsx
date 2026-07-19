@@ -104,6 +104,10 @@ export function Dashboard() {
     () => getEffectiveDashboardMode(dashboardMode, isAdmin, isMemberUser),
     [dashboardMode, isAdmin, isMemberUser],
   );
+  const personalDashboardEnabled =
+    (isAdmin || isMemberUser) && effectiveDashboardMode === "personal";
+  const boardDashboardEnabled =
+    isPublicUser || (isMemberUser && effectiveDashboardMode === "board");
   const allowedTabs = useMemo(
     () => (isPublicUser ? (["borrows"] as DashboardTab[]) : ALL_TABS),
     [isPublicUser],
@@ -121,9 +125,8 @@ export function Dashboard() {
   );
   const { counts, isLoading } = useDashboardCounts(
     userKey,
-    isPublicUser,
     refreshToken,
-    !isPublicUser,
+    personalDashboardEnabled,
   );
   const cards = useMemo(
     () => getDashboardCardItems(isPublicUser, counts, isLoading),
@@ -146,7 +149,7 @@ export function Dashboard() {
     boardWindowStats,
     showBoardWindowStatsFailureFallback,
   } = useDashboardBoardData({
-    queryEnabled: isMemberUser || isPublicUser,
+    queryEnabled: boardDashboardEnabled,
     sseEnabled: isMemberUser && effectiveDashboardMode === "board",
     summaryAllTime,
     summaryWindowDays,

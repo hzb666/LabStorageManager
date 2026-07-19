@@ -1,26 +1,23 @@
 import type React from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft, Loader2, Package, ShoppingCart } from "lucide-react";
 
 import {
-  announcementAPI,
-  consumableOrderAPI,
   dashboardAPI,
-  inventoryAPI,
-  reagentOrderAPI,
   type AdminDashboardSummary,
   type AdminDashboardWindowStats,
   type DashboardBoardSummary,
+  type PersonalDashboardSummary,
 } from "@/api/client";
 import { useSSE } from "@/hooks/useSSE";
 import {
   getDashboardAlertBadgeClassName,
-  isApprovedOrderOverdue,
   type DashboardTab,
   type DashboardAlertTone,
   subscribeDashboardCountsRefresh,
 } from "@/lib/dashboardUtils";
+import { getPublicAnnouncementsQueryOptions } from "@/lib/announcementQueries";
 import {
   COMMON_SHELF_SSE_EVENTS,
   CONSUMABLE_ORDER_SSE_EVENTS,
@@ -99,163 +96,111 @@ export const EMPTY_COUNTS: DashboardCounts = {
   stockinCount: 0,
 };
 
-// 订单接口返回 `{ [status]: { orders: [] } }`；此处累计每组 `orders.length`，不依赖状态键名。
-function countGroupedOrders(grouped: Record<string, { orders: unknown[] }>): number {
-  return Object.values(grouped).reduce(
-    (sum, item) => sum + (item.orders?.length ?? 0),
-    0,
-  );
-}
+const PERSONAL_SUMMARY_QUERY_KEY = ["dashboard", "personal", "summary"] as const;
+const PERSONAL_SUMMARY_SSE_ROOMS = ["reagent_orders", "consumable_orders", "inventory"];
+const PERSONAL_SUMMARY_SSE_EVENTS = [
+  ...REAGENT_ORDER_SSE_EVENTS,
+  ...CONSUMABLE_ORDER_SSE_EVENTS,
+  ...INVENTORY_SSE_EVENTS,
+];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function getOptionalString(value: unknown): string | null | undefined {
-  if (value === null || value === undefined || typeof value === "string") {
-    return value;
-  }
-  return undefined;
-}
-
-function countGroupedApprovedOrderOverdue(
-  grouped: Record<string, { orders: unknown[] }>,
-): number {
-  return Object.entries(grouped).reduce((sum, [groupStatus, item]) => {
-    const overdueCount = (item.orders ?? []).filter((order) => {
-      if (!isRecord(order)) {
-        return false;
-      }
-      return isApprovedOrderOverdue(
-        order.status ?? groupStatus,
-        getOptionalString(order.updated_at),
-      );
-    }).length;
-    return sum + overdueCount;
-  }, 0);
-}
-
-function isCountsEqual(a: DashboardCounts, b: DashboardCounts): boolean {
-  return (
-    a.reagentCount === b.reagentCount &&
-    a.reagentArrivalOverdueCount === b.reagentArrivalOverdueCount &&
-    a.consumableCount === b.consumableCount &&
-    a.consumableReceiptOverdueCount === b.consumableReceiptOverdueCount &&
-    a.borrowCount === b.borrowCount &&
-    a.borrowOverdueCount === b.borrowOverdueCount &&
-    a.stockinCount === b.stockinCount
-  );
-}
-
-// `public` 角色只请求借用列表，其余统计固定为 `0`，避免触发无权限或无意义的请求。
-async function loadPublicDashboardCounts(): Promise<DashboardCounts> {
-  const borrowRes = await inventoryAPI.getMyBorrows();
+function mapPersonalSummaryToCounts(summary: PersonalDashboardSummary): DashboardCounts {
   return {
-    reagentCount: 0,
-    reagentArrivalOverdueCount: 0,
-    consumableCount: 0,
-    consumableReceiptOverdueCount: 0,
-    borrowCount: (borrowRes.data?.data ?? []).length,
-    borrowOverdueCount: borrowRes.data?.overdue_count ?? 0,
-    stockinCount: 0,
+    reagentCount: summary.reagent_count,
+    reagentArrivalOverdueCount: summary.reagent_arrival_overdue_count,
+    consumableCount: summary.consumable_count,
+    consumableReceiptOverdueCount: summary.consumable_receipt_overdue_count,
+    borrowCount: summary.borrow_count,
+    borrowOverdueCount: summary.borrow_overdue_count,
+    stockinCount: summary.stockin_count,
   };
 }
 
-// 成员角色的四项统计来自 4 个接口；试剂和耗材结果需要先按分组对象聚合。
-async function loadMemberDashboardCounts(): Promise<DashboardCounts> {
-  const [reagentRes, consumableRes, borrowRes, stockinRes] = await Promise.all([
-    reagentOrderAPI.getMyReagentOrders(),
-    consumableOrderAPI.getMyConsumableOrders(),
-    inventoryAPI.getMyBorrows(),
-    inventoryAPI.getPendingStockin(),
-  ]);
+function useModeAwareReconnect(
+  enabled: boolean,
+  refreshSnapshot: () => void,
+): () => void {
+  const previousEnabledRef = useRef(enabled);
+  const skipNextReconnectRef = useRef(false);
 
-  const reagentGrouped = (reagentRes.data?.data ?? {}) as Record<
-    string,
-    { orders: unknown[] }
-  >;
-  const consumableGrouped = (consumableRes.data?.data ?? {}) as Record<
-    string,
-    { orders: unknown[] }
-  >;
+  useEffect(() => {
+    if (enabled && !previousEnabledRef.current) {
+      skipNextReconnectRef.current = true;
+    }
+    previousEnabledRef.current = enabled;
+  }, [enabled]);
 
-  return {
-    reagentCount: countGroupedOrders(reagentGrouped),
-    reagentArrivalOverdueCount: countGroupedApprovedOrderOverdue(reagentGrouped),
-    consumableCount: countGroupedOrders(consumableGrouped),
-    consumableReceiptOverdueCount: countGroupedApprovedOrderOverdue(consumableGrouped),
-    borrowCount: (borrowRes.data?.data ?? []).length,
-    borrowOverdueCount: borrowRes.data?.overdue_count ?? 0,
-    stockinCount: (stockinRes.data?.data ?? []).length,
-  };
+  return useCallback(() => {
+    if (skipNextReconnectRef.current) {
+      skipNextReconnectRef.current = false;
+      return;
+    }
+    refreshSnapshot();
+  }, [refreshSnapshot]);
 }
 
-function loadDashboardCountsByRole(isPublicUser: boolean): Promise<DashboardCounts> {
-  return isPublicUser ? loadPublicDashboardCounts() : loadMemberDashboardCounts();
+function usePersonalSummarySSE(enabled: boolean, queryKey: readonly string[]) {
+  const queryClient = useQueryClient();
+  const refreshSummary = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey }).catch(() => {});
+  }, [queryClient, queryKey]);
+  const handleReconnect = useModeAwareReconnect(enabled, refreshSummary);
+  const handlers = useMemo(
+    () =>
+      Object.fromEntries(
+        PERSONAL_SUMMARY_SSE_EVENTS.map((eventType) => [eventType, refreshSummary]),
+      ),
+    [refreshSummary],
+  );
+
+  useSSE({
+    rooms: PERSONAL_SUMMARY_SSE_ROOMS,
+    handlers,
+    autoConnect: enabled,
+    onReconnect: handleReconnect,
+    onStreamStale: refreshSummary,
+  });
 }
 
-// 个人统计只在当前组件生命周期内保存快照；刷新后数值不变时不触发界面更新。
+// 个人模式只获取聚合快照；SSE 和跨组件刷新事件都失效同一 Query。
 export function useDashboardCounts(
   userKey: string,
-  isPublicUser: boolean,
   refreshToken: number,
   queryEnabled: boolean,
 ): DashboardCountsState {
-  const [countsState, setCountsState] = useState<{
-    userKey: string;
-    counts: DashboardCounts;
-  } | null>(null);
-  const counts =
-    queryEnabled && countsState?.userKey === userKey
-      ? countsState.counts
-      : EMPTY_COUNTS;
-  const isLoading = queryEnabled && countsState?.userKey !== userKey;
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(
+    () => [...PERSONAL_SUMMARY_QUERY_KEY, userKey] as const,
+    [userKey],
+  );
+  const previousRefreshTokenRef = useRef(refreshToken);
+  usePersonalSummarySSE(queryEnabled, queryKey);
+  const summaryQuery = useQuery({
+    queryKey,
+    enabled: queryEnabled,
+    staleTime: DASHBOARD_MODE_SNAPSHOT_STALE_TIME_MS,
+    gcTime: ADMIN_SUMMARY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const response = await dashboardAPI.getPersonalSummary();
+      return mapPersonalSummaryToCounts(response.data.data);
+    },
+  });
 
   useEffect(() => {
-    if (!queryEnabled) {
+    if (previousRefreshTokenRef.current === refreshToken) {
       return;
     }
+    previousRefreshTokenRef.current = refreshToken;
+    if (queryEnabled) {
+      queryClient.invalidateQueries({ queryKey }).catch(() => {});
+    }
+  }, [queryClient, queryEnabled, queryKey, refreshToken]);
 
-    let cancelled = false;
-    const applyCounts = (nextCounts: DashboardCounts) => {
-      if (cancelled) {
-        return;
-      }
-
-      setCountsState((prev) => {
-        if (prev?.userKey === userKey && isCountsEqual(prev.counts, nextCounts)) {
-          return prev;
-        }
-        return { userKey, counts: nextCounts };
-      });
-    };
-
-    const keepCountsOrUseEmpty = () => {
-      if (cancelled) {
-        return;
-      }
-
-      setCountsState((prev) =>
-        prev?.userKey === userKey ? prev : { userKey, counts: EMPTY_COUNTS },
-      );
-    };
-
-    const syncCounts = async () => {
-      try {
-        const nextCounts = await loadDashboardCountsByRole(isPublicUser);
-        applyCounts(nextCounts);
-      } catch {
-        keepCountsOrUseEmpty();
-      }
-    };
-
-    void syncCounts();
-    return () => {
-      cancelled = true;
-    };
-  }, [isPublicUser, queryEnabled, refreshToken, userKey]);
-
-  return { counts, isLoading };
+  return {
+    counts: queryEnabled ? summaryQuery.data ?? EMPTY_COUNTS : EMPTY_COUNTS,
+    isLoading: queryEnabled && summaryQuery.isPending,
+  };
 }
 
 // 子 Tab 的增删改不会自动刷新顶部统计，这里把跨组件刷新事件折叠成 `refreshToken`。
@@ -528,9 +473,9 @@ export const ADMIN_SUMMARY_STALE_TIME_MS = 60 * 1000;
 export const ADMIN_SUMMARY_GC_TIME_MS = 10 * 60 * 1000;
 export const DASHBOARD_SECTION_DETAIL_QUERY_KEY = ["dashboard", "section", "detail"] as const;
 
+const DASHBOARD_MODE_SNAPSHOT_STALE_TIME_MS = 0;
 const BOARD_SUMMARY_QUERY_KEY = ["dashboard", "board", "summary"] as const;
 const BOARD_WINDOW_STATS_QUERY_KEY = ["dashboard", "board", "window-stats"] as const;
-const BOARD_PUBLIC_ANNOUNCEMENTS_QUERY_KEY = ["dashboard", "board", "announcements"] as const;
 const ADMIN_SUMMARY_QUERY_KEY = ["dashboard", "admin", "summary"] as const;
 const ADMIN_WINDOW_STATS_QUERY_KEY = ["dashboard", "admin", "window-stats"] as const;
 const DASHBOARD_WINDOW_DEBOUNCE_MS = 200;
@@ -541,6 +486,20 @@ const ADMIN_SUMMARY_SSE_EVENTS = [
   ...INVENTORY_SSE_EVENTS,
   ...COMMON_SHELF_SSE_EVENTS,
 ];
+
+function getAdminSummaryWindowStats(
+  summary: AdminDashboardSummary,
+): AdminDashboardWindowStats {
+  return {
+    recent_window_days: summary.recent_window_days,
+    is_all_time: summary.is_all_time ?? false,
+    recent_arrival_count: summary.recent_arrival_count,
+    recent_reagent_order_count: summary.recent_reagent_order_count ?? 0,
+    recent_consumable_order_count: summary.recent_consumable_order_count ?? 0,
+    stock_in_activity_count: summary.stock_in_activity_count,
+    order_total_value: summary.order_total_value ?? 0,
+  };
+}
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -582,12 +541,13 @@ function useDashboardSummarySSE(
       ),
     [refreshSummary],
   );
+  const handleReconnect = useModeAwareReconnect(enabled, refreshSummary);
 
   useSSE({
     rooms: ADMIN_SUMMARY_SSE_ROOMS,
     handlers,
     autoConnect: enabled,
-    onReconnect: refreshSummary,
+    onReconnect: handleReconnect,
     onStreamStale: refreshSummary,
   });
 }
@@ -615,7 +575,7 @@ export function useAdminDashboardData({
   const adminSummaryQuery = useQuery({
     queryKey: ADMIN_SUMMARY_QUERY_KEY,
     enabled: queryEnabled,
-    staleTime: ADMIN_SUMMARY_STALE_TIME_MS,
+    staleTime: DASHBOARD_MODE_SNAPSHOT_STALE_TIME_MS,
     gcTime: ADMIN_SUMMARY_GC_TIME_MS,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -629,8 +589,10 @@ export function useAdminDashboardData({
       debouncedSummaryWindowDays,
       summaryAllTime,
     ],
-    enabled: queryEnabled,
-    staleTime: ADMIN_SUMMARY_STALE_TIME_MS,
+    enabled:
+      queryEnabled &&
+      (summaryAllTime || debouncedSummaryWindowDays !== DASHBOARD_WINDOW_DEFAULT_DAYS),
+    staleTime: DASHBOARD_MODE_SNAPSHOT_STALE_TIME_MS,
     gcTime: ADMIN_SUMMARY_GC_TIME_MS,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
@@ -644,7 +606,12 @@ export function useAdminDashboardData({
   });
   const currentWindowStats = adminWindowStatsQuery.data;
   const adminSummary = adminSummaryQuery.data ?? EMPTY_ADMIN_SUMMARY;
-  const adminWindowStats = currentWindowStats ?? EMPTY_ADMIN_WINDOW_STATS;
+  const usesDefaultWindow =
+    !summaryAllTime &&
+    debouncedSummaryWindowDays === DASHBOARD_WINDOW_DEFAULT_DAYS;
+  const adminWindowStats = usesDefaultWindow
+    ? getAdminSummaryWindowStats(adminSummary)
+    : currentWindowStats ?? EMPTY_ADMIN_WINDOW_STATS;
   const isAdminSummaryLoading =
     adminSummaryQuery.isPending && !adminSummaryQuery.data;
   const managementCards = useMemo(
@@ -657,7 +624,7 @@ export function useAdminDashboardData({
     adminWindowStats,
     managementCards,
     showWindowStatsFailureFallback:
-      adminWindowStatsQuery.isError && !currentWindowStats,
+      !usesDefaultWindow && adminWindowStatsQuery.isError && !currentWindowStats,
   };
 }
 
@@ -684,7 +651,7 @@ export function useDashboardBoardData({
   const boardSummaryQuery = useQuery({
     queryKey: BOARD_SUMMARY_QUERY_KEY,
     enabled: queryEnabled,
-    staleTime: ADMIN_SUMMARY_STALE_TIME_MS,
+    staleTime: DASHBOARD_MODE_SNAPSHOT_STALE_TIME_MS,
     gcTime: ADMIN_SUMMARY_GC_TIME_MS,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -699,7 +666,7 @@ export function useDashboardBoardData({
       summaryAllTime,
     ],
     enabled: queryEnabled,
-    staleTime: ADMIN_SUMMARY_STALE_TIME_MS,
+    staleTime: DASHBOARD_MODE_SNAPSHOT_STALE_TIME_MS,
     gcTime: ADMIN_SUMMARY_GC_TIME_MS,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
@@ -712,15 +679,8 @@ export function useDashboardBoardData({
     },
   });
   const boardAnnouncementsQuery = useQuery({
-    queryKey: BOARD_PUBLIC_ANNOUNCEMENTS_QUERY_KEY,
+    ...getPublicAnnouncementsQueryOptions(),
     enabled: queryEnabled,
-    staleTime: ADMIN_SUMMARY_STALE_TIME_MS,
-    gcTime: ADMIN_SUMMARY_GC_TIME_MS,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const response = await announcementAPI.getPublic();
-      return response.data;
-    },
   });
   const currentWindowStats = boardWindowStatsQuery.data;
 

@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef, type ComponentProps, type ReactElement } from 'react'
 import { Link, useLocation, Outlet } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore, useUIStore } from '@/store/useStore'
 import { cn, getFullImageUrl } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { AnnouncementBanner } from '@/components/AnnouncementBanner'
 import { AnnouncementButton } from '@/components/AnnouncementButton'
 import { ProcedureInventorySearchButton } from '@/components/ProcedureInventorySearchButton'
-import { announcementAPI, type Announcement } from '@/api/client'
+import type { Announcement } from '@/api/client'
 import {
   LayoutDashboard,
   Package,
@@ -34,11 +35,11 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/Tooltip
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/Avatar'
 import { SidebarLogo } from '@/components/SidebarLogo'
 import { AuthDeferredShell } from '@/components/AuthDeferredShell'
+import { getPublicAnnouncementsQueryOptions } from '@/lib/announcementQueries'
 
 type NavGroup = '功能' | '管理'
 type TooltipSide = ComponentProps<typeof TooltipContent>['side']
 const SIDEBAR_TRANSITION_MS = 300
-const ANNOUNCEMENT_ROUTE_REFRESH_THROTTLE_MS = 60 * 1000
 
 interface NavItem {
   title: string
@@ -758,6 +759,7 @@ function LayoutDeferredOutlet({ pathname }: Readonly<{ pathname: string }>) {
 // 布局页负责拉取公告、维护桌面/移动侧栏状态、处理退出确认和移动端滚动锁定。
 export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean }>) {
   const location = useLocation()
+  const queryClient = useQueryClient()
   const { user, logout } = useAuthStore()
   const userId = user?.id
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
@@ -765,53 +767,28 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
   const isMobile = useIsMobile()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [logoutConfirming, setLogoutConfirming] = useState(false)
-  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const announcementsQuery = useQuery({
+    ...getPublicAnnouncementsQueryOptions(),
+    enabled: Boolean(userId),
+  })
+  const announcements = announcementsQuery.data ?? []
   const [showBugButton, setShowBugButton] = useState(
     () => Date.now() >= getBugButtonHiddenUntil()
   )
-  const lastAnnouncementCheckAtRef = useRef(0)
+  useEffect(() => {
+    if (!userId) {
+      return
+    }
+
+    const { queryKey, queryFn, staleTime } = getPublicAnnouncementsQueryOptions()
+    queryClient.fetchQuery({ queryKey, queryFn, staleTime }).catch(() => {})
+  }, [location.pathname, queryClient, userId])
 
   useEffect(() => {
-    let cancelled = false
-    let requestSettled = false
-    const previousCheckAt = lastAnnouncementCheckAtRef.current
-
-    if (!userId) {
-      return undefined
+    if (announcementsQuery.error) {
+      console.error('Failed to fetch announcements:', announcementsQuery.error)
     }
-
-    const now = Date.now()
-    if (now - previousCheckAt < ANNOUNCEMENT_ROUTE_REFRESH_THROTTLE_MS) {
-      return undefined
-    }
-
-    lastAnnouncementCheckAtRef.current = now
-
-    // 路由切换时按 1 分钟节流检查公告；用取消标记兜住卸载场景。
-    const fetchAnnouncements = async () => {
-      try {
-        const response = await announcementAPI.getPublic()
-        if (!cancelled) {
-          setAnnouncements(response.data)
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.error('Failed to fetch announcements:', error)
-        }
-      } finally {
-        requestSettled = true
-      }
-    }
-
-    fetchAnnouncements()
-
-    return () => {
-      cancelled = true
-      if (!requestSettled) {
-        lastAnnouncementCheckAtRef.current = previousCheckAt
-      }
-    }
-  }, [location.pathname, userId])
+  }, [announcementsQuery.error])
 
   const handleBugButtonRightClick = useCallback(() => {
     setShowBugButton(false)

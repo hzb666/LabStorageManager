@@ -1051,7 +1051,6 @@ export function DashboardReagentTab({
   const currentUser = useAuthStore((state) => state.user);
   const isAdmin = currentUser?.role === UserRoles.ADMIN;
   const queryClient = useQueryClient();
-  const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions());
 
   const refreshTables = useCallback(async () => {
     await Promise.all([
@@ -1079,6 +1078,12 @@ export function DashboardReagentTab({
   });
 
   const stockinDialog = useReagentStockinDialog(refreshTables);
+  const shouldLoadBrandOptions =
+    reagentEditDialog.editingReagent !== null || stockinDialog.stockinTarget !== null;
+  const { data: brandOptions = [] } = useQuery({
+    ...getReagentBrandOptionsQueryOptions(),
+    enabled: shouldLoadBrandOptions,
+  });
   const handleReagentEdit = reagentEditDialog.handleReagentEdit;
   const openStockinDialog = stockinDialog.openStockinDialog;
 

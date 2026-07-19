@@ -6,7 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.core.auth import get_current_user, require_admin
+from app.core.auth import NonPublicUser, get_current_user, require_admin
 from app.core.time_utils import get_utc_now
 from app.database import DBSession
 from app.models.user import User, UserRole
@@ -28,6 +28,7 @@ from app.services.dashboard.common import (
     DASHBOARD_WINDOW_MIN_DAYS,
     RECENT_WINDOW_DAYS,
 )
+from app.services.dashboard.personal import build_personal_dashboard_summary
 
 router = APIRouter(
     prefix="/dashboard",
@@ -100,6 +101,20 @@ class DashboardWindowStatsResponse(BaseModel):
     recent_consumable_order_count: int
     stock_in_activity_count: int
     order_total_value: float
+
+
+class DashboardPersonalSummaryDataResponse(BaseModel):
+    reagent_count: int
+    reagent_arrival_overdue_count: int
+    consumable_count: int
+    consumable_receipt_overdue_count: int
+    borrow_count: int
+    borrow_overdue_count: int
+    stockin_count: int
+
+
+class DashboardPersonalSummaryEnvelope(BaseModel):
+    data: DashboardPersonalSummaryDataResponse
 
 
 class DashboardBoardSummaryCountsResponse(BaseModel):
@@ -180,6 +195,21 @@ class DashboardAdminSummaryDataResponse(BaseModel):
 
 class DashboardAdminSummaryEnvelope(BaseModel):
     data: DashboardAdminSummaryDataResponse
+
+
+@router.get("/personal/summary", response_model=DashboardPersonalSummaryEnvelope)
+def get_personal_dashboard_summary(
+    db: DBSession,
+    current_user: NonPublicUser,
+) -> dict[str, Any]:
+    """Return the authenticated user's personal dashboard card counts."""
+
+    return {
+        "data": build_personal_dashboard_summary(
+            db,
+            user_id=current_user.id,
+        )
+    }
 
 
 @router.get("/board/summary", response_model=DashboardBoardSummaryEnvelope)

@@ -666,6 +666,16 @@ export interface AdminDashboardWindowStats {
   order_total_value: number
 }
 
+export interface PersonalDashboardSummary {
+  reagent_count: number
+  reagent_arrival_overdue_count: number
+  consumable_count: number
+  consumable_receipt_overdue_count: number
+  borrow_count: number
+  borrow_overdue_count: number
+  stockin_count: number
+}
+
 export type DashboardBoardSection = 'actions' | 'orders' | 'stockAlerts'
 export type DashboardAdminSection = 'todos' | 'risks' | 'stockAlerts'
 
@@ -695,6 +705,8 @@ export interface DashboardBoardSummary {
 }
 
 export const dashboardAPI = {
+  getPersonalSummary: () =>
+    api.get<{ data: PersonalDashboardSummary }>('/dashboard/personal/summary'),
   getBoardSummary: () => api.get<{ data: DashboardBoardSummary }>('/dashboard/board/summary'),
   getBoardSectionItems: (section: DashboardBoardSection, params?: Pick<PaginationParams, 'skip' | 'limit'>) =>
     api.get<PaginatedResponse<AdminDashboardPanelItem>>(`/dashboard/board/sections/${section}`, {
