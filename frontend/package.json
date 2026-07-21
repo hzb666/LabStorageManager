@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "generate:static-assets": "node scripts/lib-assets.mjs",
@@ -35,7 +35,7 @@
     "@tanstack/react-query": "^5.91.2",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.23",
-    "axios": "^1.13.6",
+    "axios": "^1.16.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -49,7 +49,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.71.2",
-    "react-router-dom": "^7.13.1",
+    "react-router-dom": "^7.15.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
     "valibot": "^1.3.1",
@@ -73,9 +73,10 @@
     "tailwindcss": "^4.2.2",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.1",
-    "vite": "^8.0.1"
+    "vite": "^8.1.5"
   },
   "overrides": {
+    "esbuild": "0.28.1",
     "ketcher-react": {
       "draft-js": {
         "immutable": "3.8.3"

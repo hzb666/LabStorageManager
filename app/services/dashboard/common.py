@@ -30,6 +30,7 @@ BOARD_SECTION_STOCK_ALERTS = "stockAlerts"
 ADMIN_SECTION_TODOS = "todos"
 ADMIN_SECTION_RISKS = "risks"
 ADMIN_SECTION_STOCK_ALERTS = "stockAlerts"
+ADMIN_SECTION_RECENT_ACTIONS = "recentActions"
 DashboardItemFetcher = Callable[[int], list[dict[str, Any]]]
 
 

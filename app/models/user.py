@@ -31,7 +31,7 @@ class UserBase(SQLModel):
     @classmethod
     def validate_username(cls, v: str) -> str:
         if not re.match(r"^\w+$", v, flags=re.ASCII):
-            raise ValueError("用户名只能包含字母、数字和下划线")
+            raise ValueError("Username may only contain letters, numbers, and underscores")
         return v
 
     full_name: str = Field(max_length=100)
@@ -95,7 +95,7 @@ class UserUpdate(SQLModel):
     @classmethod
     def validate_username(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not re.match(r"^\w+$", v, flags=re.ASCII):
-            raise ValueError("用户名只能包含字母，数字和下划线")
+            raise ValueError("Username may only contain letters, numbers, and underscores")
         return v
 
     full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)

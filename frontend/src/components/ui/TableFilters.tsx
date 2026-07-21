@@ -542,13 +542,13 @@ function InlineCompletionGhost({
       aria-hidden
       className={cn(
         'absolute inset-0 z-[5] pointer-events-none overflow-hidden',
-        'flex items-center',
+        'flex items-center text-base leading-10',
       )}
     >
-      <span className="invisible whitespace-pre pl-9 text-base leading-none">
+      <span className="invisible whitespace-pre pl-9">
         {value}
       </span>
-      <span className="text-muted-foreground/40 whitespace-pre text-base leading-none select-none">
+      <span className="text-muted-foreground/40 whitespace-pre select-none">
         {inlineCompletion?.suffix}
       </span>
     </div>

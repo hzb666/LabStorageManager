@@ -31,12 +31,14 @@ import type {
   SearchFieldOption,
 } from "@/hooks/useTableState";
 import { getInventoryTableColumns } from "@/lib/tableConfigs";
+import type { SearchMatchMode } from "@/lib/searchMatchMode";
 import { useSSEStore } from "@/store/sseStore";
 import { cn } from "@/lib/utils";
 
 declare module "@tanstack/react-table" {
   interface TableMeta<TData extends RowData> {
     fuzzySearch: boolean;
+    matchMode: SearchMatchMode;
     onEdit?: (item: TData) => void;
     onBorrowSuccess?: () => void;
   }
@@ -824,6 +826,7 @@ function useFilterTableInstance({
     },
     meta: {
       fuzzySearch: filter.fuzzySearch,
+      matchMode: filter.matchMode,
       onEdit: (item) => actionRefs.onEditRef.current?.(item),
       onBorrowSuccess: () => actionRefs.onBorrowSuccessRef.current?.(),
     },

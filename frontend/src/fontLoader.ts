@@ -1,4 +1,3 @@
-import { FONT_TIMEOUT_MS } from './lib/constants'
 import { LIB_ASSETS } from '@/lib/staticAssets'
 import {
   clearPreferredFontSource,
@@ -24,12 +23,6 @@ function markWebFontsReady() {
   const root = document.documentElement
   root.classList.add(FONT_READY_CLASS)
   markFontState('ready')
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms)
-  })
 }
 
 function shouldPreferLocalFont() {
@@ -119,15 +112,8 @@ async function waitForLocalFonts() {
 }
 
 async function loadGoogleFonts() {
-  await Promise.race([
-    (async () => {
-      await ensureFontStylesheet()
-      await waitForFonts()
-    })(),
-    delay(FONT_TIMEOUT_MS).then(() => {
-      throw new Error('Web font loading timed out.')
-    }),
-  ])
+  await ensureFontStylesheet()
+  await waitForFonts()
 }
 
 async function loadLocalFonts() {

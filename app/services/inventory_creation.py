@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from fastapi import HTTPException, status
 
+from app.core.api_errors import ApiErrorCode, api_error
 from app.models.inventory import Inventory, InventoryStatus, ManualInventoryCreate
 from app.services.api_utils import empty_to_none
 from app.services.cas_utils import normalize_cas, validate_cas_format
@@ -93,9 +94,14 @@ def create_manual_inventory_items(
             if not is_internal_code_unique_violation(exc):
                 raise
             if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
-                raise HTTPException(
+                raise api_error(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="库存内部编码冲突，请重试入库操作",
+                    detail="Inventory internal code conflict; retry the stock-in operation",
+                    code=ApiErrorCode.INVENTORY_CODE_CONFLICT,
                 ) from exc
 
-    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="库存内部编码冲突，请重试入库操作")
+    raise api_error(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Inventory internal code conflict; retry the stock-in operation",
+        code=ApiErrorCode.INVENTORY_CODE_CONFLICT,
+    )

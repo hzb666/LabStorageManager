@@ -157,7 +157,7 @@ class ReagentOrderCreate(SQLModel):
     def strip_required_text(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
-            raise ValueError("不能为空")
+            raise ValueError("Field must not be empty")
         return stripped
 
 
@@ -185,19 +185,19 @@ class ReagentOrderUpdate(SQLModel):
     @classmethod
     def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
-            raise ValueError("不能为空")
+            raise ValueError("Field must not be empty")
         if not isinstance(value, str):
             return value
         stripped = value.strip()
         if not stripped:
-            raise ValueError("不能为空")
+            raise ValueError("Field must not be empty")
         return stripped
 
     @field_validator("quantity", "price", mode="before")
     @classmethod
     def reject_null_required_number(cls, value: Optional[float]) -> Optional[float]:
         if value is None:
-            raise ValueError("不能为空")
+            raise ValueError("Field must not be empty")
         return value
 
 

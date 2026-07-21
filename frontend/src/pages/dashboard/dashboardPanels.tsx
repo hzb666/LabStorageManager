@@ -9,6 +9,7 @@ import {
   Boxes,
   ClipboardList,
   FlaskConical,
+  History,
   Info,
   Megaphone,
   MonitorCheck,
@@ -67,12 +68,25 @@ import {
   type ManagementCardItem,
 } from "./dashboardData";
 
-type PanelTone = "high" | "alert" | "medium" | "warning" | "success" | "sky" | "violet" | "low" | "neutral";
+type PanelTone =
+  | "high"
+  | "alert"
+  | "medium"
+  | "warning"
+  | "success"
+  | "blue"
+  | "cyan"
+  | "indigo"
+  | "sky"
+  | "teal"
+  | "violet"
+  | "low"
+  | "neutral";
 
 type DashboardBadgeVariant = "category" | "filled" | "urgent";
 
 const DASHBOARD_BADGE_BASE_CLASS =
-  "inline-flex h-7 items-center rounded-md px-2 text-sm font-normal leading-6";
+  "inline-flex h-7 items-center rounded-md px-2 font-normal leading-6";
 const DASHBOARD_BADGE_DOT_CLASS = "size-1.5 shrink-0 rounded-full";
 
 function isHighUrgencyTone(tone?: PanelTone) {
@@ -97,8 +111,20 @@ function getFilledToneClassName(tone?: PanelTone) {
   if (tone === "success") {
     return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
   }
+  if (tone === "blue") {
+    return "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300";
+  }
+  if (tone === "cyan") {
+    return "bg-cyan-100 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300";
+  }
+  if (tone === "indigo") {
+    return "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300";
+  }
   if (tone === "sky") {
     return "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300";
+  }
+  if (tone === "teal") {
+    return "bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300";
   }
   if (tone === "violet") {
     return "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300";
@@ -162,6 +188,7 @@ function DashboardBadge({
     <span
       className={cn(
         DASHBOARD_BADGE_BASE_CLASS,
+        variant === "category" ? "text-base" : "text-sm",
         dotClassName ? "gap-2" : "gap-1",
         toneClassName,
       )}
@@ -305,6 +332,31 @@ function getDashboardItemCode(
   item: AdminDashboardPanelItem,
 ): string | undefined {
   return item.codes?.label_code ?? undefined;
+}
+
+const MANAGEMENT_OPERATION_CATEGORY_CODE_PREFIX = "operation_category.";
+const MANAGEMENT_OPERATION_CATEGORY_META: Record<
+  string,
+  Readonly<{ label: string; tone: PanelTone }>
+> = {
+  reagent_order: { label: "试剂订单", tone: "blue" },
+  consumable_order: { label: "耗材订单", tone: "success" },
+  inventory: { label: "库存", tone: "violet" },
+  common_shelf: { label: "常用货架", tone: "cyan" },
+  borrow: { label: "借用", tone: "sky" },
+  user: { label: "用户", tone: "indigo" },
+  session: { label: "会话", tone: "teal" },
+  other: { label: "其他", tone: "neutral" },
+};
+const DEFAULT_MANAGEMENT_OPERATION_CATEGORY = MANAGEMENT_OPERATION_CATEGORY_META.other;
+
+function getManagementOperationCategoryMeta(item: AdminDashboardPanelItem) {
+  const code = getDashboardItemCode(item);
+  const category = code?.startsWith(MANAGEMENT_OPERATION_CATEGORY_CODE_PREFIX)
+    ? code.slice(MANAGEMENT_OPERATION_CATEGORY_CODE_PREFIX.length)
+    : "other";
+  return MANAGEMENT_OPERATION_CATEGORY_META[category]
+    ?? DEFAULT_MANAGEMENT_OPERATION_CATEGORY;
 }
 
 function getDashboardPanelItemKey(
@@ -994,6 +1046,7 @@ const BOARD_SECTION_STOCK_ALERTS: DashboardBoardSection = "stockAlerts";
 const ADMIN_SECTION_TODOS: DashboardAdminSection = "todos";
 const ADMIN_SECTION_RISKS: DashboardAdminSection = "risks";
 const ADMIN_SECTION_STOCK_ALERTS: DashboardAdminSection = "stockAlerts";
+const ADMIN_SECTION_RECENT_ACTIONS: DashboardAdminSection = "recentActions";
 
 const BOARD_SECTION_DETAIL_SOURCES: Record<
   DashboardBoardSection,
@@ -1030,6 +1083,11 @@ const ADMIN_SECTION_DETAIL_SOURCES: Record<
     queryKey: ["admin", ADMIN_SECTION_STOCK_ALERTS],
     fetchItems: (params) =>
       dashboardAPI.getAdminSectionItems(ADMIN_SECTION_STOCK_ALERTS, params),
+  },
+  [ADMIN_SECTION_RECENT_ACTIONS]: {
+    queryKey: ["admin", ADMIN_SECTION_RECENT_ACTIONS],
+    fetchItems: (params) =>
+      dashboardAPI.getAdminSectionItems(ADMIN_SECTION_RECENT_ACTIONS, params),
   },
 };
 
@@ -1835,6 +1893,51 @@ function renderRiskPanelItems(
   return <ManagementRiskDetailTable items={items} onTabChange={onTabChange} />;
 }
 
+function ManagementRecentOperationsTable({
+  items,
+}: Readonly<{ items: AdminDashboardPanelItem[] }>) {
+  return (
+    <ManagementTableShell
+      emptyText="暂无最近操作"
+      headers={[
+        { label: "操作类别", className: "w-[16%]" },
+        { label: "操作内容", className: "w-[48%]" },
+        { label: "操作用户", className: "w-[16%]" },
+        { label: "时间", className: "w-[20%]" },
+      ]}
+      items={items}
+      minWidthClassName="min-w-[760px]"
+    >
+      {items.map((item, index) => {
+        const categoryMeta = getManagementOperationCategoryMeta(item);
+        return (
+          <tr
+            key={getDashboardPanelItemKey(item, index, "management-recent-operation")}
+            className="transition-colors hover:bg-muted/40"
+          >
+            <DashboardBadgeCell tone={categoryMeta.tone} variant="filled">
+              {categoryMeta.label}
+            </DashboardBadgeCell>
+            <td className="truncate px-2 py-4 text-base font-normal leading-6">
+              {item.detail}
+            </td>
+            <td className="truncate px-2 py-4 text-base leading-6">
+              {item.submitter_name || item.entity?.actor_name || "系统"}
+            </td>
+            <DashboardTimeCell text={getPanelTimeText(item.created_at)} />
+          </tr>
+        );
+      })}
+    </ManagementTableShell>
+  );
+}
+
+function renderManagementRecentOperationsPanelItems(
+  items: AdminDashboardPanelItem[],
+) {
+  return <ManagementRecentOperationsTable items={items} />;
+}
+
 function ManagementDashboardPanel({
   summary,
   summaryAllTime,
@@ -1904,6 +2007,17 @@ function ManagementDashboardPanel({
             showWindowStatsFailureFallback={showWindowStatsFailureFallback}
           />
         </ManagementPanelSection>
+      </div>
+      <div className="min-w-0 xl:col-span-2">
+        <ExpandableManagementPanelSection
+          title="最近操作"
+          icon={History}
+          items={summary.recent_actions}
+          detailSource={ADMIN_SECTION_DETAIL_SOURCES[ADMIN_SECTION_RECENT_ACTIONS]}
+          totalCount={summary.item_counts.recent_actions}
+          onTabChange={onTabChange}
+          renderItems={renderManagementRecentOperationsPanelItems}
+        />
       </div>
     </div>
   );

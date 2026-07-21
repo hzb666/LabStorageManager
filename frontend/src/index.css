@@ -148,10 +148,6 @@
     width: 100%;
   }
 
-  html[data-font-state='loading'] body {
-    visibility: hidden;
-  }
-
   html.web-fonts-ready body {
     font-family: var(--app-font-family-web);
   }

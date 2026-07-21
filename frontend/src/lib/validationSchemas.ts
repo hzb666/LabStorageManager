@@ -658,7 +658,10 @@ export const applyValidationErrors = (
       return
     }
 
-    setFieldError(String(fieldName), errorItem.msg || '输入不合法')
+    setFieldError(
+      String(fieldName),
+      normalizeApiErrorMessage(errorItem.msg, '输入不合法'),
+    )
   })
 
   return true
@@ -674,6 +677,56 @@ const pickErrorDetailFromData = (data: unknown): unknown => {
   if ('msg' in data) return data.msg
   if ('message' in data) return data.message
   return undefined
+}
+
+const EXPORT_RATE_LIMITED_ERROR_CODE = 'EXPORT_RATE_LIMITED'
+
+const API_ERROR_CODE_MESSAGES: Record<string, string> = {
+  INVALID_SORT_FIELD: '排序字段无效',
+  STRUCTURE_SEARCH_EXPIRED: '结构式搜索结果已过期，请重新搜索',
+  STRUCTURE_FILTER_INCOMPLETE: '结构式筛选参数不完整',
+  INVENTORY_CODE_CONFLICT: '库存内部编码冲突，请重试入库操作',
+  COMMON_SHELF_GROUP_CONFLICT: '常用货架分组正在被其他操作创建，请重试',
+  COMMON_SHELF_CODE_CONFLICT: '常用货架内部编码冲突，请重试',
+  LLM_DISABLED: 'LLM 功能未启用',
+  LLM_API_NOT_CONFIGURED: 'LLM 接口未配置',
+  LLM_MODEL_NOT_CONFIGURED: 'LLM 模型未配置',
+  LLM_INVALID_JSON: 'LLM 响应不是有效 JSON',
+  LLM_REQUEST_TIMEOUT: 'LLM 请求超时',
+  LLM_REQUEST_FAILED: 'LLM 请求失败',
+  LLM_RESPONSE_INVALID: 'LLM 响应格式错误',
+  LLM_RESPONSE_FORMAT_CONFIG_INVALID: 'LLM 响应格式配置错误',
+  LLM_RESPONSE_TRUNCATED: 'LLM 响应被截断',
+  PROCEDURE_SEARCH_RATE_LIMITED: '实验步骤查询过于频繁，请稍后再试',
+}
+
+const readResponseHeader = (error: unknown, headerName: string): unknown => {
+  if (!isRecord(error) || !isRecord(error.response)) return undefined
+
+  const headers = error.response.headers
+  if (!isRecord(headers)) return undefined
+
+  const maybeGet = headers.get
+  if (typeof maybeGet === 'function') {
+    const value = (maybeGet as (name: string) => unknown).call(headers, headerName)
+    if (value !== undefined && value !== null) return value
+  }
+
+  return headers[headerName] ?? headers[headerName.toLowerCase()]
+}
+
+const resolveApiErrorCodeMessage = (error: unknown): string | undefined => {
+  const code = String(readResponseHeader(error, 'X-Error-Code') ?? '').trim()
+  if (!code) return undefined
+
+  if (code === EXPORT_RATE_LIMITED_ERROR_CODE) {
+    const retryAfter = String(readResponseHeader(error, 'Retry-After') ?? '').trim()
+    return /^\d+$/.test(retryAfter)
+      ? `导出过于频繁，请 ${retryAfter} 秒后再试`
+      : '导出过于频繁，请稍后再试'
+  }
+
+  return API_ERROR_CODE_MESSAGES[code]
 }
 
 // 错误消息映射表 - 使用正则表达式模式匹配
@@ -695,6 +748,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Too many login attempts/i, message: '登录尝试过多，请 5 分钟后重试' },
   { pattern: /Too many requests, please retry after 2 seconds/i, message: '下载过于频繁，请 2 秒后重试' },
   { pattern: /Too many requests/i, message: '请求过于频繁，请稍后再试' },
+  { pattern: /Public account is read-only/i, message: '公用账户仅支持查看' },
 
   // 密码相关
   { pattern: /Incorrect old password/i, message: '原密码错误' },
@@ -725,7 +779,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /No bottle found at selected location/i, message: '所选位置没有可扣减的瓶子' },
   { pattern: /CAS master data already exists/i, message: '该 CAS 主数据已存在' },
   { pattern: /CAS master data not found/i, message: '缺少该 CAS 的主数据，请先录入后再加入常用货架' },
-  { pattern: /cannot be deleted/i, message: '该 CAS 主数据已被常用货架引用，不能删除' },
+  { pattern: /CAS master data is referenced by CommonShelf and cannot be deleted/i, message: '该 CAS 主数据已被常用货架引用，不能删除' },
   { pattern: /Brand already exists/i, message: '该品牌已存在' },
   { pattern: /Brand name is required/i, message: '品牌名称不能为空' },
   { pattern: /Brand not found/i, message: '品牌不存在' },
@@ -735,6 +789,17 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /You are not the borrower of this item/i, message: '你不是该物品的借用人' },
   { pattern: /Remaining quantity.*cannot exceed initial quantity/i, message: '剩余量不能超过初始量' },
   { pattern: /CAS number is required/i, message: 'CAS 号不能为空' },
+  { pattern: /Inventory item cannot be deleted/i, message: '当前库存项不能删除' },
+  { pattern: /Inventory item is not pending stock-in/i, message: '该库存项不处于待入库状态' },
+  { pattern: /Order pending stock-in must be completed from order workflow/i, message: '订单待入库项必须从订单流程完成入库' },
+  { pattern: /Only the temporary keeper can stock in pending items/i, message: '仅临时保管人可以完成待入库' },
+  { pattern: /Pending stock-in item cannot be borrowed before stock-in/i, message: '待入库物品完成入库前不能借用' },
+  { pattern: /Inventory item changed by another request/i, message: '库存项已被其他操作修改，请刷新后重试' },
+  { pattern: /Invalid inventory quantity/i, message: '库存数量无效' },
+  { pattern: /remaining_quantity must be greater than or equal to 0/i, message: '剩余数量不能小于 0' },
+  { pattern: /remaining_quantity is required/i, message: '剩余数量不能为空' },
+  { pattern: /specification is required/i, message: '规格不能为空' },
+  { pattern: /Only zero remaining borrowed inventory can be deleted/i, message: '仅剩余量为 0 的借用库存可在归还时删除' },
 
   // 订单相关
   { pattern: /Order not found/i, message: '未找到订单' },
@@ -770,7 +835,29 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
 
   // SSE / 服务可用性
   { pattern: /No SSE rooms are accessible for current user/i, message: '当前用户没有可用的实时通知通道' },
+  { pattern: /SSE connection capacity reached/i, message: '实时通知连接数已达上限，请稍后重试' },
   { pattern: /Login service temporarily unavailable/i, message: '登录服务暂时不可用，请稍后重试' },
+
+  // 结构式与主数据
+  { pattern: /Structure search feature is disabled/i, message: '结构式搜索功能未启用' },
+  { pattern: /Structure cache write failed/i, message: '结构缓存写入失败' },
+  { pattern: /Structure index is unavailable/i, message: '结构式索引暂不可用' },
+  { pattern: /Invalid structure cache status/i, message: '结构缓存状态无效' },
+  { pattern: /Chemical name map not found/i, message: 'CAS 主数据不存在' },
+  { pattern: /^(Name is required|name_snapshot is required)$/i, message: '名称不能为空' },
+  { pattern: /Category is required/i, message: '分类不能为空' },
+  { pattern: /Invalid sort field/i, message: '排序字段无效' },
+  { pattern: /Structure search result has expired/i, message: '结构式搜索结果已过期，请重新搜索' },
+  { pattern: /Structure filter parameters are incomplete/i, message: '结构式筛选参数不完整' },
+  { pattern: /CommonShelf item not found/i, message: '常用货架物品不存在' },
+  { pattern: /Only empty common shelf groups can be deleted/i, message: '仅空的常用货架分组可以删除' },
+  { pattern: /Inventory internal code conflict/i, message: '库存内部编码冲突，请重试入库操作' },
+  { pattern: /Common shelf group is being created concurrently/i, message: '常用货架分组正在被其他操作创建，请重试' },
+  { pattern: /Common shelf internal code conflict/i, message: '常用货架内部编码冲突，请重试' },
+  { pattern: /Invalid specification quantity/i, message: '规格数量无效' },
+  { pattern: /Specification unit is required/i, message: '规格单位不能为空' },
+  { pattern: /Invalid specification(?! format)/i, message: '规格无效' },
+  { pattern: /count must be greater than 0/i, message: '数量必须大于 0' },
 
   // 公告相关
   { pattern: /Announcement not found/i, message: '公告不存在' },
@@ -791,13 +878,72 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /File is empty/i, message: '文件为空' },
   { pattern: /Invalid XLSX file format/i, message: '无效的 XLSX 文件格式' },
   { pattern: /Invalid XLS file format/i, message: '无效的 XLS 文件格式' },
+  { pattern: /Failed to parse Excel file/i, message: '文件解析失败，请检查文件格式' },
+  { pattern: /Missing required columns/i, message: '缺少必填列，请使用最新模板并检查表头' },
+  { pattern: /Missing required field/i, message: '缺少必填字段' },
+  { pattern: /Invalid remaining_quantity: must be a number/i, message: '剩余数量必须是数字' },
+  { pattern: /Invalid remaining_quantity: must be a finite number/i, message: '剩余数量必须是有限数字' },
+  { pattern: /Invalid remaining_quantity: cannot be negative/i, message: '剩余数量不能小于 0' },
+  { pattern: /Invalid remaining_quantity: .*cannot exceed initial_quantity/i, message: '剩余数量不能超过规格数量' },
+  { pattern: /Invalid is_hazardous/i, message: '是否危险品仅支持 true、false、1 或 0' },
+  { pattern: /Invalid created_at/i, message: '入库时间格式无效' },
+  { pattern: /Invalid name: must not exceed/i, message: '名称长度超过限制' },
+  { pattern: /Invalid english_name: must not exceed/i, message: '英文名称长度超过限制' },
+  { pattern: /Invalid alias: must not exceed/i, message: '别名长度超过限制' },
+  { pattern: /Invalid category: must not exceed/i, message: '分类长度超过限制' },
+  { pattern: /Invalid brand: must not exceed/i, message: '品牌长度超过限制' },
+  { pattern: /Invalid specification: must not exceed/i, message: '规格长度超过限制' },
+  { pattern: /Invalid storage_location: must not exceed/i, message: '存放位置长度超过限制' },
+  { pattern: /Invalid notes: must not exceed/i, message: '备注长度超过限制' },
   { pattern: /Invalid image type/i, message: '不支持该图像格式，仅支持 JPG、PNG、WebP' },
   { pattern: /Image size exceeds/i, message: '图片大小超过限制' },
   { pattern: /Invalid filename/i, message: '文件名无效' },
   { pattern: /Image not found/i, message: '图片未找到' },
   { pattern: /Storage limit exceeded/i, message: '存储空间已满' },
-  { pattern: /Import failed/i, message: '导入失败' },
+  { pattern: /Import preview failed/i, message: '预览校验失败，请检查文件格式' },
+  { pattern: /Import failed/i, message: '导入失败，请检查文件格式' },
+
+  // LLM 服务
+  { pattern: /LLM feature is disabled/i, message: 'LLM 功能未启用' },
+  { pattern: /LLM API is not configured/i, message: 'LLM 接口未配置' },
+  { pattern: /LLM model is not configured/i, message: 'LLM 模型未配置' },
+  { pattern: /LLM response is not valid JSON/i, message: 'LLM 响应不是有效 JSON' },
+  { pattern: /LLM request timed out/i, message: 'LLM 请求超时' },
+  { pattern: /LLM request failed/i, message: 'LLM 请求失败' },
+  { pattern: /LLM response format configuration is invalid/i, message: 'LLM 响应格式配置错误' },
+  { pattern: /LLM response format is invalid/i, message: 'LLM 响应格式错误' },
+  { pattern: /LLM response was truncated/i, message: 'LLM 响应被截断' },
+  { pattern: /Export rate limit exceeded/i, message: '导出过于频繁，请稍后再试' },
+
+  // FastAPI / Pydantic 通用校验
+  { pattern: /Field required/i, message: '此项为必填项' },
+  { pattern: /Field must not be empty/i, message: '此项不能为空' },
+  { pattern: /Quantity is required/i, message: '数量不能为空' },
+  { pattern: /Username may only contain letters, numbers, and underscores/i, message: '用户名只能包含字母、数字和下划线' },
+  { pattern: /Input should be a valid string/i, message: '请输入有效文本' },
+  { pattern: /Input should be a valid (integer|number)/i, message: '请输入有效数字' },
+  { pattern: /Input should be a valid boolean/i, message: '请选择有效状态' },
+  { pattern: /String should have at least \d+ characters/i, message: '输入内容长度不足' },
+  { pattern: /String should have at most \d+ characters/i, message: '输入内容过长' },
+  { pattern: /Input should be greater than or equal to/i, message: '输入值不能小于允许范围' },
+  { pattern: /Input should be less than or equal to/i, message: '输入值不能大于允许范围' },
+
+  // Axios / 浏览器网络错误
+  { pattern: /Network Error|Failed to fetch|Load failed/i, message: '网络连接失败，请检查网络后重试' },
+  { pattern: /timeout of .* exceeded|request timed out/i, message: '请求超时，请稍后重试' },
+  { pattern: /Request failed with status code 400/i, message: '请求失败，请检查提交内容' },
+  { pattern: /Request failed with status code 401/i, message: '登录状态已失效，请重新登录' },
+  { pattern: /Request failed with status code 403/i, message: '无权执行此操作' },
+  { pattern: /Request failed with status code 404/i, message: '请求的资源不存在' },
+  { pattern: /Request failed with status code 409/i, message: '操作冲突，请刷新后重试' },
+  { pattern: /Request failed with status code 413/i, message: '提交内容超过大小限制' },
+  { pattern: /Request failed with status code 422/i, message: '提交的数据格式不正确' },
+  { pattern: /Request failed with status code 429/i, message: '请求过于频繁，请稍后再试' },
+  { pattern: /Request failed with status code 500/i, message: '服务器内部错误，请稍后再试' },
+  { pattern: /Request failed with status code 50[234]/i, message: '服务暂时不可用，请稍后再试' },
 ]
+
+const CHINESE_CHARACTER_PATTERN = /[\u3400-\u9fff]/
 
 export const normalizeApiErrorMessage = (detail: unknown, fallback = '操作失败'): string => {
   if (typeof detail !== 'string' || !detail.trim()) return fallback
@@ -809,7 +955,7 @@ export const normalizeApiErrorMessage = (detail: unknown, fallback = '操作失�
     }
   }
 
-  return detail
+  return CHINESE_CHARACTER_PATTERN.test(detail) ? detail : fallback
 }
 
 export const extractApiErrorDetail = (error: unknown): unknown => {
@@ -833,5 +979,43 @@ export const extractApiErrorDetail = (error: unknown): unknown => {
 }
 
 export const getApiErrorMessage = (error: unknown, fallback = '操作失败'): string => {
-  return normalizeApiErrorMessage(extractApiErrorDetail(error), fallback)
+  return resolveApiErrorCodeMessage(error)
+    ?? normalizeApiErrorMessage(extractApiErrorDetail(error), fallback)
+}
+
+const extractBlobErrorDetail = async (blob: Blob): Promise<unknown> => {
+  try {
+    const text = (await blob.text()).trim()
+    if (!text) return undefined
+
+    try {
+      const parsed: unknown = JSON.parse(text)
+      return pickErrorDetailFromData(parsed) ?? (typeof parsed === 'string' ? parsed : text)
+    } catch {
+      return text
+    }
+  } catch {
+    return undefined
+  }
+}
+
+// 文件下载接口失败时响应体仍是 Blob，需要先异步读取才能取得后端 detail。
+export const extractApiErrorDetailAsync = async (error: unknown): Promise<unknown> => {
+  if (isRecord(error) && 'response' in error && isRecord(error.response)) {
+    const responseData = error.response.data
+    if (typeof Blob !== 'undefined' && responseData instanceof Blob) {
+      const detail = await extractBlobErrorDetail(responseData)
+      if (detail !== undefined) return detail
+    }
+  }
+
+  return extractApiErrorDetail(error)
+}
+
+export const getApiErrorMessageAsync = async (
+  error: unknown,
+  fallback = '操作失败',
+): Promise<string> => {
+  return resolveApiErrorCodeMessage(error)
+    ?? normalizeApiErrorMessage(await extractApiErrorDetailAsync(error), fallback)
 }

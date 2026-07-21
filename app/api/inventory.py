@@ -16,6 +16,7 @@ from sqlmodel import Session, select, func, delete
 
 from app.database import get_db, DBSession
 from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
+from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentSession, get_current_user, require_non_public
 from app.core.config import settings
 from app.core.constants import (    DEFAULT_PAGE_SIZE,
@@ -88,6 +89,7 @@ from app.services.search_query_log_service import (
 )
 from app.services.search_completion_entity_index import (
     delete_inventory_entity_completions,
+    run_completion_index_update,
     sync_inventory_entity_completions,
 )
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
@@ -250,9 +252,10 @@ def _get_structure_search_entry_or_410(search_id: str) -> StructureSearchCacheEn
         index_version=-1 if snapshot.dirty else snapshot.version,
     )
     if entry is None:
-        raise HTTPException(
+        raise api_error(
             status_code=status.HTTP_410_GONE,
-            detail="结构搜索结果已过期，请重新搜索",
+            detail="Structure search result has expired",
+            code=ApiErrorCode.STRUCTURE_SEARCH_EXPIRED,
         )
     return entry
 
@@ -274,7 +277,11 @@ def _resolve_inventory_structure_cas_numbers(
         and options.structure_match_mode
         and options.structure_query_format
     ):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="结构筛选参数不完整")
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Structure filter parameters are incomplete",
+            code=ApiErrorCode.STRUCTURE_FILTER_INCOMPLETE,
+        )
 
     snapshot = structure_index.status()
     if snapshot.dirty:
@@ -348,10 +355,13 @@ def _clear_list_cache(
 
     cleared_count = clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     if item is not None:
-        if is_delete:
-            delete_inventory_entity_completions(item.id)
-        else:
-            sync_inventory_entity_completions(item)
+        def update_completion_index() -> None:
+            if is_delete:
+                delete_inventory_entity_completions(item.id)
+            else:
+                sync_inventory_entity_completions(item)
+
+        run_completion_index_update(update_completion_index, context="inventory")
     logger.info(f"Cleared {cleared_count} list cache entries")
 
 
@@ -849,7 +859,11 @@ def list_inventory(
     )
 
     if sort_by and sort_by not in VALID_INVENTORY_SORT_FIELDS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid sort field",
+            code=ApiErrorCode.INVALID_SORT_FIELD,
+        )
 
     is_first_page = skip == 0
     has_search = bool(

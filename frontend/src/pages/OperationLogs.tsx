@@ -105,6 +105,7 @@ const getLogColumns = () => [
       <HighlightText
         text={getLogSummary(info.row.original)}
         highlight={info.table.getState().globalFilter}
+        matchMode={info.table.options.meta?.matchMode}
       />
     )
   })

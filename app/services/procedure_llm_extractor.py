@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -11,6 +12,7 @@ from fastapi import HTTPException, status
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
+from app.core.api_errors import ApiErrorCode, api_error
 from app.core.config import (
     LLM_RESPONSE_FORMAT_JSON_OBJECT,
     LLM_RESPONSE_FORMAT_JSON_SCHEMA,
@@ -88,13 +90,20 @@ def load_common_names(db: Session) -> list[str]:
     return dedupe_text(names)
 
 
-def extract_reagents_with_llm(text: str, common_names: list[str]) -> ProcedureLLMExtraction:
+def extract_reagents_with_llm(
+    text: str,
+    common_names: list[str],
+    *,
+    record_usage: Callable[[dict[str, Any], int], None] | None = None,
+) -> ProcedureLLMExtraction:
     payload = _build_llm_payload(text, common_names)
     headers = {"Authorization": f"Bearer {settings.llm_api_key}", "Content-Type": "application/json"}
     url = f"{settings.llm_api_base_url.rstrip('/')}/chat/completions"
     retry_count = settings.llm_parse_retry_count
     for attempt in range(retry_count + 1):
         response_payload = _post_llm_request(url, headers, payload)
+        if record_usage is not None:
+            record_usage(response_payload, attempt + 1)
         try:
             return _parse_llm_response(response_payload)
         except HTTPException as exc:
@@ -106,7 +115,11 @@ def extract_reagents_with_llm(text: str, common_names: list[str]) -> ProcedureLL
                 retry_count,
                 exc.detail,
             )
-    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应不是有效 JSON")
+    raise api_error(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="LLM response is not valid JSON",
+        code=ApiErrorCode.LLM_INVALID_JSON,
+    )
 
 
 def _post_llm_request(
@@ -120,11 +133,23 @@ def _post_llm_request(
             response.raise_for_status()
             response_payload = response.json()
     except httpx.TimeoutException as exc:
-        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="LLM 请求超时") from exc
+        raise api_error(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="LLM request timed out",
+            code=ApiErrorCode.LLM_REQUEST_TIMEOUT,
+        ) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 请求失败") from exc
+        raise api_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="LLM request failed",
+            code=ApiErrorCode.LLM_REQUEST_FAILED,
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应格式错误") from exc
+        raise api_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="LLM response format is invalid",
+            code=ApiErrorCode.LLM_RESPONSE_INVALID,
+        ) from exc
     return response_payload
 
 
@@ -224,7 +249,11 @@ def _build_llm_response_format() -> dict[str, Any]:
         return {"type": LLM_RESPONSE_FORMAT_JSON_OBJECT}
     if response_format == LLM_RESPONSE_FORMAT_TEXT:
         return {"type": LLM_RESPONSE_FORMAT_TEXT}
-    raise HTTPException(status_code=500, detail="LLM 响应格式配置错误")
+    raise api_error(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="LLM response format configuration is invalid",
+        code=ApiErrorCode.LLM_RESPONSE_FORMAT_CONFIG_INVALID,
+    )
 
 
 def _build_system_prompt(common_names: list[str]) -> str:
@@ -290,17 +319,33 @@ def _parse_llm_response(payload: dict[str, Any]) -> ProcedureLLMExtraction:
     choices = payload.get("choices")
     choice = choices[0] if isinstance(choices, list) and choices else {}
     if not isinstance(choice, dict):
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应格式错误")
+        raise api_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="LLM response format is invalid",
+            code=ApiErrorCode.LLM_RESPONSE_INVALID,
+        )
     if choice.get("finish_reason") == "length":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应被截断")
+        raise api_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="LLM response was truncated",
+            code=ApiErrorCode.LLM_RESPONSE_TRUNCATED,
+        )
     content = choice.get("message", {}).get("content")
     if not isinstance(content, str):
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应格式错误")
+        raise api_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="LLM response format is invalid",
+            code=ApiErrorCode.LLM_RESPONSE_INVALID,
+        )
     try:
         raw_payload = json.loads(_extract_json_object(content))
         return ProcedureLLMExtraction.model_validate(_normalize_llm_response_payload(raw_payload))
     except (ValueError, ValidationError) as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM 响应不是有效 JSON") from exc
+        raise api_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="LLM response is not valid JSON",
+            code=ApiErrorCode.LLM_INVALID_JSON,
+        ) from exc
 
 
 def _extract_json_object(content: str) -> str:

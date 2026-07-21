@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +15,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GLOBAL_MEMORY_USER_ID = 0
 ALL_SEARCH_FIELD = ""
 ENTITY_INDEX_STALE_KEY = "entity_index_stale"
+ENTITY_INDEX_VERSION_KEY = "entity_index_version"
+ENTITY_INDEX_VERSION = "2"
+QUERY_MEMORY_PRUNE_META_KEY = "query_memory_last_pruned"
+QUERY_MEMORY_PERSONAL_SCOPE_LIMIT = 1_000
+QUERY_MEMORY_GLOBAL_SCOPE_LIMIT = 5_000
+QUERY_MEMORY_TOTAL_LIMIT = 100_000
+QUERY_MEMORY_STALE_DAYS = 180
+QUERY_MEMORY_STALE_MAX_FREQUENCY = 2
+QUERY_MEMORY_PRUNE_INTERVAL_SECONDS = 60 * 60
 INVENTORY_COMPLETION_ENDPOINT = "/inventory/"
 REAGENT_ORDER_COMPLETION_ENDPOINT = "/reagent-orders/"
 CONSUMABLE_ORDER_COMPLETION_ENDPOINT = "/consumable-orders/"
@@ -167,6 +177,22 @@ def _entity_completion_endpoints(endpoint: str | None) -> tuple[str, ...]:
     return (endpoint,)
 
 
+def _mark_entity_completion_endpoints_stale(
+    connection: sqlite3.Connection,
+    endpoints: tuple[str, ...],
+) -> None:
+    connection.executemany(
+        """
+        INSERT INTO search_completion_meta (key, value, updated_at)
+        VALUES (?, '1', CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = '1',
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        [(_entity_completion_stale_key(endpoint),) for endpoint in endpoints],
+    )
+
+
 def _normalize_search_memory_scope(connection: sqlite3.Connection) -> None:
     rows = connection.execute(
         """
@@ -237,16 +263,7 @@ def _normalize_entity_index_stale_scope(connection: sqlite3.Connection) -> None:
     if not row or row["value"] != "1":
         return
 
-    connection.executemany(
-        """
-        INSERT INTO search_completion_meta (key, value, updated_at)
-        VALUES (?, '1', CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET
-            value = '1',
-            updated_at = CURRENT_TIMESTAMP
-        """,
-        [(_entity_completion_stale_key(endpoint),) for endpoint in TARGET_ENDPOINTS],
-    )
+    _mark_entity_completion_endpoints_stale(connection, TARGET_ENDPOINTS)
     connection.execute(
         """
         INSERT INTO search_completion_meta (key, value, updated_at)
@@ -259,12 +276,34 @@ def _normalize_entity_index_stale_scope(connection: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_entity_completion_index_version(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT value FROM search_completion_meta WHERE key = ?",
+        (ENTITY_INDEX_VERSION_KEY,),
+    ).fetchone()
+    if row and row["value"] == ENTITY_INDEX_VERSION:
+        return
+
+    _mark_entity_completion_endpoints_stale(connection, TARGET_ENDPOINTS)
+    connection.execute(
+        """
+        INSERT INTO search_completion_meta (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (ENTITY_INDEX_VERSION_KEY, ENTITY_INDEX_VERSION),
+    )
+
+
 def init_search_completion_db() -> None:
     QUERY_LOG_DIR.mkdir(parents=True, exist_ok=True)
     with _open_connection() as connection:
         connection.executescript(_COMPLETION_SCHEMA)
         _normalize_search_memory_scope(connection)
         _normalize_entity_index_stale_scope(connection)
+        _ensure_entity_completion_index_version(connection)
         connection.commit()
     logger.info("Search completion tables initialized in query_logs.db")
 
@@ -330,6 +369,126 @@ def upsert_query_memory(
             (db_user_id, endpoint, db_search_field, query, db_normalized_query),
         )
         connection.commit()
+
+
+def _is_query_memory_prune_due(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT updated_at >= datetime('now', ?) AS recently_pruned
+        FROM search_completion_meta
+        WHERE key = ?
+        """,
+        (f"-{QUERY_MEMORY_PRUNE_INTERVAL_SECONDS} seconds", QUERY_MEMORY_PRUNE_META_KEY),
+    ).fetchone()
+    return not bool(row and row["recently_pruned"])
+
+
+def _delete_stale_query_memory(connection: sqlite3.Connection) -> int:
+    changes_before = connection.total_changes
+    connection.execute(
+        """
+        DELETE FROM search_query_memory
+        WHERE frequency <= ?
+          AND last_used_at <= datetime('now', ?)
+        """,
+        (QUERY_MEMORY_STALE_MAX_FREQUENCY, f"-{QUERY_MEMORY_STALE_DAYS} days"),
+    )
+    return connection.total_changes - changes_before
+
+
+def _delete_query_memory_beyond_scope_limit(
+    connection: sqlite3.Connection,
+    *,
+    global_scope: bool,
+    limit: int,
+) -> int:
+    scope_filter = "user_id = ?" if global_scope else "user_id <> ?"
+    partition_columns = "endpoint, search_field"
+    if not global_scope:
+        partition_columns = f"user_id, {partition_columns}"
+
+    changes_before = connection.total_changes
+    connection.execute(
+        f"""
+        DELETE FROM search_query_memory
+        WHERE id IN (
+            SELECT id
+            FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY {partition_columns}
+                    ORDER BY frequency DESC, last_used_at DESC, id DESC
+                ) AS keep_rank
+                FROM search_query_memory
+                WHERE {scope_filter}
+            )
+            WHERE keep_rank > ?
+        )
+        """,
+        (GLOBAL_MEMORY_USER_ID, limit),
+    )
+    return connection.total_changes - changes_before
+
+
+def _delete_query_memory_beyond_total_limit(connection: sqlite3.Connection) -> int:
+    changes_before = connection.total_changes
+    connection.execute(
+        """
+        DELETE FROM search_query_memory
+        WHERE id IN (
+            SELECT id
+            FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    ORDER BY frequency DESC, last_used_at DESC, id DESC
+                ) AS keep_rank
+                FROM search_query_memory
+            )
+            WHERE keep_rank > ?
+        )
+        """,
+        (QUERY_MEMORY_TOTAL_LIMIT,),
+    )
+    return connection.total_changes - changes_before
+
+
+def _record_query_memory_prune(connection: sqlite3.Connection, deleted_rows: int) -> None:
+    connection.execute(
+        """
+        INSERT INTO search_completion_meta (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (QUERY_MEMORY_PRUNE_META_KEY, str(deleted_rows)),
+    )
+
+
+def prune_query_memory_if_due() -> int | None:
+    """Prune persisted query memory when the cross-process throttle allows it."""
+    with closing(_open_connection()) as connection:
+        if not _is_query_memory_prune_due(connection):
+            return None
+
+        connection.execute("BEGIN IMMEDIATE")
+        if not _is_query_memory_prune_due(connection):
+            connection.commit()
+            return None
+
+        deleted_rows = _delete_stale_query_memory(connection)
+        deleted_rows += _delete_query_memory_beyond_scope_limit(
+            connection,
+            global_scope=False,
+            limit=QUERY_MEMORY_PERSONAL_SCOPE_LIMIT,
+        )
+        deleted_rows += _delete_query_memory_beyond_scope_limit(
+            connection,
+            global_scope=True,
+            limit=QUERY_MEMORY_GLOBAL_SCOPE_LIMIT,
+        )
+        deleted_rows += _delete_query_memory_beyond_total_limit(connection)
+        _record_query_memory_prune(connection, deleted_rows)
+        connection.commit()
+    return deleted_rows
 
 
 def increment_feedback(
@@ -401,16 +560,7 @@ def query_memory_by_prefix(
 def mark_entity_completion_index_stale(endpoint: str | None = None) -> None:
     endpoints = _entity_completion_endpoints(endpoint)
     with _open_connection() as connection:
-        connection.executemany(
-            """
-            INSERT INTO search_completion_meta (key, value, updated_at)
-            VALUES (?, '1', CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET
-                value = '1',
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            [(_entity_completion_stale_key(current),) for current in endpoints],
-        )
+        _mark_entity_completion_endpoints_stale(connection, endpoints)
         connection.commit()
 
 

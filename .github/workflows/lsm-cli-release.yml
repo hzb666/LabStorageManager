@@ -1,0 +1,167 @@
+name: Release LSM CLI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Application Quality Gate
+    uses: ./.github/workflows/ci.yml
+
+  security:
+    name: Security Gate
+    uses: ./.github/workflows/security.yml
+
+  version:
+    name: Verify Release Version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Verify tag matches package metadata
+        shell: bash
+        run: |
+          python - "$GITHUB_REF_NAME" <<'PY'
+          import json
+          import re
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          tag = sys.argv[1]
+          if not tag.startswith("v"):
+              raise SystemExit(f"Release tag must start with v: {tag}")
+          expected = tag[1:]
+          root = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          cli = tomllib.loads(Path("lsm_cli/pyproject.toml").read_text(encoding="utf-8"))
+          frontend = json.loads(Path("frontend/package.json").read_text(encoding="utf-8"))
+          frontend_lock = json.loads(
+              Path("frontend/package-lock.json").read_text(encoding="utf-8")
+          )
+          app_init = Path("app/__init__.py").read_text(encoding="utf-8")
+          app_config = Path("app/core/config.py").read_text(encoding="utf-8")
+          extension = Path("browser-extension/build-config.mjs").read_text(encoding="utf-8")
+          versions = {
+              "backend": root["tool"]["poetry"]["version"],
+              "cli": cli["project"]["version"],
+              "frontend": frontend["version"],
+              "frontend_lock": frontend_lock["version"],
+              "app": re.search(r'__version__ = "([^"]+)"', app_init).group(1),
+              "app_default": re.search(
+                  r'app_version: str = "([^"]+)"', app_config
+              ).group(1),
+              "browser_extension": re.search(r"version: '([^']+)'", extension).group(1),
+          }
+          mismatches = {name: value for name, value in versions.items() if value != expected}
+          if mismatches:
+              raise SystemExit(f"Tag {tag} does not match package versions: {mismatches}")
+          print(f"Release metadata matches {tag}: {versions}")
+          PY
+
+  build:
+    name: Build ${{ matrix.asset_name }}
+    needs: [quality, security, version]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            architecture: x64
+            artifact_name: lsm-windows-x64
+            asset_name: lsm-windows-x64.exe
+          - runner: macos-15
+            architecture: arm64
+            artifact_name: lsm-macos-arm64
+            asset_name: lsm-macos-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+          cache-dependency-path: lsm_cli/pyproject.toml
+
+      - name: Install build dependencies
+        run: python -m pip install "pyinstaller>=6.14,<7" ./lsm_cli
+
+      - name: Build single-file CLI
+        run: >-
+          python -m PyInstaller
+          --clean
+          --noconfirm
+          --onefile
+          --name lsm
+          --paths .
+          lsm_cli/__main__.py
+
+      - name: Prepare and verify Windows asset
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Move-Item -LiteralPath "dist\lsm.exe" -Destination "dist\${{ matrix.asset_name }}"
+          & "dist\${{ matrix.asset_name }}" --help
+
+      - name: Prepare and verify macOS asset
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mv "dist/lsm" "dist/${{ matrix.asset_name }}"
+          chmod +x "dist/${{ matrix.asset_name }}"
+          "dist/${{ matrix.asset_name }}" --help
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.asset_name }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: lsm-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: sha256sum release-assets/lsm-* > release-assets/SHA256SUMS.txt
+
+      - name: Create or update release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --generate-notes \
+              --title "$GITHUB_REF_NAME"
+          fi

@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { AxiosError } from 'axios'
 import {
   CheckCircle,
   Download,
@@ -26,7 +25,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { IMPORT_TEMPLATE_COLUMNS } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { refreshDashboardAfterMutation } from '@/lib/dashboardUtils'
-import { getApiErrorMessage, normalizeApiErrorMessage } from '@/lib/validationSchemas'
+import {
+  getApiErrorMessage,
+  getApiErrorMessageAsync,
+  normalizeApiErrorMessage,
+} from '@/lib/validationSchemas'
 import { cn } from '@/lib/utils'
 
 // 单文件大小上限为 `2 MB`，超限时 toast 会展示当前文件的 MB 大小。
@@ -58,33 +61,6 @@ interface ImportResult {
   errors: { row: number; error: string }[] | null
   preview_items?: ImportPreviewItem[] | null
   preview_token?: string | null
-}
-
-// 模板下载失败时接口可能返回 Blob；若文本可解析为 JSON，则优先读取其中的 `detail`。
-async function parseBlobErrorDetail(error: AxiosError): Promise<unknown> {
-  const responseData = error.response?.data
-  if (!responseData) {
-    return undefined
-  }
-
-  if (responseData instanceof Blob) {
-    try {
-      const text = await responseData.text()
-      if (!text.trim()) {
-        return undefined
-      }
-      const parsed = JSON.parse(text) as { detail?: unknown }
-      return parsed.detail ?? text
-    } catch {
-      return undefined
-    }
-  }
-
-  if (typeof responseData === 'object' && responseData !== null && 'detail' in responseData) {
-    return (responseData as { detail?: unknown }).detail
-  }
-
-  return undefined
 }
 
 // 拖拽上传和点击上传共用同一份扩展名白名单。
@@ -311,8 +287,8 @@ function ImportPreviewTable({
   previewItems: ImportPreviewItem[]
 }>) {
   return (
-    <div className="border rounded-lg overflow-hidden">
-      <div className="bg-muted/50 px-4 py-2 border-b">
+    <div className="rounded-lg overflow-hidden">
+      <div className="bg-muted/50 px-4 py-2">
         <h4>待入库预览</h4>
       </div>
       <div className="max-h-75 overflow-y-auto">
@@ -376,7 +352,9 @@ function ImportErrorPanel({
             {errors.slice(0, 50).map((errorItem) => (
               <tr key={errorItem.row} className="border-t border-border">
                 <td className="px-4 py-2 text-sm">{errorItem.row}</td>
-                <td className="px-4 py-2 text-destructive text-sm">{errorItem.error}</td>
+                <td className="px-4 py-2 text-destructive text-sm">
+                  {normalizeApiErrorMessage(errorItem.error, '导入数据格式错误')}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -493,15 +471,13 @@ function ImportResultPanel({
 function ImportActionButtons({
   file,
   submittingStage,
-  resultStage,
-  resultSuccess,
+  canConfirmImport,
   onPreview,
   onConfirm,
 }: Readonly<{
   file: File | null
   submittingStage: ImportStage | null
-  resultStage: ImportStage | null
-  resultSuccess: boolean
+  canConfirmImport: boolean
   onPreview: () => void
   onConfirm: () => void
 }>) {
@@ -519,13 +495,13 @@ function ImportActionButtons({
             预览校验中...
           </>
         ) : (
-          <>先预览校验</>
+          <>预览校验</>
         )}
       </Button>
       <Button
         onClick={onConfirm}
-        disabled={!file || submittingStage !== null || resultStage !== 'preview' || !resultSuccess}
-        className="w-full"
+        disabled={!canConfirmImport || submittingStage !== null}
+        className="w-full disabled:cursor-not-allowed disabled:opacity-50"
         size="lg"
       >
         {submittingStage === 'confirm' ? (
@@ -546,8 +522,7 @@ function ImportFormCard({
   onDownloadTemplate,
   file,
   submittingStage,
-  resultStage,
-  resultSuccess,
+  canConfirmImport,
   onPreview,
   onConfirm,
 }: Readonly<{
@@ -565,8 +540,7 @@ function ImportFormCard({
   onDownloadTemplate: () => void
   file: File | null
   submittingStage: ImportStage | null
-  resultStage: ImportStage | null
-  resultSuccess: boolean
+  canConfirmImport: boolean
   onPreview: () => void
   onConfirm: () => void
 }>) {
@@ -584,8 +558,7 @@ function ImportFormCard({
         <ImportActionButtons
           file={file}
           submittingStage={submittingStage}
-          resultStage={resultStage}
-          resultSuccess={resultSuccess}
+          canConfirmImport={canConfirmImport}
           onPreview={onPreview}
           onConfirm={onConfirm}
         />
@@ -741,14 +714,7 @@ export function ImportPage() {
       const response = await inventoryAPI.downloadTemplate()
       downloadTemplateBlob(response.data)
     } catch (error) {
-      const axiosError = error as AxiosError
-      if (axiosError.response?.status === 429) {
-        toast.error('下载过于频繁，请 2 秒后重试')
-        return
-      }
-
-      const errorDetail = await parseBlobErrorDetail(axiosError)
-      toast.error(normalizeApiErrorMessage(errorDetail, '下载模板失败'))
+      toast.error(await getApiErrorMessageAsync(error, '下载模板失败'))
     }
   }, [])
 
@@ -763,6 +729,9 @@ export function ImportPage() {
     onOpenFileDialog: () => fileInputRef.current?.click(),
     onClearFile: handleClearFile,
   }
+  const canConfirmImport = Boolean(
+    file && previewToken && resultStage === 'preview' && result?.success
+  )
 
   return (
     <div className="space-y-6">
@@ -776,8 +745,7 @@ export function ImportPage() {
           onDownloadTemplate={handleDownloadTemplate}
           file={file}
           submittingStage={submittingStage}
-          resultStage={resultStage}
-          resultSuccess={Boolean(result?.success) && Boolean(previewToken)}
+          canConfirmImport={canConfirmImport}
           onPreview={handlePreview}
           onConfirm={handleConfirmImport}
         />

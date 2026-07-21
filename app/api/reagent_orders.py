@@ -9,6 +9,7 @@ from sqlalchemy import case
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
+from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
 from app.core.constants import (
     DEFAULT_PAGE_SIZE,
@@ -85,7 +86,10 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
-from app.services.search_completion_entity_index import sync_reagent_order_entity_completions
+from app.services.search_completion_entity_index import (
+    run_completion_index_update,
+    sync_reagent_order_entity_completions,
+)
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.api.reagent_orders_workflow import register_workflow_routes
 
@@ -128,7 +132,10 @@ def _clear_reagent_order_cache(
 ) -> None:
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     if order is not None:
-        sync_reagent_order_entity_completions(order, db=db)
+        run_completion_index_update(
+            lambda: sync_reagent_order_entity_completions(order, db=db),
+            context="reagent_order",
+        )
 
 
 REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
@@ -532,7 +539,11 @@ def list_reagent_orders(
     sort_order = query.sort_order
 
     if sort_by and sort_by not in VALID_REAGENT_SORT_FIELDS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid sort field",
+            code=ApiErrorCode.INVALID_SORT_FIELD,
+        )
 
     try:
         segmented_terms = _get_reagent_order_segmented_terms(search, search_field, match_mode)

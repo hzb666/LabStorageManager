@@ -166,7 +166,7 @@ function useDashboardConsumableDialogController({
         validationErrors.forEach((e) => {
           if (e.loc?.[1]) {
             consumableForm.setError(e.loc[1] as keyof ConsumableOrderFormData, {
-              message: e.msg || "输入不合法",
+              message: normalizeApiErrorMessage(e.msg, "输入不合法"),
             });
           }
         });

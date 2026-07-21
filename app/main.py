@@ -27,7 +27,13 @@ from app.core.constants import (
     STATIC_CACHE_MAX_AGE_SECONDS,
     UPLOAD_PATHS,
 )
-from app.core.auth import decode_token, extract_access_token, resolve_current_session
+from app.core.api_errors import API_ERROR_CODE_HEADER
+from app.core.auth import (
+    AUTH_ERROR_CODE_HEADER,
+    decode_token,
+    extract_access_token,
+    resolve_current_session,
+)
 from app.core.banner import print_banner
 from app.core.request_utils import (
     get_client_ip,
@@ -560,6 +566,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[API_ERROR_CODE_HEADER, AUTH_ERROR_CODE_HEADER, "Retry-After"],
 )
 
 

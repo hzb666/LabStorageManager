@@ -105,7 +105,7 @@ class ConsumableOrderCreate(SQLModel):
     def strip_required_text(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
-            raise ValueError("不能为空")
+            raise ValueError("Field must not be empty")
         return stripped
 
 
@@ -127,19 +127,19 @@ class ConsumableOrderUpdate(SQLModel):
     @classmethod
     def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
-            raise ValueError("不能为空")
+            raise ValueError("Field must not be empty")
         if not isinstance(value, str):
             return value
         stripped = value.strip()
         if not stripped:
-            raise ValueError("不能为空")
+            raise ValueError("Field must not be empty")
         return stripped
 
     @field_validator("quantity", mode="before")
     @classmethod
     def reject_null_quantity(cls, value: Optional[int]) -> Optional[int]:
         if value is None:
-            raise ValueError("数量不能为空")
+            raise ValueError("Quantity is required")
         return value
 
 

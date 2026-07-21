@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, status
 
+from app.core.api_errors import ApiErrorCode, api_error
 from app.core.constants import (
     EXPORT_RATE_LIMIT,
     EXPORT_RATE_LIMIT_SCOPE_PREFIX,
@@ -26,7 +27,9 @@ def enforce_export_rate_limit(user_id: int, export_scope: str) -> None:
     except HTTPException as exc:
         if exc.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
             raise
-        raise HTTPException(
+        raise api_error(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"导出过于频繁，请 {EXPORT_RATE_LIMIT_WINDOW_SECONDS} 秒后再试",
+            detail="Export rate limit exceeded",
+            code=ApiErrorCode.EXPORT_RATE_LIMITED,
+            headers={"Retry-After": str(EXPORT_RATE_LIMIT_WINDOW_SECONDS)},
         ) from exc

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from sqlmodel import Session, select
 
 from app.models.inventory import Inventory, InventoryStatus
@@ -26,6 +27,18 @@ logger = logging.getLogger(__name__)
 
 # (endpoint, field, value, normalized_value, entity_type, entity_id, display_meta, operational_score)
 EntityRow = tuple[str, str, str, str, str, str, str | None, float]
+
+
+def run_completion_index_update(operation: Callable[[], None], *, context: str) -> None:
+    """Run an auxiliary completion-index update without failing the business request."""
+
+    try:
+        operation()
+    except Exception:
+        logger.exception(
+            "search_completion_update_failed context=%s; continuing with stale completion data",
+            context,
+        )
 
 
 _INVENTORY_STATUS_SCORE: dict[str, float] = {
@@ -295,6 +308,12 @@ def sync_reagent_order_entity_completions(
     )
 
 
+def delete_reagent_order_entity_completions(order_id: int) -> None:
+    delete_entity_completions_for_entity(
+        REAGENT_ORDER_COMPLETION_ENDPOINT, "reagent_order", str(order_id),
+    )
+
+
 def sync_consumable_order_entity_completions(
     order: ConsumableOrder, applicant_name: str | None = None, db: Session | None = None,
 ) -> None:
@@ -321,4 +340,10 @@ def sync_consumable_order_entity_completions(
         ))
     replace_entity_completions_for_entity(
         CONSUMABLE_ORDER_COMPLETION_ENDPOINT, "consumable_order", entity_id, rows,
+    )
+
+
+def delete_consumable_order_entity_completions(order_id: int) -> None:
+    delete_entity_completions_for_entity(
+        CONSUMABLE_ORDER_COMPLETION_ENDPOINT, "consumable_order", str(order_id),
     )

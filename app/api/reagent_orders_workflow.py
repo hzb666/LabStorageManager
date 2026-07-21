@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select, delete, update as sql_update
 
 from app.database import DBSession
+from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentUser, get_current_user, require_admin
 from app.core.db_compat import exec_delete_returning_first
 from app.core.request_utils import get_request_is_cli
@@ -66,6 +67,8 @@ from app.services.order_status_times import (
 )
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.search_completion_entity_index import (
+    delete_reagent_order_entity_completions,
+    run_completion_index_update,
     sync_inventory_entity_completions,
     sync_reagent_order_entity_completions,
 )
@@ -106,10 +109,21 @@ def _clear_reagent_workflow_cache(
     search_cache: Dict[str, tuple[Any, Any]],
     order: ReagentOrder | None = None,
     db: Session | None = None,
+    *,
+    is_delete: bool = False,
 ) -> None:
     clear_cache_by_prefix(search_cache, prefix=LIST_CACHE_PREFIX)
     if order is not None:
-        sync_reagent_order_entity_completions(order, db=db)
+        def update_completion_index() -> None:
+            if is_delete:
+                delete_reagent_order_entity_completions(order.id)
+                return
+            sync_reagent_order_entity_completions(order, db=db)
+
+        run_completion_index_update(
+            update_completion_index,
+            context="reagent_order_workflow",
+        )
 
 
 class ReagentWorkflowEditableFields(BaseModel):
@@ -378,8 +392,11 @@ def _clear_inventory_projection_cache(
 
     clear_cache_by_prefix(INVENTORY_SEARCH_CACHE, prefix=INVENTORY_LIST_CACHE_PREFIX)
     if items:
-        for item in items:
-            sync_inventory_entity_completions(item)
+        def update_completion_index() -> None:
+            for item in items:
+                sync_inventory_entity_completions(item)
+
+        run_completion_index_update(update_completion_index, context="reagent_stock_in_inventory")
 
 
 def _log_stock_in_operations(
@@ -491,12 +508,17 @@ def _create_inventory_items_from_order(
             if not is_internal_code_unique_violation(exc):
                 raise
             if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
-                raise HTTPException(
+                raise api_error(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="库存内部编码冲突，请重试订单入库操作",
+                    detail="Inventory internal code conflict; retry the order stock-in operation",
+                    code=ApiErrorCode.INVENTORY_CODE_CONFLICT,
                 ) from exc
 
-    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="库存内部编码冲突，请重试订单入库操作")
+    raise api_error(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Inventory internal code conflict; retry the order stock-in operation",
+        code=ApiErrorCode.INVENTORY_CODE_CONFLICT,
+    )
 
 
 async def _broadcast_inventory_projection_events(
@@ -1178,7 +1200,7 @@ def _register_delete_order_route(
             is_cli=get_request_is_cli(request),
         )
         db.commit()
-        _clear_reagent_workflow_cache(search_cache, order, db)
+        _clear_reagent_workflow_cache(search_cache, order, db, is_delete=True)
         await sse_manager.broadcast(
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_DELETED,

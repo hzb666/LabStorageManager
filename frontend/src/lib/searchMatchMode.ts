@@ -8,6 +8,7 @@ export type SearchMatchMode = (typeof SEARCH_MATCH_MODES)[keyof typeof SEARCH_MA
 export const DEFAULT_SEARCH_MATCH_MODE: SearchMatchMode = SEARCH_MATCH_MODES.CONTAINS
 
 const LOOSE_SEARCH_CHARS = ['-', ' ', '\u00A0', '\u2002', '\u2003', '\u2009', '\u200C', '\u200D', '_']
+const SEGMENTED_SEARCH_MAX_TERMS = 8
 
 export function normalizeSearchText(value: unknown, fuzzy = false): string {
   if (value === null || value === undefined) {
@@ -46,10 +47,29 @@ export function containsSearchText(value: unknown, keyword: string, fuzzy = fals
   return matchesSearchText(value, keyword, SEARCH_MATCH_MODES.CONTAINS, fuzzy)
 }
 
-
 export function splitAndSearchTerms(keyword: string): string[] {
   return keyword
-    .split("&&")
+    .split('&&')
     .map((term) => term.trim())
     .filter(Boolean)
+}
+
+export function splitSegmentedSearchTerms(keyword: string): string[] {
+  const trimmedKeyword = keyword.trim()
+  if (!trimmedKeyword.includes(' ') || trimmedKeyword.includes('&&')) {
+    return []
+  }
+
+  const terms: string[] = []
+  const normalizedTerms = new Set<string>()
+  for (const term of trimmedKeyword.split(/ +/)) {
+    const normalizedTerm = term.toLowerCase()
+    if (!term || normalizedTerms.has(normalizedTerm)) {
+      continue
+    }
+    terms.push(term)
+    normalizedTerms.add(normalizedTerm)
+  }
+
+  return terms.length > 1 && terms.length <= SEGMENTED_SEARCH_MAX_TERMS ? terms : []
 }

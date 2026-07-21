@@ -14,6 +14,12 @@ const ADMIN_EDITABLE_ORDER_STATUSES = new Set<string>([
   ReagentOrderStatus.APPROVED,
   ConsumableOrderStatus.APPROVED,
 ])
+const RESUBMITTED_ORDER_STATUSES = new Set<string>([
+  ReagentOrderStatus.REJECTED,
+  ReagentOrderStatus.APPROVED,
+  ConsumableOrderStatus.REJECTED,
+  ConsumableOrderStatus.APPROVED,
+])
 const APPROVABLE_ORDER_STATUSES = new Set<string>([
   ReagentOrderStatus.PENDING,
   ReagentOrderStatus.REJECTED,
@@ -38,6 +44,10 @@ export function isOrderEditableByRole(status: unknown, isAdmin: boolean): boolea
   return isAdmin
     ? ADMIN_EDITABLE_ORDER_STATUSES.has(status)
     : EDITABLE_ORDER_STATUSES.has(status)
+}
+
+export function isOrderResubmittedOnEdit(status: unknown): boolean {
+  return typeof status === 'string' && RESUBMITTED_ORDER_STATUSES.has(status)
 }
 
 export function isApprovableOrderStatus(status: unknown): boolean {

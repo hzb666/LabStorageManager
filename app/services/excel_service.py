@@ -1,5 +1,7 @@
 # Excel 批量导入与模板生成。
 from dataclasses import dataclass
+import math
+from numbers import Real
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -7,8 +9,7 @@ from typing import Any, Tuple, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
-from app.models.inventory import Inventory, InventoryStatus
-from app.services.api_utils import empty_to_none
+from app.models.inventory import Inventory, InventoryStatus, ManualInventoryCreate
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.internal_code import (
     INTERNAL_CODE_CONFLICT_MAX_RETRIES,
@@ -101,6 +102,27 @@ class PreparedInventoryImport:
 
 
 REQUIRED_IMPORT_COLUMNS = {"cas_number", "name", "specification"}
+REQUIRED_COLUMN_MARKERS = ("（必填）", "(必填)")
+
+
+def _get_model_field_max_length(model: type, field_name: str) -> int:
+    for metadata in model.model_fields[field_name].metadata:
+        max_length = getattr(metadata, "max_length", None)
+        if isinstance(max_length, int):
+            return max_length
+    raise RuntimeError(f"Missing max_length metadata for {model.__name__}.{field_name}")
+
+
+IMPORT_TEXT_MAX_LENGTHS = {
+    "name": _get_model_field_max_length(Inventory, "name"),
+    "english_name": _get_model_field_max_length(Inventory, "english_name"),
+    "alias": _get_model_field_max_length(Inventory, "alias"),
+    "category": _get_model_field_max_length(Inventory, "category"),
+    "brand": _get_model_field_max_length(Inventory, "brand"),
+    "specification": _get_model_field_max_length(ManualInventoryCreate, "specification"),
+    "storage_location": _get_model_field_max_length(Inventory, "storage_location"),
+    "notes": _get_model_field_max_length(Inventory, "notes"),
+}
 
 
 def validate_uploaded_file(file: UploadFile) -> None:
@@ -147,24 +169,28 @@ def validate_uploaded_file(file: UploadFile) -> None:
 
 
 def _parse_boolean(value, default: bool = False) -> bool:
-    result = default
-    if isinstance(value, bool):
-        return value
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return result
-    if isinstance(value, (int, float)):
+    if pd.api.types.is_bool(value):
         return bool(value)
+    if value is None or pd.isna(value):
+        return default
+    if isinstance(value, Real):
+        numeric_value = float(value)
+        if numeric_value == 0:
+            return False
+        if numeric_value == 1:
+            return True
+        raise ValueError("Invalid is_hazardous: expected true/false or 1/0")
     if not isinstance(value, str):
-        return result
+        raise ValueError("Invalid is_hazardous: expected true/false or 1/0")
 
     stripped = value.strip().lower()
     if not stripped:
-        return result
+        return default
     if stripped in BOOLEAN_FALSE_STRINGS:
-        result = False
-    elif stripped in BOOLEAN_TRUE_STRINGS:
-        result = True
-    return result
+        return False
+    if stripped in BOOLEAN_TRUE_STRINGS:
+        return True
+    raise ValueError("Invalid is_hazardous: expected true/false or 1/0")
 
 
 class ExcelImportError(Exception):
@@ -210,18 +236,62 @@ def parse_excel_file(file_path: str) -> pd.DataFrame:
     if file_path.endswith(".csv"):
         for encoding in ["utf-8-sig", "utf-8", "gbk", "gb2312"]:
             try:
-                return pd.read_csv(file_path, encoding=encoding)
+                return pd.read_csv(file_path, encoding=encoding, keep_default_na=False)
             except UnicodeDecodeError:
                 continue
-        return pd.read_csv(file_path, encoding="utf-8-sig", encoding_errors="replace")
-    return pd.read_excel(file_path)
+        return pd.read_csv(
+            file_path,
+            encoding="utf-8-sig",
+            encoding_errors="replace",
+            keep_default_na=False,
+        )
+    return pd.read_excel(file_path, keep_default_na=False)
+
+
+def _normalize_import_text(value: object) -> Optional[str]:
+    if value is None or pd.isna(value):
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _validate_import_text_lengths(row: dict) -> Optional[str]:
+    for field, max_length in IMPORT_TEXT_MAX_LENGTHS.items():
+        value = _normalize_import_text(row.get(field))
+        if field == "storage_location":
+            value = normalize_storage_location(value)
+        if value is not None and len(value) > max_length:
+            return f"Invalid {field}: must not exceed {max_length} characters"
+    return None
+
+
+def _validate_remaining_quantity(row: dict, initial_quantity: float) -> Optional[str]:
+    remaining_text = _normalize_import_text(row.get("remaining_quantity"))
+    if remaining_text is None:
+        return None
+    try:
+        remaining_value = float(remaining_text)
+    except (ValueError, TypeError):
+        return "Invalid remaining_quantity: must be a number"
+    if not math.isfinite(remaining_value):
+        return "Invalid remaining_quantity: must be a finite number"
+    if remaining_value < 0:
+        return "Invalid remaining_quantity: cannot be negative"
+    if remaining_value > initial_quantity:
+        return (
+            f"Invalid remaining_quantity: {remaining_value} "
+            f"cannot exceed initial_quantity {initial_quantity}"
+        )
+    return None
 
 
 def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
-    required_fields = ["cas_number", "name", "specification"]
+    length_error = _validate_import_text_lengths(row)
+    if length_error:
+        return False, length_error
 
-    for field in required_fields:
-        if field not in row or pd.isna(row[field]) or str(row[field]).strip() == "":
+    for field in REQUIRED_IMPORT_COLUMNS:
+        if _normalize_import_text(row.get(field)) is None:
             return False, f"Missing required field: {field}"
 
     cas_raw = str(row["cas_number"]).strip()
@@ -236,21 +306,9 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     except ValueError as e:
         return False, f"Invalid specification format: {str(e)}"
 
-    # 剩余量不能超过规格解析出的初始量，防止导入后库存状态立刻失真。
-    remaining_raw = row.get("remaining_quantity")
-    if pd.notna(remaining_raw):
-        remaining_text = str(remaining_raw).strip()
-        if remaining_text:
-            try:
-                remaining_value = float(remaining_text)
-            except (ValueError, TypeError):
-                return False, "Invalid remaining_quantity: must be a number"
-
-            if remaining_value > spec_value:
-                return (
-                    False,
-                    f"Invalid remaining_quantity: {remaining_value} cannot exceed initial_quantity {spec_value}",
-                )
+    remaining_error = _validate_remaining_quantity(row, spec_value)
+    if remaining_error:
+        return False, remaining_error
 
     return True, None
 
@@ -259,18 +317,26 @@ def _parse_import_dataframe(file_path: str) -> pd.DataFrame:
     try:
         return parse_excel_file(file_path)
     except Exception as exc:
-        raise ExcelImportError(1, f"Failed to parse Excel file: {str(exc)}") from exc
+        raise ExcelImportError(1, "Failed to parse Excel file") from exc
 
 
 def _normalize_import_columns(df: pd.DataFrame) -> pd.DataFrame:
     normalized_df = pd.DataFrame()
     for standard_col, possible_cols in EXCEL_IMPORT_COLUMN_MAPPING.items():
-        possible_names = {candidate.lower() for candidate in possible_cols}
+        possible_names = {_normalize_import_column_name(candidate) for candidate in possible_cols}
         for col in df.columns:
-            if str(col).lower() in possible_names:
+            if _normalize_import_column_name(col) in possible_names:
                 normalized_df[standard_col] = df[col]
                 break
     return normalized_df
+
+
+def _normalize_import_column_name(value: object) -> str:
+    normalized = str(value).strip().lower()
+    for marker in REQUIRED_COLUMN_MARKERS:
+        if normalized.endswith(marker):
+            return normalized[: -len(marker)].strip()
+    return normalized
 
 
 def _validate_required_import_columns(df: pd.DataFrame, normalized_df: pd.DataFrame) -> None:
@@ -301,7 +367,10 @@ def _normalize_import_optional_fields(row: dict, default_storage_location: Optio
         "brand": row.get("brand"),
         "notes": row.get("notes"),
     }
-    normalized_optional = empty_to_none(all_optional_fields, list(all_optional_fields.keys()))
+    normalized_optional = {
+        field: _normalize_import_text(value)
+        for field, value in all_optional_fields.items()
+    }
     normalized_optional["storage_location"] = normalize_storage_location(
         normalized_optional["storage_location"] or default_storage_location
     )
@@ -309,11 +378,11 @@ def _normalize_import_optional_fields(row: dict, default_storage_location: Optio
 
 
 def _parse_import_created_at(value: object) -> Optional[datetime]:
-    if pd.isna(value):
+    date_str = _normalize_import_text(value)
+    if date_str is None:
         return None
 
     try:
-        date_str = str(value).strip()
         if date_str.isdigit():
             if len(date_str) == 5:
                 date_str = str(EXCEL_DATE_EPOCH + timedelta(days=int(date_str)))
@@ -321,9 +390,12 @@ def _parse_import_created_at(value: object) -> Optional[datetime]:
                 date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
             elif len(date_str) == 6:
                 date_str = f"20{date_str[:2]}-{date_str[2:4]}-{date_str[4:6]}"
-        return pd.to_datetime(date_str).to_pydatetime()
-    except (ValueError, TypeError):
-        return None
+        parsed_date = pd.to_datetime(date_str)
+        if pd.isna(parsed_date):
+            raise ValueError("date is missing")
+        return parsed_date.to_pydatetime()
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError("Invalid created_at: expected a valid date") from exc
 
 
 def _build_inventory_from_import_row(

@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_
 from sqlmodel import Session, delete, func, select, update as sql_update
 
 from app.database import DBSession
+from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
 from app.core.constants import (    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
@@ -71,7 +72,11 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
-from app.services.search_completion_entity_index import sync_consumable_order_entity_completions
+from app.services.search_completion_entity_index import (
+    delete_consumable_order_entity_completions,
+    run_completion_index_update,
+    sync_consumable_order_entity_completions,
+)
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 logger = logging.getLogger(__name__)
@@ -117,11 +122,23 @@ DASHBOARD_CONSUMABLE_STATUSES = (
 
 
 def _clear_consumable_order_cache(
-    order: ConsumableOrder | None = None, db: Session | None = None,
+    order: ConsumableOrder | None = None,
+    db: Session | None = None,
+    *,
+    is_delete: bool = False,
 ) -> None:
     clear_cache_by_prefix(SEARCH_CACHE, prefix=LIST_CACHE_PREFIX)
     if order is not None:
-        sync_consumable_order_entity_completions(order, db=db)
+        def update_completion_index() -> None:
+            if is_delete:
+                delete_consumable_order_entity_completions(order.id)
+                return
+            sync_consumable_order_entity_completions(order, db=db)
+
+        run_completion_index_update(
+            update_completion_index,
+            context="consumable_order",
+        )
 
 
 APPLICANT_SORT_KEYS = {"applicant", "applicant_name"}
@@ -512,7 +529,11 @@ def list_consumable_orders(
     sort_order = query.sort_order
 
     if sort_by and sort_by not in VALID_CONSUMABLE_SORT_FIELDS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的排序字段")
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid sort field",
+            code=ApiErrorCode.INVALID_SORT_FIELD,
+        )
 
     try:
         segmented_terms = _get_consumable_order_segmented_terms(search, search_field, match_mode)
@@ -1073,7 +1094,7 @@ async def delete_consumable_order(
     )
 
     db.commit()
-    _clear_consumable_order_cache(order, db)
+    _clear_consumable_order_cache(order, db, is_delete=True)
     await sse_manager.broadcast(
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_DELETED,

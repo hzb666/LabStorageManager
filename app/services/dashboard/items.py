@@ -4,27 +4,19 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
 
 from app.core.constants import LOW_STOCK_PERCENT, OVERDUE_BORROW_DAYS
 from app.core.time_utils import get_display_day_age_cutoff, utc_iso_str
 from app.models.chemical_name_map import ChemicalNameMap
 from app.models.common_shelf import CommonShelf, CommonShelfGroup
-from app.models.common_shelf_operation_log import CommonShelfOperationAction, CommonShelfOperationLog
 from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
-from app.models.consumable_order_operation_log import (
-    ConsumableOrderOperationAction,
-    ConsumableOrderOperationLog,
-)
 from app.models.inventory import Inventory, InventoryStatus
-from app.models.inventory_operation_log import InventoryOperationAction, InventoryOperationLog
+from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
-from app.models.reagent_order_operation_log import (
-    ReagentOrderOperationAction,
-    ReagentOrderOperationLog,
-)
 from app.models.user import User
+from app.models.user_operation_log import UserOperationAction, UserOperationLog
 from app.models.user_session import UserSession
 from app.services.dashboard.common import (
     COMMON_SHELF_ALERT_BOTTLE_THRESHOLD,
@@ -34,6 +26,7 @@ from app.services.dashboard.common import (
     PENDING_STOCKIN_ALERT_DAYS,
     TODO_PENDING_ALERT_DAYS,
     _board_panel_item,
+    _build_dashboard_codes,
     _build_dashboard_entity,
     _build_dashboard_metrics,
     _consumable_detail,
@@ -45,133 +38,101 @@ from app.services.dashboard.common import (
     _reagent_detail,
     _with_dashboard_structured,
 )
+from app.services.log_timeline_renderer import render_log_timeline_rows
 from app.services.spec_utils import format_specification
 from app.services.user_utils import batch_get_user_names
 
-def _load_recent_logs(db: Session, model: Any, condition: Any) -> list[Any]:
-    return db.exec(
-        select(model).where(condition).order_by(model.created_at.desc()).limit(LIST_LIMIT)
-    ).all()
+
+def _get_timeline_operator_id(row: LogTimeline) -> int | None:
+    return row.actor_user_id or row.subject_user_id
 
 
-def _collect_recent_log_actor_ids(
-    log_groups: list[tuple[list[Any], str]],
-) -> set[int]:
-    actor_ids: set[int] = set()
-    for logs, actor_attr in log_groups:
-        for log in logs:
-            actor_id = getattr(log, actor_attr, None)
-            if actor_id:
-                actor_ids.add(actor_id)
-    return actor_ids
-
-
-def _append_recent_actions(
-    actions: list[dict[str, Any]],
-    logs: list[Any],
+def _build_recent_management_action(
+    row: LogTimeline,
+    rendered: dict[str, object],
     users_map: dict[int, str],
-    *,
-    actor_attr: str,
-    detail_attr: str,
-) -> None:
-    for log in logs:
-        actor_id = getattr(log, actor_attr, None)
-        actor_name = users_map.get(actor_id) or "系统"
-        subject_name = getattr(log, detail_attr)
-        label_code = "management_action.other"
-        entity_type = "unknown"
-        entity_id = getattr(log, "id", None)
-        if isinstance(log, ReagentOrderOperationLog):
-            label_code = "management_action.reagent_order_reviewed"
-            entity_type = "reagent_order"
-            entity_id = getattr(log, "order_id", entity_id)
-        elif isinstance(log, ConsumableOrderOperationLog):
-            label_code = "management_action.consumable_order_reviewed"
-            entity_type = "consumable_order"
-            entity_id = getattr(log, "order_id", entity_id)
-        elif isinstance(log, InventoryOperationLog):
-            label_code = "management_action.inventory_stocked"
-            entity_type = "inventory"
-            entity_id = getattr(log, "inventory_id", entity_id)
-        elif isinstance(log, CommonShelfOperationLog):
-            label_code = "management_action.common_shelf_updated"
-            entity_type = "common_shelf"
-            entity_id = getattr(log, "common_shelf_id", entity_id)
-        actions.append(
-            _with_dashboard_structured(
-                {
-                    "detail": subject_name,
-                    "created_at": utc_iso_str(log.created_at),
-                },
-                label_code=label_code,
-                entity=_build_dashboard_entity(
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    name=subject_name,
-                    preferred_name=subject_name,
-                    preferred_name_source="operation_log",
-                    actor_name=actor_name,
-                ),
-            )
+) -> dict[str, Any]:
+    operator_id = _get_timeline_operator_id(row)
+    operator_name = users_map.get(operator_id) or "系统"
+    category = _get_management_action_category(row, rendered)
+    return {
+        "detail": str(rendered.get("detail") or ""),
+        "submitter_name": operator_name,
+        "created_at": rendered.get("time"),
+        "codes": _build_dashboard_codes(
+            label_code=f"operation_category.{category}",
+        ),
+        "entity": _build_dashboard_entity(
+            entity_type="operation_log",
+            entity_id=row.id,
+            actor_name=operator_name,
+        ),
+    }
+
+
+MANAGEMENT_ACTION_CATEGORY_BY_SOURCE: dict[LogTimelineSourceTable, str] = {
+    LogTimelineSourceTable.INVENTORY_OPERATION_LOG: "inventory",
+    LogTimelineSourceTable.REAGENT_ORDER_OPERATION_LOG: "reagent_order",
+    LogTimelineSourceTable.CONSUMABLE_ORDER_OPERATION_LOG: "consumable_order",
+    LogTimelineSourceTable.COMMON_SHELF_OPERATION_LOG: "common_shelf",
+    LogTimelineSourceTable.BORROWLOG: "borrow",
+}
+
+
+def _get_management_action_category(
+    row: LogTimeline,
+    rendered: dict[str, object],
+) -> str:
+    if row.source_table == LogTimelineSourceTable.USER_OPERATION_LOG:
+        return str(rendered.get("type") or "other")
+    return MANAGEMENT_ACTION_CATEGORY_BY_SOURCE.get(row.source_table, "other")
+
+
+def _build_management_action_filter():
+    excluded_user_log_ids = select(UserOperationLog.id).where(
+        UserOperationLog.action.in_(
+            (UserOperationAction.LOGIN, UserOperationAction.LOGOUT)
         )
+    )
+    return or_(
+        LogTimeline.source_table != LogTimelineSourceTable.USER_OPERATION_LOG.value,
+        ~LogTimeline.source_log_id.in_(excluded_user_log_ids),
+    )
 
 
-def _get_recent_management_actions(db: Session) -> list[dict[str, Any]]:
-    actions: list[dict[str, Any]] = []
-    reagent_logs = _load_recent_logs(
+def _count_recent_management_actions(db: Session) -> int:
+    return _count(
         db,
-        ReagentOrderOperationLog,
-        ReagentOrderOperationLog.action.in_(
-            [
-                ReagentOrderOperationAction.APPROVE,
-                ReagentOrderOperationAction.REJECT,
-            ]
-        ),
+        select(func.count()).select_from(LogTimeline).where(_build_management_action_filter()),
     )
-    consumable_logs = _load_recent_logs(
-        db,
-        ConsumableOrderOperationLog,
-        ConsumableOrderOperationLog.action.in_(
-            [
-                ConsumableOrderOperationAction.APPROVE,
-                ConsumableOrderOperationAction.REJECT,
-                ConsumableOrderOperationAction.ARRIVAL_COMPLETE,
-            ]
-        ),
-    )
-    inventory_logs = _load_recent_logs(
-        db,
-        InventoryOperationLog,
-        InventoryOperationLog.action == InventoryOperationAction.STOCK_IN,
-    )
-    common_logs = _load_recent_logs(
-        db,
-        CommonShelfOperationLog,
-        CommonShelfOperationLog.action == CommonShelfOperationAction.STOCK_IN,
-    )
-    log_groups = [
-        (reagent_logs, "actor_user_id", "order_name"),
-        (consumable_logs, "actor_user_id", "order_name"),
-        (inventory_logs, "operator_id", "item_name"),
-        (common_logs, "operator_id", "item_name"),
-    ]
+
+
+def _get_recent_management_actions(
+    db: Session,
+    *,
+    skip: int = 0,
+    limit: int = LIST_LIMIT,
+) -> list[dict[str, Any]]:
+    rows = db.exec(
+        select(LogTimeline)
+        .where(_build_management_action_filter())
+        .order_by(LogTimeline.occurred_at.desc(), LogTimeline.id.desc())
+        .offset(skip)
+        .limit(limit)
+    ).all()
     users_map = batch_get_user_names(
         db,
-        _collect_recent_log_actor_ids(
-            [(logs, actor_attr) for logs, actor_attr, _ in log_groups]
-        ),
+        {
+            operator_id
+            for row in rows
+            if (operator_id := _get_timeline_operator_id(row)) is not None
+        },
     )
-
-    for logs, actor_attr, detail_attr in log_groups:
-        _append_recent_actions(
-            actions,
-            logs,
-            users_map,
-            actor_attr=actor_attr,
-            detail_attr=detail_attr,
-        )
-
-    return sorted(actions, key=lambda item: item["created_at"], reverse=True)[:LIST_LIMIT]
+    rendered_rows = render_log_timeline_rows(db, rows, user_id=0)
+    return [
+        _build_recent_management_action(row, rendered, users_map)
+        for row, rendered in rendered_rows
+    ]
 
 def _get_todo_items(
     db: Session,

@@ -3,6 +3,7 @@ import { persist, type StorageValue, type PersistStorage } from 'zustand/middlew
 import { api, authAPI } from '@/api/client'
 import { resolveAuthNoticeByCode, triggerSessionInvalidation } from '@/lib/authSession'
 import { AUTH_STORAGE_EXPIRY_MS, UI_STORAGE_EXPIRY_MS } from '@/lib/constants'
+import { clearProcedureInventorySearchResults } from '@/lib/storage/procedureInventorySearchStorage'
 
 // 自定义存储，带有过期时间支持。
 const createExpireStorage = <T>(expiresInMs: number): PersistStorage<T> => ({
@@ -124,10 +125,18 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => {
       const applyAuthenticated = (user: User, invalidatePending = true) => {
+        const previousUserId = get().user?.id
+        if (previousUserId !== undefined && previousUserId !== user.id) {
+          clearProcedureInventorySearchResults()
+        }
         if (invalidatePending) {
           authFlowEpoch += 1
         }
         set({ user, isAuthenticated: true, authStatus: 'authenticated' })
+      }
+      const applyUnauthenticated = () => {
+        clearProcedureInventorySearchResults()
+        set(UNAUTH_STATE)
       }
 
       return {
@@ -139,7 +148,7 @@ export const useAuthStore = create<AuthState>()(
           applyAuthenticated(user)
         },
         setUnauthenticated: () => {
-          set(UNAUTH_STATE)
+          applyUnauthenticated()
         },
         bootstrapAuth: async () => {
           if (bootstrapInFlight) {
@@ -182,7 +191,7 @@ export const useAuthStore = create<AuthState>()(
               }
 
               if (status === 401) {
-                set(UNAUTH_STATE)
+                applyUnauthenticated()
                 return
               }
 
@@ -192,7 +201,7 @@ export const useAuthStore = create<AuthState>()(
                 return
               }
 
-              set(UNAUTH_STATE)
+              applyUnauthenticated()
             } finally {
               bootstrapInFlight = null
             }
@@ -205,7 +214,7 @@ export const useAuthStore = create<AuthState>()(
           if (forceLocal) {
             // 强制本地下线：用于被踢/401 并发风暴时优先收敛 UI 状态，不等待网络。
             authFlowEpoch += 1
-            set(UNAUTH_STATE)
+            applyUnauthenticated()
             return
           }
 
@@ -224,7 +233,7 @@ export const useAuthStore = create<AuthState>()(
                 console.error('Logout API error:', error)
               }
             }
-            set(UNAUTH_STATE)
+            applyUnauthenticated()
           })()
 
           try {

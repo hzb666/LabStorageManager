@@ -1127,7 +1127,9 @@ export function DashboardStockinTab({
       if (validationErrors.length > 0) {
         validationErrors.forEach((e) => {
           if (e.loc?.[1]) {
-            stockinForm.setError(e.loc[1] as keyof StockInFormInputData, { message: e.msg || '输入不合法' })
+            stockinForm.setError(e.loc[1] as keyof StockInFormInputData, {
+              message: normalizeApiErrorMessage(e.msg, '输入不合法'),
+            })
           }
         })
         return

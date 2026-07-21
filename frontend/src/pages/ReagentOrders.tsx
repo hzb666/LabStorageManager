@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 // UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
@@ -18,6 +19,7 @@ import { BaseForm } from '@/components/BaseForm'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import { ReagentBrandManagementDialogs } from '@/components/ReagentBrandManagementDialogs'
 import useDialogState from '@/hooks/useDialogState'
+import { useExportDownload } from '@/hooks/useExportDownload'
 import { useAuthStore } from '@/store/useStore'
 import { REAGENT_STATUS_MAP, UserRoles } from '@/lib/constants'
 import { canWriteNonPublicData } from '@/lib/permissions'
@@ -29,9 +31,8 @@ import {
   reagentOrderAPI,
   chemicalAPI,
   ReagentOrderReason,
-  ReagentOrderStatus,
 } from '@/api/client'
-import { exportAndDownload, processNotes } from '@/lib/utils'
+import { processNotes } from '@/lib/utils'
 import { ReagentOrderExpandedRow } from '@/components/ReagentOrderExpandedRow'
 import {
   ReagentCasDuplicateWarning,
@@ -60,6 +61,7 @@ import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderS
 import {
   isApprovableOrderStatus,
   isOrderEditableByRole,
+  isOrderResubmittedOnEdit,
   isRejectableOrderStatus,
 } from '@/lib/orderEditRules'
 import {
@@ -397,11 +399,9 @@ function useReagentOrderDialogController(
       })
       await Promise.resolve(refreshOrders())
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {
-        edit:
-          editingItem?.status === ReagentOrderStatus.REJECTED ||
-          editingItem?.status === ReagentOrderStatus.APPROVED
-            ? '订单已重新提交待审批'
-            : '订单信息已更新',
+        edit: isOrderResubmittedOnEdit(editingItem?.status)
+          ? '订单已重新提交待审批'
+          : '订单信息已更新',
         add: '试剂订单创建成功',
       })
       if (successMessage) {
@@ -519,13 +519,10 @@ export function ReagentOrdersPage() {
   }, [queryClient])
   const dialogController = useReagentOrderDialogController(refreshOrders, navigate, brandOptions)
 
-  const handleExport = useCallback(async () => {
-    try {
-      await exportAndDownload(() => reagentOrderAPI.exportOrders(), 'reagent_orders')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '导出失败'))
-    }
-  }, [])
+  const { handleExport, isExporting } = useExportDownload({
+    apiCall: reagentOrderAPI.exportOrders,
+    filePrefix: 'reagent_orders',
+  })
 
   const columns = useMemo(() => {
     return createReagentOrderColumns(isAdmin, refreshOrders)
@@ -552,9 +549,16 @@ export function ReagentOrdersPage() {
             </Button>
           )}
           {isAdmin && (
-            <Button variant="modern" size="lg" onClick={handleExport}>
+            <LoadingButton
+              variant="modern"
+              size="lg"
+              className="px-4"
+              isLoading={isExporting}
+              loadingText="导出中"
+              onClick={handleExport}
+            >
               <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
-            </Button>
+            </LoadingButton>
           )}
         </div>
       </div>

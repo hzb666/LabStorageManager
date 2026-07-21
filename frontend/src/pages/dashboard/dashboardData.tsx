@@ -440,7 +440,7 @@ const EMPTY_ADMIN_SUMMARY: AdminDashboardSummary = {
   recent_actions: [],
   stock_alert_items: [],
   system_status: [],
-  item_counts: { todo_items: 0, risk_items: 0, stock_alert_items: 0 },
+  item_counts: { todo_items: 0, risk_items: 0, stock_alert_items: 0, recent_actions: 0 },
   recent_window_days: 7,
   system_version: "",
   generated_at: "",

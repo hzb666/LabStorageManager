@@ -75,7 +75,7 @@ function buildManifest({ systemUrl, reagentSiteUrl }) {
   return {
     manifest_version: 3,
     name: '购物车同步',
-    version: '0.5.0',
+    version: '0.6.0',
     description: '将试剂平台的购物车同步到实验室库存管理系统',
     icons: {
       16: 'icons/favicon.png',

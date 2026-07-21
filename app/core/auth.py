@@ -6,8 +6,9 @@ from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
-from jose import JWTError, jwt
 import bcrypt
+import jwt
+from jwt import PyJWTError
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -448,7 +449,7 @@ def decode_token(token: str) -> dict:
                 algorithms=[settings.algorithm]
             )
         return payload
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise _auth_exception(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",

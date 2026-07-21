@@ -8,6 +8,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 import { toast } from '@/lib/toast'
 
@@ -31,11 +32,8 @@ import type {
 } from '@/api/structureSearchApi'
 import type { ManualStructureEditTarget } from '@/components/chem/StructureSearchDialog'
 import { isStructureSearchFeatureEnabled } from '@/lib/apiConfig'
-import {
-  exportAndDownload,
-  formatDate,
-  processNotes,
-} from '@/lib/utils'
+import { formatDate, processNotes } from '@/lib/utils'
+import { useExportDownload } from '@/hooks/useExportDownload'
 import {
   InventoryFormSchema,
   applyValidationErrors,
@@ -159,6 +157,10 @@ function createInventoryFormValues(item: InventoryItem): InventoryFormInputData 
 function resolveInventoryInitialQuantity(editingItem: InventoryItem, specification: string | undefined): number {
   const parsedValue = specification ? parseSpecification(specification) : null
   return parsedValue ?? editingItem.initial_quantity
+}
+
+function getCurrentUserId(user: { id: number } | null): number | null {
+  return user?.id ?? null
 }
 
 function useProcedureInventoryAvailability(result: ProcedureInventorySearchResponse | null) {
@@ -937,11 +939,13 @@ function InventoryFormDialog({
 function InventoryPageHeader({
   canManageInventory,
   dialogController,
+  isExporting,
   onExport,
   structureEditor,
 }: Readonly<{
   canManageInventory: boolean
   dialogController: ReturnType<typeof useInventoryDialogController>
+  isExporting: boolean
   onExport: () => Promise<void>
   structureEditor: ReturnType<typeof useInventoryStructureEditor>
 }>) {
@@ -955,9 +959,16 @@ function InventoryPageHeader({
           </Button>
         ) : null}
         <StructureCacheManagerEntry onManualEdit={structureEditor.handleManualStructureEdit} />
-        <Button variant="modern" size="lg" onClick={onExport}>
+        <LoadingButton
+          variant="modern"
+          size="lg"
+          className="px-4"
+          isLoading={isExporting}
+          loadingText="导出中"
+          onClick={onExport}
+        >
           <ArrowUpFromLine className="mr-1.5 h-4 w-4" /> 导出
-        </Button>
+        </LoadingButton>
       </div>
     </div>
   )
@@ -1068,9 +1079,10 @@ export function InventoryPage() {
   const canManageInventory = canWriteNonPublicData(currentUser?.role)
   const structureEditor = useInventoryStructureEditor()
   const procedureSearchId = searchParams.get('procedureSearchId')
+  const currentUserId = getCurrentUserId(currentUser)
   const procedureSearchResult = useMemo(
-    () => getProcedureInventorySearchResult(procedureSearchId),
-    [procedureSearchId],
+    () => getProcedureInventorySearchResult(procedureSearchId, currentUserId),
+    [currentUserId, procedureSearchId],
   )
   const procedureInventoryAvailability = useProcedureInventoryAvailability(procedureSearchResult)
   const {
@@ -1096,13 +1108,10 @@ export function InventoryPage() {
     false,
   )
 
-  const handleExport = useCallback(async () => {
-    try {
-      await exportAndDownload(() => inventoryAPI.exportInventory(), 'inventory_export')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '导出失败'))
-    }
-  }, [])
+  const { handleExport, isExporting } = useExportDownload({
+    apiCall: inventoryAPI.exportInventory,
+    filePrefix: 'inventory_export',
+  })
 
   const borrowController = useInventoryBorrowController({
     currentUserRole: currentUser?.role,
@@ -1147,6 +1156,7 @@ export function InventoryPage() {
       <InventoryPageHeader
         canManageInventory={canManageInventory}
         dialogController={dialogController}
+        isExporting={isExporting}
         onExport={handleExport}
         structureEditor={structureEditor}
       />

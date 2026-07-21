@@ -51,6 +51,7 @@ def test_segmented_query_writes_search_log_but_not_query_memory(monkeypatch) -> 
         "upsert_query_memory",
         lambda **kwargs: memory_rows.append(kwargs),
     )
+    monkeypatch.setattr(service, "prune_query_memory_if_due", lambda: None)
 
     service._write_ready_batch([_ready_log(query="三氟 磺酸钠")])
 

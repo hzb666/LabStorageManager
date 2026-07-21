@@ -56,6 +56,7 @@ from .user_operation_log import (
     UserOperationLogResponse,
 )
 from .log_timeline import LogTimeline, LogTimelineSourceTable
+from .llm_usage_log import LLMUsageLog
 from .reagent_order import (
     ReagentOrder,
     ReagentOrderStatus,
@@ -133,6 +134,7 @@ __all__ = [
     "UserOperationLogResponse",
     "LogTimeline",
     "LogTimelineSourceTable",
+    "LLMUsageLog",
     # 试剂订单。
     "ReagentOrder",
     "ReagentOrderStatus",

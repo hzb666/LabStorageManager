@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form'
 // UI 组件
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 import { toast } from '@/lib/toast'
 import { FilterTable } from '@/components/ui/FilterTable'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
@@ -15,13 +16,14 @@ import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { BaseForm } from '@/components/BaseForm'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import useDialogState from '@/hooks/useDialogState'
+import { useExportDownload } from '@/hooks/useExportDownload'
 import { useAuthStore } from '@/store/useStore'
 import { UserRoles } from '@/lib/constants'
 import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI, ConsumableOrderStatus } from '@/api/client'
-import { exportAndDownload, processNotes } from '@/lib/utils'
+import { processNotes } from '@/lib/utils'
 import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import {
   ConsumableOrderSchema,
@@ -42,6 +44,7 @@ import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderS
 import {
   isApprovableOrderStatus,
   isOrderEditableByRole,
+  isOrderResubmittedOnEdit,
   isRejectableOrderStatus,
 } from '@/lib/orderEditRules'
 import { CONSUMABLE_ORDER_SSE_EVENTS } from '@/lib/sseEvents'
@@ -196,11 +199,9 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
       })
       await Promise.resolve(refreshOrders())
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {
-        edit:
-          editingItem?.status === ConsumableOrderStatus.REJECTED ||
-          editingItem?.status === ConsumableOrderStatus.APPROVED
-            ? '订单已重新提交待审批'
-            : '订单信息已更新',
+        edit: isOrderResubmittedOnEdit(editingItem?.status)
+          ? '订单已重新提交待审批'
+          : '订单信息已更新',
         add: '耗材订单创建成功',
       })
       if (successMessage) {
@@ -306,13 +307,10 @@ export function ConsumableOrdersPage() {
   }, [filter, queryClient])
   const dialogController = useConsumableOrderDialogController(refreshOrders)
 
-  const handleExport = useCallback(async () => {
-    try {
-      await exportAndDownload(() => consumableOrderAPI.exportOrders(), 'consumable_orders_export')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '导出失败'))
-    }
-  }, [])
+  const { handleExport, isExporting } = useExportDownload({
+    apiCall: consumableOrderAPI.exportOrders,
+    filePrefix: 'consumable_orders_export',
+  })
 
   const columns = useMemo(() => {
     return createConsumableOrderColumns(isAdmin, refreshOrders)
@@ -334,9 +332,16 @@ export function ConsumableOrdersPage() {
             </Button>
           )}
           {isAdmin && (
-            <Button variant="modern" size="lg" onClick={handleExport}>
+            <LoadingButton
+              variant="modern"
+              size="lg"
+              className="px-4"
+              isLoading={isExporting}
+              loadingText="导出中"
+              onClick={handleExport}
+            >
               <ArrowUpFromLine className="w-4 h-4 mr-1.5" /> 导出
-            </Button>
+            </LoadingButton>
           )}
         </div>
       </div>

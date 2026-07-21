@@ -14,6 +14,7 @@ from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.models.user import User
 from app.services.dashboard.common import (
+    ADMIN_SECTION_RECENT_ACTIONS,
     ADMIN_SECTION_RISKS,
     ADMIN_SECTION_TODOS,
     BOARD_SECTION_ACTIONS,
@@ -29,6 +30,7 @@ from app.services.dashboard.items import (
     _build_system_status,
     _build_user_order_overview_items,
     _count_common_shelf_alerts,
+    _count_recent_management_actions,
     _count_stock_alert_items,
     _count_user_board_action_items,
     _count_user_order_overview_items,
@@ -69,6 +71,8 @@ def _get_admin_section_total(
         return _count_todo_items(db)
     if section == ADMIN_SECTION_RISKS:
         return _count_risk_items(db, now)
+    if section == ADMIN_SECTION_RECENT_ACTIONS:
+        return _count_recent_management_actions(db)
     return _count_stock_alert_items(db)
 
 
@@ -92,6 +96,8 @@ def _get_admin_section_items(
             skip=skip,
             limit=limit,
         )
+    if section == ADMIN_SECTION_RECENT_ACTIONS:
+        return _get_recent_management_actions(db, skip=skip, limit=limit)
     return _get_dashboard_section_page(
         lambda fetch_limit: _get_stock_alert_items(db, limit=fetch_limit),
         skip=skip,
@@ -227,6 +233,7 @@ def build_admin_dashboard_summary(db: Session) -> dict[str, Any]:
                 "todo_items": pending_reagent_count + pending_consumable_count,
                 "risk_items": risk_item_count,
                 "stock_alert_items": stock_alert_item_count,
+                "recent_actions": _count_recent_management_actions(db),
             },
             "system_status": _build_system_status(
                 db=db,

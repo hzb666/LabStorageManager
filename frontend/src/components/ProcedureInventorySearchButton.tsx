@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
 import { saveProcedureInventorySearchResult } from '@/lib/storage/procedureInventorySearchStorage'
 import { getApiErrorMessage } from '@/lib/validationSchemas'
+import { useAuthStore } from '@/store/useStore'
 
 const PROCEDURE_TEXT_MAX_CHARS = 5000
 type ProcedureSubmitStage = 'idle' | 'llm' | 'pubchem' | 'opening'
@@ -31,7 +32,12 @@ const SUBMIT_STAGE_LABELS: Record<ProcedureSubmitStage, string> = {
 }
 
 export function ProcedureInventorySearchButton() {
-  const state = useProcedureInventorySearch()
+  const currentUser = useAuthStore((store) => store.user)
+  const state = useProcedureInventorySearch(currentUser?.id ?? null)
+
+  if (!currentUser || currentUser.role === 'public') {
+    return null
+  }
 
   return (
     <>
@@ -41,7 +47,7 @@ export function ProcedureInventorySearchButton() {
   )
 }
 
-function useProcedureInventorySearch() {
+function useProcedureInventorySearch(userId: number | null) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
@@ -102,8 +108,11 @@ function useProcedureInventorySearch() {
       setError(result.message || '文本不像化学实验步骤')
       return
     }
-    const storageId = saveProcedureInventorySearchResult(result)
-    const params = new URLSearchParams({ procedureSearchId: storageId })
+    const storageId = userId === null ? null : saveProcedureInventorySearchResult(result, userId)
+    const params = new URLSearchParams()
+    if (storageId) {
+      params.set('procedureSearchId', storageId)
+    }
     if (result.cas_query) {
       params.set('search', result.cas_query)
       params.set('field', 'cas_number')

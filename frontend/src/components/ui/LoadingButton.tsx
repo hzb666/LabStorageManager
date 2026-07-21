@@ -16,15 +16,14 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
       <Button
         ref={ref}
         disabled={isLoading || disabled}
-        className={cn(
-          "relative disabled:[&_.loading-button-spinner]:opacity-80",
-          className,
-        )}
+        aria-busy={isLoading}
+        className={cn("relative", className)}
         {...props}
       >
         <div className="grid place-items-center w-full h-full">
           {/* 状态 1：默认文字（即便 Loading 时也存在，用来撑开宽度，但透明度设为 0） */}
           <span
+            aria-hidden={isLoading}
             className={cn(
               "col-start-1 row-start-1 flex items-center justify-center transition-opacity duration-200",
               isLoading ? "opacity-0 pointer-events-none" : "opacity-100"
@@ -35,14 +34,17 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
 
           {/* 状态 2：加载状态 */}
           <span
+            aria-hidden={!isLoading}
             className={cn(
               "col-start-1 row-start-1 flex items-center justify-center transition-opacity duration-200",
-              isLoading ? "opacity-100" : "opacity-0 pointer-events-none"
+              isLoading
+                ? "text-muted-foreground opacity-100"
+                : "opacity-0 pointer-events-none"
             )}
           >
             <Loader2
               className={cn(
-                "loading-button-spinner size-[1.2em] animate-spin shrink-0 opacity-80",
+                "loading-button-spinner size-[1.2em] animate-spin shrink-0",
                 // ✨ 关键：只有当存在 loadingText 时，才加右间距
                 loadingText ? "mr-2" : "mr-0",
                 iconClassName

@@ -33,34 +33,40 @@ export function ConfirmDeleteButton({
 }: Readonly<ConfirmDeleteButtonProps>) {
   const confirmScope = resetKey ?? onConfirm
   const [confirmingScope, setConfirmingScope] = useState<unknown>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const isConfirming = !disabled && confirmingScope === confirmScope
+  const isBusy = Boolean(isLoading) || isDeleting
 
   const handleClick = useCallback(async () => {
-    if (disabled || isLoading) {
+    if (disabled || isBusy) {
       return
     }
     if (!isConfirming) {
-      setConfirmingScope(confirmScope)
+      // confirmScope may be the onConfirm function; wrap it so React stores the
+      // function value instead of invoking it as a state updater.
+      setConfirmingScope(() => confirmScope)
       return
     }
 
+    setIsDeleting(true)
     try {
       await onConfirm()
-      setConfirmingScope(null)
     } catch (error) {
-      setConfirmingScope(null)
       if (import.meta.env.DEV) {
         console.error('Delete failed:', error)
       }
+    } finally {
+      setConfirmingScope(null)
+      setIsDeleting(false)
     }
-  }, [confirmScope, disabled, isConfirming, isLoading, onConfirm])
+  }, [confirmScope, disabled, isBusy, isConfirming, onConfirm])
 
   const handleBlur = useCallback((event: React.FocusEvent<HTMLButtonElement>) => {
     onBlur?.(event)
-    if (isConfirming && !isLoading) {
+    if (isConfirming && !isBusy) {
       setConfirmingScope(null)
     }
-  }, [isConfirming, isLoading, onBlur])
+  }, [isBusy, isConfirming, onBlur])
 
   const content = (
     <>
@@ -73,9 +79,9 @@ export function ConfirmDeleteButton({
     return (
       <LoadingButton
         {...buttonProps}
-        disabled={disabled}
+        disabled={disabled || isDeleting}
         iconClassName={iconClassName}
-        isLoading={isLoading}
+        isLoading={isBusy}
         loadingText={loadingText}
         onBlur={handleBlur}
         onClick={() => void handleClick()}
@@ -88,7 +94,7 @@ export function ConfirmDeleteButton({
   return (
     <Button
       {...buttonProps}
-      disabled={disabled}
+      disabled={disabled || isDeleting}
       onBlur={handleBlur}
       onClick={() => void handleClick()}
     >

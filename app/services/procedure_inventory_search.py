@@ -5,9 +5,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 import httpx
-from fastapi import HTTPException, status
+from fastapi import status
 from sqlmodel import Session
 
+from app.core.api_errors import ApiErrorCode, api_error
 from app.core.config import settings
 from app.services.procedure_inventory_analysis import (
     build_analysis_items,
@@ -16,6 +17,7 @@ from app.services.procedure_inventory_analysis import (
     merge_common_reagent_mentions,
 )
 from app.services.procedure_inventory_lookup import unique_cas_order
+from app.services.llm_usage_logger import record_procedure_llm_usage
 from app.services.procedure_inventory_models import (
     ProcedureInventoryExtractionResult,
     ProcedureInventorySearchResult,
@@ -42,7 +44,7 @@ def search_procedure_inventory(
     text: str,
     user_id: int,
 ) -> ProcedureInventorySearchResult:
-    extraction = extract_procedure_inventory(db, text=text)
+    extraction = extract_procedure_inventory(db, text=text, user_id=user_id)
     return resolve_procedure_inventory(db, extraction=extraction, user_id=user_id)
 
 
@@ -50,11 +52,22 @@ def extract_procedure_inventory(
     db: Session,
     *,
     text: str,
+    user_id: int,
 ) -> ProcedureInventoryExtractionResult:
     _ensure_llm_ready()
     formatted_text = format_procedure_text(text)
     common_names = load_common_names(db)
-    extraction = extract_reagents_with_llm(formatted_text, common_names)
+    extraction = extract_reagents_with_llm(
+        formatted_text,
+        common_names,
+        record_usage=lambda payload, attempt: record_procedure_llm_usage(
+            db,
+            user_id=user_id,
+            model=settings.llm_model,
+            attempt=attempt,
+            response_payload=payload,
+        ),
+    )
     if not extraction.is_experimental_procedure:
         return ProcedureInventoryExtractionResult(
             rejected=True,
@@ -80,6 +93,7 @@ def resolve_procedure_inventory(
     extraction: ProcedureInventoryExtractionResult,
     user_id: int,
 ) -> ProcedureInventorySearchResult:
+    _ensure_llm_ready()
     if extraction.rejected:
         return _rejected_result(extraction.message, extraction.formatted_text)
 
@@ -116,11 +130,23 @@ def resolve_procedure_inventory(
 
 def _ensure_llm_ready() -> None:
     if not settings.llm_enabled:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="LLM 功能未启用")
+        raise api_error(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM feature is disabled",
+            code=ApiErrorCode.LLM_DISABLED,
+        )
     if not settings.llm_api_base_url.strip() or not settings.llm_api_key.strip():
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="LLM 接口未配置")
+        raise api_error(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM API is not configured",
+            code=ApiErrorCode.LLM_API_NOT_CONFIGURED,
+        )
     if not settings.llm_model.strip():
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="LLM 模型未配置")
+        raise api_error(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM model is not configured",
+            code=ApiErrorCode.LLM_MODEL_NOT_CONFIGURED,
+        )
 
 
 def _resolve_candidates_with_pubchem(

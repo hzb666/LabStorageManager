@@ -40,7 +40,7 @@ DashboardTone = Literal["neutral", "success", "warning", "high"]
 DashboardTab = Literal["reagents", "consumables", "borrows", "stockin"]
 DashboardAlertKind = Literal["inventory", "common_shelf"]
 DashboardBoardSection = Literal["actions", "orders", "stockAlerts"]
-DashboardAdminSection = Literal["todos", "risks", "stockAlerts"]
+DashboardAdminSection = Literal["todos", "risks", "stockAlerts", "recentActions"]
 
 
 class DashboardPanelCodes(BaseModel):
@@ -155,6 +155,7 @@ class DashboardAdminSummaryCountsResponse(BaseModel):
     todo_items: int
     risk_items: int
     stock_alert_items: int
+    recent_actions: int
 
 
 class DashboardAdminSummaryDataResponse(BaseModel):

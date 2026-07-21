@@ -29,6 +29,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { FilterTable } from '@/components/ui/FilterTable'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
+import { useExportDownload } from '@/hooks/useExportDownload'
 import type { FilterAPI, FilterOption } from '@/hooks/useTableState'
 import { UserRoles } from '@/lib/constants'
 import { canWriteNonPublicData } from '@/lib/permissions'
@@ -74,11 +75,7 @@ import {
   normalizeApiErrorMessage,
   toValidationErrors,
 } from '@/lib/validationSchemas'
-import {
-  exportAndDownload,
-  formatDate,
-  processNotes,
-} from '@/lib/utils'
+import { formatDate, processNotes } from '@/lib/utils'
 import {
   ChemicalNameMapEditorDialog,
   ChemicalNameMapManagementDialog,
@@ -176,6 +173,7 @@ type CommonShelfPageController = {
   renderExpandedRow: (itemRaw: Record<string, unknown>) => ReactElement
   refreshCommonShelf: () => Promise<void>
   handleExport: () => Promise<void>
+  isExporting: boolean
 }
 
 function normalizeOptionalText(value: string | null | undefined) {
@@ -466,7 +464,10 @@ function applyQuickOrderValidationDetail(
     if (!QUICK_ORDER_FIELD_NAMES.has(String(fieldName))) {
       return
     }
-    setFieldError(String(fieldName), errorItem.msg || '输入不合法')
+    setFieldError(
+      String(fieldName),
+      normalizeApiErrorMessage(errorItem.msg, '输入不合法'),
+    )
     applied = true
   })
   return applied
@@ -1256,13 +1257,10 @@ function useCommonShelfPageController(): CommonShelfPageController {
     requireChemicalNameMapRef.current = chemicalNameMapController.promptCreateForMissingCas
   }, [chemicalNameMapController.promptCreateForMissingCas])
 
-  const handleExport = useCallback(async () => {
-    try {
-      await exportAndDownload(() => commonShelfAPI.exportCommonShelf(), 'common_shelf_export')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '导出失败'))
-    }
-  }, [])
+  const { handleExport, isExporting } = useExportDownload({
+    apiCall: commonShelfAPI.exportCommonShelf,
+    filePrefix: 'common_shelf_export',
+  })
 
   const columns = useMemo(() => createCommonShelfColumns({
     canEdit: canManageCommonShelf,
@@ -1294,6 +1292,7 @@ function useCommonShelfPageController(): CommonShelfPageController {
     renderExpandedRow,
     refreshCommonShelf,
     handleExport,
+    isExporting,
   }
 }
 
@@ -1302,11 +1301,13 @@ function CommonShelfPageHeader({
   onOpenManualAdd,
   onOpenChemicalNameMapManagement,
   onExport,
+  isExporting,
 }: {
   showManualAdd: boolean
   onOpenManualAdd: () => void
   onOpenChemicalNameMapManagement: () => void
   onExport: () => void
+  isExporting: boolean
 }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1322,10 +1323,17 @@ function CommonShelfPageHeader({
           <Database className="mr-1.5 h-4 w-4" />
           CAS 主数据管理
         </Button>
-        <Button variant="modern" size="lg" onClick={onExport}>
+        <LoadingButton
+          variant="modern"
+          size="lg"
+          className="px-4"
+          isLoading={isExporting}
+          loadingText="导出中"
+          onClick={onExport}
+        >
           <ArrowUpFromLine className="mr-1.5 h-4 w-4" />
           导出
-        </Button>
+        </LoadingButton>
       </div>
     </div>
   )
@@ -1405,6 +1413,7 @@ export function CommonShelfPage() {
     renderExpandedRow,
     refreshCommonShelf,
     handleExport,
+    isExporting,
   } = useCommonShelfPageController()
   const dialogActions = dialogController.actions
 
@@ -1414,6 +1423,7 @@ export function CommonShelfPage() {
         showManualAdd={canManageCommonShelf}
         onOpenManualAdd={dialogActions.openManualAddDialog}
         onOpenChemicalNameMapManagement={() => chemicalNameMapController.setManagementOpen(true)}
+        isExporting={isExporting}
         onExport={() => {
           void handleExport()
         }}

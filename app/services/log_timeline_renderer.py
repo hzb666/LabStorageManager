@@ -113,6 +113,20 @@ def render_log_timeline_candidates(
     *,
     user_id: int,
 ) -> list[dict[str, object]]:
+    return [
+        _wrap_rendered_candidate(rendered)
+        for _, rendered in render_log_timeline_rows(db, rows, user_id=user_id)
+    ]
+
+
+def render_log_timeline_rows(
+    db: DBSession,
+    rows: list[LogTimeline],
+    *,
+    user_id: int,
+) -> list[tuple[LogTimeline, dict[str, object]]]:
+    """Render timeline rows while preserving their source timeline metadata."""
+
     if not rows:
         return []
 
@@ -121,12 +135,12 @@ def render_log_timeline_candidates(
         user_id=user_id,
         user_names=bundle.user_names,
     )
-    candidates: list[dict[str, object]] = []
+    rendered_rows: list[tuple[LogTimeline, dict[str, object]]] = []
     for row in rows:
         rendered = _render_timeline_candidate(row, bundle=bundle, context=render_context)
         if rendered is not None:
-            candidates.append(_wrap_rendered_candidate(rendered))
-    return candidates
+            rendered_rows.append((row, rendered))
+    return rendered_rows
 
 
 def _read_export_count(snapshot: dict[str, object]) -> object:

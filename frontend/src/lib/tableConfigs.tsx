@@ -44,6 +44,7 @@ function renderHighlightedTextCell(
         text={safeString(text, fallback)}
         highlight={info.table.getState().globalFilter}
         fuzzy={info.table.options.meta?.fuzzySearch}
+        matchMode={info.table.options.meta?.matchMode}
       />
     </span>
   )

@@ -12,7 +12,12 @@ from enum import Enum
 from typing import Any, Mapping
 
 from app.search_query_log_db import insert_search_log_rows
-from app.search_completion_db import TARGET_ENDPOINTS, get_user_preferences, upsert_query_memory
+from app.search_completion_db import (
+    TARGET_ENDPOINTS,
+    get_user_preferences,
+    prune_query_memory_if_due,
+    upsert_query_memory,
+)
 from app.services.search_matchers import split_exact_cas_search_terms
 
 logger = logging.getLogger(__name__)
@@ -439,6 +444,16 @@ def _record_search_memory_from_batch(batch: list[ReadySearchLog]) -> None:
             logger.debug("Search memory recording failed for query=%s", payload.normalized_query)
 
 
+def _prune_query_memory_best_effort() -> None:
+    try:
+        deleted_rows = prune_query_memory_if_due()
+    except Exception:  # noqa: BLE001
+        logger.exception("Search query memory pruning failed")
+        return
+    if deleted_rows:
+        logger.info("Search query memory pruned deleted_rows=%s", deleted_rows)
+
+
 def _write_ready_batch(batch: list[ReadySearchLog]) -> None:
     if not batch:
         return
@@ -462,6 +477,7 @@ def _write_ready_batch(batch: list[ReadySearchLog]) -> None:
             return
 
     _record_search_memory_from_batch(batch)
+    _prune_query_memory_best_effort()
 
     committed_at_monotonic = time.monotonic()
     with _state_lock:

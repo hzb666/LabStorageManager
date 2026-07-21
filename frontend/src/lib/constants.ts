@@ -299,9 +299,6 @@ export const AUTH_STORAGE_EXPIRY_MS = 7 * ONE_DAY_MS
 // UI 偏好过期时长，不与登录态绑定
 export const UI_STORAGE_EXPIRY_MS = 30 * ONE_DAY_MS
 
-// 字体加载超时 (1秒)
-export const FONT_TIMEOUT_MS = 1000
-
 // ==================== 缓存与限流常量 ====================
 // 化学属性缓存最大条目数
 export const CHEMICAL_PROPERTIES_CACHE_MAX_SIZE = 1000

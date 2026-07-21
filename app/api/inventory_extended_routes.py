@@ -71,6 +71,7 @@ from app.services.user_utils import batch_get_user_names
 from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT, mark_entity_completion_index_stale
 from app.services.search_completion_entity_index import (
     delete_inventory_entity_completions,
+    run_completion_index_update,
     sync_inventory_entity_completions,
 )
 
@@ -88,15 +89,19 @@ def _clear_inventory_cache(
     is_delete: bool = False,
 ) -> None:
     clear_cache_by_prefix(search_cache, prefix=prefix)
-    if items is None:
-        mark_entity_completion_index_stale(INVENTORY_COMPLETION_ENDPOINT)
-    elif isinstance(items, list):
-        for item in items:
-            sync_inventory_entity_completions(item)
-    elif is_delete:
-        delete_inventory_entity_completions(items.id)
-    else:
-        sync_inventory_entity_completions(items)
+
+    def update_completion_index() -> None:
+        if items is None:
+            mark_entity_completion_index_stale(INVENTORY_COMPLETION_ENDPOINT)
+        elif isinstance(items, list):
+            for item in items:
+                sync_inventory_entity_completions(item)
+        elif is_delete:
+            delete_inventory_entity_completions(items.id)
+        else:
+            sync_inventory_entity_completions(items)
+
+    run_completion_index_update(update_completion_index, context="inventory_extended")
 
 
 def _is_overdue_borrow(updated_at: datetime | None, now: datetime) -> bool:
@@ -770,7 +775,7 @@ def _register_import_routes(
         db: Annotated[Session, Depends(get_db)],
         query: Annotated[InventoryImportQuery, Depends()],
     ):
-        from app.services.excel_service import preview_inventory_import_from_excel
+        from app.services.excel_service import ExcelImportError, preview_inventory_import_from_excel
 
         _enforce_import_upload_rate_limit(request)
         validate_uploaded_file(file)
@@ -795,6 +800,12 @@ def _register_import_routes(
                 )
                 preview_session_owns_file = True
             return _format_import_response("Preview completed", result, preview_token=preview_token)
+        except ExcelImportError as exc:
+            logger.warning("Inventory import preview rejected: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
         except Exception:
             logger.exception("Preview inventory import failed")
             raise HTTPException(

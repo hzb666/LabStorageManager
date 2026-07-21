@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.core.api_errors import ApiErrorCode, api_error
 from app.models.chemical_name_map import ChemicalNameMap
 from app.models.common_shelf import CommonShelf, CommonShelfGroup, CommonShelfManualCreate
 from app.models.reagent_order import ReagentOrder
@@ -216,20 +217,26 @@ def _create_common_shelf_rows(
         except IntegrityError as exc:
             if is_common_shelf_group_identity_violation(exc):
                 if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
-                    raise HTTPException(
+                    raise api_error(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail="常用货架分组正在被并发创建，请重试",
+                        detail="Common shelf group is being created concurrently; retry",
+                        code=ApiErrorCode.COMMON_SHELF_GROUP_CONFLICT,
                     ) from exc
                 continue
             if not is_internal_code_unique_violation(exc):
                 raise
             if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
-                raise HTTPException(
+                raise api_error(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="常用货架内部编码冲突，请重试",
+                    detail="Common shelf internal code conflict; retry",
+                    code=ApiErrorCode.COMMON_SHELF_CODE_CONFLICT,
                 ) from exc
 
-    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="常用货架内部编码冲突，请重试")
+    raise api_error(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Common shelf internal code conflict; retry",
+        code=ApiErrorCode.COMMON_SHELF_CODE_CONFLICT,
+    )
 
 
 def create_common_shelf_items_from_order(

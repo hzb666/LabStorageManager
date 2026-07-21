@@ -677,7 +677,7 @@ export interface PersonalDashboardSummary {
 }
 
 export type DashboardBoardSection = 'actions' | 'orders' | 'stockAlerts'
-export type DashboardAdminSection = 'todos' | 'risks' | 'stockAlerts'
+export type DashboardAdminSection = 'todos' | 'risks' | 'stockAlerts' | 'recentActions'
 
 export interface DashboardBoardItemCounts {
   action_items: number
@@ -689,6 +689,7 @@ export interface DashboardAdminItemCounts {
   todo_items: number
   risk_items: number
   stock_alert_items: number
+  recent_actions: number
 }
 
 export interface DashboardBoardSummary {

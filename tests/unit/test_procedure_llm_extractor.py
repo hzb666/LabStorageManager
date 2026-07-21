@@ -2,8 +2,10 @@ import pytest
 from fastapi import HTTPException
 import httpx
 
+from app.core.api_errors import API_ERROR_CODE_HEADER, ApiErrorCode
 from app.core.config import Settings
 from app.services import procedure_llm_extractor
+from app.services.llm_usage_logger import parse_llm_token_usage
 
 
 def test_build_llm_payload_uses_json_object_response_format(monkeypatch) -> None:
@@ -100,7 +102,10 @@ def test_parse_llm_response_rejects_truncated_completion() -> None:
         )
 
     assert exc_info.value.status_code == 502
-    assert exc_info.value.detail == "LLM 响应被截断"
+    assert exc_info.value.detail == "LLM response was truncated"
+    assert exc_info.value.headers == {
+        API_ERROR_CODE_HEADER: ApiErrorCode.LLM_RESPONSE_TRUNCATED,
+    }
 
 
 def test_extract_reagents_with_llm_retries_after_invalid_json(monkeypatch) -> None:
@@ -108,12 +113,16 @@ def test_extract_reagents_with_llm_retries_after_invalid_json(monkeypatch) -> No
     responses = [
         httpx.Response(
             200,
-            json={"choices": [{"finish_reason": "stop", "message": {"content": "not json"}}]},
+            json={
+                "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                "choices": [{"finish_reason": "stop", "message": {"content": "not json"}}],
+            },
             request=request,
         ),
         httpx.Response(
             200,
             json={
+                "usage": {"input_tokens": 11, "output_tokens": 3, "total_tokens": 14},
                 "choices": [
                     {
                         "finish_reason": "stop",
@@ -135,6 +144,7 @@ def test_extract_reagents_with_llm_retries_after_invalid_json(monkeypatch) -> No
         ),
     ]
     posted_payloads: list[dict] = []
+    recorded_attempts: list[tuple[int, int | None, int | None]] = []
 
     class FakeClient:
         def __init__(self, *_args, **_kwargs) -> None:
@@ -162,7 +172,26 @@ def test_extract_reagents_with_llm_retries_after_invalid_json(monkeypatch) -> No
         raising=False,
     )
 
-    result = procedure_llm_extractor.extract_reagents_with_llm("Add sodium chloride.", [])
+    def record_usage(payload: dict, attempt: int) -> None:
+        usage = parse_llm_token_usage(payload)
+        recorded_attempts.append((attempt, usage.input_tokens, usage.output_tokens))
+
+    result = procedure_llm_extractor.extract_reagents_with_llm(
+        "Add sodium chloride.",
+        [],
+        record_usage=record_usage,
+    )
 
     assert len(posted_payloads) == 2
+    assert [(1, 10, 2), (2, 11, 3)] == recorded_attempts
     assert result.reagents[0].name == "sodium chloride"
+
+
+def test_parse_llm_token_usage_preserves_zero_counts() -> None:
+    usage = parse_llm_token_usage(
+        {"usage": {"input_tokens": 0, "output_tokens": 3, "total_tokens": 3}}
+    )
+
+    assert 0 == usage.input_tokens
+    assert 3 == usage.output_tokens
+    assert 3 == usage.total_tokens
