@@ -26,44 +26,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Verify tag matches package metadata
-        shell: bash
-        run: |
-          python - "$GITHUB_REF_NAME" <<'PY'
-          import json
-          import re
-          import sys
-          import tomllib
-          from pathlib import Path
-
-          tag = sys.argv[1]
-          if not tag.startswith("v"):
-              raise SystemExit(f"Release tag must start with v: {tag}")
-          expected = tag[1:]
-          root = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-          cli = tomllib.loads(Path("lsm_cli/pyproject.toml").read_text(encoding="utf-8"))
-          frontend = json.loads(Path("frontend/package.json").read_text(encoding="utf-8"))
-          frontend_lock = json.loads(
-              Path("frontend/package-lock.json").read_text(encoding="utf-8")
-          )
-          app_init = Path("app/__init__.py").read_text(encoding="utf-8")
-          app_config = Path("app/core/config.py").read_text(encoding="utf-8")
-          extension = Path("browser-extension/build-config.mjs").read_text(encoding="utf-8")
-          versions = {
-              "backend": root["tool"]["poetry"]["version"],
-              "cli": cli["project"]["version"],
-              "frontend": frontend["version"],
-              "frontend_lock": frontend_lock["version"],
-              "app": re.search(r'__version__ = "([^"]+)"', app_init).group(1),
-              "app_default": re.search(
-                  r'app_version: str = "([^"]+)"', app_config
-              ).group(1),
-              "browser_extension": re.search(r"version: '([^']+)'", extension).group(1),
-          }
-          mismatches = {name: value for name, value in versions.items() if value != expected}
-          if mismatches:
-              raise SystemExit(f"Tag {tag} does not match package versions: {mismatches}")
-          print(f"Release metadata matches {tag}: {versions}")
-          PY
+        run: python scripts/release_version.py check "$GITHUB_REF_NAME"
 
   build:
     name: Build ${{ matrix.asset_name }}

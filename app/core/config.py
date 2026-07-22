@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     # 应用
     app_name: str = "Lab Storage Manager"
-    app_version: str = "0.6.0"
+    app_version: str = "0.6.1"
     cache_version: str = ""
     debug: bool = False
     env: str = "development"  # 生产部署通过 ENV=production 覆盖
@@ -177,7 +177,7 @@ class Settings(BaseSettings):
         description="Retry count for PubChem 429, 5xx, and timeout failures",
     )
     chem_pubchem_user_agent: str = Field(
-        default="LabStorageManager/0.6.0",
+        default="LabStorageManager/0.6.1",
         description="User-Agent sent to PubChem PUG-REST",
     )
     chem_structure_search_max_results: int = Field(
@@ -494,7 +494,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance"""
     settings = Settings()
-    settings.app_version = settings.app_version.strip() or "0.6.0"
+    settings.app_version = settings.app_version.strip() or "0.6.1"
     settings.cache_version = settings.cache_version.strip() or settings.app_version
 
     # 生产环境禁止 HS256，避免对称密钥模式的降级风险

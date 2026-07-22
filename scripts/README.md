@@ -15,6 +15,7 @@
 | `check_db_health.py` | 发布前/迁移后自检 | 检查字段、索引、拼音、CAS 等健康状态。 |
 | `check_db_schema_consistency.py` | 排查 schema 漂移 | 对比 SQLModel 与 SQLite 实际结构。 |
 | `check_index.py` | 快速仅索引核对 | 轻量索引一致性检查。 |
+| `release_version.py` | 发布前同步/检查版本 | 统一维护后端、CLI、前端、应用配置和浏览器扩展版本。 |
 | `backfill_common_shelf_groups.py` | 常用货架组补齐 | 显式补齐历史库缺失的 `common_shelf_group` 记录，默认 dry-run。 |
 | `migrate_legacy_tables_with_copy.py` | 从旧表名升级 | 把 `reagentorder/consumableorder` 数据迁移到新表名。 |
 | `rebuild_inventory_tables_if_missing_source_order_fk.py` | 旧库存表缺外键 | 仅在 `inventory.source_order_id` 外键缺失时重建库存相关表。 |
@@ -45,7 +46,14 @@
 
 ## 常用命令
 
-```bash
+```powershell
+# 统一更新发布版本（PowerShell）
+.\scripts\bump-version.ps1 0.6.1
+
+# 跨平台等价命令与发布标签检查
+python scripts/release_version.py set 0.6.1
+python scripts/release_version.py check v0.6.1
+
 # 结构健康检查
 python scripts/check_db_health.py
 
