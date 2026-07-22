@@ -2,7 +2,7 @@ const FONT_READY_CLASS = 'web-fonts-ready'
 const FONT_STATE_ATTRIBUTE = 'data-font-state'
 const LOCAL_FONT_STYLE_ID = 'wiki-local-web-fonts'
 const LOCAL_FONT_FAMILY = 'SourceHanSansCN-VF-Local'
-const FONT_TIMEOUT_MS = 1000
+const FONT_TIMEOUT_MS = 3000
 const LOCAL_FONT_URL = `${import.meta.env.BASE_URL}lib/SourceHanSansCN-VF.woff2`
 const FONT_SAMPLE_TEXT =
   'LabStorageManager 实验室库存管理系统智能化全生命周期资产管理系统可追溯高智能强协同全文搜索结构检索'
