@@ -17,7 +17,10 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
         ref={ref}
         disabled={isLoading || disabled}
         aria-busy={isLoading}
-        className={cn("relative", className)}
+        className={cn(
+          "relative disabled:[&_.loading-button-spinner]:opacity-100",
+          className
+        )}
         {...props}
       >
         <div className="grid place-items-center w-full h-full">
@@ -37,9 +40,7 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
             aria-hidden={!isLoading}
             className={cn(
               "col-start-1 row-start-1 flex items-center justify-center transition-opacity duration-200",
-              isLoading
-                ? "text-muted-foreground opacity-100"
-                : "opacity-0 pointer-events-none"
+              isLoading ? "opacity-50" : "opacity-0 pointer-events-none"
             )}
           >
             <Loader2
