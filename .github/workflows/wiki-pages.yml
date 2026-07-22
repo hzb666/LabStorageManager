@@ -37,6 +37,8 @@ jobs:
 
       - name: Build VitePress site
         working-directory: wiki
+        env:
+          VITEPRESS_BASE: /LabStorageManager/
         run: npm run build
 
       - name: Upload Pages artifact

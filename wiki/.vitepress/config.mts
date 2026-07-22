@@ -1,7 +1,8 @@
 import { defineConfig } from "vitepress";
 import { MermaidPlugin } from "@leelaa/vitepress-plugin-extended";
 
-const SITE_BASE = "/LabStorageManager/";
+// 本地服务器挂载在 /wiki/；GitHub Pages 构建会显式覆盖仓库子路径。
+const SITE_BASE = process.env.VITEPRESS_BASE?.trim() || "/wiki/";
 
 export default defineConfig({
   lang: "zh-CN",
@@ -79,6 +80,7 @@ export default defineConfig({
           { text: "快速上手", link: "/user-guide/quick-start" },
           { text: "仪表盘", link: "/user-guide/dashboard" },
           { text: "角色与导航", link: "/user-guide/roles-and-navigation" },
+          { text: "实验步骤查库存", link: "/user-guide/procedure-inventory-search" },
           {
             text: "订单、采购与入库",
             link: "/user-guide/orders-and-procurement",
