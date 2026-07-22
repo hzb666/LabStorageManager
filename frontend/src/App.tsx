@@ -15,6 +15,7 @@ import { canWriteNonPublicData } from '@/lib/permissions'
 // 懒加载页面组件 - 使用默认导出
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
 const InventoryPage = lazy(() => import('@/pages/Inventory').then(m => ({ default: m.InventoryPage })))
+const InventoryOperationTimelinePage = lazy(() => import('@/pages/InventoryOperationTimeline'))
 const CommonShelfPage = lazy(() => import('@/pages/CommonShelf').then(m => ({ default: m.CommonShelfPage })))
 const ImportPage = lazy(() => import('@/pages/Import').then(m => ({ default: m.ImportPage })))
 const CartImportPage = lazy(() => import('@/pages/CartImport').then(m => ({ default: m.CartImportPage })))
@@ -142,6 +143,11 @@ function AppContent() {
             <Route path="inventory" element={
               <Suspense fallback={<AuthDeferredShell pathname="/inventory" />}>
                 <InventoryPage />
+              </Suspense>
+            } />
+            <Route path="inventory/:internalCode" element={
+              <Suspense fallback={<AuthDeferredShell pathname="/inventory" />}>
+                <InventoryOperationTimelinePage />
               </Suspense>
             } />
             <Route path="common-shelf" element={

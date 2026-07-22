@@ -168,16 +168,26 @@ interface DataTableBodyProps<TData> {
   hasNextPage?: boolean
   total?: number
   searchKeyword?: string
+  endMessage?: string
 }
 
 // 解析表格底部提示文案，避免在已有结果时误显示空状态。
-function getFooterMessage(rowCount: number, total?: number, searchKeyword?: string): string | null {
+function getFooterMessage(
+  rowCount: number,
+  total?: number,
+  searchKeyword?: string,
+  endMessage?: string
+): string | null {
   if (rowCount === 0) {
     if (searchKeyword) {
       return `未找到匹配"${searchKeyword}"的记录`
     }
 
     return '暂无数据'
+  }
+
+  if (endMessage) {
+    return endMessage
   }
 
   if (total !== undefined && total > 0) {
@@ -201,8 +211,9 @@ export function DataTableBody<TData>({
   hasNextPage,
   total,
   searchKeyword,
+  endMessage,
 }: Readonly<DataTableBodyProps<TData>>) {
-  const footerMessage = getFooterMessage(rows.length, total, searchKeyword)
+  const footerMessage = getFooterMessage(rows.length, total, searchKeyword, endMessage)
 
   return (
     <>

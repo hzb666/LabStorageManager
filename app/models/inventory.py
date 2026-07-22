@@ -212,6 +212,7 @@ class InventoryBorrowRequest(SQLModel):
 class InventoryResponse(BaseResponse):
     """DTO for inventory API responses"""
     id: int
+    internal_code: str
     cas_number: str
     name: str
     english_name: Optional[str]

@@ -448,6 +448,14 @@ export interface InventoryReturnPayload {
   notes?: string
 }
 
+export interface InventoryDetail {
+  id: number
+  internal_code: string
+  cas_number: string
+  name: string
+  storage_location: string | null
+}
+
 export interface ProcedureInventoryItem {
   id: number
   cas_number: string
@@ -557,7 +565,8 @@ export const inventoryAPI = {
   }) =>
     api.get('/inventory/', { params }),
   get: (id: number) => api.get(`/inventory/${id}`),
-  getByCode: (code: string) => api.get(`/inventory/code/${code}`),
+  getByCode: (code: string) =>
+    api.get<InventoryDetail>(`/inventory/code/${encodeURIComponent(code)}`),
   checkCAS: (casNumber: string) => api.get(`/inventory/cas/${casNumber}`),
   borrow: (id: number, data?: { actual_borrower_id?: number }) => api.post(`/inventory/${id}/borrow`, data),
   return: (id: number, data: InventoryReturnPayload) =>
@@ -1100,6 +1109,45 @@ export interface LogItem {
   // 展开后显示的完整数据（所有数据库字段）
   full_data?: Record<string, unknown>
 }
+
+export type InventoryTimelineOperationType = 'stock_in' | 'edit' | 'borrow'
+
+export interface InventoryTimelineItem extends LogItem {
+  id: string
+  operation_type: InventoryTimelineOperationType
+  operator_name: string
+}
+
+export interface InventoryTimelineResponse {
+  data: InventoryTimelineItem[]
+  total: number
+  skip: number
+  limit: number
+}
+
+export interface InventoryTimelineAPI {
+  list: (params: {
+    skip?: number
+    limit?: number
+    search?: string
+  }) => Promise<{ data: { data: InventoryTimelineItem[]; total: number } }>
+}
+
+export const createInventoryTimelineAPI = (internalCode: string): InventoryTimelineAPI => ({
+  list: async (params) => {
+    const response = await api.get<InventoryTimelineResponse>(
+      `/inventory/code/${encodeURIComponent(internalCode)}/timeline`,
+      {
+        params: {
+          skip: params.skip,
+          limit: params.limit,
+          search: params.search || undefined,
+        },
+      }
+    )
+    return { data: { data: response.data.data, total: response.data.total } }
+  },
+})
 
 export interface LogsResponse {
   user_id: number

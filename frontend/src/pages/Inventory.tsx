@@ -4,7 +4,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import type { UseFormReturn, FieldErrors } from 'react-hook-form'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
@@ -71,6 +71,7 @@ import {
 
 export interface InventoryItem {
   id: number
+  internal_code: string
   cas_number: string
   name: string
   english_name: string | null
@@ -567,12 +568,14 @@ function createInventoryColumns(params: {
 
 function InventoryExpandedRow({
   item,
+  onViewRecords,
   matchedSmiles,
   highlightMatchMode,
   highlightQuery,
   highlightQueryFormat,
 }: {
   item: InventoryItem
+  onViewRecords: (internalCode: string) => void
   matchedSmiles?: string | null
   highlightMatchMode?: StructureSearchMode
   highlightQuery?: string | null
@@ -591,14 +594,32 @@ function InventoryExpandedRow({
           highlightMatchMode={highlightMatchMode}
         />
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
+      <div className="grid flex-1 grid-cols-2 gap-x-6 gap-y-2 md:m-2 md:grid-cols-3">
         <div className="col-span-2">英文名称：{item.english_name || '-'}</div>
         <div>别名：{item.alias || '-'}</div>
         <NoteDisplay className="col-span-2" label="备注" text={item.notes ?? undefined} />
         <div>纯度：{item.purity || '-'}</div>
         <div>入库时间：{formatDate(item.created_at)}</div>
         <div>入库用户：{item.created_by_name || '-'}</div>
-        <div>上次借用：{formatInventoryBorrowerDisplay(item)}</div>
+        <div className="min-w-0">
+          <div className="relative inline-block max-w-[calc(100%-clamp(4rem,7vw,6rem))] align-top">
+            <span className="block truncate">
+              上次借用：{formatInventoryBorrowerDisplay(item)}
+            </span>
+            <Button
+              type="button"
+              variant="modern"
+              size="sm"
+              className="absolute left-[calc(100%+clamp(0.5rem,1.5vw,1.25rem))] top-1/2 h-8 shrink-0 -translate-y-1/2 px-3 text-sm"
+              onClick={(event) => {
+                event.stopPropagation()
+                onViewRecords(item.internal_code)
+              }}
+            >
+              记录
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -1074,6 +1095,7 @@ function useInventoryBorrowController({
 
 export function InventoryPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const currentUser = useAuthStore((state) => state.user)
   const canManageInventory = canWriteNonPublicData(currentUser?.role)
@@ -1122,11 +1144,15 @@ export function InventoryPage() {
     () => createInventoryColumns({ onBorrow: borrowController.handleBorrowRequest }),
     [borrowController.handleBorrowRequest]
   )
+  const handleViewRecords = useCallback((internalCode: string) => {
+    navigate(`/inventory/${encodeURIComponent(internalCode)}`)
+  }, [navigate])
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as InventoryItem
     return (
       <InventoryExpandedRow
         item={item}
+        onViewRecords={handleViewRecords}
         matchedSmiles={
           item.structure_matched_smiles
           ?? structureEditor.structureFilter?.smilesByCas.get(item.cas_number.trim())
@@ -1136,7 +1162,7 @@ export function InventoryPage() {
         highlightQueryFormat={structureEditor.structureFilter?.queryFormat}
       />
     )
-  }, [structureEditor.structureFilter])
+  }, [handleViewRecords, structureEditor.structureFilter])
   const structureFilterSummary = structureEditor.structureFilter
     ? STRUCTURE_SEARCH_TEXT_DISABLED_MESSAGE
     : undefined

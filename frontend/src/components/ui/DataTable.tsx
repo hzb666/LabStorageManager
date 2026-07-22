@@ -24,6 +24,7 @@ interface DataTableProps<TData> {
   fetchNextPage?: () => void
   total?: number
   searchKeyword?: string
+  endMessage?: string
   onIsAtTopChange?: (isAtTop: boolean) => void
 }
 
@@ -101,6 +102,7 @@ export function DataTable<TData>({
   fetchNextPage,
   total,
   searchKeyword,
+  endMessage,
   onIsAtTopChange,
 }: Readonly<DataTableProps<TData>>) {
   const headerScrollRef = useRef<HTMLDivElement>(null)
@@ -227,6 +229,7 @@ export function DataTable<TData>({
           hasNextPage={hasNextPage}
           total={total}
           searchKeyword={searchKeyword}
+          endMessage={endMessage}
         />
       </div>
     </div>

@@ -83,6 +83,7 @@ export interface FilterTableProps {
   filterClassName?: string;
   cardClassName?: string;
   emptyText?: string;
+  endMessage?: string;
   toolbarActions?: React.ReactNode;
   inlineCompletionEndpoint?: '/inventory/' | '/reagent-orders/' | '/consumable-orders/';
   enableInlineCompletion?: boolean;
@@ -668,6 +669,7 @@ function useFilterTableRealtime({
 
 interface FilterTableContentProps {
   emptyText: string;
+  endMessage?: string;
   enableExpandAll: boolean;
   disableExpandedRowAnimation?: boolean;
   filter: ReturnType<typeof useTableState>;
@@ -683,6 +685,7 @@ interface FilterTableContentProps {
 // 根据加载态、空态和数据态切换表格主体内容。
 function FilterTableContent({
   emptyText,
+  endMessage,
   enableExpandAll,
   disableExpandedRowAnimation,
   filter,
@@ -728,6 +731,7 @@ function FilterTableContent({
         fetchNextPage={filter.fetchNextPage}
         total={filter.total}
         searchKeyword={filter.globalFilter}
+        endMessage={endMessage}
         onIsAtTopChange={setIsTableAtTop}
       />
     </div>
@@ -1015,7 +1019,7 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
     disableExpandedRowAnimation,
     renderExpandedRow,
     noteField, scrollHeight, className, filterClassName, cardClassName,
-    emptyText, toolbarActions, realtime,
+    emptyText, endMessage, toolbarActions, realtime,
     inlineCompletionEndpoint, enableInlineCompletion,
   } = resolveFilterTableProps(props);
   const location = useLocation();
@@ -1114,6 +1118,7 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
         <CardContent className="relative p-0">
           <FilterTableContent
             emptyText={emptyText}
+            endMessage={endMessage}
             enableExpandAll={enableExpandAll}
             disableExpandedRowAnimation={disableExpandedRowAnimation}
             filter={filter}

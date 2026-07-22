@@ -79,6 +79,7 @@ from app.services.inventory_operation_logger import (
 )
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
+from app.api.inventory_timeline import register_inventory_timeline_routes
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.core.db_compat import exec_delete_returning_first
 from app.models.user import User
@@ -810,6 +811,7 @@ def _ensure_inventory_required_brand(item: Inventory, update_data: dict) -> None
 
 # 先注册具名和扩展路由，保持路径优先级。
 register_inventory_extended_routes(router, SEARCH_CACHE, LIST_CACHE_PREFIX)
+register_inventory_timeline_routes(router)
 
 
 @router.get("/")

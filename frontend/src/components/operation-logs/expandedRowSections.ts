@@ -237,6 +237,8 @@ function buildInventoryChangeSections(fullData: LogRecord): DetailSection[] {
     ]),
     section('变更内容', [
       diffField('名称', before.name, after.name),
+      diffField('英文名称', before.english_name, after.english_name),
+      diffField('别名', before.alias, after.alias),
       diffField('CAS号', before.cas_number, after.cas_number),
       diffField('存放位置', before.storage_location, after.storage_location),
       diffField(
@@ -257,6 +259,11 @@ function buildInventoryChangeSections(fullData: LogRecord): DetailSection[] {
       ),
       diffField('品牌', before.brand, after.brand),
       diffField('纯度', before.purity, after.purity),
+      diffField(
+        '危险品',
+        formatBoolean(before.is_hazardous),
+        formatBoolean(after.is_hazardous)
+      ),
       diffField('备注', before.notes, after.notes),
     ]),
     systemSection(fullData),
@@ -302,11 +309,11 @@ function buildBorrowSections(fullData: LogRecord): DetailSection[] {
         tone: 'info',
         visible: hasValue(fullData.quantity_borrowed),
       }),
-      customField('归还状态', returned ? '已归还' : '未归还', {
+      customField('归还状态', returned ? '已归还' : '借用中', {
         visible: hasValue(fullData.is_returned),
         tone: returned ? 'success' : 'warning',
       }),
-      field('归还数量', formatQuantity(fullData.quantity_returned, fullData.unit), {
+      field('归还后剩余量', formatQuantity(fullData.quantity_returned, fullData.unit), {
         visible: returned && hasValue(fullData.quantity_returned),
       }),
       dateField('借用时间', fullData.borrow_time),
