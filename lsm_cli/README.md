@@ -19,6 +19,14 @@ CLI 自身有额外限制：
 - 不开放用户自助和管理接口，除了 `login/token`、`logout`、`me`
 - 不开放任何 CLI 未显式暴露的 API
 
+## Agent 自动安装（推荐）
+
+将下面一句发送给 Claude Code 或 Codex：
+
+> 阅读 https://raw.githubusercontent.com/hzb666/LabStorageManager/main/skills/lab-storage-manager-cli/INSTALL.md，并按照提示完成安装。
+
+统一安装协议会下载最新 GitHub Release 的预编译单文件 CLI，校验 SHA-256，并从同一个 Release 标签安装匹配的 Agent Skill。当前发布附件支持 Windows x64 和 macOS Apple Silicon，不支持的平台不会回退到源码安装。
+
 ## 运行方式
 
 在仓库根目录执行：
@@ -49,9 +57,9 @@ pipx install ./lsm_cli
 lsm --help
 ```
 
-## 目录版 EXE 分发
+## Windows 本地目录版构建
 
-如果要发给普通 Windows 用户，推荐做目录版 exe，而不是单文件 exe。
+本节供仓库开发者从源码构建和调试目录版产物，不是面向 Agent 的 GitHub Release 安装方式。普通用户和 Agent 应优先使用上面的自动安装协议；GitHub Release 发布的是预编译单文件 CLI。
 
 目录版的特点：
 
@@ -109,9 +117,9 @@ lsm inventory list
 powershell -ExecutionPolicy Bypass -File .\lsm_cli\windows\install.ps1 -SkipPathUpdate
 ```
 
-## macOS 目录版分发
+## macOS 本地目录版构建
 
-macOS 也建议用目录版，而不是单文件打包。
+本节供仓库开发者从源码构建和调试目录版产物。GitHub Release 的 macOS 附件是预编译单文件 CLI。
 
 ### 构建
 

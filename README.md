@@ -328,6 +328,14 @@ Compose 默认把主库、搜索日志库、上传文件和密钥放在持久化
 
 仓库提供本地命令行入口 [`lsm_cli/README.md`](lsm_cli/README.md)，适合脚本任务和不打开前端的开发者。CLI 只通过后端 API 工作，不直接访问数据库，也不导入服务层。
 
+### Agent 一句话安装
+
+将下面一句发送给 Claude Code 或 Codex：
+
+> 阅读 https://raw.githubusercontent.com/hzb666/LabStorageManager/main/skills/lab-storage-manager-cli/INSTALL.md，并按照提示完成安装。
+
+安装协议会从最新 GitHub Release 获取预编译 CLI，并从同一 Release 标签安装对应 Skill；不会使用源码构建 CLI。
+
 ### 支持范围
 
 - `auth`
@@ -376,7 +384,7 @@ python -m lsm_cli auth whoami
 - 脚本登录推荐使用 `--password-stdin` 传递密码，避免明文出现在 shell history
 - 所有命令向 `stdout` 输出 JSON，并通过退出码区分错误类别
 - 受限 CLI 操作流程见 [CLI 访问边界](#cli-访问边界)
-- Windows / macOS 目录版安装、配置文件位置、完整退出码契约见 [`lsm_cli/README.md`](lsm_cli/README.md)
+- Agent 自动安装、GitHub Release 单文件安装、本地开发构建、配置文件位置和完整退出码契约见 [`lsm_cli/README.md`](lsm_cli/README.md)
 
 ## 系统架构
 
