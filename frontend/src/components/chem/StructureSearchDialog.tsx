@@ -224,6 +224,7 @@ function StructureDialogActions({
       </LoadingButton>
       <LoadingButton
         type="button"
+        variant="modern"
         size="lg"
         className="min-w-32 text-center"
         onClick={() => onSearch('substructure')}

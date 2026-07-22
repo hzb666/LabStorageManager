@@ -223,8 +223,7 @@ export function DataTableBody<TData>({
                 key={virtualRow.key}
                 className="absolute top-0 left-0 w-full"
                 style={{
-                  transform: `translate3d(0, ${virtualRow.start}px, 0)`,
-                  willChange: 'transform',
+                  transform: `translateY(${Math.round(virtualRow.start)}px)`,
                 }}
               >
                 <div

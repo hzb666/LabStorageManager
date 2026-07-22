@@ -88,7 +88,7 @@ function useDataTableViewportEffects(
 export function DataTable<TData>({
   table,
   renderExpandedRow,
-  estimatedRowHeight = 56.8,
+  estimatedRowHeight = 57,
   scrollHeight = 600,
   enableExpandAll = false,
   expandAllStorageKey,
@@ -153,7 +153,7 @@ export function DataTable<TData>({
     const row = rows[index]
     if (!row) return estimatedRowHeight
 
-    const expandedEstimate = estimatedRowHeight + 124.8
+    const expandedEstimate = estimatedRowHeight + 125
     const snapshot = bulkExpandedSnapshotRef.current
 
     if (disableExpandedRowAnimation && isAllExpanded) {

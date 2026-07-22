@@ -832,7 +832,7 @@ function DashboardPanelDetailDialog({
 }>) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[94vw] max-w-5xl md:w-[94vw]">
+      <DialogContent className="min-h-[24rem] w-[94vw] max-w-5xl sm:min-h-[32rem] md:w-[94vw]">
         <DialogHeader>
           <DialogTitle className="mb-4 pr-10">
             <span>{title}</span>
@@ -1845,7 +1845,7 @@ function ManagementTodoTable({
           >
             <td className="px-2 py-4 text-base font-normal leading-6">{labelText}</td>
             <td className="truncate px-2 py-4 text-base leading-6">{detailText}</td>
-            <td className="truncate px-2 py-4 text-base leading-6 text-muted-foreground">
+            <td className="truncate px-2 py-4 text-base leading-6">
               {item.submitter_name || "-"}
             </td>
             <td className="px-2 py-4 text-base leading-6 text-muted-foreground">

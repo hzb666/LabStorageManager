@@ -8,6 +8,7 @@ from typing import Optional, Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import case
 from sqlmodel import Session, select, func, or_
 import redis
 
@@ -981,15 +982,20 @@ def list_users(
     current_user: Annotated[User, Depends(require_admin)],
     filters: Annotated[UserListQuery, Depends()],
 ):
-    # 保持原排序语义：本人置顶，再按启用状态、角色、创建时间排序。
+    # 本人置顶，其余用户按启用状态、角色优先级和用户名稳定排序。
     statement = _apply_user_list_filters(select(User), filters)
     total = db.exec(select(func.count()).select_from(statement.subquery())).one()
     total_without_filter = db.exec(select(func.count()).select_from(User)).one()
+    role_priority = case(
+        (User.role == UserRole.ADMIN, 0),
+        (User.role == UserRole.USER, 1),
+        else_=2,
+    )
     statement = statement.order_by(
         (User.id == current_user.id).desc(),
         User.is_active.desc(),
-        User.role.desc(),
-        User.created_at.desc()
+        role_priority.asc(),
+        User.username.asc(),
     )
     statement = statement.offset(filters.skip).limit(filters.limit)
     users = db.exec(statement).all()

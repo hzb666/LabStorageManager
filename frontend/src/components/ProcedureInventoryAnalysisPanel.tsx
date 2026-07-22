@@ -75,12 +75,12 @@ export function ProcedureInventoryAnalysisPanel({
     <section className="rounded-lg border border-border bg-card p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">实验步骤解析（仅供参考）</h2>
+          <h2 className="text-lg font-bold text-foreground">实验步骤解析（仅供参考）</h2>
           <p className="text-sm text-muted-foreground">{summary}</p>
         </div>
         {result.cas_query ? (
           <div className="max-w-full px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">CAS 查询：</span>
+            <span className="font-normal text-foreground">CAS 查询：</span>
             <span className="break-all">{result.cas_query}</span>
           </div>
         ) : null}
@@ -105,7 +105,7 @@ function ProcedureHighlightedText({
 }>) {
   return (
     <div className="min-h-60 rounded-md border border-border bg-background p-3">
-      <p className="mb-2 text-sm font-medium text-foreground">原文</p>
+      <p className="mb-2 text-sm font-normal text-foreground">原文</p>
       <div className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
         {renderHighlightedText(text, items)}
       </div>
@@ -123,7 +123,7 @@ function ProcedureAnalysisList({
   return (
     <div className="min-h-60 rounded-md border border-border bg-background p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium text-foreground">解析结果</p>
+        <p className="text-sm font-normal text-foreground">解析结果</p>
         <InventoryCheckStatusText status={inventoryCheckStatus} />
       </div>
       {items.length > 0 ? (
@@ -163,7 +163,7 @@ function ProcedureAnalysisItem({
   return (
     <div className="rounded-md border border-border px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="min-w-0 break-words text-sm font-medium text-foreground">{item.name}</span>
+        <span className="min-w-0 break-words text-sm font-normal text-foreground">{item.name}</span>
         <ProcedureStatusBadge status={item.displayStatus} />
       </div>
       <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
