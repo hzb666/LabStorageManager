@@ -29,6 +29,7 @@
 | `useInlineSearchCompletion` | 列表搜索框的内联补全请求、缓存和反馈 |
 | `useRememberedUser` | 记住登录用户名等轻量偏好 |
 | `useErrorLogger` | 统一采集前端异常和 API 错误 |
+| `useExportDownload` | 统一文件导出、中文错误提示和重复点击保护 |
 
 ### UI 与交互状态
 
@@ -68,6 +69,10 @@
 ### `useInlineSearchCompletion`
 
 该 Hook 只负责搜索建议状态，不参与真实列表数据查询。`FilterTable` 在配置了 `inlineCompletionEndpoint` 且搜索字段为 `all` 时启用它；单字段搜索不会显示建议，避免补全结果来自其他字段。完整后端和前端协作见 [搜索补全建议](/dev-guide/search-completions)。
+
+### `useExportDownload`
+
+该 Hook 统一调用导出接口、处理 blob 错误信息并维护加载状态。库存和订单页面通过加载按钮阻止重复导出请求，后端继续负责用户级限流与导出上限。
 
 ## 改动入口
 
@@ -110,6 +115,7 @@
 - [frontend/src/hooks/useDataTableScroll.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useDataTableScroll.ts)
 - [frontend/src/hooks/useDialogState.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useDialogState.tsx)
 - [frontend/src/hooks/useErrorLogger.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useErrorLogger.tsx)
+- [frontend/src/hooks/useExportDownload.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useExportDownload.ts)
 - [frontend/src/hooks/useFormModal.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useFormModal.tsx)
 - [frontend/src/hooks/useListSSE.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useListSSE.ts)
 - [frontend/src/hooks/useInlineSearchCompletion.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useInlineSearchCompletion.ts)

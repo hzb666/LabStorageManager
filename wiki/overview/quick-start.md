@@ -2,7 +2,7 @@
 
 ## 前置环境
 
-- Python 3.11+、Node.js 20+、npm 10+。
+- Python 3.11+。前端使用 Node.js 24.14.1 与 npm 11.8.0；Wiki Pages 工作流使用 Node.js 20。
 - 可选 Redis 6+，用于登录限流和会话缓存。
 - 需要 Git 和 Docker，若使用 Compose 还要保证镜像可拉取、依赖可安装。
 
@@ -35,6 +35,8 @@ cp .env.example .env
 - `PRIVATE_KEY_PATH`
 - `PUBLIC_KEY_PATH`
 
+实验步骤查库存需要配置 `LLM_ENABLED=true`、`LLM_API_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`。Sentry 为可选能力，前后端 DSN 为空时保持停用。
+
 Redis 仅监听本机或 Compose 内网时，`REDIS_PASSWORD` 可以留空。
 默认登录态为 7 天：`ACCESS_TOKEN_EXPIRE_MINUTES=10080`，`SESSION_EXPIRE_HOURS=168`。单个后端进程的 Redis 连接池上限由 `REDIS_MAX_CONNECTIONS` 控制，默认 100。
 
@@ -53,13 +55,14 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
 - 开发模式默认监听 5173。
 - 前端 API 基址通常由 `VITE_API_URL` 指向 `http://localhost:8000/api`。
 - `npm run dev` 和 `npm run build` 会先生成 RDKit 与本地字体的带版本号资源映射。
+- Ketcher 三个包固定使用同一版本，依赖调整后需要由 npm 重新生成 `package-lock.json`。
 - 生产构建使用 `npm run build`。
 - 浏览器插件构建使用 `npm run build:extension`，该命令会根据插件运行配置生成 `manifest.json` 和 `shared/generated-config.js`。
 
@@ -106,7 +109,7 @@ curl -i http://localhost:8000/health
 
 ```bash
 cd wiki
-npm install
+npm ci
 npm run dev
 ```
 

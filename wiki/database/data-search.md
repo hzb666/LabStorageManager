@@ -51,11 +51,20 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 对库存和订单类查询，系统通常先拿到候选 rowid 或 id，再回到 ORM 拉实体，避免把全部业务逻辑塞进单条复杂 SQL。
 
+### 组合搜索
+
+列表搜索支持两类显式组合语法：
+
+- 半角空格分词：`乙醇 无水` 拆为最多 8 个词，所有词需要命中同一个业务字段组，不同字段组之间保持 OR 关系。
+- CAS 多值：`64-17-5&&67-56-1` 拆为去重后的精确 CAS，多个 CAS 之间按任一命中处理。
+
+精确匹配模式不启用半角空格分词，包含 `&&` 的输入也不会再执行空格分词。前端本地列表过滤与后端查询使用相同的拆分规则。
+
 ## 搜索补全建议
 
 搜索补全建议是列表搜索输入框上的辅助能力，不参与真实列表搜索结果查询。真实结果仍由本页前述 SQL、FTS、缓存和排序路径决定。
 
-补全数据保存在 `QUERY_LOG_DIR/query_logs.db` 的独立表中：`search_query_memory` 记录用户或全局搜索记忆，`entity_completion_index` 记录从库存、试剂订单和耗材订单抽取的实体候选，`search_completion_meta` 保存 endpoint 级 stale 标记。写操作只标记对应 endpoint stale，下一次该 endpoint 的补全请求再按需重建建议索引。
+补全数据保存在 `QUERY_LOG_DIR/query_logs.db` 的独立表中：`search_query_memory` 记录用户或全局搜索记忆，`entity_completion_index` 记录从库存、试剂订单和耗材订单抽取的实体候选，`search_completion_meta` 保存 endpoint 级 stale 标记与裁剪时间。常规单条写操作直接替换或删除对应实体候选，批量路径和索引版本变化使用 endpoint 级重建。搜索记忆按过期条件、作用域上限和全表上限定期裁剪。
 
 开发者细节见 [搜索补全建议](/dev-guide/search-completions)。
 
@@ -76,6 +85,7 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 - FTS5 与普通索引并存，分别覆盖全文搜索和结构化筛选场景。
 - 列表首页在无搜索条件时允许命中后端短 TTL 内存缓存，减少重复查询。
 - 搜索或分页请求会绕过首页缓存，避免旧数据误命中。
+- 补全实体索引使用单条增量同步，搜索记忆使用每小时裁剪和分层容量上限。
 
 查询设计目标为常见查询稳定、复杂查询可接受、异常时可降级。
 
@@ -91,7 +101,7 @@ SQLite 是主存储。[app/database.py](https://github.com/hzb666/LabStorageMana
 
 - 核对 `PRAGMA journal_mode;` 与 `PRAGMA foreign_keys;`。
 - 对比六张 FTS 表与主表 `COUNT(*)` 是否一致。
-- 分别用中文、全拼、首字母、CAS 精确值和短关键字测试库存与订单搜索。
+- 分别用中文、全拼、首字母、CAS 精确值、半角空格分词、`&&` 多 CAS 和短关键字测试库存与订单搜索。
 - 临时破坏一个 FTS 触发器后重启，确认系统会自动重建。
 
 ## 参考代码

@@ -325,7 +325,22 @@
 | `snapshot_json` | 数据快照 | 操作上下文 |
 | `created_at` | 操作时间 | 日志排序字段 |
 
-## 运行状态与序列
+## 外部服务用量、运行状态与序列
+
+### `llm_usage_log`
+
+| 字段 | 含义 | 说明 |
+| --- | --- | --- |
+| `id` | 主键 | 用量记录 id |
+| `user_id` | 调用用户 | 关联 `users.id`，用户删除后置空 |
+| `feature` | 功能标识 | 实验步骤查库存使用 `procedure_inventory_search` |
+| `provider` | 服务类型 | OpenAI 兼容接口记录为 `openai_compatible` |
+| `model` | 模型名称 | 保存调用时配置的模型 |
+| `attempt` | 尝试序号 | 解析重试按服务响应分别记录 |
+| `input_tokens` | 输入 token | 服务商未返回时为空 |
+| `output_tokens` | 输出 token | 服务商未返回时为空 |
+| `total_tokens` | 总 token | 服务商未返回时为空 |
+| `created_at` | 调用时间 | 用量统计和审计字段 |
 
 ### `runtime_state`
 
@@ -381,6 +396,7 @@ FTS 的影子表由 SQLite 自动维护，不作为业务模型直接读写。
 - [app/models/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory.py)
 - [app/models/inventory_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory_operation_log.py)
 - [app/models/log_timeline.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/log_timeline.py)
+- [app/models/llm_usage_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/llm_usage_log.py)
 - [app/models/reagent_brand.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_brand.py)
 - [app/models/reagent_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py)
 - [app/models/reagent_order_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order_operation_log.py)

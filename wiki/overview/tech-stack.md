@@ -29,11 +29,12 @@
 - 落点：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" />
 - 关键配置：`WAL`、`foreign_keys=ON`、复合索引、FTS5 虚拟表和触发器。
 
-### JWT + python-jose
+### JWT + PyJWT
 
 - 用途：登录认证。
 - 落点：`app/core/auth.py`
 - 模式：浏览器使用 HttpOnly Cookie，脚本或调试工具可使用 Bearer Token。
+- 实现：PyJWT 负责 HS256 / RS256 编解码，`cryptography` 提供 RSA 支持。
 
 ### Redis
 
@@ -120,6 +121,20 @@
 - 前端：`frontend/src/components/chem/StructureSearchDialog.tsx`、`frontend/src/api/structureSearchApi.ts`
 - 边界：默认开启，可通过 `CHEM_STRUCTURE_FEATURE_ENABLED=false` 关闭。
 
+### OpenAI 兼容 LLM + PubChem
+
+- 用途：从实验步骤中提取具体试剂名称，并解析 CAS 候选后查询库存。
+- 后端：`app/api/procedure_inventory_search.py`、`app/services/procedure_*.py`
+- 前端：`frontend/src/components/ProcedureInventorySearchButton.tsx`、`ProcedureInventoryAnalysisPanel.tsx`
+- 边界：默认关闭，需同时配置 `LLM_ENABLED`、接口地址、API Key 和模型名称；公用账户不可用。
+
+### Sentry
+
+- 用途：可选的前后端错误与性能监控。
+- 后端：`app/core/sentry_monitoring.py`
+- 前端：`frontend/src/lib/sentry.ts`、`frontend/vite.config.ts`
+- 边界：DSN 为空时停用，默认不发送个人身份信息；构建凭据齐全时上传前端 source map。
+
 ### Agent skill、CLI 与 MCP
 
 - 用途：为 Agent skill、脚本、企业微信智能机器人和微信客服提供受控命令面。
@@ -170,12 +185,16 @@ flowchart LR
 | --- | --- |
 | 后端 lint | `ruff check app/` |
 | 前端 lint | `cd frontend && npm run lint` |
+| 发布版本同步 | `python scripts/release_version.py set <version>` 或 `./scripts/bump-version.ps1 <version>` |
+| 发布标签校验 | `python scripts/release_version.py check v<version>` |
 | 前端公共资源映射 | `cd frontend && npm run generate:static-assets` |
 | wiki 本地开发 | `cd wiki && npm run dev` |
 | wiki 构建 | `cd wiki && npm run build` |
 | 浏览器插件配置生成 | `npm run build:extension` |
 | 后端启动 | `python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` |
 | 前端启动 | `cd frontend && npm run dev` |
+
+发布版本脚本同步后端、CLI、前端、前端 lock 文件、运行时默认值、PubChem User-Agent、README 配置和浏览器插件版本。Wiki 的文档站包版本独立维护，不参与应用发布标签校验。
 
 ## 相关主题
 
@@ -187,6 +206,7 @@ flowchart LR
 
 ## 参考代码
 - [app/core/auth.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py)
+- [app/core/sentry_monitoring.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/sentry_monitoring.py)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
 - [app/db_bootstrap](https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap)
 - [app/api/chem.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py)
@@ -195,6 +215,7 @@ flowchart LR
 - [docker-compose.yml](https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml)
 - [frontend/src/App.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx)
 - [frontend/src/lib/validationSchemas.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/validationSchemas.ts)
+- [frontend/src/lib/sentry.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/sentry.ts)
 - [frontend/src/store/useStore.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/useStore.ts)
 - [lsm_cli](https://github.com/hzb666/LabStorageManager/tree/main/lsm_cli)
 - [lsm_mcp](https://github.com/hzb666/LabStorageManager/tree/main/lsm_mcp)

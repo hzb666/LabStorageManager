@@ -4,7 +4,7 @@
 
 ## 入口与配置
 
-后端入口是 [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)。应用启动时会先读取 `app.core.config.settings`，再根据 `use_secure_runtime()` 决定日志级别、文档是否开放，以及是否启用更严格的安全行为。`FastAPI` 实例在创建时统一注入 `lifespan`、标题、版本和描述，保证启动与关闭阶段走同一条路径。
+后端入口是 [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)。应用启动时会先读取 `app.core.config.settings`，初始化已配置的 Sentry，再根据 `use_secure_runtime()` 决定日志级别、文档是否开放，以及是否启用更严格的安全行为。`FastAPI` 实例在创建时统一注入 `lifespan`、标题、版本和描述，保证启动与关闭阶段走同一条路径。
 
 [`app/core/config.py`](https://github.com/hzb666/LabStorageManager/blob/main/app/core/config.py) 负责运行时配置的集中管理。当前约束是：
 
@@ -14,7 +14,7 @@
 
 ## 启动初始化
 
-`lifespan` 是 `asynccontextmanager`。启动阶段会初始化异步文件日志、清理过期导入预览、执行 `init_db()`、初始化搜索查询日志库、按配置重建结构索引、启动搜索日志写入线程和日志归档调度器；关闭阶段会停止归档调度器、搜索日志线程、异步文件日志和 `sse_manager` 监听器，避免后台任务残留。
+`lifespan` 是 `asynccontextmanager`。启动阶段会初始化异步文件日志、清理过期导入预览、执行 `init_db()`、初始化搜索查询与补全数据库、按需重建各列表的补全实体索引、按配置重建结构索引、启动搜索日志写入线程和日志归档调度器；关闭阶段会停止归档调度器、搜索日志线程、异步文件日志和 `sse_manager` 监听器，避免后台任务残留。
 
 `init_db()` 的顺序不能打乱：
 
@@ -73,15 +73,22 @@ Redis 相关封装主要承担三件事：
 
 ## 日志分库与归档
 
-日志存储分为三类：
+日志存储分为四类：
 
 - 业务操作日志仍在主业务库中，包括库存、试剂订单、耗材订单、常用货架和用户操作日志。
 - 搜索查询日志写入独立 SQLite 文件，由 `app/search_query_log_db.py` 管理。
 - 请求、审计和错误日志写入运行期日志文件，由 `app/services/log_queue.py` 统一配置异步文件写入。
+- LLM 用量写入主业务库的 `llm_usage_log`，仅保存调用归属、模型、尝试次数和 token 数。
 
 归档脚本负责把三个月以前的历史日志复制到独立归档库，并在复制校验成功后从源库删除。`app/archive_logs.py` 处理主业务库中的操作日志表、常用货架日志及对应 `log_timeline` 行，`app/archive_query_logs.py` 处理搜索查询日志库中的 `search_logs` 表。`borrowlog` 是借还业务数据表，不属于当前日志归档删除范围。两个脚本都支持 `--dry-run`、`--tables` 和 `--output-dir`，归档库内会写入 `archive_meta` 记录批次、源库、目标库、截止时间和归档行数。删除阶段必须在归档库提交成功后才会开始，并且源库删除运行在同一个事务中；任一表删除行数和归档行数不一致都会回滚源库删除。
 
 如果不希望额外配置 cron，可以通过 `ARCHIVE_SCHEDULER_ENABLED=true` 启用后端内置归档调度。调度器在 `lifespan` 启动阶段挂载，支持三种模式：设置 `ARCHIVE_RUN_AT_TIME` 时按服务器本地系统时间每天执行；同时设置 `ARCHIVE_RUN_WEEKDAY` 时每周指定星期执行；未设置固定时间时按 `ARCHIVE_STARTUP_DELAY_SECONDS` 和 `ARCHIVE_INTERVAL_HOURS` 周期执行。调度锁用于避免多 worker 重复运行。归档失败只记录日志，不中断后端启动或请求处理。
+
+## Sentry 监控
+
+后端在 `SENTRY_DSN` 非空时初始化 Sentry，默认关闭个人身份信息发送，环境名称回退到 `ENV`，release 使用 `APP_NAME@APP_VERSION`。前端在 `VITE_SENTRY_DSN` 非空时启用错误、性能追踪和可选回放；构建环境同时提供 `SENTRY_AUTH_TOKEN`、`SENTRY_ORG` 与 `SENTRY_PROJECT` 时会上传 source map，并在上传后删除构建目录中的映射文件。
+
+前后端 DSN 均为空时不会建立 Sentry 连接。采样率应使用 0 到 1 之间的值，生产部署需要结合流量与数据合规要求设置。
 
 ## SSE 与中间件
 
@@ -103,6 +110,7 @@ Redis 相关封装主要承担三件事：
 
 - 修改模型或搜索字段时，先同步更新 `app/db_bootstrap/` 中的 schema、索引和 FTS 初始化逻辑，再运行初始化流程核对结果。
 - 新增配置项时，需要同步写入 `Settings`，并确认它在 `use_secure_runtime()` 下的默认行为。
+- 接入外部 LLM 或监控能力时，需要保持凭据为空即停用，并确认日志中不包含实验步骤、响应正文或密钥。
 - 修改 SSE 房间、模板或序号逻辑时，要同时更新 `ALLOWED_SSE_ROOMS`、`SSERoom`、`sse_manager` 和关闭阶段的清理逻辑。
 - 新增上传接口时，要确认它被 `_is_upload_request` 覆盖，否则可能绕过体积限制。
 
@@ -117,6 +125,7 @@ Redis 相关封装主要承担三件事：
 
 - [app/core/config.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/config.py)
 - [app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py)
+- [app/core/sentry_monitoring.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/sentry_monitoring.py)
 - [app/db_bootstrap](https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap)
 - [app/database.py](https://github.com/hzb666/LabStorageManager/blob/main/app/database.py)
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)

@@ -7,7 +7,7 @@
 LabStorageManager 用于集中处理实验室采购、库存、借用、公告和账户管理。日常使用可分为三类：
 
 - 订单：提交和跟进试剂订单、耗材订单。
-- 库存：查询已入库物品，登记借用和归还。
+- 库存：查询已入库物品，从实验步骤提取试剂并查库存，登记借用和归还。
 - 个人工作区：查看待办、公告、登录设备和会话状态。
 
 浏览器插件用于把外部采购平台购物车带入系统，导入页逐项确认后才会生成正式订单。智能机器人和 Agent 入口面向受控查询与确认后的操作，普通用户仍以网页操作为主。
@@ -38,7 +38,7 @@ LabStorageManager 用于集中处理实验室采购、库存、借用、公告�
 
 ### 常用货架
 
-用于集中管理共享、常备和高频使用的试剂。常用货架不是完整库存镜像，只展示被纳入该流程的物品。
+用于集中管理共享、常备和高频使用的试剂。常用货架只展示被纳入该流程的物品，完整库存记录保留在库存管理页。
 
 ## 基本使用顺序
 
@@ -53,11 +53,12 @@ LabStorageManager 用于集中处理实验室采购、库存、借用、公告�
 1. [快速上手](/user-guide/quick-start)
 2. [仪表盘](/user-guide/dashboard)
 3. [角色与导航](/user-guide/roles-and-navigation)
-4. [订单、采购与入库](/user-guide/orders-and-procurement)
-5. [库存、借还与常用货架](/user-guide/inventory-and-borrowing)
-6. [账户、公告与使用支持](/user-guide/account-and-support)
-7. [管理员指南](/user-guide/admin-guide)
-8. [使用排障](/user-guide/faq)
+4. [实验步骤查库存](/user-guide/procedure-inventory-search)
+5. [订单、采购与入库](/user-guide/orders-and-procurement)
+6. [库存、借还与常用货架](/user-guide/inventory-and-borrowing)
+7. [账户、公告与使用支持](/user-guide/account-and-support)
+8. [管理员指南](/user-guide/admin-guide)
+9. [使用排障](/user-guide/faq)
 
 ## 主要页面
 
@@ -83,6 +84,7 @@ LabStorageManager 用于集中处理实验室采购、库存、借用、公告�
 | 申请采购试剂 | 库存或常用货架确认后，进入试剂订购 |
 | 申请采购耗材 | 耗材订购 |
 | 查找现有物品 | 库存管理 |
+| 根据实验步骤查找试剂 | 库存管理页的实验步骤查库存 |
 | 查看共享试剂 | 常用货架 |
 | 处理归还 | 个人账号仪表盘的当前借用 |
 | 完成待入库 | 非公用账号仪表盘的待入库 |

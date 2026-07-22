@@ -9,7 +9,7 @@
 1. 展示层：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/frontend/src/pages" /> 和 `components` 负责表格、导入、设备和公告等交互，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/browser-extension" /> 负责浏览器插件页面与桥接逻辑。
 2. 接口层：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts" /> 封装全部 `/api` 调用，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/api" /> 提供路由、依赖注入和事件输出。
 3. 自动化入口层：Agent skill 和脚本通过 `lsm_cli/` 访问系统，`lsm_mcp/` 通过 CLI 子进程暴露受控工具，`robot/` 处理企业微信智能机器人和微信客服消息。
-4. 领域层：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/models" /> 定义业务对象，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/services" /> 负责清洗、拼音、内码、匹配、缓存和 SSE 广播，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" /> 负责试剂工作流。
+4. 领域层：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/models" /> 定义业务对象，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/services" /> 负责清洗、拼音、内码、匹配、缓存、实验步骤解析和 SSE 广播，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py" /> 负责试剂工作流。
 5. 基础设施层：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/database.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap" /> 初始化 SQLite，<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py" /> 和 `redis.py` 处理认证与会话，`docker` 与 `nginx` 处理部署边界。
 
 ## 请求与事件路径
@@ -29,6 +29,7 @@ flowchart TD
     Api --> Cache["Redis (app/core/redis.py + rate_limit/session)"]
     Api --> Files["/static/ (CachedStaticFiles)"]
     Api --> Chem["RDKit structure index"]
+    Api --> External["OpenAI-compatible LLM / PubChem / Sentry"]
     Api --> Events["app/api/events.py -> sse_manager -> redis_pubsub"]
     Events --> Web
 ```
@@ -36,7 +37,7 @@ flowchart TD
 ## 三个子系统协作细节
 
 - `frontend/`：`App.tsx` 负责路由守卫和页面加载，`useSSE.ts` 连接 `/api/events?rooms=...`，`useListSSE.ts` 为列表页维护房间切换和 stale 标记。
-- `app/`：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" /> 负责中间件、生命周期和路由注入；`inventory.py`、`reagent_orders.py`、`reagent_orders_workflow.py`、`consumable_orders.py`、`cart_sync.py` 和 `events.py` 分别覆盖库存、订单、导入和事件；<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/services" /> 提供清洗、缓存和 SSE 支撑。
+- `app/`：<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" /> 负责中间件、生命周期和路由注入；`inventory.py`、`reagent_orders.py`、`reagent_orders_workflow.py`、`consumable_orders.py`、`procedure_inventory_search.py`、`cart_sync.py` 和 `events.py` 分别覆盖库存、订单、实验步骤查库存、导入和事件；<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/tree/main/app/services" /> 提供清洗、缓存、外部化学信息解析和 SSE 支撑。
 - `browser-extension/`：构建期 manifest 声明权限，`content/script.js` 抓取购物车，`content/import-bridge.js` 把数据同步到页面缓存；`CartImport` 页面逐条调用标准试剂或耗材订单创建接口。
 - `lsm_cli/`、Agent skill、`lsm_mcp/` 和 `robot/`：按受控命令面处理脚本、MCP、企业微信智能机器人和微信客服入口，写操作仍由后端权限控制。
 
@@ -48,6 +49,7 @@ flowchart TD
 - Redis 主要用于 SSE、登录限流和会话黑名单，不可用时系统仍保留 SQLite 读取能力。
 - SSE 的 `seq` 由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py" /> 维护，前端用序号检查重复和缺失事件。
 - Agent skill 和 MCP 不直接访问数据库，也不开放 CLI 未显式暴露的 API。
+- LLM 与 PubChem 连接参数由后端运行环境提供，Sentry 前端配置在构建时注入；服务端 API Key 不进入前端产物。
 
 ## 设计重点
 

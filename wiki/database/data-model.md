@@ -10,7 +10,7 @@
 | 采购与库存 | `reagent_order`, `consumable_order`, `inventory`, `borrowlog` |
 | 常用货架 | `common_shelf`, `common_shelf_group` |
 | 主数据与结构缓存 | `chemical_name_map`, `reagent_brand`, `compound_structure_cache` |
-| 公告与运行状态 | `announcements`, `runtime_state`, `internal_code_sequences` |
+| 公告、运行状态与外部服务用量 | `announcements`, `runtime_state`, `internal_code_sequences`, `llm_usage_log` |
 | 操作日志 | `inventory_operation_log`, `reagent_order_operation_log`, `consumable_order_operation_log`, `common_shelf_operation_log`, `user_operation_log`, `log_timeline` |
 | FTS 虚表 | `inventory_fts`, `reagent_order_fts`, `consumable_order_fts`, `users_fts`, `chemical_name_map_fts`, `log_timeline_fts` |
 
@@ -34,6 +34,7 @@ FTS 的 `_config`、`_content`、`_data`、`_docsize`、`_idx` 表是 SQLite 为
 | `CompoundStructureCache` | CAS 对应结构缓存 | `cas_number`, `smiles_canonical`, `molblock`, `status`, `manually_verified` |
 | `RuntimeState` | 后端运行状态键值 | `key`, `value`, `updated_at` |
 | `InternalCodeSequence` | 内部编号序列 | `prefix`, `current_seq`, `updated_at` |
+| `LLMUsageLog` | 外部 LLM token 用量审计 | `user_id`, `feature`, `provider`, `model`, `attempt`, `total_tokens` |
 | `*OperationLog` | 业务操作审计 | `actor_user_id` / `operator_id`, `action`, `snapshot_json`, `created_at` |
 | `LogTimeline` | 多来源操作日志读模型 | `source_table`, `source_log_id`, `search_text`, `detail_search_text` |
 
@@ -49,6 +50,7 @@ FTS 的 `_config`、`_content`、`_data`、`_docsize`、`_idx` 表是 SQLite 为
 - `ChemicalNameMap` 使用 `cas_number` 唯一索引管理 CAS 主数据，不直接作为订单或库存外键。
 - 库存、订单、常用货架和用户操作日志会投影到 `LogTimeline`，用于用户日志分页、筛选和搜索。
 - `runtime_state` 保存运行期键值，`internal_code_sequences` 保存内部编号前缀的当前序列。
+- `llm_usage_log` 按用户记录外部 LLM 响应的 token 用量，不保存提示词和响应正文。
 
 ## ER 视图
 
@@ -59,6 +61,7 @@ erDiagram
     USER ||--o{ CONSUMABLE_ORDER : applies
     USER ||--o{ BORROWLOG : borrows
     USER ||--o{ ANNOUNCEMENT : creates
+    USER ||--o{ LLM_USAGE_LOG : incurs
     REAGENT_ORDER ||--o{ INVENTORY : copies_to
     INVENTORY ||--o{ BORROWLOG : records
     COMMON_SHELF_GROUP ||--o{ COMMON_SHELF : groups
@@ -152,6 +155,13 @@ erDiagram
 - `runtime_state.key` 是主键，当前用于保存后端运行期键值，例如缓存版本。
 - `internal_code_sequences.prefix` 是主键，记录每个内部编号前缀的最新序列。
 
+### LLMUsageLog
+
+- `feature` 区分 LLM 调用场景，实验步骤查库存使用 `procedure_inventory_search`。
+- `provider` 记录兼容接口类型，`model` 记录实际配置的模型名称。
+- `attempt` 使解析重试可以逐次计费，token 字段允许服务商未返回用量时保持为空。
+- `user_id` 删除后置空，历史用量记录继续保留。
+
 ## 枚举与追溯
 
 - 试剂订单状态：`PENDING/APPROVED/REJECTED/ARRIVED/STOCKED/DELETED`。
@@ -205,6 +215,7 @@ erDiagram
 - [app/models/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory.py)
 - [app/models/inventory_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/inventory_operation_log.py)
 - [app/models/log_timeline.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/log_timeline.py)
+- [app/models/llm_usage_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/llm_usage_log.py)
 - [app/models/reagent_brand.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_brand.py)
 - [app/models/reagent_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py)
 - [app/models/reagent_order_operation_log.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order_operation_log.py)

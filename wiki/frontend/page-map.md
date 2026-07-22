@@ -11,6 +11,7 @@
 - `/reagents`：试剂订单。
 - `/consumables`：耗材订单。
 - `/inventory`：库存列表。
+- `/inventory/:internalCode`：单个库存的操作记录。
 - `/common-shelf`：常用货架。
 - `/import`：Excel 或手工批量导入相关页面。
 - `/devices`：个人设备和会话管理。
@@ -77,7 +78,8 @@
 
 `Inventory` 和 `CommonShelf` 都属于“现货侧页面”，但语义不同：
 
-- `Inventory` 面向单瓶库存和借还
+- `Inventory` 面向单瓶库存、借还和实验步骤查库存
+- `InventoryOperationTimeline` 面向单瓶库存的入库、编辑和借用记录，只读取主数据库
 - `CommonShelf` 面向分组展示、公用沉淀和补瓶减瓶
 
 因此它们虽然都接实时刷新，但列表主键和局部 patch 语义并不相同。
@@ -100,10 +102,11 @@
 
 | 页面 | 主 API 模块 | 常用 SSE rooms |
 | --- | --- | --- |
-| `Dashboard` | `dashboardAPI.getBoardSummary`、`dashboardAPI.getBoardSectionItems`、`dashboardAPI.getBoardWindowStats`、`dashboardAPI.getAdminSummary`、`dashboardAPI.getAdminSectionItems` | `dashboard`、`inventory` |
+| `Dashboard` | `dashboardAPI.getPersonalSummary`、`dashboardAPI.getBoardSummary`、`dashboardAPI.getBoardSectionItems`、`dashboardAPI.getBoardWindowStats`、`dashboardAPI.getAdminSummary`、`dashboardAPI.getAdminSectionItems` | `dashboard`、`inventory` |
 | `ReagentOrders` | `reagentOrderAPI` | `reagent_orders` |
 | `ConsumableOrders` | `consumableOrderAPI` | `consumable_orders` |
-| `Inventory` | `inventoryAPI` | `inventory` |
+| `Inventory` | `inventoryAPI`、`procedureInventorySearchAPI` | `inventory` |
+| `InventoryOperationTimeline` | `inventoryAPI.getByCode`、`createInventoryTimelineAPI` | 不订阅 SSE，按分页 HTTP 快照读取 |
 | `CommonShelf` | `commonShelfAPI` | `common_shelf` |
 | `CartImport` | `authAPI`、`reagentOrderAPI`、`consumableOrderAPI` | 以本地草稿和标准 API 为主，不直接依赖 SSE 房间 |
 | `DeviceManagement` | `sessionAPI` | 通常不依赖业务 SSE 房间 |
@@ -124,13 +127,11 @@
 
 ## 页面改动时的判断顺序
 
-- 新页面是否需要共享侧边栏和公告条？
-- 它是否要求登录，但又不适合放进主壳层？
-- 它是否需要管理员权限？
-- 它是列表页、表单页，还是一次性流程页？
-- 它是否需要接入某个 SSE 房间，还是只需要普通 HTTP 快照？
-
-按这个顺序判断，通常就能知道它该挂在哪层、该复用哪些基础设施。
+1. 确认页面是否共享侧边栏和公告条。
+2. 确认登录、角色和公用账户权限。
+3. 确认页面类型属于列表、表单或一次性流程。
+4. 确认数据同步方式使用 SSE 房间或普通 HTTP 快照。
+5. 根据以上边界选择路由层级和基础设施。
 
 ## 验证要点
 
@@ -140,6 +141,7 @@
 - `/logs` 和 `/admin/logs` 是否都能通过短期日志令牌进入。
 - 切换不同业务页后，相关列表是否仍能收到正确的 SSE 更新或 stale 提示。
 - 新页面挂载后，是否选用了正确的懒加载 fallback 和路由守卫。
+- 库存操作记录是否只显示入库、编辑、借用三类，并可搜索操作人和详情摘要。
 
 ## 参考代码
 - [frontend/src/App.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/App.tsx)
@@ -147,6 +149,7 @@
 - [frontend/src/pages/CartImport.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/CartImport.tsx)
 - [frontend/src/pages/Dashboard.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Dashboard.tsx)
 - [frontend/src/pages/Inventory.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/Inventory.tsx)
+- [frontend/src/pages/InventoryOperationTimeline.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/InventoryOperationTimeline.tsx)
 - [frontend/src/pages/ReagentOrders.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/ReagentOrders.tsx)
 - [frontend/src/pages/ConsumableOrders.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/ConsumableOrders.tsx)
 - [frontend/src/pages/DeviceManagement.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/pages/DeviceManagement.tsx)

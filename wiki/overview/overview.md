@@ -25,6 +25,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 - 借用日志
 - 用户会话
 - 公告
+- LLM 用量记录
 
 ## 子系统概览
 
@@ -56,10 +57,12 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 - CAS 号重复提醒用于降低重复采购。
 - 试剂品牌选项由后端主数据接口维护，前端表单统一复用。
 - 试剂支持到货确认、暂存和一键入库。
+- 库存页支持从实验步骤提取化学品、解析 CAS 号并匹配库存。
 - 常用货架覆盖“高频领用”的库存场景。
 - SQLite 以 WAL 模式运行，兼顾部署简单和并发读取。
 - 前端覆盖表格、表单、本地状态和设备管理。
 - 后端提供 SSE、批量导入、图片上传和公告管理。
+- 前后端可按配置接入 Sentry，LLM 调用记录仅保存用量元数据。
 
 ## 请求与事件链路
 
@@ -81,6 +84,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 | 大表格与搜索 | TanStack Table + Virtual + 后端检索/拼音字段 |
 | 认证与会话 | JWT + 多设备会话管理 |
 | 化学结构 | RDKit + Ketcher + PubChem + 本地结构缓存 |
+| 实验步骤查库存 | OpenAI 兼容 LLM + PubChem + 库存 CAS 查询 |
 | 浏览器插件 | Chrome Manifest V3 |
 | 自动化入口 | Agent skill + CLI + MCP + 企业微信智能机器人 + 微信客服 |
 
@@ -91,6 +95,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 - Redis 由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py" /> 提供登录限流和会话黑名单，由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_redis.py" /> 负责跨进程广播。
 - 图片由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/image_service.py" /> 处理后保存到 `static/` 运行目录，经 `/static/` 访问；缓存头由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/main.py" /> 的静态文件配置统一处理。
 - 结构检索由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" />、<InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/structure_index.py" /> 和 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/compound_structure.py" /> 共同支撑。
+- 实验步骤查库存由 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py" /> 统一编排 LLM 提取、PubChem 解析和库存匹配。
 
 ## 运行与部署
 
@@ -124,7 +129,8 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 3. 接口边界调整：先看 [API 边界与导航](/overview/api-boundary)。
 4. 目录和入口梳理：先看 [目录结构](/overview/directory-structure) 和 [技术栈](/overview/tech-stack)。
 5. 浏览器插件导入调整：先看 [浏览器插件购物车同步](/dev-guide/cart-sync)。
-6. CLI、MCP 和机器人入口调整：先看 [关键文件导航](/dev-guide/key-files) 和 [API 边界与导航](/overview/api-boundary)。
+6. 实验步骤查库存调整：先看 [实验步骤查库存](/user-guide/procedure-inventory-search) 和 [核心 API 与工作流](/backend/api-workflows)。
+7. CLI、MCP 和机器人入口调整：先看 [关键文件导航](/dev-guide/key-files) 和 [API 边界与导航](/overview/api-boundary)。
 
 ## 验证要点
 
@@ -139,6 +145,7 @@ LabStorageManager 是面向实验室采购与库存管理的业务系统，围�
 - [app/api/chem.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py)
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py)
 - [app/api/dashboard.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py)
+- [app/api/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py)
 - [app/api/reagent_brands.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_brands.py)
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)
 - [app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py)

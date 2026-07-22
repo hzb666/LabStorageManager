@@ -37,7 +37,8 @@
 - 表头与字段映射校验
 - 规格解析、CAS 标准化、拼音字段生成
 - 预览阶段返回逐行校验结果
-- 确认阶段批量创建库存并在失败时回滚批次
+- 预览成功后创建绑定用户的一次性令牌，默认有效期 15 分钟
+- 确认阶段重新执行完整校验，批量创建库存并在失败时回滚批次
 
 因此前端只负责上传和展示结果，不应复制导入规则。
 
@@ -59,6 +60,8 @@
 - 库存、常用货架、试剂订单、耗材订单都支持导出。
 - 统一由专门的导出服务生成面向用户的文件结构。
 - 前端通过 blob 下载，文件名由页面和后端共同约定。
+- 后端按每批 2000 条读取，单次最多导出 20000 条，超出上限时通过响应头返回总数与实际导出数。
+- 同一用户在每个导出范围内默认每分钟最多执行 2 次。
 
 新增导出页面沿用“后端生成文件，前端触发下载”的模式。
 
@@ -95,9 +98,9 @@
 
 ## 补充：导入与导出
 
-- Excel 导入接口限制 2MB，只接受 `csv/xlsx/xls`，逐行错误会汇总返回。
+- Excel 导入接口限制 2MB，只接受 `csv/xlsx/xls`，逐行错误会汇总返回；确认请求必须携带当前用户对应的一次性预览令牌。
 - 购物车导入页主链路对应标准订单创建接口，成功后由订单接口广播相关房间；`/api/cart-sync` 用于匹配分析。
-- 导出接口只负责产出文件，不负责把结果写回缓存。
+- 导出接口只负责产出文件，通过批次读取、硬上限和用户级限流控制资源占用。
 
 ## 边界与风险
 
@@ -126,5 +129,7 @@
 - [app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py)
 - [app/api/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py)
 - [app/services/chemical_info.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/chemical_info.py)
+- [app/services/export_batch.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/export_batch.py)
+- [app/services/inventory_import_preview_sessions.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/inventory_import_preview_sessions.py)
 - [app/services/sse_manager.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py)
 - [app/services/sse_redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_redis.py)

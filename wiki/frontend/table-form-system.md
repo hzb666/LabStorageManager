@@ -21,6 +21,8 @@
 - `useDataTableScroll` 与 `useBulkExpand` 负责滚动、展开和虚拟计算的联动
 - `useColumnResize` 负责列宽拖拽与约束计算
 - `FilterTable` 通过 `renderExpandedRow`、`noteField` 等入口接入业务详情，而不破坏表格骨架
+- 页面可通过 `endMessage` 覆盖已加载完毕时的底部文案；库存操作记录用它提示归档库未纳入查询
+- 虚拟行使用取整后的 `translateY` 定位，减少文本落在子像素时的模糊；长期渲染的行不保留永久 `will-change`
 
 这套设计的目标是：
 

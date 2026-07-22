@@ -1,6 +1,6 @@
 # 搜索补全建议
 
-本文档说明搜索补全建议在后端、补全索引、搜索记忆和前端表格输入之间的协作方式。该能力由提交 `44e88dce238c5850969cc2b6f920390fe75abdd7` 引入。
+本文档说明搜索补全建议在后端、补全索引、搜索记忆和前端表格输入之间的协作方式。
 
 ## 设计边界
 
@@ -30,7 +30,7 @@
 - `GET/PUT /api/search-completions/preferences`
   - 读写当前用户是否启用个性化搜索记忆
 
-`inline` 请求在排序前会调用 `rebuild_completion_entity_index_if_stale(db, endpoint)`。这意味着写操作只设置 stale 标记，真正重建发生在下一次该 endpoint 的补全请求中。
+`inline` 请求在排序前会调用 `rebuild_completion_entity_index_if_stale(db, endpoint)`，用于处理批量写入或索引版本变化留下的 endpoint 级 stale 标记。常规单条写操作会直接同步对应实体的候选行。
 
 ## 数据库与表
 
@@ -43,9 +43,9 @@
 | `user_search_preferences` | 用户级个性化开关 |
 | `search_completion_meta` | endpoint 级 stale 标记 |
 
-`search_query_memory` 使用非空哨兵值保存全局用户和全部字段，避免 SQLite `NULL` 唯一索引无法去重的问题。重复搜索不会新增行，而是增加 `frequency` 并更新 `last_used_at`。
+`search_query_memory` 使用非空哨兵值保存全局用户和全部字段，避免 SQLite `NULL` 唯一索引无法去重的问题。重复搜索会增加 `frequency` 并更新 `last_used_at`，相同作用域和规范化查询保持一条记录。
 
-`entity_completion_index` 是派生表，不是事实源。重建时先删除目标 endpoint 的旧索引，再批量插入该 endpoint 的候选行；它不会因为重复搜索而无限增长。
+`entity_completion_index` 属于可重建的派生索引，主业务表保留事实数据。全量重建会先删除目标 endpoint 的旧索引，再批量插入该 endpoint 的候选行；单条同步会按 `endpoint + entity_type + entity_id` 替换对应候选。
 
 ## 实体索引来源
 
@@ -59,12 +59,13 @@
 | `/reagent-orders/` | `ReagentOrder` | `name`、`cas_number`、`brand`、`category`、`applicant` |
 | `/consumable-orders/` | `ConsumableOrder` | `name`、`specification`、`communication`、`applicant` |
 
-索引重建支持两种模式：
+索引维护支持三种模式：
 
 - `rebuild_completion_entity_index(db)`：启动时或维护任务重建全部 endpoint。
 - `rebuild_completion_entity_index(db, endpoint)`：运行期只重建指定 endpoint。
+- `sync_*_entity_completions(...)` / `delete_*_entity_completions(...)`：业务写入后替换或删除单条实体候选。
 
-运行期 stale 标记也是 endpoint 级。库存变更只影响 `/inventory/`；试剂订单变更只影响 `/reagent-orders/`；耗材订单变更只影响 `/consumable-orders/`。试剂订单入库会额外生成库存，因此还会标记 `/inventory/` stale。
+运行期 stale 标记按 endpoint 保存。启动阶段只重建 stale endpoint；内联补全请求也保留按需重建能力。批量写入无法安全逐条同步时可标记对应 endpoint，单条创建、编辑、状态变化和删除直接维护实体候选。
 
 ## 排序与候选来源
 
@@ -111,26 +112,35 @@
 - 接受建议后提交正反馈
 - 隐藏建议后提交负反馈
 
-前端同样只在 `searchField === "all"` 时启用补全配置。单字段搜索时 `FilterTable` 不会传递内联建议到 `TableFilters`。
+前端同样只在 `searchField === "all"` 时启用补全配置。单字段搜索时 `FilterTable` 不会传递内联建议到 `TableFilters`。包含半角空格的分词查询不会请求补全，避免把组合查询误当成一个候选前缀。
 
 ## 写操作刷新规则
 
-写路径不直接重建索引，只标记 stale。这样连续多次新增或修改记录时，中间没人请求补全就不会重复重建。
+常规写路径按实体增量维护候选索引，避免每次写入后扫描整个 endpoint。
 
 变更入口主要包括：
 
-- 库存 CRUD、导入、借用、归还：标记 `/inventory/`
-- 试剂订单创建、编辑、审批、到货、删除：标记 `/reagent-orders/`
-- 试剂订单正式入库：标记 `/reagent-orders/` 和 `/inventory/`
-- 耗材订单创建、编辑、审批、完成、拒绝、删除：标记 `/consumable-orders/`
+- 库存 CRUD、借用和归还：替换或删除 `/inventory/` 对应实体候选。
+- 试剂订单创建、编辑、审批、到货和删除：替换或删除 `/reagent-orders/` 对应实体候选。
+- 试剂订单正式入库：同步试剂订单候选和生成的库存候选。
+- 耗材订单创建、编辑、审批、完成、拒绝和删除：替换或删除 `/consumable-orders/` 对应实体候选。
+- 批量导入等批量路径：批量同步实体；无法确认单条覆盖范围时标记 `/inventory/` stale。
 
-如果后续改成行级增量刷新，需要保证所有这些写路径都覆盖到；否则宁可 fallback 到 endpoint stale，避免建议索引永久不一致。
+写路径调用 `run_completion_index_update` 时，补全索引异常只记录日志，不回滚已经成功的业务事务。维护代码需要覆盖实体创建、字段变更、状态变更和删除四类路径，并保留 endpoint 重建作为恢复手段。
 
 ## 性能与容量
 
 `entity_completion_index` 是可重建缓存，大小跟主库实体数和索引字段数相关。例如一个订单可能生成多行候选，因为名称、CAS、品牌和申请人分别是不同候选。endpoint 级重建一般比全库重建更可控。
 
-`search_query_memory` 会按不同规范化搜索词增长。重复搜索不会增加行数，但新的不同搜索词会新增记录。当前没有 TTL 或 per-scope 上限；如果搜索记忆持续增长，应优先加入保留最近/高频 N 条的裁剪任务，而不是改动实体索引。
+`search_query_memory` 会按不同规范化搜索词增长，并由跨进程节流的裁剪任务限制容量：
+
+- 每小时最多执行一次裁剪检查。
+- 频次不高于 2 且 180 天未使用的记录会被清理。
+- 每个用户、endpoint 和字段作用域最多保留 1000 条。
+- 全局 endpoint 和字段作用域最多保留 5000 条。
+- 全表最多保留 100000 条。
+
+裁剪按频次、最近使用时间和 id 保留优先级较高的记录。实体索引容量由主库实体数量和索引字段数量决定，通过单条替换、单条删除和 endpoint 重建保持边界。
 
 ## 维护约束
 

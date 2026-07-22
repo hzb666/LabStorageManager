@@ -47,6 +47,14 @@
 
 负责展开态、模糊搜索、匹配模式和列宽等表格偏好的本地持久化。
 
+#### `searchMatchMode.ts` 与 `searchLimits.ts`
+
+维护包含匹配、精确匹配、半角空格分词、`&&` 多值拆分和搜索输入长度边界，使本地过滤与后端查询保持相同语法。
+
+#### `storage/procedureInventorySearchStorage.ts`
+
+使用 `sessionStorage` 暂存实验步骤解析结果，保存时间为 10 分钟，并绑定当前用户。退出登录时清理，存储不可用时安全降级。
+
 ### 常量与选项
 
 #### `constants.ts`
@@ -171,6 +179,8 @@ flowchart LR
 - [frontend/src/lib/options.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/options.ts)
 - [frontend/src/lib/reagentBrandOptions.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/reagentBrandOptions.ts)
 - [frontend/src/lib/runtimeTimeConfig.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/runtimeTimeConfig.ts)
+- [frontend/src/lib/searchLimits.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/searchLimits.ts)
+- [frontend/src/lib/searchMatchMode.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/searchMatchMode.ts)
 - [frontend/src/lib/staticAssets.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/staticAssets.ts)
 - [frontend/src/lib/tableConfigs.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/tableConfigs.tsx)
 - [frontend/src/lib/toast.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/toast.ts)
@@ -179,3 +189,4 @@ flowchart LR
 - [frontend/src/lib/storage/appAuthMetaStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appAuthMetaStorage.ts)
 - [frontend/src/lib/storage/appTableStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appTableStorage.ts)
 - [frontend/src/lib/storage/appUiStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/appUiStorage.ts)
+- [frontend/src/lib/storage/procedureInventorySearchStorage.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/procedureInventorySearchStorage.ts)

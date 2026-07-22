@@ -33,7 +33,9 @@ flowchart TD
 | `user_sessions.py` | 设备会话管理 |
 | `inventory.py` | 库存基础 CRUD |
 | `inventory_extended_routes.py` | 导入导出、借还、仪表盘等库存扩展路由 |
+| `inventory_timeline.py` | 单个库存的主库操作记录只读路由 |
 | `dashboard.py` | 仪表盘聚合、分页 section 和窗口统计路由 |
+| `procedure_inventory_search.py` | 实验步骤提取、CAS 解析和库存查询编排路由 |
 | `common_shelf.py` | 常用货架专用路由 |
 | `reagent_orders.py` | 试剂订单基础 CRUD |
 | `reagent_orders_workflow.py` | 试剂审批、到货、入库工作流 |
@@ -56,6 +58,7 @@ flowchart TD
 | `constants.py` | 上传路径、SSE 房间、限额和常量 |
 | `request_utils.py` | 客户端 IP、request id 等请求工具 |
 | `time_utils.py` | UTC 时间和格式化 |
+| `sentry_monitoring.py` | 后端 Sentry 初始化与采样配置 |
 
 ## 订单与库存核心服务
 
@@ -64,6 +67,7 @@ flowchart TD
 | 文件 | 作用 |
 | --- | --- |
 | `dashboard/common.py` | 仪表盘常量、结构化 item builder 和通用分页辅助 |
+| `dashboard/personal.py` | 个人仪表盘卡片计数查询 |
 | `dashboard/summary.py` | 管理员汇总、成员看板、公用账户看板和 section 分发 |
 | `dashboard/items.py` | 待办、风险、库存告警、最近动作和系统状态 item 构造 |
 | `dashboard/metrics.py` | 管理端计数、近期窗口统计和自然天阈值判断 |
@@ -73,6 +77,7 @@ flowchart TD
 | 文件 | 作用 |
 | --- | --- |
 | `inventory_queries.py` | 库存查询拼装 |
+| `inventory_timeline.py` | 聚合入库、编辑和借用记录，生成可搜索、可展开的库存时间线 |
 | `inventory_fts.py` | 库存全文搜索入口与异常 |
 | `order_fts.py` | 订单 FTS |
 | `order_list_search.py` | 订单列表搜索参数和查询辅助 |
@@ -130,6 +135,18 @@ flowchart TD
 | `cache_reset_service.py` | 运行时缓存版本和缓存重置 |
 | `export_rate_limit.py` | 导出接口限流 |
 | `log_queue.py` | 异步文件日志队列 |
+| `export_batch.py` | 分批读取导出数据与硬上限标记 |
+
+### 实验步骤与 LLM
+
+| 文件 | 作用 |
+| --- | --- |
+| `procedure_llm_extractor.py` | 调用 OpenAI 兼容接口并校验结构化响应 |
+| `procedure_inventory_analysis.py` | 规范化试剂状态和分析结果 |
+| `procedure_pubchem_name.py` | 通过 PubChem 名称接口解析 CAS 候选 |
+| `procedure_inventory_lookup.py` | 按 CAS 候选汇总库存命中情况 |
+| `procedure_inventory_search.py` | 编排提取、解析、库存查询和用量记录 |
+| `llm_usage_logger.py` | 保存不含提示词与响应正文的 token 用量 |
 
 ### 化学结构
 
@@ -180,7 +197,7 @@ flowchart TD
 
 模型层通常分成两类：
 
-- 表模型：`User`、`Inventory`、`CommonShelf`、`CommonShelfGroup`、`ReagentOrder`、`ReagentBrand`、`ConsumableOrder`、`Announcement`、`UserSession`、`BorrowLog`、`CompoundStructureCache`、`LogTimeline`
+- 表模型：`User`、`Inventory`、`CommonShelf`、`CommonShelfGroup`、`ReagentOrder`、`ReagentBrand`、`ConsumableOrder`、`Announcement`、`UserSession`、`BorrowLog`、`CompoundStructureCache`、`LogTimeline`、`LLMUsageLog`
 - DTO / Response：`Create`、`Update`、`Response` 等输入输出模型
 
 实体关系和字段职责可继续对照 [数据模型](/database/data-model) 与 [字段参考](/database/field-reference)。

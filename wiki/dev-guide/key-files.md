@@ -29,6 +29,8 @@
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py" />：库存瓶级唯一编码生成器，排查入库冲突时优先看这里。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py" />：名称、分类、品牌、位置的拼音与首字母预计算逻辑。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/chem.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/structure_index.py" />：结构缓存、PubChem 解析和子结构检索入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/procedure_inventory_search.py" />：实验步骤提取、CAS 解析、候选确认和库存匹配的编排入口。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/llm_usage_logger.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/models/llm_usage_log.py" />：LLM 调用用量元数据的写入逻辑与数据模型。
 
 ## 数据模型与检索基线
 
@@ -59,6 +61,8 @@
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/reagentBrandOptions.ts" />：试剂品牌选项的查询配置和转换。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/staticAssets.ts" />：RDKit 和本地字体的版本化资源路径。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useTheme.ts" />：主题初始化与切换逻辑。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ProcedureInventorySearchButton.tsx" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ProcedureInventoryAnalysisPanel.tsx" />：库存页的实验步骤输入、解析确认与结果展示。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/lib/storage/procedureInventorySearchStorage.ts" />：用户绑定的临时结果与 10 分钟有效期管理。
 
 ## 购物车导入与浏览器插件桥接
 
@@ -84,6 +88,7 @@
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/backend/Dockerfile" />：后端镜像构建方式。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/frontend/Dockerfile" />：前端静态资源镜像构建方式。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf" />：统一代理 `/api`、`/static` 和前端路由回退。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/scripts/release_version.py" /> 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/scripts/bump-version.ps1" />：统一设置并校验应用版本。
 
 ## 按问题反查文件
 
@@ -93,15 +98,18 @@
 - 耗材列表搜索异常：先看 `consumable_orders.py`、`sqlite_fts.py`、`sqlite_indexes.py`
 - 搜索建议异常：先看 `search_completions.py`、`search_completion_entity_index.py`、`search_completion_ranker.py`、`useInlineSearchCompletion.ts`
 - 结构检索异常：先看 `chem.py`、`structure_cache_workflow.py`、`structure_index.py`
+- 实验步骤查库存异常：先看 `procedure_inventory_search.py`、`procedure_llm_extractor.py`、`procedure_pubchem_name.py`、`ProcedureInventoryAnalysisPanel.tsx`
 - 页面数据旧但刷新正常：先看 `api_utils.py`、`events.py`、`useListSSE.ts`
 - 浏览器插件导入失败：先看 `popup.js`、`import-bridge.js`、`cartImportControllers.ts`
 - 线上容器访问异常：先看 `docker-compose.yml`、`default.conf`、`main.py`
+- 发布标签版本不一致：先看 `release_version.py`、`bump-version.ps1` 和各应用版本文件
 
 ## 参考代码
 - [app/api/common_shelf.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py)
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py)
 - [app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py)
 - [app/api/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py)
+- [app/api/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py)
 - [app/api/reagent_brands.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_brands.py)
 - [app/api/reagent_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py)
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)
@@ -118,6 +126,7 @@
 - [app/services/search_completion_ranker.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/search_completion_ranker.py)
 - [app/services/internal_code.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/internal_code.py)
 - [app/services/pinyin_utils.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/pinyin_utils.py)
+- [app/services/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/procedure_inventory_search.py)
 - [app/services/sse_manager.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_manager.py)
 - [browser-extension/background/service-worker.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/background/service-worker.js)
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)

@@ -12,6 +12,9 @@
 | `lsm_cli/` | 本地命令行客户端，供脚本和 Agent skill 通过后端 API 工作 | `__main__.py`、`main.py`、`client.py`、`config.py` |
 | `lsm_mcp/` | 受控 MCP 工具服务，调用 CLI 子进程 | `http_app.py`、`cli_runner.py` |
 | `robot/` | 企业微信智能机器人和微信客服入口 | `wecom_aibot/`、`wechat_kf/` |
+| `scripts/` | 发布、迁移、回填、诊断和数据维护脚本 | `release_version.py`、`migration/`、`README.md` |
+| `tests/` | 后端业务、安全和回归测试 | `unit/`、业务流程测试 |
+| `.github/workflows/` | CI、安全检查、Wiki 与 CLI 发布工作流 | `ci.yml`、`security.yml`、`wiki-pages.yml` |
 | `static/` | 上传图片和静态文件运行目录；Compose 中对应 `/data/static` | `/static/` |
 | `docker/` | 前后端镜像与 Nginx 反向代理配置 | `docker-compose.yml`、`docker/nginx/default.conf` |
 | `wiki/` | 当前知识库源码 | 站点配置、主题定制与各章节页面 |
@@ -39,7 +42,8 @@
 7. `dashboard.py`
 8. `reagent_brands.py`
 9. `cart_sync.py`
-10. `events.py`
+10. `procedure_inventory_search.py`
+11. `events.py`
 
 ### `app/services/`
 
@@ -53,11 +57,12 @@
 - SSE 广播
 - 操作日志时间线
 - 结构检索
+- 实验步骤提取、CAS 解析与 LLM 用量记录
 - 仪表盘聚合、section 分页和窗口统计
 
 更适合在理解“业务怎么做”时阅读。
 
-`app/services/dashboard/` 负责仪表盘业务逻辑：`summary.py` 负责汇总和 section 分发，`items.py` 负责待办/风险/告警 item，`metrics.py` 负责计数和自然天阈值，`common.py` 放共享 builder 与常量。
+`app/services/dashboard/` 负责仪表盘业务逻辑：`summary.py` 负责汇总和 section 分发，`items.py` 负责待办/风险/告警 item，`metrics.py` 负责计数和自然天阈值，`personal.py` 负责个人摘要，`common.py` 放共享 builder 与常量。
 
 ### `app/models/`
 
@@ -86,6 +91,7 @@ SQLite 启动期数据库准备集中放在这里：
 - `auth.py`：认证和权限依赖
 - `config.py`：配置项与运行模式判断
 - `redis.py`：Redis 客户端与断路器
+- `sentry_monitoring.py`：后端错误监控初始化与脱敏配置
 - `constants.py`：上传路径、SSE 房间和限额常量
 - `request_utils.py`、`time_utils.py`：请求和时间工具
 
@@ -93,7 +99,7 @@ SQLite 启动期数据库准备集中放在这里：
 
 ### `frontend/src/pages/`
 
-页面层按业务组织，包括登录、仪表盘、库存、试剂订单、耗材订单、公告管理、设备管理、日志、结构检索和导入页。
+页面层按业务组织，包括登录、仪表盘、库存、试剂订单、耗材订单、公告管理、设备管理、日志、结构检索和导入页。实验步骤查库存集成在库存页，由独立业务组件承载提取、解析和结果展示。
 
 ### `frontend/src/components/`
 
@@ -165,6 +171,13 @@ Zustand 状态层用于：
 | `docker/frontend/Dockerfile` | 前端构建与静态托管镜像 |
 | `docker/nginx/default.conf` | `/api`、`/static`、前端路由和文档入口代理规则 |
 
+## 脚本、测试与自动化
+
+- `scripts/release_version.py` 与 `scripts/bump-version.ps1` 统一设置和校验应用发布版本。
+- `scripts/migration/` 保存一次性迁移与回填工具，其余脚本覆盖数据库健康检查、CAS 维护、索引检查和旧系统数据整理。
+- `tests/unit/` 覆盖核心工具和服务，`tests/` 根目录覆盖业务流程、安全边界与集成回归。
+- `.github/workflows/ci.yml` 执行基础 CI，`security.yml` 执行依赖安全检查，`wiki-pages.yml` 构建文档站，`lsm-cli-release.yml` 发布 CLI。
+
 ## 按任务阅读
 
 ### 第一次接手项目
@@ -193,8 +206,11 @@ Zustand 状态层用于：
 
 ## 参考代码
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
+- [app/api/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py)
 - [app/db_bootstrap](https://github.com/hzb666/LabStorageManager/tree/main/app/db_bootstrap)
 - [app/services](https://github.com/hzb666/LabStorageManager/tree/main/app/services)
+- [scripts](https://github.com/hzb666/LabStorageManager/tree/main/scripts)
+- [tests](https://github.com/hzb666/LabStorageManager/tree/main/tests)
 - [app/models](https://github.com/hzb666/LabStorageManager/tree/main/app/models)
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)
 - [docker-compose.yml](https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml)

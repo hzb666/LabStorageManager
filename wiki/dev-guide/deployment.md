@@ -4,6 +4,8 @@
 
 ## 本地开发
 
+前端本地构建、CI 和安全检查使用 Node.js `24.14.1` 与 npm `11.8.0`。Wiki Pages 工作流使用 Node.js 20。两个 npm 项目均以各自的 lock 文件为安装依据。
+
 ### 配置准备
 
 以 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/.env.example" /> 为模板准备本地运行配置，至少填写：
@@ -29,6 +31,8 @@ cp .env.example .env
 Redis 仅监听 `127.0.0.1` 或 Compose 内网时，`REDIS_PASSWORD` 可以留空；Redis 对外监听或跨机器访问时必须设置强密码。
 默认登录态为 7 天：`ACCESS_TOKEN_EXPIRE_MINUTES=10080`，`SESSION_EXPIRE_HOURS=168`。单个后端进程的 Redis 连接池上限由 `REDIS_MAX_CONNECTIONS` 控制，默认 100。
 
+实验步骤查库存需要配置 OpenAI 兼容 LLM 的 API 地址、API Key 和模型。Sentry 前后端监控均为可选能力，DSN 为空时保持停用；前端 source map 上传还需要构建环境提供组织、项目和鉴权信息。
+
 ### 启动后端
 
 ```bash
@@ -50,7 +54,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -122,6 +126,7 @@ APP_PORT=80 docker compose up -d --build
 3. 浏览器访问 `<host>:${APP_PORT}`，确认前端静态资源与接口请求正常
 4. 登录后验证 `/api/users/me`
 5. 检查 `/static/` 上传资源能否被正常访问
+6. 启用 LLM 后检查实验步骤提取、CAS 解析和库存查询；未配置时确认接口返回服务不可用
 
 ## 参考代码
 

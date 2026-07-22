@@ -11,6 +11,7 @@
 
 当前入口层承担的全局职责包括：
 
+- `initSentry()`：仅在前端 DSN 有效时初始化错误、性能追踪和可选回放。
 - `bootstrapCacheVersion(queryClient)`：应用挂载后检查运行时缓存版本，必要时清理前端缓存并跳转登录页。
 - `ErrorBoundary`：包裹整个 `App`，运行时异常进入统一兜底页。
 - `useTheme()`：初始化主题，把 `app-ui.theme` 回放到 `document.documentElement`，并同步 `color-scheme`。
@@ -69,6 +70,7 @@
 - 普通业务页的 fallback 统一使用 `AuthDeferredShell`。
 - `/cart-import` 使用单独的 `CartImportLoadingScreen`，因为这个页面在桥接批次时有更明显的“等待批次就绪”语义。
 - `main.tsx` 对 `App` 采用动态导入；cache version bootstrap 在挂载后执行，并在版本变化时清理客户端状态。
+- `fontLoader.ts` 先使用系统字体渲染，再加载 Noto Sans SC；网络字体失败时回退到版本化的本地 Source Han Sans，成功后记住本地来源。
 
 ## 改动入口
 

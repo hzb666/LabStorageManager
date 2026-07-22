@@ -69,6 +69,7 @@
 - `app-table`：各表格的 `expandAll`、`fuzzySearch`、`matchMode`、列宽。
 - `app-auth-meta`：设备 `id/name` 和 remembered user。
 - 独立键：`auth-storage`、`sidebar-storage`、`chemical_properties_cache`、`cart_import_batch_latest`、`runtime-time-config`。
+- 会话存储：实验步骤查库存结果按用户保存 10 分钟，退出登录时清理。
 
 这几层的设计目标为“同类偏好写入同一个规范化对象”，避免每个功能散落多个 localStorage key。
 

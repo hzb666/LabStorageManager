@@ -15,11 +15,14 @@
 - `error_logs.router` -> `/api`
 - `events.router` -> `/api`
 - `inventory.router` -> `/api`
+- `inventory_timeline` 通过 `register_inventory_timeline_routes` 挂到 `inventory.router`，最终前缀为 `/api/inventory`。
+- `procedure_inventory_search.router` -> `/api`
 - `reagent_brands.router` -> `/api`
 - `reagent_orders.router` -> `/api`
 - `user_logs.router` -> `/api`
 - `user_sessions.router` -> `/api/users/me`
 - `users.router` -> `/api`
+- `search_completions.router` -> `/api`
 - `inventory_extended_routes` 通过 `register_*` 动态挂到 `inventory.router`，最终前缀为 `/api/inventory`。
 - `reagent_orders_workflow` 通过 `register_*` 动态挂到 `reagent_orders.router`，最终前缀为 `/api/reagent-orders`。
 
@@ -77,13 +80,14 @@
 
 | 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/admin/users/logs/query` | `get_user_logs` | 管理员 | body: `LogsQueryRequest` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py" /> |
-| `POST` | `/api/admin/users/{user_id}/logs-token` | `generate_logs_token` | 管理员 | path: `user_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py" /> |
+| `POST` | `/api/admin/users/logs/query` | `get_user_logs` | 本人或管理员 | body: `LogsQueryRequest` | `LogsQueryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py" /> |
+| `POST` | `/api/admin/users/{user_id}/logs-token` | `generate_logs_token` | 本人或管理员 | path: `user_id` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py" /> |
 
 ### 仪表盘聚合接口 (`dashboard`)
 
 | 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/dashboard/personal/summary` | `get_personal_dashboard_summary` | 非公用账号 | — | `DashboardPersonalSummaryEnvelope` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py" /> |
 | `GET` | `/api/dashboard/board/summary` | `get_dashboard_board_summary` | 已登录用户 | — | `DashboardBoardSummaryEnvelope` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py" /> |
 | `GET` | `/api/dashboard/board/sections/{section}` | `get_dashboard_board_section_items` | 已登录用户 | path: `section`；query: `skip`；query: `limit` | `DashboardSectionItemsEnvelope` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py" /> |
 | `GET` | `/api/dashboard/board/summary/window-stats` | `get_dashboard_board_window_stats` | 已登录用户 | query: `window_days`；query: `all_time` | `DashboardWindowStatsEnvelope` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py" /> |
@@ -96,6 +100,7 @@
 | 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/inventory/` | `list_inventory` | 已登录用户 | query: `search` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" /> |
+| `GET` | `/api/inventory/code/{internal_code}/timeline` | `get_inventory_timeline` | 已登录用户 | path: `internal_code`；query: `search`、`skip`、`limit` | `InventoryTimelineResponse` | `200`、`404` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_timeline.py" /> |
 | `DELETE` | `/api/inventory/{inventory_id}` | `delete_inventory` | 非公用账号 | path: `inventory_id` | `—` | `status.HTTP_204_NO_CONTENT` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" /> |
 | `GET` | `/api/inventory/{inventory_id}` | `get_inventory` | 已登录用户 | path: `inventory_id` | `InventoryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" /> |
 | `PUT` | `/api/inventory/{inventory_id}` | `update_inventory` | 已登录用户 | path: `inventory_id`；body: `InventoryUpdate` | `InventoryResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py" /> |
@@ -238,6 +243,23 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/chemical-info/{cas_number}` | `get_chemical_info` | 已登录用户 | path: `cas_number` | `—` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/chemical_info.py" /> |
 
+### 实验步骤查库存 (`procedure_inventory_search`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/procedure-inventory-search/extract` | `extract_inventory_from_procedure` | 非公用账号 | body: `ProcedureInventorySearchRequest` | `ProcedureInventoryExtractionResult` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py" /> |
+| `POST` | `/api/procedure-inventory-search/resolve` | `resolve_inventory_from_procedure` | 非公用账号 | body: `ProcedureInventoryResolveRequest` | `ProcedureInventorySearchResult` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py" /> |
+| `POST` | `/api/procedure-inventory-search` | `search_inventory_from_procedure` | 非公用账号 | body: `ProcedureInventorySearchRequest` | `ProcedureInventorySearchResult` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py" /> |
+
+### 搜索补全 (`search_completions`)
+
+| 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/search-completions/inline` | `get_inline_completion_endpoint` | 已登录用户 | query: `endpoint`、`q`、`field` | `InlineCompletionResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/search_completions.py" /> |
+| `POST` | `/api/search-completions/feedback` | `submit_feedback` | 已登录用户 | body: `CompletionFeedbackRequest` | `dict` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/search_completions.py" /> |
+| `GET` | `/api/search-completions/preferences` | `get_preferences` | 已登录用户 | — | `SearchPreferencesResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/search_completions.py" /> |
+| `PUT` | `/api/search-completions/preferences` | `update_preferences` | 已登录用户 | body: `SearchPreferencesUpdate` | `SearchPreferencesResponse` | `200` | <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/api/search_completions.py" /> |
+
 ### 化学结构接口 (`chem`)
 
 | 方法 | 路径 | 函数 | 权限 | 关键参数（path/query/body/file） | 返回模型 | 状态码 | 代码 |
@@ -269,6 +291,9 @@
 - [app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py)
 - [app/api/inventory_extended_routes.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_extended_routes.py)
 - [app/api/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py)
+- [app/api/inventory_timeline.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory_timeline.py)
+- [app/api/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py)
+- [app/api/search_completions.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/search_completions.py)
 - [app/api/reagent_brands.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_brands.py)
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)
 - [app/api/reagent_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py)

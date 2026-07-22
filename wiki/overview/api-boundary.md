@@ -42,7 +42,9 @@
 
 - 以 HTTP 快照为主，SSE 增量更新为辅。
 - 表格状态、列宽和展开状态保存在浏览器本地。
+- 实验步骤查库存的临时结果保存在用户绑定的 `sessionStorage` 中，并按有效期清理。
 - 认证状态和 UI 状态由 Zustand 管理，不直接回写后端。
+- LLM 与 PubChem 调用由后端统一处理，前端不持有服务端凭据；前端 Sentry 使用独立的构建时公开配置。
 
 页面入口、状态逻辑和工具函数分别对应 [应用骨架](/frontend/app-shell)、[前端 Hooks](/frontend/hooks) 和 [前端 Lib 工具箱](/frontend/lib-overview)。
 
@@ -63,6 +65,13 @@
 Agent skill 和脚本应统一走 `lsm_cli/`。`lsm_cli/` 只暴露明确列入 README 的命令。`lsm_mcp/` 在 HTTP 层提供 MCP 工具，但工具实现仍调用 CLI 子进程，并继承 CLI 的命令白名单和退出码契约。
 
 企业微信智能机器人和微信客服入口位于 `robot/`。它们不直接访问数据库，也不生成任意命令；查询和写操作都要经过 MCP、CLI 和后端 API。借用和归还等写操作必须在候选明确后等待用户确认。
+
+## 外部服务边界
+
+- 实验步骤查库存通过后端访问 OpenAI 兼容 LLM 和 PubChem，接口参数与结果均由服务层校验。
+- LLM 配置为空时，实验步骤提取与 CAS 解析接口返回服务不可用，不降级为未经确认的本地推断。
+- Sentry 的 DSN 配置为空时保持停用；前端 source map 仅在构建环境提供上传凭据时发布。
+- LLM 用量日志仅保存调用元数据，实验步骤原文和模型响应不进入用量表。
 
 ## 代理与部署边界
 
@@ -91,12 +100,14 @@ Agent skill 和脚本应统一走 `lsm_cli/`。`lsm_cli/` 只暴露明确列入 
 - 看业务流程：看 [核心 API 与工作流](/backend/api-workflows)。
 - 看认证、Cookie、CSRF 与 Redis 降级：看 [认证与安全](/backend/auth-security)。
 - 看运行时入口、中间件、WAL 与 SSE 生命周期：看 [运行时与入口](/backend/runtime)。
+- 看实验步骤查库存的用户流程：看 [实验步骤查库存](/user-guide/procedure-inventory-search)。
 
 ## 参考代码
 - [app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)
 - [app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py)
 - [app/core/auth.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/auth.py)
 - [app/main.py](https://github.com/hzb666/LabStorageManager/blob/main/app/main.py)
+- [app/api/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py)
 - [browser-extension/content/import-bridge.js](https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js)
 - [docker/nginx/default.conf](https://github.com/hzb666/LabStorageManager/blob/main/docker/nginx/default.conf)
 - [frontend/src/api/client.ts](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/api/client.ts)

@@ -69,7 +69,10 @@
 | --- | --- |
 | `ReagentOrderExpandedRow` | 展示试剂订单展开详情 |
 | `ConsumableOrderExpandedRow` | 展示耗材订单展开详情 |
+| `OperationLogExpandedRow` | 展示操作日志和库存操作记录的结构化详情，包括修改前后值 |
 | `ReagentCasDuplicateWarning` | 提示同 CAS 风险 |
+| `ProcedureInventorySearchButton` | 承载实验步骤输入、分段解析进度和错误状态 |
+| `ProcedureInventoryAnalysisPanel` | 展示原文高亮、CAS 候选和库存命中结果 |
 
 ### 公告与反馈
 
@@ -136,7 +139,10 @@
 - [frontend/src/components/BorrowDialog.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/BorrowDialog.tsx)
 - [frontend/src/components/ConfirmDeleteButton.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ConfirmDeleteButton.tsx)
 - [frontend/src/components/ErrorBoundary.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ErrorBoundary.tsx)
+- [frontend/src/components/OperationLogExpandedRow.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/OperationLogExpandedRow.tsx)
 - [frontend/src/components/ReagentOrderExpandedRow.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ReagentOrderExpandedRow.tsx)
+- [frontend/src/components/ProcedureInventoryAnalysisPanel.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ProcedureInventoryAnalysisPanel.tsx)
+- [frontend/src/components/ProcedureInventorySearchButton.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ProcedureInventorySearchButton.tsx)
 - [frontend/src/components/ReagentBrandManagementDialogs.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/ReagentBrandManagementDialogs.tsx)
 - [frontend/src/components/TableActionButtons.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/TableActionButtons.tsx)
 - [frontend/src/components/UserEditDialog.tsx](https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/components/UserEditDialog.tsx)

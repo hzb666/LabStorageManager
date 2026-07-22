@@ -13,6 +13,7 @@
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py) 负责审批、到货、入库和删除。
 - [app/api/consumable_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/consumable_orders.py) 同时承担耗材订单 CRUD 与状态流转。
 - [app/api/dashboard.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/dashboard.py) 提供成员看板、管理员汇总、section 分页和窗口统计路由，具体聚合逻辑下沉到 `app/services/dashboard/`。
+- [app/api/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py) 负责实验步骤解析、CAS 候选解析和访问限流。
 - [app/api/announcements.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/announcements.py)、[app/api/error_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/error_logs.py)、[app/api/user_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/user_logs.py)、[app/api/cart_sync.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/cart_sync.py)、[app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py) 则处理外围能力。
 - [app/api/common_shelf.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/common_shelf.py)、[app/api/chemical_name_map.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/chemical_name_map.py) 负责常用货架分组与 CAS 主数据维护。
 - [app/api/reagent_brands.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_brands.py) 负责试剂品牌主数据，供试剂订单、库存和待入库表单复用。
@@ -44,10 +45,10 @@
 库存接口由多组复合能力构成：
 
 - 列表查询同时承担分页、排序、短 TTL 缓存、CAS 搜索、文本搜索、FTS 搜索和拼音排序。
-- `manual-add` 支持管理员绕过订单链路直接入库。
+- `manual-add` 支持非公用账号绕过订单链路直接入库。
 - `borrow`、`return` 和 `return-delete` 会修改状态、写借还历史或库存删除日志，并通过 SSE 通知前端。
 - `dashboard/my-borrows` 和 `dashboard/pending-stockin` 为首页和仪表盘聚合数据。
-- `import/template` 与 `import` 组成 Excel 导入链路。
+- `import/template`、`import/preview` 与 `import/confirm` 组成 Excel 导入链路。
 - 常用货架由独立的 `common_shelf` 表（`CommonShelf` 模型）维护，按 `CAS + 品牌 + 规格` 形成分组键 `group_key`，并由 `/api/common-shelf/*` 提供分组级与瓶级操作。
 - 手动加瓶前会校验 CAS 主数据；若缺失主数据，需要先走 `/api/chemical-name-map` 完成补录，避免常用货架出现无法稳定展示名称的脏数据。
 
@@ -59,6 +60,16 @@
 - 创建和编辑时会标准化品牌名称并写入拼音字段。
 - 删除采用停用方式，历史订单和库存里的品牌文本不会被改写。
 - 新增、修改和删除都会写入用户操作日志。
+
+## 实验步骤查库存
+
+实验步骤查库存由提取与解析两段组成：
+
+1. `POST /api/procedure-inventory-search/extract` 将实验步骤交给 OpenAI 兼容 LLM，提取具体试剂名称并标记常用物料与通类名称。
+2. `POST /api/procedure-inventory-search/resolve` 通过 PubChem 将具体名称解析为 CAS 候选，并生成使用 `&&` 连接的库存 CAS 查询。
+3. `POST /api/procedure-inventory-search` 提供两段式流程的组合入口。
+
+所有入口均要求非公用账号。实验步骤最大 5000 字符，解析列表最多 50 项，提取和解析分别执行用户级限流。LLM 用量记录只保存模型、尝试次数和 token 数，不保存实验步骤或响应正文。
 
 ## 事件驱动补充层
 
@@ -120,14 +131,15 @@
 
 ### 导入导出
 
-- Excel 导入：`/api/inventory/import/preview` 和 `/api/inventory/import/confirm` 支持预览后确认，单文件 2MB，逐行错误返回；确认成功后推送 SSE 并刷新缓存。
-- 导出：库存与订单都提供导出接口，走后台生成文件再下载。
+- Excel 导入：`/api/inventory/import/preview` 和 `/api/inventory/import/confirm` 支持预览后确认，单文件 2MB，逐行错误返回；确认接口使用绑定用户的一次性令牌，并在事务内重新执行完整校验。
+- 导出：库存、常用货架和订单提供文件导出。后端按每批 2000 条读取，最多导出 20000 条，超出时通过响应头标记截断；各导出范围按用户执行限流。
 
 ## 边界与风险
 
 - 订单复制入库必须保留 `source_order_id`，否则审计链会断裂。
 - 常用货架与普通库存字段不一致时，前端列表和 SSE 房间要同步更新，否则会出现数据不一致。
 - 批量导入需校验文件大小与行数，超限会返回 413/400；模板变更也要同步前端下载链接。
+- 实验步骤解析依赖外部 LLM 与 PubChem，部署时需要配置超时、限流和凭据，并保留服务不可用时的明确错误码。
 - 新增命名路由时，要注意它不能被 `/{id}` 路由吞掉。
 
 ## 验证要点
@@ -153,6 +165,7 @@
 - [app/api/error_logs.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/error_logs.py)
 - [app/api/events.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/events.py)
 - [app/api/inventory.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/inventory.py)
+- [app/api/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/procedure_inventory_search.py)
 - [app/api/reagent_brands.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_brands.py)
 - [app/api/reagent_orders.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders.py)
 - [app/api/reagent_orders_workflow.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/reagent_orders_workflow.py)
@@ -161,3 +174,4 @@
 - [app/api/users.py](https://github.com/hzb666/LabStorageManager/blob/main/app/api/users.py)
 - [app/models/consumable_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/consumable_order.py)
 - [app/models/reagent_order.py](https://github.com/hzb666/LabStorageManager/blob/main/app/models/reagent_order.py)
+- [app/services/procedure_inventory_search.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/procedure_inventory_search.py)
