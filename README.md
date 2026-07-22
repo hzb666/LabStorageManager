@@ -208,7 +208,7 @@ npm run dev
 | `DATABASE_URL` | `sqlite:///./lab_inventory.db` | 主库 SQLite 连接串；本地默认写入项目根目录，Docker Compose 默认覆盖为 `sqlite:////data/lab_inventory.db` |
 | `QUERY_LOG_DIR` | `logs` | 搜索日志库目录；Docker Compose 默认覆盖为 `/data/logs` |
 | `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署设为 true；本地开发或无可信反代时设为 false |
-| `CACHE_VERSION` | `0.6.1` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
+| `CACHE_VERSION` | `0.7.0` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | 登录态默认 7 天 |
 | `SESSION_EXPIRE_HOURS` | `168` | 会话有效期，默认 7 天 |
 | `MAX_IP_PER_USER` | `5` | 每个用户允许的最大 IP 数 |
@@ -266,7 +266,7 @@ npm run dev
 | `CHEM_PUBCHEM_RATE_LIMIT_PER_SECOND` | `2` | PubChem 请求速率上限 |
 | `CHEM_PUBCHEM_TIMEOUT_SECONDS` | `20` | PubChem 请求超时 |
 | `CHEM_PUBCHEM_MAX_RETRIES` | `3` | PubChem 失败重试次数 |
-| `CHEM_PUBCHEM_USER_AGENT` | `LabStorageManager/0.6.1` | 发送到 PubChem 的 User-Agent |
+| `CHEM_PUBCHEM_USER_AGENT` | `LabStorageManager/0.7.0` | 发送到 PubChem 的 User-Agent |
 | `CHEM_STRUCTURE_SEARCH_MAX_RESULTS` | `100` | 子结构检索默认结果上限 |
 
 ### JWT 与密钥
