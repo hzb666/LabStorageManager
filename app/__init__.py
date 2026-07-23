@@ -18,4 +18,4 @@ def _patch_sqlite_driver() -> None:
 
 _patch_sqlite_driver()
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
