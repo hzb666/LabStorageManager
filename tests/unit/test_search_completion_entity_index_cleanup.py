@@ -1,7 +1,10 @@
 import sqlite3
 import unittest
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app import search_completion_db as completion_db
 from app.api import consumable_orders, reagent_orders_workflow
@@ -84,10 +87,82 @@ class EntityCompletionDeleteHelperTests(unittest.TestCase):
         )
 
 
+class EntityCompletionUpdateFailureTests(unittest.TestCase):
+    def test_failed_update_persists_only_its_endpoint_as_stale(self) -> None:
+        endpoint = completion_db.REAGENT_ORDER_COMPLETION_ENDPOINT
+        operation = Mock(side_effect=RuntimeError("completion update failed"))
+        with TemporaryDirectory() as directory:
+            database_path = Path(directory) / "query_logs.db"
+
+            @contextmanager
+            def open_temporary_connection():
+                connection = sqlite3.connect(database_path)
+                connection.row_factory = sqlite3.Row
+                try:
+                    yield connection
+                finally:
+                    connection.close()
+
+            with open_temporary_connection() as connection:
+                connection.executescript(completion_db._COMPLETION_SCHEMA)
+            with (
+                patch.object(completion_db, "_open_connection", open_temporary_connection),
+                patch.object(entity_index.logger, "exception"),
+            ):
+                entity_index.run_completion_index_update(
+                    operation,
+                    context="reagent_order",
+                    endpoint=endpoint,
+                )
+            with open_temporary_connection() as connection:
+                stale_rows = dict(connection.execute(
+                    "SELECT key, value FROM search_completion_meta "
+                    "WHERE key LIKE 'entity_index_stale:%'"
+                ).fetchall())
+
+        self.assertEqual(
+            {completion_db._entity_completion_stale_key(endpoint): "1"},
+            stale_rows,
+        )
+        operation.assert_called_once_with()
+
+    def test_failed_stale_mark_does_not_fail_committed_business_result(self) -> None:
+        endpoint = completion_db.CONSUMABLE_ORDER_COMPLETION_ENDPOINT
+        operation = Mock(side_effect=RuntimeError("completion update failed"))
+        with (
+            patch.object(
+                entity_index,
+                "mark_entity_completion_index_stale",
+                side_effect=RuntimeError("stale mark failed"),
+            ) as mark_stale,
+            patch.object(entity_index.logger, "exception") as log_exception,
+        ):
+            entity_index.run_completion_index_update(
+                operation,
+                context="consumable_order",
+                endpoint=endpoint,
+            )
+
+        mark_stale.assert_called_once_with(endpoint)
+        self.assertEqual(2, log_exception.call_count)
+
+    def test_successful_update_does_not_mark_endpoint_stale(self) -> None:
+        operation = Mock()
+        with patch.object(entity_index, "mark_entity_completion_index_stale") as mark_stale:
+            entity_index.run_completion_index_update(
+                operation,
+                context="inventory",
+                endpoint=completion_db.INVENTORY_COMPLETION_ENDPOINT,
+            )
+
+        operation.assert_called_once_with()
+        mark_stale.assert_not_called()
+
+
 class EntityCompletionDeleteRoutingTests(unittest.TestCase):
     @staticmethod
-    def _run_update(operation, *, context: str) -> None:
-        del context
+    def _run_update(operation, *, context: str, endpoint: str) -> None:
+        del context, endpoint
         operation()
 
     def test_consumable_delete_cache_path_deletes_instead_of_syncing(self) -> None:

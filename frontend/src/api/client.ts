@@ -683,6 +683,7 @@ export interface PersonalDashboardSummary {
   borrow_count: number
   borrow_overdue_count: number
   stockin_count: number
+  stockin_overdue_count: number
 }
 
 export type DashboardBoardSection = 'actions' | 'orders' | 'stockAlerts'

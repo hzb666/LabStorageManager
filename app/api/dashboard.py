@@ -111,6 +111,7 @@ class DashboardPersonalSummaryDataResponse(BaseModel):
     borrow_count: int
     borrow_overdue_count: int
     stockin_count: int
+    stockin_overdue_count: int
 
 
 class DashboardPersonalSummaryEnvelope(BaseModel):

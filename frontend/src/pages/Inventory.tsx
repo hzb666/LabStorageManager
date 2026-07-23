@@ -17,6 +17,8 @@ import { BorrowDialog } from '@/components/BorrowDialog'
 import { EditDialogActions } from '@/components/EditDialogActions'
 import { ProcedureInventoryAnalysisPanel } from '@/components/ProcedureInventoryAnalysisPanel'
 import useDialogState from '@/hooks/useDialogState'
+import { useIdlePreload } from '@/hooks/useIdlePreload'
+import { useIsMobile } from '@/hooks/useMobile'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
 import { FilterTable } from '@/components/ui/FilterTable'
 import type { FilterTableQueryDataReadyContext } from '@/components/ui/FilterTable'
@@ -57,6 +59,7 @@ import { useAuthStore } from '@/store/useStore'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 import { canWriteNonPublicData } from '@/lib/permissions'
 import { getProcedureInventorySearchResult } from '@/lib/storage/procedureInventorySearchStorage'
+import { preloadRDKitModule } from '@/lib/rdkitLoader'
 
 import { defaultInventoryValues, enhanceCasLookupField, getInventoryFormFields } from '@/lib/formConfigs'
 
@@ -678,56 +681,6 @@ function getApiErrorStatus(error: unknown): number | undefined {
   return typeof response?.status === 'number' ? response.status : undefined
 }
 
-type BrowserIdleWindow = Window & {
-  cancelIdleCallback?: (handle: number) => void
-  requestIdleCallback?: (
-    callback: IdleRequestCallback,
-    options?: IdleRequestOptions,
-  ) => number
-}
-
-function preloadStructureSearchDialog(): Promise<void> {
-  return loadStructureSearchDialog().then(() => undefined)
-}
-
-function scheduleStructureDialogPreload(): () => void {
-  if (typeof window === 'undefined') {
-    return () => undefined
-  }
-
-  let cancelled = false
-  const prewarm = () => {
-    if (!cancelled) {
-      preloadStructureSearchDialog().catch(() => undefined)
-    }
-  }
-  const browserWindow = window as BrowserIdleWindow
-  if (browserWindow.requestIdleCallback) {
-    const handle = browserWindow.requestIdleCallback(prewarm, {
-      timeout: STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS,
-    })
-    return () => {
-      cancelled = true
-      browserWindow.cancelIdleCallback?.(handle)
-    }
-  }
-
-  const timeoutId = window.setTimeout(prewarm, STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS)
-  return () => {
-    cancelled = true
-    window.clearTimeout(timeoutId)
-  }
-}
-
-function useStructureDialogPreload(enabled: boolean) {
-  useEffect(() => {
-    if (!enabled) {
-      return undefined
-    }
-    return scheduleStructureDialogPreload()
-  }, [enabled])
-}
-
 function StructureDialogFallback({
   contentClassName,
   open,
@@ -960,12 +913,14 @@ function InventoryFormDialog({
 function InventoryPageHeader({
   canManageInventory,
   dialogController,
+  isMobile,
   isExporting,
   onExport,
   structureEditor,
 }: Readonly<{
   canManageInventory: boolean
   dialogController: ReturnType<typeof useInventoryDialogController>
+  isMobile: boolean
   isExporting: boolean
   onExport: () => Promise<void>
   structureEditor: ReturnType<typeof useInventoryStructureEditor>
@@ -979,7 +934,9 @@ function InventoryPageHeader({
             <Plus className="mr-1.5 h-4 w-4" /> 手动入库
           </Button>
         ) : null}
-        <StructureCacheManagerEntry onManualEdit={structureEditor.handleManualStructureEdit} />
+        {!isMobile ? (
+          <StructureCacheManagerEntry onManualEdit={structureEditor.handleManualStructureEdit} />
+        ) : null}
         <LoadingButton
           variant="modern"
           size="lg"
@@ -1093,6 +1050,24 @@ function useInventoryBorrowController({
   }
 }
 
+function useInventoryChemistryResources(structureDialogOpen: boolean) {
+  const isMobile = useIsMobile()
+  const structureToolsEnabled = structureSearchEnabled && !isMobile
+
+  useIdlePreload(preloadRDKitModule, !isMobile)
+  useIdlePreload(
+    loadStructureSearchDialog,
+    structureToolsEnabled,
+    STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS,
+  )
+
+  return {
+    isMobile,
+    shouldRenderStructureDialog: structureToolsEnabled && structureDialogOpen,
+    structureToolsEnabled,
+  }
+}
+
 export function InventoryPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -1107,11 +1082,8 @@ export function InventoryPage() {
     [currentUserId, procedureSearchId],
   )
   const procedureInventoryAvailability = useProcedureInventoryAvailability(procedureSearchResult)
-  const {
-    handleClearStructureFilter,
-    structureFilter,
-  } = structureEditor
-  useStructureDialogPreload(structureSearchEnabled)
+  const { handleClearStructureFilter, structureFilter } = structureEditor
+  const chemistryResources = useInventoryChemistryResources(structureEditor.structureDialogOpen)
   const loadInventory = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
@@ -1175,13 +1147,12 @@ export function InventoryPage() {
     structureEditor.structureDraftMolblock,
     structureEditor.structureFilter,
   )
-  const shouldRenderStructureDialog = structureSearchEnabled && structureEditor.structureDialogOpen
-
   return (
     <div className="space-y-6">
       <InventoryPageHeader
         canManageInventory={canManageInventory}
         dialogController={dialogController}
+        isMobile={chemistryResources.isMobile}
         isExporting={isExporting}
         onExport={handleExport}
         structureEditor={structureEditor}
@@ -1199,7 +1170,7 @@ export function InventoryPage() {
       />
       <InventoryStructureSearchDialog
         initialMolblock={structureInitialMolblock}
-        shouldRender={shouldRenderStructureDialog}
+        shouldRender={chemistryResources.shouldRenderStructureDialog}
         structureEditor={structureEditor}
       />
       <FilterTable
@@ -1231,7 +1202,7 @@ export function InventoryPage() {
         collapseAllSignal={structureEditor.structureSearchCollapseSignal || null}
         disableExpandedRowAnimation={Boolean(structureEditor.structureFilter)}
         searchActions={
-          structureSearchEnabled ? (
+          chemistryResources.structureToolsEnabled ? (
             <Button type="button" variant="modern" size="lg" onClick={structureEditor.handleOpenStructureDialog}>
               <ScanSearch className="size-4" />
               {structureEditor.structureFilter ? '重新绘制' : '结构检索'}

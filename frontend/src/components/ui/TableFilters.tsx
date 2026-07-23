@@ -194,7 +194,7 @@ export function TooltipSelect({
       >
         <TooltipTrigger asChild>
           <SelectTrigger
-            className="w-1/3 sm:w-30 min-h-10"
+            className="min-h-10 w-full sm:w-30"
             onPointerEnter={() => setIsTooltipOpen(true)}
             onPointerLeave={() => setIsTooltipOpen(false)}
             onBlur={() => setIsTooltipOpen(false)}
@@ -288,7 +288,7 @@ function TableFilterExtraControls({
   }
 
   return (
-    <div className="flex flex-wrap gap-2 items-center justify-between shrink-0">
+    <div className="grid w-full shrink-0 grid-cols-2 items-center gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-between">
       {showFuzzySearch && (
         <TooltipCheckbox tooltip="忽略空格、连字符、下划线等格式差异">
           <label
@@ -600,7 +600,7 @@ export function TableSearchInput({
   disabledValue,
   onDisabledClear,
   inputClassName = '',
-  containerClassName = 'relative flex-1 min-w-70',
+  containerClassName = 'relative w-full min-w-0 flex-1 sm:min-w-70',
   inlineCompletion,
 }: Readonly<TableSearchInputProps>) {
   const displayValue = getSearchDisplayValue({ disabled, disabledValue, value })
@@ -688,8 +688,8 @@ export function TableFilters({
   }, [searchField, searchFieldOptions, searchPlaceholder])
 
   return (
-    <div className={`flex flex-wrap gap-3 items-center ${className}`}>
-      <div className="flex min-w-70 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+    <div className={`flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center ${className}`}>
+      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:min-w-70 sm:flex-row sm:items-center">
         <TableSearchInput
           value={searchInput}
           onChange={onSearchInputChange}

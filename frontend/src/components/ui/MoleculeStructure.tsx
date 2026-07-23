@@ -13,31 +13,11 @@ import {
   useTransitionStyles,
 } from '@floating-ui/react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
+import { useIsMobile } from '@/hooks/useMobile'
 import { querySmiles } from '@/lib/chemicalProperties'
-import { LIB_ASSETS } from '@/lib/staticAssets'
+import { loadRDKitModule } from '@/lib/rdkitLoader'
+import type { Mol, RDKitModule } from '@/lib/rdkitLoader'
 import { isSpecialCasValue } from '@/lib/validationSchemas'
-
-type RDKitModule = {
-  get_mol: (input: string) => Mol | null
-  get_qmol?: (input: string) => Mol | null
-  version: string
-}
-
-declare global {
-  var RDKit: RDKitModule | undefined
-  var initRDKitModule:
-    | ((moduleConfig?: { locateFile?: (path: string) => string }) => Promise<RDKitModule>)
-    | undefined
-}
-
-interface Mol {
-  get_svg_with_highlights: (details: string) => string
-  get_substruct_match?: (query: Mol) => string
-  get_smarts?: () => string
-  get_smiles?: () => string
-  is_valid: () => boolean
-  delete?: () => void
-}
 
 interface MoleculeStructureProps {
   casNumber: string
@@ -72,8 +52,6 @@ type RDKitHighlightDetails = {
   bonds?: number[]
   [key: string]: unknown
 }
-
-let rdkitLoaderPromise: Promise<RDKitModule> | null = null
 
 // 内存级缓存随刷新失效，大段 SVG 不写入持久化存储。
 const SVG_MAX_CACHE_SIZE = 100
@@ -214,56 +192,6 @@ function writeCachedSvgState(cacheKey: string, value: MoleculeSvgCacheValue): vo
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-async function loadRDKitScript(): Promise<void> {
-  if (document.querySelector('#rdkit-script')) return
-  await new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script')
-    script.id = 'rdkit-script'
-    script.src = LIB_ASSETS.rdkitScriptUrl
-    script.async = true
-    script.onload = () => resolve()
-    script.onerror = () => reject(new Error('RDKit 脚本加载失败'))
-    document.head.appendChild(script)
-  })
-}
-
-async function initRDKit(): Promise<RDKitModule> {
-  await loadRDKitScript()
-
-  let retries = 0
-  while (!globalThis.initRDKitModule && retries < 50) {
-    await sleep(100)
-    retries += 1
-  }
-
-  if (!globalThis.initRDKitModule) {
-    throw new Error('RDKit 模块未初始化')
-  }
-
-  const rdkit = await globalThis.initRDKitModule({
-    locateFile: (path) => {
-      if (path.endsWith('.wasm')) {
-        return LIB_ASSETS.rdkitWasmUrl
-      }
-      return `/lib/${path}`
-    },
-  })
-  globalThis.RDKit = rdkit
-  return rdkit
-}
-
-// RDKit 初始化要 single-flight，避免多个结构图首屏并发时重复拉脚本和重复 init。
-async function loadRDKitModule(): Promise<RDKitModule> {
-  if (globalThis.RDKit) return globalThis.RDKit
-  if (rdkitLoaderPromise) return rdkitLoaderPromise
-
-  rdkitLoaderPromise = initRDKit().catch((err) => {
-    rdkitLoaderPromise = null
-    throw err
-  })
-  return rdkitLoaderPromise
 }
 
 function parseRDKitHighlightDetails(rawDetails: string): RDKitHighlightDetails | null {
@@ -849,8 +777,8 @@ function MoleculeZoomPortal(props: {
   )
 }
 
-// 渲染 CAS 对应分子结构，并在可放大时提供悬浮放大预览。
-export function MoleculeStructure({
+// 仅在桌面端渲染 CAS 对应分子结构，并在可放大时提供悬浮放大预览。
+function DesktopMoleculeStructure({
   casNumber,
   width = 300,
   height = 200,
@@ -927,6 +855,13 @@ export function MoleculeStructure({
       />
     </>
   )
+}
+
+export function MoleculeStructure(props: Readonly<MoleculeStructureProps>) {
+  const isMobile = useIsMobile()
+  if (isMobile) return null
+
+  return <DesktopMoleculeStructure {...props} />
 }
 
 export default MoleculeStructure

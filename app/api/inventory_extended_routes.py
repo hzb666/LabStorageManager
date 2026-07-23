@@ -101,7 +101,11 @@ def _clear_inventory_cache(
         else:
             sync_inventory_entity_completions(items)
 
-    run_completion_index_update(update_completion_index, context="inventory_extended")
+    run_completion_index_update(
+        update_completion_index,
+        context="inventory_extended",
+        endpoint=INVENTORY_COMPLETION_ENDPOINT,
+    )
 
 
 def _is_overdue_borrow(updated_at: datetime | None, now: datetime) -> bool:
@@ -566,6 +570,7 @@ def _register_manual_and_dashboard_routes(
                     "inventory_id": item.id,
                     "name": item.name,
                     "cas_number": item.cas_number,
+                    "storage_location": item.storage_location,
                     "initial_quantity": item.initial_quantity,
                     "specification": format_specification(item.initial_quantity, item.unit),
                     "remaining_quantity": item.remaining_quantity,
@@ -607,6 +612,7 @@ def _register_manual_and_dashboard_routes(
                     "inventory_id": item.id,
                     "name": item.name,
                     "cas_number": item.cas_number,
+                    "storage_location": item.storage_location,
                     "initial_quantity": item.initial_quantity,
                     "specification": format_specification(item.initial_quantity, item.unit),
                     "remaining_quantity": item.remaining_quantity,

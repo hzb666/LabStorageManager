@@ -111,19 +111,19 @@ function TimelineHeader({
   onBack: () => void
 }>) {
   return (
-    <div className="flex min-w-0 items-center gap-4 overflow-hidden whitespace-nowrap">
+    <div className="flex min-w-0 flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4 sm:overflow-hidden sm:whitespace-nowrap">
       <Button variant="modern" className="h-10 shrink-0" onClick={onBack}>
         <ArrowLeft className="mr-2 size-4" />
         返回
       </Button>
-      <h1 className="shrink-0 text-3xl font-bold text-primary">操作记录</h1>
+      <h1 className="shrink-0 text-2xl font-bold text-primary sm:text-3xl">操作记录</h1>
       {inventory && (
-        <div className="flex min-w-0 flex-1 items-baseline gap-3 overflow-hidden text-base text-muted-foreground">
-          <span className="min-w-0 max-w-[32rem] truncate" title={inventory.name}>
+        <div className="flex w-full min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-muted-foreground sm:w-auto sm:flex-1 sm:flex-nowrap sm:overflow-hidden sm:text-base">
+          <span className="min-w-0 sm:max-w-[32rem] sm:truncate" title={inventory.name}>
             名称：{inventory.name}
           </span>
           <span className="shrink-0">CAS：{inventory.cas_number}</span>
-          <span className="min-w-0 truncate" title={inventory.storage_location || '-'}>
+          <span className="min-w-0 sm:truncate" title={inventory.storage_location || '-'}>
             位置：{inventory.storage_location || '-'}
           </span>
         </div>

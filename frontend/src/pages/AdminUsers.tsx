@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/TableFilters'
 import { getAdminUsersTableColumns } from '@/lib/tableConfigs'
 import { TableActionButtonsMemo } from '@/components/TableActionButtons'
+import { useIsMobile } from '@/hooks/useMobile'
 
 // 用户列表请求共用分页、关键字、角色和状态筛选字段。
 interface UserListParams extends PaginationParams {
@@ -75,12 +76,13 @@ const ADMIN_USER_STATUS_FILTER_OPTIONS = [
 
 // 统一管理搜索输入、防抖筛选和分页重置。
 function useAdminUsersFilterState() {
+  const isMobile = useIsMobile()
   const [inputValue, setInputValue] = useState('')
   const [debouncedFilter, setDebouncedFilter] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(() => isMobile ? 20 : 50)
 
   const normalizedInputValue = inputValue.trim()
 
@@ -382,7 +384,7 @@ function AdminUsersTableCard({
           />
         )}
         {tableState.rowCount > 0 && (
-          <div className="px-6 rounded-md overflow-auto">
+          <div className="overflow-auto rounded-md px-4 sm:px-6">
             <table className="w-full min-w-max" style={{ tableLayout: 'fixed' }}>
               <thead>
                 {tableState.table.getHeaderGroups().map((headerGroup) => (
@@ -411,7 +413,7 @@ function AdminUsersTableCard({
         )}
       </CardContent>
       {tableState.total > 20 && (
-        <div className="flex items-center justify-between px-6 py-4 mt-2">
+        <div className="mt-2 flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <PaginationInfo
             currentPage={tableState.currentPage}
             pageSize={tableState.pageSize}

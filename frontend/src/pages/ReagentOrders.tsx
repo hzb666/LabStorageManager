@@ -20,6 +20,9 @@ import { EditDialogActions } from '@/components/EditDialogActions'
 import { ReagentBrandManagementDialogs } from '@/components/ReagentBrandManagementDialogs'
 import useDialogState from '@/hooks/useDialogState'
 import { useExportDownload } from '@/hooks/useExportDownload'
+import { useIdlePreload } from '@/hooks/useIdlePreload'
+import { useIsMobile } from '@/hooks/useMobile'
+import { preloadRDKitModule } from '@/lib/rdkitLoader'
 import { useAuthStore } from '@/store/useStore'
 import { REAGENT_STATUS_MAP, UserRoles } from '@/lib/constants'
 import { canWriteNonPublicData } from '@/lib/permissions'
@@ -60,6 +63,7 @@ import {
 import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderSubmitHelpers'
 import {
   isApprovableOrderStatus,
+  isOrderDeletableStatus,
   isOrderEditableByRole,
   isOrderResubmittedOnEdit,
   isRejectableOrderStatus,
@@ -503,12 +507,14 @@ function createReagentOrderColumns(
 export function ReagentOrdersPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
   const currentUser = useAuthStore((state) => state.user)
   const currentUserRole = currentUser?.role
   const isAdmin = currentUserRole === UserRoles.ADMIN
   const canCreateOrder = currentUserRole !== UserRoles.PUBLIC
   const canViewBrands = Boolean(currentUser)
   const canWriteBrands = canWriteNonPublicData(currentUserRole)
+  useIdlePreload(preloadRDKitModule, !isMobile)
   const [brandManagementOpen, setBrandManagementOpen] = useState(false)
   const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
   const refreshOrders = useCallback(async () => {
@@ -589,7 +595,9 @@ export function ReagentOrdersPage() {
               mode={dialogController.dialogState ?? 'add'}
               onCancel={() => dialogController.setDialogState(null)}
               onDelete={
-                dialogController.dialogState === 'edit' && dialogController.editingItem
+                dialogController.dialogState === 'edit' &&
+                dialogController.editingItem &&
+                isOrderDeletableStatus(dialogController.editingItem.status)
                   ? dialogController.handleDeleteClick
                   : undefined
               }

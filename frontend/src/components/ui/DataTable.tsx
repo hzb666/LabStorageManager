@@ -5,6 +5,7 @@ import { getExpandAllState, setExpandAllState } from '@/lib/storage/appTableStor
 import { useColumnResize } from '@/hooks/useColumnResize'
 import { useBulkExpand } from '@/hooks/useBulkExpand'
 import { useDataTableScroll, useSyncVirtualizerRef } from '@/hooks/useDataTableScroll'
+import { useIsMobile } from '@/hooks/useMobile'
 import { DataTableHeader } from '@/components/ui/DataTableHeader'
 import { DataTableBody } from '@/components/ui/DataTableBody'
 
@@ -26,6 +27,8 @@ interface DataTableProps<TData> {
   searchKeyword?: string
   endMessage?: string
   onIsAtTopChange?: (isAtTop: boolean) => void
+  mobileMinTableWidth?: number
+  mobileColumnMinSizes?: Readonly<Record<string, number>>
 }
 
 type ColumnCssVariableKey =
@@ -44,11 +47,12 @@ function getOverscanCount(isBulkAnimating: boolean, isAllExpanded: boolean) {
 // 用 CSS 变量共享列宽和隐藏态，避免表头与表体各算一套布局。
 function computeCssVariables<TData>(
   visibleColumns: ReturnType<TableType<TData>['getVisibleLeafColumns']>,
+  minSizeOverrides?: Readonly<Record<string, number>>,
 ): React.CSSProperties & ColumnCssVariables {
   const styles: React.CSSProperties & ColumnCssVariables = {}
   visibleColumns.forEach((column) => {
     const size = column.getSize()
-    const minSize = column.columnDef.minSize ?? 50
+    const minSize = minSizeOverrides?.[column.id] ?? column.columnDef.minSize ?? 50
     styles[`--col-${column.id}-flex`] = size === 0 ? 'none' : `${size} 0 0%`
     styles[`--col-${column.id}-min`] = `${minSize}px`
     styles[`--col-${column.id}-display`] = size === 0 ? 'none' : 'flex'
@@ -104,7 +108,10 @@ export function DataTable<TData>({
   searchKeyword,
   endMessage,
   onIsAtTopChange,
+  mobileMinTableWidth,
+  mobileColumnMinSizes,
 }: Readonly<DataTableProps<TData>>) {
+  const isMobile = useIsMobile()
   const headerScrollRef = useRef<HTMLDivElement>(null)
   const bodyScrollRef = useRef<HTMLDivElement>(null)
 
@@ -127,12 +134,19 @@ export function DataTable<TData>({
 
   const { rows } = table.getRowModel()
   const visibleColumns = table.getVisibleLeafColumns()
+  const minSizeOverrides = isMobile ? mobileColumnMinSizes : undefined
   const totalWeight = visibleColumns.reduce((sum, col) => sum + col.getSize(), 0)
-  const minTableWidth = visibleColumns.reduce((sum, col) => sum + (col.columnDef.minSize ?? 50), 0)
-  const cssVariableStyles = computeCssVariables(visibleColumns)
+  const minTableWidth = visibleColumns.reduce(
+    (sum, col) => sum + (minSizeOverrides?.[col.id] ?? col.columnDef.minSize ?? 50),
+    0,
+  )
+  const resolvedMinTableWidth = isMobile
+    ? Math.max(minTableWidth, mobileMinTableWidth ?? 0)
+    : minTableWidth
+  const cssVariableStyles = computeCssVariables(visibleColumns, minSizeOverrides)
 
   const { resizingColId, handleCustomResize } = useColumnResize({
-    table, visibleColumns, totalWeight, minTableWidth, bodyScrollRef,
+    table, visibleColumns, totalWeight, minTableWidth: resolvedMinTableWidth, bodyScrollRef,
   })
 
   const { isBulkAnimating, bulkExpandedSnapshotRef, setVirtualizer } = useBulkExpand({
@@ -205,7 +219,7 @@ export function DataTable<TData>({
         table={table}
         headerScrollRef={headerScrollRef}
         scrollbarWidth={scrollbarWidth}
-        minTableWidth={minTableWidth}
+        minTableWidth={resolvedMinTableWidth}
         resizingColId={resizingColId}
         handleCustomResize={handleCustomResize}
       />
@@ -223,7 +237,7 @@ export function DataTable<TData>({
           noteField={noteField}
           shouldUseVirtualization={shouldUseVirtualization}
           rowVirtualizer={rowVirtualizer}
-          minTableWidth={minTableWidth}
+          minTableWidth={resolvedMinTableWidth}
           handleRowClick={handleRowClick}
           isFetchingNextPage={isFetchingNextPage}
           hasNextPage={hasNextPage}

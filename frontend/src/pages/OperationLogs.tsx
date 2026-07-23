@@ -196,12 +196,12 @@ export default function OperationLogsPage() {
     <div className="space-y-6">
       {/* 头部区域 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="modern" className="h-10" onClick={() => navigate(backPath)}>
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+          <Button variant="modern" className="h-10 shrink-0" onClick={() => navigate(backPath)}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             返回
           </Button>
-          <h1 className="text-3xl font-bold text-primary">
+          <h1 className="min-w-0 text-2xl font-bold text-primary sm:text-3xl">
             操作日志
             {userInfo?.username ? `：${userInfo.username}` : ''}
           </h1>

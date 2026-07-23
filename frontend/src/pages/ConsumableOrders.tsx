@@ -43,6 +43,7 @@ import {
 import { getDialogSubmitSuccessMessage, submitByDialogState } from '@/lib/orderSubmitHelpers'
 import {
   isApprovableOrderStatus,
+  isOrderDeletableStatus,
   isOrderEditableByRole,
   isOrderResubmittedOnEdit,
   isRejectableOrderStatus,
@@ -356,7 +357,9 @@ export function ConsumableOrdersPage() {
               mode={dialogController.dialogState ?? 'add'}
               onCancel={() => dialogController.setDialogState(null)}
               onDelete={
-                dialogController.dialogState === 'edit' && dialogController.editingItem
+                dialogController.dialogState === 'edit' &&
+                dialogController.editingItem &&
+                isOrderDeletableStatus(dialogController.editingItem.status)
                   ? dialogController.handleDeleteClick
                   : undefined
               }

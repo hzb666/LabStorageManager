@@ -22,6 +22,7 @@ export interface MyBorrowItem {
   inventory_id: number
   name: string
   cas_number: string
+  storage_location?: string | null
   initial_quantity?: number | null
   specification?: string | null
   remaining_quantity?: number | null

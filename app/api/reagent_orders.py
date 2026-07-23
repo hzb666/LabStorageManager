@@ -86,6 +86,7 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.search_completion_db import REAGENT_ORDER_COMPLETION_ENDPOINT
 from app.services.search_completion_entity_index import (
     run_completion_index_update,
     sync_reagent_order_entity_completions,
@@ -135,6 +136,7 @@ def _clear_reagent_order_cache(
         run_completion_index_update(
             lambda: sync_reagent_order_entity_completions(order, db=db),
             context="reagent_order",
+            endpoint=REAGENT_ORDER_COMPLETION_ENDPOINT,
         )
 
 

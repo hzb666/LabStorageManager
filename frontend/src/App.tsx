@@ -114,7 +114,7 @@ function AppContent() {
             path="/cart-import"
             element={
               <ProtectedRoute checkingFallback={<CartImportLoadingScreen />}>
-                <Suspense>
+                <Suspense fallback={<CartImportLoadingScreen />}>
                   <CartImportPage />
                 </Suspense>
               </ProtectedRoute>

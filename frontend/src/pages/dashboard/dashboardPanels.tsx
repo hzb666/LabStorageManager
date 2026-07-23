@@ -709,7 +709,7 @@ function ManagementRiskTable({
       emptyText={emptyText}
       headers={headers}
       items={items}
-      minWidthClassName="min-w-[720px]"
+      minWidthClassName="min-w-[760px] sm:min-w-[720px]"
     >
       {items.map((item, index) => {
         const labelText = getDashboardItemLabelText(item);
@@ -751,7 +751,7 @@ function ManagementRiskDetailTable({
         { label: "时间", className: "w-[24%]" },
       ]}
       items={items}
-      minWidthClassName="min-w-[760px]"
+      minWidthClassName="min-w-[800px] sm:min-w-[760px]"
     >
       {items.map((item, index) => (
         <tr
@@ -1124,7 +1124,7 @@ function DashboardBoardItemTable({
             ]
       }
       items={items}
-      minWidthClassName="min-w-[720px]"
+      minWidthClassName="min-w-[760px] sm:min-w-[720px]"
     >
       {items.map((item, index) => {
         const labelText = getDashboardItemLabelText(item);
@@ -1165,7 +1165,7 @@ function DashboardRecentItemsTable({
         { label: "时间", className: "w-[24%]" },
       ]}
       items={items}
-      minWidthClassName="min-w-[720px]"
+      minWidthClassName="min-w-[760px] sm:min-w-[720px]"
     >
       {items.map((item, index) => {
         const labelText = getDashboardItemLabelText(item);
@@ -1206,7 +1206,7 @@ function DashboardBoardOverviewTable({
         { label: "时间", className: "w-[24%]" },
       ]}
       items={items}
-      minWidthClassName="min-w-[720px]"
+      minWidthClassName="min-w-[760px] sm:min-w-[720px]"
     >
       {items.map((item, index) => {
         const labelText = getDashboardItemLabelText(item);
@@ -1268,7 +1268,7 @@ function DashboardAnnouncementTable({
           { label: "时间", className: "w-[28%]" },
         ]}
         items={items}
-        minWidthClassName="min-w-[720px]"
+        minWidthClassName="min-w-[760px] sm:min-w-[720px]"
       >
         {items.map((item, index) => {
           const detailText = getDashboardItemDetailText(item);
@@ -1414,13 +1414,13 @@ function SystemStatusWindowControl({
   };
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_5rem_auto] items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
       <span className="shrink-0 text-sm font-normal text-muted-foreground">
         近
       </span>
       <Slider
         aria-label="统计天数"
-        className="w-40 sm:w-52 lg:w-60"
+        className="w-full min-w-20 sm:w-52 lg:w-60"
         disabled={allTime}
         min={DASHBOARD_WINDOW_MIN_DAYS}
         max={DASHBOARD_WINDOW_MAX_DAYS}
@@ -1453,7 +1453,7 @@ function SystemStatusWindowControl({
       <span className="shrink-0 text-sm font-normal text-muted-foreground">
         天
       </span>
-      <div className="ml-1 flex shrink-0 items-center gap-2">
+      <div className="col-span-4 flex shrink-0 items-center gap-2 sm:col-auto sm:ml-1">
         <Checkbox
           id="dashboard-window-all-time"
           checked={allTime}
@@ -1833,7 +1833,7 @@ function ManagementTodoTable({
         { label: "时间", className: "w-[28%]" },
       ]}
       items={items}
-      minWidthClassName="min-w-[720px]"
+      minWidthClassName="min-w-[760px] sm:min-w-[720px]"
     >
       {items.map((item, index) => {
         const labelText = getDashboardItemLabelText(item);
@@ -1906,7 +1906,7 @@ function ManagementRecentOperationsTable({
         { label: "时间", className: "w-[20%]" },
       ]}
       items={items}
-      minWidthClassName="min-w-[760px]"
+      minWidthClassName="min-w-[800px] sm:min-w-[760px]"
     >
       {items.map((item, index) => {
         const categoryMeta = getManagementOperationCategoryMeta(item);

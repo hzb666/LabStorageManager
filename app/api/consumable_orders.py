@@ -72,6 +72,7 @@ from app.services.search_query_log_service import (
     build_search_log_filters,
     build_search_log_sort,
 )
+from app.search_completion_db import CONSUMABLE_ORDER_COMPLETION_ENDPOINT
 from app.services.search_completion_entity_index import (
     delete_consumable_order_entity_completions,
     run_completion_index_update,
@@ -138,6 +139,7 @@ def _clear_consumable_order_cache(
         run_completion_index_update(
             update_completion_index,
             context="consumable_order",
+            endpoint=CONSUMABLE_ORDER_COMPLETION_ENDPOINT,
         )
 
 

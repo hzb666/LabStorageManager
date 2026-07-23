@@ -9,6 +9,7 @@ const EDITABLE_ORDER_STATUSES = new Set<string>([
   ConsumableOrderStatus.PENDING,
   ConsumableOrderStatus.REJECTED,
 ])
+const DELETABLE_ORDER_STATUSES = EDITABLE_ORDER_STATUSES
 const ADMIN_EDITABLE_ORDER_STATUSES = new Set<string>([
   ...EDITABLE_ORDER_STATUSES,
   ReagentOrderStatus.APPROVED,
@@ -35,6 +36,10 @@ const REJECTABLE_ORDER_STATUSES = new Set<string>([
 
 export function isEditableOrderStatus(status: unknown): boolean {
   return typeof status === 'string' && EDITABLE_ORDER_STATUSES.has(status)
+}
+
+export function isOrderDeletableStatus(status: unknown): boolean {
+  return typeof status === 'string' && DELETABLE_ORDER_STATUSES.has(status)
 }
 
 export function isOrderEditableByRole(status: unknown, isAdmin: boolean): boolean {

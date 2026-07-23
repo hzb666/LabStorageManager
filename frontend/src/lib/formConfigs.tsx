@@ -468,7 +468,7 @@ export function getConfirmArrivalFormFields(
       name: 'storage_location' as const,
       label: '存放位置',
       type: 'input' as const,
-      placeholder: '留空则暂存即可',
+      placeholder: '暂存则留空即可',
     },
     {
       name: 'remaining_quantity' as const,

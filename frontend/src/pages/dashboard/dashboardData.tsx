@@ -79,6 +79,7 @@ export type DashboardCounts = {
   borrowCount: number;
   borrowOverdueCount: number;
   stockinCount: number;
+  stockinOverdueCount: number;
 };
 
 export type DashboardCountsState = {
@@ -94,6 +95,7 @@ export const EMPTY_COUNTS: DashboardCounts = {
   borrowCount: 0,
   borrowOverdueCount: 0,
   stockinCount: 0,
+  stockinOverdueCount: 0,
 };
 
 const PERSONAL_SUMMARY_QUERY_KEY = ["dashboard", "personal", "summary"] as const;
@@ -113,6 +115,7 @@ function mapPersonalSummaryToCounts(summary: PersonalDashboardSummary): Dashboar
     borrowCount: summary.borrow_count,
     borrowOverdueCount: summary.borrow_overdue_count,
     stockinCount: summary.stockin_count,
+    stockinOverdueCount: summary.stockin_overdue_count,
   };
 }
 
@@ -338,6 +341,10 @@ export function getDashboardCardItems(
       title: "待入库",
       icon: ArrowRightLeft,
       value: isLoading ? loadingValue : counts.stockinCount,
+      titleSuffix:
+        !isLoading && counts.stockinOverdueCount > 0
+          ? getCardAlertBadge(`${counts.stockinOverdueCount} 个超时`)
+          : undefined,
     },
   ];
 }

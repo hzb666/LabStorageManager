@@ -30,6 +30,7 @@ import { UserRoles } from "@/lib/constants";
 import { defaultConfirmArrivalValues, defaultCommonPublicArrivalValues, defaultReagentOrderValues, defaultStockInValues, getCommonPublicArrivalFormFields, getConfirmArrivalFormFields, getReagentOrderFormFields, getStockInFormFields } from "@/lib/formConfigs";
 import {
   isApprovableOrderStatus,
+  isOrderDeletableStatus,
   isOrderEditableByRole,
   isRejectableOrderStatus,
 } from "@/lib/orderEditRules";
@@ -81,6 +82,24 @@ import {
 } from "../../lib/dashboardUtils";
 
 type StockinMode = "arrival" | "quick" | "common-public-arrival";
+
+const DASHBOARD_REAGENT_MOBILE_COLUMN_MIN_SIZES = {
+  cas_number: 100,
+  name: 200,
+  created_at: 110,
+  status: 100,
+} as const;
+
+const DASHBOARD_REAGENT_ADMIN_MOBILE_COLUMN_MIN_SIZES = {
+  ...DASHBOARD_REAGENT_MOBILE_COLUMN_MIN_SIZES,
+  status: 60,
+} as const;
+
+function getDashboardReagentMobileColumnMinSizes(managementMode: boolean) {
+  return managementMode
+    ? DASHBOARD_REAGENT_ADMIN_MOBILE_COLUMN_MIN_SIZES
+    : DASHBOARD_REAGENT_MOBILE_COLUMN_MIN_SIZES;
+}
 
 function getReagentEditBlockMessage(
   item: DashboardReagentOrder,
@@ -614,6 +633,8 @@ function DashboardReagentEditDialog({
   } = dialog;
   const isReagentEditLocked =
     editingReagent !== null && !isOrderEditableByRole(editingReagent.status, isAdmin);
+  const canDeleteReagent =
+    editingReagent !== null && isOrderDeletableStatus(editingReagent.status);
 
   return (
     <Dialog
@@ -642,7 +663,7 @@ function DashboardReagentEditDialog({
           <EditDialogActions
             mode="edit"
             onCancel={closeReagentDialog}
-            onDelete={handleDeleteReagent}
+            onDelete={canDeleteReagent ? handleDeleteReagent : undefined}
             submitLabelEdit="保存"
             submitLabelAdd="保存"
             isSubmitting={isSubmittingReagent}
@@ -1116,6 +1137,8 @@ export function DashboardReagentTab({
         api={reagentDashboardAPI}
         queryKey={managementMode ? ["dashboard", "admin", "reagents"] : ["dashboard", "reagents"]}
         tableId={managementMode ? "dashboard-admin-reagent-orders" : "dashboard-reagent-orders"}
+        mobileMinTableWidth={760}
+        mobileColumnMinSizes={getDashboardReagentMobileColumnMinSizes(managementMode)}
         realtime={{
           room: "reagent_orders",
           eventTypes: REAGENT_ORDER_SSE_EVENTS,

@@ -233,7 +233,7 @@ function AnnouncementStorageBar({
   storageInfo: AnnouncementStorageInfo | undefined
 }) {
   return (
-    <div className="relative flex-1 h-10 rounded-md border border-input bg-card overflow-hidden flex items-center">
+    <div className="relative col-span-2 flex h-10 w-full flex-1 items-center overflow-hidden rounded-md border border-input bg-card sm:col-auto sm:w-auto">
       <div
         className="absolute inset-y-0 left-0 bg-muted transition-all duration-500 ease-in-out"
         style={{ width: `${Math.min(storageInfo?.usage_percent ?? 0, 100)}%` }}
@@ -428,7 +428,7 @@ function AnnouncementFiltersBar({
   listController: ReturnType<typeof useAnnouncementListController>
 }) {
   return (
-    <div className="flex items-center gap-3">
+    <div className="grid grid-cols-2 items-center gap-3 sm:flex">
       <AnnouncementStorageBar storageInfo={listController.storageInfo} />
       <TooltipSelect
         value={listController.visibilityFilter}

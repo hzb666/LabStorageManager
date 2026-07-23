@@ -11,7 +11,10 @@ from app.core.time_utils import get_display_day_age_cutoff, get_utc_now
 from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
-from app.services.dashboard.common import LONG_UNARRIVED_APPROVED_DAYS
+from app.services.dashboard.common import (
+    LONG_UNARRIVED_APPROVED_DAYS,
+    PENDING_STOCKIN_ALERT_DAYS,
+)
 
 PERSONAL_REAGENT_ORDER_STATUSES = (
     ReagentOrderStatus.PENDING,
@@ -110,16 +113,25 @@ def _count_borrowed_inventory(
     return int(total or 0), int(overdue or 0)
 
 
-def _count_pending_stockin(db: Session, *, user_id: int) -> int:
+def _count_pending_stockin(
+    db: Session,
+    *,
+    user_id: int,
+    overdue_cutoff: datetime,
+) -> tuple[int, int]:
     statement = (
-        select(func.count(Inventory.id))
+        select(
+            func.count(Inventory.id),
+            func.sum(case((Inventory.created_at < overdue_cutoff, 1), else_=0)),
+        )
         .select_from(Inventory)
         .where(
             Inventory.storage_location.is_(None),
             Inventory.temporary_keeper_id == user_id,
         )
     )
-    return int(db.exec(statement).one() or 0)
+    total, overdue = db.exec(statement).one()
+    return int(total or 0), int(overdue or 0)
 
 
 def build_personal_dashboard_summary(
@@ -128,7 +140,7 @@ def build_personal_dashboard_summary(
     user_id: int,
     now: datetime | None = None,
 ) -> dict[str, int]:
-    """Return the seven personal card counts without materializing list rows."""
+    """Return personal card counts without materializing list rows."""
 
     current_time = now or get_utc_now()
     approved_cutoff = get_display_day_age_cutoff(
@@ -136,6 +148,10 @@ def build_personal_dashboard_summary(
         current_time,
     )
     borrow_cutoff = get_display_day_age_cutoff(OVERDUE_BORROW_DAYS, current_time)
+    stockin_cutoff = get_display_day_age_cutoff(
+        PENDING_STOCKIN_ALERT_DAYS,
+        current_time,
+    )
     reagent_count, reagent_overdue_count = _count_reagent_orders(
         db,
         user_id=user_id,
@@ -151,6 +167,11 @@ def build_personal_dashboard_summary(
         user_id=user_id,
         overdue_cutoff=borrow_cutoff,
     )
+    stockin_count, stockin_overdue_count = _count_pending_stockin(
+        db,
+        user_id=user_id,
+        overdue_cutoff=stockin_cutoff,
+    )
 
     return {
         "reagent_count": reagent_count,
@@ -159,5 +180,6 @@ def build_personal_dashboard_summary(
         "consumable_receipt_overdue_count": consumable_overdue_count,
         "borrow_count": borrow_count,
         "borrow_overdue_count": borrow_overdue_count,
-        "stockin_count": _count_pending_stockin(db, user_id=user_id),
+        "stockin_count": stockin_count,
+        "stockin_overdue_count": stockin_overdue_count,
     }

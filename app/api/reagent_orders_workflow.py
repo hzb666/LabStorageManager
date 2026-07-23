@@ -66,6 +66,10 @@ from app.services.order_status_times import (
     get_reagent_order_status_times,
 )
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.search_completion_db import (
+    INVENTORY_COMPLETION_ENDPOINT,
+    REAGENT_ORDER_COMPLETION_ENDPOINT,
+)
 from app.services.search_completion_entity_index import (
     delete_reagent_order_entity_completions,
     run_completion_index_update,
@@ -123,6 +127,7 @@ def _clear_reagent_workflow_cache(
         run_completion_index_update(
             update_completion_index,
             context="reagent_order_workflow",
+            endpoint=REAGENT_ORDER_COMPLETION_ENDPOINT,
         )
 
 
@@ -396,7 +401,11 @@ def _clear_inventory_projection_cache(
             for item in items:
                 sync_inventory_entity_completions(item)
 
-        run_completion_index_update(update_completion_index, context="reagent_stock_in_inventory")
+        run_completion_index_update(
+            update_completion_index,
+            context="reagent_stock_in_inventory",
+            endpoint=INVENTORY_COMPLETION_ENDPOINT,
+        )
 
 
 def _log_stock_in_operations(

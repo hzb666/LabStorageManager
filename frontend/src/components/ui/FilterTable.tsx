@@ -85,6 +85,8 @@ export interface FilterTableProps {
   emptyText?: string;
   endMessage?: string;
   toolbarActions?: React.ReactNode;
+  mobileMinTableWidth?: number;
+  mobileColumnMinSizes?: Readonly<Record<string, number>>;
   inlineCompletionEndpoint?: '/inventory/' | '/reagent-orders/' | '/consumable-orders/';
   enableInlineCompletion?: boolean;
   realtime?: {
@@ -506,11 +508,11 @@ function FilterTableHeader({
   }
 
   return (
-    <CardHeader>
-      <div className="flex items-center justify-between">
-        <CardTitle className="flex items-center gap-2 text-lg">
+    <CardHeader className="px-4 sm:px-6">
+      <div className="flex items-center justify-between gap-3">
+        <CardTitle className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-base sm:text-lg">
           {title}
-          <span className="text-muted-foreground font-normal">
+          <span className="shrink-0 text-muted-foreground font-normal">
             (&thinsp;{displayCount}&thinsp;)
           </span>
         </CardTitle>
@@ -520,9 +522,10 @@ function FilterTableHeader({
             size="lg"
             onClick={onToggleExpandAll}
             disabled={disableExpandAll}
-            className={
-              disableExpandAll ? "text-muted-foreground opacity-60" : ""
-            }
+            className={cn(
+              "shrink-0",
+              disableExpandAll && "text-muted-foreground opacity-60",
+            )}
           >
             {isAllExpanded ? (
               <>
@@ -680,6 +683,8 @@ interface FilterTableContentProps {
   statusOptions: FilterOption[];
   table: Table<Record<string, unknown>>;
   tableId: string;
+  mobileMinTableWidth?: number;
+  mobileColumnMinSizes?: Readonly<Record<string, number>>;
 }
 
 // 根据加载态、空态和数据态切换表格主体内容。
@@ -696,6 +701,8 @@ function FilterTableContent({
   statusOptions,
   table,
   tableId,
+  mobileMinTableWidth,
+  mobileColumnMinSizes,
 }: Readonly<FilterTableContentProps>) {
   if (filter.isLoading && filter.data.length === 0) {
     return <TableLoadingState className="mx-6" />;
@@ -733,6 +740,8 @@ function FilterTableContent({
         searchKeyword={filter.globalFilter}
         endMessage={endMessage}
         onIsAtTopChange={setIsTableAtTop}
+        mobileMinTableWidth={mobileMinTableWidth}
+        mobileColumnMinSizes={mobileColumnMinSizes}
       />
     </div>
   );
@@ -1019,7 +1028,7 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
     disableExpandedRowAnimation,
     renderExpandedRow,
     noteField, scrollHeight, className, filterClassName, cardClassName,
-    emptyText, endMessage, toolbarActions, realtime,
+    emptyText, endMessage, toolbarActions, realtime, mobileMinTableWidth, mobileColumnMinSizes,
     inlineCompletionEndpoint, enableInlineCompletion,
   } = resolveFilterTableProps(props);
   const location = useLocation();
@@ -1129,6 +1138,8 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
             statusOptions={statusOptions}
             table={table}
             tableId={tableId}
+            mobileMinTableWidth={mobileMinTableWidth}
+            mobileColumnMinSizes={mobileColumnMinSizes}
           />
           {realtime && (
             <StaleBanner

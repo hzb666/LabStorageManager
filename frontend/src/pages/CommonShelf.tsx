@@ -1453,6 +1453,7 @@ export function CommonShelfPage() {
         api={commonShelfAPI as FilterAPI}
         queryKey={['common-shelf']}
         tableId="common-shelf-table"
+        mobileMinTableWidth={760}
         realtime={{
           room: 'common_shelf',
           eventTypes: COMMON_SHELF_SSE_EVENTS,

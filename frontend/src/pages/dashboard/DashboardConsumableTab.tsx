@@ -22,6 +22,7 @@ import { UserRoles } from "@/lib/constants";
 import { defaultConsumableOrderValues, getConsumableOrderFormFields } from "@/lib/formConfigs";
 import {
   isApprovableOrderStatus,
+  isOrderDeletableStatus,
   isOrderEditableByRole,
   isRejectableOrderStatus,
 } from "@/lib/orderEditRules";
@@ -65,6 +66,24 @@ type ConsumableForm = ReturnType<
     ConsumableOrderFormData
   >
 >;
+
+const DASHBOARD_CONSUMABLE_MOBILE_COLUMN_MIN_SIZES = {
+  name: 200,
+  specification: 180,
+  created_at: 110,
+  status: 100,
+} as const;
+
+const DASHBOARD_CONSUMABLE_ADMIN_MOBILE_COLUMN_MIN_SIZES = {
+  ...DASHBOARD_CONSUMABLE_MOBILE_COLUMN_MIN_SIZES,
+  status: 60,
+} as const;
+
+function getDashboardConsumableMobileColumnMinSizes(managementMode: boolean) {
+  return managementMode
+    ? DASHBOARD_CONSUMABLE_ADMIN_MOBILE_COLUMN_MIN_SIZES
+    : DASHBOARD_CONSUMABLE_MOBILE_COLUMN_MIN_SIZES;
+}
 
 function getConsumableEditBlockMessage(
   item: DashboardConsumableOrder,
@@ -241,6 +260,9 @@ function DashboardConsumableEditDialog({
   const isConsumableEditLocked =
     editingConsumable !== null &&
     !isOrderEditableByRole(editingConsumable.status, isAdmin);
+  const canDeleteConsumable =
+    editingConsumable !== null &&
+    isOrderDeletableStatus(editingConsumable.status);
 
   return (
     <Dialog
@@ -269,7 +291,7 @@ function DashboardConsumableEditDialog({
           <EditDialogActions
             mode="edit"
             onCancel={onClose}
-            onDelete={onDelete}
+            onDelete={canDeleteConsumable ? onDelete : undefined}
             submitLabelEdit="保存"
             submitLabelAdd="保存"
             isSubmitting={isSubmittingConsumable}
@@ -560,6 +582,8 @@ export function DashboardConsumableTab({
         api={consumableDashboardAPI}
         queryKey={managementMode ? ["dashboard", "admin", "consumables"] : ["dashboard", "consumables"]}
         tableId={managementMode ? "dashboard-admin-consumable-orders" : "dashboard-consumable-orders"}
+        mobileMinTableWidth={760}
+        mobileColumnMinSizes={getDashboardConsumableMobileColumnMinSizes(managementMode)}
         realtime={{
           room: "consumable_orders",
           eventTypes: CONSUMABLE_ORDER_SSE_EVENTS,

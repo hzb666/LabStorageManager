@@ -813,6 +813,8 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /You are not allowed to view this item's borrow history/i, message: '你无权查看该物品的借用历史' },
   { pattern: /Public account cannot delete orders/i, message: '公用账户不能删除订单' },
   { pattern: /Only the order applicant or admin can/i, message: '只有申请人或管理员才能执行此操作' },
+  { pattern: /Approved, arrived, or stocked orders cannot be deleted/i, message: '已批准、已到货或已入库的试剂订单不能删除' },
+  { pattern: /Approved or completed consumable orders cannot be deleted/i, message: '已批准或已完成的耗材订单不能删除' },
   { pattern: /Only pending, rejected, or admin-approved orders can be edited/i, message: '仅待审批、已驳回或管理员已批准订单可编辑' },
   { pattern: /Only pending or rejected orders can be edited/i, message: '仅待审批或已驳回订单可编辑' },
   { pattern: /Approved or rejected orders can only be deleted by non-admin users/i, message: '已批准或已驳回订单不可编辑，仅可删除' },

@@ -83,6 +83,7 @@ from app.api.inventory_timeline import register_inventory_timeline_routes
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.core.db_compat import exec_delete_returning_first
 from app.models.user import User
+from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT
 from app.services.search_query_log_service import (
     buffer_search_log,
     build_search_log_filters,
@@ -362,7 +363,11 @@ def _clear_list_cache(
             else:
                 sync_inventory_entity_completions(item)
 
-        run_completion_index_update(update_completion_index, context="inventory")
+        run_completion_index_update(
+            update_completion_index,
+            context="inventory",
+            endpoint=INVENTORY_COMPLETION_ENDPOINT,
+        )
     logger.info(f"Cleared {cleared_count} list cache entries")
 
 

@@ -727,6 +727,11 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
       header: 'CAS号',
       size: 120,
     }),
+    borrowColumnHelper.accessor('storage_location', {
+      header: '位置',
+      size: 120,
+      cell: (info) => info.getValue() || '-',
+    }),
     borrowColumnHelper.accessor('remaining_quantity', {
       header: '借用时剩余量',
       size: 120,
@@ -928,6 +933,7 @@ export function DashboardBorrowTab({
         api={borrowDashboardAPI}
         queryKey={managementMode ? ['dashboard', 'admin', 'borrows'] : ['dashboard', 'borrows']}
         tableId={managementMode ? 'dashboard-admin-borrows' : 'dashboard-borrows'}
+        mobileMinTableWidth={760}
         realtime={borrowRealtime}
         customColumns={borrowColumns}
         statusOptions={DASHBOARD_EMPTY_STATUS_OPTIONS}
@@ -1004,7 +1010,7 @@ function createStockinColumns(
       size: 120,
     }),
     pendingStockinColumnHelper.accessor('initial_quantity', {
-      header: '数量',
+      header: '规格',
       size: 120,
       cell: (info) => `${info.getValue()} ${info.row.original.unit}`,
     }),
@@ -1159,6 +1165,7 @@ export function DashboardStockinTab({
         api={pendingStockinDashboardAPI}
         queryKey={managementMode ? ['dashboard', 'admin', 'stockin'] : ['dashboard', 'stockin']}
         tableId={managementMode ? 'dashboard-admin-stockin' : 'dashboard-stockin'}
+        mobileMinTableWidth={760}
         realtime={{
           room: 'inventory',
           eventTypes: INVENTORY_SSE_EVENTS,

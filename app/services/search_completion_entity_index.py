@@ -18,6 +18,7 @@ from app.search_completion_db import (
     clear_entity_completion_index,
     delete_entity_completions_for_entity,
     is_entity_completion_index_stale,
+    mark_entity_completion_index_stale,
     replace_entity_completions_for_entity,
 )
 from app.services.sql_utils import normalize_search_term
@@ -29,16 +30,32 @@ logger = logging.getLogger(__name__)
 EntityRow = tuple[str, str, str, str, str, str, str | None, float]
 
 
-def run_completion_index_update(operation: Callable[[], None], *, context: str) -> None:
-    """Run an auxiliary completion-index update without failing the business request."""
+def run_completion_index_update(
+    operation: Callable[[], None],
+    *,
+    context: str,
+    endpoint: str,
+) -> None:
+    """Run an auxiliary update and schedule an endpoint rebuild after failures."""
 
     try:
         operation()
     except Exception:
         logger.exception(
-            "search_completion_update_failed context=%s; continuing with stale completion data",
+            "search_completion_update_failed context=%s endpoint=%s; "
+            "preserving the committed business result",
             context,
+            endpoint,
         )
+        try:
+            mark_entity_completion_index_stale(endpoint)
+        except Exception:
+            logger.exception(
+                "search_completion_stale_mark_failed context=%s endpoint=%s; "
+                "manual rebuild may be required",
+                context,
+                endpoint,
+            )
 
 
 _INVENTORY_STATUS_SCORE: dict[str, float] = {
