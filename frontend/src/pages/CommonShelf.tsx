@@ -216,6 +216,18 @@ function buildChemicalNameMapForm(item: ChemicalNameMapItem | null): ChemicalNam
   }
 }
 
+function buildManualAddForm(source?: ChemicalNameMapItem): CommonShelfManualAddInputData {
+  if (!source) {
+    return DEFAULT_MANUAL_ADD_FORM
+  }
+
+  return {
+    ...DEFAULT_MANUAL_ADD_FORM,
+    cas_number: source.cas_number,
+    name_snapshot: source.name,
+  }
+}
+
 function buildManualAddPayload(data: CommonShelfManualAddData): ManualAddPayload {
   return {
     cas_number: data.cas_number,
@@ -329,19 +341,23 @@ function resetCommonShelfDialogForms(forms: CommonShelfDialogForms) {
 function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
   const [mode, setMode] = useState<CommonShelfDialogMode>(null)
   const [selectedGroup, setSelectedGroup] = useState<CommonShelfGroup | null>(null)
+  const [manualAddSource, setManualAddSource] = useState<ChemicalNameMapItem | null>(null)
   const [editNeedsMergeConfirm, setEditNeedsMergeConfirm] = useState(false)
 
   const resetDialogState = useCallback(() => {
     setMode(null)
     setSelectedGroup(null)
+    setManualAddSource(null)
     setEditNeedsMergeConfirm(false)
     resetCommonShelfDialogForms(forms)
   }, [forms])
 
-  const openManualAddDialog = useCallback(() => {
+  const openManualAddDialog = useCallback((source?: ChemicalNameMapItem) => {
     resetDialogState()
+    setManualAddSource(source ?? null)
+    forms.manualAddForm.reset(buildManualAddForm(source))
     setMode('manual-add')
-  }, [resetDialogState])
+  }, [forms.manualAddForm, resetDialogState])
 
   const openEditDialog = useCallback((item: CommonShelfGroup) => {
     resetDialogState()
@@ -369,6 +385,7 @@ function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
   return {
     mode,
     selectedGroup,
+    manualAddSource,
     editNeedsMergeConfirm,
     setEditNeedsMergeConfirm,
     resetDialogState,
@@ -425,6 +442,7 @@ function createCommonShelfColumns(params: {
 
 function createChemicalNameMapColumns(params: {
   canWrite: boolean
+  onAddToCommonShelf: (item: ChemicalNameMapItem) => void
   onEdit: (item: ChemicalNameMapItem) => void
   onDelete: (item: ChemicalNameMapItem) => Promise<void>
 }) {
@@ -436,6 +454,7 @@ function createChemicalNameMapColumns(params: {
         return (
           <ChemicalNameMapActionButtons
             item={item}
+            onAddToCommonShelf={params.onAddToCommonShelf}
             onEdit={params.onEdit}
             onDelete={params.onDelete}
           />
@@ -443,6 +462,20 @@ function createChemicalNameMapColumns(params: {
       }
       : undefined,
   }) as unknown as ColumnDef<Record<string, unknown>, unknown>[]
+}
+
+function useChemicalNameMapColumns(
+  canWrite: boolean,
+  onAddToCommonShelf: (item: ChemicalNameMapItem) => void,
+  onEdit: (item: ChemicalNameMapItem) => void,
+  onDelete: (item: ChemicalNameMapItem) => Promise<void>,
+) {
+  return useMemo(() => createChemicalNameMapColumns({
+    canWrite,
+    onAddToCommonShelf,
+    onEdit,
+    onDelete,
+  }), [canWrite, onAddToCommonShelf, onDelete, onEdit])
 }
 
 function applyFormValidationDetail(
@@ -918,6 +951,7 @@ function useCommonShelfDialogController({
   const {
     mode,
     selectedGroup,
+    manualAddSource,
     editNeedsMergeConfirm,
     setEditNeedsMergeConfirm,
     resetDialogState,
@@ -1005,6 +1039,7 @@ function useCommonShelfDialogController({
     state: {
       mode,
       selectedGroup,
+      manualAddSource,
       isSubmitting,
       editNeedsMergeConfirm,
     },
@@ -1034,11 +1069,13 @@ function useCommonShelfDialogController({
 
 function useChemicalNameMapController({
   canWrite,
+  openManualAddDialog,
   refreshChemicalNameMap,
   refreshCommonShelf,
   resetCommonShelfDialog,
 }: {
   canWrite: boolean
+  openManualAddDialog: (source?: ChemicalNameMapItem) => void
   refreshChemicalNameMap: () => Promise<void>
   refreshCommonShelf: () => Promise<void>
   resetCommonShelfDialog: () => void
@@ -1171,11 +1208,9 @@ function useChemicalNameMapController({
     setPendingManualAddPayload,
   ])
 
-  const columns = useMemo(() => createChemicalNameMapColumns({
-    canWrite,
-    onEdit: openChemicalNameMapEditDialog,
-    onDelete: handleDeleteChemicalNameMap,
-  }), [canWrite, handleDeleteChemicalNameMap, openChemicalNameMapEditDialog])
+  const columns = useChemicalNameMapColumns(
+    canWrite, openManualAddDialog, openChemicalNameMapEditDialog, handleDeleteChemicalNameMap,
+  )
 
   const editorDialog: ChemicalNameMapEditorController = {
     open: editorOpen,
@@ -1249,6 +1284,7 @@ function useCommonShelfPageController(): CommonShelfPageController {
 
   const chemicalNameMapController = useChemicalNameMapController({
     canWrite: canWriteChemicalNameMap,
+    openManualAddDialog: dialogActions.openManualAddDialog,
     refreshChemicalNameMap,
     refreshCommonShelf,
     resetCommonShelfDialog: dialogActions.resetDialogState,
@@ -1343,7 +1379,7 @@ function QuickOrderSummaryField({ label, value }: Readonly<{ label: string; valu
   return (
     <div className="min-w-0">
       <div className="text-xs font-normal text-muted-foreground">{label}</div>
-      <div className="mt-1 break-words text-sm text-foreground">{value || '-'}</div>
+      <div className="mt-1 break-words text-base text-foreground">{value || '-'}</div>
     </div>
   )
 }
@@ -1421,7 +1457,7 @@ export function CommonShelfPage() {
     <div className="space-y-6">
       <CommonShelfPageHeader
         showManualAdd={canManageCommonShelf}
-        onOpenManualAdd={dialogActions.openManualAddDialog}
+        onOpenManualAdd={() => dialogActions.openManualAddDialog()}
         onOpenChemicalNameMapManagement={() => chemicalNameMapController.setManagementOpen(true)}
         isExporting={isExporting}
         onExport={() => {
@@ -1530,14 +1566,23 @@ const CommonShelfActionButtons = function CommonShelfActionButtons({
 
 function ChemicalNameMapActionButtons({
   item,
+  onAddToCommonShelf,
   onEdit,
   onDelete,
 }: {
   item: ChemicalNameMapItem
+  onAddToCommonShelf: (item: ChemicalNameMapItem) => void
   onEdit: (item: ChemicalNameMapItem) => void
   onDelete: (item: ChemicalNameMapItem) => Promise<void>
 }) {
   const actions = useMemo(() => [
+    {
+      id: 'add-to-common-shelf',
+      label: '加入常用货架',
+      icon: <Plus className="size-4 text-green-600 dark:text-green-400" />,
+      className: 'text-green-600 hover:bg-green-100 hover:text-green-700 dark:text-green-400 dark:hover:bg-green-950 dark:hover:text-green-300',
+      onClick: onAddToCommonShelf,
+    },
     {
       id: 'delete',
       label: '删除',
@@ -1547,7 +1592,7 @@ function ChemicalNameMapActionButtons({
       confirmLabel: '确认删除',
       onClick: onDelete,
     },
-  ], [onDelete])
+  ], [onAddToCommonShelf, onDelete])
 
   return (
     <TableActionButtonsMemo

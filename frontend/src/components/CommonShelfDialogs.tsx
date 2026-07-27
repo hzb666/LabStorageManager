@@ -79,6 +79,7 @@ export interface CommonShelfDialogController {
   state: {
     mode: CommonShelfDialogMode
     selectedGroup: CommonShelfGroup | null
+    manualAddSource: ChemicalNameMapItem | null
     isSubmitting: boolean
     editNeedsMergeConfirm: boolean
   }
@@ -106,7 +107,7 @@ export interface CommonShelfDialogController {
     handleSubmitAddBottles: () => Promise<void>
     handleSubmitRemoveOne: () => Promise<void>
     handleDelete?: () => Promise<void>
-    openManualAddDialog: () => void
+    openManualAddDialog: (source?: ChemicalNameMapItem) => void
     openEditDialog: (item: CommonShelfGroup) => void
     openAddBottlesDialog: (item: CommonShelfGroup) => void
     openRemoveOneDialog: (item: CommonShelfGroup) => void
@@ -214,12 +215,22 @@ function renderManualAddDialog(
   brandOptions: AutocompleteOption[],
 ) {
   const { actions, forms, state } = dialog
+  const source = state.manualAddSource
 
   return (
     <form className="space-y-4" onSubmit={handleDialogSubmit(actions.handleSubmitManualAdd)}>
+      {source ? (
+        <DialogEntitySummary
+          title={source.name}
+          details={`CAS：${source.cas_number}`}
+        />
+      ) : null}
       <BaseForm
         form={forms.manualAddForm}
-        fields={getCommonShelfManualAddFormFields({ brandOptions })}
+        fields={getCommonShelfManualAddFormFields({
+          brandOptions,
+          hideIdentityFields: Boolean(source),
+        })}
         columns={2}
       />
       <DialogSubmitActions
@@ -611,7 +622,9 @@ export function CommonShelfDialogs({
     },
   })
 
-  const dialogTitle = getCommonShelfDialogTitle(mode)
+  const dialogTitle = mode === 'manual-add' && state.manualAddSource
+    ? '加入常用货架'
+    : getCommonShelfDialogTitle(mode)
   const locationSuggestions = locationSuggestionsQuery.data ?? []
   const locationOptions = buildLocationOptions(removeLocationsQuery.data)
 

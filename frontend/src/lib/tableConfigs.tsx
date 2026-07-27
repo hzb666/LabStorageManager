@@ -519,9 +519,9 @@ export function getChemicalNameMapTableColumns(args: {
       id: 'actions',
       header: '操作',
       enableSorting: false,
-      size: 120,
-      minSize: 120,
-      maxSize: 132,
+      size: 144,
+      minSize: 132,
+      maxSize: 160,
       cell: (info) => <>{renderActions(info.row.original)}</>,
     }))
   }

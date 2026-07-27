@@ -493,12 +493,26 @@ const CHEMICAL_CATEGORY_FORM_OPTIONS = Object.entries(CHEMICAL_CATEGORY_LABELS).
 
 export function getCommonShelfManualAddFormFields(config?: {
   brandOptions?: BrandAutocompleteOption[]
+  hideIdentityFields?: boolean
 }): FieldSchema<CommonShelfManualAddInputData>[] {
   const brandOptions = resolveBrandOptions(config?.brandOptions)
 
   return [
-    { name: 'name_snapshot' as const, label: '名称', type: 'input' as const, required: true, colSpan: 2 },
-    { name: 'cas_number' as const, label: 'CAS', type: 'input' as const, required: true },
+    {
+      name: 'name_snapshot' as const,
+      label: '名称',
+      type: 'input' as const,
+      required: true,
+      colSpan: 2,
+      hidden: config?.hideIdentityFields,
+    },
+    {
+      name: 'cas_number' as const,
+      label: 'CAS',
+      type: 'input' as const,
+      required: true,
+      hidden: config?.hideIdentityFields,
+    },
     {
       name: 'brand' as const,
       label: '品牌',
