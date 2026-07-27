@@ -12,6 +12,7 @@ import { useSSEStore } from '@/store/sseStore'
 
 type RuntimeCacheVersionResponse = {
   cache_version?: unknown
+  maintenance_mode?: unknown
   display_utc_offset?: unknown
   display_timezone?: unknown
 }
@@ -22,10 +23,12 @@ type CacheVersionBootstrapResult = {
 
 type RuntimeBootstrapPayload = {
   cacheVersion: string | null
+  maintenanceMode: boolean
   timeConfig: RuntimeTimeConfig | null
 }
 
 const CACHE_VERSION_FETCH_TIMEOUT_MS = 2000
+let runtimeBootstrapPromise: Promise<RuntimeBootstrapPayload | null> | null = null
 
 function getErrorName(error: unknown): string {
   if (!error || typeof error !== 'object' || !('name' in error)) {
@@ -109,6 +112,7 @@ async function fetchRuntimeCacheVersion(): Promise<RuntimeBootstrapPayload> {
 
     return {
       cacheVersion: cacheVersion || null,
+      maintenanceMode: data.maintenance_mode === true,
       timeConfig: normalizeRuntimeTimeConfig(data),
     }
   } finally {
@@ -116,7 +120,7 @@ async function fetchRuntimeCacheVersion(): Promise<RuntimeBootstrapPayload> {
   }
 }
 
-async function resolveRuntimeBootstrapPayload(): Promise<RuntimeBootstrapPayload | null> {
+async function fetchRuntimeBootstrapPayload(): Promise<RuntimeBootstrapPayload | null> {
   try {
     return await fetchRuntimeCacheVersion()
   } catch (error) {
@@ -129,6 +133,16 @@ async function resolveRuntimeBootstrapPayload(): Promise<RuntimeBootstrapPayload
     console.error('Cache version bootstrap failed:', error)
     return null
   }
+}
+
+function resolveRuntimeBootstrapPayload(): Promise<RuntimeBootstrapPayload | null> {
+  runtimeBootstrapPromise ??= fetchRuntimeBootstrapPayload()
+  return runtimeBootstrapPromise
+}
+
+export async function resolveRuntimeMaintenanceMode(): Promise<boolean> {
+  const payload = await resolveRuntimeBootstrapPayload()
+  return payload?.maintenanceMode ?? false
 }
 
 async function clearCacheStorage(): Promise<void> {
@@ -239,7 +253,11 @@ export async function bootstrapCacheVersion(queryClient: QueryClient): Promise<C
     return { redirected: false }
   }
 
-  const { cacheVersion: currentCacheVersion, timeConfig } = payload
+  const { cacheVersion: currentCacheVersion, maintenanceMode, timeConfig } = payload
+  if (maintenanceMode) {
+    return { redirected: false }
+  }
+
   if (!currentCacheVersion) {
     persistRuntimeBootstrapState(null, timeConfig)
     return { redirected: false }

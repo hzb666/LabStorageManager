@@ -1,7 +1,8 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Layout } from '@/pages/Layout'
 import { Login } from '@/pages/Login'
+import { MaintenancePage } from '@/pages/Maintenance'
 import { CartImportLoadingScreen } from '@/components/CartImportLoadingScreen'
 import { AuthDeferredShell } from '@/components/AuthDeferredShell'
 import { useAuthStore } from '@/store/useStore'
@@ -11,6 +12,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { UserRoles } from '@/lib/constants'
 import { canWriteNonPublicData } from '@/lib/permissions'
+import { resolveRuntimeMaintenanceMode } from '@/lib/cacheVersionBootstrap'
 
 // 懒加载页面组件 - 使用默认导出
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
@@ -29,6 +31,44 @@ const OperationLogsPage = lazy(() => import('@/pages/OperationLogs').then(m => (
 
 function AuthCheckingScreen() {
   return <div className="min-h-svh flex items-center justify-center text-muted-foreground">正在验证登录状态...</div>
+}
+
+function RuntimeCheckingScreen() {
+  return <div className="min-h-svh flex items-center justify-center text-muted-foreground">正在读取系统状态...</div>
+}
+
+function MaintenanceModeGate({ children }: Readonly<{ children: React.ReactNode }>) {
+  const location = useLocation()
+  const [maintenanceMode, setMaintenanceMode] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let active = true
+    resolveRuntimeMaintenanceMode()
+      .then((enabled) => {
+        if (active) {
+          setMaintenanceMode(enabled)
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setMaintenanceMode(false)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  if (maintenanceMode === null) {
+    return <RuntimeCheckingScreen />
+  }
+  if (!maintenanceMode) {
+    return <>{children}</>
+  }
+  if (location.pathname !== '/maintenance') {
+    return <Navigate to="/maintenance" replace />
+  }
+  return <MaintenancePage />
 }
 
 function ProtectedRoute({
@@ -96,9 +136,6 @@ function LoginRoute() {
 }
 
 function AppContent() {
-  // 初始化主题
-  useTheme()
-
   const bootstrapAuth = useAuthStore((state) => state.bootstrapAuth)
   useEffect(() => {
     void bootstrapAuth()
@@ -106,9 +143,8 @@ function AppContent() {
 
   return (
     <TooltipProvider>
-      <BrowserRouter>
-        <ToastContainer />
-        <Routes>
+      <ToastContainer />
+      <Routes>
           <Route path="/login" element={<LoginRoute />} />
           <Route
             path="/cart-import"
@@ -203,16 +239,27 @@ function AppContent() {
               }
             />
           </Route>
-        </Routes>
-      </BrowserRouter>
+      </Routes>
     </TooltipProvider>
+  )
+}
+
+function AppRouter() {
+  useTheme()
+
+  return (
+    <BrowserRouter>
+      <MaintenanceModeGate>
+        <AppContent />
+      </MaintenanceModeGate>
+    </BrowserRouter>
   )
 }
 
 function App() {
   return (
     <ErrorBoundary>
-      <AppContent />
+      <AppRouter />
     </ErrorBoundary>
   )
 }

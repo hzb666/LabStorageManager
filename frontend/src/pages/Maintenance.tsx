@@ -1,0 +1,52 @@
+import { useEffect } from 'react'
+import { Construction } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/Card'
+
+export function MaintenancePage() {
+  useEffect(() => {
+    const previousTitle = document.title
+    document.title = '系统维护中'
+    return () => {
+      document.title = previousTitle
+    }
+  }, [])
+
+  return (
+    <div className="flex min-h-svh w-full items-center justify-center px-4">
+      <div className="absolute inset-0 -z-10 [background-image:radial-gradient(circle_at_center,#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(closest-side_at_50%_50%,#000_70%,transparent_100%)] dark:[background-image:radial-gradient(circle_at_center,#1f2937_1px,transparent_1px)] dark:[mask-image:radial-gradient(closest-side_at_50%_50%,#000_70%,transparent_100%)]" />
+
+      <Card className="w-full max-w-sm">
+        <CardHeader className="space-y-4 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted">
+              <Construction className="size-5 text-muted-foreground" />
+            </div>
+            <div className="text-left">
+              <CardTitle className="text-xl font-bold">系统维护中</CardTitle>
+              <CardDescription>系统正在维护升级，请稍后再试</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-3">
+            <Button
+              variant="modern"
+              onClick={() => globalThis.location.reload()}
+              className="flex-1"
+              size="lg"
+            >
+              重新检查
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

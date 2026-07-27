@@ -681,11 +681,12 @@ def robots_txt() -> PlainTextResponse:
 
 
 @app.get("/api/runtime/cache-version")
-def get_runtime_cache_version(response: Response) -> dict[str, str]:
-    """Expose current cache invalidation version for frontend startup checks."""
+def get_runtime_cache_version(response: Response) -> dict[str, str | bool]:
+    """Expose current frontend runtime configuration for startup checks."""
     response.headers["Cache-Control"] = "no-store"
     return {
         "cache_version": settings.cache_version,
+        "maintenance_mode": settings.maintenance_mode,
         "display_utc_offset": settings.display_utc_offset,
         "display_timezone": get_display_timezone_label(),
     }

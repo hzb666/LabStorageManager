@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     app_name: str = "Lab Storage Manager"
     app_version: str = "0.7.1"
     cache_version: str = ""
+    maintenance_mode: bool = Field(
+        default=False,
+        description="Redirect the frontend to the maintenance page when enabled",
+    )
     debug: bool = False
     env: str = "development"  # 生产部署通过 ENV=production 覆盖
     display_utc_offset: str = Field(
