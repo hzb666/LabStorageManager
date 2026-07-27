@@ -128,8 +128,8 @@ class Settings(BaseSettings):
     default_admin_password: str = Field(default="", description="Default admin password (set in production)")
     default_admin_full_name: str = Field(default="系统管理员", description="Default admin full name")
 
-    # 会话与设备设置（含 IP 限制）
-    max_ip_per_user: int = Field(default=5, description="Max distinct IPs per user")
+    # 会话与设备设置。max_ip_per_user 仅为兼容既有 .env，当前不限制登录 IP 数量。
+    max_ip_per_user: int = Field(default=5, description="Deprecated compatibility setting")
     max_device_per_user: int = Field(default=10, description="Max devices per user")
     session_expire_hours: int = Field(default=7 * 24, description="Session expiration hours (7 days)")
     session_strict_ip: bool = Field(default=False, description="Whether to enforce IP consistency")

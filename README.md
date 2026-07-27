@@ -211,8 +211,8 @@ npm run dev
 | `CACHE_VERSION` | `0.7.1` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | 登录态默认 7 天 |
 | `SESSION_EXPIRE_HOURS` | `168` | 会话有效期，默认 7 天 |
-| `MAX_IP_PER_USER` | `5` | 每个用户允许的最大 IP 数 |
-| `MAX_DEVICE_PER_USER` | `10` | 每个用户允许的最大设备数 |
+| `MAX_IP_PER_USER` | `5` | 兼容旧配置，当前不限制登录 IP 数量 |
+| `MAX_DEVICE_PER_USER` | `10` | 每个用户允许的最大设备会话数；超限时淘汰最旧会话 |
 | `CLI_RATE_LIMIT_COUNT` | `60` | CLI API 单窗口请求次数 |
 | `CLI_RATE_LIMIT_WINDOW_SECONDS` | `60` | CLI API 限流窗口秒数 |
 | `CLI_LOGIN_RATE_LIMIT_COUNT` | `3` | CLI 登录单窗口尝试次数 |

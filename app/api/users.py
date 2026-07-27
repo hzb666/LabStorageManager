@@ -62,7 +62,6 @@ from app.services.session_service import (
     SessionCreationRequest,
     SessionCacheIdentity,
     _check_device_limit,
-    _check_ip_limit,
     _evict_oldest_session,
     finalize_revoked_sessions,
     stage_create_or_refresh_user_session,
@@ -646,14 +645,9 @@ def _login_user(
             expired_token_hashes=expired_token_hashes,
         )
 
-    if not _check_ip_limit(db, user.id, client_ip):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"IP limit reached ({settings.max_ip_per_user} IPs), please remove other devices first",
-        )
-
+    within_device_limit = _check_device_limit(db, user.id, login_request.device_id)
     evicted_token_hashes: list[str] = []
-    if not _check_device_limit(db, user.id, login_request.device_id):
+    if not within_device_limit:
         evicted_token_hashes = _evict_oldest_session(db, user.id, commit=False)
 
     user_role = user.role.value if isinstance(user.role, UserRole) else str(user.role)

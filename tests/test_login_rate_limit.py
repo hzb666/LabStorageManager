@@ -11,6 +11,7 @@ from app.api import users as users_api
 from app.core.constants import LOGIN_WINDOW_SECONDS, MAX_LOGIN_ATTEMPTS
 from app.models.user import User, UserRole
 from app.models.user_session import UserSession
+from app.services import session_service
 
 
 class _FakeRedis:
@@ -127,8 +128,8 @@ class LoginRateLimitTests(unittest.TestCase):
             patch("app.api.users.cleanup_expired_sessions", return_value=[]),
             patch("app.api.users.get_user_by_username", return_value=user),
             patch("app.api.users.verify_password", return_value=True),
-            patch("app.api.users._check_ip_limit", return_value=True),
             patch("app.api.users._check_device_limit", return_value=True),
+            patch("app.api.users._evict_oldest_session") as evict_oldest_session,
             patch("app.api.users.create_access_token", return_value="token-value"),
             patch("app.api.users.stage_create_or_refresh_user_session", return_value=(session, [])),
             patch("app.api.users.log_user_operation"),
@@ -148,6 +149,78 @@ class LoginRateLimitTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(fake_redis.get(key))
+        evict_oldest_session.assert_not_called()
+
+    def test_login_device_limit_evicts_oldest_session_and_succeeds(self) -> None:
+        fake_redis = _FakeRedis()
+        client_ip = "192.0.2.6"
+        user = _build_user()
+        session = UserSession(
+            id=11,
+            user_id=user.id,
+            device_id="device-6",
+            device_name="Chrome",
+            ip_address=client_ip,
+            last_ip_address=client_ip,
+            user_agent="pytest",
+            token_hash="new-token-hash",
+            expires_at=user.created_at,
+        )
+        fake_db = MagicMock()
+
+        with (
+            patch("app.api.users.get_redis", return_value=fake_redis),
+            patch("app.api.users.cleanup_expired_sessions", return_value=[]),
+            patch("app.api.users.get_user_by_username", return_value=user),
+            patch("app.api.users.verify_password", return_value=True),
+            patch("app.api.users._check_device_limit", return_value=False),
+            patch(
+                "app.api.users._evict_oldest_session",
+                return_value=["oldest-token-hash"],
+            ) as evict_oldest_session,
+            patch("app.api.users.create_access_token", return_value="new-token"),
+            patch(
+                "app.api.users.stage_create_or_refresh_user_session",
+                return_value=(session, []),
+            ),
+            patch("app.api.users.log_user_operation"),
+            patch("app.api.users.log_audit_event"),
+            patch(
+                "app.api.users._apply_login_post_commit_side_effects"
+            ) as apply_side_effects,
+        ):
+            result = users_api._login_user(
+                login_request=users_api.LoginRequest(
+                    username="admin",
+                    password="password123",
+                    device_id="device-6",
+                    device_name="Chrome",
+                ),
+                http_request=_build_request(client_ip=client_ip),
+                db=fake_db,
+            )
+
+        self.assertEqual(result.user.id, user.id)
+        evict_oldest_session.assert_called_once_with(fake_db, user.id, commit=False)
+        self.assertEqual(
+            apply_side_effects.call_args.kwargs["evicted_token_hashes"],
+            ["oldest-token-hash"],
+        )
+        fake_db.commit.assert_called_once()
+
+    def test_missing_device_id_still_obeys_session_limit(self) -> None:
+        fake_db = MagicMock()
+        fake_db.exec.return_value.one.return_value = 10
+
+        with patch.object(session_service.settings, "max_device_per_user", 10):
+            within_limit = session_service._check_device_limit(
+                fake_db,
+                user_id=1,
+                device_id=None,
+            )
+
+        self.assertFalse(within_limit)
+        fake_db.exec.assert_called_once()
 
     def test_login_invalid_password_records_failure_without_creating_session(self) -> None:
         fake_redis = _FakeRedis()
@@ -161,7 +234,6 @@ class LoginRateLimitTests(unittest.TestCase):
             patch("app.api.users.cleanup_expired_sessions", return_value=[]),
             patch("app.api.users.get_user_by_username", return_value=user),
             patch("app.api.users.verify_password", return_value=False),
-            patch("app.api.users._check_ip_limit") as check_ip_limit,
             patch("app.api.users.stage_create_or_refresh_user_session") as create_session,
             patch("app.api.users.create_access_token") as create_access_token,
             patch("app.api.users.log_user_operation") as log_user_operation,
@@ -184,7 +256,6 @@ class LoginRateLimitTests(unittest.TestCase):
         fake_db.commit.assert_called_once()
         log_user_operation.assert_called_once()
         log_audit_event.assert_called_once()
-        check_ip_limit.assert_not_called()
         create_session.assert_not_called()
         create_access_token.assert_not_called()
 
@@ -199,7 +270,6 @@ class LoginRateLimitTests(unittest.TestCase):
             patch("app.api.users.cleanup_expired_sessions", return_value=[]),
             patch("app.api.users.get_user_by_username", return_value=None),
             patch("app.api.users.verify_password", return_value=False) as verify_password,
-            patch("app.api.users._check_ip_limit") as check_ip_limit,
             patch("app.api.users.stage_create_or_refresh_user_session") as create_session,
             patch("app.api.users.create_access_token") as create_access_token,
             patch("app.api.users.log_user_operation") as log_user_operation,
@@ -224,7 +294,6 @@ class LoginRateLimitTests(unittest.TestCase):
         log_user_operation.assert_called_once()
         self.assertIsNone(log_user_operation.call_args.kwargs["target_user_id"])
         log_audit_event.assert_called_once()
-        check_ip_limit.assert_not_called()
         create_session.assert_not_called()
         create_access_token.assert_not_called()
 
@@ -280,7 +349,6 @@ class LoginRateLimitTests(unittest.TestCase):
             patch("app.api.users.cleanup_expired_sessions", return_value=[]),
             patch("app.api.users.get_user_by_username", return_value=user),
             patch("app.api.users.verify_password", return_value=True),
-            patch("app.api.users._check_ip_limit") as check_ip_limit,
             patch("app.api.users.stage_create_or_refresh_user_session") as create_session,
             patch("app.api.users.create_access_token") as create_access_token,
             patch("app.api.users.log_user_operation") as log_user_operation,
@@ -303,7 +371,6 @@ class LoginRateLimitTests(unittest.TestCase):
         fake_db.commit.assert_called_once()
         log_user_operation.assert_called_once()
         log_audit_event.assert_called_once()
-        check_ip_limit.assert_not_called()
         create_session.assert_not_called()
         create_access_token.assert_not_called()
 
