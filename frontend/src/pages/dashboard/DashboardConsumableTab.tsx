@@ -431,7 +431,7 @@ function createConsumableColumns({
   const personalActions = [
     {
       id: "confirm-complete",
-      label: "确认收货",
+      label: "到货",
       confirm: true,
       confirmLabel: "确认",
       showWhen: (currItem: DashboardConsumableOrder) =>

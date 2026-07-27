@@ -3,7 +3,7 @@ import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { safeParse } from "valibot";
-import { AlertTriangle, Check, FlaskConical, PackageCheck, Warehouse, X } from "lucide-react";
+import { AlertTriangle, Check, FlaskConical, X } from "lucide-react";
 
 import { BaseForm } from "@/components/BaseForm";
 import { EditDialogActions } from "@/components/EditDialogActions";
@@ -23,11 +23,10 @@ import {
   ReagentOrderStatus,
   type ConfirmArrivalPayload,
   type ReagentWorkflowEditPayload,
-  type StockInPayload,
 } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
 import { UserRoles } from "@/lib/constants";
-import { defaultConfirmArrivalValues, defaultCommonPublicArrivalValues, defaultReagentOrderValues, defaultStockInValues, getCommonPublicArrivalFormFields, getConfirmArrivalFormFields, getReagentOrderFormFields, getStockInFormFields } from "@/lib/formConfigs";
+import { defaultConfirmArrivalValues, defaultCommonPublicArrivalValues, defaultReagentOrderValues, getCommonPublicArrivalFormFields, getConfirmArrivalFormFields, getReagentOrderFormFields } from "@/lib/formConfigs";
 import {
   isApprovableOrderStatus,
   isOrderDeletableStatus,
@@ -43,7 +42,6 @@ import {
   CommonPublicArrivalFormSchema,
   ConfirmArrivalFormSchema,
   ReagentOrderSchema,
-  StockInFormSchema,
   applyValidationErrors,
   createRemainingQuantitySchema,
   createValibotResolver,
@@ -59,8 +57,6 @@ import {
   type ConfirmArrivalFormInputData,
   type ReagentOrderFormData,
   type ReagentOrderFormInputData,
-  type StockInFormData,
-  type StockInFormInputData,
 } from "@/lib/validationSchemas";
 import { useAuthStore } from "@/store/useStore";
 import {
@@ -81,7 +77,7 @@ import {
   type DashboardReagentOrder,
 } from "../../lib/dashboardUtils";
 
-type StockinMode = "arrival" | "quick" | "common-public-arrival";
+type StockinMode = "arrival" | "common-public-arrival";
 
 const DASHBOARD_REAGENT_MOBILE_COLUMN_MIN_SIZES = {
   cas_number: 100,
@@ -286,7 +282,7 @@ function buildWorkflowBaseValues(item: DashboardReagentOrder) {
 }
 
 function buildWorkflowPayload(
-  formData: StockInFormData | ConfirmArrivalFormData | CommonPublicArrivalFormData,
+  formData: ConfirmArrivalFormData | CommonPublicArrivalFormData,
 ): ReagentWorkflowEditPayload {
   return {
     name: formData.name,
@@ -320,16 +316,8 @@ function buildCommonPublicArrivalPayload(
   };
 }
 
-function buildStockInPayload(formData: StockInFormData): StockInPayload {
-  return {
-    ...buildWorkflowPayload(formData),
-    storage_location: formData.storage_location,
-    remaining_quantity: formData.remaining_quantity,
-  };
-}
-
 type WorkflowRemainingFields = Pick<
-  StockInFormData,
+  ConfirmArrivalFormData,
   "specification" | "remaining_quantity"
 >;
 
@@ -371,51 +359,22 @@ function buildCommonPublicArrivalFormValues(
   };
 }
 
-function buildStockinFormValues(
-  item: DashboardReagentOrder,
-  mode: StockinMode,
-): StockInFormInputData {
-  const remainingQuantity =
-    mode === "quick" ? (item.initial_quantity ?? "") : (item.remaining_quantity ?? "");
-
-  return {
-    ...buildWorkflowBaseValues(item),
-    remaining_quantity: remainingQuantity,
-    storage_location: "",
-  };
-}
-
 function getStockinDialogTitle(mode: StockinMode): string {
-  if (mode === "arrival") {
-    return "确认到货";
-  }
-  if (mode === "quick") {
-    return "一键入库";
-  }
   if (mode === "common-public-arrival") {
     return "到货并加入常用货架";
   }
-  return "入库";
-}
-
-function getStockinSubmitLabel(mode: StockinMode): string {
-  if (mode === "arrival" || mode === "common-public-arrival") {
-    return "确认到货";
-  }
-  return "确认入库";
+  return "确认到货";
 }
 
 function getActiveStockinSpecification(params: {
   mode: StockinMode;
   arrivalSpecification: string;
-  stockinSpecification: string;
   commonPublicArrivalSpecification: string;
 }): string {
-  if (params.mode === "arrival") return params.arrivalSpecification;
   if (params.mode === "common-public-arrival") {
     return params.commonPublicArrivalSpecification;
   }
-  return params.stockinSpecification;
+  return params.arrivalSpecification;
 }
 
 async function finishWorkflowSubmit(
@@ -431,7 +390,6 @@ async function finishWorkflowSubmit(
 function useReagentWorkflowSubmitHandlers({
   stockinTarget,
   arrivalForm,
-  stockinForm,
   commonPublicArrivalForm,
   setIsSubmittingStockin,
   resetStockinDialog,
@@ -439,36 +397,11 @@ function useReagentWorkflowSubmitHandlers({
 }: Readonly<{
   stockinTarget: DashboardReagentOrder | null;
   arrivalForm: ReturnType<typeof useForm<ConfirmArrivalFormInputData, unknown, ConfirmArrivalFormData>>;
-  stockinForm: ReturnType<typeof useForm<StockInFormInputData, unknown, StockInFormData>>;
   commonPublicArrivalForm: ReturnType<typeof useForm<CommonPublicArrivalFormInputData, unknown, CommonPublicArrivalFormData>>;
   setIsSubmittingStockin: (value: boolean) => void;
   resetStockinDialog: () => void;
   refreshTables: () => Promise<void>;
 }>) {
-  const submitStockin = stockinForm.handleSubmit(async (formData) => {
-    if (!stockinTarget) return;
-    const isRemainingValid = validateWorkflowRemainingQuantity(
-      formData,
-      stockinTarget.initial_quantity,
-      (message) => stockinForm.setError("remaining_quantity", { message }),
-    );
-    if (!isRemainingValid) return;
-
-    setIsSubmittingStockin(true);
-    try {
-      await reagentOrderAPI.stockIn(stockinTarget.id, buildStockInPayload(formData));
-      await finishWorkflowSubmit(resetStockinDialog, refreshTables, "入库成功");
-    } catch (err) {
-      const detail = extractApiErrorDetail(err);
-      if (applyFormValidationErrors<StockInFormInputData>(detail, stockinForm.setError)) {
-        return;
-      }
-      toast.error(normalizeApiErrorMessage(detail, "入库失败"));
-    } finally {
-      setIsSubmittingStockin(false);
-    }
-  });
-
   const submitArrival = arrivalForm.handleSubmit(async (formData) => {
     if (!stockinTarget) return;
     const isRemainingValid = validateWorkflowRemainingQuantity(
@@ -524,23 +457,18 @@ function useReagentWorkflowSubmitHandlers({
     },
   );
 
-  return { submitArrival, submitCommonPublicArrival, submitStockin };
+  return { submitArrival, submitCommonPublicArrival };
 }
 
 function useReagentStockinDialog(refreshTables: () => Promise<void>) {
   const [stockinTarget, setStockinTarget] =
     useState<DashboardReagentOrder | null>(null);
-  const [stockinMode, setStockinMode] = useState<StockinMode>("quick");
+  const [stockinMode, setStockinMode] = useState<StockinMode>("arrival");
   const [isSubmittingStockin, setIsSubmittingStockin] = useState(false);
 
   const arrivalForm = useForm<ConfirmArrivalFormInputData, unknown, ConfirmArrivalFormData>({
     resolver: createValibotResolver(ConfirmArrivalFormSchema),
     defaultValues: defaultConfirmArrivalValues,
-    shouldFocusError: false,
-  });
-  const stockinForm = useForm<StockInFormInputData, unknown, StockInFormData>({
-    resolver: createValibotResolver(StockInFormSchema),
-    defaultValues: defaultStockInValues,
     shouldFocusError: false,
   });
   const commonPublicArrivalForm = useForm<
@@ -555,27 +483,22 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
 
   const resetStockinDialog = useCallback(() => {
     setStockinTarget(null);
-    setStockinMode("quick");
+    setStockinMode("arrival");
     arrivalForm.reset(defaultConfirmArrivalValues);
-    stockinForm.reset(defaultStockInValues);
     commonPublicArrivalForm.reset(defaultCommonPublicArrivalValues);
-  }, [arrivalForm, commonPublicArrivalForm, stockinForm]);
+  }, [arrivalForm, commonPublicArrivalForm]);
 
   const openStockinDialog = useCallback(
     (item: DashboardReagentOrder, mode: StockinMode) => {
       setStockinTarget(item);
       setStockinMode(mode);
-      if (mode === "arrival") {
-        arrivalForm.reset(buildConfirmArrivalFormValues(item));
-        return;
-      }
       if (mode === "common-public-arrival") {
         commonPublicArrivalForm.reset(buildCommonPublicArrivalFormValues(item));
         return;
       }
-      stockinForm.reset(buildStockinFormValues(item, mode));
+      arrivalForm.reset(buildConfirmArrivalFormValues(item));
     },
-    [arrivalForm, commonPublicArrivalForm, stockinForm],
+    [arrivalForm, commonPublicArrivalForm],
   );
 
   const closeStockinDialog = useCallback(() => {
@@ -583,34 +506,30 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
     resetStockinDialog();
   }, [isSubmittingStockin, resetStockinDialog]);
 
-  const { submitArrival, submitCommonPublicArrival, submitStockin } =
+  const { submitArrival, submitCommonPublicArrival } =
     useReagentWorkflowSubmitHandlers({
       stockinTarget,
       arrivalForm,
-      stockinForm,
       commonPublicArrivalForm,
       setIsSubmittingStockin,
       resetStockinDialog,
       refreshTables,
     });
 
-  let activeSubmit = submitStockin;
-  if (stockinMode === "arrival") {
-    activeSubmit = submitArrival;
-  } else if (stockinMode === "common-public-arrival") {
-    activeSubmit = submitCommonPublicArrival;
-  }
+  const activeSubmit =
+    stockinMode === "common-public-arrival"
+      ? submitCommonPublicArrival
+      : submitArrival;
 
   return {
     stockinTarget,
     stockinMode,
     arrivalForm,
-    stockinForm,
     commonPublicArrivalForm,
     isSubmittingStockin,
     openStockinDialog,
     closeStockinDialog,
-    submitStockin: activeSubmit,
+    submitArrival: activeSubmit,
   };
 }
 
@@ -680,7 +599,6 @@ function ReagentWorkflowFormContent({
   unit,
   brandOptions,
   arrivalForm,
-  stockinForm,
   commonPublicArrivalForm,
   commonPublicArrivalFields,
 }: Readonly<{
@@ -688,18 +606,9 @@ function ReagentWorkflowFormContent({
   unit?: string | null;
   brandOptions: { label: string; value: string }[];
   arrivalForm: ReturnType<typeof useReagentStockinDialog>["arrivalForm"];
-  stockinForm: ReturnType<typeof useReagentStockinDialog>["stockinForm"];
   commonPublicArrivalForm: ReturnType<typeof useReagentStockinDialog>["commonPublicArrivalForm"];
   commonPublicArrivalFields: ReturnType<typeof getCommonPublicArrivalFormFields>;
 }>) {
-  if (mode === "arrival") {
-    return (
-      <BaseForm
-        form={arrivalForm}
-        fields={getConfirmArrivalFormFields(unit ?? undefined, { brandOptions })}
-      />
-    );
-  }
   if (mode === "common-public-arrival") {
     return (
       <BaseForm form={commonPublicArrivalForm} fields={commonPublicArrivalFields} />
@@ -707,8 +616,8 @@ function ReagentWorkflowFormContent({
   }
   return (
     <BaseForm
-      form={stockinForm}
-      fields={getStockInFormFields(unit ?? undefined, undefined, { brandOptions })}
+      form={arrivalForm}
+      fields={getConfirmArrivalFormFields(unit ?? undefined, { brandOptions })}
     />
   );
 }
@@ -724,18 +633,13 @@ function DashboardReagentStockinDialog({
     stockinTarget,
     stockinMode,
     arrivalForm,
-    stockinForm,
     commonPublicArrivalForm,
     isSubmittingStockin,
     closeStockinDialog,
-    submitStockin,
+    submitArrival,
   } = dialog;
   const arrivalSpecification = useWatch({
     control: arrivalForm.control,
-    name: "specification",
-  });
-  const stockinSpecification = useWatch({
-    control: stockinForm.control,
     name: "specification",
   });
   const commonPublicArrivalSpecification = useWatch({
@@ -749,7 +653,6 @@ function DashboardReagentStockinDialog({
   const activeSpecification = getActiveStockinSpecification({
     mode: stockinMode,
     arrivalSpecification,
-    stockinSpecification,
     commonPublicArrivalSpecification,
   });
   const activeUnit = resolveSpecificationUnit(activeSpecification, stockinTarget?.unit);
@@ -799,13 +702,12 @@ function DashboardReagentStockinDialog({
           <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
 
-        <form className="space-y-4" onSubmit={submitStockin}>
+        <form className="space-y-4" onSubmit={submitArrival}>
           <ReagentWorkflowFormContent
             mode={stockinMode}
             unit={activeUnit}
             brandOptions={brandOptions}
             arrivalForm={arrivalForm}
-            stockinForm={stockinForm}
             commonPublicArrivalForm={commonPublicArrivalForm}
             commonPublicArrivalFields={commonPublicArrivalFields}
           />
@@ -813,8 +715,8 @@ function DashboardReagentStockinDialog({
           <EditDialogActions
             mode="add"
             onCancel={closeStockinDialog}
-            submitLabelEdit={getStockinSubmitLabel(stockinMode)}
-            submitLabelAdd={getStockinSubmitLabel(stockinMode)}
+            submitLabelEdit="确认到货"
+            submitLabelAdd="确认到货"
             isSubmitting={isSubmittingStockin}
           />
         </form>
@@ -895,10 +797,7 @@ function createReagentActions(
     {
       id: "confirm-arrival",
       label: "到货",
-      icon: <PackageCheck className="size-4" />,
-      variant: "modern" as const,
-      className:
-        "text-blue-600/90 hover:text-blue-700 dark:text-blue-400/70 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30",
+      className: "h-8 px-3 leading-4",
       showWhen: (currItem: DashboardReagentOrder) =>
         currItem.status === "approved",
       onClick: (currItem: DashboardReagentOrder) => {
@@ -908,20 +807,6 @@ function createReagentActions(
             ? "common-public-arrival"
             : "arrival",
         );
-      },
-    },
-    {
-      id: "quick-stock-in",
-      label: "一键入库",
-      icon: <Warehouse className="size-4" />,
-      variant: "modern" as const,
-      className:
-        "text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 hover:bg-green-100 dark:hover:bg-green-950",
-      showWhen: (currItem: DashboardReagentOrder) =>
-        currItem.status === "approved" &&
-        currItem.order_reason !== "common_public",
-      onClick: (currItem: DashboardReagentOrder) => {
-        openStockinDialog(currItem, "quick");
       },
     },
   ];
