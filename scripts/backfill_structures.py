@@ -18,7 +18,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.core.config import settings
 from app.database import engine
 from app.db_bootstrap.schema_upgrades import ensure_sqlite_compound_structure_cache_name_columns
+from app.db_bootstrap.structure_index_schema import ensure_structure_index_schema
 from app.models.compound_structure import CompoundStructureCache
+from app.models.structure_index import (
+    StructureIndexChange,
+    StructureIndexMeta,
+    StructureResolutionJob,
+)
 from app.services.pubchem_resolver import PubChemResolver, create_pubchem_client
 from app.services.structure_backfill import (
     StructureBackfillTargetOptions,
@@ -110,8 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def ensure_structure_cache_table() -> None:
     CompoundStructureCache.__table__.create(engine, checkfirst=True)
+    StructureIndexMeta.__table__.create(engine, checkfirst=True)
+    StructureIndexChange.__table__.create(engine, checkfirst=True)
+    StructureResolutionJob.__table__.create(engine, checkfirst=True)
     with engine.begin() as connection:
         ensure_sqlite_compound_structure_cache_name_columns(connection)
+        ensure_structure_index_schema(connection)
 
 
 def print_status_counts(db: Session) -> None:

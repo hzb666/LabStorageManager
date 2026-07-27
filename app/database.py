@@ -24,6 +24,7 @@ from app.db_bootstrap.sqlite_fts import (
     ensure_sqlite_inventory_fts,
 )
 from app.db_bootstrap.sqlite_indexes import ensure_sqlite_performance_indexes
+from app.db_bootstrap.structure_index_schema import ensure_structure_index_schema
 from app.models.user import User, UserRole
 from app.services import pinyin_utils
 
@@ -98,6 +99,7 @@ def init_db() -> None:
         ensure_sqlite_common_shelf_location_pinyin_columns(connection)
         ensure_sqlite_log_timeline_detail_search_text(connection)
         ensure_sqlite_compound_structure_cache_name_columns(connection)
+        ensure_structure_index_schema(connection)
         check_sqlite_common_shelf_groups_consistency(connection)
         ensure_sqlite_performance_indexes(connection)
         ensure_log_timeline_source_delete_triggers(connection)

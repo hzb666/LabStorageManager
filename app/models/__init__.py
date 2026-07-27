@@ -30,6 +30,13 @@ from .compound_structure import (
     CompoundStructureStatus,
     StructureCacheStatusCount,
 )
+from .structure_index import (
+    StructureIndexChange,
+    StructureIndexChangeOperation,
+    StructureIndexMeta,
+    StructureResolutionJob,
+    StructureResolutionJobState,
+)
 from .inventory_operation_log import (
     InventoryOperationAction,
     InventoryOperationLog,
@@ -117,6 +124,11 @@ __all__ = [
     "CompoundStructureSource",
     "CompoundStructureStatus",
     "StructureCacheStatusCount",
+    "StructureIndexChange",
+    "StructureIndexChangeOperation",
+    "StructureIndexMeta",
+    "StructureResolutionJob",
+    "StructureResolutionJobState",
     "InventoryOperationAction",
     "InventoryOperationLog",
     "InventoryOperationLogResponse",
