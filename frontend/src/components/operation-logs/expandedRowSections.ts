@@ -1,3 +1,5 @@
+import { INVENTORY_STATUS_MAP } from '@/lib/constants'
+
 import {
   asRecord,
   customField,
@@ -70,6 +72,11 @@ const EXPORT_SCOPE_LABELS: Record<string, string> = {
 function formatAction(value: unknown, labels: Record<string, string>): string {
   const action = formatText(value, '')
   return labels[action] ?? action
+}
+
+function formatInventoryStatus(value: unknown): string {
+  const status = formatText(value, '')
+  return INVENTORY_STATUS_MAP[status] ?? status
 }
 
 function getActionValue(fullData: LogRecord): string {
@@ -216,7 +223,7 @@ function buildInventoryInfoSection(title: string, fullData: LogRecord): DetailSe
     field('危险品', formatBoolean(fullData.is_hazardous), {
       visible: hasValue(fullData.is_hazardous),
     }),
-    field('状态', fullData.status),
+    field('状态', formatInventoryStatus(fullData.status)),
     field('内部编号', fullData.internal_code, { mono: true }),
     field('来源', fullData.source),
     field('备注', fullData.notes),
@@ -251,7 +258,11 @@ function buildInventoryChangeSections(fullData: LogRecord): DetailSection[] {
         formatQuantity(before.initial_quantity, before.unit),
         formatQuantity(after.initial_quantity, after.unit)
       ),
-      diffField('状态', before.status, after.status),
+      diffField(
+        '状态',
+        formatInventoryStatus(before.status),
+        formatInventoryStatus(after.status)
+      ),
       diffField(
         '类别',
         formatInventoryCategory(before.category),

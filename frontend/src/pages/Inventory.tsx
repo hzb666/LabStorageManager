@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -25,7 +25,12 @@ import type { FilterTableQueryDataReadyContext } from '@/components/ui/FilterTab
 import { NoteDisplay } from '@/components/ui/NoteDisplay'
 import type { FilterAPI } from '@/hooks/useTableState'
 
-import { inventoryAPI, chemicalAPI, type ProcedureInventorySearchResponse } from '@/api/client'
+import {
+  inventoryAPI,
+  chemicalAPI,
+  type InventoryStatus,
+  type ProcedureInventorySearchResponse,
+} from '@/api/client'
 import type {
   CompoundStructureCache,
   StructureQueryFormat,
@@ -69,7 +74,7 @@ import {
   Loader2,
   Plus,
   Package,
-  ScanSearch
+  ScanSearch,
 } from 'lucide-react'
 
 export interface InventoryItem {
@@ -87,7 +92,7 @@ export interface InventoryItem {
   remaining_quantity: number
   remaining_percent?: number | null
   unit: string
-  status: string
+  status: InventoryStatus
   is_hazardous: boolean
   created_at: string
   notes: string | null
@@ -156,6 +161,23 @@ function createInventoryFormValues(item: InventoryItem): InventoryFormInputData 
     is_hazardous: item.is_hazardous || false,
     notes: item.notes || '',
   }
+}
+
+function isPositiveInventoryQuantity(value: string | number | undefined): boolean {
+  const quantity = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(quantity) && quantity > 0
+}
+
+function useShowNotInStockToggle(
+  form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>,
+  editingItem: InventoryItem | null,
+): boolean {
+  const remainingQuantity = useWatch({
+    control: form.control,
+    name: 'remaining_quantity',
+  })
+  return editingItem?.status !== 'consumed'
+    && isPositiveInventoryQuantity(remainingQuantity)
 }
 
 function resolveInventoryInitialQuantity(editingItem: InventoryItem, specification: string | undefined): number {
@@ -398,6 +420,33 @@ function formatInventoryBorrowerDisplay(item: InventoryItem): string {
   return '-'
 }
 
+function useNotInStockToggle(
+  editingItem: InventoryItem | null,
+  refreshInventory: () => void | Promise<void>,
+) {
+  const [isTogglingNotInStock, setIsTogglingNotInStock] = useState(false)
+  const handleToggleNotInStock = useCallback(async () => {
+    if (!editingItem) return
+
+    const wasNotInStock = editingItem.status === 'not_in_stock'
+    setIsTogglingNotInStock(true)
+    try {
+      const response = await inventoryAPI.toggleNotInStock(editingItem.id)
+      toast.success(wasNotInStock ? '更新为已找到' : '更新为未找到')
+      Promise.resolve(refreshInventory()).catch(() => {
+        toast.warning('状态已修改，列表刷新失败')
+      })
+      return response.data.status
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '状态修改失败'))
+    } finally {
+      setIsTogglingNotInStock(false)
+    }
+  }, [editingItem, refreshInventory])
+
+  return { handleToggleNotInStock, isTogglingNotInStock }
+}
+
 function useInventoryDialogController(
   refreshInventory: () => void | Promise<void>,
   requireManualStorageLocation: boolean,
@@ -407,11 +456,13 @@ function useInventoryDialogController(
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
+  const notInStockToggle = useNotInStockToggle(editingItem, refreshInventory)
   const form = useForm<InventoryFormInputData, unknown, InventoryFormData>({
     resolver: createValibotResolver(InventoryFormSchema),
     defaultValues: defaultInventoryValues,
     shouldFocusError: false,
   })
+  const showNotInStockToggle = useShowNotInStockToggle(form, editingItem)
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
     form.reset(defaultInventoryValues)
@@ -508,6 +559,11 @@ function useInventoryDialogController(
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
   }, [editingItem, refreshInventory, setDialogState])
+  const handleToggleNotInStock = useCallback(async () => {
+    const nextStatus = await notInStockToggle.handleToggleNotInStock()
+    if (!nextStatus) return
+    setEditingItem((current) => (current ? { ...current, status: nextStatus } : current))
+  }, [notInStockToggle])
   const handleDialogOpenChange = useCallback((open: boolean) => {
     if (open) return
     setDialogState(null)
@@ -533,12 +589,15 @@ function useInventoryDialogController(
     dialogState,
     editingItem,
     isSubmitting,
+    isTogglingNotInStock: notInStockToggle.isTogglingNotInStock,
+    showNotInStockToggle,
     form,
     formFields,
     handleAddClick,
     handleEditClick,
     handleFormSubmit,
     handleDeleteClick,
+    handleToggleNotInStock,
     handleDialogOpenChange,
     setDialogState,
   }
@@ -900,9 +959,34 @@ function InventoryFormDialog({
                 ? dialogController.handleDeleteClick
                 : undefined
             }
+            leadingContent={
+              isEditing
+              && dialogController.editingItem
+              && dialogController.showNotInStockToggle ? (
+                <LoadingButton
+                  type="button"
+                  variant="modern"
+                  size="lg"
+                  className="px-4"
+                  isLoading={dialogController.isTogglingNotInStock}
+                  loadingText="处理中"
+                  disabled={
+                    dialogController.isSubmitting
+                    || dialogController.editingItem.status === 'borrowed'
+                    || Boolean(dialogController.editingItem.temporary_keeper_id)
+                  }
+                  onClick={dialogController.handleToggleNotInStock}
+                >
+                  {dialogController.editingItem.status === 'not_in_stock'
+                    ? '已找到'
+                    : '未找到'}
+                </LoadingButton>
+              ) : undefined
+            }
             submitLabelEdit="保存"
             submitLabelAdd="确认入库"
             isSubmitting={dialogController.isSubmitting}
+            disableSubmit={dialogController.isTogglingNotInStock}
           />
         </form>
       </DialogContent>
@@ -1241,9 +1325,13 @@ const ActionButtons = React.memo(function ActionButtons({
       }
     ]
 
-    if (item.status === 'in_stock' && !item.storage_location && item.temporary_keeper_name) {
+    if (
+      (item.status === 'in_stock' || item.status === 'run_short')
+      && !item.storage_location
+      && item.temporary_keeper_name
+    ) {
       statusList.push({
-        value: 'in_stock',
+        value: item.status,
         label: `${item.temporary_keeper_name}暂存`,
         className: 'text-base text-orange-700 dark:text-orange-300',
         title: `暂存人: ${item.temporary_keeper_name}`
@@ -1262,7 +1350,8 @@ const ActionButtons = React.memo(function ActionButtons({
         confirm: !isPublicUser,
         confirmLabel: isPublicUser ? undefined : '确认',
         showWhen: (currItem: InventoryItem) =>
-          currItem.status === 'in_stock' && !currItem.temporary_keeper_id,
+          (currItem.status === 'in_stock' || currItem.status === 'run_short')
+          && !currItem.temporary_keeper_id,
         onClick: async (currItem: InventoryItem) => {
           await onBorrow(currItem)
         }

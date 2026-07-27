@@ -53,6 +53,35 @@ function WarningSectionLabel({ label, onClick }: Readonly<WarningSectionLabelPro
   return <span className="font-bold">{label}</span>
 }
 
+const getInventoryWarningLabel = (totalCount: number, missingCount: number): string =>
+  missingCount > 0
+    ? `现有库存（共 ${totalCount} 条，其中未找到 ${missingCount} 条）：`
+    : `现有库存（共 ${totalCount} 条）：`
+
+function InventoryLatestSummary({
+  inventoryLatest,
+}: Readonly<{
+  inventoryLatest: CASOverviewResponse['inventory']['latest']
+}>) {
+  if (!inventoryLatest) {
+    return null
+  }
+  const placementLabel = inventoryLatest.temporary_keeper_name
+    ? `${inventoryLatest.temporary_keeper_name}暂存`
+    : inventoryLatest.storage_location || '位置未填写'
+
+  return (
+    <>
+      <span>{placementLabel}</span>
+      {inventoryLatest.status === 'not_in_stock' ? (
+        <span className="font-bold">（未找到）</span>
+      ) : null}
+      <span>，</span>
+      <span>{inventoryLatest.remaining_quantity ?? '-'} / {inventoryLatest.specification}</span>
+    </>
+  )
+}
+
 // 消费后端给出的 has_warning 结果，前端不重复推导冲突规则。
 export function ReagentCasDuplicateWarning({
   casWarning,
@@ -73,7 +102,10 @@ export function ReagentCasDuplicateWarning({
   const hasOrderRecord = casWarning.orders.total_count > 0 && Boolean(orderLatest)
   const hasInventoryRecord = casWarning.inventory.total_count > 0 && Boolean(inventoryLatest)
   const orderLabel = `现有订单（共 ${casWarning.orders.total_count} 条）：`
-  const inventoryLabel = `现有库存（共 ${casWarning.inventory.total_count} 条）：`
+  const inventoryLabel = getInventoryWarningLabel(
+    casWarning.inventory.total_count,
+    casWarning.inventory.not_in_stock_count,
+  )
 
   return (
     <div className={className || DEFAULT_WARNING_CLASS_NAME}>
@@ -99,8 +131,7 @@ export function ReagentCasDuplicateWarning({
         {hasInventoryRecord && inventoryLatest && (
           <p>
             <WarningSectionLabel label={inventoryLabel} onClick={onOpenInventory} />
-            <span>{inventoryLatest.storage_location || '位置未填写'}，</span>
-            <span>{inventoryLatest.remaining_quantity ?? '-'} / {inventoryLatest.specification}</span>
+            <InventoryLatestSummary inventoryLatest={inventoryLatest} />
           </p>
         )}
       </div>

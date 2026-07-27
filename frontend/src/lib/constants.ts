@@ -74,7 +74,7 @@ export const STATUS_COLORS = {
 export const STATUS_LABELS: Record<string, string> = {
   in_stock: '在库',
   run_short: '快用完',
-  not_in_stock: '没有',
+  not_in_stock: '未找到',
   borrowed: '借出',
   consume: '拿取',
   consumed: '用完',
@@ -163,6 +163,7 @@ export const CONSUMABLE_STATUS_STYLE: Record<string, string> = {
 
 // === 库存状态 ===
 export const INVENTORY_STATUS_MAP: Record<string, string> = {
+  not_in_stock: '未找到',
   in_stock: '在库',
   run_short: '快用完',
   borrowed: '已借出',
@@ -170,6 +171,7 @@ export const INVENTORY_STATUS_MAP: Record<string, string> = {
 }
 
 export const INVENTORY_STATUS_STYLE: Record<string, string> = {
+  not_in_stock: 'bg-amber-100 text-amber-800',
   in_stock: 'bg-green-100 text-green-800',
   run_short: 'bg-orange-100 text-orange-800',
   borrowed: 'bg-blue-100 text-blue-800',

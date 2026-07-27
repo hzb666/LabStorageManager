@@ -795,6 +795,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Only the temporary keeper can stock in pending items/i, message: '仅临时保管人可以完成待入库' },
   { pattern: /Pending stock-in item cannot be borrowed before stock-in/i, message: '待入库物品完成入库前不能借用' },
   { pattern: /Inventory item changed by another request/i, message: '库存项已被其他操作修改，请刷新后重试' },
+  { pattern: /Consumed inventory cannot be marked as not found/i, message: '已用完的库存不能标记为未找到' },
   { pattern: /Invalid inventory quantity/i, message: '库存数量无效' },
   { pattern: /remaining_quantity must be greater than or equal to 0/i, message: '剩余数量不能小于 0' },
   { pattern: /remaining_quantity is required/i, message: '剩余数量不能为空' },

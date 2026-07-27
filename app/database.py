@@ -16,6 +16,7 @@ from app.db_bootstrap.schema_upgrades import (
     check_sqlite_common_shelf_groups_consistency,
     ensure_sqlite_common_shelf_location_pinyin_columns,
     ensure_sqlite_compound_structure_cache_name_columns,
+    ensure_sqlite_inventory_quantity_statuses,
     ensure_sqlite_log_timeline_detail_search_text,
 )
 from app.db_bootstrap.sqlite_fts import (
@@ -99,6 +100,7 @@ def init_db() -> None:
         ensure_sqlite_common_shelf_location_pinyin_columns(connection)
         ensure_sqlite_log_timeline_detail_search_text(connection)
         ensure_sqlite_compound_structure_cache_name_columns(connection)
+        ensure_sqlite_inventory_quantity_statuses(connection)
         ensure_structure_index_schema(connection)
         check_sqlite_common_shelf_groups_consistency(connection)
         ensure_sqlite_performance_indexes(connection)

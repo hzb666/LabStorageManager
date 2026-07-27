@@ -38,6 +38,13 @@ class InventoryPublicPermissionTests(unittest.TestCase):
         self.assertIn(get_current_user, edit_dependencies)
         self.assertNotIn(require_non_public, edit_dependencies)
 
+        toggle_dependencies = _route_dependency_calls(
+            "/inventory/{inventory_id}/toggle-not-in-stock",
+            "POST",
+        )
+        self.assertIn(get_current_user, toggle_dependencies)
+        self.assertNotIn(require_non_public, toggle_dependencies)
+
 
 if __name__ == "__main__":
     unittest.main()

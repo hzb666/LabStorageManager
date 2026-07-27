@@ -50,6 +50,7 @@ from app.services.inventory_operation_logger import (
     log_stock_in,
 )
 from app.services.inventory_queries import regular_inventory_query
+from app.services.inventory_status import derive_inventory_quantity_status
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.shelf_utils import normalize_storage_location
 from app.services.spec_utils import SpecificationError, format_specification, parse_specification
@@ -501,7 +502,14 @@ def _create_inventory_items_from_order(
                         ),
                         unit=order.unit,
                         is_hazardous=order.is_hazardous,
-                        status=options.inventory_status,
+                        status=(
+                            derive_inventory_quantity_status(
+                                effective_remaining,
+                                order.initial_quantity,
+                            )
+                            if options.inventory_status == InventoryStatus.IN_STOCK
+                            else options.inventory_status
+                        ),
                         temporary_keeper_id=options.temporary_keeper_id,
                         source_order_id=order.id,
                         created_by_id=options.created_by_id,
@@ -1113,7 +1121,10 @@ def _apply_arrived_items_stock_in(
         item.remaining_quantity = effective_remaining
         item.remaining_percent = _compute_remaining_percent(effective_remaining, item.initial_quantity)
         item.temporary_keeper_id = None
-        item.status = InventoryStatus.IN_STOCK
+        item.status = derive_inventory_quantity_status(
+            effective_remaining,
+            item.initial_quantity,
+        )
 
         pinyin_fields = compute_pinyin_fields(
             name=item.name,

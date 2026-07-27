@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -8,11 +9,14 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine, select
 from starlette.requests import Request
 
+from app.api import inventory as inventory_api
 from app.api import inventory_extended_routes
+from app.db_bootstrap.schema_upgrades import ensure_sqlite_inventory_quantity_statuses
 from app.models.inventory import BorrowLog, Inventory, InventoryBorrowRequest, InventoryBorrowReturn, InventoryStatus
 from app.models.inventory_operation_log import InventoryOperationAction, InventoryOperationLog
 from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
 from app.models.user import User, UserRole
+from app.services.inventory_status import derive_inventory_quantity_status
 
 
 def _build_request(path: str = "/api/inventory/1/borrow") -> Request:
@@ -54,6 +58,108 @@ def _build_return_delete_endpoint():
     raise AssertionError("return-delete endpoint not found")
 
 
+def _build_toggle_not_in_stock_endpoint():
+    router = APIRouter()
+    inventory_extended_routes._register_inventory_status_route(router, {}, "inventory:list")
+    for route in router.routes:
+        if getattr(route, "path", "") == "/{inventory_id}/toggle-not-in-stock":
+            return route.endpoint
+    raise AssertionError("toggle-not-in-stock endpoint not found")
+
+
+class InventoryQuantityStatusTests(unittest.TestCase):
+    def test_quantity_status_boundaries(self) -> None:
+        self.assertEqual(
+            InventoryStatus.CONSUMED,
+            derive_inventory_quantity_status(0.0, 100.0),
+        )
+        self.assertEqual(
+            InventoryStatus.RUN_SHORT,
+            derive_inventory_quantity_status(10.0, 100.0),
+        )
+        self.assertEqual(
+            InventoryStatus.IN_STOCK,
+            derive_inventory_quantity_status(10.01, 100.0),
+        )
+        self.assertEqual(
+            InventoryStatus.IN_STOCK,
+            derive_inventory_quantity_status(10.0, None),
+        )
+
+    def test_startup_alignment_preserves_manual_and_borrowed_statuses(self) -> None:
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(engine, tables=[Inventory.__table__])
+        rows = [
+            Inventory(
+                internal_code="STATUS-LOW",
+                cas_number="64-17-5",
+                name="低库存",
+                initial_quantity=100.0,
+                remaining_quantity=10.0,
+                unit="mL",
+                status=InventoryStatus.IN_STOCK,
+            ),
+            Inventory(
+                internal_code="STATUS-NORMAL",
+                cas_number="64-17-5",
+                name="正常库存",
+                initial_quantity=100.0,
+                remaining_quantity=11.0,
+                unit="mL",
+                status=InventoryStatus.RUN_SHORT,
+            ),
+            Inventory(
+                internal_code="STATUS-ZERO",
+                cas_number="64-17-5",
+                name="已耗尽",
+                initial_quantity=100.0,
+                remaining_quantity=0.0,
+                unit="mL",
+                status=InventoryStatus.IN_STOCK,
+            ),
+            Inventory(
+                internal_code="STATUS-MISSING",
+                cas_number="64-17-5",
+                name="找不到",
+                initial_quantity=100.0,
+                remaining_quantity=10.0,
+                unit="mL",
+                status=InventoryStatus.NOT_IN_STOCK,
+            ),
+            Inventory(
+                internal_code="STATUS-BORROWED",
+                cas_number="64-17-5",
+                name="借出",
+                initial_quantity=100.0,
+                remaining_quantity=10.0,
+                unit="mL",
+                status=InventoryStatus.BORROWED,
+            ),
+        ]
+        with Session(engine) as db:
+            db.add_all(rows)
+            db.commit()
+
+        with engine.begin() as connection:
+            ensure_sqlite_inventory_quantity_statuses(connection)
+
+        with Session(engine) as db:
+            statuses = {
+                item.internal_code: item.status
+                for item in db.exec(select(Inventory)).all()
+            }
+
+        self.assertEqual(InventoryStatus.RUN_SHORT, statuses["STATUS-LOW"])
+        self.assertEqual(InventoryStatus.IN_STOCK, statuses["STATUS-NORMAL"])
+        self.assertEqual(InventoryStatus.CONSUMED, statuses["STATUS-ZERO"])
+        self.assertEqual(InventoryStatus.NOT_IN_STOCK, statuses["STATUS-MISSING"])
+        self.assertEqual(InventoryStatus.BORROWED, statuses["STATUS-BORROWED"])
+
+
 class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.engine = create_engine(
@@ -75,6 +181,7 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.borrow_endpoint = _build_borrow_endpoint()
         self.return_endpoint = _build_return_endpoint()
         self.return_delete_endpoint = _build_return_delete_endpoint()
+        self.toggle_not_in_stock_endpoint = _build_toggle_not_in_stock_endpoint()
 
         self.user = User(
             username="borrower",
@@ -167,6 +274,20 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
                 db=self.db,
             )
 
+    async def _toggle_not_in_stock(self, *, user: User | None = None) -> dict:
+        with (
+            patch("app.api.inventory_extended_routes._clear_inventory_cache"),
+            patch.object(inventory_extended_routes.sse_manager, "broadcast", new=AsyncMock()),
+        ):
+            return await self.toggle_not_in_stock_endpoint(
+                inventory_id=self.item.id,
+                request=_build_request(
+                    f"/api/inventory/{self.item.id}/toggle-not-in-stock"
+                ),
+                current_user=user or self.user,
+                db=self.db,
+            )
+
     async def test_borrow_success_updates_inventory_and_log(self) -> None:
         response = await self._borrow()
 
@@ -178,6 +299,116 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(latest_item.borrower_id, self.user.id)
         self.assertEqual(len(logs), 1)
         self.assertEqual(logs[0].borrower_id, self.user.id)
+
+    async def test_run_short_inventory_can_be_borrowed(self) -> None:
+        self.item.status = InventoryStatus.RUN_SHORT
+        self.item.remaining_quantity = 10.0
+        self.item.remaining_percent = 0.1
+        self.db.add(self.item)
+        self.db.commit()
+
+        response = await self._borrow()
+
+        latest_item = self.db.get(Inventory, self.item.id)
+        self.assertEqual(InventoryStatus.BORROWED.value, response["status"])
+        self.assertEqual(InventoryStatus.BORROWED, latest_item.status)
+
+    async def test_not_in_stock_inventory_cannot_be_borrowed(self) -> None:
+        self.item.status = InventoryStatus.NOT_IN_STOCK
+        self.db.add(self.item)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await self._borrow()
+
+        latest_item = self.db.get(Inventory, self.item.id)
+        self.assertEqual(409, exc_info.exception.status_code)
+        self.assertEqual(InventoryStatus.NOT_IN_STOCK, latest_item.status)
+        self.assertEqual([], self.db.exec(select(BorrowLog)).all())
+
+    async def test_consumed_inventory_cannot_be_marked_not_in_stock(self) -> None:
+        self.item.status = InventoryStatus.CONSUMED
+        self.item.remaining_quantity = 0.0
+        self.item.remaining_percent = 0.0
+        self.db.add(self.item)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await self._toggle_not_in_stock()
+
+        latest_item = self.db.get(Inventory, self.item.id)
+        operation_logs = self.db.exec(select(InventoryOperationLog)).all()
+        self.assertEqual(409, exc_info.exception.status_code)
+        self.assertEqual(
+            inventory_extended_routes.CONSUMED_INVENTORY_NOT_IN_STOCK_FORBIDDEN_DETAIL,
+            exc_info.exception.detail,
+        )
+        self.assertEqual(InventoryStatus.CONSUMED, latest_item.status)
+        self.assertEqual([], operation_logs)
+
+    async def test_zero_quantity_not_in_stock_inventory_can_be_restored_to_consumed(self) -> None:
+        self.item.status = InventoryStatus.NOT_IN_STOCK
+        self.item.remaining_quantity = 0.0
+        self.item.remaining_percent = 0.0
+        self.db.add(self.item)
+        self.db.commit()
+
+        restored = await self._toggle_not_in_stock()
+
+        latest_item = self.db.get(Inventory, self.item.id)
+        self.assertEqual(InventoryStatus.CONSUMED.value, restored["status"])
+        self.assertEqual(InventoryStatus.CONSUMED, latest_item.status)
+
+    async def test_public_user_can_toggle_not_in_stock_and_restore_quantity_status(self) -> None:
+        public_user = self._add_user("public_toggle", role=UserRole.PUBLIC)
+
+        marked = await self._toggle_not_in_stock(user=public_user)
+        self.assertEqual(InventoryStatus.NOT_IN_STOCK.value, marked["status"])
+
+        self.item.remaining_quantity = 10.0
+        self.item.remaining_percent = 0.1
+        self.db.add(self.item)
+        self.db.commit()
+        restored = await self._toggle_not_in_stock(user=public_user)
+
+        latest_item = self.db.get(Inventory, self.item.id)
+        operation_logs = self.db.exec(
+            select(InventoryOperationLog).order_by(InventoryOperationLog.id)
+        ).all()
+        first_snapshot = json.loads(operation_logs[0].snapshot_json)
+        second_snapshot = json.loads(operation_logs[1].snapshot_json)
+
+        self.assertEqual(InventoryStatus.RUN_SHORT.value, restored["status"])
+        self.assertEqual(InventoryStatus.RUN_SHORT, latest_item.status)
+        self.assertEqual(InventoryStatus.IN_STOCK.value, first_snapshot["bf"]["st"])
+        self.assertEqual(InventoryStatus.NOT_IN_STOCK.value, first_snapshot["af"]["st"])
+        self.assertEqual(InventoryStatus.NOT_IN_STOCK.value, second_snapshot["bf"]["st"])
+        self.assertEqual(InventoryStatus.RUN_SHORT.value, second_snapshot["af"]["st"])
+        self.assertTrue(all(log.operator_id == public_user.id for log in operation_logs))
+
+    def test_quantity_edit_preserves_not_in_stock_override(self) -> None:
+        self.item.status = InventoryStatus.NOT_IN_STOCK
+
+        inventory_api._apply_inventory_remaining_quantity_update(
+            self.item,
+            update_data={"remaining_quantity": 5.0},
+            specification_updated=False,
+        )
+
+        self.assertEqual(InventoryStatus.NOT_IN_STOCK, self.item.status)
+        self.assertEqual(0.05, self.item.remaining_percent)
+
+    def test_zero_quantity_edit_replaces_not_in_stock_override_with_consumed(self) -> None:
+        self.item.status = InventoryStatus.NOT_IN_STOCK
+
+        inventory_api._apply_inventory_remaining_quantity_update(
+            self.item,
+            update_data={"remaining_quantity": 0.0},
+            specification_updated=False,
+        )
+
+        self.assertEqual(InventoryStatus.CONSUMED, self.item.status)
+        self.assertEqual(0.0, self.item.remaining_percent)
 
     async def test_borrow_log_failure_rolls_back_inventory_status(self) -> None:
         original_add = self.db.add
@@ -323,20 +554,20 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
         await self._borrow()
         admin = self._add_user("admin", role=UserRole.ADMIN)
 
-        response = await self._return(InventoryBorrowReturn(remaining_quantity=5.0), user=admin)
+        response = await self._return(InventoryBorrowReturn(remaining_quantity=10.0), user=admin)
 
         latest_item = self.db.get(Inventory, self.item.id)
         borrow_log = self.db.exec(select(BorrowLog).where(BorrowLog.inventory_id == self.item.id)).one()
 
-        self.assertEqual(response["status"], InventoryStatus.IN_STOCK.value)
+        self.assertEqual(response["status"], InventoryStatus.RUN_SHORT.value)
         self.assertIn("warning", response)
-        self.assertEqual(latest_item.status, InventoryStatus.IN_STOCK)
-        self.assertEqual(latest_item.remaining_quantity, 5.0)
-        self.assertEqual(latest_item.remaining_percent, 0.05)
+        self.assertEqual(latest_item.status, InventoryStatus.RUN_SHORT)
+        self.assertEqual(latest_item.remaining_quantity, 10.0)
+        self.assertEqual(latest_item.remaining_percent, 0.1)
         self.assertEqual(latest_item.last_borrower_id, self.user.id)
         self.assertIsNone(latest_item.borrower_id)
         self.assertIsNotNone(borrow_log.return_time)
-        self.assertEqual(borrow_log.quantity_returned, 5.0)
+        self.assertEqual(borrow_log.quantity_returned, 10.0)
 
     async def test_return_legacy_item_requires_specification_without_mutation(self) -> None:
         self.item.initial_quantity = None

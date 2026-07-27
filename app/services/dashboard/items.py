@@ -863,7 +863,7 @@ def _count_inventory_stock_alerts(db: Session) -> int:
         .where(Inventory.initial_quantity.is_not(None))
         .where(Inventory.initial_quantity > 0)
         .where(Inventory.remaining_quantity.is_not(None))
-        .where(remaining_percent < LOW_STOCK_PERCENT)
+        .where(remaining_percent <= LOW_STOCK_PERCENT)
     )
     return _count(db, statement)
 
@@ -884,7 +884,7 @@ def _get_inventory_stock_alerts(
         .where(Inventory.initial_quantity.is_not(None))
         .where(Inventory.initial_quantity > 0)
         .where(Inventory.remaining_quantity.is_not(None))
-        .where(remaining_percent < LOW_STOCK_PERCENT)
+        .where(remaining_percent <= LOW_STOCK_PERCENT)
         .order_by(remaining_percent.asc(), Inventory.updated_at.desc())
     )
     if limit is not None:

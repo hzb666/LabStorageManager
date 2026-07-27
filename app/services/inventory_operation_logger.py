@@ -72,6 +72,7 @@ def build_inventory_snapshot(
         "rq": inventory.remaining_quantity,
         "rp": inventory.remaining_percent,
         "un": inventory.unit,
+        "st": inventory.status.value if hasattr(inventory.status, "value") else inventory.status,
         "hz": inventory.is_hazardous,
         "nt": inventory.notes,
         "bi": inventory.borrower_id,

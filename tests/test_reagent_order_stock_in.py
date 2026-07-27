@@ -10,7 +10,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from starlette.requests import Request
 
 import app.models  # noqa: F401 - populate SQLModel metadata for the test database.
-from app.api import reagent_orders_workflow
+from app.api import reagent_orders, reagent_orders_workflow
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.inventory_operation_log import InventoryOperationAction, InventoryOperationLog
 from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
@@ -202,6 +202,59 @@ class ReagentOrderStockInTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertTrue(all("乙醇" in row.detail_search_text for row in timeline_rows))
+
+    async def test_stock_in_at_ten_percent_creates_run_short_inventory(self) -> None:
+        payload = reagent_orders_workflow.StockInRequest(
+            storage_location="A1",
+            remaining_quantity=50.0,
+        )
+
+        await self._stock_in(payload)
+
+        inventory_items = self._inventory_for_order(self.order.id)
+        self.assertEqual(2, len(inventory_items))
+        self.assertTrue(
+            all(item.status == InventoryStatus.RUN_SHORT for item in inventory_items)
+        )
+        self.assertTrue(
+            all(item.remaining_percent == 0.1 for item in inventory_items)
+        )
+
+    def test_cas_overview_reports_not_in_stock_count(self) -> None:
+        self.db.add_all(
+            [
+                Inventory(
+                    internal_code="OVERVIEW-IN-STOCK",
+                    cas_number=self.order.cas_number,
+                    name=self.order.name,
+                    initial_quantity=500.0,
+                    remaining_quantity=400.0,
+                    remaining_percent=0.8,
+                    unit="mL",
+                    status=InventoryStatus.IN_STOCK,
+                ),
+                Inventory(
+                    internal_code="OVERVIEW-MISSING",
+                    cas_number=self.order.cas_number,
+                    name=self.order.name,
+                    initial_quantity=500.0,
+                    remaining_quantity=400.0,
+                    remaining_percent=0.8,
+                    unit="mL",
+                    status=InventoryStatus.NOT_IN_STOCK,
+                ),
+            ]
+        )
+        self.db.commit()
+
+        overview = reagent_orders.get_cas_overview(
+            self.order.cas_number,
+            self.db,
+            exclude_order_id=self.order.id,
+        )
+
+        self.assertEqual(2, overview["inventory"]["total_count"])
+        self.assertEqual(1, overview["inventory"]["not_in_stock_count"])
 
     async def test_stock_in_rejects_non_applicant_without_side_effects(self) -> None:
         outsider = self._add_user("outsider")

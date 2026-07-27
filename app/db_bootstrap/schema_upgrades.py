@@ -6,6 +6,8 @@ import re
 
 from sqlalchemy import Connection, text
 
+from app.core.constants import LOW_STOCK_PERCENT
+from app.models.inventory import InventoryStatus
 from app.services import pinyin_utils
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,33 @@ SQLITE_COMPOUND_STRUCTURE_CACHE_NAME_COLUMN_UPGRADES: tuple[tuple[str, str], ...
         "ALTER TABLE compound_structure_cache ADD COLUMN name_last_resolved_at DATETIME",
     ),
 )
+
+SQLITE_INVENTORY_QUANTITY_STATUS_SQL = """
+UPDATE inventory
+SET status = CASE
+    WHEN remaining_quantity IS NOT NULL
+         AND remaining_quantity <= 0
+        THEN :consumed_status
+    WHEN remaining_quantity IS NOT NULL
+         AND initial_quantity IS NOT NULL
+         AND initial_quantity > 0
+         AND remaining_quantity / initial_quantity <= :low_stock_percent
+        THEN :run_short_status
+    ELSE :in_stock_status
+END
+WHERE status IN (:in_stock_status, :run_short_status)
+  AND status != CASE
+      WHEN remaining_quantity IS NOT NULL
+           AND remaining_quantity <= 0
+          THEN :consumed_status
+      WHEN remaining_quantity IS NOT NULL
+           AND initial_quantity IS NOT NULL
+           AND initial_quantity > 0
+           AND remaining_quantity / initial_quantity <= :low_stock_percent
+          THEN :run_short_status
+      ELSE :in_stock_status
+  END
+"""
 
 
 def _quote_sqlite_identifier(identifier: str) -> str:
@@ -172,3 +201,19 @@ def ensure_sqlite_compound_structure_cache_name_columns(connection: Connection) 
         if column_name not in existing_columns:
             connection.execute(text(alter_statement))
             logger.info("Added compound_structure_cache.%s column.", column_name)
+
+
+def ensure_sqlite_inventory_quantity_statuses(connection: Connection) -> None:
+    """Align legacy automatic statuses with the current quantity thresholds."""
+
+    result = connection.execute(
+        text(SQLITE_INVENTORY_QUANTITY_STATUS_SQL),
+        {
+            "consumed_status": InventoryStatus.CONSUMED.value,
+            "in_stock_status": InventoryStatus.IN_STOCK.value,
+            "low_stock_percent": LOW_STOCK_PERCENT,
+            "run_short_status": InventoryStatus.RUN_SHORT.value,
+        },
+    )
+    if result.rowcount > 0:
+        logger.info("Aligned %d inventory quantity status rows.", result.rowcount)

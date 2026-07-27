@@ -69,6 +69,7 @@ from app.services.order_list_search import (
     normalize_order_list_search_value,
 )
 from app.services.inventory_queries import regular_inventory_query
+from app.services.inventory_state_guards import is_pending_stockin_item
 from app.services.sse_manager import sse_manager
 from app.services.export_rate_limit import EXPORT_SCOPE_REAGENT_ORDERS, enforce_export_rate_limit
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
@@ -213,6 +214,7 @@ class CASOverviewInventoryResponse(BaseResponse):
     created_at: datetime
     status: str
     borrower_name: str | None
+    temporary_keeper_name: str | None
 
 
 class CASOverviewResponseModel(BaseResponse):
@@ -790,9 +792,19 @@ def get_cas_overview(
         (Inventory.remaining_quantity.is_(None)) | (Inventory.remaining_quantity > 0),
     )
     inventory_count = db.exec(select(func.count()).select_from(inventory_base.subquery())).one()
+    not_in_stock_count = db.exec(
+        select(func.count()).select_from(
+            inventory_base.where(Inventory.status == InventoryStatus.NOT_IN_STOCK).subquery()
+        )
+    ).one()
     latest_inventory = db.exec(
         inventory_base.order_by(Inventory.created_at.desc(), Inventory.id.desc()).limit(1)
     ).first()
+    temporary_keeper_id = (
+        latest_inventory.temporary_keeper_id
+        if latest_inventory and is_pending_stockin_item(latest_inventory)
+        else None
+    )
 
     # 补齐涉及人员姓名
     user_ids: set[int] = set()
@@ -800,6 +812,8 @@ def get_cas_overview(
         user_ids.add(latest_order.applicant_id)
     if latest_inventory and latest_inventory.borrower_id:
         user_ids.add(latest_inventory.borrower_id)
+    if temporary_keeper_id:
+        user_ids.add(temporary_keeper_id)
     users_map = batch_get_user_names(db, user_ids)
 
     latest_order_payload = None
@@ -830,6 +844,7 @@ def get_cas_overview(
             if hasattr(latest_inventory.status, "value")
             else latest_inventory.status,
             "borrower_name": users_map.get(latest_inventory.borrower_id),
+            "temporary_keeper_name": users_map.get(temporary_keeper_id),
         }
 
     preferred_name = None
@@ -853,6 +868,7 @@ def get_cas_overview(
         },
         "inventory": {
             "total_count": inventory_count,
+            "not_in_stock_count": not_in_stock_count,
             "latest": latest_inventory_payload,
         },
     }

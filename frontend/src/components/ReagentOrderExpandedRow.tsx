@@ -30,10 +30,16 @@ const getOrderCountLabel = (
 const getInventoryCountLabel = (
   loadingOverview: boolean,
   casOverview: CASOverviewResponse | null,
-): string =>
-  loadingOverview
-    ? "查询中..."
-    : `匹配 ${casOverview?.inventory.total_count ?? 0} 条`;
+): string => {
+  if (loadingOverview) {
+    return "查询中...";
+  }
+  const totalCount = casOverview?.inventory.total_count ?? 0;
+  const missingCount = casOverview?.inventory.not_in_stock_count ?? 0;
+  return missingCount > 0
+    ? `匹配 ${totalCount} 条（其中未找到 ${missingCount} 条）`
+    : `匹配 ${totalCount} 条`;
+};
 
 // 组装最近一条订单记录的摘要文本。
 const getLatestOrderText = (
@@ -55,12 +61,20 @@ const getInventoryQuantityText = (
     : "-";
 
 // 组装最近一条库存记录的位置与借用状态摘要。
-const getInventoryLocationText = (
+const getInventoryPlacementText = (
   inventoryLatest: CASOverviewResponse["inventory"]["latest"],
-): string =>
-  inventoryLatest
-    ? `${inventoryLatest.storage_location || "未填写"} ，借用状态： ${getInventoryBorrowLabel(inventoryLatest.status, inventoryLatest.borrower_name)}`
-    : "-";
+): string => {
+  if (!inventoryLatest) {
+    return "-";
+  }
+  if (inventoryLatest.temporary_keeper_name) {
+    return `暂存人：${inventoryLatest.temporary_keeper_name}`;
+  }
+  if (inventoryLatest.status === "not_in_stock") {
+    return `库存位置：${inventoryLatest.storage_location || "未填写"}（未找到）`;
+  }
+  return `库存位置：${inventoryLatest.storage_location || "未填写"}，借用状态：${getInventoryBorrowLabel(inventoryLatest.status, inventoryLatest.borrower_name)}`;
+};
 
 // 特殊 CAS 不发请求，避免无意义查询和误导性的“查重中/查重失败”提示。
 function useCasOverview({
@@ -145,7 +159,7 @@ function CasOverviewDetails({
     <div className={CAS_OVERVIEW_GRID_CLASS_NAME}>
       <span>库存：{getInventoryCountLabel(loadingOverview, casOverview)}</span>
       <span>，最近库存剩余量：{getInventoryQuantityText(inventoryLatest ?? null)}</span>
-      <span>，库存位置：{getInventoryLocationText(inventoryLatest ?? null)}</span>
+      <span>，{getInventoryPlacementText(inventoryLatest ?? null)}</span>
       <span>；订单：{getOrderCountLabel(loadingOverview, casOverview)}</span>
       <span>，最近订单：{getLatestOrderText(latestOrder ?? null)}</span>
     </div>

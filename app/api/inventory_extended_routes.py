@@ -74,8 +74,16 @@ from app.services.search_completion_entity_index import (
     run_completion_index_update,
     sync_inventory_entity_completions,
 )
+from app.services.inventory_state_guards import ensure_inventory_editable
+from app.services.inventory_status import (
+    BORROWABLE_INVENTORY_STATUSES,
+    derive_inventory_quantity_status,
+)
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
+CONSUMED_INVENTORY_NOT_IN_STOCK_FORBIDDEN_DETAIL = (
+    "Consumed inventory cannot be marked as not found"
+)
 ACTUAL_BORROWER_NOTE_PREFIX = "actual_borrower_id:"
 PENDING_STOCKIN_OVERDUE_DAYS = 7
 logger = logging.getLogger(__name__)
@@ -283,7 +291,7 @@ def _apply_manual_pending_stockin_update(
     item.remaining_quantity = remaining_quantity
     item.remaining_percent = _compute_remaining_percent(remaining_quantity, item.initial_quantity)
     item.temporary_keeper_id = None
-    item.status = InventoryStatus.IN_STOCK
+    item.status = derive_inventory_quantity_status(remaining_quantity, item.initial_quantity)
 
     pinyin_fields = compute_pinyin_fields(
         name=item.name,
@@ -346,7 +354,9 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
 
         total_remaining = sum((item.remaining_quantity or 0) for item in items)
         borrowed_count = sum(1 for item in items if item.status == InventoryStatus.BORROWED)
-        in_stock_count = sum(1 for item in items if item.status == InventoryStatus.IN_STOCK)
+        in_stock_count = sum(
+            1 for item in items if item.status in BORROWABLE_INVENTORY_STATUSES
+        )
 
         return {
             "cas_number": normalized_cas,
@@ -422,6 +432,79 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
 
         response = export_inventory_xlsx(result.items)
         result.apply_truncation_headers(response)
+        return response
+
+
+def _register_inventory_status_route(
+    router: APIRouter,
+    search_cache: Dict[str, tuple[Any, Any]],
+    list_cache_prefix: str,
+) -> None:
+    @router.post("/{inventory_id}/toggle-not-in-stock", response_model=InventoryResponse)
+    async def toggle_not_in_stock(
+        inventory_id: int,
+        request: Request,
+        current_user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[Session, Depends(get_db)],
+    ):
+        item = _get_by_id(db, inventory_id)
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+
+        ensure_inventory_editable(item)
+        if item.status == InventoryStatus.CONSUMED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=CONSUMED_INVENTORY_NOT_IN_STOCK_FORBIDDEN_DETAIL,
+            )
+        before_item = Inventory.model_validate(item)
+        target_status = (
+            derive_inventory_quantity_status(item.remaining_quantity, item.initial_quantity)
+            if item.status == InventoryStatus.NOT_IN_STOCK
+            else InventoryStatus.NOT_IN_STOCK
+        )
+        result = db.exec(
+            sql_update(Inventory)
+            .where(Inventory.id == inventory_id)
+            .where(Inventory.status == item.status)
+            .where(
+                Inventory.remaining_quantity == item.remaining_quantity
+                if item.remaining_quantity is not None
+                else Inventory.remaining_quantity.is_(None)
+            )
+            .where(
+                Inventory.initial_quantity == item.initial_quantity
+                if item.initial_quantity is not None
+                else Inventory.initial_quantity.is_(None)
+            )
+            .where(Inventory.temporary_keeper_id.is_(None))
+            .values(status=target_status, updated_at=get_utc_now())
+        )
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Inventory item changed by another request, please refresh and retry",
+            )
+
+        db.refresh(item)
+        log_inventory_update(
+            db,
+            before_inventory=before_item,
+            after_inventory=item,
+            operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
+        )
+        db.commit()
+        db.refresh(item)
+        _clear_inventory_cache(search_cache, list_cache_prefix, items=item)
+
+        response = _serialize_inventory_item(db, item)
+        await sse_manager.broadcast(
+            SSERoom.INVENTORY,
+            SSEEventType.INVENTORY_UPDATED,
+            {"id": inventory_id, "item": response},
+            actor_client_id=get_sse_client_id(request),
+        )
         return response
 
 
@@ -1006,14 +1089,15 @@ def _apply_return_to_inventory_item(item: Inventory, return_data: InventoryBorro
         item.notes = _normalize_return_notes(return_data.notes)
 
     low_quantity_warning = None
+    item.status = derive_inventory_quantity_status(
+        return_data.remaining_quantity,
+        item.initial_quantity,
+    )
     if return_data.remaining_quantity > 0:
-        item.status = InventoryStatus.IN_STOCK
         if item.initial_quantity and item.initial_quantity > 0:
             percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
-            if percentage < (LOW_STOCK_PERCENT * 100):
+            if percentage <= (LOW_STOCK_PERCENT * 100):
                 low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
-    else:
-        item.status = InventoryStatus.CONSUMED
     return low_quantity_warning
 
 
@@ -1047,7 +1131,7 @@ def _register_borrow_route(
         update_statement = (
             sql_update(Inventory)
             .where(Inventory.id == inventory_id)
-            .where(Inventory.status == InventoryStatus.IN_STOCK)
+            .where(Inventory.status.in_(BORROWABLE_INVENTORY_STATUSES))
             .where(Inventory.temporary_keeper_id.is_(None))
             .values(
                 status=InventoryStatus.BORROWED,
@@ -1267,6 +1351,7 @@ def register_inventory_extended_routes(
     list_cache_prefix: str,
 ) -> None:
     _register_cas_and_export_routes(router)
+    _register_inventory_status_route(router, search_cache, list_cache_prefix)
     _register_manual_and_dashboard_routes(router, search_cache, list_cache_prefix)
     _register_import_routes(router, search_cache, list_cache_prefix)
     _register_borrow_return_routes(router, search_cache, list_cache_prefix)

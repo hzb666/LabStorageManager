@@ -179,6 +179,13 @@ export enum ConsumableOrderStatus {
   COMPLETED = "completed",
 }
 
+export type InventoryStatus =
+  | 'not_in_stock'
+  | 'in_stock'
+  | 'run_short'
+  | 'borrowed'
+  | 'consumed'
+
 // 耗材订单原因枚举。
 export enum ConsumableOrderReason {
   NONE = "none",
@@ -314,8 +321,9 @@ export interface CASOverviewInventory {
   specification: string
   storage_location: string | null
   created_at: string
-  status: string
+  status: InventoryStatus
   borrower_name: string | null
+  temporary_keeper_name: string | null
 }
 
 export interface CASOverviewResponse {
@@ -330,6 +338,7 @@ export interface CASOverviewResponse {
   }
   inventory: {
     total_count: number
+    not_in_stock_count: number
     latest: CASOverviewInventory | null
   }
 }
@@ -573,6 +582,8 @@ export const inventoryAPI = {
     api.post(`/inventory/${id}/return`, data),
   returnDelete: (id: number, data: InventoryReturnPayload) =>
     api.post(`/inventory/${id}/return-delete`, data),
+  toggleNotInStock: (id: number) =>
+    api.post<{ status: InventoryStatus }>(`/inventory/${id}/toggle-not-in-stock`),
   update: (id: number, data: Record<string, unknown>) => api.put(`/inventory/${id}`, data),
   delete: (id: number) => api.delete(`/inventory/${id}`),
   getMyBorrows: () => api.get('/inventory/dashboard/my-borrows'),

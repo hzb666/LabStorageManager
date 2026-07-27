@@ -9,7 +9,8 @@ from typing import Any, Tuple, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile
-from app.models.inventory import Inventory, InventoryStatus, ManualInventoryCreate
+from app.models.inventory import Inventory, ManualInventoryCreate
+from app.services.inventory_status import derive_inventory_quantity_status
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.internal_code import (
     INTERNAL_CODE_CONFLICT_MAX_RETRIES,
@@ -437,7 +438,7 @@ def _build_inventory_from_import_row(
         remaining_percent=_compute_remaining_percent(remaining_qty, initial_quantity),
         unit=unit,
         is_hazardous=_parse_boolean(row.get("is_hazardous"), context.default_is_hazardous),
-        status=InventoryStatus.IN_STOCK,
+        status=derive_inventory_quantity_status(remaining_qty, initial_quantity),
         notes=optional_fields["notes"],
         created_at=stored_created_at,
         created_by_id=context.user_id,

@@ -28,14 +28,15 @@ export function EditDialogActions({
   const showDelete = mode === 'edit' && onDelete
   let leadingArea: ReactNode = null
 
-  if (showDelete) {
+  if (showDelete || leadingContent) {
     leadingArea = (
       <div className="flex items-center gap-2 order-1">
-        <ConfirmDeleteButton variant="destructive" size="lg" type="button" onConfirm={onDelete} />
+        {showDelete ? (
+          <ConfirmDeleteButton variant="destructive" size="lg" type="button" onConfirm={onDelete} />
+        ) : null}
+        {leadingContent}
       </div>
     )
-  } else if (leadingContent) {
-    leadingArea = <div className="order-1">{leadingContent}</div>
   }
 
   return (

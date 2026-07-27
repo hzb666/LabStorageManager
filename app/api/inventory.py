@@ -56,6 +56,7 @@ from app.services.inventory_state_guards import (
     ensure_inventory_deletable,
     ensure_inventory_editable,
 )
+from app.services.inventory_status import derive_inventory_quantity_status
 from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
@@ -1125,6 +1126,17 @@ def _apply_inventory_remaining_quantity_update(
                     ),
                 )
             item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
+            if (
+                item.remaining_quantity is not None
+                and (
+                    item.status != InventoryStatus.NOT_IN_STOCK
+                    or item.remaining_quantity <= 0
+                )
+            ):
+                item.status = derive_inventory_quantity_status(
+                    item.remaining_quantity,
+                    item.initial_quantity,
+                )
         return
 
     new_remaining = update_data["remaining_quantity"]
@@ -1146,7 +1158,9 @@ def _apply_inventory_remaining_quantity_update(
     item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
     if new_remaining is None:
         return
-    item.status = InventoryStatus.CONSUMED if new_remaining == 0 else InventoryStatus.IN_STOCK
+    if item.status == InventoryStatus.NOT_IN_STOCK and new_remaining > 0:
+        return
+    item.status = derive_inventory_quantity_status(new_remaining, item.initial_quantity)
 
 
 def _apply_inventory_pinyin_updates(item: Inventory, *, update_data: dict) -> None:

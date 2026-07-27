@@ -112,7 +112,8 @@ export interface UseTableStateReturn {
 export const DEFAULT_STATUS_OPTIONS: FilterOption[] = [
   { value: 'all', label: '全部状态' },
   { value: 'in_stock', label: '在库' },
-  { value: 'not_in_stock', label: '没有' },
+  { value: 'run_short', label: '快用完' },
+  { value: 'not_in_stock', label: '未找到' },
   { value: 'borrowed', label: '借出' },
   { value: 'consumed', label: '已用完' },
 ]
