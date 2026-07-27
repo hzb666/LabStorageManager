@@ -32,6 +32,7 @@ from app.services.structure_cache_workflow import (
     save_manual_molblock_to_cache,
 )
 from app.services.structure_index import (
+    StructureIndexRevisionChangedError,
     StructureIndexSnapshot,
     StructureQueryFormat,
     StructureSearchMode,
@@ -54,6 +55,17 @@ class StructureIndexStatusResponse(BaseModel):
     version: int
     dirty: bool
     molecule_count: int
+    db_revision: int
+    applied_revision: int
+    revision_lag: int
+    base_count: int
+    delta_count: int
+    tombstone_count: int
+    last_compaction_duration_ms: float | None
+    snapshot_loaded: bool
+    resolution_jobs_queued: int | None = None
+    resolution_jobs_running: int | None = None
+    resolution_jobs_exhausted: int | None = None
 
 
 class SubstructureSearchRequest(BaseModel):
@@ -154,6 +166,14 @@ def _serialize_index_status(snapshot: StructureIndexSnapshot) -> StructureIndexS
         version=snapshot.version,
         dirty=snapshot.dirty,
         molecule_count=snapshot.molecule_count,
+        db_revision=snapshot.db_revision,
+        applied_revision=snapshot.applied_revision,
+        revision_lag=snapshot.revision_lag,
+        base_count=snapshot.base_count,
+        delta_count=snapshot.delta_count,
+        tombstone_count=snapshot.tombstone_count,
+        last_compaction_duration_ms=snapshot.last_compaction_duration_ms,
+        snapshot_loaded=snapshot.snapshot_loaded,
     )
 
 
@@ -172,23 +192,28 @@ def _map_structure_write_error(exc: Exception) -> HTTPException:
 
 
 def _ensure_structure_index_current(db: DBSession) -> StructureIndexStatusResponse:
-    snapshot = structure_index.status()
-    if snapshot.dirty:
-        snapshot = structure_index.rebuild(db)
-        logger.info("Structure index rebuilt before search")
-    return _serialize_index_status(snapshot)
+    try:
+        return _serialize_index_status(structure_index.ensure_current(db))
+    except RuntimeError as exc:
+        logger.warning("Structure index revision barrier failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Structure index is unavailable",
+        ) from exc
 
 
 def _run_structure_search(
     payload: SubstructureSearchRequest,
     limit: int,
     allowed_cas_numbers: set[str] | None,
+    expected_revision: int,
 ):
     search_kwargs = {
         "query": payload.query,
         "query_format": payload.format,
         "limit": limit,
         "allowed_cas_numbers": allowed_cas_numbers,
+        "expected_revision": expected_revision,
     }
     if payload.match_mode == StructureSearchMode.EXACT:
         return structure_index.exact_search(**search_kwargs)
@@ -397,18 +422,37 @@ def search_substructure(
 ) -> SubstructureSearchResponse:
     started = perf_counter()
     preview_limit = min(payload.limit, settings.chem_structure_search_max_results)
-    index_status = _ensure_structure_index_current(db)
-    allowed_cas_numbers = (
-        get_visible_inventory_cas_numbers(db) if payload.only_in_stock else None
-    )
     try:
-        hits = (
-            []
-            if allowed_cas_numbers is not None and not allowed_cas_numbers
-            else _run_structure_search(payload, index_status.molecule_count, allowed_cas_numbers)
-        )
+        for revision_attempt in range(2):
+            index_status = _ensure_structure_index_current(db)
+            allowed_cas_numbers = (
+                get_visible_inventory_cas_numbers(db) if payload.only_in_stock else None
+            )
+            try:
+                hits = (
+                    []
+                    if allowed_cas_numbers is not None and not allowed_cas_numbers
+                    else _run_structure_search(
+                        payload,
+                        index_status.molecule_count,
+                        allowed_cas_numbers,
+                        index_status.applied_revision,
+                    )
+                )
+            except StructureIndexRevisionChangedError:
+                if revision_attempt == 0:
+                    db.rollback()
+                    continue
+                raise
+            break
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except StructureIndexRevisionChangedError as exc:
+        logger.warning("Structure index changed repeatedly during search: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Structure index changed during search",
+        ) from exc
     except RuntimeError as exc:
         logger.warning("Structure search unavailable: %s", exc)
         raise HTTPException(

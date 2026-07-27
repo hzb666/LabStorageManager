@@ -1,14 +1,27 @@
-"""In-memory RDKit substructure index backed by compound_structure_cache."""
+"""Revisioned RDKit index with immutable base snapshots and a small delta."""
 from __future__ import annotations
 
+import base64
+import hashlib
+import io
+import json
+import logging
+import os
 import re
+import tempfile
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from threading import RLock, Semaphore
+from types import MappingProxyType
 
 from rdkit import Chem
 from rdkit import DataStructs
+from rdkit import rdBase
 from rdkit.Chem import rdSubstructLibrary
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -17,7 +30,19 @@ from app.models.compound_structure import (
     CompoundStructureSource,
     CompoundStructureStatus,
 )
+from app.models.structure_index import (
+    StructureIndexChange,
+    StructureIndexChangeOperation,
+    StructureIndexMeta,
+)
 from app.services.rdkit_smiles import mol_from_smiles_quiet_h_removal
+
+logger = logging.getLogger(__name__)
+INDEX_SNAPSHOT_SCHEMA_VERSION = 3
+DEFAULT_SNAPSHOT_PATH = (
+    Path(__file__).resolve().parents[2] / ".cache" / "structure-index.snapshot.json"
+)
+_INDEX_EVENT_BATCH_SIZE = 512
 
 
 @dataclass(frozen=True)
@@ -50,6 +75,44 @@ class StructureIndexSnapshot:
     version: int
     dirty: bool
     molecule_count: int
+    db_revision: int = 0
+    applied_revision: int = 0
+    revision_lag: int = 0
+    base_count: int = 0
+    delta_count: int = 0
+    tombstone_count: int = 0
+    last_compaction_duration_ms: float | None = None
+    snapshot_loaded: bool = False
+
+
+@dataclass(frozen=True)
+class _IndexState:
+    generation_id: str
+    base_revision: int
+    base_library: rdSubstructLibrary.SubstructLibrary
+    base_records: tuple[StructureIndexRecord, ...]
+    delta_revision: int
+    delta_library: rdSubstructLibrary.SubstructLibrary
+    delta_records_by_cas: Mapping[str, StructureIndexRecord]
+    suppressed_cas: frozenset[str]
+
+    @property
+    def applied_revision(self) -> int:
+        return self.delta_revision
+
+
+@dataclass(frozen=True)
+class _IndexMetaSnapshot:
+    generation_id: str
+    current_revision: int
+
+
+class StructureIndexUnavailableError(RuntimeError):
+    """Raised when revision completeness cannot be proven."""
+
+
+class StructureIndexRevisionChangedError(RuntimeError):
+    """Raised when search state no longer matches its revision barrier."""
 
 
 class StructureQueryFormat(str, Enum):
@@ -67,37 +130,297 @@ _DUMMY_ATOM_SMARTS_PATTERN = re.compile(r"\[#0(?P<atom_map>:\d+)?\]")
 
 
 class SubstructureIndex:
-    """Thread-safe process-local substructure index."""
+    """Thread-safe immutable base plus incremental delta index."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, snapshot_path: str | Path | None = None) -> None:
         self._lock = RLock()
-        self._library: rdSubstructLibrary.SubstructLibrary | None = None
-        self._records: list[StructureIndexRecord] = []
-        self._version = 0
-        self._dirty = True
+        self._sync_lock = RLock()
+        self._state: _IndexState | None = None
+        self._last_db_revision = 0
+        self._notified_dirty = True
+        resolved_snapshot_path = Path(snapshot_path or DEFAULT_SNAPSHOT_PATH)
+        if not resolved_snapshot_path.is_absolute():
+            resolved_snapshot_path = Path(__file__).resolve().parents[2] / resolved_snapshot_path
+        self._snapshot_path = resolved_snapshot_path
+        self._snapshot_loaded = False
+        self._last_compaction_duration_ms: float | None = None
+        self._change_notifier: Callable[[], None] | None = None
         self._search_semaphore = Semaphore(settings.chem_structure_search_concurrency)
 
-    def mark_dirty(self) -> None:
+    def notify_change(self) -> None:
+        """Wake background maintenance; request paths only apply bounded deltas."""
         with self._lock:
-            self._dirty = True
+            self._notified_dirty = True
+            notifier = self._change_notifier
+        if notifier is not None:
+            notifier()
 
-    def status(self) -> StructureIndexSnapshot:
+    def set_change_notifier(self, notifier: Callable[[], None] | None) -> None:
         with self._lock:
-            return StructureIndexSnapshot(
-                version=self._version,
-                dirty=self._dirty,
-                molecule_count=len(self._records),
-            )
+            self._change_notifier = notifier
+
+    def is_initialized(self) -> bool:
+        with self._lock:
+            return self._state is not None
+
+    def status(self, db: Session | None = None) -> StructureIndexSnapshot:
+        db_revision = _get_index_meta(db).current_revision if db is not None else None
+        with self._lock:
+            if db_revision is not None:
+                self._last_db_revision = db_revision
+            return self._snapshot_locked(db_revision=db_revision)
 
     def rebuild(self, db: Session) -> StructureIndexSnapshot:
-        records = _load_resolved_records(db)
-        library, indexed_records = _build_library(records)
+        """Explicit full rebuild used by admin operations, never ordinary search."""
+        return self.compact(db)
+
+    def compact(
+        self,
+        db: Session,
+        *,
+        on_base_captured: Callable[[], None] | None = None,
+    ) -> StructureIndexSnapshot:
+        """Build and publish a full base, then replay changes committed during the build."""
+        with self._sync_lock:
+            with Session(db.get_bind()) as compaction_db:
+                return self._compact(
+                    compaction_db,
+                    on_base_captured=on_base_captured,
+                )
+
+    def _compact(
+        self,
+        db: Session,
+        *,
+        on_base_captured: Callable[[], None] | None,
+    ) -> StructureIndexSnapshot:
+        from time import perf_counter
+
+        started = perf_counter()
+        base_meta = _get_index_meta(db)
+        base_revision = base_meta.current_revision
+        base_records = _load_resolved_records(db)
+        db.rollback()
+        if on_base_captured is not None:
+            on_base_captured()
+        base_library, indexed_records = _build_library(base_records)
+        base_state = _IndexState(
+            generation_id=base_meta.generation_id,
+            base_revision=base_revision,
+            base_library=base_library,
+            base_records=tuple(indexed_records),
+            delta_revision=base_revision,
+            delta_library=_empty_library(),
+            delta_records_by_cas=MappingProxyType({}),
+            suppressed_cas=frozenset(),
+        )
+        self._write_snapshot(base_state)
+
+        target_meta = _get_index_meta(db)
+        if target_meta.generation_id != base_meta.generation_id:
+            raise StructureIndexUnavailableError(
+                "Structure index database generation changed during compaction"
+            )
+        target_revision = target_meta.current_revision
+        published_state = self._apply_events(
+            db,
+            state=base_state,
+            target_revision=target_revision,
+        )
         with self._lock:
-            self._library = library
-            self._records = indexed_records
-            self._version += 1
-            self._dirty = False
-            return self.status()
+            self._state = published_state
+            self._last_db_revision = target_revision
+            self._notified_dirty = False
+            self._snapshot_loaded = False
+            self._last_compaction_duration_ms = (perf_counter() - started) * 1000
+            snapshot = self._snapshot_locked(db_revision=target_revision)
+
+        db.exec(
+            text(
+                """
+                UPDATE structure_index_meta
+                SET last_compacted_revision = :revision, updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1 AND generation_id = :generation_id
+                """
+            ),
+            params={
+                "revision": base_revision,
+                "generation_id": base_meta.generation_id,
+            },
+        )
+        db.exec(
+            text("DELETE FROM structure_index_change WHERE revision <= :revision"),
+            params={"revision": base_revision},
+        )
+        db.commit()
+        return snapshot
+
+    def load_snapshot(self, db: Session) -> bool:
+        """Load a persistent base only when it belongs to the active database."""
+        with self._sync_lock:
+            return self._load_snapshot(db)
+
+    def _load_snapshot(
+        self,
+        db: Session,
+    ) -> bool:
+        try:
+            state = self._read_snapshot()
+            meta = _get_index_meta(db)
+            if (
+                state.generation_id != meta.generation_id
+                or state.base_revision > meta.current_revision
+            ):
+                return False
+        except FileNotFoundError:
+            return False
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+        ):
+            logger.warning("structure_index_snapshot outcome=rejected path=%s", self._snapshot_path)
+            return False
+        with self._lock:
+            self._state = state
+            self._last_db_revision = state.applied_revision
+            self._notified_dirty = False
+            self._snapshot_loaded = True
+        return True
+
+    @staticmethod
+    def replay_requires_compaction(snapshot: StructureIndexSnapshot) -> bool:
+        return snapshot.revision_lag >= _incremental_event_threshold(snapshot.base_count)
+
+    def ensure_current(self, db: Session) -> StructureIndexSnapshot:
+        """Revision barrier: replay every event committed at the captured DB revision."""
+        with self._sync_lock:
+            return self._ensure_current(db, allow_snapshot_recovery=True)
+
+    def _ensure_current(
+        self,
+        db: Session,
+        *,
+        allow_snapshot_recovery: bool,
+    ) -> StructureIndexSnapshot:
+        meta = _get_index_meta(db)
+        target_revision = meta.current_revision
+        with self._lock:
+            state = self._state
+        if state is None or state.generation_id != meta.generation_id:
+            if allow_snapshot_recovery and self._load_snapshot(db):
+                return self._ensure_current(db, allow_snapshot_recovery=False)
+            raise StructureIndexUnavailableError(
+                "Structure index has no valid base for this database; "
+                "background compaction is required"
+            )
+        if state.applied_revision > target_revision:
+            raise StructureIndexUnavailableError("Structure index revision is ahead of the database")
+        if state.applied_revision == target_revision:
+            with self._lock:
+                self._last_db_revision = target_revision
+                self._notified_dirty = False
+                return self._snapshot_locked(db_revision=target_revision)
+        if target_revision - state.applied_revision >= _incremental_event_threshold(
+            len(state.base_records)
+        ):
+            self.notify_change()
+            raise StructureIndexUnavailableError(
+                "Structure index revision lag requires background compaction"
+            )
+
+        try:
+            new_state = self._apply_events(
+                db,
+                state=state,
+                target_revision=target_revision,
+            )
+        except StructureIndexUnavailableError:
+            old_revision = state.applied_revision
+            if allow_snapshot_recovery and self._load_snapshot(db):
+                with self._lock:
+                    recovered = self._state
+                if recovered is not None and recovered.applied_revision > old_revision:
+                    return self._ensure_current(db, allow_snapshot_recovery=False)
+            raise
+        with self._lock:
+            self._state = new_state
+            self._last_db_revision = target_revision
+            self._notified_dirty = False
+            return self._snapshot_locked(db_revision=target_revision)
+
+    def _apply_events(
+        self,
+        db: Session,
+        *,
+        state: _IndexState,
+        target_revision: int,
+    ) -> _IndexState:
+        if target_revision == state.applied_revision:
+            return state
+        latest_by_cas = _load_latest_changes(
+            db,
+            start_revision=state.applied_revision + 1,
+            target_revision=target_revision,
+        )
+        delta_records = dict(state.delta_records_by_cas)
+        suppressed = set(state.suppressed_cas)
+        for cas_number, event in latest_by_cas.items():
+            suppressed.add(cas_number)
+            if _change_is_indexable(event):
+                delta_records[cas_number] = _record_from_change(event)
+            else:
+                delta_records.pop(cas_number, None)
+        delta_library, indexed_delta = _build_library(
+            [delta_records[cas] for cas in sorted(delta_records)]
+        )
+        return _IndexState(
+            generation_id=state.generation_id,
+            base_revision=state.base_revision,
+            base_library=state.base_library,
+            base_records=state.base_records,
+            delta_revision=target_revision,
+            delta_library=delta_library,
+            delta_records_by_cas=MappingProxyType(
+                {record.cas_number: record for record in indexed_delta}
+            ),
+            suppressed_cas=frozenset(suppressed),
+        )
+
+    def _snapshot_locked(self, *, db_revision: int | None) -> StructureIndexSnapshot:
+        state = self._state
+        applied_revision = state.applied_revision if state is not None else 0
+        current_revision = (
+            self._last_db_revision if db_revision is None else db_revision
+        )
+        if state is None:
+            base_count = delta_count = tombstone_count = molecule_count = 0
+        else:
+            base_count = len(state.base_records)
+            delta_count = len(state.delta_records_by_cas)
+            tombstone_count = len(state.suppressed_cas - set(state.delta_records_by_cas))
+            molecule_count = (
+                sum(
+                    record.cas_number not in state.suppressed_cas
+                    for record in state.base_records
+                )
+                + delta_count
+            )
+        lag = max(0, current_revision - applied_revision)
+        return StructureIndexSnapshot(
+            version=applied_revision,
+            dirty=self._notified_dirty or lag > 0 or state is None,
+            molecule_count=molecule_count,
+            db_revision=current_revision,
+            applied_revision=applied_revision,
+            revision_lag=lag,
+            base_count=base_count,
+            delta_count=delta_count,
+            tombstone_count=tombstone_count,
+            last_compaction_duration_ms=self._last_compaction_duration_ms,
+            snapshot_loaded=self._snapshot_loaded,
+        )
 
     def search(
         self,
@@ -106,26 +429,34 @@ class SubstructureIndex:
         query_format: str,
         limit: int,
         allowed_cas_numbers: set[str] | None = None,
+        expected_revision: int | None = None,
     ) -> list[StructureSearchHit]:
         query_mol = _parse_query_molecule(query=query, query_format=query_format)
         use_chirality = _query_has_stereochemistry(query_mol)
         query_fp = Chem.PatternFingerprint(query_mol)
         with self._search_semaphore:
             with self._lock:
-                if self._library is None or not self._records:
-                    raise RuntimeError("Structure index is empty; rebuild after cache backfill")
-                records = self._records
-                params = Chem.SubstructMatchParameters()
-                params.useChirality = use_chirality
-                match_indices = self._library.GetMatches(query_mol, params, -1, -1)
-            return _select_limited_hits(
-                records=records,
-                match_indices=match_indices,
-                limit=limit,
-                allowed_cas_numbers=allowed_cas_numbers,
+                state = self._require_searchable_state_locked(expected_revision)
+            base_hits = _collect_library_hits(
+                library=state.base_library,
+                records=state.base_records,
                 query_mol=query_mol,
                 query_fp=query_fp,
+                use_chirality=use_chirality,
+                allowed_cas_numbers=allowed_cas_numbers,
+                suppressed_cas=state.suppressed_cas,
             )
+            delta_records = tuple(state.delta_records_by_cas.values())
+            delta_hits = _collect_library_hits(
+                library=state.delta_library,
+                records=delta_records,
+                query_mol=query_mol,
+                query_fp=query_fp,
+                use_chirality=use_chirality,
+                allowed_cas_numbers=allowed_cas_numbers,
+                suppressed_cas=frozenset(),
+            )
+            return _sort_and_limit_hits(base_hits + delta_hits, limit=limit)
 
     def exact_search(
         self,
@@ -134,6 +465,7 @@ class SubstructureIndex:
         query_format: str,
         limit: int,
         allowed_cas_numbers: set[str] | None = None,
+        expected_revision: int | None = None,
     ) -> list[StructureSearchHit]:
         if query_format == StructureQueryFormat.SMARTS:
             query_mol, r_atom_indices = _parse_simple_r_exact_query(query=query)
@@ -141,9 +473,8 @@ class SubstructureIndex:
             query_fp = Chem.PatternFingerprint(query_mol)
             with self._search_semaphore:
                 with self._lock:
-                    if self._library is None or not self._records:
-                        raise RuntimeError("Structure index is empty; rebuild after cache backfill")
-                    records = self._records
+                    state = self._require_searchable_state_locked(expected_revision)
+                    records = _current_records(state)
                 return _select_exact_r_group_hits(
                     records=records,
                     query_mol=query_mol,
@@ -159,9 +490,8 @@ class SubstructureIndex:
         query_smiles = _canonical_query_smiles(query_mol, use_chirality=use_chirality)
         with self._search_semaphore:
             with self._lock:
-                if self._library is None or not self._records:
-                    raise RuntimeError("Structure index is empty; rebuild after cache backfill")
-                records = self._records
+                state = self._require_searchable_state_locked(expected_revision)
+                records = _current_records(state)
             return _select_exact_hits(
                 records=records,
                 query_smiles=query_smiles,
@@ -170,6 +500,101 @@ class SubstructureIndex:
                 allowed_cas_numbers=allowed_cas_numbers,
                 query_atom_count=query_mol.GetNumAtoms(),
             )
+
+    def _require_searchable_state_locked(
+        self,
+        expected_revision: int | None,
+    ) -> _IndexState:
+        state = self._state
+        if state is None:
+            raise RuntimeError("Structure index is unavailable")
+        if expected_revision is not None and state.applied_revision != expected_revision:
+            raise StructureIndexRevisionChangedError(
+                f"Expected structure index revision {expected_revision}, "
+                f"found {state.applied_revision}"
+            )
+        if not state.base_records and not state.delta_records_by_cas:
+            raise RuntimeError("Structure index is empty; backfill or resolve cache entries")
+        return state
+
+    def _write_snapshot(self, state: _IndexState) -> None:
+        payload = _snapshot_payload(state)
+        checksum = _snapshot_checksum(payload)
+        document = {**payload, "checksum": checksum}
+        self._snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{self._snapshot_path.name}.",
+            suffix=".tmp",
+            dir=self._snapshot_path.parent,
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(document, handle, ensure_ascii=False, separators=(",", ":"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_name, self._snapshot_path)
+            _fsync_parent_directory(self._snapshot_path)
+        except Exception:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+            raise
+
+    def _read_snapshot(self) -> _IndexState:
+        document = json.loads(self._snapshot_path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            raise ValueError("Structure index snapshot must be an object")
+        checksum = document.pop("checksum", None)
+        if not isinstance(checksum, str) or checksum != _snapshot_checksum(document):
+            raise ValueError("Structure index snapshot checksum mismatch")
+        if document.get("index_schema_version") != INDEX_SNAPSHOT_SCHEMA_VERSION:
+            raise ValueError("Structure index snapshot schema mismatch")
+        if document.get("rdkit_version") != rdBase.rdkitVersion:
+            raise ValueError("Structure index snapshot RDKit version mismatch")
+
+        raw_records = document.get("records")
+        encoded_library = document.get("serialized_library")
+        base_revision = document.get("base_revision")
+        generation_id = document.get("generation_id")
+        if (
+            not isinstance(raw_records, list)
+            or not isinstance(encoded_library, str)
+            or not isinstance(base_revision, int)
+            or not isinstance(generation_id, str)
+            or not generation_id
+        ):
+            raise ValueError("Structure index snapshot fields are invalid")
+        library = rdSubstructLibrary.SubstructLibrary()
+        library.InitFromStream(
+            io.BytesIO(base64.b64decode(encoded_library, validate=True))
+        )
+        if len(library) != len(raw_records) or document.get("molecule_count") != len(raw_records):
+            raise ValueError("Structure index snapshot record count mismatch")
+        fingerprint_holder = library.GetFpHolder()
+        if fingerprint_holder is None:
+            raise ValueError("Structure index snapshot fingerprint holder is missing")
+        records = tuple(
+            _record_from_snapshot(
+                item,
+                mol=library.GetMol(index),
+                fingerprint=fingerprint_holder.GetFingerprint(index),
+            )
+            for index, item in enumerate(raw_records)
+        )
+        cas_numbers = [record.cas_number for record in records]
+        if len(cas_numbers) != len(set(cas_numbers)):
+            raise ValueError("Structure index snapshot contains duplicate CAS records")
+        return _IndexState(
+            generation_id=generation_id,
+            base_revision=base_revision,
+            base_library=library,
+            base_records=records,
+            delta_revision=base_revision,
+            delta_library=_empty_library(),
+            delta_records_by_cas=MappingProxyType({}),
+            suppressed_cas=frozenset(),
+        )
 
 
 def _load_resolved_records(db: Session) -> list[StructureIndexRecord]:
@@ -183,31 +608,164 @@ def _load_resolved_records(db: Session) -> list[StructureIndexRecord]:
     for row in rows:
         if not row.smiles_canonical:
             continue
-        raw_canonical = str(row.smiles_canonical)
-        mol = mol_from_smiles_quiet_h_removal(raw_canonical)
-        if mol is None:
-            continue
-        exact_canonical = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False) or None
-        if not exact_canonical:
-            continue
         records.append(
-            StructureIndexRecord(
+            _build_record(
                 cas_number=row.cas_number,
-                smiles_canonical=raw_canonical,
+                smiles_canonical=str(row.smiles_canonical),
                 smiles_isomeric=row.smiles_isomeric,
-                exact_smiles_canonical=exact_canonical,
-                exact_smiles_isomeric=_canonical_smiles_from_smiles(
-                    row.smiles_isomeric or raw_canonical,
-                    use_chirality=True,
-                ),
                 inchikey=row.inchikey,
                 source=row.source,
-                mol=mol,
-                fingerprint=Chem.PatternFingerprint(mol),
-                atom_count=mol.GetNumAtoms(),
             )
         )
     return records
+
+
+def _get_index_meta(db: Session) -> _IndexMetaSnapshot:
+    meta = db.get(StructureIndexMeta, 1)
+    if meta is None:
+        raise StructureIndexUnavailableError("Structure index metadata is missing")
+    if not meta.generation_id:
+        raise StructureIndexUnavailableError("Structure index database generation is missing")
+    return _IndexMetaSnapshot(
+        generation_id=meta.generation_id,
+        current_revision=int(meta.current_revision),
+    )
+
+
+def _load_latest_changes(
+    db: Session,
+    *,
+    start_revision: int,
+    target_revision: int,
+) -> dict[str, StructureIndexChange]:
+    latest_by_cas: dict[str, StructureIndexChange] = {}
+    next_revision = start_revision
+    while next_revision <= target_revision:
+        events = db.exec(
+            select(StructureIndexChange)
+            .where(StructureIndexChange.revision >= next_revision)
+            .where(StructureIndexChange.revision <= target_revision)
+            .order_by(StructureIndexChange.revision)
+            .limit(_INDEX_EVENT_BATCH_SIZE)
+        ).all()
+        if not events:
+            raise _revision_gap_error(next_revision, target_revision, None)
+        for event in events:
+            if event.revision != next_revision:
+                raise _revision_gap_error(
+                    next_revision,
+                    target_revision,
+                    event.revision,
+                )
+            latest_by_cas[event.cas_number] = event
+            next_revision += 1
+    return latest_by_cas
+
+
+def _revision_gap_error(
+    expected_revision: int,
+    target_revision: int,
+    actual_revision: int | None,
+) -> StructureIndexUnavailableError:
+    return StructureIndexUnavailableError(
+        "Structure index revision gap: "
+        f"expected {expected_revision} through {target_revision}, "
+        f"received {actual_revision}"
+    )
+
+
+def _incremental_event_threshold(base_count: int) -> int:
+    return max(
+        settings.chem_structure_index_compaction_min_delta,
+        int(base_count * settings.chem_structure_index_compaction_ratio),
+    )
+
+
+def _change_is_indexable(event: StructureIndexChange) -> bool:
+    return (
+        event.operation == StructureIndexChangeOperation.ADD_OR_UPDATE
+        and event.status == CompoundStructureStatus.RESOLVED
+        and bool(event.smiles_canonical)
+    )
+
+
+def _record_from_change(event: StructureIndexChange) -> StructureIndexRecord:
+    if not event.smiles_canonical:
+        raise StructureIndexUnavailableError(
+            f"Resolved structure event {event.revision} has no canonical SMILES"
+        )
+    return _build_record(
+        cas_number=event.cas_number,
+        smiles_canonical=event.smiles_canonical,
+        smiles_isomeric=event.smiles_isomeric,
+        inchikey=event.inchikey,
+        source=event.source,
+    )
+
+
+def _build_record(
+    *,
+    cas_number: str,
+    smiles_canonical: str,
+    smiles_isomeric: str | None,
+    inchikey: str | None,
+    source: CompoundStructureSource | None,
+) -> StructureIndexRecord:
+    mol = mol_from_smiles_quiet_h_removal(smiles_canonical)
+    if mol is None:
+        raise StructureIndexUnavailableError(f"Unable to parse indexed structure for {cas_number}")
+    return _build_record_from_mol(
+        cas_number=cas_number,
+        smiles_canonical=smiles_canonical,
+        smiles_isomeric=smiles_isomeric,
+        inchikey=inchikey,
+        source=source,
+        mol=mol,
+        exact_smiles_isomeric=_canonical_smiles_from_smiles(
+            smiles_isomeric or smiles_canonical,
+            use_chirality=True,
+        ),
+    )
+
+
+def _build_record_from_mol(
+    *,
+    cas_number: str,
+    smiles_canonical: str,
+    smiles_isomeric: str | None,
+    inchikey: str | None,
+    source: CompoundStructureSource | None,
+    mol,
+    exact_smiles_isomeric: str | None,
+    expected_exact_smiles_canonical: str | None = None,
+    fingerprint=None,
+) -> StructureIndexRecord:
+    if mol is None:
+        raise ValueError(f"Structure index snapshot molecule is missing for {cas_number}")
+    exact_canonical = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False) or None
+    if not exact_canonical:
+        raise StructureIndexUnavailableError(
+            f"Unable to canonicalize indexed structure for {cas_number}"
+        )
+    if (
+        expected_exact_smiles_canonical is not None
+        and exact_canonical != expected_exact_smiles_canonical
+    ):
+        raise ValueError(
+            f"Structure index snapshot record/library mismatch for {cas_number}"
+        )
+    return StructureIndexRecord(
+        cas_number=cas_number,
+        smiles_canonical=smiles_canonical,
+        smiles_isomeric=smiles_isomeric,
+        exact_smiles_canonical=exact_canonical,
+        exact_smiles_isomeric=exact_smiles_isomeric,
+        inchikey=inchikey,
+        source=source,
+        mol=mol,
+        fingerprint=fingerprint if fingerprint is not None else Chem.PatternFingerprint(mol),
+        atom_count=mol.GetNumAtoms(),
+    )
 
 
 def _build_library(
@@ -223,6 +781,98 @@ def _build_library(
             raise RuntimeError("RDKit SubstructLibrary holder indexes diverged")
         indexed_records.append(record)
     return rdSubstructLibrary.SubstructLibrary(mol_holder, pattern_holder), indexed_records
+
+
+def _empty_library() -> rdSubstructLibrary.SubstructLibrary:
+    return _build_library([])[0]
+
+
+def _current_records(state: _IndexState) -> list[StructureIndexRecord]:
+    records = [
+        record
+        for record in state.base_records
+        if record.cas_number not in state.suppressed_cas
+    ]
+    records.extend(state.delta_records_by_cas.values())
+    return records
+
+
+def _snapshot_payload(state: _IndexState) -> dict[str, object]:
+    return {
+        "index_schema_version": INDEX_SNAPSHOT_SCHEMA_VERSION,
+        "rdkit_version": rdBase.rdkitVersion,
+        "generation_id": state.generation_id,
+        "base_revision": state.base_revision,
+        "molecule_count": len(state.base_records),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "records": [_snapshot_record(record) for record in state.base_records],
+        "serialized_library": base64.b64encode(state.base_library.Serialize()).decode("ascii"),
+    }
+
+
+def _snapshot_record(record: StructureIndexRecord) -> dict[str, object]:
+    return {
+        "cas_number": record.cas_number,
+        "smiles_canonical": record.smiles_canonical,
+        "smiles_isomeric": record.smiles_isomeric,
+        "exact_smiles_canonical": record.exact_smiles_canonical,
+        "exact_smiles_isomeric": record.exact_smiles_isomeric,
+        "inchikey": record.inchikey,
+        "source": record.source.value if record.source is not None else None,
+    }
+
+
+def _record_from_snapshot(value: object, *, mol, fingerprint) -> StructureIndexRecord:
+    if not isinstance(value, dict):
+        raise ValueError("Structure index snapshot record must be an object")
+    cas_number = value.get("cas_number")
+    smiles_canonical = value.get("smiles_canonical")
+    exact_smiles_canonical = value.get("exact_smiles_canonical")
+    if (
+        not isinstance(cas_number, str)
+        or not isinstance(smiles_canonical, str)
+        or not isinstance(exact_smiles_canonical, str)
+    ):
+        raise ValueError("Structure index snapshot record fields are invalid")
+    raw_source = value.get("source")
+    source = CompoundStructureSource(raw_source) if isinstance(raw_source, str) else None
+    exact_smiles_isomeric = value.get("exact_smiles_isomeric")
+    if exact_smiles_isomeric is not None and not isinstance(exact_smiles_isomeric, str):
+        raise ValueError("Structure index snapshot isomeric metadata is invalid")
+    return _build_record_from_mol(
+        cas_number=cas_number,
+        smiles_canonical=smiles_canonical,
+        smiles_isomeric=(
+            value["smiles_isomeric"] if isinstance(value.get("smiles_isomeric"), str) else None
+        ),
+        inchikey=value["inchikey"] if isinstance(value.get("inchikey"), str) else None,
+        source=source,
+        mol=mol,
+        exact_smiles_isomeric=exact_smiles_isomeric,
+        expected_exact_smiles_canonical=exact_smiles_canonical,
+        fingerprint=fingerprint,
+    )
+
+
+def _snapshot_checksum(payload: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _fsync_parent_directory(path: Path) -> None:
+    """Persist the atomic directory entry before covered revisions are pruned."""
+    if os.name == "nt" or not hasattr(os, "O_DIRECTORY"):
+        return
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _parse_query_molecule(*, query: str, query_format: str):
@@ -311,30 +961,47 @@ def _canonical_smiles_from_smiles(smiles: str | None, *, use_chirality: bool) ->
     return Chem.MolToSmiles(mol, canonical=True, isomericSmiles=use_chirality) or None
 
 
-def _select_limited_hits(
+def _collect_library_hits(
     *,
-    records: list[StructureIndexRecord],
-    match_indices,
-    limit: int,
-    allowed_cas_numbers: set[str] | None,
+    library: rdSubstructLibrary.SubstructLibrary,
+    records: tuple[StructureIndexRecord, ...],
     query_mol,
     query_fp,
+    use_chirality: bool,
+    allowed_cas_numbers: set[str] | None,
+    suppressed_cas: frozenset[str],
 ) -> list[StructureSearchHit]:
+    if not records:
+        return []
+    params = Chem.SubstructMatchParameters()
+    params.useChirality = use_chirality
+    match_indices = library.GetMatches(query_mol, params, -1, -1)
     hits: list[StructureSearchHit] = []
     for index in match_indices:
         record = records[index]
+        if record.cas_number in suppressed_cas:
+            continue
         if allowed_cas_numbers is not None and record.cas_number not in allowed_cas_numbers:
             continue
-        hits.append(_record_to_hit(record, **_calculate_substructure_score(query_mol, query_fp, record)))
-    hits.sort(key=lambda hit: (
+        score = _calculate_substructure_score_for_record(query_mol, query_fp, record)
+        hits.append(_record_to_hit(record, **score))
+    return hits
+
+
+def _sort_and_limit_hits(
+    hits: list[StructureSearchHit],
+    *,
+    limit: int,
+) -> list[StructureSearchHit]:
+    deduplicated = {hit.cas_number: hit for hit in hits}
+    ordered_hits = list(deduplicated.values())
+    ordered_hits.sort(key=lambda hit: (
         -hit.matched_atom_ratio,
         hit.atom_count_delta,
         -hit.similarity,
         hit.cas_number,
     ))
-    if len(hits) > limit:
-        return hits[:limit]
-    return hits
+    return ordered_hits[:limit]
 
 
 def _select_exact_hits(
@@ -359,9 +1026,8 @@ def _select_exact_hits(
             matched_atom_ratio=1.0,
             atom_count_delta=abs(record.atom_count - query_atom_count),
         ))
-        if len(hits) >= limit:
-            break
-    return hits
+    hits.sort(key=lambda hit: hit.cas_number)
+    return hits[:limit]
 
 
 def _select_exact_r_group_hits(
@@ -466,10 +1132,6 @@ def _exact_record_smiles(record: StructureIndexRecord, *, use_chirality: bool) -
     return record.exact_smiles_canonical
 
 
-def _calculate_substructure_score(query_mol, query_fp, record: StructureIndexRecord) -> dict[str, float | int]:
-    return _calculate_substructure_score_for_record(query_mol, query_fp, record)
-
-
 def _calculate_substructure_score_for_record(
     query_mol,
     query_fp,
@@ -503,4 +1165,4 @@ def _record_to_hit(
     )
 
 
-structure_index = SubstructureIndex()
+structure_index = SubstructureIndex(snapshot_path=settings.chem_structure_index_snapshot_path)

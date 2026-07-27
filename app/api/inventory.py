@@ -95,7 +95,12 @@ from app.services.search_completion_entity_index import (
     sync_inventory_entity_completions,
 )
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
-from app.services.structure_index import StructureQueryFormat, StructureSearchMode, structure_index
+from app.services.structure_index import (
+    StructureIndexRevisionChangedError,
+    StructureQueryFormat,
+    StructureSearchMode,
+    structure_index,
+)
 from app.services.structure_inventory_summary import normalized_inventory_cas_expr
 from app.services.structure_search_cache import (
     StructureSearchCacheEntry,
@@ -247,11 +252,14 @@ def _ensure_structure_filter_enabled(options: InventoryFilterOptions) -> None:
         )
 
 
-def _get_structure_search_entry_or_410(search_id: str) -> StructureSearchCacheEntry:
-    snapshot = structure_index.status()
+def _get_structure_search_entry_or_410(
+    db: Session,
+    search_id: str,
+) -> StructureSearchCacheEntry:
+    snapshot = structure_index.status(db)
     entry = get_structure_search_cache_entry(
         search_id,
-        index_version=-1 if snapshot.dirty else snapshot.version,
+        index_version=snapshot.db_revision,
     )
     if entry is None:
         raise api_error(
@@ -271,7 +279,7 @@ def _resolve_inventory_structure_cas_numbers(
     if options.structure_cas_numbers is not None:
         return options.structure_cas_numbers
     if options.structure_search_id:
-        return _get_structure_search_entry_or_410(options.structure_search_id).cas_numbers
+        return _get_structure_search_entry_or_410(db, options.structure_search_id).cas_numbers
     if not _has_structure_query(options):
         return None
     if not (
@@ -285,17 +293,23 @@ def _resolve_inventory_structure_cas_numbers(
             code=ApiErrorCode.STRUCTURE_FILTER_INCOMPLETE,
         )
 
-    snapshot = structure_index.status()
-    if snapshot.dirty:
-        snapshot = structure_index.rebuild(db)
-    if snapshot.molecule_count <= 0:
-        return ()
-
     try:
-        hits = _search_inventory_structure_index(
-            options=options,
-            limit=snapshot.molecule_count,
-        )
+        for revision_attempt in range(2):
+            snapshot = structure_index.ensure_current(db)
+            if snapshot.molecule_count <= 0:
+                return ()
+            try:
+                hits = _search_inventory_structure_index(
+                    options=options,
+                    limit=snapshot.molecule_count,
+                    expected_revision=snapshot.applied_revision,
+                )
+            except StructureIndexRevisionChangedError:
+                if revision_attempt == 0:
+                    db.rollback()
+                    continue
+                raise
+            break
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -315,11 +329,13 @@ def _search_inventory_structure_index(
     *,
     options: InventoryFilterOptions,
     limit: int,
+    expected_revision: int,
 ):
     search_kwargs = {
         "query": options.structure_query or "",
         "query_format": options.structure_query_format or "",
         "limit": limit,
+        "expected_revision": expected_revision,
     }
     if options.structure_match_mode == StructureSearchMode.EXACT:
         return structure_index.exact_search(**search_kwargs)
@@ -327,11 +343,12 @@ def _search_inventory_structure_index(
 
 
 def _resolve_inventory_structure_smiles_by_cas(
+    db: Session,
     options: InventoryFilterOptions,
 ) -> Mapping[str, str]:
     if not options.structure_search_id:
         return {}
-    return _get_structure_search_entry_or_410(options.structure_search_id).smiles_by_cas
+    return _get_structure_search_entry_or_410(db, options.structure_search_id).smiles_by_cas
 
 
 def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
@@ -937,7 +954,7 @@ def list_inventory(
 
     result_data = _attach_structure_matched_smiles(
         serialize_inventory_items(db, items),
-        _resolve_inventory_structure_smiles_by_cas(filter_options),
+        _resolve_inventory_structure_smiles_by_cas(db, filter_options),
     )
 
     result = {

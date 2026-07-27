@@ -73,7 +73,10 @@ from app.services.log_queue import get_request_logger, initialize_async_file_log
 from app.services.rate_limit import enforce_rate_limit
 from app.services.search_query_log_service import stop_search_query_log_worker, start_search_query_log_worker
 from app.services.sse_manager import sse_manager
-from app.services.structure_index import structure_index
+from app.services.structure_index_scheduler import (
+    start_structure_index_scheduler,
+    stop_structure_index_scheduler,
+)
 from app.search_query_log_db import init_query_log_db
 from app.search_completion_db import TARGET_ENDPOINTS, init_search_completion_db
 from app.services.search_completion_entity_index import rebuild_completion_entity_index_if_stale
@@ -351,10 +354,7 @@ async def lifespan(app: FastAPI):
     init_db()
     init_query_log_db()
     init_search_completion_db()
-    if settings.chem_structure_feature_enabled:
-        with Session(engine) as db:
-            structure_index.rebuild(db)
-        logger.info("Structure index rebuilt on startup")
+    start_structure_index_scheduler()
     with Session(engine) as db:
         for ep in TARGET_ENDPOINTS:
             rebuild_completion_entity_index_if_stale(db, ep)
@@ -373,6 +373,7 @@ async def lifespan(app: FastAPI):
     print_banner()
     yield
     await stop_archive_scheduler()
+    await stop_structure_index_scheduler()
     stop_search_query_log_worker()
     shutdown_async_file_logging()
     await sse_manager.stop_listener()

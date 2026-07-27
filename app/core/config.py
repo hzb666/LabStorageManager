@@ -204,6 +204,14 @@ class Settings(BaseSettings):
         le=1024,
         description="Maximum in-memory cached structure search result sets",
     )
+    chem_structure_index_snapshot_path: str = Field(
+        default=".cache/structure-index.snapshot.json",
+        description="Persistent RDKit structure index snapshot path",
+    )
+    chem_structure_index_maintenance_hour: int = Field(default=3, ge=0, le=23)
+    chem_structure_index_compaction_min_delta: int = Field(default=256, ge=1)
+    chem_structure_index_compaction_ratio: float = Field(default=0.05, gt=0, le=1)
+    chem_structure_index_compaction_tombstone_threshold: int = Field(default=128, ge=1)
 
     # 小牛翻译 API
     niutrans_appid: str = Field(default="", description="Niutrans API appId")

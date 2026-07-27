@@ -107,7 +107,7 @@ def _write_cache_result(
     cache = upsert_structure_cache(db, payload, skip_manual=skip_manual)
     db.commit()
     db.refresh(cache)
-    structure_index.mark_dirty()
+    structure_index.notify_change()
     clear_structure_search_cache()
     return cache
 
