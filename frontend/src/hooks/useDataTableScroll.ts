@@ -127,6 +127,8 @@ export function useDataTableScroll<TData>({
 
   // 展开位于视口上方的行时，把该行平滑滚回可见区域顶部。
   const handleRowClick = useCallback((e: MouseEvent<HTMLDivElement>, row: Row<TData>) => {
+    if (!row.getCanExpand()) return
+
     const isExpanding = !row.getIsExpanded()
     row.toggleExpanded()
 

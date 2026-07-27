@@ -809,10 +809,12 @@ function FilterTableControls({
 
 function useFilterTableInstance({
   actionRefs,
+  canExpandRows,
   customColumns,
   filter,
 }: Readonly<{
   actionRefs: ReturnType<typeof useActionRefs>;
+  canExpandRows: boolean;
   customColumns?: ColumnDef<Record<string, unknown>, unknown>[];
   filter: ReturnType<typeof useTableState>;
 }>) {
@@ -826,7 +828,7 @@ function useFilterTableInstance({
     getRowId: getTableRowId,
     getCoreRowModel: getCoreRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
-    getRowCanExpand: () => true,
+    getRowCanExpand: () => canExpandRows,
     columnResizeMode: "onChange",
     enableColumnResizing: true,
     onColumnSizingChange: filter.setColumnSizing,
@@ -1058,7 +1060,7 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
     enableFuzzySearch: showFuzzySearch,
   });
 
-  const table = useFilterTableInstance({ actionRefs, customColumns, filter });
+  const table = useFilterTableInstance({ actionRefs, canExpandRows: Boolean(renderExpandedRow), customColumns, filter });
 
   useFilterTableEffects({
     defaultStatus,

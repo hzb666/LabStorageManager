@@ -56,7 +56,7 @@ function InnerRowComponent<TData>({
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (onRowClick) {
         onRowClick(e, row)
-      } else if (renderExpandedRow) {
+      } else if (renderExpandedRow && row.getCanExpand()) {
         row.toggleExpanded()
       }
     },
