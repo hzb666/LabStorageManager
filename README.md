@@ -265,9 +265,22 @@ npm run dev
 | `CHEM_RESOLVER_PUBCHEM_ENABLED` | `true` | 是否允许通过 PubChem 解析 CAS 结构 |
 | `CHEM_PUBCHEM_RATE_LIMIT_PER_SECOND` | `2` | PubChem 请求速率上限 |
 | `CHEM_PUBCHEM_TIMEOUT_SECONDS` | `20` | PubChem 请求超时 |
-| `CHEM_PUBCHEM_MAX_RETRIES` | `3` | PubChem 失败重试次数 |
+| `CHEM_PUBCHEM_MAX_RETRIES` | `3` | 管理员显式解析和离线回填的请求内重试次数 |
 | `CHEM_PUBCHEM_USER_AGENT` | `LabStorageManager/0.7.1` | 发送到 PubChem 的 User-Agent |
+| `CHEM_RESOLUTION_SCHEDULER_ENABLED` | `true` | 启用 SQLite 持久化自动解析队列 |
+| `CHEM_RESOLUTION_RETRY_DELAYS_SECONDS` | `[60,300,1800]` | 首次失败后的 3 次自动重试间隔 |
+| `CHEM_RESOLUTION_JOB_LEASE_SECONDS` | `120` | 自动解析任务租约；过期后允许其他进程恢复 |
+| `CHEM_RESOLUTION_JOB_ATTEMPT_TIMEOUT_SECONDS` | `1800` | 单次自动解析硬超时；超时按可重试错误持久化 |
 | `CHEM_STRUCTURE_SEARCH_MAX_RESULTS` | `100` | 子结构检索默认结果上限 |
+| `CHEM_STRUCTURE_INDEX_SNAPSHOT_PATH` | `.cache/structure-index.snapshot.json` | 带数据库代际、revision、RDKit 版本和 checksum 的持久快照 |
+| `CHEM_STRUCTURE_INDEX_MAINTENANCE_HOUR` | `3` | 每天按 `DISPLAY_UTC_OFFSET` 执行低频增量整理的小时（0～23） |
+
+结构缓存写入由 SQLite trigger 在同一事务中记录连续 revision。搜索前会通过 revision
+barrier 重放小型增量层；普通搜索请求不会全量重建。新增、修改、终态转换和删除会屏蔽
+旧主快照内容，同进程写入通过事件立即同步；达到阈值或每天维护时间再由后台原子发布
+新快照。独立脚本写入由下一次搜索的 revision barrier 发现，无需固定轮询数据库。
+自动 PubChem 解析每次 lease 只执行一次完整解析尝试，等待时间写入数据库，不保留按
+任务休眠的协程或 HTTP 客户端。
 
 ### JWT 与密钥
 

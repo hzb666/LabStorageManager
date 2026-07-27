@@ -77,6 +77,10 @@ from app.services.structure_index_scheduler import (
     start_structure_index_scheduler,
     stop_structure_index_scheduler,
 )
+from app.services.structure_resolution_scheduler import (
+    start_structure_resolution_scheduler,
+    stop_structure_resolution_scheduler,
+)
 from app.search_query_log_db import init_query_log_db
 from app.search_completion_db import TARGET_ENDPOINTS, init_search_completion_db
 from app.services.search_completion_entity_index import rebuild_completion_entity_index_if_stale
@@ -355,6 +359,7 @@ async def lifespan(app: FastAPI):
     init_query_log_db()
     init_search_completion_db()
     start_structure_index_scheduler()
+    start_structure_resolution_scheduler()
     with Session(engine) as db:
         for ep in TARGET_ENDPOINTS:
             rebuild_completion_entity_index_if_stale(db, ep)
@@ -373,6 +378,7 @@ async def lifespan(app: FastAPI):
     print_banner()
     yield
     await stop_archive_scheduler()
+    await stop_structure_resolution_scheduler()
     await stop_structure_index_scheduler()
     stop_search_query_log_worker()
     shutdown_async_file_logging()

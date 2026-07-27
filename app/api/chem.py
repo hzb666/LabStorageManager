@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from time import perf_counter
 from typing import Any
 
@@ -19,6 +20,7 @@ from app.models.compound_structure import (
     CompoundStructureSource,
     CompoundStructureStatus,
 )
+from app.models.structure_index import StructureResolutionJob, StructureResolutionJobState
 from app.services.api_utils import normalize_pagination
 from app.services.cas_utils import normalize_cas
 from app.services.structure_cache_repo import get_structure_cache
@@ -43,6 +45,12 @@ from app.services.structure_inventory_summary import (
     get_visible_inventory_cas_numbers,
 )
 from app.services.structure_search_cache import clear_structure_search_cache, put_structure_search_results
+from app.services.structure_resolution_jobs import (
+    StructureResolutionJobCounts,
+    count_structure_resolution_jobs,
+    enqueue_structure_resolution_job,
+)
+from app.services.structure_resolution_scheduler import structure_resolution_scheduler
 
 router = APIRouter(prefix="/chem", tags=["Chem"])
 logger = logging.getLogger(__name__)
@@ -144,6 +152,29 @@ class StructureCacheListResponse(BaseModel):
     limit: int
 
 
+class StructureResolutionJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    cas_number: str
+    state: StructureResolutionJobState
+    attempt_count: int
+    retry_count: int
+    next_attempt_at: datetime | None
+    lease_until: datetime | None
+    trigger_reason: str
+    last_error_code: str | None
+    last_error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class StructureResolutionJobListResponse(BaseModel):
+    data: list[StructureResolutionJobResponse]
+    total: int
+    skip: int
+    limit: int
+
+
 ACTION_REQUIRED_STATUSES = (
     CompoundStructureStatus.PENDING,
     CompoundStructureStatus.AMBIGUOUS,
@@ -161,7 +192,10 @@ def ensure_structure_feature_enabled() -> None:
         )
 
 
-def _serialize_index_status(snapshot: StructureIndexSnapshot) -> StructureIndexStatusResponse:
+def _serialize_index_status(
+    snapshot: StructureIndexSnapshot,
+    job_counts: StructureResolutionJobCounts | None = None,
+) -> StructureIndexStatusResponse:
     return StructureIndexStatusResponse(
         version=snapshot.version,
         dirty=snapshot.dirty,
@@ -174,6 +208,9 @@ def _serialize_index_status(snapshot: StructureIndexSnapshot) -> StructureIndexS
         tombstone_count=snapshot.tombstone_count,
         last_compaction_duration_ms=snapshot.last_compaction_duration_ms,
         snapshot_loaded=snapshot.snapshot_loaded,
+        resolution_jobs_queued=job_counts.queued if job_counts is not None else None,
+        resolution_jobs_running=job_counts.running if job_counts is not None else None,
+        resolution_jobs_exhausted=job_counts.exhausted if job_counts is not None else None,
     )
 
 
@@ -278,8 +315,73 @@ def _serialize_candidate_preview(result: Any) -> PubChemCandidatePreviewResponse
     response_model=StructureIndexStatusResponse,
     dependencies=[Depends(get_current_user), Depends(ensure_structure_feature_enabled)],
 )
-def get_structure_index_status() -> StructureIndexStatusResponse:
-    return _serialize_index_status(structure_index.status())
+def get_structure_index_status(db: DBSession) -> StructureIndexStatusResponse:
+    return _serialize_index_status(
+        structure_index.status(db),
+        count_structure_resolution_jobs(db),
+    )
+
+
+@router.get(
+    "/structures/resolution-jobs",
+    response_model=StructureResolutionJobListResponse,
+    dependencies=[Depends(require_admin), Depends(ensure_structure_feature_enabled)],
+)
+def list_structure_resolution_jobs(
+    db: DBSession,
+    job_state: StructureResolutionJobState | None = Query(default=None, alias="state"),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1),
+) -> StructureResolutionJobListResponse:
+    skip, limit = normalize_pagination(skip, limit)
+    statement = select(StructureResolutionJob)
+    if job_state is not None:
+        statement = statement.where(StructureResolutionJob.state == job_state)
+    total = db.exec(select(func.count()).select_from(statement.subquery())).one()
+    rows = db.exec(
+        statement.order_by(
+            StructureResolutionJob.updated_at.desc(),
+            StructureResolutionJob.cas_number,
+        )
+        .offset(skip)
+        .limit(limit)
+    ).all()
+    return StructureResolutionJobListResponse(
+        data=[StructureResolutionJobResponse.model_validate(row) for row in rows],
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/structures/resolution-jobs/{cas_number}/requeue",
+    response_model=StructureResolutionJobResponse,
+    dependencies=[Depends(require_admin), Depends(ensure_structure_feature_enabled)],
+)
+def requeue_structure_resolution_job(
+    cas_number: str,
+    db: DBSession,
+) -> StructureResolutionJobResponse:
+    if not enqueue_structure_resolution_job(
+        db,
+        cas_number,
+        trigger_reason="admin_requeue",
+        force=True,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Structure resolution job is not exhausted or CAS is invalid",
+        )
+    db.commit()
+    job = db.get(StructureResolutionJob, normalize_cas(cas_number))
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Structure resolution job was not persisted",
+        )
+    structure_resolution_scheduler.notify()
+    return StructureResolutionJobResponse.model_validate(job)
 
 
 @router.post(

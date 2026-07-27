@@ -6,6 +6,9 @@ import logging
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from enum import Enum
 from typing import Any
 from urllib.parse import quote
 
@@ -24,6 +27,17 @@ PUBCHEM_PROPERTIES = (
     "InChIKey,MolecularFormula,MolecularWeight,IUPACName"
 )
 CANDIDATE_DETAIL_LIMIT = 20
+
+
+class ResolutionOutcomeKind(str, Enum):
+    """Stable resolver result classification used by the durable scheduler."""
+
+    RESOLVED = "resolved"
+    TERMINAL_AMBIGUOUS = "terminal_ambiguous"
+    TERMINAL_NOT_FOUND = "terminal_not_found"
+    TERMINAL_INVALID = "terminal_invalid"
+    TERMINAL_UNSUPPORTED = "terminal_unsupported"
+    RETRYABLE_ERROR = "retryable_error"
 
 
 @dataclass(frozen=True)
@@ -49,6 +63,52 @@ class ResolvedStructure:
         return StructureCacheWrite(**asdict(self))
 
 
+@dataclass(frozen=True)
+class ResolutionOutcome:
+    """Typed single-attempt result without string-based retry decisions."""
+
+    kind: ResolutionOutcomeKind
+    result: ResolvedStructure
+    error_code: str | None = None
+    error_message: str | None = None
+    retry_after_seconds: int | None = None
+
+    @property
+    def retryable(self) -> bool:
+        return self.kind == ResolutionOutcomeKind.RETRYABLE_ERROR
+
+
+class PubChemRetryableError(RuntimeError):
+    """Retryable PubChem HTTP response with optional Retry-After metadata."""
+
+    def __init__(self, status_code: int, retry_after_seconds: int | None) -> None:
+        super().__init__(f"PubChem returned retryable HTTP status {status_code}")
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
+
+
+class StructureNormalizationRetryableError(RuntimeError):
+    """Unexpected structure-normalization failure suitable for a later retry."""
+
+
+class PubChemRequestRateLimiter:
+    """Short-lived async request gate reusable across resolver/client batches."""
+
+    def __init__(self, *, min_interval_seconds: float) -> None:
+        self.min_interval_seconds = min_interval_seconds
+        self._last_request_ts = 0.0
+        self._lock = asyncio.Lock()
+
+    async def wait(self) -> None:
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            wait_seconds = self.min_interval_seconds - (now - self._last_request_ts)
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+            self._last_request_ts = loop.time()
+
+
 class PubChemResolver:
     def __init__(
         self,
@@ -56,29 +116,44 @@ class PubChemResolver:
         *,
         min_interval_seconds: float,
         max_retries: int,
+        rate_limiter: PubChemRequestRateLimiter | None = None,
     ) -> None:
         self.client = client
         self.min_interval_seconds = min_interval_seconds
         self.max_retries = max_retries
-        self._last_request_ts = 0.0
-        self._rate_lock = asyncio.Lock()
+        self._rate_limiter = rate_limiter or PubChemRequestRateLimiter(
+            min_interval_seconds=min_interval_seconds
+        )
 
     async def resolve_cas(self, cas_number: str) -> ResolvedStructure:
+        """Resolve using the configured transport retry count."""
+        return (await self.resolve_cas_outcome(cas_number)).result
+
+    async def resolve_cas_outcome(self, cas_number: str) -> ResolutionOutcome:
+        """Resolve and classify one full attempt for the durable scheduler."""
         cas = normalize_cas(cas_number)
         if not is_valid_cas(cas):
-            return ResolvedStructure(
+            return classify_resolution_result(ResolvedStructure(
                 cas_number=cas or cas_number,
                 status=CompoundStructureStatus.INVALID_CAS,
                 error_message="Invalid CAS checksum or format",
-            )
+            ))
         try:
-            return await self._resolve_valid_cas(cas)
+            return classify_resolution_result(await self._resolve_valid_cas(cas))
         except Exception as exc:  # noqa: BLE001
             logger.warning("PubChem CAS resolve failed for %s: %s", cas, exc)
-            return ResolvedStructure(
+            result = ResolvedStructure(
                 cas_number=cas,
                 status=CompoundStructureStatus.ERROR,
                 error_message=_format_error(exc),
+            )
+            error_code, retry_after_seconds = _classify_retryable_exception(exc)
+            return ResolutionOutcome(
+                kind=ResolutionOutcomeKind.RETRYABLE_ERROR,
+                result=result,
+                error_code=error_code,
+                error_message=result.error_message,
+                retry_after_seconds=retry_after_seconds,
             )
 
     async def resolve_pubchem_cid(self, cas_number: str, cid: int) -> ResolvedStructure:
@@ -161,13 +236,7 @@ class PubChemResolver:
         return await self._resolve_single_cid(cas, exact_cids[0], candidates)
 
     async def _rate_limit(self) -> None:
-        async with self._rate_lock:
-            loop = asyncio.get_running_loop()
-            now = loop.time()
-            wait_seconds = self.min_interval_seconds - (now - self._last_request_ts)
-            if wait_seconds > 0:
-                await asyncio.sleep(wait_seconds)
-            self._last_request_ts = loop.time()
+        await self._rate_limiter.wait()
 
     async def _get(self, path: str) -> httpx.Response:
         retry_delay = 0.5
@@ -178,7 +247,10 @@ class PubChemResolver:
                 if response.status_code not in PUBCHEM_RETRY_STATUSES:
                     return response
                 if attempt >= self.max_retries:
-                    return response
+                    raise PubChemRetryableError(
+                        response.status_code,
+                        _parse_retry_after_seconds(response.headers.get("Retry-After")),
+                    )
             except (httpx.TimeoutException, httpx.TransportError):
                 if attempt >= self.max_retries:
                     raise
@@ -253,12 +325,17 @@ class PubChemResolver:
     ) -> ResolvedStructure:
         row = await self._load_property_row(cid)
         candidates = _merge_candidate_details(candidates, [_candidate_property_details(cid, row)])
-        normalized = normalize_structure_from_pubchem(
-            canonical_smiles=_read_canonical_smiles(row),
-            isomeric_smiles=_read_isomeric_smiles(row),
-            inchikey=_optional_text(row, "InChIKey"),
-            sdf=await self._get_text(f"/compound/cid/{cid}/SDF?record_type=2d"),
-        )
+        try:
+            normalized = normalize_structure_from_pubchem(
+                canonical_smiles=_read_canonical_smiles(row),
+                isomeric_smiles=_read_isomeric_smiles(row),
+                inchikey=_optional_text(row, "InChIKey"),
+                sdf=await self._get_text(f"/compound/cid/{cid}/SDF?record_type=2d"),
+            )
+        except Exception as exc:
+            raise StructureNormalizationRetryableError(
+                "PubChem structure normalization failed"
+            ) from exc
         if normalized.status != CompoundStructureStatus.RESOLVED:
             return ResolvedStructure(
                 cas_number=cas,
@@ -395,6 +472,53 @@ def _read_isomeric_smiles(row: Mapping[str, Any]) -> str | None:
 
 def _format_error(exc: Exception) -> str:
     return f"{exc.__class__.__name__}: {message}" if (message := str(exc).strip()) else exc.__class__.__name__
+
+
+def classify_resolution_result(result: ResolvedStructure) -> ResolutionOutcome:
+    """Map cache statuses to the stable scheduler disposition enum."""
+    kind_by_status = {
+        CompoundStructureStatus.RESOLVED: ResolutionOutcomeKind.RESOLVED,
+        CompoundStructureStatus.AMBIGUOUS: ResolutionOutcomeKind.TERMINAL_AMBIGUOUS,
+        CompoundStructureStatus.NOT_FOUND: ResolutionOutcomeKind.TERMINAL_NOT_FOUND,
+        CompoundStructureStatus.INVALID_CAS: ResolutionOutcomeKind.TERMINAL_INVALID,
+        CompoundStructureStatus.UNSUPPORTED: ResolutionOutcomeKind.TERMINAL_UNSUPPORTED,
+        CompoundStructureStatus.ERROR: ResolutionOutcomeKind.RETRYABLE_ERROR,
+    }
+    kind = kind_by_status.get(result.status, ResolutionOutcomeKind.RETRYABLE_ERROR)
+    return ResolutionOutcome(
+        kind=kind,
+        result=result,
+        error_code="resolver_error" if kind == ResolutionOutcomeKind.RETRYABLE_ERROR else None,
+        error_message=result.error_message,
+    )
+
+
+def _classify_retryable_exception(exc: Exception) -> tuple[str, int | None]:
+    if isinstance(exc, PubChemRetryableError):
+        return f"http_{exc.status_code}", exc.retry_after_seconds
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout", None
+    if isinstance(exc, httpx.TransportError):
+        return "transport_error", None
+    if isinstance(exc, StructureNormalizationRetryableError):
+        return "structure_normalization_error", None
+    return "unexpected_error", None
+
+
+def _parse_retry_after_seconds(value: str | None) -> int | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if text.isdigit():
+        return int(text)
+    try:
+        retry_at = parsedate_to_datetime(text)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    seconds = int((retry_at - datetime.now(timezone.utc)).total_seconds())
+    return max(0, seconds)
 
 
 def _ambiguous_result(

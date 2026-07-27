@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, List, Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 from app.core.constants import RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
 
@@ -179,6 +179,26 @@ class Settings(BaseSettings):
     chem_pubchem_user_agent: str = Field(
         default="LabStorageManager/0.7.1",
         description="User-Agent sent to PubChem PUG-REST",
+    )
+    chem_resolution_scheduler_enabled: bool = Field(
+        default=True,
+        description="Enable durable automatic PubChem resolution jobs",
+    )
+    chem_resolution_retry_delays_seconds: Annotated[tuple[int, ...], NoDecode] = (
+        60,
+        300,
+        1800,
+    )
+    chem_resolution_retry_after_min_seconds: int = Field(default=1, ge=0, le=3600)
+    chem_resolution_retry_after_max_seconds: int = Field(default=3600, ge=1, le=86_400)
+    chem_resolution_retry_jitter_seconds: int = Field(default=5, ge=0, le=300)
+    chem_resolution_job_concurrency: int = Field(default=2, ge=1, le=8)
+    chem_resolution_job_lease_seconds: int = Field(default=120, ge=10, le=3600)
+    chem_resolution_job_attempt_timeout_seconds: float = Field(
+        default=1800,
+        gt=0,
+        le=7200,
+        description="Hard timeout for one complete durable structure-resolution attempt",
     )
     chem_structure_search_max_results: int = Field(
         default=100,
@@ -403,6 +423,39 @@ class Settings(BaseSettings):
             return tuple(item.strip() for item in parsed if item.strip())
 
         return tuple(item.strip() for item in stripped.split(",") if item.strip())
+
+    @field_validator("chem_resolution_retry_delays_seconds", mode="before")
+    @classmethod
+    def parse_chem_resolution_retry_delays(cls, value: Any) -> tuple[int, ...] | Any:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("CHEM_RESOLUTION_RETRY_DELAYS_SECONDS must not be empty")
+        raw_values = json.loads(stripped) if stripped.startswith("[") else stripped.split(",")
+        if not isinstance(raw_values, list | tuple):
+            raise ValueError("CHEM_RESOLUTION_RETRY_DELAYS_SECONDS must be a list")
+        delays = tuple(int(item) for item in raw_values)
+        if len(delays) != 3 or any(delay <= 0 for delay in delays):
+            raise ValueError("CHEM_RESOLUTION_RETRY_DELAYS_SECONDS must contain 3 positive values")
+        return delays
+
+    @model_validator(mode="after")
+    def validate_chem_resolution_retry_settings(self) -> "Settings":
+        delays = self.chem_resolution_retry_delays_seconds
+        if len(delays) != 3 or any(delay <= 0 for delay in delays):
+            raise ValueError(
+                "CHEM_RESOLUTION_RETRY_DELAYS_SECONDS must contain 3 positive values"
+            )
+        if (
+            self.chem_resolution_retry_after_min_seconds
+            > self.chem_resolution_retry_after_max_seconds
+        ):
+            raise ValueError(
+                "CHEM_RESOLUTION_RETRY_AFTER_MIN_SECONDS must not exceed "
+                "CHEM_RESOLUTION_RETRY_AFTER_MAX_SECONDS"
+            )
+        return self
 
     def get_private_key(self) -> str:
         """Load or generate RSA private key"""
