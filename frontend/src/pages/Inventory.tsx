@@ -379,10 +379,6 @@ function createInventoryFormFields(params: {
     brandOptions,
     requireStorageLocation: dialogState === 'add' && requireManualStorageLocation,
   })
-  if (dialogState !== 'add') {
-    return fields
-  }
-
   return enhanceCasLookupField(fields, {
     prefixButton: {
       onClick: handleCasLookup,
@@ -742,18 +738,30 @@ function getApiErrorStatus(error: unknown): number | undefined {
 
 function StructureDialogFallback({
   contentClassName,
+  loadingLabel,
   open,
+  title,
   onOpenChange,
 }: Readonly<{
   contentClassName?: string
+  loadingLabel?: string
   open: boolean
+  title?: string
   onOpenChange: (open: boolean) => void
 }>) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={contentClassName ?? "flex h-48 max-w-md items-center justify-center"}>
-        <DialogTitle className="sr-only">结构搜索加载中</DialogTitle>
-        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      <DialogContent
+        aria-describedby={undefined}
+        className={contentClassName ?? "flex h-48 max-w-md items-center justify-center"}
+      >
+        <DialogTitle className={title ? 'absolute left-6 top-6 mb-0 text-xl' : 'sr-only'}>
+          {title ?? '结构搜索加载中'}
+        </DialogTitle>
+        <div className="flex items-center gap-3 text-muted-foreground" role="status">
+          <Loader2 className="size-8 animate-spin" aria-hidden="true" />
+          {loadingLabel ? <span>{loadingLabel}</span> : null}
+        </div>
       </DialogContent>
     </Dialog>
   )
@@ -915,8 +923,10 @@ function StructureCacheManagerEntry({
         <React.Suspense
           fallback={(
             <StructureDialogFallback
-              contentClassName="flex min-h-[32rem] !w-[98vw] !max-w-[96rem] items-center justify-center p-4 md:p-6"
+              contentClassName="flex h-[min(52rem,90vh)] !w-[98vw] !max-w-[96rem] items-center justify-center overflow-hidden p-4 md:p-6"
+              loadingLabel="正在加载结构缓存..."
               open={open}
+              title="结构缓存管理"
               onOpenChange={setOpen}
             />
           )}
@@ -1053,7 +1063,12 @@ function InventoryStructureSearchDialog({
     <React.Suspense
       fallback={(
         <StructureDialogFallback
+          contentClassName="flex h-[82vh] max-h-[820px] w-[94vw] max-w-[1180px] items-center justify-center overflow-hidden p-3 md:w-[88vw] md:p-4"
+          loadingLabel="正在加载结构编辑器..."
           open={structureEditor.structureDialogOpen}
+          title={structureEditor.manualEditTarget
+            ? `手工确认结构：${structureEditor.manualEditTarget.casNumber}`
+            : '结构检索'}
           onOpenChange={structureEditor.handleStructureDialogOpenChange}
         />
       )}
@@ -1142,6 +1157,11 @@ function useInventoryChemistryResources(structureDialogOpen: boolean) {
   useIdlePreload(
     loadStructureSearchDialog,
     structureToolsEnabled,
+    STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS,
+  )
+  useIdlePreload(
+    loadStructureCacheManagerDialog,
+    structureSearchEnabled,
     STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS,
   )
 

@@ -410,7 +410,7 @@ export function StructureSearchDialog({
 
   return (
     <Dialog open={open} keepMounted={keepMounted} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[82vh] max-h-[820px] w-[94vw] max-w-[1180px] flex-col overflow-hidden p-3 md:w-[88vw] md:p-4">
+      <DialogContent aria-describedby={undefined} className="flex h-[82vh] max-h-[820px] w-[94vw] max-w-[1180px] flex-col overflow-hidden p-3 md:w-[88vw] md:p-4">
         <DialogHeader className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <DialogTitle className="mb-0 px-3 py-1.5">
             {isManualMode ? `手工确认结构：${manualEditTarget?.casNumber}` : '结构检索'}

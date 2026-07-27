@@ -21,6 +21,7 @@ import {
 import { Input } from '@/components/ui/Input'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
+import { Pagination, PaginationInfo } from '@/components/ui/Pagination'
 import {
   Select,
   SelectContent,
@@ -38,7 +39,7 @@ import { getStructureResolveToastMessage } from './structureCacheMessages'
 import { StructureCandidateList } from './StructureCandidateList'
 import { parseStructureCandidates } from './structureCandidateUtils'
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 20
 const ADMIN_DEFAULT_STATUS_FILTER = 'needs_action'
 const VIEWER_DEFAULT_STATUS_FILTER = 'resolved'
 const TRANSLATED_NAME_SUFFIX = '（译）'
@@ -412,50 +413,65 @@ function CacheTableCard({
   canManage,
   loading,
   page,
+  pageSize,
   response,
   search,
   statusFilter,
   onPageChange,
+  onPageSizeChange,
 }: Readonly<{
   activeAction: string | null
   actions: CacheActionHandlers
   canManage: boolean
   loading: boolean
   page: number
+  pageSize: number
   response: StructureCacheListResponse | null
   search: string
   statusFilter: string
   onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
 }>) {
   const rows = response?.data ?? []
   const total = response?.total ?? 0
+  const initialLoading = loading && response === null
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="pb-4">
+    <Card className="min-h-0 flex-1 overflow-hidden pb-0" aria-busy={loading}>
+      <CardHeader className="shrink-0 pb-4">
         <CardTitle className="flex items-center gap-2 text-lg card-title-placeholder">
           <Search className="w-5 h-5" />
           缓存列表
           <span className="text-muted-foreground font-normal">(&thinsp;{total}&thinsp;)</span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="p-0">
-        <div className="px-6 rounded-md overflow-auto">
-          <table className="w-full min-w-[1240px]" style={{ tableLayout: 'fixed' }}>
-            <CacheTableColumns canManage={canManage} />
-            <CacheTableHeader canManage={canManage} />
-            <CacheTableBody
-              activeAction={activeAction}
-              actions={actions}
-              canManage={canManage}
-              loading={loading}
-              rows={rows}
-              search={search}
-              statusFilter={statusFilter}
-            />
-          </table>
-        </div>
+      <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+        {initialLoading ? (
+          <TableLoadingState className="mx-6 min-h-0 flex-1" label="正在加载结构缓存" />
+        ) : (
+          <div className="h-full overflow-auto rounded-md px-6">
+            <table className="w-full min-w-[1240px]" style={{ tableLayout: 'fixed' }}>
+              <CacheTableColumns canManage={canManage} />
+              <CacheTableHeader canManage={canManage} />
+              <CacheTableBody
+                activeAction={activeAction}
+                actions={actions}
+                canManage={canManage}
+                rows={rows}
+                search={search}
+                statusFilter={statusFilter}
+              />
+            </table>
+          </div>
+        )}
       </CardContent>
-      <ManagerFooter page={page} response={response} onPageChange={onPageChange} />
+      <ManagerFooter
+        initialLoading={initialLoading}
+        page={page}
+        pageSize={pageSize}
+        response={response}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
     </Card>
   )
 }
@@ -512,7 +528,6 @@ function CacheTableBody({
   activeAction,
   actions,
   canManage,
-  loading,
   rows,
   search,
   statusFilter,
@@ -520,21 +535,10 @@ function CacheTableBody({
   activeAction: string | null
   actions: CacheActionHandlers
   canManage: boolean
-  loading: boolean
   rows: CompoundStructureCache[]
   search: string
   statusFilter: string
 }>) {
-  if (loading && rows.length === 0) {
-    return (
-      <tbody>
-        <CacheTablePlaceholderRow canManage={canManage}>
-          <TableLoadingState className="min-h-[16rem]" />
-        </CacheTablePlaceholderRow>
-      </tbody>
-    )
-  }
-
   if (rows.length === 0) {
     return (
       <tbody>
@@ -567,38 +571,37 @@ function CacheTableBody({
 }
 
 function ManagerFooter({
+  initialLoading,
   page,
+  pageSize,
   response,
   onPageChange,
+  onPageSizeChange,
 }: Readonly<{
+  initialLoading: boolean
   page: number
+  pageSize: number
   response: StructureCacheListResponse | null
   onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
 }>) {
   const total = response?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   return (
-    <div className="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <span className="text-sm text-muted-foreground">共 {total} 条，第 {page} / {totalPages} 页</span>
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant="modern"
-          size="sm"
-          disabled={page <= 1}
-          onClick={() => onPageChange(page - 1)}
-        >
-          上一页
-        </Button>
-        <Button
-          type="button"
-          variant="modern"
-          size="sm"
-          disabled={page >= totalPages}
-          onClick={() => onPageChange(page + 1)}
-        >
-          下一页
-        </Button>
+    <div className="shrink-0 border-t border-border px-4 py-3 sm:px-6">
+      <div
+        className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between ${
+          initialLoading ? 'invisible pointer-events-none' : ''
+        }`}
+      >
+        <PaginationInfo currentPage={page} pageSize={pageSize} total={total} />
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
+        />
       </div>
     </div>
   )
@@ -728,9 +731,10 @@ function useStructureCacheListState(open: boolean, canManage: boolean) {
   const [searchDraft, setSearchDraft] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [response, setResponse] = useState<StructureCacheListResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const skip = useMemo(() => (page - 1) * PAGE_SIZE, [page])
+  const [loading, setLoading] = useState(open)
+  const skip = useMemo(() => (page - 1) * pageSize, [page, pageSize])
 
   const loadCaches = useCallback(async () => {
     if (!open) return
@@ -740,14 +744,14 @@ function useStructureCacheListState(open: boolean, canManage: boolean) {
         status_filter: statusFilter,
         search: search || undefined,
         skip,
-        limit: PAGE_SIZE,
+        limit: pageSize,
       }))
     } catch (error) {
       toast.error(getApiErrorMessage(error, '结构缓存读取失败'))
     } finally {
       setLoading(false)
     }
-  }, [open, search, skip, statusFilter])
+  }, [open, pageSize, search, skip, statusFilter])
 
   useEffect(() => {
     void loadCaches()
@@ -769,6 +773,11 @@ function useStructureCacheListState(open: boolean, canManage: boolean) {
     setPage(1)
   }, [])
 
+  const handlePageSizeChange = useCallback((nextPageSize: number) => {
+    setPageSize(nextPageSize)
+    setPage(1)
+  }, [])
+
   const replaceCache = useCallback((cache: CompoundStructureCache) => {
     setResponse((current) => replaceCacheRow(current, cache))
   }, [])
@@ -784,10 +793,12 @@ function useStructureCacheListState(open: boolean, canManage: boolean) {
     },
     loading,
     page,
+    pageSize,
     replaceCache,
     response,
     search,
     setPage,
+    setPageSize: handlePageSizeChange,
     statusFilter,
   }
 }
@@ -921,10 +932,12 @@ function useStructureCacheManagerController({
       },
       loading: cacheList.loading,
       page: cacheList.page,
+      pageSize: cacheList.pageSize,
       response: cacheList.response,
       search: cacheList.search,
       statusFilter: cacheList.statusFilter,
       onPageChange: cacheList.setPage,
+      onPageSizeChange: cacheList.setPageSize,
     },
   }
 }
@@ -936,8 +949,11 @@ export function StructureCacheManagerDialog(props: Readonly<StructureCacheManage
   return (
     <>
       <Dialog open={open} onOpenChange={manager.onDialogOpenChange}>
-        <DialogContent className="min-h-[32rem] !w-[98vw] !max-w-[96rem] p-4 md:p-6">
-          <div className="flex flex-col gap-4">
+        <DialogContent
+          aria-describedby={undefined}
+          className="h-[min(52rem,90vh)] !w-[98vw] !max-w-[96rem] overflow-hidden p-4 md:p-6"
+        >
+          <div className="flex h-full min-h-0 flex-col gap-4">
             <DialogHeader className="shrink-0">
               <DialogTitle className="mb-0 pr-10">结构缓存管理</DialogTitle>
               <DialogCloseButton
@@ -945,7 +961,9 @@ export function StructureCacheManagerDialog(props: Readonly<StructureCacheManage
                 onClick={() => manager.onDialogOpenChange(false)}
               />
             </DialogHeader>
-            <ManagerToolbar {...manager.filters} />
+            <div className="shrink-0">
+              <ManagerToolbar {...manager.filters} />
+            </div>
             <CacheTableCard canManage={manager.canManage} {...manager.table} />
           </div>
         </DialogContent>
