@@ -5,6 +5,7 @@ import json
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +23,8 @@ from app.services.structure_index import (
     _snapshot_checksum,
 )
 from app.services.structure_index_scheduler import StructureIndexScheduler
+
+_BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 class StructureIndexCompactionTest(unittest.TestCase):
@@ -313,7 +316,7 @@ class StructureIndexCompactionTest(unittest.TestCase):
         compact.assert_called_once()
         self.assertEqual(3, index.status().base_count)
 
-    def test_daily_maintenance_compacts_small_delta(self) -> None:
+    def test_incremental_changes_wait_for_scheduled_compaction(self) -> None:
         self._write("64-17-5", "CCO")
         index = SubstructureIndex(snapshot_path=self.snapshot_path)
         with Session(self.engine) as db:
@@ -324,12 +327,37 @@ class StructureIndexCompactionTest(unittest.TestCase):
         with (
             patch.object(structure_index_scheduler_module, "engine", self.engine),
             patch.object(structure_index_scheduler_module, "structure_index", index),
+            patch.object(
+                structure_index_scheduler_module.settings,
+                "chem_structure_index_compaction_min_delta",
+                2,
+            ),
+            patch.object(
+                structure_index_scheduler_module.settings,
+                "chem_structure_index_weekly_maintenance_weekday",
+                6,
+            ),
             patch.object(index, "compact", wraps=index.compact) as compact,
         ):
-            scheduler._sync_or_compact(daily_maintenance=True)
+            scheduler._sync_or_compact(
+                daily_maintenance=True,
+                now=datetime(2026, 7, 27, 3, tzinfo=_BEIJING_TZ),
+            )
+            compact.assert_not_called()
+            self.assertEqual(1, index.status().delta_count)
 
-        compact.assert_called_once()
-        self.assertEqual(2, index.status().base_count)
+            self._write("7732-18-5", "O")
+            scheduler._sync_or_compact()
+            compact.assert_not_called()
+            self.assertEqual(2, index.status().delta_count)
+
+            scheduler._sync_or_compact(
+                daily_maintenance=True,
+                now=datetime(2026, 7, 26, 3, tzinfo=_BEIJING_TZ),
+            )
+            compact.assert_called_once()
+
+        self.assertEqual(3, index.status().base_count)
         self.assertEqual(0, index.status().delta_count)
 
 

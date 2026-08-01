@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.time_utils import get_display_tzinfo
 from app.database import engine
 from app.services.structure_index import (
+    StructureIndexSnapshot,
     StructureIndexUnavailableError,
     structure_index,
 )
@@ -64,7 +65,12 @@ class StructureIndexScheduler:
             daily_maintenance=daily_maintenance,
         )
 
-    def _sync_or_compact(self, *, daily_maintenance: bool = False) -> None:
+    def _sync_or_compact(
+        self,
+        *,
+        daily_maintenance: bool = False,
+        now: datetime | None = None,
+    ) -> None:
         with Session(engine) as db:
             if not structure_index.is_initialized():
                 if not structure_index.load_snapshot(db):
@@ -82,19 +88,7 @@ class StructureIndexScheduler:
             except StructureIndexUnavailableError:
                 structure_index.compact(db)
                 return
-            delta_threshold = max(
-                settings.chem_structure_index_compaction_min_delta,
-                int(snapshot.base_count * settings.chem_structure_index_compaction_ratio),
-            )
-            if snapshot.delta_count >= delta_threshold or (
-                snapshot.tombstone_count
-                >= settings.chem_structure_index_compaction_tombstone_threshold
-            ):
-                structure_index.compact(db)
-                return
-            if daily_maintenance and (
-                snapshot.delta_count > 0 or snapshot.tombstone_count > 0
-            ):
+            if daily_maintenance and _scheduled_compaction_due(snapshot, now=now):
                 structure_index.compact(db)
 
     async def _run(self) -> None:
@@ -138,6 +132,31 @@ def _seconds_until_next_maintenance(
     if next_run <= current:
         next_run += timedelta(days=1)
     return (next_run - current).total_seconds()
+
+
+def _scheduled_compaction_due(
+    snapshot: StructureIndexSnapshot,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    has_changes = snapshot.delta_count > 0 or snapshot.tombstone_count > 0
+    if not has_changes:
+        return False
+    delta_threshold = max(
+        settings.chem_structure_index_compaction_min_delta,
+        int(snapshot.base_count * settings.chem_structure_index_compaction_ratio),
+    )
+    threshold_reached = (
+        snapshot.delta_count >= delta_threshold
+        or snapshot.tombstone_count
+        >= settings.chem_structure_index_compaction_tombstone_threshold
+    )
+    current = now or datetime.now(get_display_tzinfo())
+    weekly_maintenance_due = (
+        current.weekday()
+        == settings.chem_structure_index_weekly_maintenance_weekday
+    )
+    return threshold_reached or weekly_maintenance_due
 
 
 structure_index_scheduler = StructureIndexScheduler()

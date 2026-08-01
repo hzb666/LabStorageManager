@@ -16,37 +16,16 @@
 
 ## 目录
 
-- [项目简介](#项目简介)
 - [核心能力](#核心能力)
 - [技术栈](#技术栈)
 - [快速开始](#快速开始)
 - [环境变量](#环境变量)
 - [常用命令](#常用命令)
-- [CLI 支持](#cli-支持)
-- [系统架构](#系统架构)
-- [前端本地存储](#前端本地存储)
 - [关键业务规则](#关键业务规则)
 - [目录结构](#目录结构)
 - [部署说明](#部署说明)
 - [附属模块](#附属模块)
-- [故障排查](#故障排查)
-- [CLI 访问边界](#cli-访问边界)
 - [许可证](#许可证)
-
-## 项目简介
-
-LabStorageManager 解决的是实验室中最容易失控的几类问题：
-
-- 试剂和耗材分开管理，但又能共享统一的认证、审批和搜索体验。
-- CAS 号、防重复采购、拼音检索、模糊搜索、批量导入这些实验室高频需求由系统直接支持。
-- 订单到库存的流转保留审计链路，避免“入库后订单消失”带来的追溯困难。
-- 图片不入库，只落文件系统并在数据库中保存 URL，减轻数据库压力。
-
-适用场景：
-
-- 高校课题组或研究平台
-- 企业研发实验室
-- 需要部署在单机 / 轻量服务器上的库存系统
 
 ## 核心能力
 
@@ -64,7 +43,7 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
   个人模式展示订单、借用和待入库待办；成员看板展示公告、运行统计、个人待处理、订单概览、近期到货/入库和库存告警；管理员管理模式展示全局待办、风险提醒、库存告警和管理表格；公用账户展示公告和全局窗口统计；低库存按剩余比例低于 10% 判断。
 - 常用货架与常用试剂
   支持常用货架分组、CAS 主数据、位置统计、加瓶和扣减。
-- 用户、设备、会话治理
+- 用户、设备、会话
   支持 HttpOnly Cookie 登录、设备列表、批量注销、IP/设备数量限制。
 - 公告与图片上传
   公告支持图片，文件保存到 `static/` 运行目录，经 `/static/` 访问；数据库只保留 URL，并受尺寸、类型、上传频率控制。
@@ -74,8 +53,6 @@ LabStorageManager 解决的是实验室中最容易失控的几类问题：
   提供 `python -m lsm_cli` 命令行入口，供脚本、Agent skill 和无 UI 场景在受控命令面内操作。
 - MCP、智能机器人与浏览器插件
   MCP 通过 CLI 子进程工作；企业微信智能机器人、微信客服和浏览器插件都回到标准 API 与确认流程，识别到 CAS 时优先执行系统内精确查询。
-- 部署简单
-  内置 Docker Compose，可快速拉起 `frontend + backend + redis`。
 
 ## 技术栈
 
@@ -273,14 +250,8 @@ npm run dev
 | `CHEM_RESOLUTION_JOB_ATTEMPT_TIMEOUT_SECONDS` | `1800` | 单次自动解析硬超时；超时按可重试错误持久化 |
 | `CHEM_STRUCTURE_SEARCH_MAX_RESULTS` | `100` | 子结构检索默认结果上限 |
 | `CHEM_STRUCTURE_INDEX_SNAPSHOT_PATH` | `.cache/structure-index.snapshot.json` | 带数据库代际、revision、RDKit 版本和 checksum 的持久快照 |
-| `CHEM_STRUCTURE_INDEX_MAINTENANCE_HOUR` | `3` | 每天按 `DISPLAY_UTC_OFFSET` 执行低频增量整理的小时（0～23） |
-
-结构缓存写入由 SQLite trigger 在同一事务中记录连续 revision。搜索前会通过 revision
-barrier 重放小型增量层；普通搜索请求不会全量重建。新增、修改、终态转换和删除会屏蔽
-旧主快照内容，同进程写入通过事件立即同步；达到阈值或每天维护时间再由后台原子发布
-新快照。独立脚本写入由下一次搜索的 revision barrier 发现，无需固定轮询数据库。
-自动 PubChem 解析每次 lease 只执行一次完整解析尝试，等待时间写入数据库，不保留按
-任务休眠的协程或 HTTP 客户端。
+| `CHEM_STRUCTURE_INDEX_MAINTENANCE_HOUR` | `3` | 每天按 `DISPLAY_UTC_OFFSET` 判断是否整理的小时（0～23） |
+| `CHEM_STRUCTURE_INDEX_WEEKLY_MAINTENANCE_WEEKDAY` | `6` | 未达阈值时的每周整理日（0=周一，6=周日） |
 
 ### JWT 与密钥
 
@@ -337,68 +308,6 @@ docker compose logs -f redis
 
 Compose 默认把主库、搜索日志库、上传文件和密钥放在持久化 volume 中。备份 SQLite 主库前先做 checkpoint，并保证主库及其 WAL/SHM 伴随文件处于同一备份批次。
 
-## CLI 支持
-
-仓库提供本地命令行入口 [`lsm_cli/README.md`](lsm_cli/README.md)，适合脚本任务和不打开前端的开发者。CLI 只通过后端 API 工作，不直接访问数据库，也不导入服务层。
-
-### Agent 一句话安装
-
-将下面一句发送给 Claude Code 或 Codex：
-
-> 阅读 https://raw.githubusercontent.com/hzb666/LabStorageManager/main/skills/lab-storage-manager-cli/INSTALL.md，并按照提示完成安装。
-
-安装协议会从最新 GitHub Release 获取预编译 CLI，并从同一 Release 标签安装对应 Skill；不会使用源码构建 CLI。
-
-### 支持范围
-
-- `auth`
-  支持 `login`、`logout`、`whoami`
-- `inventory`
-  支持列表、详情、CAS 查询、借还、手工入库、更新等日常库存操作
-- `reagent-orders`
-  支持列表、创建、更新、到货确认、一键入库等试剂订单流程
-- `consumable-orders`
-  支持列表、创建、更新、完成等耗材订单流程
-- `common-shelf`
-  支持常用货架列表、CAS/别名查询、位置统计、加瓶和扣减
-- `chemical-name-map`
-  支持 CAS 主数据列表、关键词查询和 CAS 精确查询
-
-限制说明：
-
-- 不开放 `delete`
-- 不开放 `export`
-- 不开放文件上传
-- 不开放 CLI 未显式暴露的 API
-
-### 快速示例
-
-```bash
-# 查看顶层帮助
-python -m lsm_cli --help
-
-# 交互式登录
-python -m lsm_cli auth login --username alice
-
-# 查询库存
-python -m lsm_cli inventory list --page 1 --page-size 20 --param search=乙醇
-
-# 创建试剂订单
-python -m lsm_cli reagent-orders create --data-file payload.json
-
-# 查看当前登录用户
-python -m lsm_cli auth whoami
-```
-
-### 使用约定
-
-- 默认 API 地址为 `http://127.0.0.1:8000/api`
-- `auth login` 支持 `--base-url` 与 `--timeout`
-- 脚本登录推荐使用 `--password-stdin` 传递密码，避免明文出现在 shell history
-- 所有命令向 `stdout` 输出 JSON，并通过退出码区分错误类别
-- 受限 CLI 操作流程见 [CLI 访问边界](#cli-访问边界)
-- Agent 自动安装、GitHub Release 单文件安装、本地开发构建、配置文件位置和完整退出码契约见 [`lsm_cli/README.md`](lsm_cli/README.md)
-
 ## 系统架构
 
 ### 总体结构
@@ -444,18 +353,7 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
 
 - 使用 `BrowserRouter` 管理路由。
 - 登录态通过 HttpOnly Cookie 持有，Axios 统一开启 `withCredentials`。
-- 页面采用懒加载，主要模块包括：
-  - 仪表盘
-  - 试剂订单
-  - 耗材订单
-  - 库存
-  - 公共货架
-  - 导入页
-  - 结构检索
-  - 设备管理
-  - 用户管理
-  - 公告管理
-  - 操作日志
+- 页面或模块之间多采用懒加载策略。
 
 ### 认证与会话
 
@@ -464,7 +362,7 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
 - 会话可按设备名称、IP 等信息追踪。
 - 401 会统一触发前端登出与跳转。
 
-## 前端本地存储
+### 前端本地存储
 
 | Key | 用途 |
 | --- | --- |
@@ -482,41 +380,6 @@ lsm_mcp -> python -m lsm_cli -> FastAPI API
 - `inventory`、`reagent_order`、`consumable_order`、`users`、`chemical_name_map`、`log_timeline` 建有 SQLite FTS5 虚表。
 - 名称、拼音、拼音首字母等字段会被索引，便于中文检索。
 - 大量列表查询配套了状态、申请人、时间、公共货架等复合索引。
-
-## 关键业务规则
-
-这些规则直接影响系统正确性，开发和运维都应该了解。
-
-### 1. SQLite 必须启用 WAL
-
-这是并发读写的基础约束，项目在数据库连接层已强制设置。
-
-### 2. 订单到库存采用 Copy 语义
-
-试剂一键入库时会根据订单生成库存记录，但订单本身保留，用于审计和回溯。
-
-### 3. 所有格式化输入在后端标准化
-
-CAS 号等关键字段会在服务端清洗，避免由于大小写、空格、分隔符差异导致重复数据。
-
-### 4. 数据写接口必须带权限控制
-
-涉及写操作的接口需要校验当前用户身份，管理员能力与普通用户能力分离。
-
-### 5. 归还与库存删除分流
-
-普通删除不处理借用中库存。借用记录归还后剩余量为 0 时，可通过归还流程删除该库存并写入库存删除日志。
-
-### 6. 错误反馈分层
-
-- 输入校验错误应在表单字段旁展示
-- toast 主要用于非字段级错误
-
-### 7. 生产环境有额外约束
-
-- 生产环境必须使用 `RS256`
-- Cookie 场景下会启用更严格的 CSRF 与 HTTPS 策略
-- 未配置 HTTPS 时，不应把 `ENV` 直接切到 `production`
 
 ## 目录结构
 
@@ -551,25 +414,6 @@ app/
 └── services/             # 业务服务
 ```
 
-仪表盘聚合逻辑位于 `app/services/dashboard/`，覆盖汇总分发、item 构造、指标统计和通用 builder。
-
-主要接口模块：
-
-- `users.py`
-- `user_sessions.py`
-- `user_logs.py`
-- `dashboard.py`
-- `inventory.py`
-- `reagent_orders.py`
-- `consumable_orders.py`
-- `reagent_brands.py`
-- `announcements.py`
-- `cart_sync.py`
-- `events.py`
-- `error_logs.py`
-- `common_shelf.py`
-- `chemical_name_map.py`
-
 ### 前端
 
 ```text
@@ -581,8 +425,6 @@ frontend/src/
 ├── pages/                # 页面级组件
 └── store/                # Zustand 状态管理
 ```
-
-仪表盘入口为 `frontend/src/pages/Dashboard.tsx`，辅助文件集中在 `frontend/src/pages/dashboard/`。
 
 ## 部署说明
 
@@ -683,7 +525,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ### 浏览器插件
 
-仓库包含 `browser-extension/`，用于浏览器侧导入或购物车同步相关场景。后端提供了 `/cart-import` 路由，会将入口跳转到前端页面。
+仓库包含 `browser-extension/`，用于浏览器侧导入或购物车同步相关场景。后端提供了 `/cart-import` 路由，会将入口跳转到前端页面。可在chrome商店自行下载插件。
 
 `browser-extension/manifest.json` 和 `browser-extension/shared/generated-config.js` 是构建期文件，不提交到 Git。生产部署浏览器插件前，先准备插件构建配置，再运行：
 
@@ -695,107 +537,15 @@ npm run build:extension
 
 Agent skill、`lsm_mcp/` 和 `robot/` 都应通过 `python -m lsm_cli` 或安装后的 `lsm` 命令进入系统，不直接访问数据库。企业微信智能机器人和微信客服入口位于 `robot/`，查询和借还流程都通过 MCP、CLI 与后端 API 完成。
 
-### 公告图片与 `/static/`
+### CLI 支持
 
-- 上传目录是仓库运行时 `static/`，Compose 中对应 `/data/static`
-- 公开访问路径默认挂载在 `/static/`
-- 响应头附带缓存控制
-- 图片安全头由后端统一补齐
+CLI 通过后端 API 工作，不直接访问数据库，详见 [`lsm_cli/README.md`](lsm_cli/README.md)
 
-## 故障排查
+将下面一句发送给 Claude Code 或 Codex，可以直接安装cli：
 
-### 启动时报 `DEFAULT_ADMIN_PASSWORD must be set`
+> 阅读 https://raw.githubusercontent.com/hzb666/LabStorageManager/main/skills/lab-storage-manager-cli/INSTALL.md，并按照提示完成安装。
 
-判断：
-未设置默认管理员密码。
-
-处理：
-在本地运行配置中补充 `DEFAULT_ADMIN_PASSWORD` 后重启后端。
-
-### 生产环境访问 `/docs` 为 404
-
-判断：
-生产模式默认关闭 API 文档。
-
-处理：
-确认 `ENV=development` 时再访问 `/docs`。
-
-### 登录后立刻掉线或 Cookie 不生效
-
-判断：
-
-- `CORS_ORIGINS` 未正确配置
-- 浏览器与后端地址不匹配
-- 在无 HTTPS 的环境使用了 `production`
-- 外层 HTTPS 代理部署时未启用 `TRUST_PROXY_HEADERS`
-
-处理：
-
-- 开发时设为 `ENV=development`
-- 检查前端域名是否在 `CORS_ORIGINS` 中
-- 生产 Compose 部署保持 `TRUST_PROXY_HEADERS=true`
-- 确认浏览器实际请求携带 Cookie
-
-### Redis 连不上
-
-影响：
-会话或限流相关能力可能异常，核心库存数据仍在 SQLite。
-
-处理：
-
-- 确认 `REDIS_HOST`、`REDIS_PORT`；Redis 对外监听时再确认 `REDIS_PASSWORD`
-- 检查容器或本地 Redis 是否已启动
-
-### 图片上传失败
-
-检查以下几项：
-
-- 文件类型是否在 `ALLOWED_IMAGE_TYPES`
-- 请求体是否超过 `MAX_UPLOAD_REQUEST_SIZE_MB`
-- 单图是否超过限制，或 `static/`、`/data/static` 目录无写权限
-
-### 搜索结果异常或性能下降
-
-检查以下几项：
-
-- 数据库初始化是否完整执行
-- FTS 虚表和触发器是否存在
-- 是否误删了 SQLite 索引或数据库文件
-
-## CLI 访问边界
-
-CLI 面向脚本化操作提供稳定命令面。脚本化操作应通过 `python -m lsm_cli` 或安装后的 `lsm` 命令与系统交互，并遵守当前 CLI 已暴露的能力范围。
-
-### 适用场景
-
-- 需要通过 CLI 登录、查询库存、查看借用状态
-- 需要通过 CLI 创建或更新试剂订单、确认到货、一键入库
-- 需要通过 CLI 创建、更新或完成耗材订单
-- 需要通过 CLI 查询常用货架或 CAS 主数据
-- 需要让 Agent skill、MCP 或智能机器人复用稳定命令面
-- 需要避免 raw HTTP、数据库直连、直接导入后端模块
-
-### 硬限制
-
-- 只允许调用 `python -m lsm_cli` 及其已暴露子命令
-- 禁止使用 `curl`、`Invoke-RestMethod`、`requests`、`httpx`、数据库直连或伪造本地 token
-- 写操作前必须先通过 CLI 查询拿到准确 ID；禁止猜测 ID
-- 目标不唯一、字段含义不清或单位/数量有歧义时，必须先确认，不能“先试一下”
-- 登录只允许普通用户账号；推荐 `--password-stdin`
-- 不支持 `delete`、`export`、文件上传、用户管理、会话管理、密码修改、头像修改
-
-### 推荐执行流程
-
-1. 用 `python -m lsm_cli --help` 确认目标能力是否存在。
-2. 需要认证时，用 `auth login` 登录，再用 `auth whoami` 校验身份。
-3. 对写操作先用 `list`、`get`、`cas`、`code`、`my-*` 等读命令定位准确 ID。
-4. 再执行真正的写操作，并再次核对目标 ID、动作和输入值。
-5. 如果命令失败，优先按退出码处理；不要切换到 HTTP 或数据库旁路。
-
-### 参考入口
-
-- CLI 说明：[`lsm_cli/README.md`](lsm_cli/README.md)
-- 后端 CLI 访问控制：[`app/main.py`](app/main.py)
+安装协议会从最新 GitHub Release 获取预编译 CLI。
 
 ## 许可证
 

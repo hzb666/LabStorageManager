@@ -233,6 +233,12 @@ class Settings(BaseSettings):
         description="Persistent RDKit structure index snapshot path",
     )
     chem_structure_index_maintenance_hour: int = Field(default=3, ge=0, le=23)
+    chem_structure_index_weekly_maintenance_weekday: int = Field(
+        default=6,
+        ge=0,
+        le=6,
+        description="Weekday for subthreshold structure index compaction, 0=Monday and 6=Sunday",
+    )
     chem_structure_index_compaction_min_delta: int = Field(default=256, ge=1)
     chem_structure_index_compaction_ratio: float = Field(default=0.05, gt=0, le=1)
     chem_structure_index_compaction_tombstone_threshold: int = Field(default=128, ge=1)

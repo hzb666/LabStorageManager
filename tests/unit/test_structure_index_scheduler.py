@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
+from app.services.structure_index import StructureIndexSnapshot
 from app.services.structure_index_scheduler import (
     StructureIndexScheduler,
+    _scheduled_compaction_due,
     _seconds_until_next_maintenance,
 )
+
+_BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 class StructureIndexSchedulerTest(unittest.IsolatedAsyncioTestCase):
@@ -57,6 +61,49 @@ class StructureIndexSchedulerTest(unittest.IsolatedAsyncioTestCase):
                 now=datetime(2026, 7, 27, 3, 0, tzinfo=timezone.utc),
             ),
         )
+
+    def test_scheduled_compaction_policy_covers_weekly_and_threshold_cases(self) -> None:
+        monday = datetime(2026, 7, 27, 3, tzinfo=_BEIJING_TZ)
+        sunday = datetime(2026, 7, 26, 3, tzinfo=_BEIJING_TZ)
+        cases = (
+            ("empty Sunday", 0, 0, sunday, False),
+            ("small Monday delta", 1, 0, monday, False),
+            ("small Sunday delta", 1, 0, sunday, True),
+            ("Monday delta threshold", 2, 0, monday, True),
+            ("Monday tombstone threshold", 0, 2, monday, True),
+            ("Sunday at threshold", 2, 0, sunday, True),
+        )
+        with (
+            patch(
+                "app.services.structure_index_scheduler.settings."
+                "chem_structure_index_compaction_min_delta",
+                2,
+            ),
+            patch(
+                "app.services.structure_index_scheduler.settings."
+                "chem_structure_index_compaction_tombstone_threshold",
+                2,
+            ),
+            patch(
+                "app.services.structure_index_scheduler.settings."
+                "chem_structure_index_weekly_maintenance_weekday",
+                6,
+            ),
+        ):
+            for name, delta_count, tombstone_count, now, expected in cases:
+                with self.subTest(name=name):
+                    snapshot = StructureIndexSnapshot(
+                        1,
+                        False,
+                        1 + delta_count,
+                        base_count=1,
+                        delta_count=delta_count,
+                        tombstone_count=tombstone_count,
+                    )
+                    self.assertEqual(
+                        expected,
+                        _scheduled_compaction_due(snapshot, now=now),
+                    )
 
     async def test_transient_cycle_failure_retries_without_daily_compaction(self) -> None:
         scheduler = StructureIndexScheduler()
