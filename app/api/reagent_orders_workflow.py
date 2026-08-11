@@ -188,8 +188,8 @@ def _validate_positive_remaining_quantity(
 ) -> None:
     if remaining_quantity is None:
         return
-    if remaining_quantity <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity must be greater than 0")
+    if remaining_quantity < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity cannot be negative")
     if initial_quantity is not None and remaining_quantity > initial_quantity:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -471,8 +471,8 @@ def _create_inventory_items_from_order(
     )
 
     effective_remaining = order.initial_quantity if options.remaining_quantity is None else options.remaining_quantity
-    if effective_remaining is not None and effective_remaining <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity must be greater than 0")
+    if effective_remaining is not None and effective_remaining < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="remaining_quantity cannot be negative")
 
     for attempt in range(INTERNAL_CODE_CONFLICT_MAX_RETRIES):
         try:

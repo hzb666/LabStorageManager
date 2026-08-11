@@ -582,7 +582,7 @@ export type ReturnFormInputData = v.InferInput<typeof ReturnFormSchema>
 // 到货表单 Schema
 export const ConfirmArrivalFormSchema = v.object({
   ...ReagentWorkflowEditableFields,
-  remaining_quantity: createQuantitySchema('剩余量'),
+  remaining_quantity: createNonNegativeNumberSchema('剩余量'),
   storage_location: createMaxLengthSchema('库存位置', 200),
 })
 
@@ -592,7 +592,7 @@ export type ConfirmArrivalFormInputData = v.InferInput<typeof ConfirmArrivalForm
 // 入库表单 Schema
 export const StockInFormSchema = v.object({
   ...ReagentWorkflowEditableFields,
-  remaining_quantity: createQuantitySchema('剩余量'),
+  remaining_quantity: createNonNegativeNumberSchema('剩余量'),
   storage_location: createRequiredStringSchema('库存位置'),
 })
 
