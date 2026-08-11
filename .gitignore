@@ -52,7 +52,7 @@ env/
 .claude/
 .agents/
 .codex/
-.kilocode/
+.kilo/
 .sonar/
 .trellis/
 *.sw?

@@ -275,10 +275,10 @@ def _apply_manual_pending_stockin_update(
     initial_quantity = update_data["initial_quantity"]
     if remaining_quantity is None:
         remaining_quantity = initial_quantity
-    if remaining_quantity <= 0:
+    if remaining_quantity < 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="remaining_quantity must be greater than 0",
+            detail="remaining_quantity cannot be negative",
         )
     if remaining_quantity > initial_quantity:
         raise HTTPException(

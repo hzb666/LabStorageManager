@@ -449,17 +449,6 @@ const ActionButtons = React.memo(function ActionButtons({
         toast.success('已驳回')
       }
     },
-    {
-      id: 'complete',
-      label: '确认完成',
-      showWhen: (currItem: Record<string, unknown>) =>
-        currItem.status === ConsumableOrderStatus.APPROVED,
-      onClick: async (currItem: Record<string, unknown>) => {
-        await consumableOrderAPI.complete(currItem.id as number)
-        await onRefreshRef.current()
-        toast.success('耗材订单已完成')
-      }
-    }
   ], [])
 
   return (

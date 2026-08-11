@@ -1353,7 +1353,7 @@ const ActionButtons = React.memo(function ActionButtons({
       statusList.push({
         value: item.status,
         label: `${item.temporary_keeper_name}暂存`,
-        className: 'text-base text-orange-700 dark:text-orange-300',
+        className: 'text-base text-orange-600 dark:text-orange-300',
         title: `暂存人: ${item.temporary_keeper_name}`
       })
     }

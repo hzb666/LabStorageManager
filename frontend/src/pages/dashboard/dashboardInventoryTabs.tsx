@@ -603,6 +603,7 @@ function DashboardStockinDialog({
     stockinLoading: boolean;
     onClose: () => void;
     onSubmit: () => void;
+    onDelete: () => void;
   };
   brandOptions: { label: string; value: string }[];
 }>) {
@@ -612,6 +613,7 @@ function DashboardStockinDialog({
     stockinLoading,
     onClose,
     onSubmit,
+    onDelete,
   } = dialog;
   const watchedSpecification = useWatch({
     control: stockinForm.control,
@@ -641,8 +643,9 @@ function DashboardStockinDialog({
           />
 
           <EditDialogActions
-            mode="add"
+            mode="edit"
             onCancel={onClose}
+            onDelete={onDelete}
             submitLabelEdit="确认入库"
             submitLabelAdd="确认入库"
             isSubmitting={stockinLoading}
@@ -1153,11 +1156,24 @@ export function DashboardStockinTab({
     stockinForm.reset(defaultStockInValues)
   }, [stockinForm, stockinLoading])
 
+  const handleDeleteStockin = useCallback(async () => {
+    if (!selectedStockin) return
+    try {
+      await inventoryAPI.delete(selectedStockin.inventory_id)
+      setSelectedStockin(null)
+      stockinForm.reset(defaultStockInValues)
+      await refreshTables()
+      toast.success('已删除暂存记录')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '删除失败'))
+    }
+  }, [selectedStockin, stockinForm, refreshTables])
+
   const stockinColumns = useMemo(
     () => createStockinColumns(openStockinModal, managementMode),
     [managementMode, openStockinModal]
   )
-  const stockinDialog = { selectedStockin, stockinForm, stockinLoading, onClose: closeStockinModal, onSubmit: handleStockin }
+  const stockinDialog = { selectedStockin, stockinForm, stockinLoading, onClose: closeStockinModal, onSubmit: handleStockin, onDelete: handleDeleteStockin }
 
   return (
     <>
