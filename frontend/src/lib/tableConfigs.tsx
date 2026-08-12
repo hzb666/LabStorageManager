@@ -257,16 +257,16 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
   return [
     columnHelper.accessor('name', {
       header: '名称',
-      size: 250,
+      size: 200,
       minSize: 150,
-      maxSize: 300,
+      maxSize: 250,
       cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('specification', {
       header: '规格',
-      size: 250,
+      size: 300,
       minSize: 150,
-      maxSize: 300,
+      maxSize: 350,
       enableSorting: false,
       cell: info => renderPlainTextCell(info.getValue(), { fallback: '-', className: 'break-all' }),
     }),

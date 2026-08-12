@@ -319,7 +319,7 @@ export function ConsumableOrdersPage() {
 
   const renderExpandedRow = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
-    return <ConsumableOrderExpandedRow item={item} showExtraFields={true} />
+    return <ConsumableOrderExpandedRow item={item} />
   }, [])
 
   return (

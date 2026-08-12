@@ -24,7 +24,7 @@ VALID_STATUSES = ['pending', 'approved', 'arrived', 'stocked', 'rejected']
 
 # 有效订单原因枚举（与后端 ReagentOrderReason.value 一致）
 VALID_REASONS = ['running_out', 'not_stocked', 'common_public', 'not_found',
-                 'reorder', 'high_usage', 'degraded', 'others']
+                 'reorder', 'high_usage', 'degraded', 'not_enough', 'others']
 
 
 def get_user_id_map(db_file: str) -> dict:

@@ -246,7 +246,7 @@ function CartImportFormPanel(
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
         {orderType === "reagent" ? (
           <BaseForm form={reagentForm} fields={reagentFormFields} />
         ) : (

@@ -30,6 +30,7 @@ class ReagentOrderReason(str, Enum):
     REORDER = "reorder"              # 追加订购
     HIGH_USAGE = "high_usage"        # 大量使用
     DEGRADED = "degraded"            # 变质
+    NOT_ENOUGH = "not_enough"        # 不够用
     OTHERS = "others"                # 其他
 
 

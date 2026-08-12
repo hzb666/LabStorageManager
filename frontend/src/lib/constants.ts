@@ -67,6 +67,7 @@ export const STATUS_COLORS = {
   reorder: 'green',
   high_usage: 'amber',
   degraded: 'red',
+  not_enough: 'cyan',
   others: 'gray',
   common_shelf: 'blue',
 } as const satisfies Record<string, BadgeColor>
@@ -97,6 +98,7 @@ export const STATUS_LABELS: Record<string, string> = {
   reorder: '追加',
   high_usage: '大量',
   degraded: '变质',
+  not_enough: '不够',
   others: '其他',
   common_shelf: '常用货架',
 }
@@ -109,6 +111,7 @@ export const ORDER_REASON_LABELS: Record<string, string> = {
   reorder: '追加',
   high_usage: '大量',
   degraded: '变质',
+  not_enough: '不够',
   others: '其他',
 }
 
@@ -120,6 +123,7 @@ export const ORDER_REASON_COLORS: Record<string, BadgeColor> = {
   reorder: 'green',
   high_usage: 'amber',
   degraded: 'red',
+  not_enough: 'cyan',
   others: 'gray',
 }
 

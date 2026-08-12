@@ -23,6 +23,7 @@ export interface ReagentDraft {
     | "reorder"
     | "high_usage"
     | "degraded"
+    | "not_enough"
     | "others";
   is_hazardous: boolean;
   notes: string;

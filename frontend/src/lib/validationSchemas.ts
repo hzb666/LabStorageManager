@@ -297,6 +297,7 @@ const ORDER_REASON_VALUES = [
   'reorder',
   'high_usage',
   'degraded',
+  'not_enough',
   'others',
 ] as const
 

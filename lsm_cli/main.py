@@ -27,6 +27,7 @@ REAGENT_ORDER_REASON_CHOICES = (
     "reorder",
     "high_usage",
     "degraded",
+    "not_enough",
     "others",
 )
 

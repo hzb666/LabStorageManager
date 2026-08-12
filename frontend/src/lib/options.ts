@@ -4,6 +4,7 @@ export const ORDER_REASON_OPTIONS = [
   { label: '公用常用', value: 'common_public' },
   { label: '库存用完', value: 'running_out' },
   { label: '没找到', value: 'not_found' },
+  { label: '不够用', value: 'not_enough' },
   { label: '追加订购', value: 'reorder' },
   { label: '大量使用', value: 'high_usage' },
   { label: '变质', value: 'degraded' },

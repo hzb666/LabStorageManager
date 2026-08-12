@@ -145,6 +145,7 @@ export enum ReagentOrderReason {
   REORDER = "reorder",
   HIGH_USAGE = "high_usage",
   DEGRADED = "degraded",
+  NOT_ENOUGH = "not_enough",
   OTHERS = "others",
 }
 

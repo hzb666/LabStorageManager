@@ -170,7 +170,7 @@ export const defaultReagentOrderValues = {
   specification: '',
   quantity: 1,
   price: undefined as unknown as number,
-  order_reason: '' as unknown as 'running_out' | 'not_stocked' | 'common_public' | 'not_found' | 'reorder' | 'high_usage' | 'degraded' | 'others',
+  order_reason: '' as unknown as 'running_out' | 'not_stocked' | 'common_public' | 'not_found' | 'reorder' | 'high_usage' | 'degraded' | 'not_enough' | 'others',
   is_hazardous: false,
   notes: '',
 }

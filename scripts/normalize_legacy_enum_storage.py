@@ -42,6 +42,7 @@ LEGACY_ENUM_VALUE_MAP: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] 
             ("REORDER", "reorder"),
             ("HIGH_USAGE", "high_usage"),
             ("DEGRADED", "degraded"),
+            ("NOT_ENOUGH", "not_enough"),
             ("OTHERS", "others"),
         ),
     ),

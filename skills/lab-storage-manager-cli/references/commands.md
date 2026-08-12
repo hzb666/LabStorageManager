@@ -245,7 +245,7 @@ body 字段：
 - `is_hazardous`
 - `notes` 可选
 
-`order_reason` 可选值：`running_out`、`not_stocked`、`common_public`、`not_found`、`reorder`、`high_usage`、`degraded`、`others`
+`order_reason` 可选值：`running_out`、`not_stocked`、`common_public`、`not_found`、`reorder`、`high_usage`、`degraded`、`not_enough`、`others`
 
 ### update
 
