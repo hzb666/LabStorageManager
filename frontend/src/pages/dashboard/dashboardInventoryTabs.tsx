@@ -619,10 +619,15 @@ function DashboardStockinDialog({
     control: stockinForm.control,
     name: "specification",
   });
+  const watchedRemainingQuantity = useWatch({
+    control: stockinForm.control,
+    name: "remaining_quantity",
+  });
   const stockinUnit = resolveSpecificationUnit(
     watchedSpecification,
     selectedStockin?.unit,
   );
+  const canDiscard = watchedRemainingQuantity !== '' && watchedRemainingQuantity !== undefined && Number(watchedRemainingQuantity) === 0;
 
   return (
     <Dialog
@@ -645,7 +650,7 @@ function DashboardStockinDialog({
           <EditDialogActions
             mode="edit"
             onCancel={onClose}
-            onDelete={onDelete}
+            onDelete={canDiscard ? onDelete : undefined}
             submitLabelEdit="确认入库"
             submitLabelAdd="确认入库"
             isSubmitting={stockinLoading}
@@ -1159,7 +1164,7 @@ export function DashboardStockinTab({
   const handleDeleteStockin = useCallback(async () => {
     if (!selectedStockin) return
     try {
-      await inventoryAPI.delete(selectedStockin.inventory_id)
+      await inventoryAPI.discardPendingStockin(selectedStockin.inventory_id, { remaining_quantity: 0 })
       setSelectedStockin(null)
       stockinForm.reset(defaultStockInValues)
       await refreshTables()

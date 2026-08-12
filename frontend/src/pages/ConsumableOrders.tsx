@@ -22,7 +22,7 @@ import { UserRoles } from '@/lib/constants'
 import { useTableState, type FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
-import { consumableOrderAPI, ConsumableOrderStatus } from '@/api/client'
+import { consumableOrderAPI } from '@/api/client'
 import { processNotes } from '@/lib/utils'
 import { ConsumableOrderExpandedRow } from '@/components/ConsumableOrderExpandedRow'
 import {

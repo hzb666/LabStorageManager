@@ -827,6 +827,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Order missing initial_quantity or unit/i, message: '订单缺少数量或单位，请先编辑订单' },
   { pattern: /remaining_quantity must be greater than 0/i, message: '剩余量必须大于 0' },
   { pattern: /remaining_quantity cannot be negative/i, message: '剩余量不能小于 0' },
+  { pattern: /remaining_quantity must be 0 to discard/i, message: '剩余量为 0 时才能删除' },
   { pattern: /Invalid order quantity/i, message: '订单数量无效' },
   { pattern: /No enough pending stock items/i, message: '没有足够的待入库物品' },
   { pattern: /Order must be in APPROVED or ARRIVED status to stock in/i, message: '订单必须处于已批准或已到货状态才能入库' },

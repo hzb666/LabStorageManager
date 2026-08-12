@@ -592,6 +592,8 @@ export const inventoryAPI = {
   getAdminPendingStockin: () => api.get('/inventory/dashboard/admin/pending-stockin'),
   completePendingStockin: (id: number, data: StockInPayload) =>
     api.post(`/inventory/${id}/complete-stockin`, data),
+  discardPendingStockin: (id: number, data: { remaining_quantity: number }) =>
+    api.delete(`/inventory/${id}/discard-pending-stockin`, { data }),
   getBorrowHistory: (id: number) => api.get(`/inventory/${id}/borrow-history`),
   getImportTemplate: () => api.get('/inventory/import/template'),
   downloadTemplate: () => api.get('/inventory/import/template', { responseType: 'blob' }),

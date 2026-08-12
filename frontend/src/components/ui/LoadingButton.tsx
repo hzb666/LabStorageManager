@@ -23,7 +23,7 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
         )}
         {...props}
       >
-        <div className="grid place-items-center w-full h-full">
+        <div className="grid place-items-center">
           {/* 状态 1：默认文字（即便 Loading 时也存在，用来撑开宽度，但透明度设为 0） */}
           <span
             aria-hidden={isLoading}

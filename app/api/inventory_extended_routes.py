@@ -9,9 +9,10 @@ from typing import Any, Annotated, Dict, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlmodel import Session, select, func, update as sql_update
+from sqlmodel import Session, select, func, update as sql_update, delete as sql_delete
 
-from app.core.auth import NonPublicUser, get_current_user, require_admin
+from app.core.auth import NonPublicUser, get_current_user, require_admin, require_non_public
+from app.core.db_compat import exec_delete_returning_first
 from app.core.constants import (
     IMPORT_UPLOAD_RATE_LIMIT,
     IMPORT_UPLOAD_RATE_LIMIT_WINDOW_SECONDS,
@@ -553,6 +554,58 @@ def _register_manual_pending_stockin_route(
             actor_client_id=get_sse_client_id(request),
         )
         return serialized_item
+
+    class DiscardPendingStockinRequest(BaseModel):
+        remaining_quantity: float
+
+    @router.delete("/{inventory_id}/discard-pending-stockin")
+    async def discard_pending_stockin(
+        inventory_id: int,
+        payload: DiscardPendingStockinRequest,
+        request: Request,
+        current_user: Annotated[NonPublicUser, Depends(require_non_public)],
+        db: Annotated[Session, Depends(get_db)],
+    ):
+        item = _get_by_id(db, inventory_id)
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+        if not (item.storage_location is None and item.temporary_keeper_id is not None):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Inventory item is not pending stock-in",
+            )
+        if payload.remaining_quantity != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="remaining_quantity must be 0 to discard",
+            )
+        if current_user.role != UserRole.ADMIN and item.temporary_keeper_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the temporary keeper can discard pending items",
+            )
+        deleted_item = exec_delete_returning_first(
+            db,
+            sql_delete(Inventory).where(Inventory.id == inventory_id),
+            Inventory,
+        )
+        if not deleted_item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
+        log_inventory_delete(
+            db,
+            inventory=deleted_item,
+            operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
+        )
+        db.commit()
+        _clear_inventory_cache(search_cache, list_cache_prefix, items=deleted_item)
+        await sse_manager.broadcast(
+            SSERoom.INVENTORY,
+            SSEEventType.INVENTORY_DELETED,
+            {"id": inventory_id},
+            actor_client_id=get_sse_client_id(request),
+        )
+        return {"detail": "ok"}
 
 
 def _register_manual_and_dashboard_routes(

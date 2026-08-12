@@ -170,7 +170,6 @@ const getInputClassName = ({
     isActive
       ? cn(activeConfig.text, activeConfig.border, activeConfig.focus)
       : styles.input.inactive,
-    isNumber && styles.input.numberApperance,
     hasLeftArea ? "pl-10" : "pl-3",
     hasRightArea ? "pr-10" : "pr-3",
     className

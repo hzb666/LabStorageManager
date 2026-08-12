@@ -69,7 +69,6 @@ export interface InputStyles {
   input: {
     base: string;
     inactive: string;
-    numberApperance: string;
   };
   stepper: {
     wrapper: string;
@@ -109,8 +108,6 @@ export const defaultInputStyles: InputStyles = {
     base: "inline-flex h-10 leading-10! w-full rounded-md border bg-card text-base transition-all duration-300 ease-out placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ring-offset-background",
     inactive:
       "border-input text-foreground focus-visible:border-ring focus-visible:ring-ring/30",
-    numberApperance:
-      "[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&]:-moz-appearance:textfield",
   },
 
   // 原有的数字加减控制器样式

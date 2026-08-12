@@ -213,7 +213,7 @@ function buildInventoryInfoSection(title: string, fullData: LogRecord): DetailSe
     field('品牌', fullData.brand),
     field('纯度', fullData.purity),
     field('存放位置', fullData.storage_location),
-    field('入库数量', formatQuantity(fullData.initial_quantity, fullData.unit), {
+    field('规格', formatQuantity(fullData.initial_quantity, fullData.unit), {
       tone: quantityTone,
       visible: hasValue(fullData.initial_quantity),
     }),
@@ -254,7 +254,7 @@ function buildInventoryChangeSections(fullData: LogRecord): DetailSection[] {
         formatQuantity(after.remaining_quantity, after.unit)
       ),
       diffField(
-        '入库数量',
+        '规格',
         formatQuantity(before.initial_quantity, before.unit),
         formatQuantity(after.initial_quantity, after.unit)
       ),

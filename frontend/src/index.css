@@ -156,6 +156,17 @@
   [role='button']:not(:disabled) {
     cursor: pointer;
   }
+
+  /* 隐藏 number input 浏览器原生步进器箭头（Chrome / Firefox 保险规则） */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
 }
 
 /* 移动端输入控件使用 16px 字号，防止聚焦时页面缩放。 */
