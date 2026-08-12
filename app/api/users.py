@@ -1,5 +1,6 @@
 # 用户认证、会话与资料管理接口。
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import logging
 import time
@@ -49,7 +50,7 @@ from app.models.user import (
     UserResponse,
     UserRole,
 )
-from app.models.user_operation_log import UserOperationAction
+from app.models.user_operation_log import UserOperationAction, UserOperationLog
 from app.models.user_session import UserSession
 from app.services.image_service import save_avatar, delete_file
 from app.services.rate_limit import enforce_rate_limit
@@ -162,11 +163,29 @@ def _load_user_last_active_map(db: Session, user_ids: list[int]) -> dict[int, ob
         .where(UserSession.user_id.in_(user_ids))
         .group_by(UserSession.user_id)
     ).all()
-    return {
+    result: dict[int, datetime] = {
         user_id: last_active_at
         for user_id, last_active_at in last_active_rows
         if last_active_at is not None
     }
+
+    missing_ids = [uid for uid in user_ids if uid not in result]
+    if missing_ids:
+        login_log_rows = db.exec(
+            select(
+                UserOperationLog.actor_user_id,
+                func.max(UserOperationLog.created_at),
+            )
+            .where(UserOperationLog.actor_user_id.in_(missing_ids))
+            .where(UserOperationLog.action == UserOperationAction.LOGIN)
+            .where(UserOperationLog.outcome == "success")
+            .group_by(UserOperationLog.actor_user_id)
+        ).all()
+        for user_id, login_at in login_log_rows:
+            if login_at is not None:
+                result[user_id] = login_at
+
+    return result
 
 
 def _serialize_user_list(
