@@ -11,13 +11,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+from app.api.deps import SSEAuthFailure, SSECurrentSession, get_sse_current_session
+from app.core.auth import is_token_session_active
 from app.core.constants import SSERoom
 from app.core.request_utils import get_client_ip
-from app.core.auth import is_token_session_active
 from app.core.time_utils import get_utc_now
 from app.models.user import User
-from app.models.user_session import UserSession
-from app.api.deps import get_current_session
 from app.services.sse_manager import SSECapacityError, SSESubscriptionRequest, sse_manager
 
 router = APIRouter(tags=["Events"])
@@ -95,11 +94,32 @@ def _parse_last_seq_by_room(rooms: list[str], raw_value: str) -> dict[str, int]:
     return normalized
 
 
+def _build_auth_invalid_response(failure: SSEAuthFailure) -> StreamingResponse:
+    async def event_generator():
+        payload = json.dumps(
+            {"reason": failure.reason, "code": failure.code},
+            ensure_ascii=False,
+        )
+        yield f"event: auth.invalid\ndata: {payload}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/events")
 async def sse_events(
     request: Request,
-    current: Annotated[tuple[User, UserSession], Depends(get_current_session)],
+    current: Annotated[SSECurrentSession, Depends(get_sse_current_session)],
 ) -> StreamingResponse:
+    if isinstance(current, SSEAuthFailure):
+        return _build_auth_invalid_response(current)
+
     current_user, current_session = current
     client_ip = get_client_ip(request)
     rooms_param = request.query_params.get("rooms", SSERoom.INVENTORY)
