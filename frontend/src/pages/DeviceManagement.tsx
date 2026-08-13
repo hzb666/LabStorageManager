@@ -374,7 +374,7 @@ function buildDeviceTableContent({
               {row.getVisibleCells().map((cell) => (
                 <td
                   key={cell.id}
-                  className="p-3 align-middle text-base"
+                  className="p-3 align-middle text-base break-all"
                   style={{ width: cell.column.getSize() }}
                 >
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -428,9 +428,9 @@ function useDeviceTableModel({
       header: '设备名称',
       size: 150,
       cell: (info) => (
-        <div className="flex items-center gap-2">
-          <Laptop className="w-4 h-4 text-muted-foreground" />
-          <span>
+        <div className="flex items-center gap-2 min-w-0">
+          <Laptop className="w-4 h-4 text-muted-foreground shrink-0" />
+          <span className="min-w-0 break-all">
             <HighlightText text={info.getValue()} highlight={info.table.getState().globalFilter} />
           </span>
         </div>
@@ -438,7 +438,7 @@ function useDeviceTableModel({
     }),
     columnHelper.accessor('ip_address', {
       header: 'IP地址',
-      size: 120,
+      size: 150,
       cell: (info) => (
         <span className="text-base">
           <HighlightText text={info.getValue()} highlight={info.table.getState().globalFilter} />
@@ -447,12 +447,12 @@ function useDeviceTableModel({
     }),
     columnHelper.accessor('last_active_at', {
       header: '最近活跃',
-      size: 150,
+      size: 140,
       cell: (info) => formatDateTime(info.getValue()),
     }),
     columnHelper.accessor('created_at', {
       header: '首次登录',
-      size: 150,
+      size: 140,
       cell: (info) => formatDateTime(info.getValue()),
     }),
     columnHelper.display({
