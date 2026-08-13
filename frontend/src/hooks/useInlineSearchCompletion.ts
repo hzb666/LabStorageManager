@@ -65,7 +65,7 @@ export function useInlineSearchCompletion({
   field,
   value,
   enabled,
-  debounceMs = 120,
+  debounceMs = 200,
   minLength = 1,
 }: UseInlineSearchCompletionOptions): UseInlineSearchCompletionResult {
   const [completionState, setCompletionState] = useState<InlineCompletionResponse | null>(null)

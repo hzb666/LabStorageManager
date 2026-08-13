@@ -12,7 +12,7 @@ from app.models.user_session import UserSession
 def get_current_session(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Annotated[Session, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db, scope="function")],
 ) -> tuple[User, UserSession]:
     """
     Backward-compatible dependency alias.

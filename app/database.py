@@ -62,6 +62,7 @@ engine = create_engine(
     sqlite_url,
     echo=False,
     connect_args={"check_same_thread": False},
+    pool_timeout=5,
 )
 
 
