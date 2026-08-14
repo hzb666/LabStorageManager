@@ -106,3 +106,10 @@ def reset_current_sse_client_id(token: Token[str | None]) -> None:
 def get_current_sse_client_id() -> str | None:
     """Return request-scoped SSE client id for the active mutation request."""
     return _current_sse_client_id.get()
+
+
+def is_user_search_request(request: Request) -> bool:
+    """Check if the request is a deliberate user search (not background refresh)."""
+    return (
+        request.headers.get("X-Search-Intent", "").strip().lower() == "user"
+    )

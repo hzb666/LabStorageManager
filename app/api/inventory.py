@@ -81,7 +81,7 @@ from app.services.inventory_operation_logger import (
 from app.services.shelf_utils import normalize_storage_location
 from app.api.inventory_extended_routes import register_inventory_extended_routes
 from app.api.inventory_timeline import register_inventory_timeline_routes
-from app.core.request_utils import get_request_is_cli, get_sse_client_id
+from app.core.request_utils import get_request_is_cli, get_sse_client_id, is_user_search_request
 from app.core.db_compat import exec_delete_returning_first
 from app.models.user import User
 from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT
@@ -973,40 +973,42 @@ def list_inventory(
         }
         set_cached_result(SEARCH_CACHE, cache_key, cache_data, now=get_utc_now)
 
-    buffer_search_log(
-        user_id=session.user_id,
-        session_id=session.id or 0,
-        source="cli" if get_request_is_cli(request) else "web",
-        endpoint="/inventory/",
-        client_slot="cli" if get_request_is_cli(request) else (get_sse_client_id(request) or "web"),
-        raw_query=search,
-        filters=build_search_log_filters(
-            search_field=search_field if include_search_options else None,
-            fuzzy=fuzzy if include_search_options else False,
-            match_mode=match_mode if include_search_options else None,
-            extra_filters={
-                "status_filter": status_filter,
-                "cas_filter": cas_filter,
-                "hazardous_only": hazardous_only,
-                **build_multi_search_log_meta(
-                    search,
-                    enabled=bool(multi_cas_terms),
-                ),
-                **build_segmented_search_log_meta(
-                    segmented_terms,
-                    enabled=bool(segmented_terms) and not multi_cas_terms,
-                ),
-            },
-        ),
-        has_effective_filter=bool(
-            status_filter
-            or cas_filter
-            or hazardous_only
-        ),
-        sort=build_search_log_sort(sort_by=sort_by, sort_order=sort_order),
-        result_count=total,
-        latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
-    )
+    is_cli = get_request_is_cli(request)
+    if is_cli or is_user_search_request(request):
+        buffer_search_log(
+            user_id=session.user_id,
+            session_id=session.id or 0,
+            source="cli" if is_cli else "web",
+            endpoint="/inventory/",
+            client_slot="cli" if is_cli else (get_sse_client_id(request) or "web"),
+            raw_query=search,
+            filters=build_search_log_filters(
+                search_field=search_field if include_search_options else None,
+                fuzzy=fuzzy if include_search_options else False,
+                match_mode=match_mode if include_search_options else None,
+                extra_filters={
+                    "status_filter": status_filter,
+                    "cas_filter": cas_filter,
+                    "hazardous_only": hazardous_only,
+                    **build_multi_search_log_meta(
+                        search,
+                        enabled=bool(multi_cas_terms),
+                    ),
+                    **build_segmented_search_log_meta(
+                        segmented_terms,
+                        enabled=bool(segmented_terms) and not multi_cas_terms,
+                    ),
+                },
+            ),
+            has_effective_filter=bool(
+                status_filter
+                or cas_filter
+                or hazardous_only
+            ),
+            sort=build_search_log_sort(sort_by=sort_by, sort_order=sort_order),
+            result_count=total,
+            latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
+        )
 
     return result
 

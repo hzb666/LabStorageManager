@@ -558,22 +558,31 @@ export const procedureInventorySearchAPI = {
 
 // 库存 API。
 export const inventoryAPI = {
-  list: (params?: PaginationParams & {
-    status_filter?: string
-    cas_filter?: string
-    hazardous_only?: boolean
-    structure_search_id?: string
-    structure_match_mode?: string
-    structure_query?: string
-    structure_query_format?: string
-    search?: string
-    search_field?: string
-    fuzzy?: boolean
-    match_mode?: SearchMatchMode
-    sort_by?: string
-    sort_order?: string
-  }) =>
-    api.get('/inventory/', { params }),
+  list: (
+    params?: PaginationParams & {
+      status_filter?: string
+      cas_filter?: string
+      hazardous_only?: boolean
+      structure_search_id?: string
+      structure_match_mode?: string
+      structure_query?: string
+      structure_query_format?: string
+      search?: string
+      search_field?: string
+      fuzzy?: boolean
+      match_mode?: SearchMatchMode
+      sort_by?: string
+      sort_order?: string
+    },
+    options?: { searchIntent?: 'user' | 'background' },
+  ) =>
+    api.get('/inventory/', {
+      params,
+      headers:
+        options?.searchIntent === 'user'
+          ? { 'X-Search-Intent': 'user' }
+          : undefined,
+    }),
   get: (id: number) => api.get(`/inventory/${id}`),
   getByCode: (code: string) =>
     api.get<InventoryDetail>(`/inventory/code/${encodeURIComponent(code)}`),

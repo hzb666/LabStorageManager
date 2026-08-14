@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- Hook utility module exports shared table helpers. */
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { RefObject } from 'react'
 import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query'
 import type { SortingState, ColumnSizingState } from '@tanstack/react-table'
@@ -28,7 +29,10 @@ export interface ListResponseData {
 }
 
 export interface FilterAPI {
-  list: (params: Record<string, unknown>) => Promise<{ data: ListResponseData }>
+  list: (
+    params: Record<string, unknown>,
+    options?: { searchIntent?: 'user' | 'background' },
+  ) => Promise<{ data: ListResponseData }>
 }
 
 export interface FilterOption {
@@ -160,6 +164,12 @@ type TableQueryFilters = {
   fuzzySearch: boolean
   matchMode: SearchMatchMode
   sorting: SortingState
+}
+
+function isSameSorting(current: SortingState, next: SortingState): boolean {
+  return current.length === next.length && current.every(
+    (item, index) => item.id === next[index]?.id && item.desc === next[index]?.desc
+  )
 }
 
 // 默认状态和 `all` 都不进请求参数，尽量让“无筛选”请求保持稳定形态。
@@ -299,13 +309,17 @@ function useFilterState(options: FilterStateOptions) {
     getSearchMatchModeState(expandStorageId, DEFAULT_SEARCH_MATCH_MODE)
   )
   const [sorting, setSorting] = useState<SortingState>([])
+  const sortingRef = useRef<SortingState>([])
   const normalizedSearchInput = searchInput.trim()
+  const pendingUserSearchRef = useRef(false)
 
   const setFuzzySearch = useCallback(
     (value: boolean) => {
-      setStoredFuzzySearch(enableFuzzySearch ? value : false)
+      const nextValue = enableFuzzySearch ? value : false
+      if (nextValue !== fuzzySearch) pendingUserSearchRef.current = true
+      setStoredFuzzySearch(nextValue)
     },
-    [enableFuzzySearch]
+    [enableFuzzySearch, fuzzySearch]
   )
 
   useEffect(() => {
@@ -318,9 +332,13 @@ function useFilterState(options: FilterStateOptions) {
     setSearchMatchModeState(expandStorageId, matchMode)
   }, [expandStorageId, matchMode])
 
-  const setMatchMode = useCallback((value: SearchMatchMode) => {
-    setMatchModeState(value)
-  }, [])
+  const setMatchMode = useCallback(
+    (value: SearchMatchMode) => {
+      if (value !== matchMode) pendingUserSearchRef.current = true
+      setMatchModeState(value)
+    },
+    [matchMode]
+  )
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -329,6 +347,7 @@ function useFilterState(options: FilterStateOptions) {
         globalFilter !== normalizedSearchInput &&
         searchInput.length <= searchMaxLength
       if (shouldSync) {
+        pendingUserSearchRef.current = true
         setGlobalFilter(normalizedSearchInput)
       }
     }, debounceMs)
@@ -353,17 +372,28 @@ function useFilterState(options: FilterStateOptions) {
     const nextField = field ?? searchField
     setSearchInput(nextValue)
     if (nextValue.length <= getEffectiveSearchMaxLength(nextValue, nextField)) {
+      const valueChanged = globalFilter !== nextValue
+      const fieldChanged = field !== undefined && field !== searchField
+      if (valueChanged || fieldChanged) {
+        pendingUserSearchRef.current = true
+      }
       setGlobalFilter(nextValue)
     }
     if (field !== undefined) {
       setSearchField(field)
     }
-  }, [searchField])
+  }, [globalFilter, searchField])
 
   // 对外暴露排序更新器，保持兼容 React Table 回调签名。
   const handleSortingChange = useCallback(
     (updater: SortingState | ((prev: SortingState) => SortingState)) => {
-      setSorting(updater)
+      const current = sortingRef.current
+      const next = typeof updater === 'function' ? updater(current) : updater
+      if (isSameSorting(current, next)) return
+
+      pendingUserSearchRef.current = true
+      sortingRef.current = next
+      setSorting(next)
     },
     []
   )
@@ -376,8 +406,24 @@ function useFilterState(options: FilterStateOptions) {
     setSearchField(defaultSearchField)
     setFuzzySearch(false)
     setMatchMode(DEFAULT_SEARCH_MATCH_MODE)
-    setSorting([])
-  }, [defaultStatus, defaultSearchField, setFuzzySearch, setMatchMode])
+    handleSortingChange([])
+  }, [defaultStatus, defaultSearchField, setFuzzySearch, setMatchMode, handleSortingChange])
+
+  const handleStatusFilterChange = useCallback(
+    (value: string) => {
+      if (value !== statusFilter) pendingUserSearchRef.current = true
+      setStatusFilter(value)
+    },
+    [statusFilter]
+  )
+
+  const handleSearchFieldChange = useCallback(
+    (value: string) => {
+      if (value !== searchField) pendingUserSearchRef.current = true
+      setSearchField(value)
+    },
+    [searchField]
+  )
 
   const hasFilter = Boolean(
     globalFilter ||
@@ -390,9 +436,9 @@ function useFilterState(options: FilterStateOptions) {
     applySearchImmediate,
     globalFilter,
     statusFilter,
-    setStatusFilter,
+    setStatusFilter: handleStatusFilterChange,
     searchField,
-    setSearchField,
+    setSearchField: handleSearchFieldChange,
     fuzzySearch,
     setFuzzySearch,
     matchMode,
@@ -401,6 +447,7 @@ function useFilterState(options: FilterStateOptions) {
     handleSortingChange,
     hasFilter,
     resetFilters,
+    pendingUserSearchRef,
   }
 }
 
@@ -456,6 +503,7 @@ function useTableQueryData(args: {
   extraParams: Record<string, unknown>
   defaultStatus: string
   filters: TableQueryFilters
+  pendingUserSearchRef: RefObject<boolean>
 }): TableQueryState {
   const {
     api,
@@ -464,6 +512,7 @@ function useTableQueryData(args: {
     extraParams,
     defaultStatus,
     filters,
+    pendingUserSearchRef,
   } = args
 
   const queryFn = useCallback(
@@ -475,7 +524,13 @@ function useTableQueryData(args: {
         defaultStatus,
         filters,
       })
-      const response = await api.list(params)
+      const isUserSearch = pageParam === 0 && pendingUserSearchRef.current
+      if (isUserSearch) {
+        pendingUserSearchRef.current = false
+      }
+      const response = await api.list(params, {
+        searchIntent: isUserSearch ? 'user' : 'background',
+      })
       return response.data
     },
     [
@@ -484,6 +539,7 @@ function useTableQueryData(args: {
       extraParams,
       defaultStatus,
       filters,
+      pendingUserSearchRef,
     ]
   )
 
@@ -589,6 +645,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     extraParams,
     defaultStatus,
     filters: queryFilters,
+    pendingUserSearchRef: filterState.pendingUserSearchRef,
   })
   const baseQueryKey = useMemo(
     () =>
