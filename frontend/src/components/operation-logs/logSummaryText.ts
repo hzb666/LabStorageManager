@@ -5,6 +5,7 @@ const SEARCH_LOG_ENDPOINT_LABELS: Record<string, string> = {
   '/reagent-orders/': '试剂订单',
   '/consumable-orders/': '耗材订单',
   '/common-shelf/groups': '常用货架',
+  '/chem/search/substructure': '结构',
 }
 
 const ORDER_EXPORT_SCOPE_LABELS: Record<string, string> = {

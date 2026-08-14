@@ -1,6 +1,6 @@
 /** 列表页 SSE 集成 Hook。 */
 import { useEffect, useMemo, useRef } from 'react'
-import type { MutableRefObject } from 'react'
+import type { RefObject } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
 
@@ -262,8 +262,8 @@ function applySafeMutation(args: {
   event: SSEEventEnvelope
   nextData: InfiniteData<ListResponseData> | undefined
   queryClient: ReturnType<typeof useQueryClient>
-  queryKeyRef: MutableRefObject<readonly unknown[]>
-  onSafePatchRef: MutableRefObject<((event: SSEEventEnvelope) => void) | undefined>
+  queryKeyRef: RefObject<readonly unknown[]>
+  onSafePatchRef: RefObject<((event: SSEEventEnvelope) => void) | undefined>
 }): void {
   const { event, nextData, queryClient, queryKeyRef, onSafePatchRef } = args
   queryClient.setQueryData(queryKeyRef.current, nextData)
@@ -281,9 +281,9 @@ function touchesSearchFields(item: AnyRecord, context: ListSSEContext): boolean 
 type ListEventRuntime = {
   markStale: () => void
   moveUpdatedRowToStartWhenUnsorted: boolean
-  onSafePatchRef: MutableRefObject<((event: SSEEventEnvelope) => void) | undefined>
+  onSafePatchRef: RefObject<((event: SSEEventEnvelope) => void) | undefined>
   queryClient: ReturnType<typeof useQueryClient>
-  queryKeyRef: MutableRefObject<readonly unknown[]>
+  queryKeyRef: RefObject<readonly unknown[]>
 }
 
 function handleCreatedListEvent(args: {

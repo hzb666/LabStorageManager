@@ -1,6 +1,6 @@
 /** 表格展开时的滚动定位 Hook。 */
 import { useRef, useCallback, useEffect } from 'react'
-import type { RefObject, MutableRefObject, MouseEvent, UIEvent } from 'react'
+import type { RefObject, MouseEvent, UIEvent } from 'react'
 import type { Row } from '@tanstack/react-table'
 import type { Virtualizer } from '@tanstack/react-virtual'
 
@@ -50,7 +50,7 @@ function syncHeaderScroll(
 }
 
 function updateIsAtTop(
-  isAtTopRef: MutableRefObject<boolean>,
+  isAtTopRef: RefObject<boolean>,
   scrollTop: number,
   onIsAtTopChange?: (isAtTop: boolean) => void,
 ) {

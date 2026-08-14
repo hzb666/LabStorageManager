@@ -1,6 +1,6 @@
 /** 房间级事件流 SSE Hook。 */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
+import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { getApiBaseUrl } from '@/lib/apiConfig'
 import {
   resolveAuthNoticeByCode,
@@ -47,7 +47,7 @@ function createSSEConnectionKey(): string {
   return `sse-${sseConnectionCounter}`
 }
 
-function useLatestRef<T>(value: T): MutableRefObject<T> {
+function useLatestRef<T>(value: T): RefObject<T> {
   const ref = useRef(value)
 
   useEffect(() => {
@@ -97,8 +97,8 @@ function useStableSSEConfig(args: {
 }
 
 function useResetRoomTracking(args: {
-  lastOriginByRoomRef: MutableRefObject<Record<string, string>>
-  lastSeqByRoomRef: MutableRefObject<Record<string, number>>
+  lastOriginByRoomRef: RefObject<Record<string, string>>
+  lastSeqByRoomRef: RefObject<Record<string, number>>
   roomsKey: string
 }) {
   const { lastOriginByRoomRef, lastSeqByRoomRef, roomsKey } = args
@@ -125,7 +125,7 @@ function buildEventsUrl(args: {
 }
 
 function buildLastSeqSnapshot(args: {
-  lastSeqByRoomRef: MutableRefObject<Record<string, number>>
+  lastSeqByRoomRef: RefObject<Record<string, number>>
   stableRooms: string[]
 }): Record<string, number> {
   const { lastSeqByRoomRef, stableRooms } = args
@@ -140,8 +140,8 @@ function buildLastSeqSnapshot(args: {
 }
 
 function processSeqByConnection(args: {
-  lastOriginByRoomRef: MutableRefObject<Record<string, string>>
-  lastSeqByRoomRef: MutableRefObject<Record<string, number>>
+  lastOriginByRoomRef: RefObject<Record<string, string>>
+  lastSeqByRoomRef: RefObject<Record<string, number>>
   origin?: string
   room: string
   seq: number
@@ -211,7 +211,7 @@ function attachConnectedListener(args: {
   onConnectionSuccess: () => void
   onReconnect?: () => void
   onStreamStale?: () => void
-  openedOnceRef: MutableRefObject<boolean>
+  openedOnceRef: RefObject<boolean>
   registerConnection: (connectionKey: string, clientId: string) => void
   setReconnectCount: Dispatch<SetStateAction<number>>
   stableRooms: string[]
@@ -285,9 +285,9 @@ function attachAuthInvalidListener(args: {
 
 function attachBusinessEventListeners(args: {
   es: EventSource
-  handlersRef: MutableRefObject<Record<string, SSEEventHandler>>
-  lastOriginByRoomRef: MutableRefObject<Record<string, string>>
-  lastSeqByRoomRef: MutableRefObject<Record<string, number>>
+  handlersRef: RefObject<Record<string, SSEEventHandler>>
+  lastOriginByRoomRef: RefObject<Record<string, string>>
+  lastSeqByRoomRef: RefObject<Record<string, number>>
   markRoomStale: (room: string) => void
   onStreamStale?: () => void
   stableEventTypes: string[]
@@ -339,6 +339,103 @@ function attachBusinessEventListeners(args: {
       }
     })
   })
+}
+
+function attachReconnectOnErrorListener(args: {
+  autoConnectRef: RefObject<boolean>
+  connectRef: RefObject<() => void>
+  connectionKeyRef: RefObject<string>
+  disconnect: () => void
+  disposedRef: RefObject<boolean>
+  es: EventSource
+  eventSourceRef: RefObject<EventSource | null>
+  reconnectAttemptRef: RefObject<number>
+  reconnectTimerRef: RefObject<ReturnType<typeof globalThis.setTimeout> | null>
+  setIsConnected: Dispatch<SetStateAction<boolean>>
+  unregisterConnection: (connectionKey: string) => void
+}) {
+  const {
+    autoConnectRef,
+    connectRef,
+    connectionKeyRef,
+    disconnect,
+    disposedRef,
+    es,
+    eventSourceRef,
+    reconnectAttemptRef,
+    reconnectTimerRef,
+    setIsConnected,
+    unregisterConnection,
+  } = args
+
+  es.onerror = async () => {
+    if (eventSourceRef.current !== es) {
+      return
+    }
+
+    es.close()
+    eventSourceRef.current = null
+    unregisterConnection(connectionKeyRef.current)
+    setIsConnected(false)
+
+    if (!autoConnectRef.current || disposedRef.current) {
+      return
+    }
+
+    const controller = new AbortController()
+    const probeTimeout = globalThis.setTimeout(() => {
+      controller.abort()
+    }, 5000)
+
+    try {
+      const apiBaseUrl = getApiBaseUrl().replace(/\/$/, '')
+
+      const response = await fetch(`${apiBaseUrl}/users/me`, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+
+      if (response.status === 401 || response.status === 403) {
+        disconnect()
+
+        void triggerSessionInvalidation({
+          notice: '登录状态已失效，请重新登录',
+          skipApi: true,
+        })
+        return
+      }
+    } catch {
+      // 网络错误或 probe 超时：不要判定登录失效，
+      // 继续走后面的指数退避重连。
+    } finally {
+      globalThis.clearTimeout(probeTimeout)
+    }
+
+    if (!autoConnectRef.current || disposedRef.current) {
+      return
+    }
+
+    if (reconnectTimerRef.current !== null) {
+      return
+    }
+
+    const delay = Math.min(
+      SSE_RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttemptRef.current,
+      SSE_RECONNECT_MAX_DELAY_MS,
+    )
+
+    reconnectAttemptRef.current += 1
+
+    reconnectTimerRef.current = globalThis.setTimeout(() => {
+      reconnectTimerRef.current = null
+
+      if (!disposedRef.current && autoConnectRef.current) {
+        connectRef.current()
+      }
+    }, delay)
+  }
 }
 
 export function useSSE({
@@ -441,79 +538,24 @@ export function useSSE({
       stableEventTypes,
       stableRooms,
     })
-
-    es.onerror = async () => {
-      if (eventSourceRef.current !== es) {
-        return
-      }
-
-      es.close()
-      eventSourceRef.current = null
-      unregisterConnection(connectionKeyRef.current)
-      setIsConnected(false)
-
-      if (!autoConnectRef.current || disposedRef.current) {
-        return
-      }
-
-      const controller = new AbortController()
-      const probeTimeout = globalThis.setTimeout(() => {
-        controller.abort()
-      }, 5000)
-
-      try {
-        const apiBaseUrl = getApiBaseUrl().replace(/\/$/, '')
-
-        const response = await fetch(`${apiBaseUrl}/users/me`, {
-          method: 'GET',
-          credentials: 'include',
-          cache: 'no-store',
-          signal: controller.signal,
-        })
-
-        if (response.status === 401 || response.status === 403) {
-          disconnect()
-
-          void triggerSessionInvalidation({
-            notice: '登录状态已失效，请重新登录',
-            skipApi: true,
-          })
-          return
-        }
-      } catch {
-        // 网络错误或 probe 超时：不要判定登录失效，
-        // 继续走后面的指数退避重连。
-      } finally {
-        globalThis.clearTimeout(probeTimeout)
-      }
-
-      if (!autoConnectRef.current || disposedRef.current) {
-        return
-      }
-
-      if (reconnectTimerRef.current !== null) {
-        return
-      }
-
-      const delay = Math.min(
-        SSE_RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttemptRef.current,
-        SSE_RECONNECT_MAX_DELAY_MS,
-      )
-
-      reconnectAttemptRef.current += 1
-
-      reconnectTimerRef.current = globalThis.setTimeout(() => {
-        reconnectTimerRef.current = null
-
-        if (!disposedRef.current && autoConnectRef.current) {
-          connectRef.current()
-        }
-      }, delay)
-    }
+    attachReconnectOnErrorListener({
+      autoConnectRef,
+      connectRef, // stable ref from useRef; won't trigger re-creation
+      connectionKeyRef,
+      disconnect,
+      disposedRef,
+      es,
+      eventSourceRef,
+      reconnectAttemptRef,
+      reconnectTimerRef,
+      setIsConnected,
+      unregisterConnection,
+    })
   }, [
     autoConnectRef,
     clearReconnectTimer,
     closeActiveSource,
+    connectRef,
     disconnect,
     handlersRef,
     markRoomStale,

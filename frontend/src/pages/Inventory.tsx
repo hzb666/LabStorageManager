@@ -833,6 +833,17 @@ function useInventoryStructureEditor() {
     setStructureSearchCollapseSignal((value) => value + 1)
   }, [resolvePendingStructureSearchClose])
 
+  const handleClearStructureSearch = useCallback(() => {
+    resolvePendingStructureSearchClose()
+    setStructureFilter(null)
+    setStructureDraftMolblock(null)
+    setStructureSearchCollapseSignal((value) => value + 1)
+  }, [resolvePendingStructureSearchClose])
+
+  const handleStructureDraftChange = useCallback((molblock: string | null) => {
+    setStructureDraftMolblock(molblock)
+  }, [])
+
   const handleStructureDialogOpenChange = useCallback((nextOpen: boolean) => {
     setStructureDialogOpen(nextOpen)
     if (!nextOpen) {
@@ -878,11 +889,13 @@ function useInventoryStructureEditor() {
 
   return {
     handleClearStructureFilter,
+    handleClearStructureSearch,
     handleManualStructureEdit,
     handleManualStructureSaved,
     handleOpenStructureDialog,
     handleStructureQueryDataReady,
     handleStructureDialogOpenChange,
+    handleStructureDraftChange,
     handleStructureResults,
     manualEditTarget,
     structureDialogOpen,
@@ -1077,6 +1090,7 @@ function InventoryStructureSearchDialog({
         open={structureEditor.structureDialogOpen}
         initialMolblock={initialMolblock}
         manualEditTarget={structureEditor.manualEditTarget}
+        onDraftChange={structureEditor.handleStructureDraftChange}
         onManualSaved={structureEditor.handleManualStructureSaved}
         onOpenChange={structureEditor.handleStructureDialogOpenChange}
         onResults={structureEditor.handleStructureResults}
@@ -1298,7 +1312,7 @@ export function InventoryPage() {
         searchInputDisabledReason={structureFilterTitle}
         searchInputDisabledValue={structureFilterSummary}
         onSearchInputDisabledClear={
-          structureEditor.structureFilter ? structureEditor.handleClearStructureFilter : undefined
+          structureEditor.structureFilter ? structureEditor.handleClearStructureSearch : undefined
         }
         searchResetSignal={structureEditor.structureFilter?.filterKey ?? null}
         sortingResetSignal={structureEditor.structureFilter?.filterKey ?? null}

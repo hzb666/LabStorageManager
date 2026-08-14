@@ -18,16 +18,16 @@ interface UseBulkExpandOptions<TData> {
 }
 
 interface BulkAnimationControls {
-  frameRef: React.MutableRefObject<number | null>
+  frameRef: React.RefObject<number | null>
   runId: number
-  runIdRef: React.MutableRefObject<number>
-  timerRef: React.MutableRefObject<number | null>
+  runIdRef: React.RefObject<number>
+  timerRef: React.RefObject<number | null>
 }
 
 /** 批量展开结束后的多帧测量与锚点恢复。 */
 function scheduleBulkAnimationComplete(
   virtualizerRef: React.RefObject<Virtualizer<HTMLDivElement, Element> | null>,
-  bulkAnchorRef: React.MutableRefObject<BulkAnchor | null>,
+  bulkAnchorRef: React.RefObject<BulkAnchor | null>,
   bulkAnimationControls: BulkAnimationControls,
   restoreBulkAnchor: (anchor: BulkAnchor | null) => void,
   setIsBulkAnimating: (v: boolean) => void,

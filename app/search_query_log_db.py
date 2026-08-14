@@ -105,6 +105,7 @@ SEARCH_LOG_ENDPOINT_LABELS: dict[str, str] = {
     "/reagent-orders/": "试剂订单",
     "/consumable-orders/": "耗材订单",
     "/common-shelf/groups": "常用货架",
+    "/chem/search/substructure": "结构",
 }
 
 _SEARCH_LOG_SOURCE_LABELS: dict[str, tuple[str, ...]] = {

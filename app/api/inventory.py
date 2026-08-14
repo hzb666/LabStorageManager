@@ -988,11 +988,6 @@ def list_inventory(
                 "status_filter": status_filter,
                 "cas_filter": cas_filter,
                 "hazardous_only": hazardous_only,
-                "structure_search_id": structure_search_id,
-                "structure_match_mode": structure_match_mode,
-                "structure_query": structure_query,
-                "structure_query_format": structure_query_format,
-                "structure_only_in_stock": structure_only_in_stock,
                 **build_multi_search_log_meta(
                     search,
                     enabled=bool(multi_cas_terms),
@@ -1007,8 +1002,6 @@ def list_inventory(
             status_filter
             or cas_filter
             or hazardous_only
-            or has_structure_filter
-            or structure_only_in_stock
         ),
         sort=build_search_log_sort(sort_by=sort_by, sort_order=sort_order),
         result_count=total,

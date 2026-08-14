@@ -1,7 +1,7 @@
 import { CheckCircle2 } from 'lucide-react'
 
 import type { PubChemCandidate } from '@/api/structureSearchApi'
-import { Button } from '@/components/ui/Button'
+import { LoadingButton } from '@/components/ui/LoadingButton'
 import { MoleculeStructure } from '@/components/ui/MoleculeStructure'
 
 const PUBCHEM_COMPOUND_URL = 'https://pubchem.ncbi.nlm.nih.gov/compound'
@@ -122,16 +122,17 @@ function StructureCandidateCard({
       <CandidatePreview candidate={candidate} />
       <CandidateMeta candidate={candidate} />
       {cid && (
-        <Button
+        <LoadingButton
           type="button"
           variant="modern"
           size="sm"
-          disabled={disabled}
+          isLoading={disabled}
+          loadingText="确认中..."
           onClick={() => onConfirm(cid)}
         >
           <CheckCircle2 className="size-4" />
           确认 CID {cid}
-        </Button>
+        </LoadingButton>
       )}
     </div>
   )

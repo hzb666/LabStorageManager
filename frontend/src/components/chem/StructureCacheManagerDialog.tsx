@@ -626,12 +626,19 @@ function CandidateReviewDialog({
 
   const confirming = activeAction?.startsWith(`confirm:${cache.cas_number}:`) ?? false
   return (
-    <Dialog open={Boolean(cache)} onOpenChange={onOpenChange}>
+    <Dialog
+      open={Boolean(cache)}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && confirming) return
+        onOpenChange(nextOpen)
+      }}
+    >
       <DialogContent className="w-[96vw] max-w-5xl p-4 md:p-6">
         <DialogHeader className="mb-4">
           <DialogTitle className="mb-0 pr-10">PubChem 候选确认</DialogTitle>
           <DialogCloseButton
             aria-label="关闭 PubChem 候选确认弹窗"
+            disabled={confirming}
             onClick={() => onOpenChange(false)}
           />
         </DialogHeader>

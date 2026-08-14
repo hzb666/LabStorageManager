@@ -6,13 +6,14 @@ from datetime import datetime
 from time import perf_counter
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_
 from sqlmodel import func, select
 
-from app.core.auth import get_current_user, require_admin
+from app.core.auth import CurrentSession, get_current_user, require_admin
 from app.core.config import settings
+from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.database import DBSession
 from app.models.compound_structure import (
     CompoundStructureCache,
@@ -51,6 +52,7 @@ from app.services.structure_resolution_jobs import (
     enqueue_structure_resolution_job,
 )
 from app.services.structure_resolution_scheduler import structure_resolution_scheduler
+from app.services.search_query_log_service import buffer_search_log
 
 router = APIRouter(prefix="/chem", tags=["Chem"])
 logger = logging.getLogger(__name__)
@@ -516,11 +518,13 @@ async def confirm_pubchem_candidate(
 @router.post(
     "/search/substructure",
     response_model=SubstructureSearchResponse,
-    dependencies=[Depends(get_current_user), Depends(ensure_structure_feature_enabled)],
+    dependencies=[Depends(ensure_structure_feature_enabled)],
 )
 def search_substructure(
+    request: Request,
     payload: SubstructureSearchRequest,
     db: DBSession,
+    current_session: CurrentSession,
 ) -> SubstructureSearchResponse:
     started = perf_counter()
     preview_limit = min(payload.limit, settings.chem_structure_search_max_results)
@@ -590,11 +594,33 @@ def search_substructure(
         for hit in preview_hits
         if (not payload.only_in_stock) or hit.cas_number in summaries
     ]
+    elapsed_ms = round((perf_counter() - started) * 1000, 2)
+
+    _current_user, session = current_session
+    is_cli = get_request_is_cli(request)
+    buffer_search_log(
+        user_id=session.user_id,
+        session_id=session.id or 0,
+        source="cli" if is_cli else "web",
+        endpoint="/chem/search/substructure",
+        client_slot="cli" if is_cli else (get_sse_client_id(request) or "web"),
+        raw_query=payload.query,
+        filters={
+            "query_format": payload.format,
+            "match_mode": payload.match_mode,
+            "only_in_stock": payload.only_in_stock,
+        },
+        has_effective_filter=True,
+        sort=None,
+        result_count=cache_entry.total,
+        latency_ms=max(0, int(elapsed_ms)),
+    )
+
     return SubstructureSearchResponse(
         search_id=cache_entry.search_id,
         total=cache_entry.total,
         limit=preview_limit,
-        elapsed_ms=round((perf_counter() - started) * 1000, 2),
+        elapsed_ms=elapsed_ms,
         index=index_status,
         results=results,
     )

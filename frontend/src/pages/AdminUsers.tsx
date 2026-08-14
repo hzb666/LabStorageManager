@@ -599,8 +599,8 @@ export function AdminUsersPage() {
     try {
       const response = await userAdminAPI.generateLogsToken(user.id)
       navigate('/admin/logs', { state: { logsToken: response.data.token } })
-    } catch {
-      toast.error('获取日志访问失败')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '获取日志访问失败'))
     }
   }, [navigate])
 

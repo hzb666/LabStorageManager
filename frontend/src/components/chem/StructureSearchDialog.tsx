@@ -34,6 +34,7 @@ export interface StructureSearchDialogProps {
   keepMounted?: boolean
   manualEditTarget?: ManualStructureEditTarget | null
   onOpenChange: (open: boolean) => void
+  onDraftChange?: (molblock: string | null) => void
   onManualSaved?: (cache: CompoundStructureCache) => void
   onResults: (
     payload: SubstructureSearchResponse,
@@ -57,21 +58,25 @@ function getManualTargetKey(target: ManualStructureEditTarget | null | undefined
   return `${target.casNumber}:${target.molblock ?? ''}`
 }
 
-function scheduleAfterEditorPaint(callback: () => void): () => void {
-  let firstFrame = 0
-  let secondFrame = 0
-  firstFrame = window.requestAnimationFrame(() => {
-    secondFrame = window.requestAnimationFrame(callback)
-  })
-
-  return () => {
-    window.cancelAnimationFrame(firstFrame)
-    window.cancelAnimationFrame(secondFrame)
+async function exportCurrentMolblock(ketcher: Ketcher): Promise<string> {
+  const molblock = await ketcher.getMolfile('v3000')
+  if (!molblock?.trim()) {
+    return ''
   }
+  return molblock
 }
 
-async function exportCurrentMolblock(ketcher: Ketcher): Promise<string> {
-  return normalizeExportedQuery(await ketcher.getMolfile('v3000'))
+async function trySaveStructureDraft(
+  ketcher: Ketcher | null,
+  onDraftChange?: (molblock: string | null) => void,
+): Promise<void> {
+  if (!ketcher) return
+  try {
+    const molblock = await exportCurrentMolblock(ketcher)
+    onDraftChange?.(molblock || null)
+  } catch {
+    // Draft export failure should not block dialog close.
+  }
 }
 
 async function createExportedQuery(
@@ -273,39 +278,32 @@ function StructureEditorSurface({
   )
 }
 
-export function StructureSearchDialog({
-  open,
-  initialMolblock,
-  keepMounted = false,
-  manualEditTarget,
-  onOpenChange,
-  onManualSaved,
-  onResults,
-}: Readonly<StructureSearchDialogProps>) {
+function useKetcherMoleculeLoader(params: {
+  open: boolean
+  manualEditTarget?: ManualStructureEditTarget | null
+  manualTargetKey: string | null
+  initialMolblock?: string | null
+  onError: (message: string) => void
+}) {
+  const { open, manualEditTarget, manualTargetKey, initialMolblock, onError } = params
   const ketcherRef = useRef<Ketcher | null>(null)
   const loadedModeRef = useRef<'search' | 'manual'>('search')
   const loadedManualKeyRef = useRef<string | null>(null)
   const loadedSearchMolblockRef = useRef<string | null>(null)
   const searchMolblockBeforeManualRef = useRef<string | null>(null)
-  const [searchingMode, setSearchingMode] = useState<StructureSearchMode | null>(null)
-  const [savingManual, setSavingManual] = useState(false)
   const [editorReady, setEditorReady] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const manualTargetKey = getManualTargetKey(manualEditTarget)
-  const isManualMode = Boolean(manualEditTarget)
 
   const loadMolecule = useCallback((molblock: string, mode: 'search' | 'manual') => {
     const ketcher = ketcherRef.current
     if (!ketcher) return Promise.resolve(false)
-
     return ketcher.setMolecule(molblock).then(() => {
       loadedModeRef.current = mode
       return true
     }).catch(() => {
-      setError('结构载入失败，请重新绘制')
+      onError('结构载入失败，请重新绘制')
       return false
     })
-  }, [])
+  }, [onError])
 
   const loadManualMolecule = useCallback((
     target: ManualStructureEditTarget,
@@ -320,7 +318,7 @@ export function StructureSearchDialog({
       return
     }
     ketcherRef.current?.getMolfile('v3000').then((molblock) => {
-      searchMolblockBeforeManualRef.current = normalizeExportedQuery(molblock) || null
+      searchMolblockBeforeManualRef.current = molblock?.trim() ? molblock : null
     }).catch(() => {
       searchMolblockBeforeManualRef.current = null
     }).finally(loadTarget)
@@ -328,8 +326,41 @@ export function StructureSearchDialog({
 
   const handleEditorInit = useCallback((ketcher: Ketcher) => {
     ketcherRef.current = ketcher
-    setEditorReady(true)
-  }, [])
+
+    const isManual = Boolean(manualEditTarget)
+    const molblockToLoad = isManual
+      ? manualEditTarget?.molblock ?? ''
+      : initialMolblock ?? ''
+
+    const markReady = () => {
+      setEditorReady(true)
+    }
+
+    if (!molblockToLoad) {
+      loadedModeRef.current = isManual ? 'manual' : 'search'
+      if (isManual && manualTargetKey) {
+        loadedManualKeyRef.current = manualTargetKey
+      } else {
+        loadedSearchMolblockRef.current = ''
+      }
+      markReady()
+      return
+    }
+
+    ketcher.setMolecule(molblockToLoad)
+      .then(() => {
+        loadedModeRef.current = isManual ? 'manual' : 'search'
+        if (isManual && manualTargetKey) {
+          loadedManualKeyRef.current = manualTargetKey
+        } else {
+          loadedSearchMolblockRef.current = molblockToLoad
+        }
+      })
+      .catch(() => {
+        onError('结构载入失败，请重新绘制')
+      })
+      .finally(markReady)
+  }, [initialMolblock, manualEditTarget, manualTargetKey, onError])
 
   useEffect(() => {
     if (!open || !editorReady || !manualEditTarget || !manualTargetKey) return
@@ -344,22 +375,51 @@ export function StructureSearchDialog({
     searchMolblockBeforeManualRef.current = null
   }, [editorReady, initialMolblock, loadMolecule, manualEditTarget, open])
 
-  useEffect(() => {
-    if (!open || !editorReady || manualEditTarget || !initialMolblock) return undefined
-    if (loadedSearchMolblockRef.current === initialMolblock) return undefined
+  return { ketcherRef, editorReady, handleEditorInit }
+}
 
-    return scheduleAfterEditorPaint(() => {
-      const molblockToLoad = initialMolblock
-      if (loadedSearchMolblockRef.current === molblockToLoad) return
-      loadMolecule(molblockToLoad, 'search').then((loaded) => {
-        if (loaded) loadedSearchMolblockRef.current = molblockToLoad
-      })
-    })
-  }, [editorReady, initialMolblock, loadMolecule, manualEditTarget, open])
+export function StructureSearchDialog({
+  open,
+  initialMolblock,
+  keepMounted = false,
+  manualEditTarget,
+  onOpenChange,
+  onDraftChange,
+  onManualSaved,
+  onResults,
+}: Readonly<StructureSearchDialogProps>) {
+  const manualTargetKey = getManualTargetKey(manualEditTarget)
+  const isManualMode = Boolean(manualEditTarget)
+  const [searchingMode, setSearchingMode] = useState<StructureSearchMode | null>(null)
+  const [savingManual, setSavingManual] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const { ketcherRef, editorReady, handleEditorInit } = useKetcherMoleculeLoader({
+    open,
+    manualEditTarget,
+    manualTargetKey,
+    initialMolblock,
+    onError: setError,
+  })
 
   const handleEditorError = useCallback((message: string) => {
     setError(message || '结构编辑器出错')
   }, [])
+
+  const handleDialogOpenChange = useCallback((nextOpen: boolean) => {
+    if (nextOpen) {
+      onOpenChange(true)
+      return
+    }
+    if (manualEditTarget) {
+      onOpenChange(false)
+      return
+    }
+
+    trySaveStructureDraft(ketcherRef.current, onDraftChange).then(() => {
+      onOpenChange(false)
+    })
+  }, [ketcherRef, manualEditTarget, onDraftChange, onOpenChange])
 
   const handleSearch = useCallback(async (matchMode: StructureSearchMode) => {
     setError(null)
@@ -380,7 +440,7 @@ export function StructureSearchDialog({
     } finally {
       setSearchingMode(null)
     }
-  }, [onOpenChange, onResults])
+  }, [ketcherRef, onOpenChange, onResults])
 
   const handleManualSave = useCallback(async () => {
     if (!manualEditTarget) return
@@ -406,10 +466,10 @@ export function StructureSearchDialog({
     } finally {
       setSavingManual(false)
     }
-  }, [manualEditTarget, onManualSaved, onOpenChange])
+  }, [ketcherRef, manualEditTarget, onManualSaved, onOpenChange])
 
   return (
-    <Dialog open={open} keepMounted={keepMounted} onOpenChange={onOpenChange}>
+    <Dialog open={open} keepMounted={keepMounted} onOpenChange={handleDialogOpenChange}>
       <DialogContent aria-describedby={undefined} className="flex h-[82vh] max-h-[820px] w-[94vw] max-w-[1180px] flex-col overflow-hidden p-3 md:w-[88vw] md:p-4">
         <DialogHeader className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <DialogTitle className="mb-0 px-3 py-1.5">
@@ -420,7 +480,7 @@ export function StructureSearchDialog({
             isManualMode={isManualMode}
             savingManual={savingManual}
             searchingMode={searchingMode}
-            onClose={() => onOpenChange(false)}
+            onClose={() => handleDialogOpenChange(false)}
             onManualSave={handleManualSave}
             onSearch={handleSearch}
           />

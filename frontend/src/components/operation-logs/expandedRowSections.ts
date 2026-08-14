@@ -400,8 +400,7 @@ function buildSearchSections(fullData: LogRecord): DetailSection[] {
   return [
     section('搜索日志', [
       field('端点', fullData.endpoint),
-      field('关键词', firstValue(fullData.query, fullData.normalized_query)),
-      field('标准化关键词', fullData.normalized_query),
+      field('关键词', fullData.normalized_query),
       field('筛选条件', formatRecord(fullData.filters), {
         visible: hasValue(formatRecord(fullData.filters)),
       }),
