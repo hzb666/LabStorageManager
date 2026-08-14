@@ -37,7 +37,7 @@ interface DialogContentProps
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ children, className, ...props }, ref) => {
+>(({ children, className, onOpenAutoFocus, ...props }, ref) => {
   const { keepMounted, open } = React.useContext(DialogMountContext)
   const forceMount = keepMounted ? true : undefined
 
@@ -53,6 +53,29 @@ export const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         forceMount={forceMount}
+        onOpenAutoFocus={(e) => {
+          onOpenAutoFocus?.(e)
+          if (!e.defaultPrevented) {
+            requestAnimationFrame(() => {
+              const el = document.activeElement
+
+              if (el instanceof HTMLTextAreaElement) {
+                const end = el.value.length
+                el.setSelectionRange(end, end)
+                return
+              }
+
+              if (
+                el instanceof HTMLInputElement &&
+                ["text", "search", "password"].includes(el.type) &&
+                el.value
+              ) {
+                const end = el.value.length
+                el.setSelectionRange(end, end)
+              }
+            })
+          }
+        }}
         className={cn(
           "fixed left-1/2 top-1/2 z-50 w-[90%] max-h-[90vh] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-border bg-card p-6 text-popover-foreground shadow-lg md:w-auto md:min-w-md",
           keepMounted && !open && "hidden pointer-events-none",
