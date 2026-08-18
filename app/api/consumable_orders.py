@@ -155,6 +155,15 @@ VALID_CONSUMABLE_SORT_FIELDS = {
     "updated_at",
     *APPLICANT_SORT_KEYS,
 }
+CONSUMABLE_ORDER_SORT_FIELD_MAP = {
+    "name": ConsumableOrder.name_pinyin,
+    "name_pinyin": ConsumableOrder.name_pinyin,
+    "quantity": ConsumableOrder.quantity,
+    "price": ConsumableOrder.price,
+    "status": ConsumableOrder.status,
+    "created_at": ConsumableOrder.created_at,
+    "updated_at": ConsumableOrder.updated_at,
+}
 CONSUMABLE_ORDER_SEARCH_SQL_FIELD_MAP = {
     "name": [
         ConsumableOrder.name,
@@ -570,16 +579,6 @@ def list_consumable_orders(
     base = select(ConsumableOrder)
 
     # 排序处理
-    sort_field_map = {
-        "name": ConsumableOrder.name,
-        "name_pinyin": ConsumableOrder.name_pinyin,
-        "quantity": ConsumableOrder.quantity,
-        "price": ConsumableOrder.price,
-        "status": ConsumableOrder.status,
-        "created_at": ConsumableOrder.created_at,
-        "updated_at": ConsumableOrder.updated_at,
-    }
-
     # 处理申请人排序（需要 JOIN User 表）
     use_applicant_join = sort_by in APPLICANT_SORT_KEYS
 
@@ -612,21 +611,29 @@ def list_consumable_orders(
             match_mode,
             segmented_terms,
         )
-        order_column = sort_field_map.get(sort_by, ConsumableOrder.created_at)
+        order_column = CONSUMABLE_ORDER_SORT_FIELD_MAP.get(sort_by, ConsumableOrder.created_at)
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
 
     order_direction = sort_order.lower() if sort_order else "desc"
 
-    order_expr = order_with_nulls_last(order_column, order_direction)
+    if sort_by == "created_at":
+        order_expr = (
+            (ConsumableOrder.created_at.asc(),)
+            if order_direction == "asc"
+            else (ConsumableOrder.created_at.desc(),)
+        )
+    else:
+        order_expr = order_with_nulls_last(order_column, order_direction)
 
-    secondary_order = ConsumableOrder.created_at.desc()
-
-    # 第三级排序：按ID降序（确保排序完全稳定）
-    tertiary_order = ConsumableOrder.id.desc()
+    stable_order = (
+        (ConsumableOrder.id.desc(),)
+        if sort_by == "created_at"
+        else (ConsumableOrder.created_at.desc(), ConsumableOrder.id.desc())
+    )
 
     if limit > 0:
-        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+        orders = db.exec(base.order_by(*order_expr, *stable_order).offset(skip).limit(limit)).all()
     else:
         orders = []
 

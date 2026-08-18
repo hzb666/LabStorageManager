@@ -18,6 +18,8 @@ from app.db_bootstrap.schema_upgrades import (
     ensure_sqlite_compound_structure_cache_name_columns,
     ensure_sqlite_inventory_quantity_statuses,
     ensure_sqlite_log_timeline_detail_search_text,
+    ensure_sqlite_reagent_order_category_pinyin_columns_removed,
+    ensure_sqlite_reagent_order_constraints,
 )
 from app.db_bootstrap.sqlite_fts import (
     check_sqlite_fts_consistency,
@@ -102,9 +104,11 @@ def init_db() -> None:
         ensure_sqlite_log_timeline_detail_search_text(connection)
         ensure_sqlite_compound_structure_cache_name_columns(connection)
         ensure_sqlite_inventory_quantity_statuses(connection)
+        ensure_sqlite_reagent_order_category_pinyin_columns_removed(connection)
         ensure_structure_index_schema(connection)
         check_sqlite_common_shelf_groups_consistency(connection)
         ensure_sqlite_performance_indexes(connection)
+        ensure_sqlite_reagent_order_constraints(connection)
         ensure_log_timeline_source_delete_triggers(connection)
         cleanup_orphan_log_timeline_rows(connection)
         ensure_sqlite_inventory_fts(connection)

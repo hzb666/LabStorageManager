@@ -66,6 +66,10 @@ from app.services.order_status_times import (
     get_order_status_time_fields,
     get_reagent_order_status_times,
 )
+from app.services.reagent_order_validation import (
+    ensure_common_public_order_master_data,
+    get_cas_master_data,
+)
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.search_completion_db import (
     INVENTORY_COMPLETION_ENDPOINT,
@@ -335,28 +339,36 @@ def _normalize_required_storage_location(storage_location: Optional[str]) -> str
 
 
 def _apply_order_pinyin_updates(order: ReagentOrder, *, update_data: dict[str, Any]) -> None:
-    # 名称/分类/品牌变更后同步刷新订单拼音字段。
-    if not any(key in update_data for key in ("name", "category", "brand")):
+    # 名称/品牌变更后同步刷新订单拼音字段。
+    if not any(key in update_data for key in ("name", "brand")):
         return
     pinyin_fields = compute_pinyin_fields(
         name=update_data.get("name", order.name),
-        category=update_data.get("category", order.category),
         brand=update_data.get("brand", order.brand),
     )
     update_data["name_pinyin"] = pinyin_fields.get("name_pinyin")
     update_data["name_pinyin_initials"] = pinyin_fields.get("name_pinyin_initials")
-    update_data["category_pinyin"] = pinyin_fields.get("category_pinyin")
-    update_data["category_pinyin_initials"] = pinyin_fields.get("category_pinyin_initials")
     update_data["brand_pinyin"] = pinyin_fields.get("brand_pinyin")
     update_data["brand_pinyin_initials"] = pinyin_fields.get("brand_pinyin_initials")
 
 
 def _apply_workflow_order_updates(
+    db: Session,
     order: ReagentOrder,
     payload: ReagentWorkflowEditableFields,
 ) -> Optional[ReagentOrder]:
     # 返回更新前快照用于审计；没有实际字段变化时不生成日志。
     update_data = _normalize_workflow_order_updates(payload)
+    if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
+        master_data = get_cas_master_data(db, cas_number=order.cas_number)
+        if master_data is not None:
+            update_data.update({
+                "name": master_data.name,
+                "english_name": master_data.english_name,
+                "alias": master_data.alias_1,
+                "category": None,
+                "is_hazardous": False,
+            })
     _apply_order_pinyin_updates(order, update_data=update_data)
     if not update_data:
         return None
@@ -606,6 +618,12 @@ def _register_approval_routes(
                 detail=f"Cannot approve order with status: {order.status}",
             )
 
+        ensure_common_public_order_master_data(
+            db,
+            cas_number=order.cas_number,
+            order_reason=order.order_reason,
+        )
+
         before_order = ReagentOrder.model_validate(order)
         _claim_reagent_order_status_transition_from(
             db,
@@ -707,7 +725,7 @@ def _register_arrival_routes(
                 detail=f"Cannot confirm arrival for order with status: {order.status}. Order must be APPROVED first.",
             )
 
-        before_order = _apply_workflow_order_updates(order, body)
+        before_order = _apply_workflow_order_updates(db, order, body)
         _ensure_workflow_order_brand(order)
         _validate_positive_remaining_quantity(
             body.remaining_quantity,
@@ -719,6 +737,11 @@ def _register_arrival_routes(
             ReagentOrderStatus.STOCKED
             if order.order_reason == ReagentOrderReason.COMMON_PUBLIC or direct_storage_location
             else ReagentOrderStatus.ARRIVED
+        )
+        ensure_common_public_order_master_data(
+            db,
+            cas_number=order.cas_number,
+            order_reason=order.order_reason,
         )
         _claim_reagent_order_status_transition(
             db,
@@ -1250,7 +1273,7 @@ def _register_stock_in_route(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ORDER_NOT_FOUND)
 
         _validate_stock_in_order_access(order, current_user=current_user)
-        before_order = _apply_workflow_order_updates(order, payload)
+        before_order = _apply_workflow_order_updates(db, order, payload)
         _ensure_workflow_order_brand(order)
         _validate_stock_in_order(order, payload=payload)
         stock_context = _build_stock_in_context(order, payload)

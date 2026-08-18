@@ -278,11 +278,7 @@ def process_row(row_data: dict, user_map: dict) -> dict:
     order_time_val = parse_date(order_time)
     
     # 计算拼音字段
-    pinyin_fields = compute_pinyin_fields(
-        name=name,
-        category=category,
-        brand=brand,
-    )
+    pinyin_fields = compute_pinyin_fields(name=name, brand=brand)
     
     return {
         'cas_number': cas_number if cas_number else '',
@@ -300,8 +296,6 @@ def process_row(row_data: dict, user_map: dict) -> dict:
         'created_at': order_time_val,
         'name_pinyin': pinyin_fields.get('name_pinyin'),
         'name_pinyin_initials': pinyin_fields.get('name_pinyin_initials'),
-        'category_pinyin': pinyin_fields.get('category_pinyin'),
-        'category_pinyin_initials': pinyin_fields.get('category_pinyin_initials'),
         'brand_pinyin': pinyin_fields.get('brand_pinyin'),
         'brand_pinyin_initials': pinyin_fields.get('brand_pinyin_initials'),
     }
@@ -379,9 +373,8 @@ def main():
     INSERT INTO reagent_order (
         cas_number, name, english_name, category, brand, initial_quantity, unit,
         quantity, price, order_reason, applicant_id, status, created_at, updated_at,
-        name_pinyin, name_pinyin_initials, category_pinyin, category_pinyin_initials,
-        brand_pinyin, brand_pinyin_initials, is_hazardous
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        name_pinyin, name_pinyin_initials, brand_pinyin, brand_pinyin_initials, is_hazardous
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -407,8 +400,6 @@ def main():
                 now,
                 record.get('name_pinyin'),
                 record.get('name_pinyin_initials'),
-                record.get('category_pinyin'),
-                record.get('category_pinyin_initials'),
                 record.get('brand_pinyin'),
                 record.get('brand_pinyin_initials'),
                 0,  # is_hazardous 默认值

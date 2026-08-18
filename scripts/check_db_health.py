@@ -56,7 +56,6 @@ PINYIN_MAPPINGS = {
     ],
     "reagent_order": [
         ("name", "name_pinyin", "name_pinyin_initials"),
-        ("category", "category_pinyin", "category_pinyin_initials"),
         ("brand", "brand_pinyin", "brand_pinyin_initials"),
     ],
     "consumable_order": [

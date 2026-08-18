@@ -16,30 +16,36 @@ SQLITE_BORROWLOG_INDEX_UPGRADES: tuple[str, ...] = (
 SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
     # 库存可搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_inventory_cas_number_created_at_id ON inventory (cas_number, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_cas_number_desc_created_at_id ON inventory (cas_number DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_name_pinyin_created_at_id ON inventory (name_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_name_pinyin_desc_created_at_id ON inventory (name_pinyin DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_name_pinyin_initials_created_at_id ON inventory (name_pinyin_initials, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_category_pinyin_created_at_id ON inventory (category_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_category_pinyin_desc_created_at_id ON inventory (category_pinyin DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_category_pinyin_initials_created_at_id ON inventory (category_pinyin_initials, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_brand_pinyin_created_at_id ON inventory (brand_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_brand_pinyin_desc_created_at_id ON inventory (brand_pinyin DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_brand_pinyin_initials_created_at_id ON inventory (brand_pinyin_initials, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_created_at_id ON inventory (storage_location, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_pinyin_created_at_id ON inventory (storage_location_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_pinyin_desc_created_at_id ON inventory (storage_location_pinyin DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_storage_location_pinyin_initials_created_at_id ON inventory (storage_location_pinyin_initials, created_at DESC, id DESC)",
     # 试剂订单原文与拼音搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_cas_number_created_at_id ON reagent_order (cas_number, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_cas_number_desc_created_at_id ON reagent_order (cas_number DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_created_at_id ON reagent_order (name, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_reagent_order_category_created_at_id ON reagent_order (category, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_created_at_id ON reagent_order (brand, created_at DESC, id DESC)",
     # 试剂订单拼音搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_pinyin_created_at_id ON reagent_order (name_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_pinyin_desc_created_at_id ON reagent_order (name_pinyin DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_name_pinyin_initials_created_at_id ON reagent_order (name_pinyin_initials, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_reagent_order_category_pinyin_created_at_id ON reagent_order (category_pinyin, created_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS ix_reagent_order_category_pinyin_initials_created_at_id ON reagent_order (category_pinyin_initials, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_pinyin_created_at_id ON reagent_order (brand_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_pinyin_desc_created_at_id ON reagent_order (brand_pinyin DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_brand_pinyin_initials_created_at_id ON reagent_order (brand_pinyin_initials, created_at DESC, id DESC)",
     # 耗材订单原文与拼音搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_created_at_id ON consumable_order (name, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_created_at_id ON consumable_order (name_pinyin, created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_desc_created_at_id ON consumable_order (name_pinyin DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_name_pinyin_initials_created_at_id ON consumable_order (name_pinyin_initials, created_at DESC, id DESC)",
     # 化学名称映射拼音搜索字段。
     "CREATE INDEX IF NOT EXISTS ix_chemical_name_map_name_pinyin ON chemical_name_map (name_pinyin)",
@@ -60,6 +66,7 @@ SQLITE_PERFORMANCE_SEARCH_INDEX_UPGRADES: tuple[str, ...] = (
 SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
     # 库存筛选、排序与操作链路。
     "CREATE INDEX IF NOT EXISTS ix_inventory_created_at_id ON inventory (created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_created_at_asc_id_desc ON inventory (created_at ASC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_status_created_at_id ON inventory (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_remaining_percent_created_at_id ON inventory (remaining_percent DESC, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_inventory_borrower_status_updated_at ON inventory (borrower_id, status, updated_at DESC)",
@@ -105,9 +112,11 @@ SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES: tuple[str, ...] = (
     *SQLITE_BORROWLOG_INDEX_UPGRADES,
     # 试剂/耗材列表的状态与申请人筛选。
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_created_at_id ON reagent_order (created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_reagent_order_created_at_asc_id_desc ON reagent_order (created_at ASC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_status_created_at_id ON reagent_order (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_reagent_order_applicant_created_at_id ON reagent_order (applicant_id, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_created_at_id ON consumable_order (created_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_consumable_order_created_at_asc_id_desc ON consumable_order (created_at ASC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_status_created_at_id ON consumable_order (status, created_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS ix_consumable_order_applicant_created_at_id ON consumable_order (applicant_id, created_at DESC, id DESC)",
     # 其他模块。
@@ -154,6 +163,12 @@ SQLITE_PERFORMANCE_INDEX_UPGRADES: tuple[str, ...] = (
     + SQLITE_PERFORMANCE_FILTER_SORT_INDEX_UPGRADES
 )
 
+SQLITE_OBSOLETE_PERFORMANCE_INDEXES: tuple[str, ...] = (
+    "ix_reagent_order_category_created_at_id",
+    "ix_reagent_order_category_pinyin_created_at_id",
+    "ix_reagent_order_category_pinyin_initials_created_at_id",
+)
+
 def _extract_index_name_from_create_statement(statement: str) -> str | None:
     match = re.search(
         r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)",
@@ -198,6 +213,9 @@ def _ensure_sqlite_index_statement(connection: Connection, create_statement: str
     return False
 
 def ensure_sqlite_performance_indexes(connection: Connection) -> None:
+    for index_name in SQLITE_OBSOLETE_PERFORMANCE_INDEXES:
+        _drop_sqlite_index_if_exists(connection, index_name)
+
     rebuilt_indexes = 0
     for statement in SQLITE_PERFORMANCE_INDEX_UPGRADES:
         if _ensure_sqlite_index_statement(connection, statement):

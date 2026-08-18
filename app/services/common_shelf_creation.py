@@ -151,9 +151,10 @@ def _create_common_shelf_rows(
         select(ChemicalNameMap.id).where(ChemicalNameMap.cas_number == cas_number).limit(1)
     ).first()
     if cas_mapping_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise api_error(
+            status_code=status.HTTP_409_CONFLICT,
             detail="CAS master data not found",
+            code=ApiErrorCode.COMMON_PUBLIC_MASTER_DATA_REQUIRED,
         )
 
     normalized_brand = require_common_shelf_brand(brand)

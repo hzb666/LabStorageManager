@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, Enum as SAEnum, Index
+from sqlalchemy import Column, Enum as SAEnum, Index, asc, desc
 from app.core.constants import MAX_BOTTLES_PER_IMPORT
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
@@ -45,37 +45,68 @@ class Inventory(InventoryBase, table=True):
     """Inventory database model - Individual item tracking"""
     __table_args__ = (
         # 搜索和排序加速：使用可命中 B-Tree 的索引。
-        Index("ix_inventory_cas_number_created_at_id", "cas_number", "created_at", "id"),
-        Index("ix_inventory_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
-        Index("ix_inventory_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),
-        Index("ix_inventory_category_pinyin_created_at_id", "category_pinyin", "created_at", "id"),
-        Index("ix_inventory_category_pinyin_initials_created_at_id", "category_pinyin_initials", "created_at", "id"),
-        Index("ix_inventory_brand_pinyin_created_at_id", "brand_pinyin", "created_at", "id"),
-        Index("ix_inventory_brand_pinyin_initials_created_at_id", "brand_pinyin_initials", "created_at", "id"),
-        Index("ix_inventory_storage_location_created_at_id", "storage_location", "created_at", "id"),
-        Index("ix_inventory_storage_location_pinyin_created_at_id", "storage_location_pinyin", "created_at", "id"),
+        Index("ix_inventory_cas_number_created_at_id", asc("cas_number"), desc("created_at"), desc("id")),
+        Index(
+            "ix_inventory_cas_number_desc_created_at_id",
+            desc("cas_number"),
+            desc("created_at"),
+            desc("id"),
+        ),
+        Index("ix_inventory_name_pinyin_created_at_id", asc("name_pinyin"), desc("created_at"), desc("id")),
+        Index(
+            "ix_inventory_name_pinyin_desc_created_at_id",
+            desc("name_pinyin"),
+            desc("created_at"),
+            desc("id"),
+        ),
+        Index("ix_inventory_name_pinyin_initials_created_at_id", asc("name_pinyin_initials"), desc("created_at"), desc("id")),
+        Index("ix_inventory_category_pinyin_created_at_id", asc("category_pinyin"), desc("created_at"), desc("id")),
+        Index("ix_inventory_category_pinyin_initials_created_at_id", asc("category_pinyin_initials"), desc("created_at"), desc("id")),
+        Index(
+            "ix_inventory_category_pinyin_desc_created_at_id",
+            desc("category_pinyin"),
+            desc("created_at"),
+            desc("id"),
+        ),
+        Index("ix_inventory_brand_pinyin_created_at_id", asc("brand_pinyin"), desc("created_at"), desc("id")),
+        Index(
+            "ix_inventory_brand_pinyin_desc_created_at_id",
+            desc("brand_pinyin"),
+            desc("created_at"),
+            desc("id"),
+        ),
+        Index("ix_inventory_brand_pinyin_initials_created_at_id", asc("brand_pinyin_initials"), desc("created_at"), desc("id")),
+        Index("ix_inventory_storage_location_created_at_id", asc("storage_location"), desc("created_at"), desc("id")),
+        Index("ix_inventory_storage_location_pinyin_created_at_id", asc("storage_location_pinyin"), desc("created_at"), desc("id")),
+        Index(
+            "ix_inventory_storage_location_pinyin_desc_created_at_id",
+            desc("storage_location_pinyin"),
+            desc("created_at"),
+            desc("id"),
+        ),
         Index(
             "ix_inventory_storage_location_pinyin_initials_created_at_id",
-            "storage_location_pinyin_initials",
-            "created_at",
-            "id",
+            asc("storage_location_pinyin_initials"),
+            desc("created_at"),
+            desc("id"),
         ),
         Index(
             "ix_inventory_remaining_percent_created_at_id",
-            "remaining_percent",
-            "created_at",
-            "id",
+            desc("remaining_percent"),
+            desc("created_at"),
+            desc("id"),
         ),
-        Index("ix_inventory_created_at_id", "created_at", "id"),
-        Index("ix_inventory_status_created_at_id", "status", "created_at", "id"),
-        Index("ix_inventory_borrower_status_updated_at", "borrower_id", "status", "updated_at"),
+        Index("ix_inventory_created_at_id", desc("created_at"), desc("id")),
+        Index("ix_inventory_created_at_asc_id_desc", asc("created_at"), desc("id")),
+        Index("ix_inventory_status_created_at_id", asc("status"), desc("created_at"), desc("id")),
+        Index("ix_inventory_borrower_status_updated_at", asc("borrower_id"), asc("status"), desc("updated_at")),
         Index(
             "ix_inventory_keeper_location_created_at",
-            "temporary_keeper_id",
-            "storage_location",
-            "created_at",
+            asc("temporary_keeper_id"),
+            asc("storage_location"),
+            desc("created_at"),
         ),
-        Index("ix_inventory_created_by_created_at_id", "created_by_id", "created_at", "id"),
+        Index("ix_inventory_created_by_created_at_id", asc("created_by_id"), desc("created_at"), desc("id")),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -177,7 +208,7 @@ class InventoryUpdate(SQLModel):
     brand: Optional[str] = None
     purity: Optional[str] = None
     is_hazardous: Optional[bool] = None
-    # 规格字段：前端传入规格字符串（如 "500ml"），后端用 parse_specification 解析
+    # 规格字段：前端传入规格字符串（如 "500mL"），后端用 parse_specification 解析
     specification: Optional[str] = Field(default=None, max_length=50)
 
     @field_validator("name", "cas_number", "brand", "specification", mode="before")
@@ -236,7 +267,7 @@ class InventoryResponse(BaseResponse):
     notes: Optional[str]
     created_at: datetime
     updated_at: datetime
-    # 计算字段：规格，如 "500ml"
+    # 计算字段：规格，如 "500mL"
     specification: Optional[str] = None
     # 计算字段：用户名称
     borrower_name: Optional[str] = None
@@ -290,7 +321,7 @@ class ManualInventoryCreate(SQLModel):
     name: str = Field(max_length=200)
     english_name: Optional[str] = None
     alias: Optional[str] = None
-    specification: str = Field(max_length=50)  # e.g., "500ml"
+    specification: str = Field(max_length=50)  # e.g., "500mL"
     initial_quantity: Optional[float] = None  # Optional - derived from specification
     quantity_bottles: int = Field(default=1, ge=1, le=MAX_BOTTLES_PER_IMPORT)  # Number of bottles: 1-99
     storage_location: Optional[str] = None

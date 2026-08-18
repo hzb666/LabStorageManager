@@ -39,7 +39,7 @@ import type {
 } from '@/api/structureSearchApi'
 import type { ManualStructureEditTarget } from '@/components/chem/StructureSearchDialog'
 import { isStructureSearchFeatureEnabled } from '@/lib/apiConfig'
-import { formatDate, processNotes } from '@/lib/utils'
+import { processNotes } from '@/lib/utils'
 import { useExportDownload } from '@/hooks/useExportDownload'
 import {
   InventoryFormSchema,
@@ -657,7 +657,7 @@ function InventoryExpandedRow({
         <div>别名：{item.alias || '-'}</div>
         <NoteDisplay className="col-span-2" label="备注" text={item.notes ?? undefined} />
         <div>纯度：{item.purity || '-'}</div>
-        <div>入库时间：{formatDate(item.created_at)}</div>
+        <div>分类：{item.category || '-'}</div>
         <div>入库用户：{item.created_by_name || '-'}</div>
         <div className="min-w-0">
           <div className="relative inline-block max-w-[calc(100%-clamp(4rem,7vw,6rem))] align-top">

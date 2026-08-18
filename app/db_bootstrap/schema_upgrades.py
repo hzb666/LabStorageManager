@@ -8,6 +8,7 @@ from sqlalchemy import Connection, text
 
 from app.core.constants import LOW_STOCK_PERCENT
 from app.models.inventory import InventoryStatus
+from app.models.reagent_order import ReagentOrderStatus
 from app.services import pinyin_utils
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,55 @@ WHERE status IN (:in_stock_status, :run_short_status)
       ELSE :in_stock_status
   END
 """
+
+SQLITE_REAGENT_ORDER_CONSTRAINT_TRIGGERS: tuple[str, ...] = (
+    f"""
+    CREATE TRIGGER IF NOT EXISTS trg_chemical_name_map_bd_reagent_order
+    BEFORE DELETE ON chemical_name_map
+    FOR EACH ROW
+    WHEN EXISTS (
+        SELECT 1
+        FROM reagent_order
+        WHERE cas_number = OLD.cas_number
+          AND status != '{ReagentOrderStatus.STOCKED.value}'
+    )
+    BEGIN
+        SELECT RAISE(
+            ABORT,
+            'CAS master data is referenced by an unfinished reagent order and cannot be deleted'
+        );
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_reagent_order_bi_common_public_master_data
+    BEFORE INSERT ON reagent_order
+    FOR EACH ROW
+    WHEN NEW.order_reason = 'common_public'
+         AND NOT EXISTS (
+             SELECT 1 FROM chemical_name_map WHERE cas_number = NEW.cas_number
+         )
+    BEGIN
+        SELECT RAISE(ABORT, 'Common-public orders require CAS master data');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_reagent_order_bu_common_public_master_data
+    BEFORE UPDATE OF cas_number, order_reason ON reagent_order
+    FOR EACH ROW
+    WHEN NEW.order_reason = 'common_public'
+         AND NOT EXISTS (
+             SELECT 1 FROM chemical_name_map WHERE cas_number = NEW.cas_number
+         )
+    BEGIN
+        SELECT RAISE(ABORT, 'Common-public orders require CAS master data');
+    END
+    """,
+)
+
+SQLITE_REAGENT_ORDER_CATEGORY_PINYIN_COLUMNS = (
+    "category_pinyin",
+    "category_pinyin_initials",
+)
 
 
 def _quote_sqlite_identifier(identifier: str) -> str:
@@ -177,6 +227,34 @@ def ensure_sqlite_common_shelf_location_pinyin_columns(connection: Connection) -
         logger.info("Backfilled %d common shelf location pinyin rows.", updated_rows)
 
 
+def ensure_sqlite_reagent_order_category_pinyin_columns_removed(connection: Connection) -> None:
+    """Remove obsolete reagent-order category pinyin columns and FTS objects."""
+    existing_columns = _get_sqlite_table_columns(connection, "reagent_order")
+    obsolete_columns = [
+        column_name
+        for column_name in SQLITE_REAGENT_ORDER_CATEGORY_PINYIN_COLUMNS
+        if column_name in existing_columns
+    ]
+    if not obsolete_columns:
+        return
+
+    connection.execute(text("DROP TRIGGER IF EXISTS trg_reagent_order_fts_ai"))
+    connection.execute(text("DROP TRIGGER IF EXISTS trg_reagent_order_fts_ad"))
+    connection.execute(text("DROP TRIGGER IF EXISTS trg_reagent_order_fts_au"))
+    connection.execute(text("DROP TABLE IF EXISTS reagent_order_fts"))
+    for index_name in (
+        "ix_reagent_order_category_created_at_id",
+        "ix_reagent_order_category_pinyin_created_at_id",
+        "ix_reagent_order_category_pinyin_initials_created_at_id",
+    ):
+        connection.execute(text(f"DROP INDEX IF EXISTS {_quote_sqlite_identifier(index_name)}"))
+
+    for column_name in obsolete_columns:
+        quoted_column = _quote_sqlite_identifier(column_name)
+        connection.execute(text(f"ALTER TABLE reagent_order DROP COLUMN {quoted_column}"))
+        logger.info("Removed obsolete reagent_order.%s column.", column_name)
+
+
 def ensure_sqlite_log_timeline_detail_search_text(connection: Connection) -> None:
     """Ensure timeline detail search text exists and is populated for existing rows."""
     existing_columns = _get_sqlite_table_columns(connection, "log_timeline")
@@ -217,3 +295,11 @@ def ensure_sqlite_inventory_quantity_statuses(connection: Connection) -> None:
     )
     if result.rowcount > 0:
         logger.info("Aligned %d inventory quantity status rows.", result.rowcount)
+
+
+def ensure_sqlite_reagent_order_constraints(connection: Connection) -> None:
+    """Ensure CAS master data and reagent order invariants are database-enforced."""
+    # Rebuild this trigger so existing SQLite databases receive updated delete semantics.
+    connection.execute(text("DROP TRIGGER IF EXISTS trg_chemical_name_map_bd_reagent_order"))
+    for statement in SQLITE_REAGENT_ORDER_CONSTRAINT_TRIGGERS:
+        connection.execute(text(statement))

@@ -96,7 +96,7 @@ function renderHazardousNameCell(
 
 /**
  * 库存表格列配置
- * 包含：CAS号、名称、位置、分类、品牌、剩余/规格、状态
+ * 包含：CAS号、名称、位置、品牌、剩余/规格、入库时间、状态
  */
 export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
   return [
@@ -109,7 +109,7 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
     }),
     columnHelper.accessor('name', {
       header: '名称',
-      size: 250,
+      size: 260,
       minSize: 200,
       maxSize: 500,
       cell: info => renderHazardousNameCell(info),
@@ -127,13 +127,6 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
           fallback: '-',
           className: 'break-all',
         }),
-    }),
-    columnHelper.accessor('category', {
-      header: '分类',
-      size: 100,
-      minSize: 80,
-      maxSize: 150,
-      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('brand', {
       header: '品牌',
@@ -155,6 +148,14 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
           specification={safeString(info.row.original.specification, '')}
         />
       ),
+    }),
+    columnHelper.accessor('created_at', {
+      header: '入库时间',
+      size: 120,
+      minSize: 100,
+      maxSize: 180,
+      sortDescFirst: true,
+      cell: info => renderHighlightedDateCell(info, { dateOnly: true }),
     }),
     columnHelper.accessor('status', {
       header: '状态',
@@ -226,7 +227,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-' }),
     }),
     columnHelper.accessor('created_at', {
-      header: '时间',
+      header: '申购时间',
       size: 80,
       minSize: 70,
       maxSize: 120,
@@ -257,14 +258,14 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
   return [
     columnHelper.accessor('name', {
       header: '名称',
-      size: 200,
+      size: 180,
       minSize: 150,
       maxSize: 250,
       cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
     }),
     columnHelper.accessor('specification', {
       header: '规格',
-      size: 300,
+      size: 280,
       minSize: 150,
       maxSize: 350,
       enableSorting: false,
@@ -292,7 +293,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
     }),
     columnHelper.accessor('communication', {
       header: '订购信息',
-      size: 100,
+      size: 120,
       minSize: 80,
       maxSize: 200,
       enableSorting: false,

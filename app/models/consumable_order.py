@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, Enum as SAEnum, Index
+from sqlalchemy import Column, Enum as SAEnum, Index, asc, desc
 from sqlmodel import Field, SQLModel
 
 
@@ -27,7 +27,7 @@ class ConsumableOrderBase(SQLModel):
     english_name: Optional[str] = Field(None, max_length=200)
     # 货号
     product_number: Optional[str] = Field(None, max_length=200)
-    # 规格型号，如 "500ml"、M 码
+    # 规格型号，如 "500mL"、M 码
     specification: Optional[str] = Field(default=None, max_length=100)
     # 单位，如 "箱"、"个"，选填
     unit: Optional[str] = Field(None, max_length=20)
@@ -45,12 +45,19 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
     """Consumable Order database model"""
     __tablename__ = "consumable_order"
     __table_args__ = (
-        Index("ix_consumable_order_name_created_at_id", "name", "created_at", "id"),
-        Index("ix_consumable_order_name_pinyin_created_at_id", "name_pinyin", "created_at", "id"),
-        Index("ix_consumable_order_name_pinyin_initials_created_at_id", "name_pinyin_initials", "created_at", "id"),
-        Index("ix_consumable_order_created_at_id", "created_at", "id"),
-        Index("ix_consumable_order_status_created_at_id", "status", "created_at", "id"),
-        Index("ix_consumable_order_applicant_created_at_id", "applicant_id", "created_at", "id"),
+        Index("ix_consumable_order_name_created_at_id", asc("name"), desc("created_at"), desc("id")),
+        Index("ix_consumable_order_name_pinyin_created_at_id", asc("name_pinyin"), desc("created_at"), desc("id")),
+        Index(
+            "ix_consumable_order_name_pinyin_desc_created_at_id",
+            desc("name_pinyin"),
+            desc("created_at"),
+            desc("id"),
+        ),
+        Index("ix_consumable_order_name_pinyin_initials_created_at_id", asc("name_pinyin_initials"), desc("created_at"), desc("id")),
+        Index("ix_consumable_order_created_at_id", desc("created_at"), desc("id")),
+        Index("ix_consumable_order_created_at_asc_id_desc", asc("created_at"), desc("id")),
+        Index("ix_consumable_order_status_created_at_id", asc("status"), desc("created_at"), desc("id")),
+        Index("ix_consumable_order_applicant_created_at_id", asc("applicant_id"), desc("created_at"), desc("id")),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)

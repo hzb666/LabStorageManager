@@ -41,8 +41,6 @@ def _update_inventory(cursor: sqlite3.Cursor) -> int:
         (
             "name_pinyin",
             "name_pinyin_initials",
-            "category_pinyin",
-            "category_pinyin_initials",
             "brand_pinyin",
             "brand_pinyin_initials",
             "storage_location_pinyin",
@@ -110,15 +108,13 @@ def _update_reagent_orders(cursor: sqlite3.Cursor) -> int:
         (
             "name_pinyin",
             "name_pinyin_initials",
-            "category_pinyin",
-            "category_pinyin_initials",
             "brand_pinyin",
             "brand_pinyin_initials",
         ),
     )
     rows = cursor.execute(
         """
-        SELECT id, name, category, brand, alias
+        SELECT id, name, brand, alias
         FROM reagent_order
         """
     ).fetchall()
@@ -129,10 +125,9 @@ def _update_reagent_orders(cursor: sqlite3.Cursor) -> int:
         return 0
 
     print(f"[reagent_order] 开始重建，共 {total} 条记录...")
-    for index, (row_id, name, category, brand, alias) in enumerate(rows, start=1):
+    for index, (row_id, name, brand, alias) in enumerate(rows, start=1):
         fields = compute_pinyin_fields(
             name=name,
-            category=category,
             brand=brand,
             alias=alias,
         )
@@ -141,8 +136,6 @@ def _update_reagent_orders(cursor: sqlite3.Cursor) -> int:
             UPDATE reagent_order
             SET name_pinyin = ?,
                 name_pinyin_initials = ?,
-                category_pinyin = ?,
-                category_pinyin_initials = ?,
                 brand_pinyin = ?,
                 brand_pinyin_initials = ?
             WHERE id = ?
@@ -150,8 +143,6 @@ def _update_reagent_orders(cursor: sqlite3.Cursor) -> int:
             (
                 fields.get("name_pinyin"),
                 fields.get("name_pinyin_initials"),
-                fields.get("category_pinyin"),
-                fields.get("category_pinyin_initials"),
                 fields.get("brand_pinyin"),
                 fields.get("brand_pinyin_initials"),
                 row_id,

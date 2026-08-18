@@ -6,6 +6,7 @@ from typing import Annotated, Optional, Dict, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import case
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select, func
 
 from app.database import DBSession
@@ -34,7 +35,6 @@ from app.services.cas_utils import (
     normalize_cas,
     validate_cas_format,
     is_special_cas_value,
-    BIOLOGICAL_REAGENT_CAS,
 )
 from app.services.spec_utils import parse_specification, SpecificationError, format_specification
 from app.services.pinyin_utils import compute_pinyin_fields
@@ -52,7 +52,6 @@ from app.services.search_matchers import (
 )
 from app.services.user_utils import batch_get_user_names
 from app.services.sql_utils import order_with_nulls_last
-from app.services.sql_utils import order_with_special_last
 from app.services.api_utils import (
     add_inventory_specification,
     clear_cache_by_prefix,
@@ -73,6 +72,7 @@ from app.services.inventory_state_guards import is_pending_stockin_item
 from app.services.sse_manager import sse_manager
 from app.services.export_rate_limit import EXPORT_SCOPE_REAGENT_ORDERS, enforce_export_rate_limit
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
+from app.models.chemical_name_map import ChemicalNameMap
 from app.services.order_operation_logger import (
     log_reagent_order_create,
     log_reagent_order_export,
@@ -93,6 +93,11 @@ from app.services.search_completion_entity_index import (
     sync_reagent_order_entity_completions,
 )
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.services.reagent_order_validation import (
+    get_cas_master_data,
+    raise_common_public_master_data_constraint_error,
+    validate_common_public_order_master_data,
+)
 from app.api.reagent_orders_workflow import register_workflow_routes
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
@@ -116,7 +121,6 @@ VALID_REAGENT_SORT_FIELDS = {
     "cas_number",
     "name",
     "name_pinyin",
-    "category",
     "brand",
     "brand_pinyin",
     "quantity",
@@ -126,6 +130,19 @@ VALID_REAGENT_SORT_FIELDS = {
     "created_at",
     "updated_at",
     *APPLICANT_SORT_KEYS,
+}
+REAGENT_ORDER_SORT_FIELD_MAP = {
+    "cas_number": ReagentOrder.cas_number,
+    "name": ReagentOrder.name_pinyin,
+    "name_pinyin": ReagentOrder.name_pinyin,
+    "brand": ReagentOrder.brand_pinyin,
+    "brand_pinyin": ReagentOrder.brand_pinyin,
+    "quantity": ReagentOrder.quantity,
+    "price": ReagentOrder.price,
+    "status": ReagentOrder.status,
+    "order_reason": ReagentOrder.order_reason,
+    "created_at": ReagentOrder.created_at,
+    "updated_at": ReagentOrder.updated_at,
 }
 
 
@@ -154,22 +171,20 @@ REAGENT_ORDER_SEARCH_SQL_FIELD_MAP = {
         ReagentOrder.brand_pinyin_initials,
     ],
     "created_at": [ReagentOrder.created_at],
-    "category": [
-        ReagentOrder.category,
-        ReagentOrder.category_pinyin,
-        ReagentOrder.category_pinyin_initials,
-    ],
+}
+VALID_REAGENT_SEARCH_FIELDS = {
+    "all",
+    *REAGENT_ORDER_SEARCH_SQL_FIELD_MAP,
+    *APPLICANT_SEARCH_KEYS,
 }
 REAGENT_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS = {
     "name": REAGENT_ORDER_SEARCH_SQL_FIELD_MAP["name"],
     "brand": REAGENT_ORDER_SEARCH_SQL_FIELD_MAP["brand"],
-    "category": REAGENT_ORDER_SEARCH_SQL_FIELD_MAP["category"],
 }
 REAGENT_ORDER_SEARCH_FTS_FIELD_MAP = {
     "name": ["name", "name_pinyin", "name_pinyin_initials"],
     "cas_number": ["cas_number"],
     "brand": ["brand", "brand_pinyin", "brand_pinyin_initials"],
-    "category": ["category", "category_pinyin", "category_pinyin_initials"],
 }
 REAGENT_ORDER_SEARCH_CONFIG = OrderListSearchConfig(
     id_column=ReagentOrder.id,
@@ -217,8 +232,17 @@ class CASOverviewInventoryResponse(BaseResponse):
     temporary_keeper_name: str | None
 
 
+class CASOverviewMasterDataResponse(BaseResponse):
+    name: str
+    english_name: str | None
+    alias: str | None
+    category: str | None
+
+
 class CASOverviewResponseModel(BaseResponse):
     cas_number: str
+    is_common_cas: bool
+    master_data: CASOverviewMasterDataResponse | None
     preferred_name: str | None
     preferred_name_source: str | None
     display_name: str | None = None
@@ -454,6 +478,17 @@ async def create_reagent_order(
             detail=f"Invalid CAS format: {error}"
         )
 
+    validate_common_public_order_master_data(
+        db,
+        cas_number=normalized_cas,
+        order_reason=order.order_reason,
+    )
+    common_public_master_data = (
+        get_cas_master_data(db, cas_number=normalized_cas)
+        if order.order_reason == ReagentOrderReason.COMMON_PUBLIC
+        else None
+    )
+
     # 解析规格得到初始量和单位。
     try:
         initial_quantity, unit = parse_specification(order.specification)
@@ -468,14 +503,27 @@ async def create_reagent_order(
     # 处理可选字段：空字符串和纯空格转为 None
     optional_string_fields = ["english_name", "alias", "category", "purity", "notes"]
     normalized = empty_to_none(order.model_dump(), optional_string_fields)
+    if common_public_master_data is not None:
+        normalized["name"] = common_public_master_data.name
+        normalized["english_name"] = common_public_master_data.english_name
+        normalized["alias"] = common_public_master_data.alias_1
+        normalized["category"] = None
     normalized_brand = _ensure_required_brand(order.brand)
 
     # 计算拼音字段
-    pinyin_fields = compute_pinyin_fields(
+    computed_pinyin_fields = compute_pinyin_fields(
         name=normalized.get("name", order.name),
-        category=normalized.get("category"),
         brand=normalized_brand,
     )
+    pinyin_fields = {
+        key: computed_pinyin_fields[key]
+        for key in (
+            "name_pinyin",
+            "name_pinyin_initials",
+            "brand_pinyin",
+            "brand_pinyin_initials",
+        )
+    }
 
     # 创建订单记录。
     db_order = ReagentOrder(
@@ -491,14 +539,23 @@ async def create_reagent_order(
         quantity=order.quantity,
         price=order.price,
         order_reason=order.order_reason,
-        is_hazardous=order.is_hazardous,
+        is_hazardous=(
+            False
+            if common_public_master_data is not None
+            else order.is_hazardous
+        ),
         applicant_id=current_user.id,
         notes=normalized.get("notes"),
         **pinyin_fields,
     )
 
     db.add(db_order)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise_common_public_master_data_constraint_error(exc)
+        raise
     log_reagent_order_create(
         db,
         order=db_order,
@@ -548,6 +605,12 @@ def list_reagent_orders(
             detail="Invalid sort field",
             code=ApiErrorCode.INVALID_SORT_FIELD,
         )
+    if search_field and search_field not in VALID_REAGENT_SEARCH_FIELDS:
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid search field",
+            code=ApiErrorCode.INVALID_SEARCH_FIELD,
+        )
 
     try:
         segmented_terms = _get_reagent_order_segmented_terms(search, search_field, match_mode)
@@ -582,21 +645,6 @@ def list_reagent_orders(
     base = select(ReagentOrder)
 
     # 排序处理
-    sort_field_map = {
-        "cas_number": ReagentOrder.cas_number,
-        "name": ReagentOrder.name,
-        "name_pinyin": ReagentOrder.name_pinyin,
-        "category": ReagentOrder.category,
-        "brand": ReagentOrder.brand,
-        "brand_pinyin": ReagentOrder.brand_pinyin,
-        "quantity": ReagentOrder.quantity,
-        "price": ReagentOrder.price,
-        "status": ReagentOrder.status,
-        "order_reason": ReagentOrder.order_reason,
-        "created_at": ReagentOrder.created_at,
-        "updated_at": ReagentOrder.updated_at,
-    }
-
     # 处理申请人排序（需要 JOIN User 表）
     use_applicant_join = sort_by in APPLICANT_SORT_KEYS
 
@@ -629,7 +677,7 @@ def list_reagent_orders(
             match_mode,
             segmented_terms,
         )
-        order_column = sort_field_map.get(sort_by, ReagentOrder.created_at)
+        order_column = REAGENT_ORDER_SORT_FIELD_MAP.get(sort_by, ReagentOrder.created_at)
 
     total = db.exec(select(func.count()).select_from(base.subquery())).one()
 
@@ -637,20 +685,25 @@ def list_reagent_orders(
     multi_cas_terms = _get_reagent_order_multi_cas_terms(search, search_field)
     multi_cas_order_expr = _build_reagent_order_multi_cas_order_expr(multi_cas_terms)
 
-    if sort_by == "cas_number":
-        order_expr = order_with_special_last(order_column, BIOLOGICAL_REAGENT_CAS, order_direction)
+    if sort_by == "created_at":
+        order_expr = (
+            (ReagentOrder.created_at.asc(),)
+            if order_direction == "asc"
+            else (ReagentOrder.created_at.desc(),)
+        )
     else:
         order_expr = order_with_nulls_last(order_column, order_direction)
     if multi_cas_order_expr is not None:
         order_expr = (multi_cas_order_expr, *order_expr)
 
-    secondary_order = ReagentOrder.created_at.desc()
-
-    # 第三级排序：按ID降序（确保排序完全稳定）
-    tertiary_order = ReagentOrder.id.desc()
+    stable_order = (
+        (ReagentOrder.id.desc(),)
+        if sort_by == "created_at"
+        else (ReagentOrder.created_at.desc(), ReagentOrder.id.desc())
+    )
 
     if limit > 0:
-        orders = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+        orders = db.exec(base.order_by(*order_expr, *stable_order).offset(skip).limit(limit)).all()
     else:
         orders = []
 
@@ -847,9 +900,17 @@ def get_cas_overview(
             "temporary_keeper_name": users_map.get(temporary_keeper_id),
         }
 
+    common_name_map = db.exec(
+        select(ChemicalNameMap)
+        .where(ChemicalNameMap.cas_number == normalized_cas)
+        .limit(1)
+    ).first()
     preferred_name = None
     preferred_name_source = None
-    if latest_order and latest_order.name:
+    if common_name_map and common_name_map.name:
+        preferred_name = common_name_map.name
+        preferred_name_source = "chemical_name_map"
+    elif latest_order and latest_order.name:
         preferred_name = latest_order.name
         preferred_name_source = "latest_order_name"
     elif latest_inventory and latest_inventory.name:
@@ -858,6 +919,17 @@ def get_cas_overview(
 
     return {
         "cas_number": normalized_cas,
+        "is_common_cas": common_name_map is not None,
+        "master_data": (
+            {
+                "name": common_name_map.name,
+                "english_name": common_name_map.english_name,
+                "alias": common_name_map.alias_1,
+                "category": common_name_map.category,
+            }
+            if common_name_map is not None
+            else None
+        ),
         "preferred_name": preferred_name,
         "preferred_name_source": preferred_name_source,
         "display_name": preferred_name,
@@ -911,6 +983,28 @@ async def update_reagent_order(
     before_order = ReagentOrder.model_validate(order)
     update_data = _normalize_reagent_order_update_data(order_update)
     _ensure_required_brand(update_data.get("brand", order.brand))
+    final_cas_number = normalize_cas(update_data.get("cas_number", order.cas_number))
+    if final_cas_number != order.cas_number:
+        update_data["cas_number"] = final_cas_number
+    final_order_reason = update_data.get("order_reason", order.order_reason)
+    validate_common_public_order_master_data(
+        db,
+        cas_number=final_cas_number,
+        order_reason=final_order_reason,
+    )
+    common_public_master_data = (
+        get_cas_master_data(db, cas_number=final_cas_number)
+        if final_order_reason == ReagentOrderReason.COMMON_PUBLIC
+        else None
+    )
+    if common_public_master_data is not None:
+        update_data.update({
+            "name": common_public_master_data.name,
+            "english_name": common_public_master_data.english_name,
+            "alias": common_public_master_data.alias_1,
+            "category": None,
+            "is_hazardous": False,
+        })
     _apply_reagent_order_pinyin_updates(order, update_data=update_data)
     should_resubmit = order.status in {
         ReagentOrderStatus.APPROVED,
@@ -930,7 +1024,12 @@ async def update_reagent_order(
         is_cli=get_request_is_cli(request),
     )
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise_common_public_master_data_constraint_error(exc)
+        raise
     db.refresh(order)
 
     # 清除列表缓存，确保更新后前端立即看到最新数据
@@ -1016,16 +1115,13 @@ def _normalize_reagent_order_update_data(order_update: ReagentOrderUpdate) -> di
 def _apply_reagent_order_pinyin_updates(order: ReagentOrder, *, update_data: dict) -> None:
     # 在名称/类别/品牌变更时刷新拼音字段，保证搜索和排序索引持续正确。
 
-    if not any(key in update_data for key in ("name", "category", "brand")):
+    if not any(key in update_data for key in ("name", "brand")):
         return
     name = update_data.get("name", order.name)
-    category = update_data.get("category", order.category)
     brand = update_data.get("brand", order.brand)
-    pinyin_fields = compute_pinyin_fields(name=name, category=category, brand=brand)
+    pinyin_fields = compute_pinyin_fields(name=name, brand=brand)
     update_data["name_pinyin"] = pinyin_fields.get("name_pinyin")
     update_data["name_pinyin_initials"] = pinyin_fields.get("name_pinyin_initials")
-    update_data["category_pinyin"] = pinyin_fields.get("category_pinyin")
-    update_data["category_pinyin_initials"] = pinyin_fields.get("category_pinyin_initials")
     update_data["brand_pinyin"] = pinyin_fields.get("brand_pinyin")
     update_data["brand_pinyin_initials"] = pinyin_fields.get("brand_pinyin_initials")
 

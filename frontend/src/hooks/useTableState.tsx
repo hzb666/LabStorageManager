@@ -128,7 +128,6 @@ export const DEFAULT_SEARCH_FIELD_OPTIONS: SearchFieldOption[] = [
   { value: 'cas_number', label: 'CAS号' },
   { value: 'storage_location', label: '位置' },
   { value: 'brand', label: '品牌' },
-  { value: 'category', label: '分类' },
 ]
 
 export const SEARCH_MAX_LENGTH = SEARCH_INPUT_MAX_LENGTH

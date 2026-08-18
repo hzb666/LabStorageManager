@@ -28,12 +28,10 @@ from app.core.constants import (    DEFAULT_PAGE_SIZE,
 from app.services.sse_manager import sse_manager
 from app.core.time_utils import get_utc_now
 from app.services.cas_utils import normalize_cas, validate_cas_format
-from app.services.cas_utils import BIOLOGICAL_REAGENT_CAS
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.sql_utils import (
     normalize_search_term,
     order_with_nulls_last,
-    order_with_special_last,
 )
 from app.services.api_utils import (
     clear_cache_by_prefix,
@@ -126,16 +124,11 @@ INVENTORY_SEARCH_SQL_FIELD_MAP = {
         Inventory.storage_location_pinyin_initials,
     ],
     "brand": [Inventory.brand, Inventory.brand_pinyin, Inventory.brand_pinyin_initials],
-    "category": [
-        Inventory.category,
-        Inventory.category_pinyin,
-        Inventory.category_pinyin_initials,
-    ],
 }
+VALID_INVENTORY_SEARCH_FIELDS = {"all", *INVENTORY_SEARCH_SQL_FIELD_MAP}
 INVENTORY_SEGMENTED_SEARCH_FIELD_GROUPS = {
     "name": INVENTORY_SEARCH_SQL_FIELD_MAP["name"],
     "brand": INVENTORY_SEARCH_SQL_FIELD_MAP["brand"],
-    "category": INVENTORY_SEARCH_SQL_FIELD_MAP["category"],
     "storage_location": INVENTORY_SEARCH_SQL_FIELD_MAP["storage_location"],
 }
 
@@ -160,7 +153,6 @@ INVENTORY_SEARCH_FTS_FIELD_MAP = {
         "storage_location_pinyin_initials",
     ],
     "brand": ["brand", "brand_pinyin", "brand_pinyin_initials"],
-    "category": ["category", "category_pinyin", "category_pinyin_initials"],
 }
 VISIBLE_STRUCTURE_STATUSES = (
     InventoryStatus.IN_STOCK,
@@ -749,17 +741,16 @@ def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str
     sort_direction = sort_order.lower() if sort_order else "desc"
     pinyin_sort_fields = {"name", "category", "brand", "storage_location"}
 
+    if sort_by == "created_at":
+        if sort_direction == "asc":
+            return (Inventory.created_at.asc(), Inventory.id.desc())
+        return (Inventory.created_at.desc(), Inventory.id.desc())
+
     if sort_by in pinyin_sort_fields:
         order_column = pinyin_sort_field_map.get(sort_by)
-        # 索引优先：避免使用 `field IS NULL` 表达式，给 SQLite 机会走复合索引排序
-        if sort_direction == "asc":
-            return (order_column.asc(),)
-        return (order_column.desc(),)
+        return order_with_nulls_last(order_column, sort_direction)
     else:
         order_column = sort_field_map.get(sort_by, Inventory.created_at)
-
-    if sort_by == "cas_number":
-        return order_with_special_last(order_column, BIOLOGICAL_REAGENT_CAS, sort_direction)
 
     return order_with_nulls_last(order_column, sort_direction)
 
@@ -852,6 +843,21 @@ def list_inventory(
     status_filter = query.status_filter
     cas_filter = query.cas_filter
     hazardous_only = query.hazardous_only
+    search_field = query.search_field
+    sort_by = query.sort_by
+    sort_order = query.sort_order
+    if sort_by and sort_by not in VALID_INVENTORY_SORT_FIELDS:
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid sort field",
+            code=ApiErrorCode.INVALID_SORT_FIELD,
+        )
+    if search_field and search_field not in VALID_INVENTORY_SEARCH_FIELDS:
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid search field",
+            code=ApiErrorCode.INVALID_SEARCH_FIELD,
+        )
     filter_options = query.to_filter_options()
     resolved_structure_cas_numbers = _resolve_inventory_structure_cas_numbers(
         db,
@@ -862,7 +868,6 @@ def list_inventory(
         structure_cas_numbers=resolved_structure_cas_numbers,
     )
     search = query.search
-    search_field = query.search_field
     fuzzy = query.fuzzy
     match_mode = query.match_mode
     has_structure_filter = resolved_structure_cas_numbers is not None
@@ -871,8 +876,6 @@ def list_inventory(
     structure_query = query.structure_query
     structure_query_format = query.structure_query_format
     structure_only_in_stock = query.structure_only_in_stock
-    sort_by = query.sort_by
-    sort_order = query.sort_order
 
     cache_key = (
         f"{LIST_CACHE_PREFIX}{skip}:{limit}:{search or ''}:{status_filter or ''}:"
@@ -882,13 +885,6 @@ def list_inventory(
         f"{structure_query or ''}:{structure_query_format or ''}:"
         f"{sort_by or ''}:{sort_order or ''}"
     )
-
-    if sort_by and sort_by not in VALID_INVENTORY_SORT_FIELDS:
-        raise api_error(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid sort field",
-            code=ApiErrorCode.INVALID_SORT_FIELD,
-        )
 
     is_first_page = skip == 0
     has_search = bool(
@@ -945,11 +941,13 @@ def list_inventory(
         )
     )
 
-    secondary_order = Inventory.created_at.desc()
-    tertiary_order = Inventory.id.desc()
+    stable_order = () if sort_by == "created_at" else (
+        Inventory.created_at.desc(),
+        Inventory.id.desc(),
+    )
 
     if limit > 0:
-        items = db.exec(base.order_by(*order_expr, secondary_order, tertiary_order).offset(skip).limit(limit)).all()
+        items = db.exec(base.order_by(*order_expr, *stable_order).offset(skip).limit(limit)).all()
     else:
         items = []
 

@@ -6,9 +6,11 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from app.core.auth import CurrentUser, NonPublicUser, get_current_user
+from app.core.api_errors import ApiErrorCode, api_error
 from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
 from app.core.time_utils import utc_iso_str
@@ -21,6 +23,7 @@ from app.models.chemical_name_map import (
     ChemicalNameMapUpdate,
 )
 from app.models.common_shelf import CommonShelf, CommonShelfGroup
+from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.models.user_operation_log import UserOperationAction
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.common_shelf_queries import search_name_map_cas_numbers
@@ -299,6 +302,19 @@ def delete_chemical_name_map(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chemical name map not found")
     before_snapshot = _build_chemical_name_map_snapshot(row)
 
+    referenced_order_id = db.exec(
+        select(ReagentOrder.id)
+        .where(ReagentOrder.cas_number == row.cas_number)
+        .where(ReagentOrder.status != ReagentOrderStatus.STOCKED)
+        .limit(1)
+    ).first()
+    if referenced_order_id is not None:
+        raise api_error(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="CAS master data is referenced by an unfinished reagent order and cannot be deleted",
+            code=ApiErrorCode.CAS_MASTER_DATA_REFERENCED_BY_ORDER,
+        )
+
     referenced_item_id = db.exec(
         select(CommonShelf.id)
         .where(CommonShelf.cas_number == row.cas_number)
@@ -328,5 +344,15 @@ def delete_chemical_name_map(
             "after": {},
         },
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if "CAS master data is referenced by an unfinished reagent order" in str(exc):
+            raise api_error(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="CAS master data is referenced by an unfinished reagent order and cannot be deleted",
+                code=ApiErrorCode.CAS_MASTER_DATA_REFERENCED_BY_ORDER,
+            ) from exc
+        raise
     return {"message": "CAS 主数据已删除", "id": item_id}

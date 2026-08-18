@@ -46,29 +46,12 @@ def normalize_search_term(search_term: str) -> str:
 
 
 def order_with_nulls_last(field: Any, direction: str = "desc") -> tuple[Any, ...]:
-    """构建兼容 SQLite 的 NULLS LAST 排序表达式。
+    """构建可直接利用 SQLite B-Tree 索引的 NULLS LAST 排序表达式。
 
-    性能优先：
-    - ``DESC`` 时，SQLite 默认就是 NULLS LAST，直接 ``field DESC`` 可最大化索引利用。
-    - ``ASC`` 时，为保持 NULLS LAST，仍使用 ``field IS NULL, field ASC`` 兼容写法。
+    ``field IS NULL, field ASC`` 会让 SQLite 使用临时 B-Tree；原生
+    ``field ASC NULLS LAST`` 在保持空值置底语义的同时可以扫描普通索引。
     """
     normalized_direction = direction.lower() if direction else "desc"
     if normalized_direction == "desc":
         return (field.desc(),)
-    return field.is_(None).asc(), field.asc()
-
-
-def order_with_special_last(field: Any, special_value: str, direction: str = "desc") -> tuple[Any, ...]:
-    """Build sort expression that always places one special value at the end.
-
-    Order strategy:
-    1) NULL values last
-    2) special value last
-    3) regular value sort by requested direction
-    """
-    normalized_direction = direction.lower() if direction else "desc"
-    special_rank = (field == special_value).asc()
-    if normalized_direction == "desc":
-        # DESC 下 NULL 默认在末尾，避免再叠加 null_rank 影响索引排序。
-        return special_rank, field.desc()
-    return field.is_(None).asc(), special_rank, field.asc()
+    return (field.asc().nulls_last(),)
