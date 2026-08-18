@@ -113,11 +113,11 @@ export function getInventoryFormFields(
   const quantityFields = isEdit && initialQuantity !== undefined
     ? [
       { name: 'remaining_quantity' as const, label: '剩余量', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 100' },
-      { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
+      { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500mL' }
     ]
     : [
       { name: 'quantity_bottles' as const, label: '瓶数', type: 'input' as const, inputType: 'number' as const, required: true, placeholder: '如: 1' },
-      { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' }
+      { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500mL' }
     ]
 
   return [
@@ -149,7 +149,7 @@ export function getInventoryFormFields(
     ...quantityFields,
     { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: brandOptions, required: true, placeholder: '输入品牌名称' },
     { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如: 95%、AR、HPLC' },
-    { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: categoryOptions, placeholder: '输入分类名称' },
+    { name: 'category' as const, label: '分类', type: 'autocomplete' as const, options: categoryOptions, autocompleteShowAllOnFocus: true, placeholder: '输入分类名称' },
     { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
   ]
 }
@@ -191,8 +191,12 @@ export const defaultConsumableOrderValues: ConsumableOrderFormInputData = {
 // 获取试剂订单表单字段配置
 export function getReagentOrderFormFields(config?: {
   brandOptions?: BrandAutocompleteOption[]
+  isEdit?: boolean
+  isCommonPublic?: boolean
+  masterDataLocked?: boolean
 }): FieldSchema<ReagentOrderFormInputData>[] {
   const brandOptions = resolveBrandOptions(config?.brandOptions)
+  const masterDataLocked = config?.masterDataLocked ?? false
 
   return [
     {
@@ -201,8 +205,9 @@ export function getReagentOrderFormFields(config?: {
       type: 'input' as const,
       required: true,
       colSpan: 2,
+      readOnly: masterDataLocked,
       placeholder: '如: 乙醇',
-      suffixBooleanToggle: {
+      suffixBooleanToggle: config?.isCommonPublic ? undefined : {
         name: 'is_hazardous' as const,
         activeInputClassName: HAZARDOUS_NAME_ACTIVE_INPUT_CLASS,
         label: '危险品',
@@ -210,12 +215,12 @@ export function getReagentOrderFormFields(config?: {
         icon: AlertTriangle,
       },
     },
-    { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, placeholder: '如: 64-17-5' },
-    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, placeholder: '如: Ethanol' },
-    { name: 'alias' as const, label: '别名', type: 'input' as const, placeholder: '如: 酒精' },
+    { name: 'cas_number' as const, label: 'CAS号', type: 'input' as const, required: true, readOnly: config?.isEdit, placeholder: '如: 64-17-5' },
+    { name: 'english_name' as const, label: '英文名称', type: 'input' as const, colSpan: 2, readOnly: masterDataLocked, placeholder: '如: Ethanol' },
+    { name: 'alias' as const, label: '别名', type: 'input' as const, readOnly: masterDataLocked, placeholder: '如: 酒精' },
     { name: 'purity' as const, label: '纯度', type: 'input' as const, placeholder: '如: 95%、AR、HPLC' },
     { name: 'brand' as const, label: '品牌', type: 'autocomplete' as const, options: brandOptions, required: true, placeholder: '输入品牌名称' },
-    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500ml' },
+    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500mL' },
     {
       name: 'quantity' as const,
       label: '数量',
@@ -233,7 +238,24 @@ export function getReagentOrderFormFields(config?: {
       required: true,
       placeholder: '请选择订购原因'
     },
-    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
+    {
+      name: 'notes' as const,
+      label: '备注',
+      type: 'input' as const,
+      colSpan: config?.isCommonPublic ? 3 : 2,
+      enableTagToggle: true,
+      placeholder: '输入 [强调] 或点击图标可进行强调',
+    },
+    {
+      name: 'category' as const,
+      label: '分类',
+      type: 'autocomplete' as const,
+      options: REAGENT_CATEGORY_OPTIONS,
+      autocompleteShowAllOnFocus: true,
+      readOnly: masterDataLocked,
+      hidden: config?.isCommonPublic,
+      placeholder: '输入分类名称',
+    },
   ]
 }
 
@@ -329,7 +351,7 @@ export function getReturnFormFields(
       label: '规格',
       type: 'input' as const,
       required: true,
-      placeholder: '如: 500ml',
+      placeholder: '如: 500mL',
     })
   }
   fields.push(
@@ -390,18 +412,33 @@ const reagentWorkflowBaseFields = [
   { name: 'alias', label: '别名', type: 'input', placeholder: '如: 酒精' },
 ]
 
-function getReagentWorkflowBaseFields<T extends StockInFormInputData | ConfirmArrivalFormInputData | CommonPublicArrivalFormInputData>(): FieldSchema<T>[] {
-  return reagentWorkflowBaseFields as unknown as FieldSchema<T>[]
+function getReagentWorkflowBaseFields<T extends StockInFormInputData | ConfirmArrivalFormInputData | CommonPublicArrivalFormInputData>(config?: {
+  hideHazardous?: boolean
+  readOnlyIdentityFields?: boolean
+}): FieldSchema<T>[] {
+  return reagentWorkflowBaseFields.map((field) => {
+    if (field.name === 'name') {
+      return {
+        ...field,
+        readOnly: config?.readOnlyIdentityFields,
+        suffixBooleanToggle: config?.hideHazardous ? undefined : field.suffixBooleanToggle,
+      }
+    }
+    if (field.name === 'english_name' || field.name === 'alias') {
+      return { ...field, readOnly: config?.readOnlyIdentityFields }
+    }
+    return field
+  }) as unknown as FieldSchema<T>[]
 }
 
 function getReagentWorkflowTrailingFields<T extends StockInFormInputData | ConfirmArrivalFormInputData | CommonPublicArrivalFormInputData>(
   brandOptions?: BrandAutocompleteOption[],
 ): FieldSchema<T>[] {
   const fields = [
-    { name: 'specification', label: '规格', type: 'input', required: true, placeholder: '如: 500ml' },
+    { name: 'specification', label: '规格', type: 'input', required: true, placeholder: '如: 500mL' },
     { name: 'brand', label: '品牌', type: 'autocomplete', options: resolveBrandOptions(brandOptions), required: true, placeholder: '输入品牌名称' },
     { name: 'purity', label: '纯度', type: 'input', placeholder: '如: 95%、AR、HPLC' },
-    { name: 'category', label: '分类', type: 'autocomplete', options: REAGENT_CATEGORY_OPTIONS, placeholder: '输入分类名称' },
+    { name: 'category', label: '分类', type: 'autocomplete', options: REAGENT_CATEGORY_OPTIONS, autocompleteShowAllOnFocus: true, placeholder: '输入分类名称' },
     { name: 'notes', label: '备注', type: 'input', colSpan: 3, enableTagToggle: true, placeholder: '输入 [强调] 或点击图标可进行强调' },
   ]
 
@@ -423,6 +460,7 @@ export const defaultConfirmArrivalValues: ConfirmArrivalFormInputData = {
 
 export const defaultCommonPublicArrivalValues: CommonPublicArrivalFormInputData = {
   ...defaultReagentWorkflowValues,
+  quantity: '',
   storage_location: '',
 }
 
@@ -505,6 +543,7 @@ export function getCommonShelfManualAddFormFields(config?: {
       required: true,
       colSpan: 2,
       hidden: config?.hideIdentityFields,
+      placeholder: '如: 乙醇',
     },
     {
       name: 'cas_number' as const,
@@ -512,6 +551,7 @@ export function getCommonShelfManualAddFormFields(config?: {
       type: 'input' as const,
       required: true,
       hidden: config?.hideIdentityFields,
+      placeholder: '如: 64-17-5',
     },
     {
       name: 'brand' as const,
@@ -519,18 +559,18 @@ export function getCommonShelfManualAddFormFields(config?: {
       type: 'autocomplete' as const,
       options: brandOptions,
       required: true,
-      placeholder: '输入品牌名称',
+      placeholder: '如: 阿拉丁、Sigma',
     },
     {
       name: 'purity' as const,
       label: '纯度',
       type: 'input' as const,
-      placeholder: '如 95%、AR、HPLC',
+      placeholder: '如: 95%、AR、HPLC',
     },
-    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如 500mL' },
-    { name: 'count' as const, label: '瓶数', type: 'number' as const, required: true },
-    { name: 'storage_location' as const, label: '位置', type: 'input' as const, required: true },
-    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 2 },
+    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500mL' },
+    { name: 'count' as const, label: '瓶数', type: 'number' as const, required: true, placeholder: '如: 1' },
+    { name: 'storage_location' as const, label: '位置', type: 'input' as const, required: true, placeholder: '如: A-1-1 柜' },
+    { name: 'notes' as const, label: '备注', type: 'input' as const, colSpan: 2, placeholder: '如: 避光保存' },
   ]
 }
 
@@ -546,9 +586,9 @@ export function getCommonShelfEditFormFields(config?: {
       type: 'autocomplete' as const,
       options: brandOptions,
       required: true,
-      placeholder: '输入品牌名称',
+      placeholder: '如: 阿拉丁、Sigma',
     },
-    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true },
+    { name: 'specification' as const, label: '规格', type: 'input' as const, required: true, placeholder: '如: 500mL' },
   ]
 }
 
@@ -561,49 +601,70 @@ export function getCommonShelfItemEditFormFields(
       label: '纯度',
       type: 'input' as const,
       hideLabel,
-      placeholder: '如 95%、AR、HPLC',
+      placeholder: '如: 95%、AR、HPLC',
     },
     {
       name: 'storage_location' as const,
       label: '位置',
       type: 'input' as const,
       hideLabel,
-      placeholder: '如 A-1-1 柜',
+      placeholder: '如: A-1-1 柜',
     },
     {
       name: 'notes' as const,
       label: '备注',
       type: 'input' as const,
       hideLabel,
-      placeholder: '选填',
+      placeholder: '如: 避光保存',
     },
   ]
 }
 
-export function getCommonShelfQuickOrderFormFields(): FieldSchema<CommonShelfQuickOrderInputData>[] {
+export function getCommonShelfQuickOrderFormFields(config?: {
+  brandOptions?: BrandAutocompleteOption[]
+  showProductFields?: boolean
+}): FieldSchema<CommonShelfQuickOrderInputData>[] {
+  const brandOptions = resolveBrandOptions(config?.brandOptions)
+
   return [
-    { name: 'quantity' as const, label: '数量', type: 'number' as const, required: true },
+    {
+      name: 'brand' as const,
+      label: '品牌',
+      type: 'autocomplete' as const,
+      options: brandOptions,
+      required: true,
+      hidden: !config?.showProductFields,
+      placeholder: '如: 阿拉丁、Sigma',
+    },
+    {
+      name: 'specification' as const,
+      label: '规格',
+      type: 'input' as const,
+      required: true,
+      hidden: !config?.showProductFields,
+      placeholder: '如: 500mL',
+    },
+    { name: 'quantity' as const, label: '数量', type: 'number' as const, required: true, placeholder: '如: 1' },
     {
       name: 'price' as const,
       label: '单价(元)',
       type: 'input' as const,
       inputType: 'number' as const,
       required: true,
-      placeholder: '如 100',
+      placeholder: '如: 100',
     },
     {
       name: 'purity' as const,
       label: '纯度',
       type: 'input' as const,
-      placeholder: '如 95%、AR、HPLC',
+      placeholder: '如: 95%、AR、HPLC',
     },
     {
       name: 'notes' as const,
       label: '备注',
       type: 'input' as const,
-      colSpan: 2,
       enableTagToggle: true,
-      placeholder: '选填',
+      placeholder: '如: 避光保存',
     },
   ]
 }
@@ -614,8 +675,23 @@ export function getCommonPublicArrivalFormFields(
     brandOptions?: BrandAutocompleteOption[]
   },
 ): FieldSchema<CommonPublicArrivalFormInputData>[] {
+  const identityFields = getReagentWorkflowBaseFields<CommonPublicArrivalFormInputData>({
+    hideHazardous: true,
+    readOnlyIdentityFields: true,
+  }).filter((field) => field.name !== 'alias')
+  const productFields = getReagentWorkflowTrailingFields<CommonPublicArrivalFormInputData>(
+    config?.brandOptions,
+  ).filter((field) => field.name !== 'category' && field.name !== 'purity' && field.name !== 'notes')
+
   return [
-    ...getReagentWorkflowBaseFields<CommonPublicArrivalFormInputData>(),
+    ...identityFields,
+    {
+      name: 'quantity' as const,
+      label: '数量',
+      type: 'input' as const,
+      inputType: 'number' as const,
+      readOnly: true,
+    },
     {
       name: 'storage_location' as const,
       label: '存放位置',
@@ -626,7 +702,21 @@ export function getCommonPublicArrivalFormFields(
       required: true,
       placeholder: '如: A-1-1 柜',
     },
-    ...getReagentWorkflowTrailingFields<CommonPublicArrivalFormInputData>(config?.brandOptions),
+    ...productFields,
+    {
+      name: 'notes' as const,
+      label: '备注',
+      type: 'input' as const,
+      colSpan: 2,
+      enableTagToggle: true,
+      placeholder: '输入 [强调] 或点击图标可进行强调',
+    },
+    {
+      name: 'purity' as const,
+      label: '纯度',
+      type: 'input' as const,
+      placeholder: '如: 95%、AR、HPLC',
+    },
   ]
 }
 
@@ -634,7 +724,7 @@ export function getCommonShelfAddBottlesFormFields(
   locationSuggestions: string[],
 ): FieldSchema<CommonShelfAddBottlesInputData>[] {
   return [
-    { name: 'count' as const, label: '新增瓶数', type: 'number' as const, required: true },
+    { name: 'count' as const, label: '新增瓶数', type: 'number' as const, required: true, placeholder: '如: 1' },
     {
       name: 'storage_location' as const,
       label: '位置',
@@ -643,15 +733,15 @@ export function getCommonShelfAddBottlesFormFields(
       autocompleteMinSearchLength: 1,
       autocompleteShowAllOnFocus: true,
       required: true,
-      placeholder: '输入或选择当前位置',
+      placeholder: '如: A-1-1 柜',
     },
     {
       name: 'purity' as const,
       label: '纯度',
       type: 'input' as const,
-      placeholder: '如 95%、AR、HPLC',
+      placeholder: '如: 95%、AR、HPLC',
     },
-    { name: 'notes' as const, label: '备注', type: 'input' as const, placeholder: '选填' },
+    { name: 'notes' as const, label: '备注', type: 'input' as const, placeholder: '如: 避光保存' },
   ]
 }
 

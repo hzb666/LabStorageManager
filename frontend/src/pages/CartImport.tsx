@@ -258,7 +258,7 @@ function CartImportFormPanel(
       </div>
 
       <div className="mt-auto shrink-0 pt-3">
-        {orderType === "reagent" && casWarning?.has_warning ? (
+        {orderType === "reagent" ? (
           <ReagentCasDuplicateWarning
             casWarning={casWarning}
             className="mb-4 rounded-md bg-orange-50 p-3 dark:bg-orange-950"

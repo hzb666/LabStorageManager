@@ -58,6 +58,26 @@ const getInventoryWarningLabel = (totalCount: number, missingCount: number): str
     ? `现有库存（共 ${totalCount} 条，其中未找到 ${missingCount} 条）：`
     : `现有库存（共 ${totalCount} 条）：`
 
+const shouldShowCasWarning = (
+  casWarning: CASOverviewResponse | null,
+): casWarning is CASOverviewResponse =>
+  Boolean(casWarning?.has_warning || casWarning?.is_common_cas)
+
+const getCasWarningTitle = (
+  casWarning: CASOverviewResponse,
+  displayName: string,
+): string => {
+  if (casWarning.is_common_cas) {
+    return `该 CAS 为常用 CAS（CAS: ${casWarning.cas_number}${
+      displayName ? `，名称：${displayName}` : ''
+    }）`
+  }
+
+  return `注意：检测到同 CAS 相关记录（CAS: ${casWarning.cas_number}${
+    displayName ? `，名称：${displayName}` : ''
+  }）`
+}
+
 function InventoryLatestSummary({
   inventoryLatest,
 }: Readonly<{
@@ -90,7 +110,7 @@ export function ReagentCasDuplicateWarning({
   onOpenInventory,
   getOrderStatusLabel,
 }: Readonly<ReagentCasDuplicateWarningProps>) {
-  if (!casWarning?.has_warning) {
+  if (!shouldShowCasWarning(casWarning)) {
     return null
   }
 
@@ -111,11 +131,7 @@ export function ReagentCasDuplicateWarning({
     <div className={className || DEFAULT_WARNING_CLASS_NAME}>
       <p className="flex items-center gap-1 text-sm text-orange-700 dark:text-orange-300">
         <AlertTriangle className="h-4 w-4" />
-        <span>
-          注意：检测到同 CAS 相关记录（CAS: {casWarning.cas_number}
-          {displayName ? `，名称：${displayName}` : ''}
-          ）
-        </span>
+        <span>{getCasWarningTitle(casWarning, displayName)}</span>
       </p>
 
       <div className="mt-2 space-y-1 text-sm text-orange-800 dark:text-orange-200">

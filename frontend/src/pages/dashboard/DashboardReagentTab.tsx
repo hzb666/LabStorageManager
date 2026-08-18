@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
@@ -20,6 +20,7 @@ import { FilterTable } from "@/components/ui/FilterTable";
 import {
   commonShelfAPI,
   reagentOrderAPI,
+  ReagentOrderReason,
   ReagentOrderStatus,
   type ConfirmArrivalPayload,
   type ReagentWorkflowEditPayload,
@@ -178,6 +179,24 @@ function useReagentEditDialog({
     defaultValues: defaultReagentOrderValues,
     shouldFocusError: false,
   });
+  const editingCasOverviewQuery = useQuery({
+    queryKey: ["reagent-order-edit-cas-overview", editingReagent?.cas_number],
+    enabled: Boolean(editingReagent?.cas_number),
+    queryFn: async () => {
+      const response = await reagentOrderAPI.getCASOverview(editingReagent!.cas_number, {
+        exclude_order_id: editingReagent!.id,
+      });
+      return response.data;
+    },
+  });
+
+  useEffect(() => {
+    const masterData = editingCasOverviewQuery.data?.master_data;
+    if (!masterData) return;
+    reagentForm.setValue("name", masterData.name, { shouldValidate: true });
+    reagentForm.setValue("english_name", masterData.english_name || "", { shouldValidate: true });
+    reagentForm.setValue("alias", masterData.alias || "", { shouldValidate: true });
+  }, [editingCasOverviewQuery.data?.master_data, reagentForm]);
 
   const handleReagentEdit = useCallback(
     (itemRaw: Record<string, unknown>) => {
@@ -203,18 +222,19 @@ function useReagentEditDialog({
     if (!editingReagent) return;
     setIsSubmittingReagent(true);
     try {
+      const isCommonPublic = formData.order_reason === ReagentOrderReason.COMMON_PUBLIC;
       await reagentOrderAPI.update(editingReagent.id, {
         name: formData.name,
         english_name: formData.english_name || "",
         alias: formData.alias || "",
-        category: formData.category || "",
+        ...(isCommonPublic ? {} : { category: formData.category || "" }),
         brand: formData.brand || "",
         purity: formData.purity || "",
         specification: formData.specification || "",
         quantity: formData.quantity,
         price: formData.price,
         order_reason: formData.order_reason,
-        is_hazardous: formData.is_hazardous,
+        is_hazardous: isCommonPublic ? false : formData.is_hazardous,
         notes: processNotes(formData.notes),
       });
       setEditingReagent(null);
@@ -297,6 +317,18 @@ function buildWorkflowPayload(
   };
 }
 
+function buildCommonPublicWorkflowPayload(
+  formData: CommonPublicArrivalFormData,
+): ReagentWorkflowEditPayload {
+  return {
+    brand: formData.brand || "",
+    purity: formData.purity || "",
+    specification: formData.specification,
+    is_hazardous: false,
+    notes: processNotes(formData.notes),
+  };
+}
+
 function buildConfirmArrivalPayload(
   formData: ConfirmArrivalFormData,
 ): ConfirmArrivalPayload {
@@ -311,7 +343,7 @@ function buildCommonPublicArrivalPayload(
   formData: CommonPublicArrivalFormData,
 ): ConfirmArrivalPayload {
   return {
-    ...buildWorkflowPayload(formData),
+    ...buildCommonPublicWorkflowPayload(formData),
     storage_location: formData.storage_location || "",
   };
 }
@@ -355,6 +387,7 @@ function buildCommonPublicArrivalFormValues(
 ): CommonPublicArrivalFormInputData {
   return {
     ...buildWorkflowBaseValues(item),
+    quantity: item.quantity,
     storage_location: "",
   };
 }
@@ -423,7 +456,7 @@ function useReagentWorkflowSubmitHandlers({
       if (applyFormValidationErrors<ConfirmArrivalFormData>(detail, arrivalForm.setError)) {
         return;
       }
-      toast.error(normalizeApiErrorMessage(detail, "确认到货失败"));
+      toast.error(getApiErrorMessage(err, "确认到货失败"));
     } finally {
       setIsSubmittingStockin(false);
     }
@@ -450,7 +483,7 @@ function useReagentWorkflowSubmitHandlers({
         ) {
           return;
         }
-        toast.error(normalizeApiErrorMessage(detail, "确认到货失败"));
+        toast.error(getApiErrorMessage(err, "确认到货失败"));
       } finally {
         setIsSubmittingStockin(false);
       }
@@ -554,6 +587,26 @@ function DashboardReagentEditDialog({
     editingReagent !== null && !isOrderEditableByRole(editingReagent.status, isAdmin);
   const canDeleteReagent =
     editingReagent !== null && isOrderDeletableStatus(editingReagent.status);
+  const orderReason = useWatch({
+    control: reagentForm.control,
+    name: "order_reason",
+  });
+  const isCommonPublic = orderReason === ReagentOrderReason.COMMON_PUBLIC;
+
+  useEffect(() => {
+    if (!isCommonPublic) return;
+    if (reagentForm.getValues("category")) {
+      reagentForm.setValue("category", "", {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
+    if (!reagentForm.getValues("is_hazardous")) return;
+    reagentForm.setValue("is_hazardous", false, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }, [isCommonPublic, reagentForm]);
 
   return (
     <Dialog
@@ -576,7 +629,12 @@ function DashboardReagentEditDialog({
         <form onSubmit={submitReagentEdit}>
           <BaseForm
             form={reagentForm}
-            fields={getReagentOrderFormFields({ brandOptions })}
+            fields={getReagentOrderFormFields({
+              brandOptions,
+              isEdit: true,
+              isCommonPublic,
+              masterDataLocked: isCommonPublic,
+            })}
             disabled={isReagentEditLocked}
           />
           <EditDialogActions
@@ -830,6 +888,7 @@ function createReagentApprovalActions(refreshTables: () => Promise<void>) {
         await refreshTables();
         toast.success("审批通过");
       },
+      onError: (error: unknown) => toast.error(getApiErrorMessage(error, "审批失败")),
     },
     {
       id: "reject",
@@ -847,6 +906,7 @@ function createReagentApprovalActions(refreshTables: () => Promise<void>) {
         await refreshTables();
         toast.success("已驳回");
       },
+      onError: (error: unknown) => toast.error(getApiErrorMessage(error, "驳回失败")),
     },
   ];
 }
@@ -879,10 +939,10 @@ function createReagentColumns({
   const createdAtColumnIndex = findDashboardColumnIndex(columns, "created_at");
   if (createdAtColumnIndex >= 0) {
     columns[createdAtColumnIndex] = reagentColumnHelper.accessor("created_at", {
-      header: "时间",
-      size: 160,
-      minSize: 140,
-      maxSize: 220,
+      header: "申购时间",
+      size: managementMode ? 120 : 140,
+      minSize: managementMode ? 110 : 120,
+      maxSize: managementMode ? 140 : 180,
       cell: (info) => {
         const item = info.row.original as DashboardReagentOrder;
         return (
@@ -898,9 +958,9 @@ function createReagentColumns({
   if (!managementMode && statusColumnIndex >= 0) {
     columns[statusColumnIndex] = reagentColumnHelper.accessor("status", {
       header: "状态",
-      size: 150,
-      minSize: 120,
-      maxSize: 180,
+      size: 100,
+      minSize: 80,
+      maxSize: 120,
       cell: (info) => {
         const item = info.row.original as DashboardReagentOrder;
         return (
@@ -921,8 +981,8 @@ function createReagentColumns({
   const actionColumn = reagentColumnHelper.display({
     id: "actions",
     header: "操作",
-    size: 132,
-    minSize: 132,
+    size: 140,
+    minSize: 140,
     cell: (info) => {
       const item = info.row.original;
       const disableEdit =

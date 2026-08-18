@@ -329,6 +329,13 @@ export interface CASOverviewInventory {
 
 export interface CASOverviewResponse {
   cas_number: string
+  is_common_cas: boolean
+  master_data: {
+    name: string
+    english_name: string | null
+    alias: string | null
+    category: string | null
+  } | null
   preferred_name: string | null
   preferred_name_source?: string | null
   display_name?: string | null

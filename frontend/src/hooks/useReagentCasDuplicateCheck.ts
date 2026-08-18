@@ -9,6 +9,7 @@ import {
 
 export function useReagentCasDuplicateCheck() {
   const [casWarning, setCasWarning] = useState<CASOverviewResponse | null>(null)
+  const [casOverview, setCasOverview] = useState<CASOverviewResponse | null>(null)
   const [casLoading, setCasLoading] = useState(false)
   const casRequestIdRef = useRef(0)
   const lastCheckedCasRef = useRef<string | null>(null)
@@ -16,6 +17,7 @@ export function useReagentCasDuplicateCheck() {
   const clearCASWarning = useCallback(() => {
     casRequestIdRef.current += 1
     setCasWarning(null)
+    setCasOverview(null)
     setCasLoading(false)
     lastCheckedCasRef.current = null
   }, [])
@@ -25,6 +27,7 @@ export function useReagentCasDuplicateCheck() {
     if (!lastCheckedCasRef.current || currentValue !== lastCheckedCasRef.current) {
       casRequestIdRef.current += 1
       setCasWarning(null)
+      setCasOverview(null)
       setCasLoading(false)
       lastCheckedCasRef.current = null
     }
@@ -34,6 +37,7 @@ export function useReagentCasDuplicateCheck() {
     const casValidation = validateAndNormalizeCASInput(casInput || '')
     if ('error' in casValidation) {
       setCasWarning(null)
+      setCasOverview(null)
       setCasLoading(false)
       return
     }
@@ -41,6 +45,7 @@ export function useReagentCasDuplicateCheck() {
     const normalizedCas = casValidation.normalized
     if (isSpecialCasValue(normalizedCas)) {
       setCasWarning(null)
+      setCasOverview(null)
       setCasLoading(false)
       lastCheckedCasRef.current = normalizedCas
       return
@@ -59,7 +64,8 @@ export function useReagentCasDuplicateCheck() {
         return
       }
       const overview = response.data
-      setCasWarning(overview.has_warning ? overview : null)
+      setCasOverview(overview)
+      setCasWarning(overview.has_warning || overview.is_common_cas ? overview : null)
       lastCheckedCasRef.current = normalizedCas
     } catch (error) {
       if (requestId === casRequestIdRef.current) {
@@ -74,6 +80,7 @@ export function useReagentCasDuplicateCheck() {
 
   return {
     casWarning,
+    casOverview,
     casLoading,
     checkCASWarning,
     clearCASWarning,

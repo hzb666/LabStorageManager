@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import type { UseFormReturn } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -99,10 +99,21 @@ function createCartImportReagentFormFields(params: {
     options?: { force?: boolean },
   ) => Promise<void>;
   handleCasLookup: () => Promise<void>;
+  isCommonPublic: boolean;
   isCasLookupLoading: boolean;
 }) {
-  const { brandOptions, checkCASWarning, handleCasLookup, isCasLookupLoading } = params;
-  return enhanceCasLookupField(getReagentOrderFormFields({ brandOptions }), {
+  const {
+    brandOptions,
+    checkCASWarning,
+    handleCasLookup,
+    isCommonPublic,
+    isCasLookupLoading,
+  } = params;
+  return enhanceCasLookupField(getReagentOrderFormFields({
+    brandOptions,
+    isCommonPublic,
+    masterDataLocked: isCommonPublic,
+  }), {
     onCasBlur: checkCASWarning,
     prefixButton: {
       onClick: handleCasLookup,
@@ -111,6 +122,37 @@ function createCartImportReagentFormFields(params: {
       icon: ScanSearch,
     },
   });
+}
+
+function useCartImportCommonPublicSync(params: {
+  casOverview: ReturnType<typeof useReagentCasDuplicateCheck>["casOverview"];
+  checkCASWarning: (casNumber: string, options?: { force?: boolean }) => Promise<void>;
+  orderType: OrderType;
+  reagentForm: UseFormReturn<ReagentOrderFormInputData, unknown, ReagentOrderFormData>;
+}) {
+  const { casOverview, checkCASWarning, orderType, reagentForm } = params;
+  const orderReason = useWatch({ control: reagentForm.control, name: "order_reason" });
+  const casNumber = useWatch({ control: reagentForm.control, name: "cas_number" });
+  const isCommonPublic = orderType === "reagent" && orderReason === "common_public";
+
+  useEffect(() => {
+    if (!isCommonPublic) return;
+    reagentForm.setValue("category", "", { shouldDirty: true, shouldValidate: true });
+    reagentForm.setValue("is_hazardous", false, { shouldDirty: true, shouldValidate: true });
+    const masterData = casOverview?.master_data;
+    if (!masterData) return;
+    reagentForm.setValue("name", masterData.name, { shouldValidate: true });
+    reagentForm.setValue("english_name", masterData.english_name || "", { shouldValidate: true });
+    reagentForm.setValue("alias", masterData.alias || "", { shouldValidate: true });
+  }, [casOverview?.master_data, isCommonPublic, reagentForm]);
+
+  useEffect(() => {
+    if (!isCommonPublic) return;
+    const currentCas = normalizeCASInputValue(casNumber || "");
+    if (currentCas) void checkCASWarning(currentCas);
+  }, [casNumber, checkCASWarning, isCommonPublic]);
+
+  return isCommonPublic;
 }
 
 function applyCartImportValidationErrors(params: {
@@ -306,6 +348,7 @@ function useCartImportReagentFormState(params: {
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false);
   const {
     casWarning,
+    casOverview,
     casLoading,
     checkCASWarning,
     clearCASWarning,
@@ -320,6 +363,12 @@ function useCartImportReagentFormState(params: {
     orderType,
     reagentForm,
     setIsCasLookupLoading,
+  });
+  const isCommonPublic = useCartImportCommonPublicSync({
+    casOverview,
+    checkCASWarning,
+    orderType,
+    reagentForm,
   });
 
   const resetReagentFormByItem = useCallback(
@@ -370,11 +419,37 @@ function useCartImportReagentFormState(params: {
         const currentValue = normalizeCASInputValue(value.cas_number || "");
         invalidateReagentAsyncRequests();
         reagentForm.clearErrors("cas_number");
+        if (
+          !reagentForm.getFieldState("order_reason").isDirty
+          && reagentForm.getValues("order_reason") === "common_public"
+        ) {
+          reagentForm.setValue(
+            "order_reason",
+            "" as ReagentOrderFormInputData["order_reason"],
+            { shouldDirty: false, shouldValidate: false },
+          );
+        }
         handleCasValueChange(currentValue);
       }
     });
     return () => subscription.unsubscribe();
   }, [handleCasValueChange, invalidateReagentAsyncRequests, reagentForm]);
+
+  useEffect(() => {
+    if (
+      orderType !== "reagent"
+      || !casOverview?.is_common_cas
+      || reagentForm.getFieldState("order_reason").isDirty
+      || reagentForm.getValues("order_reason")
+    ) {
+      return;
+    }
+
+    reagentForm.setValue("order_reason", "common_public", {
+      shouldDirty: false,
+      shouldValidate: true,
+    });
+  }, [casOverview, orderType, reagentForm]);
 
   const handleCasLookup = useCallback(async () => {
     await runCartImportCasLookup({
@@ -399,9 +474,10 @@ function useCartImportReagentFormState(params: {
         brandOptions,
         checkCASWarning,
         handleCasLookup,
+        isCommonPublic,
         isCasLookupLoading,
       }),
-    [brandOptions, checkCASWarning, handleCasLookup, isCasLookupLoading],
+    [brandOptions, checkCASWarning, handleCasLookup, isCasLookupLoading, isCommonPublic],
   );
 
   return {
@@ -423,18 +499,19 @@ async function submitCartImportReagentForm(
   let submitSucceeded = false;
   const submitReagent = reagentForm.handleSubmit(
     async (formData) => {
+      const isCommonPublic = formData.order_reason === "common_public";
       await reagentOrderAPI.create({
         name: formData.name,
         cas_number: formData.cas_number.trim(),
         english_name: formData.english_name || undefined,
         alias: formData.alias || undefined,
-        category: formData.category || undefined,
+        category: isCommonPublic ? undefined : formData.category || undefined,
         brand: formData.brand,
         specification: normalizeReagentSpecification(formData.specification),
         quantity: formData.quantity,
         price: formData.price,
         order_reason: formData.order_reason as ReagentOrderReason,
-        is_hazardous: formData.is_hazardous,
+        is_hazardous: isCommonPublic ? false : formData.is_hazardous,
         notes: processNotes(formData.notes),
       });
       submitSucceeded = true;

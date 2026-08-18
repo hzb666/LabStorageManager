@@ -21,6 +21,7 @@ export interface ActionButtonConfig<T> {
   showWhen?: (item: T, isAdmin?: boolean) => boolean;
   disableWhen?: (item: T, isAdmin?: boolean) => boolean;
   onClick: (item: T) => void | Promise<void>;
+  onError?: (error: unknown, item: T) => void;
   confirm?: boolean;
   confirmLabel?: string;
   requiredRole?: typeof UserRoles.ADMIN | typeof UserRoles.USER;
@@ -179,8 +180,9 @@ function useConfirmAction<T>(
     try {
       await config.onClick(item);
       setIsConfirming(false);
-    } catch {
+    } catch (error) {
       setIsConfirming(false);
+      config.onError?.(error, item);
     } finally {
       setIsLoading(false);
     }

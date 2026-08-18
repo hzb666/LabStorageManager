@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import type { UseFormReturn } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 
@@ -34,12 +34,11 @@ import {
   reagentOrderAPI,
   chemicalAPI,
   ReagentOrderReason,
+  type CASOverviewResponse,
 } from '@/api/client'
 import { processNotes } from '@/lib/utils'
 import { ReagentOrderExpandedRow } from '@/components/ReagentOrderExpandedRow'
-import {
-  ReagentCasDuplicateWarning,
-} from '@/components/ReagentCasDuplicateWarning'
+import { ReagentCasDuplicateWarning } from '@/components/ReagentCasDuplicateWarning'
 import { useReagentCasDuplicateCheck } from '@/hooks/useReagentCasDuplicateCheck'
 import {
   ReagentOrderSchema,
@@ -133,7 +132,6 @@ const REAGENT_SEARCH_FIELD_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'cas_number', label: 'CAS号' },
   { value: 'name', label: '名称' },
-  { value: 'category', label: '分类' },
   { value: 'brand', label: '品牌' },
   { value: 'applicant', label: '订购人' },
   { value: 'created_at', label: '订购时间' },
@@ -173,38 +171,40 @@ function createReagentOrderFormValues(item: ReagentOrder): ReagentOrderFormInput
 
 // 生成新增试剂订单的请求体。 把表单值转换与接口契约绑定到单点，减少提交处理器内的分支噪音。
 function createReagentOrderCreatePayload(formData: ReagentOrderFormData) {
+  const isCommonPublic = formData.order_reason === ReagentOrderReason.COMMON_PUBLIC
   return {
     name: formData.name,
     cas_number: formData.cas_number,
     english_name: formData.english_name || undefined,
     alias: formData.alias || undefined,
-    category: formData.category || undefined,
+    category: isCommonPublic ? undefined : formData.category || undefined,
     brand: formData.brand,
     purity: formData.purity || undefined,
     specification: formData.specification,
     quantity: formData.quantity,
     price: formData.price,
     order_reason: formData.order_reason as ReagentOrderReason,
-    is_hazardous: formData.is_hazardous,
+    is_hazardous: isCommonPublic ? false : formData.is_hazardous,
     notes: processNotes(formData.notes),
   }
 }
 
 // 生成编辑试剂订单的请求体，沿用当前更新接口的空字符串语义，并抽离字段组装。
 function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
+  const isCommonPublic = formData.order_reason === ReagentOrderReason.COMMON_PUBLIC
   return {
     name: formData.name,
     cas_number: formData.cas_number,
     english_name: formData.english_name || '',
     alias: formData.alias || '',
-    category: formData.category || '',
+    ...(isCommonPublic ? {} : { category: formData.category || '' }),
     brand: formData.brand || '',
     purity: formData.purity || '',
     specification: formData.specification || '',
     quantity: formData.quantity,
     price: formData.price,
     order_reason: formData.order_reason,
-    is_hazardous: formData.is_hazardous,
+    is_hazardous: isCommonPublic ? false : formData.is_hazardous,
     notes: processNotes(formData.notes),
   }
 }
@@ -213,12 +213,27 @@ function createReagentOrderUpdatePayload(formData: ReagentOrderFormData) {
 function createReagentOrderFormFields(params: {
   dialogState: ReagentOrderDialogState
   brandOptions: AutocompleteOption[]
+  isCommonPublic: boolean
+  masterDataLocked: boolean
   handleCasLookup: () => Promise<void>
   isCasLookupLoading: boolean
   checkCASWarning: (casNumber: string, options?: { force?: boolean }) => Promise<void>
 }) {
-  const { dialogState, brandOptions, handleCasLookup, isCasLookupLoading, checkCASWarning } = params
-  const fields = getReagentOrderFormFields({ brandOptions })
+  const {
+    dialogState,
+    brandOptions,
+    isCommonPublic,
+    masterDataLocked,
+    handleCasLookup,
+    isCasLookupLoading,
+    checkCASWarning,
+  } = params
+  const fields = getReagentOrderFormFields({
+    brandOptions,
+    isEdit: dialogState === 'edit',
+    isCommonPublic,
+    masterDataLocked,
+  })
 
   if (dialogState !== 'add') {
     return fields
@@ -235,6 +250,63 @@ function createReagentOrderFormFields(params: {
   })
 }
 
+function useReagentMasterDataFormSync(
+  form: UseFormReturn<ReagentOrderFormInputData, unknown, ReagentOrderFormData>,
+  masterData: CASOverviewResponse['master_data'],
+  orderReason: ReagentOrderFormInputData['order_reason'],
+) {
+  useEffect(() => {
+    if (!masterData || orderReason !== ReagentOrderReason.COMMON_PUBLIC) return
+    form.setValue('name', masterData.name, { shouldValidate: true })
+    form.setValue('english_name', masterData.english_name || '', { shouldValidate: true })
+    form.setValue('alias', masterData.alias || '', { shouldValidate: true })
+  }, [form, masterData, orderReason])
+
+  useEffect(() => {
+    if (orderReason !== ReagentOrderReason.COMMON_PUBLIC) return
+    if (form.getValues('category')) {
+      form.setValue('category', '', { shouldDirty: true, shouldValidate: true })
+    }
+    if (form.getValues('is_hazardous')) {
+      form.setValue('is_hazardous', false, { shouldDirty: true, shouldValidate: true })
+    }
+  }, [form, orderReason])
+}
+
+function useAutoSelectCommonPublicReason(
+  casOverview: CASOverviewResponse | null,
+  dialogState: ReagentOrderDialogState,
+  form: UseFormReturn<ReagentOrderFormInputData, unknown, ReagentOrderFormData>,
+) {
+  useEffect(() => {
+    if (
+      dialogState !== 'add'
+      || !casOverview?.is_common_cas
+      || form.getFieldState('order_reason').isDirty
+      || form.getValues('order_reason')
+    ) return
+
+    form.setValue('order_reason', ReagentOrderReason.COMMON_PUBLIC, {
+      shouldDirty: false,
+      shouldValidate: true,
+    })
+  }, [casOverview, dialogState, form])
+}
+
+function useCommonPublicCasLookup(params: {
+  casNumber: string
+  checkCASWarning: (casNumber: string, options?: { force?: boolean }) => Promise<void>
+  dialogState: ReagentOrderDialogState
+  orderReason: ReagentOrderFormInputData['order_reason']
+}) {
+  const { casNumber, checkCASWarning, dialogState, orderReason } = params
+  useEffect(() => {
+    if (dialogState !== 'add' || orderReason !== ReagentOrderReason.COMMON_PUBLIC) return
+    const currentCas = normalizeCASInputValue(casNumber)
+    if (currentCas) void checkCASWarning(currentCas)
+  }, [casNumber, checkCASWarning, dialogState, orderReason])
+}
+
 // 管理试剂订单弹窗里的 CAS 联动与重复检查。 把 CAS 专项逻辑从弹窗控制器中拆开，避免单个 hook 继续膨胀。
 function useReagentOrderCasController(params: {
   dialogState: ReagentOrderDialogState
@@ -246,18 +318,45 @@ function useReagentOrderCasController(params: {
 }) {
   const { dialogState, brandOptions, editingItemId, form, navigate, setDialogState } = params
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
-  const { casWarning, casLoading, checkCASWarning, clearCASWarning, handleCasValueChange } = useReagentCasDuplicateCheck()
+  const orderReason = useWatch({ control: form.control, name: 'order_reason' })
+  const casNumber = useWatch({ control: form.control, name: 'cas_number' })
+  const {
+    casWarning,
+    casOverview,
+    casLoading,
+    checkCASWarning,
+    clearCASWarning,
+    handleCasValueChange,
+  } = useReagentCasDuplicateCheck()
+  useReagentMasterDataFormSync(form, casOverview?.master_data ?? null, orderReason)
+  useAutoSelectCommonPublicReason(casOverview, dialogState, form)
+  useCommonPublicCasLookup({
+    casNumber: casNumber || '',
+    checkCASWarning,
+    dialogState,
+    orderReason,
+  })
 
   useEffect(() => {
     const subscription = form.watch((value, field) => {
       if (field.name === 'cas_number') {
         const currentValue = normalizeCASInputValue(value.cas_number || '')
         form.clearErrors('cas_number')
+        if (
+          dialogState === 'add'
+          && !form.getFieldState('order_reason').isDirty
+          && form.getValues('order_reason') === ReagentOrderReason.COMMON_PUBLIC
+        ) {
+          form.setValue('order_reason', '' as ReagentOrderFormInputData['order_reason'], {
+            shouldDirty: false,
+            shouldValidate: false,
+          })
+        }
         handleCasValueChange(currentValue)
       }
     })
     return () => subscription.unsubscribe()
-  }, [form, handleCasValueChange])
+  }, [dialogState, form, handleCasValueChange])
 
   useEffect(() => {
     if (!dialogState) {
@@ -337,11 +436,20 @@ function useReagentOrderCasController(params: {
     return createReagentOrderFormFields({
       dialogState,
       brandOptions,
+      isCommonPublic: orderReason === ReagentOrderReason.COMMON_PUBLIC,
+      masterDataLocked: orderReason === ReagentOrderReason.COMMON_PUBLIC,
       handleCasLookup,
       isCasLookupLoading,
       checkCASWarning,
     })
-  }, [dialogState, brandOptions, handleCasLookup, isCasLookupLoading, checkCASWarning])
+  }, [
+    dialogState,
+    brandOptions,
+    orderReason,
+    handleCasLookup,
+    isCasLookupLoading,
+    checkCASWarning,
+  ])
 
   return {
     casWarning,
@@ -674,7 +782,8 @@ const ActionButtons = React.memo(function ActionButtons({
         await reagentOrderAPI.approve(currItem.id as number)
         await onRefreshRef.current()
         toast.success('审批通过')
-      }
+      },
+      onError: (error: unknown) => toast.error(getApiErrorMessage(error, '审批失败')),
     },
     {
       id: 'reject',
@@ -689,7 +798,8 @@ const ActionButtons = React.memo(function ActionButtons({
         await reagentOrderAPI.reject(currItem.id as number, '管理员驳回')
         await onRefreshRef.current()
         toast.success('已驳回')
-      }
+      },
+      onError: (error: unknown) => toast.error(getApiErrorMessage(error, '驳回失败')),
     }
   ], [])
 

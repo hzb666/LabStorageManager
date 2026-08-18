@@ -374,6 +374,8 @@ export const CommonShelfAddBottlesSchema = v.object({
 })
 
 export const CommonShelfQuickOrderSchema = v.object({
+  brand: createStringLengthSchema('品牌', 1, 100),
+  specification: SpecificationSchema,
   quantity: v.pipe(createPositiveNumberSchema('数量'), v.maxValue(99, '数量不能超过99')),
   price: createPriceSchema(0.01),
   purity: createMaxLengthSchema('纯度', 20),
@@ -602,6 +604,7 @@ export type StockInFormData = v.InferOutput<typeof StockInFormSchema>
 
 export const CommonPublicArrivalFormSchema = v.object({
   ...ReagentWorkflowEditableFields,
+  quantity: v.pipe(createPositiveNumberSchema('数量'), v.maxValue(99, '数量不能超过99')),
   storage_location: createRequiredStringSchema('常用货架位置'),
 })
 
@@ -684,11 +687,14 @@ const EXPORT_RATE_LIMITED_ERROR_CODE = 'EXPORT_RATE_LIMITED'
 
 const API_ERROR_CODE_MESSAGES: Record<string, string> = {
   INVALID_SORT_FIELD: '排序字段无效',
+  INVALID_SEARCH_FIELD: '搜索字段无效，请重新选择',
   STRUCTURE_SEARCH_EXPIRED: '结构式搜索结果已过期，请重新搜索',
   STRUCTURE_FILTER_INCOMPLETE: '结构式筛选参数不完整',
   INVENTORY_CODE_CONFLICT: '库存内部编码冲突，请重试入库操作',
   COMMON_SHELF_GROUP_CONFLICT: '常用货架分组正在被其他操作创建，请重试',
   COMMON_SHELF_CODE_CONFLICT: '常用货架内部编码冲突，请重试',
+  CAS_MASTER_DATA_REFERENCED_BY_ORDER: '该 CAS 已被未完成的试剂订单引用，不能删除',
+  COMMON_PUBLIC_MASTER_DATA_REQUIRED: '该 CAS 不在常用列表中，无法继续公用常用订单流程',
   LLM_DISABLED: 'LLM 功能未启用',
   LLM_API_NOT_CONFIGURED: 'LLM 接口未配置',
   LLM_MODEL_NOT_CONFIGURED: 'LLM 模型未配置',
@@ -781,6 +787,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /CAS master data already exists/i, message: '该 CAS 主数据已存在' },
   { pattern: /CAS master data not found/i, message: '缺少该 CAS 的主数据，请先录入后再加入常用货架' },
   { pattern: /CAS master data is referenced by CommonShelf and cannot be deleted/i, message: '该 CAS 主数据已被常用货架引用，不能删除' },
+  { pattern: /CAS master data is referenced by an unfinished reagent order and cannot be deleted/i, message: '该 CAS 已被未完成的试剂订单引用，不能删除' },
   { pattern: /Brand already exists/i, message: '该品牌已存在' },
   { pattern: /Brand name is required/i, message: '品牌名称不能为空' },
   { pattern: /Brand not found/i, message: '品牌不存在' },
@@ -807,6 +814,7 @@ const ERROR_MAPPINGS: Array<{ pattern: RegExp; message: string }> = [
   { pattern: /Order not found/i, message: '未找到订单' },
   { pattern: /order_reason is required/i, message: '申购原因不能为空' },
   { pattern: /Invalid order_reason/i, message: '申购原因无效' },
+  { pattern: /Common-public orders require CAS master data/i, message: '该 CAS 不在常用列表中' },
   { pattern: /brand is required/i, message: '品牌不能为空' },
   { pattern: /Public account cannot create orders/i, message: '公用账户不能创建订单' },
   { pattern: /Public account cannot edit orders/i, message: '公用账户不能编辑订单' },
