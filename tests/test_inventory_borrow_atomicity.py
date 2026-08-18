@@ -11,7 +11,6 @@ from starlette.requests import Request
 
 from app.api import inventory as inventory_api
 from app.api import inventory_extended_routes
-from app.db_bootstrap.schema_upgrades import ensure_sqlite_inventory_quantity_statuses
 from app.models.inventory import BorrowLog, Inventory, InventoryBorrowRequest, InventoryBorrowReturn, InventoryStatus
 from app.models.inventory_operation_log import InventoryOperationAction, InventoryOperationLog
 from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
@@ -85,80 +84,6 @@ class InventoryQuantityStatusTests(unittest.TestCase):
             InventoryStatus.IN_STOCK,
             derive_inventory_quantity_status(10.0, None),
         )
-
-    def test_startup_alignment_preserves_manual_and_borrowed_statuses(self) -> None:
-        engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        SQLModel.metadata.create_all(engine, tables=[Inventory.__table__])
-        rows = [
-            Inventory(
-                internal_code="STATUS-LOW",
-                cas_number="64-17-5",
-                name="低库存",
-                initial_quantity=100.0,
-                remaining_quantity=10.0,
-                unit="mL",
-                status=InventoryStatus.IN_STOCK,
-            ),
-            Inventory(
-                internal_code="STATUS-NORMAL",
-                cas_number="64-17-5",
-                name="正常库存",
-                initial_quantity=100.0,
-                remaining_quantity=11.0,
-                unit="mL",
-                status=InventoryStatus.RUN_SHORT,
-            ),
-            Inventory(
-                internal_code="STATUS-ZERO",
-                cas_number="64-17-5",
-                name="已耗尽",
-                initial_quantity=100.0,
-                remaining_quantity=0.0,
-                unit="mL",
-                status=InventoryStatus.IN_STOCK,
-            ),
-            Inventory(
-                internal_code="STATUS-MISSING",
-                cas_number="64-17-5",
-                name="找不到",
-                initial_quantity=100.0,
-                remaining_quantity=10.0,
-                unit="mL",
-                status=InventoryStatus.NOT_IN_STOCK,
-            ),
-            Inventory(
-                internal_code="STATUS-BORROWED",
-                cas_number="64-17-5",
-                name="借出",
-                initial_quantity=100.0,
-                remaining_quantity=10.0,
-                unit="mL",
-                status=InventoryStatus.BORROWED,
-            ),
-        ]
-        with Session(engine) as db:
-            db.add_all(rows)
-            db.commit()
-
-        with engine.begin() as connection:
-            ensure_sqlite_inventory_quantity_statuses(connection)
-
-        with Session(engine) as db:
-            statuses = {
-                item.internal_code: item.status
-                for item in db.exec(select(Inventory)).all()
-            }
-
-        self.assertEqual(InventoryStatus.RUN_SHORT, statuses["STATUS-LOW"])
-        self.assertEqual(InventoryStatus.IN_STOCK, statuses["STATUS-NORMAL"])
-        self.assertEqual(InventoryStatus.CONSUMED, statuses["STATUS-ZERO"])
-        self.assertEqual(InventoryStatus.NOT_IN_STOCK, statuses["STATUS-MISSING"])
-        self.assertEqual(InventoryStatus.BORROWED, statuses["STATUS-BORROWED"])
-
 
 class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

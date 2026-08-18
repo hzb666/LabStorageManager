@@ -20,9 +20,6 @@ from app.api.reagent_orders import (
 )
 from app.core.api_errors import API_ERROR_CODE_HEADER, ApiErrorCode
 from app.db_bootstrap.sqlite_indexes import ensure_sqlite_performance_indexes
-from app.db_bootstrap.schema_upgrades import (
-    ensure_sqlite_reagent_order_category_pinyin_columns_removed,
-)
 from app.db_bootstrap.schema_consistency import check_sqlite_schema_consistency
 from app.models.consumable_order import ConsumableOrder
 from app.models.reagent_order import ReagentOrder
@@ -32,68 +29,6 @@ class InventoryListContractsTests(unittest.TestCase):
     def test_reagent_order_category_is_not_a_list_sort_field(self) -> None:
         self.assertNotIn("category", VALID_REAGENT_SORT_FIELDS)
         self.assertNotIn("category", REAGENT_ORDER_SORT_FIELD_MAP)
-
-    def test_reagent_order_category_pinyin_columns_are_removed_on_upgrade(self) -> None:
-        engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        SQLModel.metadata.create_all(engine)
-        try:
-            with engine.begin() as connection:
-                connection.execute(
-                    text(
-                        "ALTER TABLE reagent_order "
-                        "ADD COLUMN category_pinyin VARCHAR(200)"
-                    )
-                )
-                connection.execute(
-                    text(
-                        "ALTER TABLE reagent_order "
-                        "ADD COLUMN category_pinyin_initials VARCHAR(200)"
-                    )
-                )
-                connection.execute(
-                    text(
-                        "CREATE INDEX ix_reagent_order_category_created_at_id "
-                        "ON reagent_order (category, created_at DESC, id DESC)"
-                    )
-                )
-                connection.execute(
-                    text(
-                        "CREATE INDEX ix_reagent_order_category_pinyin_created_at_id "
-                        "ON reagent_order (category_pinyin, created_at DESC, id DESC)"
-                    )
-                )
-                connection.execute(
-                    text(
-                        "CREATE INDEX ix_reagent_order_category_pinyin_initials_created_at_id "
-                        "ON reagent_order "
-                        "(category_pinyin_initials, created_at DESC, id DESC)"
-                    )
-                )
-                ensure_sqlite_reagent_order_category_pinyin_columns_removed(connection)
-                columns = {
-                    row[1]
-                    for row in connection.execute(text("PRAGMA table_info(reagent_order)"))
-                }
-                indexes = {
-                    row[0]
-                    for row in connection.execute(
-                        text(
-                            "SELECT name FROM sqlite_master "
-                            "WHERE type='index' AND tbl_name='reagent_order'"
-                        )
-                    )
-                }
-            self.assertNotIn("category_pinyin", columns)
-            self.assertNotIn("category_pinyin_initials", columns)
-            self.assertNotIn("ix_reagent_order_category_created_at_id", indexes)
-            self.assertNotIn("ix_reagent_order_category_pinyin_created_at_id", indexes)
-            self.assertNotIn("ix_reagent_order_category_pinyin_initials_created_at_id", indexes)
-        finally:
-            SQLModel.metadata.drop_all(engine)
 
     def test_reagent_order_category_search_field_is_rejected(self) -> None:
         self.assertNotIn("category", VALID_REAGENT_SEARCH_FIELDS)

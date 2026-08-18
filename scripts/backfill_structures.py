@@ -17,7 +17,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.core.config import settings
 from app.database import engine
-from app.db_bootstrap.schema_upgrades import ensure_sqlite_compound_structure_cache_name_columns
 from app.db_bootstrap.structure_index_schema import ensure_structure_index_schema
 from app.models.compound_structure import CompoundStructureCache
 from app.models.structure_index import (
@@ -120,7 +119,6 @@ def ensure_structure_cache_table() -> None:
     StructureIndexChange.__table__.create(engine, checkfirst=True)
     StructureResolutionJob.__table__.create(engine, checkfirst=True)
     with engine.begin() as connection:
-        ensure_sqlite_compound_structure_cache_name_columns(connection)
         ensure_structure_index_schema(connection)
 
 

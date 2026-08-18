@@ -72,7 +72,7 @@ function PasswordInput({
       {showCapsLockHint && typeof document !== 'undefined'
         ? createPortal(
             <div
-              className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4 animate-in fade-in slide-in-from-top-2 duration-200"
+              className="pointer-events-none fixed inset-x-0 bottom-15 z-50 flex justify-center px-4 animate-in fade-in slide-in-from-top-2 duration-200"
               role="status"
               aria-live="polite"
               aria-atomic="true"
