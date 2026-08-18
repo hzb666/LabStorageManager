@@ -10,6 +10,20 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _get_index_column_names(index) -> list[str]:
+    """Extract column names from plain and ASC/DESC index expressions."""
+    column_names: list[str] = []
+    for expression in index.expressions:
+        column = getattr(expression, "element", expression)
+        column_name = getattr(column, "name", None)
+        if column_name is None:
+            column_name = getattr(column, "element", None)
+        if column_name:
+            column_names.append(str(column_name))
+    return column_names
+
+
 def check_sqlite_schema_consistency(connection: Connection) -> None:
     inspector = inspect(connection)
     metadata = SQLModel.metadata
@@ -36,7 +50,7 @@ def check_sqlite_schema_consistency(connection: Connection) -> None:
             )
 
         expected_indexes = {
-            index.name: [column.name for column in index.columns]
+            index.name: _get_index_column_names(index)
             for index in table.indexes
             if index.name
         }

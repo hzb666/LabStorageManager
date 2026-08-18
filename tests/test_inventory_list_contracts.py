@@ -23,6 +23,7 @@ from app.db_bootstrap.sqlite_indexes import ensure_sqlite_performance_indexes
 from app.db_bootstrap.schema_upgrades import (
     ensure_sqlite_reagent_order_category_pinyin_columns_removed,
 )
+from app.db_bootstrap.schema_consistency import check_sqlite_schema_consistency
 from app.models.consumable_order import ConsumableOrder
 from app.models.reagent_order import ReagentOrder
 
@@ -194,6 +195,20 @@ class InventoryListContractsTests(unittest.TestCase):
                             {"index_name": index_name},
                         ).scalar_one()
                         self.assertIn("DESC, created_at DESC, id DESC", ddl)
+        finally:
+            SQLModel.metadata.drop_all(engine)
+
+    def test_schema_consistency_accepts_directional_indexes(self) -> None:
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(engine)
+        try:
+            with engine.begin() as connection:
+                ensure_sqlite_performance_indexes(connection)
+                check_sqlite_schema_consistency(connection)
         finally:
             SQLModel.metadata.drop_all(engine)
 
