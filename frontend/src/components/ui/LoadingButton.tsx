@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/Button"; // 确保路径正确
 import { cn } from "@/lib/utils";
 
-// 1. 动态提取你的 Button 组件的 Props 类型
+// 动态提取 Button 组件的 Props 类型
 export interface LoadingButtonProps extends React.ComponentProps<typeof Button> {
   isLoading?: boolean;
   loadingText?: React.ReactNode;
@@ -40,13 +40,12 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
             aria-hidden={!isLoading}
             className={cn(
               "col-start-1 row-start-1 flex items-center justify-center transition-opacity duration-200",
-              isLoading ? "opacity-50" : "opacity-0 pointer-events-none"
+              isLoading ? "opacity-70" : "opacity-0 pointer-events-none"
             )}
           >
             <Loader2
               className={cn(
                 "loading-button-spinner size-[1.2em] animate-spin shrink-0",
-                // ✨ 关键：只有当存在 loadingText 时，才加右间距
                 loadingText ? "mr-2" : "mr-0",
                 iconClassName
               )}

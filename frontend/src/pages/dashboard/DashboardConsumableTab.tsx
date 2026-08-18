@@ -393,9 +393,9 @@ function createConsumableColumns({
   if (createdAtColumnIndex >= 0) {
     columns[createdAtColumnIndex] = consumableColumnHelper.accessor("created_at", {
       header: "申购时间",
-      size: 190,
-      minSize: 160,
-      maxSize: 240,
+      size: managementMode ? 120 : 140,
+      minSize: managementMode ? 110 : 120,
+      maxSize: managementMode ? 140 : 180,
       cell: (info) => {
         const item = info.row.original as DashboardConsumableOrder;
         return (
@@ -411,9 +411,9 @@ function createConsumableColumns({
   if (!managementMode && statusColumnIndex >= 0) {
     columns[statusColumnIndex] = consumableColumnHelper.accessor("status", {
       header: "状态",
-      size: 150,
-      minSize: 120,
-      maxSize: 180,
+      size: 100,
+      minSize: 80,
+      maxSize: 120,
       cell: (info) => {
         const item = info.row.original as DashboardConsumableOrder;
         return (
@@ -483,8 +483,8 @@ function createConsumableColumns({
   const actionColumn = consumableColumnHelper.display({
     id: "actions",
     header: "操作",
-    size: 132,
-    minSize: 132,
+    size: 140,
+    minSize: 140,
     cell: (info) => {
       const item = info.row.original;
       const disableEdit =

@@ -728,12 +728,12 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
   return [
     borrowColumnHelper.accessor('name', {
       header: '名称',
-      size: 160,
+      size: 200,
       cell: (info) => <span>{info.getValue()}</span>,
     }),
     borrowColumnHelper.accessor('cas_number', {
       header: 'CAS号',
-      size: 120,
+      size: 100,
     }),
     borrowColumnHelper.accessor('storage_location', {
       header: '位置',
@@ -747,7 +747,7 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
     }),
     borrowColumnHelper.accessor('borrow_time', {
       header: '借用时间',
-      size: 230,
+      size: 180,
       cell: (info) => {
         const item = info.row.original as MyBorrowItem
         return (
@@ -769,7 +769,7 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
     }),
     borrowColumnHelper.accessor('borrower_name', {
       header: '借用人',
-      size: 120,
+      size: 100,
       cell: (info) => info.getValue() || '-',
     }),
     borrowColumnHelper.display({

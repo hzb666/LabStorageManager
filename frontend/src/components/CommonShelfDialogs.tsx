@@ -199,12 +199,14 @@ function getCommonShelfDialogTitle(mode: CommonShelfDialogMode) {
   }
 }
 
+const COMMON_SHELF_FORM_DIALOG_WIDTH = 'w-[92vw] max-w-xl md:w-[36rem]'
+
 function getCommonShelfDialogContentClassName(mode: CommonShelfDialogMode) {
   if (mode === 'edit') {
     return 'max-h-[85vh] w-[96vw] max-w-5xl overflow-y-auto'
   }
   if (mode === 'manual-add') {
-    return 'max-h-[85vh] w-[92vw] max-w-3xl overflow-y-auto'
+    return `${COMMON_SHELF_FORM_DIALOG_WIDTH} max-h-[85vh] overflow-y-auto`
   }
 
   return 'max-h-[85vh] w-[92vw] max-w-lg overflow-y-auto'
@@ -659,7 +661,7 @@ export function ChemicalNameMapEditorDialog({
 
   return (
     <Dialog open={dialog.open} onOpenChange={dialog.onOpenChange}>
-      <DialogContent className="w-[92vw] max-w-2xl">
+      <DialogContent className={COMMON_SHELF_FORM_DIALOG_WIDTH}>
         <DialogHeader>
           <DialogTitle>{isEdit ? '编辑 CAS 主数据' : '新增 CAS 主数据'}</DialogTitle>
         </DialogHeader>
