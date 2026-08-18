@@ -639,7 +639,7 @@ def generate_excel_template() -> bytes:
         ("alias", "别名", "酒精"),
         ("category", "分类", "有机溶剂"),
         ("brand", "品牌", "Sigma"),
-        ("specification", "规格（必填）", "500ml"),
+        ("specification", "规格（必填）", "500mL"),
         ("remaining_quantity", "剩余量", ""),
         ("storage_location", "存放位置", "2-6-6-1"),
         ("is_hazardous", "是否危险品", ""),
@@ -720,7 +720,7 @@ def generate_import_template() -> dict:
                 "name": "specification",
                 "label": "规格",
                 "required": True,
-                "description": "格式: 数值+单位，如 500ml, 1L, 100g，系统会自动解析出数量和单位"
+                "description": "格式: 数值+单位，如 500mL, 1L, 100g，系统会自动解析出数量和单位"
             },
             {
                 "name": "remaining_quantity",

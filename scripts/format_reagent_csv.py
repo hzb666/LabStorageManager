@@ -311,7 +311,7 @@ def parse_spec(spec_str):
         quantity = int(match_eq.group(2))
         return value, unit, quantity
     
-    # 模式3: 乘积格式 - 数量在前面 2x500ml, 3*5mL, 1g*3
+    # 模式3: 乘积格式 - 数量在前面 2x500mL, 3*5mL, 1g*3
     # 支持: 数字*数字+单位 或 数字*数字+单位（无空格）
     match_mult_front = re.match(r'^(\d+)\s*[x*]\s*(\d+\.?\d*)\s*(ml|l|g|kg|mg|个|瓶|支|盒|包|套)$', spec_lower)
     if match_mult_front:
@@ -320,7 +320,7 @@ def parse_spec(spec_str):
         unit = match_mult_front.group(3)
         return value, unit, quantity
     
-    # 模式4: 乘积格式 - 数量在后面 500ml*2, 500 mL X 10, 25g*2
+    # 模式4: 乘积格式 - 数量在后面 500mL*2, 500 mL X 10, 25g*2
     # 支持有/无空格，大小写x
     match_mult_back = re.match(r'^(\d+\.?\d*)\s*(ml|l|g|kg|mg|个|瓶|支|盒|包|套)\s*[x*]\s*(\d+)$', spec_lower)
     if match_mult_back:
@@ -329,7 +329,7 @@ def parse_spec(spec_str):
         quantity = int(match_mult_back.group(3))
         return value, unit, quantity
     
-    # 模式5: 标准格式 500ml, 500 ml
+    # 模式5: 标准格式 500mL, 500 ml
     match = re.match(r'^(\d+\.?\d*)\s*(ml|l|g|kg|mg|个|瓶|支|盒|包|套)$', spec_lower)
     if match:
         value = float(match.group(1))

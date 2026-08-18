@@ -66,7 +66,7 @@ def parse_specification(spec: str) -> Tuple[float, str]:
     Parse specification string into (numeric_value, canonical_unit)
 
     Examples:
-        "500ml" -> (500.0, "mL")
+        "500mL" -> (500.0, "mL")
         "1L"    -> (1.0, "L")
         "100 g" -> (100.0, "g")
 
@@ -83,7 +83,7 @@ def parse_specification(spec: str) -> Tuple[float, str]:
 
     if not match:
         raise SpecificationError(
-            "规格格式无效，请输入数字+单位（如：500ml、1L、100g）"
+            "规格格式无效，请输入数字+单位（如：500mL、1L、100g）"
         )
 
     value = float(match.group(1))

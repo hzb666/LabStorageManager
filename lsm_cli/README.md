@@ -578,7 +578,7 @@ python -m lsm_cli inventory return 123 --used-quantity 20 --notes "已取用 20m
   "brand": "国药",
   "purity": "AR",
   "storage_location": "A-01",
-  "specification": "500ml",
+  "specification": "500mL",
   "quantity_bottles": 2,
   "is_hazardous": true,
   "notes": "新购入"
@@ -602,7 +602,7 @@ python -m lsm_cli inventory return 123 --used-quantity 20 --notes "已取用 20m
   "brand": "国药",
   "purity": "AR",
   "is_hazardous": true,
-  "specification": "500ml"
+  "specification": "500mL"
 }
 ```
 
@@ -627,7 +627,7 @@ python -m lsm_cli inventory update 123 \
   "name_snapshot": "乙醇",
   "brand": "国药",
   "purity": "AR",
-  "specification": "500ml",
+  "specification": "500mL",
   "count": 2,
   "storage_location": "A-01",
   "notes": "常用货架补充"
@@ -703,7 +703,7 @@ python -m lsm_cli common-shelf remove-one <group_key> \
   "category": "醇",
   "brand": "国药",
   "purity": "AR",
-  "specification": "500ml",
+  "specification": "500mL",
   "quantity": 2,
   "price": 120.5,
   "order_reason": "running_out",

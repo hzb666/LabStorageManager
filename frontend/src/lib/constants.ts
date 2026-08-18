@@ -267,7 +267,7 @@ export const IMPORT_TEMPLATE_COLUMNS: ImportColumn[] = [
   {
     name: 'specification',
     required: true,
-    description: '格式: 数值+单位，如 500ml, 1L, 100g，系统会自动解析出数量和单位',
+    description: '格式: 数值+单位，如 500mL, 1L, 100g，系统会自动解析出数量和单位',
   },
   {
     name: 'remaining_quantity',
