@@ -5,7 +5,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from sqlalchemy import event, text
 from sqlmodel import SQLModel, Session, create_engine
@@ -236,12 +236,21 @@ class StructureIndexIncrementalTest(unittest.TestCase):
             limit=10,
             only_in_stock=False,
         )
+        mock_request = MagicMock()
+        mock_user = MagicMock()
+        mock_user_session = MagicMock()
+        mock_user_session.user_id = 1
+        mock_user_session.id = 1
+        mock_current_session = (mock_user, mock_user_session)
+
         with (
             patch.object(chem_api, "structure_index", self.index),
             patch.object(self.index, "exact_search", side_effect=_race_then_search),
+            patch("app.api.chem.get_request_is_cli", return_value=False),
+            patch("app.api.chem.get_sse_client_id", return_value=None),
             Session(self.engine) as db,
         ):
-            response = chem_api.search_substructure(payload, db)
+            response = chem_api.search_substructure(mock_request, payload, db, mock_current_session)
 
         self.assertTrue(raced)
         self.assertEqual(2, response.index.applied_revision)
