@@ -22,6 +22,7 @@ from app.services.dashboard.common import (
     _count_model_rows,
 )
 
+
 def _active_reagent_order_clause(cutoff):
     return or_(
         ReagentOrder.status.in_([ReagentOrderStatus.PENDING, ReagentOrderStatus.APPROVED]),

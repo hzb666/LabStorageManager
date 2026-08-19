@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import ConfigDict, field_validator
 from sqlalchemy import Index, text
@@ -19,18 +18,18 @@ class CommonShelfBase(SQLModel):
 
     cas_number: str = Field(max_length=50)
     name_snapshot: str = Field(min_length=1, max_length=200)
-    brand: Optional[str] = Field(default=None, max_length=100)
+    brand: str | None = Field(default=None, max_length=100)
     brand_normalized: str = Field(max_length=100)
-    purity: Optional[str] = Field(default=None, max_length=20)
+    purity: str | None = Field(default=None, max_length=20)
     specification_text: str = Field(max_length=50)
     spec_quantity: float
     spec_unit: str = Field(max_length=20)
     specification_normalized: str = Field(max_length=50)
-    storage_location: Optional[str] = Field(default=None, max_length=200)
-    storage_location_normalized: Optional[str] = Field(default=None, max_length=200)
-    storage_location_pinyin: Optional[str] = Field(default=None, max_length=200)
-    storage_location_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
-    notes: Optional[str] = Field(default=None, max_length=100)
+    storage_location: str | None = Field(default=None, max_length=200)
+    storage_location_normalized: str | None = Field(default=None, max_length=200)
+    storage_location_pinyin: str | None = Field(default=None, max_length=200)
+    storage_location_pinyin_initials: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=100)
 
 
 class CommonShelf(CommonShelfBase, table=True):
@@ -78,14 +77,14 @@ class CommonShelf(CommonShelfBase, table=True):
         Index("ix_common_shelf_creator_created_at", "created_by_id", "created_at"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     internal_code: str = Field(unique=True, index=True, max_length=50)
-    source_order_id: Optional[int] = Field(
+    source_order_id: int | None = Field(
         default=None,
         foreign_key="reagent_order.id",
         ondelete="SET NULL",
     )
-    created_by_id: Optional[int] = Field(
+    created_by_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",
@@ -131,20 +130,20 @@ class CommonShelfGroup(SQLModel, table=True):
         ),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     cas_number: str = Field(max_length=50)
     name_snapshot: str = Field(min_length=1, max_length=200)
-    brand: Optional[str] = Field(default=None, max_length=100)
+    brand: str | None = Field(default=None, max_length=100)
     brand_normalized: str = Field(max_length=100)
     # 兼容旧字段；纯度和备注以瓶记录为准。
-    purity: Optional[str] = Field(default=None, max_length=20)
+    purity: str | None = Field(default=None, max_length=20)
     specification_text: str = Field(max_length=50)
     spec_quantity: float
     spec_unit: str = Field(max_length=20)
     specification_normalized: str = Field(max_length=50)
     # 兼容旧字段；纯度和备注以瓶记录为准。
-    notes: Optional[str] = Field(default=None, max_length=100)
-    created_by_id: Optional[int] = Field(
+    notes: str | None = Field(default=None, max_length=100)
+    created_by_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",
@@ -155,7 +154,7 @@ class CommonShelfGroup(SQLModel, table=True):
         default_factory=get_utc_now,
         sa_column_kwargs={"onupdate": get_utc_now},
     )
-    deleted_at: Optional[datetime] = Field(default=None)
+    deleted_at: datetime | None = Field(default=None)
 
 
 class CommonShelfResponse(BaseResponse):
@@ -165,20 +164,20 @@ class CommonShelfResponse(BaseResponse):
     internal_code: str
     cas_number: str
     name_snapshot: str
-    brand: Optional[str]
+    brand: str | None
     brand_normalized: str
-    purity: Optional[str]
+    purity: str | None
     specification_text: str
     spec_quantity: float
     spec_unit: str
     specification_normalized: str
-    storage_location: Optional[str]
-    storage_location_normalized: Optional[str]
-    storage_location_pinyin: Optional[str]
-    storage_location_pinyin_initials: Optional[str]
-    notes: Optional[str]
-    source_order_id: Optional[int]
-    created_by_id: Optional[int]
+    storage_location: str | None
+    storage_location_normalized: str | None
+    storage_location_pinyin: str | None
+    storage_location_pinyin_initials: str | None
+    notes: str | None
+    source_order_id: int | None
+    created_by_id: int | None
     created_at: datetime
     updated_at: datetime
 
@@ -188,7 +187,7 @@ class CommonShelfGroupIdentity(BaseResponse):
 
     group_key: str
     cas_number: str
-    brand: Optional[str]
+    brand: str | None
     brand_normalized: str
     specification_text: str
     specification_normalized: str
@@ -198,17 +197,17 @@ class CommonShelfGroupDisplay(BaseResponse):
     """Display metadata for a grouped common-shelf row."""
 
     name: str
-    english_name: Optional[str]
-    alias_1: Optional[str]
-    alias_2: Optional[str]
-    alias_3: Optional[str]
-    category: Optional[ChemicalCategory]
+    english_name: str | None
+    alias_1: str | None
+    alias_2: str | None
+    alias_3: str | None
+    category: ChemicalCategory | None
 
 
 class CommonShelfRecentLocationResponse(BaseResponse):
     """Recent location summary for grouped common-shelf rows."""
 
-    storage_location: Optional[str]
+    storage_location: str | None
     bottle_count: int
 
 
@@ -228,7 +227,7 @@ class CommonShelfGroupResponse(BaseResponse):
 class CommonShelfLocationSummaryResponse(BaseResponse):
     """Aggregated location summary inside one group."""
 
-    storage_location: Optional[str]
+    storage_location: str | None
     bottle_count: int
     oldest_created_at: datetime
 
@@ -249,11 +248,11 @@ class CommonShelfManualCreate(SQLModel):
     cas_number: str = Field(max_length=50)
     name_snapshot: str = Field(min_length=1, max_length=200)
     brand: str = Field(max_length=100)
-    purity: Optional[str] = Field(default=None, max_length=20)
+    purity: str | None = Field(default=None, max_length=20)
     specification: str = Field(max_length=50)
     count: int = Field(default=1, ge=1, le=MAX_BOTTLES_PER_IMPORT)
-    storage_location: Optional[str] = Field(default=None, max_length=200)
-    notes: Optional[str] = Field(default=None, max_length=100)
+    storage_location: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=100)
 
     @field_validator("brand")
     @classmethod
@@ -287,9 +286,9 @@ class CommonShelfGroupItemResponse(BaseResponse):
 
     id: int
     internal_code: str
-    purity: Optional[str]
-    storage_location: Optional[str]
-    notes: Optional[str]
+    purity: str | None
+    storage_location: str | None
+    notes: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -299,9 +298,9 @@ class CommonShelfGroupItemUpdateRequest(SQLModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    purity: Optional[str] = Field(default=None, max_length=20)
-    storage_location: Optional[str] = Field(default=None, max_length=200)
-    notes: Optional[str] = Field(default=None, max_length=100)
+    purity: str | None = Field(default=None, max_length=20)
+    storage_location: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=100)
 
 
 class CommonShelfAddBottlesRequest(SQLModel):
@@ -310,9 +309,9 @@ class CommonShelfAddBottlesRequest(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     count: int = Field(ge=1, le=MAX_BOTTLES_PER_IMPORT)
-    storage_location: Optional[str] = Field(default=None, max_length=200)
-    purity: Optional[str] = Field(default=None, max_length=20)
-    notes: Optional[str] = Field(default=None, max_length=100)
+    storage_location: str | None = Field(default=None, max_length=200)
+    purity: str | None = Field(default=None, max_length=20)
+    notes: str | None = Field(default=None, max_length=100)
 
 
 class CommonShelfRemoveOneRequest(SQLModel):
@@ -320,4 +319,4 @@ class CommonShelfRemoveOneRequest(SQLModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    storage_location: Optional[str] = Field(default=None, max_length=200)
+    storage_location: str | None = Field(default=None, max_length=200)

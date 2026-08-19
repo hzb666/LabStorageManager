@@ -3,12 +3,10 @@ User Session Model - Device and IP Login Management
 """
 from datetime import datetime
 
-from app.core.time_utils import get_utc_now
-from typing import Optional
-
 from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
+from app.core.time_utils import get_utc_now
 
 DEVICE_ID_MAX_LENGTH = 128
 DEVICE_NAME_MAX_LENGTH = 200
@@ -28,7 +26,7 @@ class UserSession(SQLModel, table=True):
         Index("ix_user_sessions_expires_at", "expires_at"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", description="User ID")
     device_id: str = Field(
         max_length=DEVICE_ID_MAX_LENGTH,

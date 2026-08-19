@@ -4,7 +4,6 @@ from collections.abc import Mapping
 
 from fastapi import HTTPException
 
-
 API_ERROR_CODE_HEADER = "X-Error-Code"
 
 

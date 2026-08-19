@@ -1,10 +1,9 @@
 """后端错误日志收集服务。"""
-from collections import deque
 import logging
 import re
+from collections import deque
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
-from datetime import datetime, timedelta, timezone
 
 from app.core.constants import DEFAULT_LOG_HOURS, DEFAULT_LOG_LINES
 from app.core.time_utils import to_display_time
@@ -104,7 +103,7 @@ def _convert_log_timestamp_to_display_time(line: str) -> str:
 
     timestamp_text = match.group("timestamp")
     try:
-        local_naive = datetime.strptime(timestamp_text, ERROR_LOG_TIMESTAMP_FORMAT)
+        local_naive = datetime.strptime(timestamp_text, ERROR_LOG_TIMESTAMP_FORMAT)  # noqa: DTZ007
     except ValueError:
         return line
 
@@ -115,7 +114,7 @@ def _convert_log_timestamp_to_display_time(line: str) -> str:
     utc_naive = (
         local_naive
         .replace(tzinfo=local_tzinfo)
-        .astimezone(timezone.utc)
+        .astimezone(UTC)
         .replace(tzinfo=None)
     )
     display_time = to_display_time(utc_naive)
@@ -133,7 +132,7 @@ def _is_error_log_line(line: str) -> bool:
     return "[ERROR]" in line
 
 
-def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
+def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> list[str]:
     """
     获取最近的错误日志
 
@@ -161,13 +160,13 @@ def get_recent_error_logs(lines: int = DEFAULT_LOG_LINES) -> List[str]:
 
         return sanitized_lines
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - log reads must fail closed.
         logger = get_error_logger()
         logger.error(f"Failed to read error logs: {e}")
         return []
 
 
-def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
+def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> list[str]:
     """
     获取指定时间范围内的错误日志
 
@@ -182,7 +181,7 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
 
     try:
         # 解析时间并过滤
-        cutoff_time = datetime.now() - timedelta(hours=hours)
+        cutoff_time = datetime.now() - timedelta(hours=hours)  # noqa: DTZ005
         recent_errors = []
 
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -193,7 +192,7 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
                 try:
                     # 提取时间戳 (格式: 2024-01-01 12:00:00)
                     time_str = line.split("[")[0].strip()
-                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
+                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)  # noqa: DTZ007
 
                     if log_time >= cutoff_time:
                         recent_errors.append(_format_error_log_line(line))
@@ -203,13 +202,13 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> List[str]:
 
         return recent_errors
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - log reads must fail closed.
         logger = get_error_logger()
         logger.error(f"Failed to read error logs: {e}")
         return []
 
 
-def log_error(message: str, exc_info: Optional[Exception] = None) -> None:
+def log_error(message: str, exc_info: Exception | None = None) -> None:
     """
     记录错误日志
 
@@ -220,7 +219,7 @@ def log_error(message: str, exc_info: Optional[Exception] = None) -> None:
     logger = get_error_logger()
 
     if exc_info:
-        logger.error(message, exc_info=True)
+        logger.error(message, exc_info=True)  # noqa: LOG014 - preserve exception logging behavior.
     else:
         logger.error(message)
 
@@ -239,7 +238,7 @@ def clear_old_logs(days: int = 7) -> int:
         return 0
 
     try:
-        cutoff_time = datetime.now() - timedelta(days=days)
+        cutoff_time = datetime.now() - timedelta(days=days)  # noqa: DTZ005
         deleted_count = 0
         tmp_file = LOG_FILE.with_suffix(f"{LOG_FILE.suffix}.tmp")
 
@@ -254,7 +253,7 @@ def clear_old_logs(days: int = 7) -> int:
 
                 try:
                     time_str = line.split("[")[0].strip()
-                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
+                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)  # noqa: DTZ007
 
                     if log_time >= cutoff_time:
                         target.write(line)
@@ -267,7 +266,7 @@ def clear_old_logs(days: int = 7) -> int:
 
         return deleted_count
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - log cleanup must not propagate.
         logger = get_error_logger()
         logger.error(f"Failed to clear old logs: {e}")
         return 0

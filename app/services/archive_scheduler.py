@@ -8,7 +8,8 @@ import math
 import os
 import time
 from collections.abc import Callable, Iterator
-from datetime import datetime, time as datetime_time, timedelta
+from datetime import datetime, timedelta
+from datetime import time as datetime_time
 from pathlib import Path
 
 from app.archive_logs import resolve_log_archive_output_dir, run_log_archive
@@ -215,13 +216,13 @@ async def _run_weekly_archive_loop(
 
 
 def _seconds_until_next_daily_run(run_at_time: datetime_time) -> int:
-    now = datetime.now()
+    now = datetime.now()  # noqa: DTZ005 - scheduler uses server-local naive time.
     next_run = _next_daily_run_at(now, run_at_time)
     return max(1, math.ceil((next_run - now).total_seconds()))
 
 
 def _seconds_until_next_weekly_run(run_at_time: datetime_time, run_weekday: int) -> int:
-    now = datetime.now()
+    now = datetime.now()  # noqa: DTZ005 - scheduler uses server-local naive time.
     next_run = _next_weekly_run_at(now, run_at_time, run_weekday)
     return max(1, math.ceil((next_run - now).total_seconds()))
 

@@ -1,30 +1,36 @@
 # 试剂订单工作流路由：审批、到货、仪表盘、入库。
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Collection, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select, delete, update as sql_update
+from sqlmodel import Session, delete, select
+from sqlmodel import update as sql_update
 
-from app.database import DBSession
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentUser, get_current_user, require_admin
+from app.core.constants import SSEEventType, SSERoom
 from app.core.db_compat import exec_delete_returning_first
 from app.core.request_utils import get_request_is_cli
 from app.core.time_utils import get_utc_now, utc_iso_str
-from app.models.user import UserRole
+from app.database import DBSession
+from app.models.common_shelf import CommonShelf
+from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import (
     ReagentOrder,
     ReagentOrderReason,
     ReagentOrderResponse,
     ReagentOrderStatus,
 )
-from app.models.common_shelf import CommonShelf
-from app.models.inventory import Inventory, InventoryStatus
-from app.core.constants import SSEEventType, SSERoom
+from app.models.user import UserRole
+from app.search_completion_db import (
+    INVENTORY_COMPLETION_ENDPOINT,
+    REAGENT_ORDER_COMPLETION_ENDPOINT,
+)
 from app.services.api_utils import clear_cache_by_prefix, empty_to_none, serialize_inventory_items
 from app.services.cas_utils import normalize_cas
 from app.services.common_shelf_creation import (
@@ -51,29 +57,20 @@ from app.services.inventory_operation_logger import (
 )
 from app.services.inventory_queries import regular_inventory_query
 from app.services.inventory_status import derive_inventory_quantity_status
-from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.shelf_utils import normalize_storage_location
-from app.services.spec_utils import SpecificationError, format_specification, parse_specification
-from app.services.sse_manager import sse_manager
-from app.services.user_utils import batch_get_user_names
 from app.services.order_operation_logger import (
     log_reagent_order_approve,
     log_reagent_order_delete,
-    log_reagent_order_update,
     log_reagent_order_reject,
+    log_reagent_order_update,
 )
 from app.services.order_status_times import (
     get_order_status_time_fields,
     get_reagent_order_status_times,
 )
+from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.reagent_order_validation import (
     ensure_common_public_order_master_data,
     get_cas_master_data,
-)
-from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
-from app.search_completion_db import (
-    INVENTORY_COMPLETION_ENDPOINT,
-    REAGENT_ORDER_COMPLETION_ENDPOINT,
 )
 from app.services.search_completion_entity_index import (
     delete_reagent_order_entity_completions,
@@ -81,6 +78,11 @@ from app.services.search_completion_entity_index import (
     sync_inventory_entity_completions,
     sync_reagent_order_entity_completions,
 )
+from app.services.shelf_utils import normalize_storage_location
+from app.services.spec_utils import SpecificationError, format_specification, parse_specification
+from app.services.sse_manager import sse_manager
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.services.user_utils import batch_get_user_names
 
 ORDER_NOT_FOUND = "Order not found"
 LIST_CACHE_PREFIX = "list:"
@@ -115,7 +117,7 @@ DASHBOARD_REAGENT_STATUSES = (
 
 
 def _clear_reagent_workflow_cache(
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     order: ReagentOrder | None = None,
     db: Session | None = None,
     *,
@@ -140,44 +142,44 @@ class ReagentWorkflowEditableFields(BaseModel):
     # 到货/入库时允许再次校正的试剂信息；CAS、价格、订购原因和瓶数不在此处修改。
     model_config = ConfigDict(extra="forbid")
 
-    name: Optional[str] = Field(default=None, max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    alias: Optional[str] = Field(default=None, max_length=200)
-    category: Optional[str] = Field(default=None, max_length=100)
-    brand: Optional[str] = Field(default=None, max_length=100)
-    purity: Optional[str] = Field(default=None, max_length=20)
-    specification: Optional[str] = Field(default=None, max_length=100)
-    is_hazardous: Optional[bool] = None
-    notes: Optional[str] = Field(default=None, max_length=500)
+    name: str | None = Field(default=None, max_length=200)
+    english_name: str | None = Field(default=None, max_length=200)
+    alias: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=100)
+    brand: str | None = Field(default=None, max_length=100)
+    purity: str | None = Field(default=None, max_length=20)
+    specification: str | None = Field(default=None, max_length=100)
+    is_hazardous: bool | None = None
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class ConfirmArrivalRequest(ReagentWorkflowEditableFields):
     # confirm-arrival 操作请求体。
 
-    arrival_notes: Optional[str] = Field(default=None, max_length=500)
-    storage_location: Optional[str] = None
-    remaining_quantity: Optional[float] = None
+    arrival_notes: str | None = Field(default=None, max_length=500)
+    storage_location: str | None = None
+    remaining_quantity: float | None = None
 
 
 class StockInRequest(ReagentWorkflowEditableFields):
     # stock-in 操作请求体。
 
     storage_location: str
-    remaining_quantity: Optional[float] = None
+    remaining_quantity: float | None = None
 
 
 @dataclass(frozen=True)
 class InventoryCreateOptions:
     # 创建库存项的可选参数集合，避免内部 helper 参数膨胀。
 
-    created_by_id: Optional[int]
-    temporary_keeper_id: Optional[int]
-    storage_location: Optional[str]
+    created_by_id: int | None
+    temporary_keeper_id: int | None
+    storage_location: str | None
     inventory_status: InventoryStatus
-    remaining_quantity: Optional[float] = None
+    remaining_quantity: float | None = None
 
 
-def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
+def _compute_remaining_percent(remaining: float | None, initial: float | None) -> float | None:
     if initial is None or initial <= 0:
         return None
     if remaining is None:
@@ -186,9 +188,9 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
 
 
 def _validate_positive_remaining_quantity(
-    remaining_quantity: Optional[float],
+    remaining_quantity: float | None,
     *,
-    initial_quantity: Optional[float],
+    initial_quantity: float | None,
 ) -> None:
     if remaining_quantity is None:
         return
@@ -204,7 +206,7 @@ def _validate_positive_remaining_quantity(
         )
 
 
-def _get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
+def _get_reagent_order_by_id(db: Session, order_id: int) -> ReagentOrder | None:
     return db.get(ReagentOrder, order_id)
 
 
@@ -328,7 +330,7 @@ def _ensure_workflow_order_brand(order: ReagentOrder) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
 
 
-def _normalize_required_storage_location(storage_location: Optional[str]) -> str:
+def _normalize_required_storage_location(storage_location: str | None) -> str:
     normalized = normalize_storage_location(storage_location)
     if normalized is None:
         raise HTTPException(
@@ -356,7 +358,7 @@ def _apply_workflow_order_updates(
     db: Session,
     order: ReagentOrder,
     payload: ReagentWorkflowEditableFields,
-) -> Optional[ReagentOrder]:
+) -> ReagentOrder | None:
     # 返回更新前快照用于审计；没有实际字段变化时不生成日志。
     update_data = _normalize_workflow_order_updates(payload)
     if order.order_reason == ReagentOrderReason.COMMON_PUBLIC:
@@ -384,7 +386,7 @@ def _apply_workflow_order_updates(
 def _log_workflow_order_update(
     db: Session,
     *,
-    before_order: Optional[ReagentOrder],
+    before_order: ReagentOrder | None,
     order: ReagentOrder,
     operator_id: int,
     is_cli: bool,
@@ -405,6 +407,8 @@ def _clear_inventory_projection_cache(
 ) -> None:
     from app.api.inventory import (
         LIST_CACHE_PREFIX as INVENTORY_LIST_CACHE_PREFIX,
+    )
+    from app.api.inventory import (
         SEARCH_CACHE as INVENTORY_SEARCH_CACHE,
     )
 
@@ -599,7 +603,7 @@ async def _broadcast_common_shelf_events(
 
 def _register_approval_routes(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
 ) -> None:
     @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
     async def approve_reagent_order(
@@ -698,7 +702,7 @@ def _register_approval_routes(
 
 def _register_arrival_routes(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
 ) -> None:
     @router.post("/{order_id}/confirm-arrival")
     async def confirm_reagent_arrival(
@@ -707,7 +711,7 @@ def _register_arrival_routes(
         current_user: CurrentUser,
         db: DBSession,
         order_id: int,
-        body: ConfirmArrivalRequest = ConfirmArrivalRequest(),
+        body: ConfirmArrivalRequest = ConfirmArrivalRequest(),  # noqa: B008
     ):
         order = _get_reagent_order_by_id(db, order_id)
         if not order:
@@ -925,8 +929,8 @@ def _build_reagent_dashboard_groups(
             grouped_orders[status_key] = {"status": status_key, "orders": [], "count": 0}
         grouped_orders[status_key]["orders"].append(order_data)
 
-    for key in grouped_orders:
-        grouped_orders[key]["count"] = len(grouped_orders[key]["orders"])
+    for value in grouped_orders.values():
+        value["count"] = len(value["orders"])
 
     return grouped_orders
 
@@ -1061,7 +1065,7 @@ def _validate_stock_in_order(
 
 
 # 计算 stock-in 的目标库存属性，复用 APPROVED/ARRIVED 两条路径。
-def _build_stock_in_context(order: ReagentOrder, payload: StockInRequest) -> tuple[Optional[str], float]:
+def _build_stock_in_context(order: ReagentOrder, payload: StockInRequest) -> tuple[str | None, float]:
     target_location = _normalize_required_storage_location(payload.storage_location)
     effective_remaining = order.initial_quantity if payload.remaining_quantity is None else payload.remaining_quantity
     return target_location, effective_remaining
@@ -1073,7 +1077,7 @@ def _stock_in_approved_order(
     *,
     order: ReagentOrder,
     current_user: CurrentUser,
-    stock_context: tuple[Optional[str], float],
+    stock_context: tuple[str | None, float],
 ) -> list[Inventory]:
     target_location, effective_remaining = stock_context
     return _create_inventory_items_from_order(
@@ -1126,7 +1130,7 @@ def _apply_arrived_items_stock_in(
     target_items: list[Inventory],
     *,
     order: ReagentOrder,
-    target_location: Optional[str],
+    target_location: str | None,
     effective_remaining: float,
 ) -> None:
     for item in target_items:
@@ -1165,7 +1169,7 @@ async def _finalize_stock_in_order(
     *,
     order: ReagentOrder,
     order_id: int,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
 ) -> None:
     order.status = ReagentOrderStatus.STOCKED
     db.commit()
@@ -1219,7 +1223,7 @@ def _delete_reagent_order_with_permission(
 # 注册删除订单接口，保持原权限和 204 语义。
 def _register_delete_order_route(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
 ) -> None:
     # 删除试剂订单。
     @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1254,7 +1258,7 @@ def _register_delete_order_route(
 # 注册订单入库接口，拆分 APPROVED/ARRIVED 路径但保持外部行为不变。
 def _register_stock_in_route(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
 ) -> None:
     # 执行试剂订单入库。
     @router.post("/{order_id}/stock-in", response_model=dict)
@@ -1369,7 +1373,7 @@ def _register_stock_in_route(
 # 汇总删除与入库路由注册。
 def _register_delete_stock_routes(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
 ) -> None:
     _register_delete_order_route(router, search_cache)
     _register_stock_in_route(router, search_cache)
@@ -1377,7 +1381,7 @@ def _register_delete_stock_routes(
 
 def register_workflow_routes(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
 ) -> None:
     _register_approval_routes(router, search_cache)
     _register_arrival_routes(router, search_cache)

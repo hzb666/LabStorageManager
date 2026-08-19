@@ -72,10 +72,9 @@ class StructureIndexScheduler:
         now: datetime | None = None,
     ) -> None:
         with Session(engine) as db:
-            if not structure_index.is_initialized():
-                if not structure_index.load_snapshot(db):
-                    structure_index.compact(db)
-                    return
+            if not structure_index.is_initialized() and not structure_index.load_snapshot(db):
+                structure_index.compact(db)
+                return
             snapshot = structure_index.status(db)
             if snapshot.dirty and snapshot.applied_revision == 0 and snapshot.base_count == 0:
                 structure_index.compact(db)

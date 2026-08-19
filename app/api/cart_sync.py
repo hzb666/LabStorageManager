@@ -3,14 +3,14 @@ Cart Sync API - 购物车同步
 支持耗材订单和试剂订单的自动匹配
 """
 from enum import Enum
-from typing import Optional, Annotated
+from typing import Annotated
 
-from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.database import get_db
 from app.core.auth import get_current_user
+from app.database import get_db
 from app.models.reagent_order import ReagentOrder
 from app.services.cas_utils import normalize_cas
 
@@ -36,7 +36,7 @@ class CartItem(BaseModel):
     name: str
     specification: str = ""
     quantity: int = 1
-    price: Optional[float] = None
+    price: float | None = None
     brand: str = ""
     cas_number: str = ""
     english_name: str = ""
@@ -44,8 +44,8 @@ class CartItem(BaseModel):
     unit: str = ""
     product_number: str = ""
     is_hazardous: bool = False
-    product_id: Optional[str] = None  # 学校系统产品ID
-    detail_url: Optional[str] = None  # 详情页URL
+    product_id: str | None = None  # 学校系统产品ID
+    detail_url: str | None = None  # 详情页URL
 
 
 class CartItemRequest(BaseModel):
@@ -57,7 +57,7 @@ class CartItemRequest(BaseModel):
 class MatchedItem(BaseModel):
     """匹配结果项"""
     cart_item: CartItem
-    matched_id: Optional[int] = None
+    matched_id: int | None = None
     match_type: MatchType = MatchType.NONE
     similarity: float = 0.0
 

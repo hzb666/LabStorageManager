@@ -24,6 +24,7 @@ from app.models.compound_structure import (
 from app.models.structure_index import StructureResolutionJob, StructureResolutionJobState
 from app.services.api_utils import normalize_pagination
 from app.services.cas_utils import normalize_cas
+from app.services.search_query_log_service import buffer_search_log
 from app.services.structure_cache_repo import get_structure_cache
 from app.services.structure_cache_workflow import (
     StructureFeatureDisabledError,
@@ -45,14 +46,16 @@ from app.services.structure_inventory_summary import (
     get_inventory_summaries_by_cas,
     get_visible_inventory_cas_numbers,
 )
-from app.services.structure_search_cache import clear_structure_search_cache, put_structure_search_results
 from app.services.structure_resolution_jobs import (
     StructureResolutionJobCounts,
     count_structure_resolution_jobs,
     enqueue_structure_resolution_job,
 )
 from app.services.structure_resolution_scheduler import structure_resolution_scheduler
-from app.services.search_query_log_service import buffer_search_log
+from app.services.structure_search_cache import (
+    clear_structure_search_cache,
+    put_structure_search_results,
+)
 
 router = APIRouter(prefix="/chem", tags=["Chem"])
 logger = logging.getLogger(__name__)
@@ -331,7 +334,7 @@ def get_structure_index_status(db: DBSession) -> StructureIndexStatusResponse:
 )
 def list_structure_resolution_jobs(
     db: DBSession,
-    job_state: StructureResolutionJobState | None = Query(default=None, alias="state"),
+    job_state: StructureResolutionJobState | None = Query(default=None, alias="state"),  # noqa: B008
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1),
 ) -> StructureResolutionJobListResponse:

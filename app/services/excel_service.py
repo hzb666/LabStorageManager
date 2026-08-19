@@ -1,16 +1,24 @@
 # Excel 批量导入与模板生成。
-from dataclasses import dataclass
 import math
-from numbers import Real
-import pandas as pd
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from numbers import Real
 from pathlib import Path
-from typing import Any, Tuple, Optional
+from typing import Any
+
+import pandas as pd
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, status, UploadFile
+
+from app.core.constants import (
+    EXCEL_DATE_EPOCH,
+    EXCEL_FILE_MAX_BYTES,
+    EXCEL_RED_FONT_COLOR,
+    INTERNAL_CODE_MAX_SEQUENCE,
+)
+from app.core.time_utils import get_utc_now, normalize_to_utc_naive
 from app.models.inventory import Inventory, ManualInventoryCreate
-from app.services.inventory_status import derive_inventory_quantity_status
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.internal_code import (
     INTERNAL_CODE_CONFLICT_MAX_RETRIES,
@@ -23,19 +31,13 @@ from app.services.inventory_operation_logger import (
     SOURCE_BATCH_IMPORT,
     log_stock_in,
 )
-from app.services.spec_utils import format_specification, parse_specification
-from app.services.shelf_utils import normalize_storage_location
+from app.services.inventory_status import derive_inventory_quantity_status
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.core.constants import (
-    EXCEL_DATE_EPOCH,
-    EXCEL_FILE_MAX_BYTES,
-    EXCEL_RED_FONT_COLOR,
-    INTERNAL_CODE_MAX_SEQUENCE,
-)
-from app.core.time_utils import get_utc_now, normalize_to_utc_naive
+from app.services.shelf_utils import normalize_storage_location
+from app.services.spec_utils import format_specification, parse_specification
 
 
-def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
+def _compute_remaining_percent(remaining: float | None, initial: float | None) -> float | None:
     if initial is None or initial <= 0:
         return None
     if remaining is None:
@@ -85,7 +87,7 @@ EXCEL_IMPORT_COLUMN_MAPPING = {
 class ExcelImportContext:
     db: Session
     sequence_tracker: dict[tuple[str, str], int]
-    default_storage_location: Optional[str]
+    default_storage_location: str | None
     default_is_hazardous: bool
     user_id: int
 
@@ -160,8 +162,7 @@ def validate_uploaded_file(file: UploadFile) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid XLSX file format"
             )
-    elif ext == ".xls":
-        if not header.startswith(b"\xd0\xcf\x11\xe0"):
+    elif ext == ".xls" and not header.startswith(b"\xd0\xcf\x11\xe0"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid XLS file format"
@@ -182,7 +183,7 @@ def _parse_boolean(value, default: bool = False) -> bool:
             return True
         raise ValueError("Invalid is_hazardous: expected true/false or 1/0")
     if not isinstance(value, str):
-        raise ValueError("Invalid is_hazardous: expected true/false or 1/0")
+        raise ValueError("Invalid is_hazardous: expected true/false or 1/0")  # noqa: TRY004
 
     stripped = value.strip().lower()
     if not stripped:
@@ -205,7 +206,7 @@ def _generate_internal_code_with_tracking(
     db: Session,
     cas_number: str,
     sequence_tracker: dict[tuple[str, str], int],
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 ) -> str:
     # 同一批次里相同 CAS 也要拿到不同流水号，防止内部编码唯一约束冲突。
     date_str = (created_at or get_utc_now()).strftime("%y%m%d")
@@ -249,14 +250,14 @@ def parse_excel_file(file_path: str) -> pd.DataFrame:
     return pd.read_excel(file_path, keep_default_na=False)
 
 
-def _normalize_import_text(value: object) -> Optional[str]:
+def _normalize_import_text(value: object) -> str | None:
     if value is None or pd.isna(value):
         return None
     normalized = str(value).strip()
     return normalized or None
 
 
-def _validate_import_text_lengths(row: dict) -> Optional[str]:
+def _validate_import_text_lengths(row: dict) -> str | None:
     for field, max_length in IMPORT_TEXT_MAX_LENGTHS.items():
         value = _normalize_import_text(row.get(field))
         if field == "storage_location":
@@ -266,7 +267,7 @@ def _validate_import_text_lengths(row: dict) -> Optional[str]:
     return None
 
 
-def _validate_remaining_quantity(row: dict, initial_quantity: float) -> Optional[str]:
+def _validate_remaining_quantity(row: dict, initial_quantity: float) -> str | None:
     remaining_text = _normalize_import_text(row.get("remaining_quantity"))
     if remaining_text is None:
         return None
@@ -286,7 +287,7 @@ def _validate_remaining_quantity(row: dict, initial_quantity: float) -> Optional
     return None
 
 
-def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
+def validate_row_data(row: dict) -> tuple[bool, str | None]:
     length_error = _validate_import_text_lengths(row)
     if length_error:
         return False, length_error
@@ -305,7 +306,7 @@ def validate_row_data(row: dict) -> Tuple[bool, Optional[str]]:
     try:
         spec_value, _ = parse_specification(str(row["specification"]))
     except ValueError as e:
-        return False, f"Invalid specification format: {str(e)}"
+        return False, f"Invalid specification format: {e!s}"
 
     remaining_error = _validate_remaining_quantity(row, spec_value)
     if remaining_error:
@@ -359,7 +360,7 @@ def _parse_remaining_quantity(row: dict, initial_quantity: float) -> float:
     return remaining_qty
 
 
-def _normalize_import_optional_fields(row: dict, default_storage_location: Optional[str]) -> dict[str, Optional[str]]:
+def _normalize_import_optional_fields(row: dict, default_storage_location: str | None) -> dict[str, str | None]:
     all_optional_fields = {
         "storage_location": row.get("storage_location"),
         "alias": row.get("alias"),
@@ -378,7 +379,7 @@ def _normalize_import_optional_fields(row: dict, default_storage_location: Optio
     return normalized_optional
 
 
-def _parse_import_created_at(value: object) -> Optional[datetime]:
+def _parse_import_created_at(value: object) -> datetime | None:
     date_str = _normalize_import_text(value)
     if date_str is None:
         return None
@@ -479,7 +480,7 @@ def _build_import_result(
 def _prepare_inventory_import(
     db: Session,
     file_path: str,
-    default_storage_location: Optional[str] = None,
+    default_storage_location: str | None = None,
     default_is_hazardous: bool = False,
     user_id: int = 1,
 ) -> PreparedInventoryImport:
@@ -509,7 +510,7 @@ def _prepare_inventory_import(
                 import_context,
                 row,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - collect row-level validation errors.
             errors.append({"row": row_num, "error": str(exc)})
             continue
 
@@ -552,7 +553,7 @@ def _persist_imported_inventory(
 def preview_inventory_import_from_excel(
     db: Session,
     file_path: str,
-    default_storage_location: Optional[str] = None,
+    default_storage_location: str | None = None,
     default_is_hazardous: bool = False,
     user_id: int = 1,
 ) -> dict[str, Any]:
@@ -570,7 +571,7 @@ def preview_inventory_import_from_excel(
 def confirm_inventory_import_from_excel(
     db: Session,
     file_path: str,
-    default_storage_location: Optional[str] = None,
+    default_storage_location: str | None = None,
     default_is_hazardous: bool = False,
     user_id: int = 1,
     is_cli: bool = False,
@@ -599,15 +600,15 @@ def confirm_inventory_import_from_excel(
         except IntegrityError as exc:
             if not is_internal_code_unique_violation(exc):
                 db.rollback()
-                raise Exception(f"Failed to save imported data: {str(exc)}") from exc
+                raise Exception(f"Failed to save imported data: {exc!s}") from exc  # noqa: TRY002
             db.rollback()
             if attempt == INTERNAL_CODE_CONFLICT_MAX_RETRIES - 1:
-                raise Exception("Failed to allocate unique internal codes during import, please retry") from exc
+                raise Exception("Failed to allocate unique internal codes during import, please retry") from exc  # noqa: TRY002
         except Exception as exc:
             db.rollback()
-            raise Exception(f"Failed to save imported data: {str(exc)}") from exc
+            raise Exception(f"Failed to save imported data: {exc!s}") from exc  # noqa: TRY002
 
-    raise Exception("Failed to import inventory after retries")
+    raise Exception("Failed to import inventory after retries")  # noqa: TRY002
 
 
 def generate_excel_template() -> bytes:

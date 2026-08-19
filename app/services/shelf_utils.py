@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
-
 
 EMPTY_LOCATION_TEXT_PATTERN = re.compile(r"[\s\-‐‑‒–—―−－﹣]+")
 LOCATION_EDGE_DASH_CHARS = "-‐‑‒–—―−－﹣"
 
 
-def is_effectively_empty_storage_location(storage_location: Optional[str]) -> bool:
+def is_effectively_empty_storage_location(storage_location: str | None) -> bool:
     """Return whether location input is empty after trimming placeholder dashes."""
     if storage_location is None:
         return True
@@ -19,7 +17,7 @@ def is_effectively_empty_storage_location(storage_location: Optional[str]) -> bo
     return not EMPTY_LOCATION_TEXT_PATTERN.sub("", normalized)
 
 
-def normalize_storage_location(storage_location: Optional[str]) -> Optional[str]:
+def normalize_storage_location(storage_location: str | None) -> str | None:
     """Normalize storage location input to a clean value or None."""
     if storage_location is None:
         return None

@@ -1,15 +1,15 @@
 """试剂订单模型。"""
 from datetime import datetime
+from enum import Enum
+
+from pydantic import ConfigDict, field_validator
+from sqlalchemy import Column, Index, asc, desc
+from sqlalchemy import Enum as SAEnum
+from sqlmodel import Field, SQLModel
 
 from app.core.constants import MAX_ORDER_QUANTITY
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
-from enum import Enum
-from typing import Optional
-
-from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, Enum as SAEnum, Index, asc, desc
-from sqlmodel import Field, SQLModel
 
 
 class ReagentOrderStatus(str, Enum):
@@ -41,25 +41,25 @@ class ReagentOrderBase(SQLModel):
     # 中文名称，带查询索引和拼音排序字段
     name: str = Field(max_length=200)
     # 英文名称
-    english_name: Optional[str] = Field(None, max_length=200)
+    english_name: str | None = Field(None, max_length=200)
     # 别名，如 "酒精, Ethanol"
-    alias: Optional[str] = Field(None, max_length=200)
+    alias: str | None = Field(None, max_length=200)
     # 分类：到货/入库阶段补充后复制到库存
-    category: Optional[str] = Field(max_length=100)
+    category: str | None = Field(max_length=100)
     # 品牌，带查询索引和拼音排序字段
-    brand: Optional[str] = Field(max_length=100)
+    brand: str | None = Field(max_length=100)
     # 纯度或等级，如 95%、AR、HPLC
-    purity: Optional[str] = Field(None, max_length=20)
+    purity: str | None = Field(None, max_length=20)
     # 数据库模型：允许 NULL 以兼容旧数据
-    initial_quantity: Optional[float] = Field(default=None)
+    initial_quantity: float | None = Field(default=None)
     # 单位，如 "ml"、"g"、"L"
-    unit: Optional[str] = Field(None, max_length=20)
+    unit: str | None = Field(None, max_length=20)
     # 订购数量（瓶数）
     quantity: int = Field(gt=0)
     # 单价
     price: float = Field(ge=0)
     # 订购原因；数据库允许为空，但前端创建时必须传入
-    order_reason: Optional[ReagentOrderReason] = Field(
+    order_reason: ReagentOrderReason | None = Field(
         default=None,
         sa_column=Column(
             SAEnum(
@@ -75,7 +75,7 @@ class ReagentOrderBase(SQLModel):
     # 危险品标记
     is_hazardous: bool = False
     # 备注
-    notes: Optional[str] = Field(None, max_length=500)
+    notes: str | None = Field(None, max_length=500)
 
 
 class ReagentOrder(ReagentOrderBase, table=True):
@@ -113,8 +113,8 @@ class ReagentOrder(ReagentOrderBase, table=True):
         Index("ix_reagent_order_applicant_created_at_id", asc("applicant_id"), desc("created_at"), desc("id")),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    applicant_id: Optional[int] = Field(
+    id: int | None = Field(default=None, primary_key=True)
+    applicant_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL"
@@ -140,10 +140,10 @@ class ReagentOrder(ReagentOrderBase, table=True):
     )
 
     # 名称和品牌拼音字段（预计算，使用数据库索引加速搜索/排序）
-    name_pinyin: Optional[str] = Field(default=None, max_length=200)
-    name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
-    brand_pinyin: Optional[str] = Field(default=None, max_length=200)
-    brand_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    name_pinyin: str | None = Field(default=None, max_length=200)
+    name_pinyin_initials: str | None = Field(default=None, max_length=200)
+    brand_pinyin: str | None = Field(default=None, max_length=200)
+    brand_pinyin_initials: str | None = Field(default=None, max_length=200)
 
 
 class ReagentOrderCreate(SQLModel):
@@ -155,17 +155,17 @@ class ReagentOrderCreate(SQLModel):
 
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    alias: Optional[str] = Field(default=None, max_length=200)
-    category: Optional[str] = Field(default=None, max_length=100)
+    english_name: str | None = Field(default=None, max_length=200)
+    alias: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=100)
     brand: str = Field(max_length=100)
-    purity: Optional[str] = Field(default=None, max_length=20)
+    purity: str | None = Field(default=None, max_length=20)
     specification: str = Field(max_length=100)  # 前端传入规格字符串，如 "500mL"
     quantity: int = Field(gt=0, le=MAX_ORDER_QUANTITY)  # 数量限制：1-99
     price: float = Field(gt=0)  # 价格必填，必须大于0
     order_reason: ReagentOrderReason  # 必填，前端只能选择枚举值
     is_hazardous: bool = False
-    notes: Optional[str] = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=500)
 
     @field_validator("cas_number", "name", "brand", "specification")
     @classmethod
@@ -180,25 +180,25 @@ class ReagentOrderUpdate(SQLModel):
     """DTO for updating reagent order information"""
     model_config = ConfigDict(extra="forbid")
 
-    cas_number: Optional[str] = Field(default=None, max_length=50)
-    name: Optional[str] = Field(default=None, max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    alias: Optional[str] = Field(default=None, max_length=200)
-    category: Optional[str] = Field(default=None, max_length=100)
-    brand: Optional[str] = Field(default=None, max_length=100)
-    purity: Optional[str] = Field(default=None, max_length=20)
-    specification: Optional[str] = Field(default=None, max_length=100)
-    initial_quantity: Optional[float] = Field(default=None, gt=0)
-    unit: Optional[str] = Field(default=None, max_length=20)
-    quantity: Optional[int] = Field(default=None, gt=0, le=MAX_ORDER_QUANTITY)
-    price: Optional[float] = Field(default=None, gt=0)
-    order_reason: Optional[ReagentOrderReason] = None
-    is_hazardous: Optional[bool] = None
-    notes: Optional[str] = Field(default=None, max_length=500)
+    cas_number: str | None = Field(default=None, max_length=50)
+    name: str | None = Field(default=None, max_length=200)
+    english_name: str | None = Field(default=None, max_length=200)
+    alias: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=100)
+    brand: str | None = Field(default=None, max_length=100)
+    purity: str | None = Field(default=None, max_length=20)
+    specification: str | None = Field(default=None, max_length=100)
+    initial_quantity: float | None = Field(default=None, gt=0)
+    unit: str | None = Field(default=None, max_length=20)
+    quantity: int | None = Field(default=None, gt=0, le=MAX_ORDER_QUANTITY)
+    price: float | None = Field(default=None, gt=0)
+    order_reason: ReagentOrderReason | None = None
+    is_hazardous: bool | None = None
+    notes: str | None = Field(default=None, max_length=500)
 
     @field_validator("cas_number", "name", "specification", mode="before")
     @classmethod
-    def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
+    def strip_supplied_required_text(cls, value: str | None) -> str | None:
         if value is None:
             raise ValueError("Field must not be empty")
         if not isinstance(value, str):
@@ -210,7 +210,7 @@ class ReagentOrderUpdate(SQLModel):
 
     @field_validator("quantity", "price", mode="before")
     @classmethod
-    def reject_null_required_number(cls, value: Optional[float]) -> Optional[float]:
+    def reject_null_required_number(cls, value: float | None) -> float | None:
         if value is None:
             raise ValueError("Field must not be empty")
         return value
@@ -221,23 +221,23 @@ class ReagentOrderResponse(BaseResponse):
     id: int
     cas_number: str
     name: str
-    english_name: Optional[str]
-    alias: Optional[str]
-    category: Optional[str]
-    brand: Optional[str]
-    purity: Optional[str]
-    initial_quantity: Optional[float]
-    unit: Optional[str]
+    english_name: str | None
+    alias: str | None
+    category: str | None
+    brand: str | None
+    purity: str | None
+    initial_quantity: float | None
+    unit: str | None
     quantity: int
-    price: Optional[float]
-    order_reason: Optional[ReagentOrderReason]
+    price: float | None
+    order_reason: ReagentOrderReason | None
     is_hazardous: bool
-    notes: Optional[str]
-    applicant_id: Optional[int]
+    notes: str | None
+    applicant_id: int | None
     status: ReagentOrderStatus
     created_at: datetime
     updated_at: datetime
-    approved_at: Optional[datetime] = None
-    rejected_at: Optional[datetime] = None
-    arrived_at: Optional[datetime] = None
-    stocked_at: Optional[datetime] = None
+    approved_at: datetime | None = None
+    rejected_at: datetime | None = None
+    arrived_at: datetime | None = None
+    stocked_at: datetime | None = None

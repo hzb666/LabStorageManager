@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from typing import Optional, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -14,8 +14,8 @@ from app.core.time_utils import get_utc_now
 from app.database import DBSession
 from app.models.common_shelf import (
     CommonShelf,
-    CommonShelfGroup,
     CommonShelfAddBottlesRequest,
+    CommonShelfGroup,
     CommonShelfGroupEditRequest,
     CommonShelfGroupItemResponse,
     CommonShelfGroupItemUpdateRequest,
@@ -24,14 +24,14 @@ from app.models.common_shelf import (
     CommonShelfManualCreate,
     CommonShelfRemoveOneRequest,
 )
+from app.services.api_utils import normalize_optional_text, normalize_pagination
+from app.services.cas_utils import normalize_cas
 from app.services.common_shelf_creation import (
     create_common_shelf_items_for_group_record,
     create_manual_common_shelf_items,
     normalize_brand_for_group,
     normalize_specification_for_group,
 )
-from app.services.api_utils import normalize_optional_text, normalize_pagination
-from app.services.cas_utils import normalize_cas
 from app.services.common_shelf_group_records import (
     get_active_common_shelf_group,
     mark_common_shelf_group_deleted,
@@ -46,36 +46,36 @@ from app.services.common_shelf_operation_logger import (
     log_common_shelf_remove_one,
     log_common_shelf_stock_in,
 )
-from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.common_shelf_queries import (
     CommonShelfGroupFields,
     CommonShelfGroupListOptions,
     build_group_key,
     get_common_shelf_group_row_payload,
-    get_group_identity_from_item,
     get_group_identity_from_group,
+    get_group_identity_from_item,
     get_group_items,
     get_group_name_map,
     list_group_item_details,
-    remove_earliest_item_in_location,
     list_group_location_suggestions,
-    list_location_suggestions_by_identity,
     list_group_locations,
     list_grouped_common_shelf,
+    list_location_suggestions_by_identity,
     locate_merge_target,
     parse_group_key,
+    remove_earliest_item_in_location,
 )
-from app.services.spec_utils import SpecificationError, parse_specification
-from app.services.shelf_utils import normalize_storage_location
-from app.services.sse_manager import sse_manager
+from app.services.export_rate_limit import EXPORT_SCOPE_COMMON_SHELF, enforce_export_rate_limit
+from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.search_matchers import TextMatchMode
 from app.services.search_query_log_service import (
     buffer_search_log,
     build_search_log_filters,
     build_search_log_sort,
 )
-from app.services.search_matchers import TextMatchMode
+from app.services.shelf_utils import normalize_storage_location
+from app.services.spec_utils import SpecificationError, parse_specification
+from app.services.sse_manager import sse_manager
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
-from app.services.export_rate_limit import EXPORT_SCOPE_COMMON_SHELF, enforce_export_rate_limit
 from app.services.xlsx_export import export_common_shelf_xlsx
 
 router = APIRouter(prefix="/common-shelf", tags=["CommonShelf"])
@@ -85,7 +85,7 @@ async def _broadcast_common_shelf_change(
     *,
     event_type: str,
     items: list[CommonShelf],
-    extra: Optional[dict] = None,
+    extra: dict | None = None,
 ) -> None:
     payload = {"ids": [item.id for item in items if item.id is not None]}
     if extra:
@@ -98,7 +98,7 @@ def _build_group_row_event_extra(
     *,
     match_group_key: str,
     group_fields: CommonShelfGroupFields,
-    extra: Optional[dict] = None,
+    extra: dict | None = None,
 ) -> dict:
     payload = {"id": match_group_key}
     group_row = get_common_shelf_group_row_payload(db, group_fields=group_fields)
@@ -125,7 +125,7 @@ def _build_manual_create_group_fields(payload: CommonShelfManualCreate) -> Commo
     )
 
 
-def _normalize_required_brand(value: Optional[str]) -> str:
+def _normalize_required_brand(value: str | None) -> str:
     normalized = normalize_optional_text(value)
     if normalized is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
@@ -166,19 +166,19 @@ def _commit_and_refresh_items(db: DBSession, items: list[CommonShelf]) -> None:
 
 
 class CommonShelfGroupListQuery(BaseModel):
-    search: Optional[str] = Query(default=None, max_length=100)
-    search_field: Optional[str] = None
+    search: str | None = Query(default=None, max_length=100)
+    search_field: str | None = None
     fuzzy: bool = False
     match_mode: TextMatchMode = TextMatchMode.CONTAINS
     skip: int = 0
     limit: int = DEFAULT_PAGE_SIZE
-    sort_by: Optional[str] = None
-    sort_order: Optional[str] = "desc"
+    sort_by: str | None = None
+    sort_order: str | None = "desc"
 
 
 class CommonShelfLocationSuggestionQuery(BaseModel):
     cas_number: str = Query(..., max_length=50)
-    brand: Optional[str] = Query(default=None, max_length=100)
+    brand: str | None = Query(default=None, max_length=100)
     specification: str = Query(..., max_length=50)
 
 

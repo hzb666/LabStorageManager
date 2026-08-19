@@ -1,8 +1,6 @@
 """Persistent common shelf group record helpers."""
 from __future__ import annotations
 
-from typing import Optional
-
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -30,7 +28,7 @@ def get_active_common_shelf_group(
     cas_number: str,
     brand_normalized: str,
     specification_normalized: str,
-) -> Optional[CommonShelfGroup]:
+) -> CommonShelfGroup | None:
     """Return the active group record for a normalized common-shelf identity."""
     return db.exec(
         select(CommonShelfGroup)
@@ -46,13 +44,13 @@ def ensure_active_common_shelf_group(
     *,
     cas_number: str,
     name_snapshot: str,
-    brand: Optional[str],
+    brand: str | None,
     brand_normalized: str,
     specification_text: str,
     spec_quantity: float,
     spec_unit: str,
     specification_normalized: str,
-    created_by_id: Optional[int],
+    created_by_id: int | None,
 ) -> CommonShelfGroup:
     """Create or refresh an active group identity for a bottle batch."""
     group = get_active_common_shelf_group(
@@ -92,7 +90,7 @@ def touch_common_shelf_group(
     cas_number: str,
     brand_normalized: str,
     specification_normalized: str,
-) -> Optional[CommonShelfGroup]:
+) -> CommonShelfGroup | None:
     """Refresh group updated_at after bottle-level count or metadata changes."""
     group = get_active_common_shelf_group(
         db,

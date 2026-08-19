@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
+import threading
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
 from queue import Queue
-import threading
 
 from app.core.constants import LOG_FILE_MAX_BYTES
-
 
 REQUEST_LOG_DIR = Path(__file__).parent.parent.parent / "logs"
 REQUEST_LOG_FILE = REQUEST_LOG_DIR / "request.log"

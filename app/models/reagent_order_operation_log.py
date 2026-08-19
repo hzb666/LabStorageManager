@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
-from sqlalchemy import Column, Enum as SAEnum, Index, Text
+from sqlalchemy import Column, Index, Text
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now
@@ -65,14 +65,14 @@ class ReagentOrderOperationLog(SQLModel, table=True):
         ),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     order_id: int = Field(index=False)
-    actor_user_id: Optional[int] = Field(
+    actor_user_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",
     )
-    applicant_id: Optional[int] = Field(
+    applicant_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",
@@ -93,7 +93,7 @@ class ReagentOrderOperationLog(SQLModel, table=True):
     order_name: str = Field(max_length=200)
     cas_number: str = Field(max_length=50)
     snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
-    notes: Optional[str] = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class ReagentOrderOperationLogResponse(BaseResponse):
@@ -101,11 +101,11 @@ class ReagentOrderOperationLogResponse(BaseResponse):
 
     id: int
     order_id: int
-    actor_user_id: Optional[int]
-    applicant_id: Optional[int]
+    actor_user_id: int | None
+    applicant_id: int | None
     action: ReagentOrderOperationAction
     created_at: datetime
     order_name: str
     cas_number: str
     snapshot_json: str
-    notes: Optional[str]
+    notes: str | None

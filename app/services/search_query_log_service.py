@@ -7,17 +7,18 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
-from app.search_query_log_db import insert_search_log_rows
 from app.search_completion_db import (
     TARGET_ENDPOINTS,
     get_user_preferences,
     prune_query_memory_if_due,
     upsert_query_memory,
 )
+from app.search_query_log_db import insert_search_log_rows
 from app.services.search_matchers import split_exact_cas_search_terms
 
 logger = logging.getLogger(__name__)
@@ -245,9 +246,13 @@ def buffer_search_log(
     now_monotonic = time.monotonic()
     with _state_lock:
         recent_committed = _recent_committed_by_slot.get(slot_key)
-        if recent_committed and recent_committed.semantic_fingerprint == semantic_fingerprint:
-            if now_monotonic - recent_committed.committed_at_monotonic < RECENT_COMMIT_SUPPRESSION_SECONDS:
-                return
+        if (
+            recent_committed
+            and recent_committed.semantic_fingerprint == semantic_fingerprint
+            and now_monotonic - recent_committed.committed_at_monotonic
+            < RECENT_COMMIT_SUPPRESSION_SECONDS
+        ):
+            return
 
         _pending_by_slot[slot_key] = PendingSearchLog(
             semantic_fingerprint=semantic_fingerprint,
@@ -447,7 +452,7 @@ def _record_search_memory_from_batch(batch: list[ReadySearchLog]) -> None:
 def _prune_query_memory_best_effort() -> None:
     try:
         deleted_rows = prune_query_memory_if_due()
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Search query memory pruning failed")
         return
     if deleted_rows:

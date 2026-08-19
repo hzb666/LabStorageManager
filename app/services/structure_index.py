@@ -11,15 +11,13 @@ import re
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from threading import RLock, Semaphore
 from types import MappingProxyType
 
-from rdkit import Chem
-from rdkit import DataStructs
-from rdkit import rdBase
+from rdkit import Chem, DataStructs, rdBase
 from rdkit.Chem import rdSubstructLibrary
 from sqlalchemy import text
 from sqlmodel import Session, select
@@ -181,12 +179,11 @@ class SubstructureIndex:
         on_base_captured: Callable[[], None] | None = None,
     ) -> StructureIndexSnapshot:
         """Build and publish a full base, then replay changes committed during the build."""
-        with self._sync_lock:
-            with Session(db.get_bind()) as compaction_db:
-                return self._compact(
-                    compaction_db,
-                    on_base_captured=on_base_captured,
-                )
+        with self._sync_lock, Session(db.get_bind()) as compaction_db:
+            return self._compact(
+                compaction_db,
+                on_base_captured=on_base_captured,
+            )
 
     def _compact(
         self,
@@ -544,7 +541,7 @@ class SubstructureIndex:
     def _read_snapshot(self) -> _IndexState:
         document = json.loads(self._snapshot_path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
-            raise ValueError("Structure index snapshot must be an object")
+            raise ValueError("Structure index snapshot must be an object")  # noqa: TRY004
         checksum = document.pop("checksum", None)
         if not isinstance(checksum, str) or checksum != _snapshot_checksum(document):
             raise ValueError("Structure index snapshot checksum mismatch")
@@ -804,7 +801,7 @@ def _snapshot_payload(state: _IndexState) -> dict[str, object]:
         "generation_id": state.generation_id,
         "base_revision": state.base_revision,
         "molecule_count": len(state.base_records),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "records": [_snapshot_record(record) for record in state.base_records],
         "serialized_library": base64.b64encode(state.base_library.Serialize()).decode("ascii"),
     }
@@ -824,7 +821,7 @@ def _snapshot_record(record: StructureIndexRecord) -> dict[str, object]:
 
 def _record_from_snapshot(value: object, *, mol, fingerprint) -> StructureIndexRecord:
     if not isinstance(value, dict):
-        raise ValueError("Structure index snapshot record must be an object")
+        raise ValueError("Structure index snapshot record must be an object")  # noqa: TRY004
     cas_number = value.get("cas_number")
     smiles_canonical = value.get("smiles_canonical")
     exact_smiles_canonical = value.get("exact_smiles_canonical")
@@ -833,7 +830,7 @@ def _record_from_snapshot(value: object, *, mol, fingerprint) -> StructureIndexR
         or not isinstance(smiles_canonical, str)
         or not isinstance(exact_smiles_canonical, str)
     ):
-        raise ValueError("Structure index snapshot record fields are invalid")
+        raise ValueError("Structure index snapshot record fields are invalid")  # noqa: TRY004
     raw_source = value.get("source")
     source = CompoundStructureSource(raw_source) if isinstance(raw_source, str) else None
     exact_smiles_isomeric = value.get("exact_smiles_isomeric")

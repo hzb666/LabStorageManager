@@ -1,8 +1,9 @@
 """Shared dashboard response builders and query helpers."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy import func
 from sqlmodel import Session, select
@@ -63,7 +64,7 @@ def _build_dashboard_entity(
     cas_number: str | None = None,
     brand: str | None = None,
     specification: str | None = None,
-    quantity: float | int | None = None,
+    quantity: float | None = None,
     unit: str | None = None,
     actor_name: str | None = None,
 ) -> dict[str, Any]:
@@ -85,7 +86,7 @@ def _build_dashboard_entity(
 def _build_dashboard_metrics(
     *,
     count: int | None = None,
-    value: float | int | None = None,
+    value: float | None = None,
     remaining_quantity: float | None = None,
     initial_quantity: float | None = None,
     remaining_percent: float | None = None,

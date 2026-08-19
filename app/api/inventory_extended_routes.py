@@ -4,27 +4,37 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Annotated, Dict, Optional
+from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlmodel import Session, select, func, update as sql_update, delete as sql_delete
+from sqlmodel import Session, func, select
+from sqlmodel import delete as sql_delete
+from sqlmodel import update as sql_update
 
 from app.core.auth import NonPublicUser, get_current_user, require_admin, require_non_public
-from app.core.db_compat import exec_delete_returning_first
 from app.core.constants import (
     IMPORT_UPLOAD_RATE_LIMIT,
     IMPORT_UPLOAD_RATE_LIMIT_WINDOW_SECONDS,
     LOW_STOCK_PERCENT,
     OVERDUE_BORROW_DAYS,
-    SSEEventType,
-    SSERoom,
     TEMPLATE_DOWNLOAD_RATE_LIMIT,
     TEMPLATE_DOWNLOAD_RATE_LIMIT_SCOPE,
     TEMPLATE_DOWNLOAD_WINDOW_SECONDS,
+    SSEEventType,
+    SSERoom,
 )
-from app.services.sse_manager import sse_manager
+from app.core.db_compat import exec_delete_returning_first
 from app.core.request_utils import get_client_ip, get_request_is_cli, get_sse_client_id
 from app.core.time_utils import get_utc_now, is_display_day_age_at_least, utc_iso_str
 from app.database import DBSession, get_db
@@ -38,11 +48,15 @@ from app.models.inventory import (
     ManualInventoryCreate,
 )
 from app.models.user import User, UserRole
+from app.search_completion_db import (
+    INVENTORY_COMPLETION_ENDPOINT,
+    mark_entity_completion_index_stale,
+)
 from app.services.api_utils import clear_cache_by_prefix, empty_to_none, serialize_inventory_items
-from app.services.cas_utils import normalize_cas, is_special_cas_value
-from app.services.xlsx_export import export_inventory_xlsx
+from app.services.cas_utils import is_special_cas_value, normalize_cas
 from app.services.excel_service import ALLOWED_EXTENSIONS, validate_uploaded_file
 from app.services.export_rate_limit import EXPORT_SCOPE_INVENTORY, enforce_export_rate_limit
+from app.services.inventory_creation import create_manual_inventory_items
 from app.services.inventory_import_preview_sessions import (
     cleanup_expired_inventory_import_preview_artifacts,
     consume_inventory_import_preview_session,
@@ -50,12 +64,10 @@ from app.services.inventory_import_preview_sessions import (
     discard_inventory_import_preview_session,
     get_inventory_import_preview_dir,
 )
-from app.services.inventory_creation import create_manual_inventory_items
-from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.inventory_operation_logger import (
     SOURCE_MANUAL_ADD,
-    log_inventory_export_operation,
     log_inventory_delete,
+    log_inventory_export_operation,
     log_inventory_update,
     log_stock_in,
 )
@@ -63,23 +75,25 @@ from app.services.inventory_queries import (
     get_regular_inventory_by_id,
     regular_inventory_query,
 )
-from app.services.log_timeline_projection import project_borrow_log
-from app.services.rate_limit import enforce_rate_limit
-from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.shelf_utils import normalize_storage_location
-from app.services.spec_utils import SpecificationError, format_specification, parse_specification
-from app.services.user_utils import batch_get_user_names
-from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT, mark_entity_completion_index_stale
-from app.services.search_completion_entity_index import (
-    delete_inventory_entity_completions,
-    run_completion_index_update,
-    sync_inventory_entity_completions,
-)
 from app.services.inventory_state_guards import ensure_inventory_editable
 from app.services.inventory_status import (
     BORROWABLE_INVENTORY_STATUSES,
     derive_inventory_quantity_status,
 )
+from app.services.log_timeline_projection import project_borrow_log
+from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.rate_limit import enforce_rate_limit
+from app.services.search_completion_entity_index import (
+    delete_inventory_entity_completions,
+    run_completion_index_update,
+    sync_inventory_entity_completions,
+)
+from app.services.shelf_utils import normalize_storage_location
+from app.services.spec_utils import SpecificationError, format_specification, parse_specification
+from app.services.sse_manager import sse_manager
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.services.user_utils import batch_get_user_names
+from app.services.xlsx_export import export_inventory_xlsx
 
 INVENTORY_NOT_FOUND = "Inventory item not found"
 CONSUMED_INVENTORY_NOT_IN_STOCK_FORBIDDEN_DETAIL = (
@@ -91,7 +105,7 @@ logger = logging.getLogger(__name__)
 
 
 def _clear_inventory_cache(
-    search_cache: Dict[str, tuple[Any, datetime]],
+    search_cache: dict[str, tuple[Any, datetime]],
     prefix: str,
     *,
     items: Inventory | list[Inventory] | None = None,
@@ -149,7 +163,7 @@ def _save_import_upload(file: UploadFile) -> str:
 class InventoryImportQuery(BaseModel):
     # 库存导入接口查询参数，收口路由签名并保持参数语义。
 
-    default_storage_location: Optional[str] = None
+    default_storage_location: str | None = None
     default_is_hazardous: bool = False
 
 
@@ -162,19 +176,19 @@ class ManualPendingStockInRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    alias: Optional[str] = Field(default=None, max_length=200)
-    category: Optional[str] = Field(default=None, max_length=100)
+    english_name: str | None = Field(default=None, max_length=200)
+    alias: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=100)
     brand: str = Field(max_length=100)
-    purity: Optional[str] = Field(default=None, max_length=20)
+    purity: str | None = Field(default=None, max_length=20)
     specification: str = Field(max_length=100)
     is_hazardous: bool = False
-    notes: Optional[str] = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=500)
     storage_location: str = Field(max_length=200)
-    remaining_quantity: Optional[float] = None
+    remaining_quantity: float | None = None
 
 
-def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
+def _compute_remaining_percent(remaining: float | None, initial: float | None) -> float | None:
     if initial is None or initial <= 0:
         return None
     if remaining is None:
@@ -182,17 +196,17 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
     return remaining / initial
 
 
-def _get_by_id(db: Session, inventory_id: int) -> Optional[Inventory]:
+def _get_by_id(db: Session, inventory_id: int) -> Inventory | None:
     return get_regular_inventory_by_id(db, inventory_id)
 
 
-def _encode_actual_borrower_notes(actual_borrower_id: Optional[int]) -> Optional[str]:
+def _encode_actual_borrower_notes(actual_borrower_id: int | None) -> str | None:
     if actual_borrower_id is None:
         return None
     return f"{ACTUAL_BORROWER_NOTE_PREFIX}{actual_borrower_id}"
 
 
-def _parse_actual_borrower_id(notes: Optional[str]) -> Optional[int]:
+def _parse_actual_borrower_id(notes: str | None) -> int | None:
     if not notes or not notes.startswith(ACTUAL_BORROWER_NOTE_PREFIX):
         return None
     raw_id = notes[len(ACTUAL_BORROWER_NOTE_PREFIX):].strip()
@@ -201,7 +215,7 @@ def _parse_actual_borrower_id(notes: Optional[str]) -> Optional[int]:
     return int(raw_id)
 
 
-def _find_by_code(db: Session, code: str) -> Optional[Inventory]:
+def _find_by_code(db: Session, code: str) -> Inventory | None:
     statement = regular_inventory_query().where(Inventory.internal_code == code)
     return db.exec(statement).first()
 
@@ -438,7 +452,7 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
 
 def _register_inventory_status_route(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     @router.post("/{inventory_id}/toggle-not-in-stock", response_model=InventoryResponse)
@@ -511,7 +525,7 @@ def _register_inventory_status_route(
 
 def _register_manual_pending_stockin_route(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     @router.post("/{inventory_id}/complete-stockin", response_model=InventoryResponse)
@@ -610,7 +624,7 @@ def _register_manual_pending_stockin_route(
 
 def _register_manual_and_dashboard_routes(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     _register_manual_pending_stockin_route(router, search_cache, list_cache_prefix)
@@ -858,14 +872,14 @@ def _register_manual_and_dashboard_routes(
 
 def _register_import_routes(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     def _format_import_response(
         message: str,
         result: dict[str, Any],
         *,
-        preview_token: Optional[str] = None,
+        preview_token: str | None = None,
     ) -> dict[str, Any]:
         return {
             "message": message,
@@ -932,7 +946,7 @@ def _register_import_routes(
                 default_is_hazardous=query.default_is_hazardous,
                 user_id=current_user.id,
             )
-            preview_token: Optional[str] = None
+            preview_token: str | None = None
             if result["success"] and result.get("valid_rows", 0) > 0:
                 preview_token = create_inventory_import_preview_session(
                     file_path=tmp_file_path,
@@ -1011,9 +1025,9 @@ def _resolve_borrower_context(
     db: Session,
     *,
     current_user: User,
-    borrow_data: Optional[InventoryBorrowRequest],
-) -> tuple[int, Optional[int]]:
-    actual_borrower_id: Optional[int] = None
+    borrow_data: InventoryBorrowRequest | None,
+) -> tuple[int, int | None]:
+    actual_borrower_id: int | None = None
     borrower_id = current_user.id
     if current_user.role != UserRole.PUBLIC:
         return borrower_id, actual_borrower_id
@@ -1099,7 +1113,7 @@ def _validate_return_request(item: Inventory, return_data: InventoryBorrowReturn
 
 
 # 获取当前未归还的最近借用日志，确保归还时日志回写口径一致。
-def _get_latest_active_borrow_log(db: Session, inventory_id: int) -> Optional[BorrowLog]:
+def _get_latest_active_borrow_log(db: Session, inventory_id: int) -> BorrowLog | None:
     return db.exec(
         select(BorrowLog)
         .where(
@@ -1110,12 +1124,12 @@ def _get_latest_active_borrow_log(db: Session, inventory_id: int) -> Optional[Bo
     ).first()
 
 
-def _normalize_return_notes(notes: Optional[str]) -> Optional[str]:
+def _normalize_return_notes(notes: str | None) -> str | None:
     normalized = (notes or "").strip()
     return normalized or None
 
 
-def _append_return_zero_remaining_delete_reason(notes: Optional[str]) -> str:
+def _append_return_zero_remaining_delete_reason(notes: str | None) -> str:
     normalized = (notes or "").strip()
     if normalized == RETURN_ZERO_REMAINING_DELETE_REASON:
         return normalized
@@ -1133,7 +1147,7 @@ def _ensure_zero_remaining_return(return_data: InventoryBorrowReturn) -> None:
 
 
 # 应用归还后的库存状态变更，并返回低库存提示文案（若有）。
-def _apply_return_to_inventory_item(item: Inventory, return_data: InventoryBorrowReturn) -> Optional[str]:
+def _apply_return_to_inventory_item(item: Inventory, return_data: InventoryBorrowReturn) -> str | None:
     item.remaining_quantity = return_data.remaining_quantity
     item.remaining_percent = _compute_remaining_percent(item.remaining_quantity, item.initial_quantity)
     item.last_borrower_id = item.borrower_id
@@ -1146,18 +1160,17 @@ def _apply_return_to_inventory_item(item: Inventory, return_data: InventoryBorro
         return_data.remaining_quantity,
         item.initial_quantity,
     )
-    if return_data.remaining_quantity > 0:
-        if item.initial_quantity and item.initial_quantity > 0:
-            percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
-            if percentage <= (LOW_STOCK_PERCENT * 100):
-                low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
+    if return_data.remaining_quantity > 0 and item.initial_quantity and item.initial_quantity > 0:
+        percentage = (return_data.remaining_quantity / item.initial_quantity) * 100
+        if percentage <= (LOW_STOCK_PERCENT * 100):
+            low_quantity_warning = f"剩余量仅剩 {percentage:.1f}%，请及时补充"
     return low_quantity_warning
 
 
 # 注册借用接口，保持并发借用冲突语义和日志写入行为。
 def _register_borrow_route(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     # 借用库存项。
@@ -1167,7 +1180,7 @@ def _register_borrow_route(
         request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
-        borrow_data: Optional[InventoryBorrowRequest] = None,
+        borrow_data: InventoryBorrowRequest | None = None,
     ):
         # 借用库存项并写入借用日志。
         item = _get_by_id(db, inventory_id)
@@ -1245,7 +1258,7 @@ def _register_borrow_route(
 # 注册归还接口，拆分参数校验与状态计算后保持原响应结构。
 def _register_return_route(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     @router.post("/{inventory_id}/return-delete", status_code=status.HTTP_204_NO_CONTENT)
@@ -1390,7 +1403,7 @@ def _register_borrow_history_route(router: APIRouter) -> None:
 # 汇总借还相关路由注册。
 def _register_borrow_return_routes(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     _register_borrow_route(router, search_cache, list_cache_prefix)
@@ -1400,7 +1413,7 @@ def _register_borrow_return_routes(
 
 def register_inventory_extended_routes(
     router: APIRouter,
-    search_cache: Dict[str, tuple[Any, Any]],
+    search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     _register_cas_and_export_routes(router)

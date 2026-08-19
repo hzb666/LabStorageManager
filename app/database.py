@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from pathlib import Path
-from typing import Annotated, Generator
+from typing import Annotated
 
 from fastapi import Depends
 from sqlalchemy import event
 from sqlalchemy.engine import make_url
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.core.config import settings
 from app.db_bootstrap.schema_consistency import check_sqlite_schema_consistency

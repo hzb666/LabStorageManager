@@ -5,34 +5,35 @@
 # 避免路径参数误捕获 "export"、"dashboard" 等字符串。
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Optional, Dict, Any, Annotated, Mapping
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import case
-from sqlmodel import Session, select, func, delete
+from sqlmodel import Session, delete, func, select
 
-from app.database import get_db, DBSession
-from app.models.inventory import Inventory, InventoryUpdate, InventoryResponse, InventoryStatus
+from app.api.inventory_extended_routes import register_inventory_extended_routes
+from app.api.inventory_timeline import register_inventory_timeline_routes
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentSession, get_current_user, require_non_public
 from app.core.config import settings
-from app.core.constants import (    DEFAULT_PAGE_SIZE,
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
     SSEEventType,
     SSERoom,
 )
-from app.services.sse_manager import sse_manager
+from app.core.db_compat import exec_delete_returning_first
+from app.core.request_utils import get_request_is_cli, get_sse_client_id, is_user_search_request
 from app.core.time_utils import get_utc_now
-from app.services.cas_utils import normalize_cas, validate_cas_format
-from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.sql_utils import (
-    normalize_search_term,
-    order_with_nulls_last,
-)
+from app.database import DBSession, get_db
+from app.models.inventory import Inventory, InventoryResponse, InventoryStatus, InventoryUpdate
+from app.models.user import User
+from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT
 from app.services.api_utils import (
     clear_cache_by_prefix,
     get_cached_result,
@@ -40,11 +41,16 @@ from app.services.api_utils import (
     serialize_inventory_items,
     set_cached_result,
 )
+from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.inventory_fts import (
     InventoryFTSError,
     apply_inventory_fts_filter,
     build_inventory_fts_rowid_subquery,
     should_use_inventory_fts,
+)
+from app.services.inventory_operation_logger import (
+    log_inventory_delete,
+    log_inventory_update,
 )
 from app.services.inventory_queries import (
     get_regular_inventory_by_id,
@@ -55,44 +61,40 @@ from app.services.inventory_state_guards import (
     ensure_inventory_editable,
 )
 from app.services.inventory_status import derive_inventory_quantity_status
+from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.search_completion_entity_index import (
+    delete_inventory_entity_completions,
+    run_completion_index_update,
+    sync_inventory_entity_completions,
+)
 from app.services.search_matchers import (
     CASSearchMode,
     TextMatchMode,
-    build_chunked_in_clause,
     build_cas_search_clause,
+    build_chunked_in_clause,
+    build_multi_search_log_meta,
     build_segmented_search_log_meta,
     build_text_same_field_segmented_clause,
     build_text_search_clause,
     classify_cas_search,
     collect_search_fields,
     combine_or_clauses,
-    build_multi_search_log_meta,
-    split_segmented_search_terms,
     split_exact_cas_search_terms,
+    split_segmented_search_terms,
     union_id_subqueries,
 )
-from app.services.spec_utils import parse_specification, SpecificationError
-from app.services.inventory_operation_logger import (
-    log_inventory_delete,
-    log_inventory_update,
-)
-from app.services.shelf_utils import normalize_storage_location
-from app.api.inventory_extended_routes import register_inventory_extended_routes
-from app.api.inventory_timeline import register_inventory_timeline_routes
-from app.core.request_utils import get_request_is_cli, get_sse_client_id, is_user_search_request
-from app.core.db_compat import exec_delete_returning_first
-from app.models.user import User
-from app.search_completion_db import INVENTORY_COMPLETION_ENDPOINT
 from app.services.search_query_log_service import (
     buffer_search_log,
     build_search_log_filters,
     build_search_log_sort,
 )
-from app.services.search_completion_entity_index import (
-    delete_inventory_entity_completions,
-    run_completion_index_update,
-    sync_inventory_entity_completions,
+from app.services.shelf_utils import normalize_storage_location
+from app.services.spec_utils import SpecificationError, parse_specification
+from app.services.sql_utils import (
+    normalize_search_term,
+    order_with_nulls_last,
 )
+from app.services.sse_manager import sse_manager
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.structure_index import (
     StructureIndexRevisionChangedError,
@@ -113,7 +115,7 @@ LIST_CACHE_PREFIX = "list:"
 INVENTORY_NOT_FOUND = "Inventory item not found"
 
 # ==================== 搜索缓存 ====================
-SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
+SEARCH_CACHE: dict[str, tuple[Any, datetime]] = {}
 INVENTORY_CAS_SEARCH_KEYS = frozenset({"cas_number"})
 INVENTORY_SEARCH_SQL_FIELD_MAP = {
     "name": [Inventory.name, Inventory.name_pinyin, Inventory.name_pinyin_initials],
@@ -165,18 +167,18 @@ VISIBLE_STRUCTURE_STATUSES = (
 class InventoryFilterOptions:
     # 封装库存列表筛选参数，避免筛选函数参数膨胀并统一调用边界。
 
-    status_filter: Optional[InventoryStatus]
-    cas_filter: Optional[str]
+    status_filter: InventoryStatus | None
+    cas_filter: str | None
     hazardous_only: bool
-    search: Optional[str]
-    search_field: Optional[str]
+    search: str | None
+    search_field: str | None
     fuzzy: bool
     match_mode: TextMatchMode
     structure_cas_numbers: tuple[str, ...] | None
-    structure_search_id: Optional[str]
-    structure_match_mode: Optional[StructureSearchMode]
-    structure_query: Optional[str]
-    structure_query_format: Optional[StructureQueryFormat]
+    structure_search_id: str | None
+    structure_match_mode: StructureSearchMode | None
+    structure_query: str | None
+    structure_query_format: StructureQueryFormat | None
     structure_only_in_stock: bool
 
 
@@ -185,20 +187,20 @@ class InventoryListQuery(BaseModel):
 
     skip: int = 0
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
-    status_filter: Optional[InventoryStatus] = None
-    cas_filter: Optional[str] = None
+    status_filter: InventoryStatus | None = None
+    cas_filter: str | None = None
     hazardous_only: bool = False
-    search: Optional[str] = Query(default=None, max_length=20_000)
-    search_field: Optional[str] = None
+    search: str | None = Query(default=None, max_length=20_000)
+    search_field: str | None = None
     fuzzy: bool = False
     match_mode: TextMatchMode = TextMatchMode.CONTAINS
-    structure_search_id: Optional[str] = Query(default=None, max_length=128)
-    structure_match_mode: Optional[StructureSearchMode] = None
-    structure_query: Optional[str] = Query(default=None, max_length=20_000)
-    structure_query_format: Optional[StructureQueryFormat] = None
+    structure_search_id: str | None = Query(default=None, max_length=128)
+    structure_match_mode: StructureSearchMode | None = None
+    structure_query: str | None = Query(default=None, max_length=20_000)
+    structure_query_format: StructureQueryFormat | None = None
     structure_only_in_stock: bool = False
-    sort_by: Optional[str] = None
-    sort_order: Optional[str] = "desc"
+    sort_by: str | None = None
+    sort_order: str | None = "desc"
 
     def to_filter_options(self) -> InventoryFilterOptions:
         # 把路由查询参数转换为筛选参数对象，减少调用方重复拼装。
@@ -344,7 +346,7 @@ def _resolve_inventory_structure_smiles_by_cas(
     return _get_structure_search_entry_or_410(db, options.structure_search_id).smiles_by_cas
 
 
-def _compute_remaining_percent(remaining: Optional[float], initial: Optional[float]) -> Optional[float]:
+def _compute_remaining_percent(remaining: float | None, initial: float | None) -> float | None:
     # 计算库存剩余比例，统一处理空值和零分母。
 
     if initial is None or initial <= 0:
@@ -354,7 +356,7 @@ def _compute_remaining_percent(remaining: Optional[float], initial: Optional[flo
     return remaining / initial
 
 
-def _get_by_id(db: Session, inventory_id: int) -> Optional[Inventory]:
+def _get_by_id(db: Session, inventory_id: int) -> Inventory | None:
     # 按库存 ID 查询常规库存记录，复用统一查询入口。
 
     return get_regular_inventory_by_id(db, inventory_id)
@@ -397,7 +399,7 @@ def _apply_inventory_static_filters(base, *, options: InventoryFilterOptions):
     return base
 
 
-def _normalize_inventory_search_value(options: InventoryFilterOptions) -> Optional[str]:
+def _normalize_inventory_search_value(options: InventoryFilterOptions) -> str | None:
     # 标准化搜索词，统一处理 fuzzy 场景和空白输入。
 
     if not options.search:
@@ -430,7 +432,7 @@ def _get_inventory_segmented_terms(options: InventoryFilterOptions) -> list[str]
     )
 
 
-def _get_inventory_segmented_field_groups(search_field: Optional[str]):
+def _get_inventory_segmented_field_groups(search_field: str | None):
     if search_field and search_field != "all":
         fields = INVENTORY_SEGMENTED_SEARCH_FIELD_GROUPS.get(search_field)
         return [fields] if fields else []
@@ -476,7 +478,7 @@ def _build_inventory_all_fts_subquery(search_value: str):
 def _apply_inventory_single_field_search(
     base,
     *,
-    search_field: Optional[str],
+    search_field: str | None,
     search_value: str,
     fuzzy: bool,
     match_mode: TextMatchMode,
@@ -658,7 +660,7 @@ def _apply_inventory_like_filters(
     base,
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode,
 ):
@@ -710,7 +712,7 @@ def _apply_inventory_like_filters(
     return base.where(combine_or_clauses(all_clauses))
 
 
-def _build_inventory_order_expr(sort_by: Optional[str], sort_order: Optional[str]):
+def _build_inventory_order_expr(sort_by: str | None, sort_order: str | None):
     # 生成库存列表排序表达式，统一处理中英文与特殊 CAS 排序规则。
 
     computed_remaining_percent = (
@@ -792,7 +794,7 @@ def _normalize_update_payload(item: Inventory, update_data: dict) -> bool:
         if field in update_data and update_data[field] == "":
             update_data[field] = None
 
-    if "cas_number" in update_data and update_data["cas_number"]:
+    if update_data.get("cas_number"):
         normalized_cas = normalize_cas(update_data["cas_number"])
         if normalized_cas:
             update_data["cas_number"] = normalized_cas

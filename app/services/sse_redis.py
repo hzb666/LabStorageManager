@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from redis.client import PubSub
 
@@ -39,7 +39,7 @@ class RedisPubSub:
             return 0
 
     @staticmethod
-    def subscribe_patterns(*patterns: str) -> Optional[PubSub]:
+    def subscribe_patterns(*patterns: str) -> PubSub | None:
         """Subscribe to pub/sub patterns, e.g. lsm:sse:*.
 
         Returns None when Redis is not available.
@@ -57,7 +57,7 @@ class RedisPubSub:
             return None
 
     @staticmethod
-    def close_pubsub(pubsub: Optional[PubSub]) -> None:
+    def close_pubsub(pubsub: PubSub | None) -> None:
         """Close pubsub safely."""
         if pubsub is None:
             return
@@ -67,7 +67,7 @@ class RedisPubSub:
             logger.exception("Failed closing Redis pubsub")
 
     @staticmethod
-    def next_sequence(room: str) -> Optional[int]:
+    def next_sequence(room: str) -> int | None:
         """Generate a room-level monotonic sequence via Redis INCR.
 
         Returns None when Redis is unavailable so caller can use fallback.

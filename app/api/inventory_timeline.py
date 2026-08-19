@@ -14,7 +14,6 @@ from app.models.inventory_timeline import InventoryTimelineResponse
 from app.services.api_utils import normalize_pagination
 from app.services.inventory_timeline import list_inventory_timeline
 
-
 INVENTORY_NOT_FOUND = "Inventory item not found"
 
 

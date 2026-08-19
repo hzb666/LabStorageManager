@@ -1,19 +1,23 @@
 """
 User Model - Authentication and Authorization
 """
-from datetime import datetime
-
-from app.core.time_utils import get_utc_now
-from app.core.constants import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH
-from app.models.base import BaseResponse
-from enum import Enum
-from typing import Optional
-
 import re
+from datetime import datetime
+from enum import Enum
 
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, Enum as SAEnum, Index
+from sqlalchemy import Column, Index
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
+
+from app.core.constants import (
+    PASSWORD_MAX_LENGTH,
+    PASSWORD_MIN_LENGTH,
+    USERNAME_MAX_LENGTH,
+    USERNAME_MIN_LENGTH,
+)
+from app.core.time_utils import get_utc_now
+from app.models.base import BaseResponse
 
 
 class UserRole(str, Enum):
@@ -50,7 +54,7 @@ class UserBase(SQLModel):
         ),
     )
     is_active: bool = Field(default=True)
-    avatar_url: Optional[str] = Field(default=None, max_length=500)
+    avatar_url: str | None = Field(default=None, max_length=500)
 
 
 class User(UserBase, table=True):
@@ -62,12 +66,12 @@ class User(UserBase, table=True):
         Index("ix_users_full_name_pinyin_id", "full_name_pinyin", "id"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     password_hash: str
     username_version: int = Field(default=1, description="用户名版本号，每次修改用户名时+1")
     # 姓名拼音，用于按姓名排序
-    full_name_pinyin: Optional[str] = Field(default=None, max_length=200)
-    full_name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    full_name_pinyin: str | None = Field(default=None, max_length=200)
+    full_name_pinyin_initials: str | None = Field(default=None, max_length=200)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
@@ -88,27 +92,27 @@ class UserUpdate(SQLModel):
     # 安全边界：拒绝未声明字段
     model_config = ConfigDict(extra="forbid")
 
-    username: Optional[str] = Field(None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
+    username: str | None = Field(None, min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
 
     # 添加 username 格式验证
     @field_validator("username")
     @classmethod
-    def validate_username(cls, v: Optional[str]) -> Optional[str]:
+    def validate_username(cls, v: str | None) -> str | None:
         if v is not None and not re.match(r"^\w+$", v, flags=re.ASCII):
             raise ValueError("Username may only contain letters, numbers, and underscores")
         return v
 
-    full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    is_active: Optional[bool] = None
-    role: Optional[UserRole] = None
+    full_name: str | None = Field(default=None, min_length=1, max_length=100)
+    is_active: bool | None = None
+    role: UserRole | None = None
 
 
 class PublicUserResponse(BaseResponse):
     """Public user profile payload for authenticated non-admin access."""
 
     id: int
-    full_name: Optional[str]
-    avatar_url: Optional[str] = None
+    full_name: str | None
+    avatar_url: str | None = None
 
 
 class UserResponse(BaseResponse):
@@ -116,10 +120,10 @@ class UserResponse(BaseResponse):
 
     id: int
     username: str
-    full_name: Optional[str]
-    full_name_pinyin: Optional[str] = None
-    full_name_pinyin_initials: Optional[str] = None
+    full_name: str | None
+    full_name_pinyin: str | None = None
+    full_name_pinyin_initials: str | None = None
     role: UserRole
     is_active: bool
     created_at: datetime
-    avatar_url: Optional[str] = None
+    avatar_url: str | None = None

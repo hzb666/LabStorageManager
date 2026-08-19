@@ -1,5 +1,5 @@
 """Inventory FTS helpers for high-performance substring search on SQLite."""
-from typing import Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import bindparam, text
 from sqlmodel import select
@@ -24,7 +24,7 @@ def _quote_fts_phrase(term: str) -> str:
 
 def _collect_target_columns(
     field_map: Mapping[str, Sequence[str]],
-    search_field: Optional[str],
+    search_field: str | None,
 ) -> list[str]:
     if search_field and search_field != "all" and search_field in field_map:
         return list(field_map[search_field])
@@ -43,7 +43,7 @@ def _collect_target_columns(
 def build_inventory_match_query(
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ) -> str:
     """Build a safe FTS5 MATCH expression for inventory search."""
@@ -59,7 +59,7 @@ def apply_inventory_fts_filter(
     base,
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ):
     """Apply `inventory_fts MATCH ...` filter onto an inventory SQLModel query."""
@@ -74,7 +74,7 @@ def apply_inventory_fts_filter(
 def build_inventory_fts_rowid_subquery(
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ):
     """Build `SELECT rowid FROM inventory_fts WHERE MATCH ...` subquery."""

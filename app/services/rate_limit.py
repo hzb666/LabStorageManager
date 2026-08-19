@@ -11,7 +11,6 @@ from fastapi import HTTPException, status
 
 from app.core.redis import get_redis, redis_key
 
-
 _fallback_store: dict[str, deque[float]] = {}
 _fallback_windows: dict[str, int] = {}
 _fallback_lock = threading.Lock()

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import ConfigDict
-from sqlalchemy import Column, Enum as SAEnum, Index
+from sqlalchemy import Column, Index
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now
@@ -26,11 +26,11 @@ class ChemicalNameMapBase(SQLModel):
 
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    alias_1: Optional[str] = Field(default=None, max_length=200)
-    alias_2: Optional[str] = Field(default=None, max_length=200)
-    alias_3: Optional[str] = Field(default=None, max_length=200)
-    category: Optional[ChemicalCategory] = Field(
+    english_name: str | None = Field(default=None, max_length=200)
+    alias_1: str | None = Field(default=None, max_length=200)
+    alias_2: str | None = Field(default=None, max_length=200)
+    alias_3: str | None = Field(default=None, max_length=200)
+    category: ChemicalCategory | None = Field(
         default=None,
         sa_column=Column(
             SAEnum(
@@ -43,14 +43,14 @@ class ChemicalNameMapBase(SQLModel):
             nullable=True,
         ),
     )
-    name_pinyin: Optional[str] = Field(default=None, max_length=200)
-    name_initials: Optional[str] = Field(default=None, max_length=200)
-    alias_1_pinyin: Optional[str] = Field(default=None, max_length=200)
-    alias_1_initials: Optional[str] = Field(default=None, max_length=200)
-    alias_2_pinyin: Optional[str] = Field(default=None, max_length=200)
-    alias_2_initials: Optional[str] = Field(default=None, max_length=200)
-    alias_3_pinyin: Optional[str] = Field(default=None, max_length=200)
-    alias_3_initials: Optional[str] = Field(default=None, max_length=200)
+    name_pinyin: str | None = Field(default=None, max_length=200)
+    name_initials: str | None = Field(default=None, max_length=200)
+    alias_1_pinyin: str | None = Field(default=None, max_length=200)
+    alias_1_initials: str | None = Field(default=None, max_length=200)
+    alias_2_pinyin: str | None = Field(default=None, max_length=200)
+    alias_2_initials: str | None = Field(default=None, max_length=200)
+    alias_3_pinyin: str | None = Field(default=None, max_length=200)
+    alias_3_initials: str | None = Field(default=None, max_length=200)
 
 
 class ChemicalNameMap(ChemicalNameMapBase, table=True):
@@ -69,7 +69,7 @@ class ChemicalNameMap(ChemicalNameMapBase, table=True):
         Index("ix_chemical_name_map_alias_3_initials", "alias_3_initials"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     cas_number: str = Field(unique=True, index=True, max_length=50)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
@@ -85,22 +85,22 @@ class ChemicalNameMapCreate(SQLModel):
 
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    alias_1: Optional[str] = Field(default=None, max_length=200)
-    alias_2: Optional[str] = Field(default=None, max_length=200)
-    alias_3: Optional[str] = Field(default=None, max_length=200)
+    english_name: str | None = Field(default=None, max_length=200)
+    alias_1: str | None = Field(default=None, max_length=200)
+    alias_2: str | None = Field(default=None, max_length=200)
+    alias_3: str | None = Field(default=None, max_length=200)
     category: ChemicalCategory
 
 
 class ChemicalNameMapUpdate(SQLModel):
     """Update payload for CAS master data."""
 
-    name: Optional[str] = Field(default=None, max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    alias_1: Optional[str] = Field(default=None, max_length=200)
-    alias_2: Optional[str] = Field(default=None, max_length=200)
-    alias_3: Optional[str] = Field(default=None, max_length=200)
-    category: Optional[ChemicalCategory] = None
+    name: str | None = Field(default=None, max_length=200)
+    english_name: str | None = Field(default=None, max_length=200)
+    alias_1: str | None = Field(default=None, max_length=200)
+    alias_2: str | None = Field(default=None, max_length=200)
+    alias_3: str | None = Field(default=None, max_length=200)
+    category: ChemicalCategory | None = None
 
 
 class ChemicalNameMapResponse(BaseResponse):
@@ -109,10 +109,10 @@ class ChemicalNameMapResponse(BaseResponse):
     id: int
     cas_number: str
     name: str
-    english_name: Optional[str]
-    alias_1: Optional[str]
-    alias_2: Optional[str]
-    alias_3: Optional[str]
-    category: Optional[ChemicalCategory]
+    english_name: str | None
+    alias_1: str | None
+    alias_2: str | None
+    alias_3: str | None
+    category: ChemicalCategory | None
     created_at: datetime
     updated_at: datetime

@@ -5,13 +5,13 @@ import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, delete, func, or_
 from sqlmodel import Session, select
 
-from app.core.db_compat import exec_delete_returning_first, exec_delete_returning_all
+from app.core.db_compat import exec_delete_returning_all, exec_delete_returning_first
 from app.core.time_utils import get_utc_now
 from app.models.chemical_name_map import ChemicalCategory, ChemicalNameMap
 from app.models.common_shelf import (
@@ -41,7 +41,6 @@ from app.services.search_matchers import (
     combine_or_clauses,
 )
 from app.services.sql_utils import normalize_search_term
-
 
 COMMON_SHELF_NOT_FOUND = "CommonShelf group not found"
 MAX_RECENT_LOCATIONS = 3
@@ -93,33 +92,33 @@ class CommonShelfGroupFields:
 
 @dataclass(frozen=True)
 class CommonShelfGroupListOptions:
-    search: Optional[str]
-    search_field: Optional[str]
+    search: str | None
+    search_field: str | None
     fuzzy: bool
     match_mode: TextMatchMode
     skip: int
     limit: int
-    sort_by: Optional[str]
-    sort_order: Optional[str]
+    sort_by: str | None
+    sort_order: str | None
 
 
 class CommonShelfGroupRow(Protocol):
     cas_number: str
-    brand: Optional[str]
+    brand: str | None
     brand_normalized: str
     specification_text: str
     specification_normalized: str
     name_snapshot: str
     bottle_count: int
     location_count: int
-    created_at: Optional[datetime]
-    updated_at: Optional[datetime]
-    map_name: Optional[str]
-    map_english_name: Optional[str]
-    map_alias_1: Optional[str]
-    map_alias_2: Optional[str]
-    map_alias_3: Optional[str]
-    map_category: Optional[ChemicalCategory]
+    created_at: datetime | None
+    updated_at: datetime | None
+    map_name: str | None
+    map_english_name: str | None
+    map_alias_1: str | None
+    map_alias_2: str | None
+    map_alias_3: str | None
+    map_category: ChemicalCategory | None
 
 
 GroupIdentityKey = tuple[str, str, str]
@@ -191,7 +190,7 @@ def get_active_group_from_fields(
     db: Session,
     *,
     group_fields: CommonShelfGroupFields,
-) -> Optional[CommonShelfGroup]:
+) -> CommonShelfGroup | None:
     return get_active_common_shelf_group(
         db,
         cas_number=group_fields.cas_number,
@@ -214,7 +213,7 @@ def get_group_items(
     ).all()
 
 
-def get_group_name_map(db: Session, *, cas_number: str) -> Optional[ChemicalNameMap]:
+def get_group_name_map(db: Session, *, cas_number: str) -> ChemicalNameMap | None:
     return db.exec(select(ChemicalNameMap).where(ChemicalNameMap.cas_number == cas_number)).first()
 
 
@@ -223,7 +222,7 @@ def locate_merge_target(
     *,
     current_group_fields: CommonShelfGroupFields,
     target_group_fields: CommonShelfGroupFields,
-) -> Optional[CommonShelfGroup]:
+) -> CommonShelfGroup | None:
     if current_group_fields == target_group_fields:
         return None
 
@@ -328,7 +327,7 @@ def remove_earliest_item_in_location(
     db: Session,
     *,
     group_fields: CommonShelfGroupFields,
-    storage_location: Optional[str],
+    storage_location: str | None,
 ) -> CommonShelf:
     normalized_location = normalize_storage_for_group(storage_location)
     filters = [
@@ -376,7 +375,7 @@ def _apply_chemical_name_like_filter(
     base,
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode,
 ):
@@ -441,7 +440,7 @@ def search_name_map_cas_numbers(
     db: Session,
     *,
     search: str,
-    search_field: Optional[str],
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode = TextMatchMode.CONTAINS,
 ) -> set[str]:
@@ -546,8 +545,8 @@ def _filter_common_shelf_group_query(
     base,
     *,
     db: Session,
-    search: Optional[str],
-    search_field: Optional[str],
+    search: str | None,
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode,
 ):
@@ -643,8 +642,8 @@ def _filter_common_shelf_group_query(
 
 def _build_group_order_expressions(
     *,
-    sort_by: Optional[str],
-    sort_order: Optional[str],
+    sort_by: str | None,
+    sort_order: str | None,
     grouped_subquery,
 ):
     reverse = sort_order != "asc"
@@ -723,7 +722,7 @@ def _build_common_shelf_grouped_subquery(filtered_groups, item_counts):
     )
 
 
-def _build_common_shelf_group_page_query(grouped_subquery, *, sort_by: Optional[str], sort_order: Optional[str]):
+def _build_common_shelf_group_page_query(grouped_subquery, *, sort_by: str | None, sort_order: str | None):
     page_query = (
         select(
             grouped_subquery.c.cas_number,

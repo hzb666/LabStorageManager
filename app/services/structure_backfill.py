@@ -15,7 +15,6 @@ from app.services.structure_cache_repo import (
     upsert_structure_cache_names,
 )
 
-
 DEFAULT_RETRY_STATUSES = {
     CompoundStructureStatus.PENDING,
     CompoundStructureStatus.ERROR,

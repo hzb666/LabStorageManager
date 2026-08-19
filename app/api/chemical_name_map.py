@@ -1,21 +1,18 @@
 """Chemical name map APIs for CommonShelf."""
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from app.core.auth import CurrentUser, NonPublicUser, get_current_user
 from app.core.api_errors import ApiErrorCode, api_error
+from app.core.auth import CurrentUser, NonPublicUser, get_current_user
 from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
 from app.core.time_utils import utc_iso_str
 from app.database import DBSession
-from app.services.api_utils import normalize_optional_text
 from app.models.chemical_name_map import (
     ChemicalNameMap,
     ChemicalNameMapCreate,
@@ -25,12 +22,13 @@ from app.models.chemical_name_map import (
 from app.models.common_shelf import CommonShelf, CommonShelfGroup
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.models.user_operation_log import UserOperationAction
+from app.services.api_utils import normalize_optional_text
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.common_shelf_queries import search_name_map_cas_numbers
-from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.pinyin_utils import to_pinyin_parts
 from app.services.search_matchers import TextMatchMode
 from app.services.sql_utils import order_with_nulls_last
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.user_operation_logger import log_user_operation
 
 router = APIRouter(prefix="/chemical-name-map", tags=["Chemical Name Map"])
@@ -61,7 +59,7 @@ def _validate_cas_number(raw_cas_number: str) -> str:
     return cas_number
 
 
-def _build_name_map_order_expr(sort_by: Optional[str], sort_order: Optional[str]):
+def _build_name_map_order_expr(sort_by: str | None, sort_order: str | None):
     sort_direction = sort_order.lower() if sort_order else "desc"
     sort_field_map = {
         "cas_number": ChemicalNameMap.cas_number,
@@ -76,11 +74,11 @@ def _build_name_map_order_expr(sort_by: Optional[str], sort_order: Optional[str]
 def _apply_name_map_payload(
     target: ChemicalNameMap,
     *,
-    name: Optional[str] = None,
-    english_name: Optional[str] = None,
-    alias_1: Optional[str] = None,
-    alias_2: Optional[str] = None,
-    alias_3: Optional[str] = None,
+    name: str | None = None,
+    english_name: str | None = None,
+    alias_1: str | None = None,
+    alias_2: str | None = None,
+    alias_3: str | None = None,
 ) -> None:
     if name is not None:
         normalized_name = name.strip()
@@ -156,12 +154,12 @@ def _log_chemical_name_map_operation(
 )
 def list_chemical_name_map(
     db: DBSession,
-    search: Optional[str] = Query(default=None, max_length=100),
-    search_field: Optional[str] = Query(default=None),
+    search: str | None = Query(default=None, max_length=100),
+    search_field: str | None = Query(default=None),
     fuzzy: bool = False,
     match_mode: TextMatchMode = TextMatchMode.CONTAINS,
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = "desc",
+    sort_by: str | None = None,
+    sort_order: str | None = "desc",
     skip: int = 0,
     limit: int = DEFAULT_PAGE_SIZE,
 ):

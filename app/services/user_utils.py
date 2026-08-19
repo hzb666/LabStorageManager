@@ -2,12 +2,13 @@
 User Query Utilities - Batch user lookup for API responses
 Eliminates N+1 query problems by caching user information
 """
-from typing import Set, Dict, Optional
+
 from sqlmodel import Session, select
+
 from app.models.user import User
 
 
-def batch_get_user_names(db: Session, user_ids: Set[Optional[int]]) -> Dict[int, str]:
+def batch_get_user_names(db: Session, user_ids: set[int | None]) -> dict[int, str]:
     """
     Batch query user names by IDs.
 

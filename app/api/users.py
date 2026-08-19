@@ -1,35 +1,35 @@
 # 用户认证、会话与资料管理接口。
-from dataclasses import dataclass
-from datetime import datetime
 import hashlib
 import logging
 import time
-from typing import Optional, Annotated
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, UploadFile
+import redis
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import case
-from sqlmodel import Session, select, func, or_
-import redis
+from sqlmodel import Session, func, or_, select
 
 from app.core.auth import (
+    CurrentUser,
+    create_access_token,
     decode_token,
     extract_access_token,
     get_current_user,
-    require_admin,
-    create_access_token,
-    verify_password,
     get_password_hash,
-    CurrentUser,
+    require_admin,
+    verify_password,
 )
 from app.core.config import settings
 from app.core.constants import (
     LOGIN_WINDOW_SECONDS,
     MAX_LOGIN_ATTEMPTS,
-    PASSWORD_MAX_LENGTH,
     PASSWORD_CHANGE_RATE_LIMIT,
     PASSWORD_CHANGE_RATE_WINDOW_SECONDS,
+    PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
     PASSWORD_RESET_RATE_LIMIT,
     PASSWORD_RESET_RATE_WINDOW_SECONDS,
@@ -38,47 +38,47 @@ from app.core.constants import (
     USERNAME_MAX_LENGTH,
     USERNAME_MIN_LENGTH,
 )
-from app.core.time_utils import utc_iso_str
-from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
 from app.core.redis import get_redis, redis_key
-from app.database import get_db, DBSession
+from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
+from app.core.time_utils import utc_iso_str
+from app.database import DBSession, get_db
 from app.models.user import (
     PublicUserResponse,
     User,
     UserCreate,
-    UserUpdate,
     UserResponse,
     UserRole,
+    UserUpdate,
 )
 from app.models.user_operation_log import UserOperationAction, UserOperationLog
 from app.models.user_session import UserSession
-from app.services.image_service import save_avatar, delete_file
-from app.services.rate_limit import enforce_rate_limit
-from app.services.user_service import get_user_by_username, get_user_by_id
+from app.services.audit_logger import AuditEventContext, log_audit_event
+from app.services.image_service import delete_file, save_avatar
 from app.services.pinyin_utils import compute_pinyin_fields
+from app.services.rate_limit import enforce_rate_limit
 from app.services.search_matchers import build_applicant_id_subquery
-from app.services.sql_utils import normalize_search_term
 from app.services.session_service import (
-    cleanup_expired_sessions,
-    SessionCreationRequest,
+    LOGIN_ATTEMPTS,
     SessionCacheIdentity,
+    SessionCreationRequest,
     _check_device_limit,
     _evict_oldest_session,
+    _login_attempts_lock,
+    cleanup_expired_sessions,
     finalize_revoked_sessions,
+    prune_login_attempts,
     stage_create_or_refresh_user_session,
     stage_revoke_user_sessions,
     sync_session_cache,
-    LOGIN_ATTEMPTS,
-    prune_login_attempts,
-    _login_attempts_lock,
 )
-from app.services.audit_logger import AuditEventContext, log_audit_event
+from app.services.sql_utils import normalize_search_term
 from app.services.user_operation_logger import (
     build_user_snapshot,
     log_user_operation,
     log_user_profile_update,
     log_user_sensitive_update,
 )
+from app.services.user_service import get_user_by_id, get_user_by_username
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +92,10 @@ CLI_DEVICE_NAME = "LabStorageManager CLI"
 class UserListQuery:
     skip: int = 0
     limit: int = 50
-    username: Annotated[Optional[str], Query(max_length=100)] = None
-    full_name: Annotated[Optional[str], Query(max_length=100)] = None
-    role: Optional[str] = None
-    is_active: Optional[bool] = None
+    username: Annotated[str | None, Query(max_length=100)] = None
+    full_name: Annotated[str | None, Query(max_length=100)] = None
+    role: str | None = None
+    is_active: bool | None = None
 
 
 class UserListItemResponse(UserResponse):
@@ -441,8 +441,8 @@ def _record_failed_login_memory(client_ip: str) -> None:
 class LoginRequest(BaseModel):
     username: str = Field(min_length=USERNAME_MIN_LENGTH, max_length=USERNAME_MAX_LENGTH)
     password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
-    device_id: Optional[str] = None  # Client device ID
-    device_name: Optional[str] = UNKNOWN_DEVICE  # Client device name
+    device_id: str | None = None  # Client device ID
+    device_name: str | None = UNKNOWN_DEVICE  # Client device name
 
 
 class ChangePasswordRequest(BaseModel):
@@ -472,7 +472,7 @@ class CLILoginResponse(BaseModel):
     token_type: str
     expires_in: int
     user: UserResponse
-    redis_warning: Optional[str] = None
+    redis_warning: str | None = None
 
 
 def _get_cli_token_expires_in_seconds() -> int:
@@ -1301,7 +1301,7 @@ def update_user_role(
 
 class ResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=6, max_length=50, description="新密码")
-    old_password: Optional[str] = None  # Required when resetting admin password
+    old_password: str | None = None  # Required when resetting admin password
 
 
 @router.post("/{user_id}/reset-password", dependencies=[Depends(require_admin)])

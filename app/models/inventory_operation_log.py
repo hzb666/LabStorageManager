@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
-from sqlalchemy import Column, Enum as SAEnum, Index, Text
+from sqlalchemy import Column, Index, Text
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now
@@ -67,7 +67,7 @@ class InventoryOperationLog(SQLModel, table=True):
         ),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     inventory_id: int = Field(index=False)
     operator_id: int = Field(
         foreign_key="users.id",
@@ -89,7 +89,7 @@ class InventoryOperationLog(SQLModel, table=True):
     item_name: str = Field(max_length=200)
     cas_number: str = Field(max_length=50)
     snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
-    notes: Optional[str] = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class InventoryOperationLogResponse(BaseResponse):
@@ -103,4 +103,4 @@ class InventoryOperationLogResponse(BaseResponse):
     item_name: str
     cas_number: str
     snapshot_json: str
-    notes: Optional[str]
+    notes: str | None

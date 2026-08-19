@@ -4,7 +4,6 @@ import secrets
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict
 
 from sqlmodel import Session, delete, func, select
 
@@ -16,7 +15,12 @@ from app.core.constants import (
     SECONDS_PER_HOUR,
     UNKNOWN_DEVICE,
 )
-from app.core.redis import cache_session, delete_cached_session, delete_cached_sessions, mark_revoked_sessions
+from app.core.redis import (
+    cache_session,
+    delete_cached_session,
+    delete_cached_sessions,
+    mark_revoked_sessions,
+)
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.models.user_session import UserSession
 from app.services.sse_manager import sse_manager
@@ -49,7 +53,7 @@ class StagedSessionRefresh:
 # ==================== 内存后备限流 ====================
 # 内存后备速率限制（Redis 不可用时使用）
 
-LOGIN_ATTEMPTS: Dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次失败时间)
+LOGIN_ATTEMPTS: dict[str, tuple[int, float]] = {}  # IP -> (失败次数, 首次失败时间)
 _login_attempts_lock = threading.Lock()  # 线程锁，保护并发访问
 _login_attempts_last_sweep = 0.0
 

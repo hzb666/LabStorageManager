@@ -8,7 +8,6 @@ from sqlmodel import Session, func, select
 from app.models.inventory import Inventory, InventoryStatus
 from app.services.cas_utils import normalize_cas
 
-
 VISIBLE_STOCK_STATUSES = {
     InventoryStatus.IN_STOCK,
     InventoryStatus.RUN_SHORT,

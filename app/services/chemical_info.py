@@ -1,30 +1,31 @@
 # 化学物质信息查询服务。
+import hashlib
+import logging
+import random
 import re
 import time
-import random
-import logging
-import hashlib
-from urllib.parse import quote, urlparse
-import requests
-from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+from urllib.parse import quote, urlparse
+
+import requests
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
+from app.core.auth import get_current_user
 from app.core.config import settings
 from app.core.constants import (
+    CHEMICAL_INFO_CACHE_MAX_SIZE,
+    CHEMICAL_INFO_CACHE_TTL_SECONDS,
     CHEMICAL_INFO_FALLBACK_FUTURE_TIMEOUT_SECONDS,
     CHEMICAL_INFO_PRIMARY_FUTURE_TIMEOUT_SECONDS,
     CHEMICAL_INFO_RATE_LIMIT_DELAY_SECONDS,
-    CHEMICAL_INFO_CACHE_MAX_SIZE,
-    CHEMICAL_INFO_CACHE_TTL_SECONDS,
     MIN_REQUEST_TIMEOUT_SECONDS,
     TRANSLATED_NAME_SUFFIX,
 )
-from app.core.auth import get_current_user
 from app.database import DBSession
 from app.models.compound_structure import CompoundStructureCache
-from app.services.cas_utils import validate_and_normalize_cas, is_special_cas_value
+from app.services.cas_utils import is_special_cas_value, validate_and_normalize_cas
 from app.services.structure_cache_repo import (
     StructureNameCacheWrite,
     get_structure_cache,
@@ -45,7 +46,7 @@ USER_AGENTS = [
 ]
 
 # 简单内存缓存（带大小限制的 LRU）
-_CACHE: Dict[str, Dict[str, Any]] = {}
+_CACHE: dict[str, dict[str, Any]] = {}
 _CACHE_ORDER: list = []  # 记录访问顺序
 _ALLOWED_OUTBOUND_HOSTS = {
     "www.chemblink.com",
@@ -55,7 +56,7 @@ _ALLOWED_OUTBOUND_HOSTS = {
 }
 
 
-def _get_headers() -> Dict[str, str]:
+def _get_headers() -> dict[str, str]:
     return {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -71,7 +72,7 @@ def _safe_get(url: str, timeout: float):
     return requests.get(url, headers=_get_headers(), timeout=timeout, allow_redirects=False)
 
 
-def _safe_post(url: str, data: Dict[str, str], timeout: float):
+def _safe_post(url: str, data: dict[str, str], timeout: float):
     # 禁止跟随重定向，避免白名单域名再跳到非预期目标。
     if not _is_safe_outbound_url(url):
         raise requests.RequestException(f"Unsafe outbound URL blocked: {url}")
@@ -85,11 +86,8 @@ def _is_safe_outbound_url(url: str) -> bool:
             return False
 
         hostname = (parsed.hostname or "").lower()
-        if not hostname or hostname not in _ALLOWED_OUTBOUND_HOSTS:
-            return False
-
-        return True
-    except Exception:
+        return bool(hostname and hostname in _ALLOWED_OUTBOUND_HOSTS)
+    except Exception:  # noqa: BLE001 - malformed URLs are rejected safely.
         return False
 
 
@@ -100,7 +98,7 @@ def _format_exception_message(exc: Exception) -> str:
     return exc.__class__.__name__
 
 
-def _get_cached(cas_number: str) -> Optional[Dict[str, Any]]:
+def _get_cached(cas_number: str) -> dict[str, Any] | None:
     if cas_number in _CACHE:
         cached_data, cached_time = _CACHE[cas_number]
         if time.time() - cached_time < CHEMICAL_INFO_CACHE_TTL_SECONDS:
@@ -115,7 +113,7 @@ def _get_cached(cas_number: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _set_cached(cas_number: str, data: Dict[str, Any]) -> None:
+def _set_cached(cas_number: str, data: dict[str, Any]) -> None:
     if cas_number in _CACHE:
         del _CACHE[cas_number]
         if cas_number in _CACHE_ORDER:
@@ -123,14 +121,13 @@ def _set_cached(cas_number: str, data: Dict[str, Any]) -> None:
 
     while len(_CACHE) >= CHEMICAL_INFO_CACHE_MAX_SIZE and _CACHE_ORDER:
         oldest = _CACHE_ORDER.pop(0)
-        if oldest in _CACHE:
-            del _CACHE[oldest]
+        _CACHE.pop(oldest, None)
 
     _CACHE[cas_number] = (data, time.time())
     _CACHE_ORDER.append(cas_number)
 
 
-def _remaining_timeout(deadline: float) -> Optional[float]:
+def _remaining_timeout(deadline: float) -> float | None:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return None
@@ -138,7 +135,7 @@ def _remaining_timeout(deadline: float) -> Optional[float]:
     return max(MIN_REQUEST_TIMEOUT_SECONDS, remaining)
 
 
-def _parse_chinese_name(content: str) -> Optional[str]:
+def _parse_chinese_name(content: str) -> str | None:
     if "404" in content[:500] or "File Not Found" in content[:500]:
         return None
 
@@ -157,7 +154,7 @@ def _parse_chinese_name(content: str) -> Optional[str]:
     return None
 
 
-def query_chinese_name(cas_number: str) -> Optional[str]:
+def query_chinese_name(cas_number: str) -> str | None:
     cas = str(cas_number).strip()
     if not cas:
         return None
@@ -171,15 +168,15 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
         f"https://www.chemblink.com/zh/moreProducts/more{cas}C.htm",
     ]
 
-    chinese_name: Optional[str] = None
+    chinese_name: str | None = None
 
-    def fetch_and_parse(url: str) -> Optional[str]:
+    def fetch_and_parse(url: str) -> str | None:
         try:
             response = _safe_get(url, timeout=3)
             if response.status_code == 200:
                 content = response.content.decode("utf-8", errors="ignore")
                 return _parse_chinese_name(content)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - external lookup failures are best-effort.
             logger.warning(f"Failed to query chemblink {url} for CAS {cas}: {e}")
         return None
 
@@ -196,14 +193,14 @@ def query_chinese_name(cas_number: str) -> Optional[str]:
     return chinese_name
 
 
-def _extract_iupac_name(data: Dict[str, Any]) -> Optional[str]:
+def _extract_iupac_name(data: dict[str, Any]) -> str | None:
     properties = data.get("PropertyTable", {}).get("Properties", [])
     if properties and properties[0].get("IUPACName"):
         return properties[0]["IUPACName"]
     return None
 
 
-def _query_pubchem_primary(cas: str, encoded_cas: str) -> tuple[Optional[str], Optional[str]]:
+def _query_pubchem_primary(cas: str, encoded_cas: str) -> tuple[str | None, str | None]:
     url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_cas}/property/IUPACName/JSON"
     try:
         response = _safe_get(url, timeout=PUBCHEM_PRIMARY_TIMEOUT_SECONDS)
@@ -214,23 +211,23 @@ def _query_pubchem_primary(cas: str, encoded_cas: str) -> tuple[Optional[str], O
         if english_name:
             return english_name, None
         return None, "主查询返回成功但未包含 IUPACName"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - external lookup failures are best-effort.
         logger.warning(f"Failed to query PubChem for CAS {cas}: {exc}")
         return None, f"主查询异常：{_format_exception_message(exc)}"
 
 
-def _safe_get_with_deadline(url: str, deadline: float) -> tuple[Optional[requests.Response], Optional[str]]:
+def _safe_get_with_deadline(url: str, deadline: float) -> tuple[requests.Response | None, str | None]:
     timeout = _remaining_timeout(deadline)
     if timeout is None:
         return None, f"补充查询超时（最多 {PUBCHEM_FALLBACK_BUDGET_SECONDS} 秒）"
     return _safe_get(url, timeout=timeout), None
 
 
-def _query_pubchem_fallback(cas: str, encoded_cas: str) -> tuple[Optional[str], Optional[str]]:
+def _query_pubchem_fallback(cas: str, encoded_cas: str) -> tuple[str | None, str | None]:
     deadline = time.monotonic() + PUBCHEM_FALLBACK_BUDGET_SECONDS
     cid_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_cas}/cids/JSON"
-    english_name: Optional[str] = None
-    failure_reason: Optional[str] = None
+    english_name: str | None = None
+    failure_reason: str | None = None
 
     try:
         cid_response, failure_reason = _safe_get_with_deadline(cid_url, deadline)
@@ -255,20 +252,20 @@ def _query_pubchem_fallback(cas: str, encoded_cas: str) -> tuple[Optional[str], 
                                 failure_reason = "补充查询返回成功但未包含 IUPACName"
         elif failure_reason is None:
             failure_reason = "补充 CID 查询失败"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - external lookup failures are best-effort.
         logger.warning(f"Failed to query PubChem CID for CAS {cas}: {exc}")
         failure_reason = f"补充查询异常：{_format_exception_message(exc)}"
 
     return english_name, failure_reason
 
-def _build_pubchem_warning(*failure_reasons: Optional[str]) -> str:
+def _build_pubchem_warning(*failure_reasons: str | None) -> str:
     warning_parts = [reason for reason in failure_reasons if reason]
     if not warning_parts:
         warning_parts.append("未命中可用结果")
     return "PubChem 未获取英文名：" + "；".join(warning_parts)
 
 
-def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
+def query_english_name(cas_number: str) -> tuple[str | None, str | None]:
     cas = str(cas_number).strip()
     if not cas:
         return None, None
@@ -280,7 +277,7 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
     encoded_cas = quote(cas, safe="")
 
     english_name, primary_failure_reason = _query_pubchem_primary(cas, encoded_cas)
-    fallback_failure_reason: Optional[str] = None
+    fallback_failure_reason: str | None = None
     if not english_name:
         english_name, fallback_failure_reason = _query_pubchem_fallback(cas, encoded_cas)
 
@@ -294,13 +291,13 @@ def query_english_name(cas_number: str) -> tuple[Optional[str], Optional[str]]:
     return (english_name if english_name else None), warning_message
 
 
-def _get_cache_smiles(cache: CompoundStructureCache | None) -> Optional[str]:
+def _get_cache_smiles(cache: CompoundStructureCache | None) -> str | None:
     if cache is None:
         return None
     return cache.smiles_canonical or cache.smiles_isomeric
 
 
-def _cache_to_chemical_info(cas: str, cache: CompoundStructureCache | None) -> Dict[str, Any]:
+def _cache_to_chemical_info(cas: str, cache: CompoundStructureCache | None) -> dict[str, Any]:
     if cache is None:
         return {
             "cas_number": cas,
@@ -321,7 +318,7 @@ def _cache_to_chemical_info(cas: str, cache: CompoundStructureCache | None) -> D
     }
 
 
-def _set_chemical_info_memory_cache(cas: str, result: Dict[str, Any]) -> None:
+def _set_chemical_info_memory_cache(cas: str, result: dict[str, Any]) -> None:
     _set_cached(cas, {
         "chinese_name": result.get("name"),
         "english_name": result.get("english_name"),
@@ -331,24 +328,24 @@ def _set_chemical_info_memory_cache(cas: str, result: Dict[str, Any]) -> None:
     })
 
 
-def _has_required_names(result: Dict[str, Any], *, skip_chinese: bool) -> bool:
+def _has_required_names(result: dict[str, Any], *, skip_chinese: bool) -> bool:
     if skip_chinese:
         return bool(result.get("english_name"))
     return bool(result.get("name")) and bool(result.get("english_name"))
 
 
-def _query_chinese_name_safely(cas: str) -> Optional[str]:
+def _query_chinese_name_safely(cas: str) -> str | None:
     try:
         return query_chinese_name(cas)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - external lookup failures are best-effort.
         logger.warning(f"Failed to get Chinese name for CAS {cas}: {exc}")
         return None
 
 
-def _query_english_name_safely(cas: str) -> tuple[Optional[str], Optional[str]]:
+def _query_english_name_safely(cas: str) -> tuple[str | None, str | None]:
     try:
         return query_english_name(cas)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - external lookup failures are best-effort.
         logger.warning(f"Failed to get English name for CAS {cas}: {exc}")
         return None, "英文名查询超时，已跳过 PubChem 补充识别"
 
@@ -358,7 +355,7 @@ def _query_missing_external_names(
     *,
     need_chinese: bool,
     need_english: bool,
-) -> tuple[Optional[str], Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None, str | None]:
     if need_chinese and need_english:
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_chinese = executor.submit(query_chinese_name, cas)
@@ -374,18 +371,18 @@ def _query_missing_external_names(
     return chinese_name, None, None
 
 
-def _read_chinese_future(cas: str, future) -> Optional[str]:
+def _read_chinese_future(cas: str, future) -> str | None:
     try:
         return future.result(timeout=CHEMICAL_INFO_PRIMARY_FUTURE_TIMEOUT_SECONDS)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - external lookup failures are best-effort.
         logger.warning(f"Failed to get Chinese name for CAS {cas}: {exc}")
         return None
 
 
-def _read_english_future(cas: str, future) -> tuple[Optional[str], Optional[str]]:
+def _read_english_future(cas: str, future) -> tuple[str | None, str | None]:
     try:
         return future.result(timeout=CHEMICAL_INFO_FALLBACK_FUTURE_TIMEOUT_SECONDS)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - external lookup failures are best-effort.
         logger.warning(f"Failed to get English name for CAS {cas}: {exc}")
         return None, "英文名查询超时，已跳过 PubChem 补充识别"
 
@@ -393,9 +390,9 @@ def _read_english_future(cas: str, future) -> tuple[Optional[str], Optional[str]
 def _fill_translated_chinese_name(
     cas: str,
     *,
-    chinese_name: Optional[str],
-    english_name: Optional[str],
-) -> tuple[Optional[str], bool]:
+    chinese_name: str | None,
+    english_name: str | None,
+) -> tuple[str | None, bool]:
     if chinese_name or not english_name:
         return chinese_name, False
 
@@ -416,10 +413,10 @@ def _fill_translated_chinese_name(
 def _resolve_and_store_missing_names(
     db: Session,
     cas: str,
-    result: Dict[str, Any],
+    result: dict[str, Any],
     *,
     skip_chinese: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     need_chinese = not skip_chinese and not result.get("name")
     need_english = not result.get("english_name")
     chinese_name, english_name, warning_message = _query_missing_external_names(
@@ -453,7 +450,7 @@ def _resolve_and_store_missing_names(
     return _cache_to_chemical_info(cas, cache)
 
 
-def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Optional[str]:
+def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> str | None:
     if not text:
         return None
 
@@ -491,7 +488,7 @@ def translate_text(text: str, from_lang: str = "en", to_lang: str = "zh") -> Opt
         else:
             logger.warning(f"Niutrans API request failed with status {response.status_code}")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - translation is a best-effort fallback.
         logger.warning(f"Failed to translate text via niutrans: {e}")
 
     return None
@@ -503,7 +500,7 @@ def query_chemical_info(
     *,
     skip_chinese: bool = False,
     cache_only: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     cas = str(cas_number).strip()
     if not cas:
         return _cache_to_chemical_info(cas, None)

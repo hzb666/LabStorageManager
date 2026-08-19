@@ -12,7 +12,6 @@ from app.core.time_utils import get_utc_now
 from app.models.structure_index import StructureResolutionJob, StructureResolutionJobState
 from app.services.cas_utils import normalize_cas
 
-
 MAX_JOB_ERROR_MESSAGE_LENGTH = 500
 LEASE_ATTEMPT_LIMIT_ERROR_CODE = "lease_attempt_limit_exhausted"
 LEASE_ATTEMPT_LIMIT_ERROR_MESSAGE = (

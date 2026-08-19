@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import secrets
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from threading import RLock
 from types import MappingProxyType
-from typing import Mapping
 
 from app.services.cas_utils import normalize_cas
 from app.services.structure_index import StructureSearchHit
-
 
 DEFAULT_STRUCTURE_SEARCH_CACHE_TTL_SECONDS = 12 * 60 * 60
 DEFAULT_STRUCTURE_SEARCH_CACHE_MAX_ENTRIES = 128

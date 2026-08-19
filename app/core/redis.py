@@ -1,8 +1,8 @@
 import json
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Optional
 
 import redis
 
@@ -16,7 +16,7 @@ from app.core.constants import (
 logger = logging.getLogger(__name__)
 
 # Redis 客户端单例与断路器状态
-_redis_client: Optional[redis.Redis] = None
+_redis_client: redis.Redis | None = None
 _last_error_time: float = 0.0
 _raw_prefix = (settings.redis_key_prefix or "lsm").strip(":").strip()
 REDIS_KEY_PREFIX = _raw_prefix or "lsm"
@@ -30,11 +30,11 @@ class RedisDeleteByPrefixResult:
 
 @dataclass(frozen=True)
 class CachedSessionState:
-    session_data: Optional[dict]
+    session_data: dict | None
     is_revoked: bool
 
 
-def get_redis() -> Optional[redis.Redis]:
+def get_redis() -> redis.Redis | None:
     """获取 Redis 客户端（带简易熔断机制）"""
     global _redis_client, _last_error_time
 
@@ -119,7 +119,7 @@ def cache_session(token_hash: str, session_data: dict, ttl_seconds: int) -> None
         logger.error(f"Session 数据序列化失败: {e}")
 
 
-def get_cached_session(token_hash: str) -> Optional[dict]:
+def get_cached_session(token_hash: str) -> dict | None:
     return get_cached_session_state(token_hash).session_data
 
 

@@ -32,7 +32,6 @@ from app.services.log_timeline_detail_text import (
 )
 from app.services.pinyin_utils import to_pinyin
 
-
 LOG_TIMELINE_MUTABLE_COLUMNS = (
     "occurred_at",
     "is_cli",

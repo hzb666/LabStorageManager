@@ -1,14 +1,14 @@
 """耗材订单模型。"""
 from datetime import datetime
+from enum import Enum
+
+from pydantic import ConfigDict, field_validator
+from sqlalchemy import Column, Index, asc, desc
+from sqlalchemy import Enum as SAEnum
+from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
-from enum import Enum
-from typing import Optional
-
-from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, Enum as SAEnum, Index, asc, desc
-from sqlmodel import Field, SQLModel
 
 
 class ConsumableOrderStatus(str, Enum):
@@ -24,21 +24,21 @@ class ConsumableOrderBase(SQLModel):
     # 中文名称，带查询索引
     name: str = Field(max_length=200)
     # 英文名称
-    english_name: Optional[str] = Field(None, max_length=200)
+    english_name: str | None = Field(None, max_length=200)
     # 货号
-    product_number: Optional[str] = Field(None, max_length=200)
+    product_number: str | None = Field(None, max_length=200)
     # 规格型号，如 "500mL"、M 码
-    specification: Optional[str] = Field(default=None, max_length=100)
+    specification: str | None = Field(default=None, max_length=100)
     # 单位，如 "箱"、"个"，选填
-    unit: Optional[str] = Field(None, max_length=20)
+    unit: str | None = Field(None, max_length=20)
     # 订购数量，必填且大于 0
     quantity: int = Field(gt=0)
     # 单价
-    price: Optional[float] = Field(None, ge=0)
+    price: float | None = Field(None, ge=0)
     # 沟通信息，选填
-    communication: Optional[str] = Field(None, max_length=100)
+    communication: str | None = Field(None, max_length=100)
     # 备注
-    notes: Optional[str] = Field(None, max_length=500)
+    notes: str | None = Field(None, max_length=500)
 
 
 class ConsumableOrder(ConsumableOrderBase, table=True):
@@ -60,8 +60,8 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
         Index("ix_consumable_order_applicant_created_at_id", asc("applicant_id"), desc("created_at"), desc("id")),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    applicant_id: Optional[int] = Field(
+    id: int | None = Field(default=None, primary_key=True)
+    applicant_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL"
@@ -81,8 +81,8 @@ class ConsumableOrder(ConsumableOrderBase, table=True):
         ),
     )
     # 拼音索引字段（用于排序和搜索）
-    name_pinyin: Optional[str] = Field(None, max_length=200)
-    name_pinyin_initials: Optional[str] = Field(None, max_length=200)
+    name_pinyin: str | None = Field(None, max_length=200)
+    name_pinyin_initials: str | None = Field(None, max_length=200)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
         default_factory=get_utc_now,
@@ -98,14 +98,14 @@ class ConsumableOrderCreate(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    product_number: Optional[str] = Field(default=None, max_length=200)  # 货号，选填
+    english_name: str | None = Field(default=None, max_length=200)
+    product_number: str | None = Field(default=None, max_length=200)  # 货号，选填
     specification: str = Field(max_length=100)  # 规格型号，必填
-    unit: Optional[str] = Field(default=None, max_length=20)  # 单位，选填
+    unit: str | None = Field(default=None, max_length=20)  # 单位，选填
     quantity: int = Field(gt=0)  # 数量，必填，大于0
-    price: Optional[float] = Field(default=None, ge=0)
-    communication: Optional[str] = Field(default=None, max_length=100)
-    notes: Optional[str] = Field(default=None, max_length=500)
+    price: float | None = Field(default=None, ge=0)
+    communication: str | None = Field(default=None, max_length=100)
+    notes: str | None = Field(default=None, max_length=500)
 
     @field_validator("name", "specification")
     @classmethod
@@ -120,19 +120,19 @@ class ConsumableOrderUpdate(SQLModel):
     """DTO for updating consumable order information"""
     model_config = ConfigDict(extra="forbid")
 
-    name: Optional[str] = Field(default=None, max_length=200)
-    english_name: Optional[str] = Field(default=None, max_length=200)
-    product_number: Optional[str] = Field(default=None, max_length=200)
-    specification: Optional[str] = Field(default=None, max_length=100)
-    unit: Optional[str] = Field(default=None, max_length=20)
-    quantity: Optional[int] = Field(default=None, gt=0)
-    price: Optional[float] = Field(default=None, ge=0)
-    communication: Optional[str] = Field(default=None, max_length=100)
-    notes: Optional[str] = Field(default=None, max_length=500)
+    name: str | None = Field(default=None, max_length=200)
+    english_name: str | None = Field(default=None, max_length=200)
+    product_number: str | None = Field(default=None, max_length=200)
+    specification: str | None = Field(default=None, max_length=100)
+    unit: str | None = Field(default=None, max_length=20)
+    quantity: int | None = Field(default=None, gt=0)
+    price: float | None = Field(default=None, ge=0)
+    communication: str | None = Field(default=None, max_length=100)
+    notes: str | None = Field(default=None, max_length=500)
 
     @field_validator("name", "specification", mode="before")
     @classmethod
-    def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
+    def strip_supplied_required_text(cls, value: str | None) -> str | None:
         if value is None:
             raise ValueError("Field must not be empty")
         if not isinstance(value, str):
@@ -144,7 +144,7 @@ class ConsumableOrderUpdate(SQLModel):
 
     @field_validator("quantity", mode="before")
     @classmethod
-    def reject_null_quantity(cls, value: Optional[int]) -> Optional[int]:
+    def reject_null_quantity(cls, value: int | None) -> int | None:
         if value is None:
             raise ValueError("Quantity is required")
         return value
@@ -154,18 +154,18 @@ class ConsumableOrderResponse(BaseResponse):
     """DTO for consumable order API responses"""
     id: int
     name: str
-    english_name: Optional[str]
-    product_number: Optional[str]
-    specification: Optional[str]
-    unit: Optional[str]
+    english_name: str | None
+    product_number: str | None
+    specification: str | None
+    unit: str | None
     quantity: int
-    price: Optional[float]
-    communication: Optional[str]
-    notes: Optional[str]
-    applicant_id: Optional[int]
+    price: float | None
+    communication: str | None
+    notes: str | None
+    applicant_id: int | None
     status: ConsumableOrderStatus
     created_at: datetime
     updated_at: datetime
-    approved_at: Optional[datetime] = None
-    rejected_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    approved_at: datetime | None = None
+    rejected_at: datetime | None = None
+    completed_at: datetime | None = None

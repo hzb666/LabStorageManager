@@ -1,13 +1,12 @@
 """Cross-route validation for reagent order business constraints."""
-from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.api_errors import ApiErrorCode, api_error
 from app.models.chemical_name_map import ChemicalNameMap
 from app.models.reagent_order import ReagentOrderReason
 from app.services.cas_utils import normalize_cas
-
 
 COMMON_PUBLIC_MASTER_DATA_ERROR = "Common-public orders require CAS master data"
 

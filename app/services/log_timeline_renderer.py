@@ -1,8 +1,8 @@
 """Render log timeline rows into API payload candidates."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from sqlmodel import select
 
@@ -39,7 +39,6 @@ from app.services.order_operation_logger import (
 )
 from app.services.user_operation_logger import parse_user_operation_snapshot
 from app.services.user_utils import batch_get_user_names
-
 
 OTHER_USER_OPERATION_ACTION_VALUES: tuple[str, ...] = (
     UserOperationAction.CREATE_REAGENT_BRAND.value,
@@ -154,7 +153,7 @@ def _build_log_summary_target(
     target_name: str | None = None,
     cas_number: str | None = None,
     specification: str | None = None,
-    quantity: float | int | None = None,
+    quantity: float | None = None,
     unit: str | None = None,
 ) -> dict[str, object]:
     return {
@@ -172,8 +171,8 @@ def _build_log_summary_metrics(
     *,
     count: int | None = None,
     result_count: int | None = None,
-    quantity_borrowed: float | int | None = None,
-    quantity_returned: float | int | None = None,
+    quantity_borrowed: float | None = None,
+    quantity_returned: float | None = None,
 ) -> dict[str, object]:
     return {
         "count": count,

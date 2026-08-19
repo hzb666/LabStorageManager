@@ -1,12 +1,12 @@
 # 图片上传、压缩与静态文件删除。
+import io
 import uuid
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from fastapi import UploadFile, HTTPException
+from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
-import io
 
-from app.core.config import settings, BASE_DIR, UPLOADS_DIR
+from app.core.config import BASE_DIR, UPLOADS_DIR, settings
 from app.core.constants import (
     ANNOUNCEMENT_IMAGE_MAX_MB,
     AVATAR_MAX_HEIGHT,
@@ -79,8 +79,7 @@ def _sanitize_static_relative_path(file_path: str) -> Path | None:
         return None
 
     normalized = normalized.replace("\\", "/").lstrip("/")
-    if normalized.startswith("static/"):
-        normalized = normalized[len("static/"):]
+    normalized = normalized.removeprefix("static/")
     if not normalized:
         return None
 
@@ -201,9 +200,9 @@ def _image_size_error(max_size_mb: float) -> HTTPException:
 
 def compress_image(
     image: Image.Image,
-    max_size_kb: int = None,
-    max_width: int = None,
-    max_height: int = None
+    max_size_kb: int | None = None,
+    max_width: int | None = None,
+    max_height: int | None = None
 ) -> Image.Image:
     # 头像压缩优先满足体积约束，再尽量提升画质。
     if max_size_kb is None:

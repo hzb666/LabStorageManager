@@ -5,7 +5,8 @@ from datetime import datetime
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import Column, Enum as SAEnum, Index
+from sqlalchemy import Column, Index
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now

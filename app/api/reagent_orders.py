@@ -1,15 +1,15 @@
 import logging
 import time
 from datetime import datetime
-from typing import Annotated, Optional, Dict, Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import case
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select, func
+from sqlmodel import Session, func, select
 
-from app.database import DBSession
+from app.api.reagent_orders_workflow import register_workflow_routes
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
 from app.core.constants import (
@@ -19,39 +19,22 @@ from app.core.constants import (
     SSEEventType,
     SSERoom,
 )
+from app.core.request_utils import get_request_is_cli, get_sse_client_id
 from app.core.time_utils import get_utc_now
+from app.database import DBSession
 from app.models import BaseResponse
-from app.models.user import User, UserRole
+from app.models.chemical_name_map import ChemicalNameMap
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import (
     ReagentOrder,
     ReagentOrderCreate,
-    ReagentOrderUpdate,
-    ReagentOrderResponse,
     ReagentOrderReason,
+    ReagentOrderResponse,
     ReagentOrderStatus,
+    ReagentOrderUpdate,
 )
-from app.services.cas_utils import (
-    normalize_cas,
-    validate_cas_format,
-    is_special_cas_value,
-)
-from app.services.spec_utils import parse_specification, SpecificationError, format_specification
-from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.search_matchers import (
-    CASSearchMode,
-    TextMatchMode,
-    build_chunked_in_clause,
-    build_segmented_search_log_meta,
-    build_text_same_field_segmented_clause,
-    build_multi_search_log_meta,
-    build_applicant_id_subquery,
-    classify_cas_search,
-    split_segmented_search_terms,
-    split_exact_cas_search_terms,
-)
-from app.services.user_utils import batch_get_user_names
-from app.services.sql_utils import order_with_nulls_last
+from app.models.user import User, UserRole
+from app.search_completion_db import REAGENT_ORDER_COMPLETION_ENDPOINT
 from app.services.api_utils import (
     add_inventory_specification,
     clear_cache_by_prefix,
@@ -60,6 +43,14 @@ from app.services.api_utils import (
     normalize_pagination,
     set_cached_result,
 )
+from app.services.cas_utils import (
+    is_special_cas_value,
+    normalize_cas,
+    validate_cas_format,
+)
+from app.services.export_rate_limit import EXPORT_SCOPE_REAGENT_ORDERS, enforce_export_rate_limit
+from app.services.inventory_queries import regular_inventory_query
+from app.services.inventory_state_guards import is_pending_stockin_item
 from app.services.order_list_search import (
     OrderListSearchConfig,
     apply_order_list_single_field_search,
@@ -67,12 +58,6 @@ from app.services.order_list_search import (
     build_order_list_fts_state,
     normalize_order_list_search_value,
 )
-from app.services.inventory_queries import regular_inventory_query
-from app.services.inventory_state_guards import is_pending_stockin_item
-from app.services.sse_manager import sse_manager
-from app.services.export_rate_limit import EXPORT_SCOPE_REAGENT_ORDERS, enforce_export_rate_limit
-from app.core.request_utils import get_request_is_cli, get_sse_client_id
-from app.models.chemical_name_map import ChemicalNameMap
 from app.services.order_operation_logger import (
     log_reagent_order_create,
     log_reagent_order_export,
@@ -82,30 +67,45 @@ from app.services.order_status_times import (
     get_order_status_time_fields,
     get_reagent_order_status_times,
 )
-from app.services.search_query_log_service import (
-    buffer_search_log,
-    build_search_log_filters,
-    build_search_log_sort,
-)
-from app.search_completion_db import REAGENT_ORDER_COMPLETION_ENDPOINT
-from app.services.search_completion_entity_index import (
-    run_completion_index_update,
-    sync_reagent_order_entity_completions,
-)
-from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.reagent_order_validation import (
     get_cas_master_data,
     raise_common_public_master_data_constraint_error,
     validate_common_public_order_master_data,
 )
-from app.api.reagent_orders_workflow import register_workflow_routes
+from app.services.search_completion_entity_index import (
+    run_completion_index_update,
+    sync_reagent_order_entity_completions,
+)
+from app.services.search_matchers import (
+    CASSearchMode,
+    TextMatchMode,
+    build_applicant_id_subquery,
+    build_chunked_in_clause,
+    build_multi_search_log_meta,
+    build_segmented_search_log_meta,
+    build_text_same_field_segmented_clause,
+    classify_cas_search,
+    split_exact_cas_search_terms,
+    split_segmented_search_terms,
+)
+from app.services.search_query_log_service import (
+    buffer_search_log,
+    build_search_log_filters,
+    build_search_log_sort,
+)
+from app.services.spec_utils import SpecificationError, format_specification, parse_specification
+from app.services.sql_utils import order_with_nulls_last
+from app.services.sse_manager import sse_manager
+from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
+from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
 logger = logging.getLogger(__name__)
 
 # ==================== 搜索缓存 ====================
 # 简单内存缓存，用于减少重复搜索查询
-SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
+SEARCH_CACHE: dict[str, tuple[Any, datetime]] = {}
 LIST_CACHE_PREFIX = "list:"
 VALID_REAGENT_ORDER_REASONS = {reason.value for reason in ReagentOrderReason}
 REAGENT_ORDER_EDITABLE_STATUSES = frozenset(
@@ -203,13 +203,13 @@ class ReagentOrderListQuery(BaseModel):
 
     skip: int = 0
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
-    status_filter: Optional[ReagentOrderStatus] = None
-    search: Optional[str] = Query(default=None, max_length=20_000)
-    search_field: Optional[str] = None
+    status_filter: ReagentOrderStatus | None = None
+    search: str | None = Query(default=None, max_length=20_000)
+    search_field: str | None = None
     fuzzy: bool = False
     match_mode: TextMatchMode = TextMatchMode.CONTAINS
-    sort_by: Optional[str] = None
-    sort_order: Optional[str] = "desc"
+    sort_by: str | None = None
+    sort_order: str | None = "desc"
 
 
 class CASOverviewOrderResponse(BaseResponse):
@@ -251,7 +251,7 @@ class CASOverviewResponseModel(BaseResponse):
     inventory: dict[str, int | CASOverviewInventoryResponse | None]
 
 
-def _validate_order_reason(reason: Optional[str], required: bool = False) -> Optional[ReagentOrderReason]:
+def _validate_order_reason(reason: str | None, required: bool = False) -> ReagentOrderReason | None:
     # API 层校验订购原因，并转换为模型持久化使用的枚举。
     if reason is None:
         if required:
@@ -277,7 +277,7 @@ def _validate_order_reason(reason: Optional[str], required: bool = False) -> Opt
     return ReagentOrderReason(normalized_reason)
 
 
-def _ensure_required_brand(brand: Optional[str]) -> str:
+def _ensure_required_brand(brand: str | None) -> str:
     normalized_brand = brand.strip() if isinstance(brand, str) else ""
     if not normalized_brand:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="brand is required")
@@ -293,7 +293,7 @@ def _serialize_reagent_order(order: ReagentOrder, db: Session) -> dict[str, Any]
         "applicant_name": users_map.get(order.applicant_id, ""),
     })
 
-def get_reagent_order_by_id(db: Session, order_id: int) -> Optional[ReagentOrder]:
+def get_reagent_order_by_id(db: Session, order_id: int) -> ReagentOrder | None:
     # 按 ID 获取试剂订单。
     return db.get(ReagentOrder, order_id)
 
@@ -302,7 +302,7 @@ def _apply_reagent_order_search_term(
     base,
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode,
 ):
@@ -358,8 +358,8 @@ def _apply_reagent_order_search_term(
 
 
 def _get_reagent_order_multi_cas_terms(
-    search: Optional[str],
-    search_field: Optional[str],
+    search: str | None,
+    search_field: str | None,
 ) -> list[str]:
     if search_field not in REAGENT_ORDER_CAS_SEARCH_KEYS and search_field not in {None, "all"}:
         return []
@@ -367,8 +367,8 @@ def _get_reagent_order_multi_cas_terms(
 
 
 def _get_reagent_order_segmented_terms(
-    search: Optional[str],
-    search_field: Optional[str],
+    search: str | None,
+    search_field: str | None,
     match_mode: TextMatchMode,
 ) -> list[str]:
     disabled = (
@@ -379,7 +379,7 @@ def _get_reagent_order_segmented_terms(
     return split_segmented_search_terms(search, match_mode=match_mode, disabled=disabled)
 
 
-def _get_reagent_order_segmented_field_groups(search_field: Optional[str]):
+def _get_reagent_order_segmented_field_groups(search_field: str | None):
     if search_field and search_field != "all":
         fields = REAGENT_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS.get(search_field)
         return [fields] if fields else []
@@ -389,7 +389,7 @@ def _get_reagent_order_segmented_field_groups(search_field: Optional[str]):
 def _apply_reagent_order_segmented_search(
     base,
     *,
-    search_field: Optional[str],
+    search_field: str | None,
     terms: list[str],
     fuzzy: bool,
     match_mode: TextMatchMode,
@@ -409,9 +409,9 @@ def _apply_reagent_order_segmented_search(
 
 def _apply_reagent_order_filters(
     base,
-    status_filter: Optional[ReagentOrderStatus],
-    search: Optional[str],
-    search_field: Optional[str],
+    status_filter: ReagentOrderStatus | None,
+    search: str | None,
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode,
     segmented_terms: list[str] | None = None,
@@ -773,8 +773,8 @@ def export_reagent_orders(
     current_user: CurrentUser,
 ):
     enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_REAGENT_ORDERS)
-    from app.services.xlsx_export import export_reagent_orders_xlsx
     from app.services.export_batch import batch_fetch_all
+    from app.services.xlsx_export import export_reagent_orders_xlsx
 
     statement = select(ReagentOrder).order_by(ReagentOrder.created_at.desc())
     result = batch_fetch_all(db, statement)
@@ -802,7 +802,7 @@ def export_reagent_orders(
 def get_cas_overview(
     cas_number: str,
     db: DBSession,
-    exclude_order_id: Optional[int] = None,
+    exclude_order_id: int | None = None,
 ):
     # 获取 CAS 概览，用于表单查重提示和展开行提示。
     normalized_cas = normalize_cas(cas_number)
@@ -1100,7 +1100,7 @@ def _normalize_reagent_order_update_data(order_update: ReagentOrderUpdate) -> di
         if field in update_data:
             update_data[field] = normalized_strings[field]
 
-    if "cas_number" in update_data and update_data["cas_number"]:
+    if update_data.get("cas_number"):
         normalized_cas = normalize_cas(update_data["cas_number"])
         is_valid, error = validate_cas_format(normalized_cas)
         if not is_valid:

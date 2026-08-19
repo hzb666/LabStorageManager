@@ -54,7 +54,7 @@ class CompletionFeedbackRequest(BaseModel):
 
 
 @router.get("/preferences", response_model=SearchPreferencesResponse)
-def get_preferences(current_user: User = Depends(get_current_user)):
+def get_preferences(current_user: User = Depends(get_current_user)):  # noqa: B008
     prefs = get_user_preferences(current_user.id)
     return SearchPreferencesResponse(personalization_enabled=prefs.personalization_enabled)
 
@@ -62,7 +62,7 @@ def get_preferences(current_user: User = Depends(get_current_user)):
 @router.put("/preferences", response_model=SearchPreferencesResponse)
 def update_preferences(
     body: SearchPreferencesUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  # noqa: B008
 ):
     prefs = upsert_user_preferences(current_user.id, body.personalization_enabled)
     return SearchPreferencesResponse(personalization_enabled=prefs.personalization_enabled)
@@ -74,7 +74,7 @@ def get_inline_completion_endpoint(
     q: str,
     db: DBSession,
     field: str = "all",
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  # noqa: B008
 ):
     if endpoint not in TARGET_ENDPOINTS:
         return InlineCompletionResponse()
@@ -105,7 +105,7 @@ def get_inline_completion_endpoint(
 @router.post("/feedback")
 def submit_feedback(
     body: CompletionFeedbackRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  # noqa: B008
 ):
     if body.endpoint not in TARGET_ENDPOINTS:
         return {"ok": True}

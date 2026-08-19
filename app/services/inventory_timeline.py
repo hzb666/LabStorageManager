@@ -22,7 +22,6 @@ from app.services.log_timeline_renderer import render_log_timeline_rows
 from app.services.spec_utils import format_specification
 from app.services.user_utils import batch_get_user_names
 
-
 INVENTORY_CHANGE_FIELD_LABELS: tuple[tuple[str, str], ...] = (
     ("name", "名称"),
     ("english_name", "英文名称"),

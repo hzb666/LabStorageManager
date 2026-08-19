@@ -8,7 +8,7 @@ to a SELECT-then-DELETE pattern when running on an older SQLite build.
 from __future__ import annotations
 
 import sqlite3
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 from sqlmodel import Session, SQLModel, select
 
@@ -24,7 +24,7 @@ def exec_delete_returning_first(
     db: Session,
     delete_stmt,
     model_cls: type[_ModelT],
-) -> Optional[_ModelT]:
+) -> _ModelT | None:
     """Execute ``DELETE … RETURNING`` and return the first deleted row as a model instance.
 
     Falls back to SELECT + DELETE within the same transaction on SQLite < 3.35.

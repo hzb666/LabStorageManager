@@ -11,6 +11,14 @@ from app.core.time_utils import get_utc_now
 from app.database import DBSession
 from app.models.user import User, UserRole
 from app.services.api_utils import normalize_pagination
+from app.services.dashboard.common import (
+    BOARD_SECTION_MAX_PAGE_SIZE,
+    BOARD_SECTION_PAGE_SIZE,
+    DASHBOARD_WINDOW_MAX_DAYS,
+    DASHBOARD_WINDOW_MIN_DAYS,
+    RECENT_WINDOW_DAYS,
+)
+from app.services.dashboard.personal import build_personal_dashboard_summary
 from app.services.dashboard.summary import (
     _build_public_board_summary_data,
     _build_user_board_summary_data,
@@ -21,14 +29,6 @@ from app.services.dashboard.summary import (
     build_admin_dashboard_summary,
     build_dashboard_window_stats,
 )
-from app.services.dashboard.common import (
-    BOARD_SECTION_MAX_PAGE_SIZE,
-    BOARD_SECTION_PAGE_SIZE,
-    DASHBOARD_WINDOW_MAX_DAYS,
-    DASHBOARD_WINDOW_MIN_DAYS,
-    RECENT_WINDOW_DAYS,
-)
-from app.services.dashboard.personal import build_personal_dashboard_summary
 
 router = APIRouter(
     prefix="/dashboard",
@@ -217,7 +217,7 @@ def get_personal_dashboard_summary(
 @router.get("/board/summary", response_model=DashboardBoardSummaryEnvelope)
 def get_dashboard_board_summary(
     db: DBSession,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  # noqa: B008
 ) -> dict[str, Any]:
     """Return public dashboard board data for authenticated users."""
 
@@ -234,7 +234,7 @@ def get_dashboard_board_section_items(
     db: DBSession,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=BOARD_SECTION_PAGE_SIZE, ge=1, le=BOARD_SECTION_MAX_PAGE_SIZE),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  # noqa: B008
 ) -> dict[str, Any]:
     """Return one paginated public dashboard board section."""
 

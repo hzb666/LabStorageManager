@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -226,7 +226,7 @@ def export_common_shelf_xlsx(
 
 def export_reagent_orders_xlsx(
     items: list[Any],
-    users_map: Optional[dict[int, str]] = None,
+    users_map: dict[int, str] | None = None,
 ) -> StreamingResponse:
     """Export reagent orders."""
     headers = [
@@ -295,7 +295,7 @@ def export_reagent_orders_xlsx(
 
 def export_consumable_orders_xlsx(
     items: list[Any],
-    users_map: Optional[dict[int, str]] = None,
+    users_map: dict[int, str] | None = None,
 ) -> StreamingResponse:
     """Export consumable orders."""
     headers = [

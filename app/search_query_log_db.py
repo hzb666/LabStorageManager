@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from app.core.config import settings
 from app.services.pinyin_utils import to_pinyin

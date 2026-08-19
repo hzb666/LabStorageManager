@@ -1,8 +1,6 @@
 # 中文与混合文本的拼音归一化工具。
-from typing import Optional
 
 from pypinyin import lazy_pinyin
-
 
 PINYIN_FIELD_MAX_LENGTH = 200
 
@@ -17,7 +15,7 @@ def _flush_ascii_buffer(buffer: list[str], full_parts: list[str], initial_parts:
     buffer.clear()
 
 
-def to_pinyin_parts(text: Optional[str]) -> tuple[str, str]:
+def to_pinyin_parts(text: str | None) -> tuple[str, str]:
     if not text:
         return "", ""
 
@@ -54,11 +52,11 @@ def to_pinyin(text: str) -> str:
 
 
 def compute_pinyin_fields(
-    name: str = None,
-    category: str = None,
-    brand: str = None,
-    storage_location: str = None,
-    full_name: str = None,
+    name: str | None = None,
+    category: str | None = None,
+    brand: str | None = None,
+    storage_location: str | None = None,
+    full_name: str | None = None,
 ) -> dict:
     def truncate(text: str) -> str:
         return text[:PINYIN_FIELD_MAX_LENGTH] if len(text) > PINYIN_FIELD_MAX_LENGTH else text

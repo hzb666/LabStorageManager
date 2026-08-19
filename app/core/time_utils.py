@@ -1,5 +1,5 @@
 import calendar
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta, timezone
 
 from app.core.config import settings
 
@@ -12,14 +12,14 @@ def get_utc_now() -> datetime:
     1. 保证服务器存储的永远是绝对的零时区时间（UTC），避免跨时区部署导致时间错乱。
     2. 使用 .replace(tzinfo=None) 剥离时区信息，完美兼容 SQLite 对无时区时间格式的底层要求。
     """
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _coerce_utc_naive(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
     if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.astimezone(UTC).replace(tzinfo=None)
     return dt
 
 
@@ -101,7 +101,7 @@ def normalize_to_utc_naive(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
     if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.astimezone(UTC).replace(tzinfo=None)
     return (dt - _get_display_offset_delta()).replace(tzinfo=None)
 
 
@@ -135,7 +135,7 @@ def utc_iso_str(dt: datetime | None) -> str | None:
     normalized = _coerce_utc_naive(dt)
     if normalized is None:
         return None
-    return normalized.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+    return normalized.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
 
 
 def format_sqlite_datetime(value: datetime) -> str:
@@ -172,5 +172,5 @@ def parse_utc_datetime(value: object) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is not None:
-        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed.astimezone(UTC).replace(tzinfo=None)
     return parsed

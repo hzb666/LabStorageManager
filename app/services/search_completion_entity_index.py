@@ -3,19 +3,20 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+
 from sqlmodel import Session, select
 
+from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
-from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.search_completion_db import (
     CONSUMABLE_ORDER_COMPLETION_ENDPOINT,
     INVENTORY_COMPLETION_ENDPOINT,
     REAGENT_ORDER_COMPLETION_ENDPOINT,
     TARGET_ENDPOINTS,
     bulk_insert_entity_completions,
-    clear_entity_completion_index_stale,
     clear_entity_completion_index,
+    clear_entity_completion_index_stale,
     delete_entity_completions_for_entity,
     is_entity_completion_index_stale,
     mark_entity_completion_index_stale,

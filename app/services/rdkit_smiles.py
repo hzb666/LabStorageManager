@@ -24,6 +24,6 @@ def mol_from_smiles_quiet_h_removal(smiles: str | None):
         remove_params = rdmolops.RemoveHsParameters()
         remove_params.showWarnings = False
         return rdmolops.RemoveHs(mol, remove_params)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - RDKit failures return an unsupported result.
         logger.warning("RDKit SMILES parsing failed: %s", type(exc).__name__)
         return None

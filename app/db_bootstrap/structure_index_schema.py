@@ -5,7 +5,6 @@ from uuid import uuid4
 
 from sqlalchemy.engine import Connection
 
-
 _TRIGGER_STATEMENTS = (
     (
         "trg_structure_cache_index_ai",

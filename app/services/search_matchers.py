@@ -1,8 +1,9 @@
 """Shared search matcher helpers for inventory/order list APIs."""
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
 from enum import Enum
-import re
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any
 
 from sqlalchemy import bindparam, text
 from sqlalchemy import false as sql_false
@@ -10,7 +11,6 @@ from sqlmodel import func, select
 
 from app.services.cas_utils import normalize_cas, validate_cas_format
 from app.services.sql_utils import normalize_field_sql, normalize_search_term
-
 
 CAS_PREFIX_PATTERN = re.compile(r"^[0-9-]{1,50}$")
 DATE_DIGITS_PATTERN = re.compile(r"[^0-9]")
@@ -27,7 +27,7 @@ SEGMENTED_SEARCH_SPLIT_RE = re.compile(r" +")
 SEGMENTED_SEARCH_MAX_TERMS = 8
 
 
-def split_exact_cas_search_terms(search: Optional[str]) -> list[str]:
+def split_exact_cas_search_terms(search: str | None) -> list[str]:
     """Split && CAS search input into unique normalized CAS terms."""
     if not search or SEARCH_MULTI_DELIMITER not in search:
         return []
@@ -43,7 +43,7 @@ def split_exact_cas_search_terms(search: Optional[str]) -> list[str]:
     return terms
 
 
-def build_multi_search_log_meta(search: Optional[str], *, enabled: bool) -> dict[str, Any]:
+def build_multi_search_log_meta(search: str | None, *, enabled: bool) -> dict[str, Any]:
     if not enabled:
         return {}
     terms = split_exact_cas_search_terms(search)
@@ -119,7 +119,7 @@ def combine_and_clauses(clauses: Iterable[Any]):
 
 
 def split_segmented_search_terms(
-    search: Optional[str],
+    search: str | None,
     *,
     match_mode: "TextMatchMode",
     disabled: bool = False,
@@ -160,7 +160,7 @@ def split_segmented_search_terms(
 def collect_search_fields(
     field_map: Mapping[str, Sequence[Any]],
     *,
-    exclude_keys: Optional[set[str]] = None,
+    exclude_keys: set[str] | None = None,
 ) -> list[Any]:
     """Collect deduplicated SQLModel fields from a configured field-map."""
     excluded = exclude_keys or set()
@@ -358,21 +358,21 @@ def build_date_search_clause(field, search_value: str):
     try:
         if len(normalized) == 4:
             year = int(normalized)
-            start = datetime(year, 1, 1)
-            end = datetime(year + 1, 1, 1)
+            start = datetime(year, 1, 1)  # noqa: DTZ001
+            end = datetime(year + 1, 1, 1)  # noqa: DTZ001
         elif len(normalized) == 6:
             year = int(normalized[:4])
             month = int(normalized[4:6])
-            start = datetime(year, month, 1)
+            start = datetime(year, month, 1)  # noqa: DTZ001
             if month == 12:
-                end = datetime(year + 1, 1, 1)
+                end = datetime(year + 1, 1, 1)  # noqa: DTZ001
             else:
-                end = datetime(year, month + 1, 1)
+                end = datetime(year, month + 1, 1)  # noqa: DTZ001
         else:
             year = int(normalized[:4])
             month = int(normalized[4:6])
             day = int(normalized[6:8])
-            start = datetime(year, month, day)
+            start = datetime(year, month, day)  # noqa: DTZ001
             end = start + timedelta(days=1)
     except ValueError:
         return sql_false()

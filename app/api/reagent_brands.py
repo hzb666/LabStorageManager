@@ -1,8 +1,6 @@
 """Reagent brand master-data APIs."""
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func, or_
@@ -80,7 +78,7 @@ def _find_brand_by_normalized_name(
     return db.exec(query).first()
 
 
-def _apply_brand_search(query, search: Optional[str]):
+def _apply_brand_search(query, search: str | None):
     search_name = normalize_reagent_brand_name(search)
     if not search_name:
         return query
@@ -104,7 +102,7 @@ def _apply_brand_search(query, search: Optional[str]):
     return query.where(or_(*clauses))
 
 
-def _build_brand_order_expr(sort_by: Optional[str], sort_order: Optional[str]):
+def _build_brand_order_expr(sort_by: str | None, sort_order: str | None):
     sort_direction = sort_order.lower() if sort_order else "asc"
     sort_field_map = {
         "name": ReagentBrand.name_pinyin,
@@ -201,9 +199,9 @@ def _commit_brand_with_audit(
 def list_reagent_brands(
     current_user: CurrentUser,
     db: DBSession,
-    search: Optional[str] = Query(default=None, max_length=100),
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = "asc",
+    search: str | None = Query(default=None, max_length=100),
+    sort_by: str | None = None,
+    sort_order: str | None = "asc",
     skip: int = 0,
     limit: int = 500,
     include_inactive: bool = False,

@@ -3,17 +3,17 @@ Internal Code Generator - Generate unique internal codes for inventory items
 Format: CAS号-日期(yymmdd)-序号 (e.g., "64175-250113-001")
 Sequence: Auto-increment per CAS number group, zero-padded to ensure proper sorting
 """
-from datetime import datetime
 import re
+from datetime import datetime
 
 from sqlalchemy import Integer, cast, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.models.common_shelf import CommonShelf
 from app.core.constants import INTERNAL_CODE_MAX_SEQUENCE, INTERNAL_CODE_SEQUENCE_PAD_WIDTH
 from app.core.db_compat import SQLITE_SUPPORTS_RETURNING
 from app.core.time_utils import get_utc_now
+from app.models.common_shelf import CommonShelf
 from app.models.inventory import Inventory
 
 # UPDATE ... RETURNING 需要 SQLite >= 3.35.0。

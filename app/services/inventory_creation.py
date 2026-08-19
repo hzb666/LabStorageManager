@@ -1,10 +1,9 @@
 """Shared inventory item creation helpers."""
 from __future__ import annotations
 
+from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
-
-from fastapi import HTTPException, status
 
 from app.core.api_errors import ApiErrorCode, api_error
 from app.models.inventory import Inventory, InventoryStatus, ManualInventoryCreate
@@ -16,8 +15,8 @@ from app.services.internal_code import (
     is_internal_code_unique_violation,
 )
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.spec_utils import SpecificationError, parse_specification
 from app.services.shelf_utils import normalize_storage_location
+from app.services.spec_utils import SpecificationError, parse_specification
 
 
 def create_manual_inventory_items(

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import ConfigDict, field_validator
 from sqlalchemy import Index
@@ -32,11 +31,11 @@ class ReagentBrand(SQLModel, table=True):
         Index("ix_reagent_brand_active_updated_at_id", "is_active", "updated_at", "id"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     name: str = Field(max_length=100)
     name_normalized: str = Field(max_length=100)
-    name_pinyin: Optional[str] = Field(default=None, max_length=200)
-    name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    name_pinyin: str | None = Field(default=None, max_length=200)
+    name_pinyin_initials: str | None = Field(default=None, max_length=200)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(
@@ -77,8 +76,8 @@ class ReagentBrandResponse(BaseResponse):
     id: int
     name: str
     name_normalized: str
-    name_pinyin: Optional[str]
-    name_pinyin_initials: Optional[str]
+    name_pinyin: str | None
+    name_pinyin_initials: str | None
     is_active: bool
     created_at: datetime
     updated_at: datetime

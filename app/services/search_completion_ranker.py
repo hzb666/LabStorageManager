@@ -4,13 +4,13 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.search_completion_db import (
     CONSUMABLE_ORDER_COMPLETION_ENDPOINT,
     INVENTORY_COMPLETION_ENDPOINT,
-    QueryMemoryRow,
     REAGENT_ORDER_COMPLETION_ENDPOINT,
+    QueryMemoryRow,
     get_user_preferences,
     query_entity_by_prefix,
     query_memory_by_prefix,
@@ -76,8 +76,8 @@ def _recency_score(last_used_at: str) -> float:
         ts = last_used_at.replace("Z", "+00:00") if "Z" in last_used_at else last_used_at
         dt = datetime.fromisoformat(ts)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        delta = datetime.now(timezone.utc) - dt
+            dt = dt.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - dt
         days = max(delta.total_seconds() / 86400.0, 0.0)
         return math.exp(-RECENCY_DECAY_LAMBDA * days)
     except (ValueError, TypeError):

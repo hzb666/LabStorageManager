@@ -1,7 +1,9 @@
 # 全局模型基类。
 from datetime import datetime
+
 from pydantic import ConfigDict
 from sqlmodel import SQLModel
+
 from app.core.time_utils import utc_iso_str
 
 

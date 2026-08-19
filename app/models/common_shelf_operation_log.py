@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
-from sqlalchemy import Column, Enum as SAEnum, Index, Text
+from sqlalchemy import Column, Index, Text
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now
@@ -47,9 +47,9 @@ class CommonShelfOperationLog(SQLModel, table=True):
         Index("ix_common_shelf_operation_log_cas_created_at", "cas_number", "created_at"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     common_shelf_id: int = Field(default=0, index=False)
-    operator_id: Optional[int] = Field(
+    operator_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",
@@ -70,7 +70,7 @@ class CommonShelfOperationLog(SQLModel, table=True):
     item_name: str = Field(max_length=200)
     cas_number: str = Field(max_length=50)
     snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
-    notes: Optional[str] = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class CommonShelfOperationLogResponse(BaseResponse):
@@ -78,10 +78,10 @@ class CommonShelfOperationLogResponse(BaseResponse):
 
     id: int
     common_shelf_id: int
-    operator_id: Optional[int]
+    operator_id: int | None
     action: CommonShelfOperationAction
     created_at: datetime
     item_name: str
     cas_number: str
     snapshot_json: str
-    notes: Optional[str]
+    notes: str | None

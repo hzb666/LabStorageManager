@@ -2,15 +2,16 @@
 import json
 import logging
 import secrets
-from datetime import datetime, time as datetime_time
+from datetime import datetime
+from datetime import time as datetime_time
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
-from app.core.constants import RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
 
+from app.core.constants import RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class Settings(BaseSettings):
 
     # 应用
     app_name: str = "Lab Storage Manager"
-    app_version: str = "0.9.0"
+    app_version: str = "0.9.1"
     cache_version: str = ""
     maintenance_mode: bool = Field(
         default=False,
@@ -103,7 +104,7 @@ class Settings(BaseSettings):
     public_key_path: str = Field(default=".keys/public.pem", description="JWT public key path")
 
     # 跨域配置。
-    cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
     trust_proxy_headers: bool = Field(
         default=False,
         description="Whether to trust reverse-proxy forwarding headers such as X-Forwarded-For",
@@ -146,7 +147,7 @@ class Settings(BaseSettings):
     redis_host: str = Field(default="localhost", description="Redis host")
     redis_port: int = Field(default=6379, description="Redis port")
     redis_db: int = Field(default=0, description="Redis database number")
-    redis_password: Optional[str] = Field(default=None, description="Redis password")
+    redis_password: str | None = Field(default=None, description="Redis password")
     redis_key_prefix: str = Field(default="lsm", description="Redis key prefix for app namespace")
     redis_max_connections: int = Field(
         default=100,
@@ -181,7 +182,7 @@ class Settings(BaseSettings):
         description="Retry count for PubChem 429, 5xx, and timeout failures",
     )
     chem_pubchem_user_agent: str = Field(
-        default="LabStorageManager/0.9.0",
+        default="LabStorageManager/0.9.1",
         description="User-Agent sent to PubChem PUG-REST",
     )
     chem_resolution_scheduler_enabled: bool = Field(
@@ -336,7 +337,7 @@ class Settings(BaseSettings):
 
         for fmt in ("%H:%M", "%H:%M:%S"):
             try:
-                return datetime.strptime(stripped, fmt).time()
+                return datetime.strptime(stripped, fmt).time()  # noqa: DTZ007
             except ValueError:
                 continue
         raise ValueError("ARCHIVE_RUN_AT_TIME must use HH:MM or HH:MM:SS")
@@ -388,7 +389,7 @@ class Settings(BaseSettings):
         if value is None:
             return "+08:00"
         if not isinstance(value, str):
-            raise ValueError("DISPLAY_UTC_OFFSET must be a string")
+            raise ValueError("DISPLAY_UTC_OFFSET must be a string")  # noqa: TRY004
 
         stripped = value.strip()
         if not stripped:
@@ -444,7 +445,7 @@ class Settings(BaseSettings):
             raise ValueError("CHEM_RESOLUTION_RETRY_DELAYS_SECONDS must not be empty")
         raw_values = json.loads(stripped) if stripped.startswith("[") else stripped.split(",")
         if not isinstance(raw_values, list | tuple):
-            raise ValueError("CHEM_RESOLUTION_RETRY_DELAYS_SECONDS must be a list")
+            raise ValueError("CHEM_RESOLUTION_RETRY_DELAYS_SECONDS must be a list")  # noqa: TRY004
         delays = tuple(int(item) for item in raw_values)
         if len(delays) != 3 or any(delay <= 0 for delay in delays):
             raise ValueError("CHEM_RESOLUTION_RETRY_DELAYS_SECONDS must contain 3 positive values")
@@ -561,11 +562,11 @@ class Settings(BaseSettings):
         return public_pem.decode("utf-8")
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance"""
     settings = Settings()
-    settings.app_version = settings.app_version.strip() or "0.9.0"
+    settings.app_version = settings.app_version.strip() or "0.9.1"
     settings.cache_version = settings.cache_version.strip() or settings.app_version
 
     # 生产环境禁止 HS256，避免对称密钥模式的降级风险

@@ -4,19 +4,19 @@ import logging
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
-from fastapi.security import HTTPBearer
 import bcrypt
 import jwt
+from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.security import HTTPBearer
 from jwt import PyJWTError
 from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.constants import ACTIVITY_DEBOUNCE_SECONDS, BEARER_PREFIX_LEN
+from app.core.redis import delete_cached_session, get_cached_session_state
 from app.core.request_utils import get_client_ip
 from app.core.time_utils import get_utc_now, parse_utc_datetime
-from app.core.redis import delete_cached_session, get_cached_session_state
-from app.database import get_db, engine
+from app.database import engine, get_db
 from app.models.user import User, UserRole
 from app.models.user_session import UserSession
 from app.services.session_service import SessionCacheIdentity, sync_session_cache
@@ -532,7 +532,7 @@ def resolve_current_session(
 def get_current_session(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db),  # noqa: B008
 ) -> tuple[User, UserSession]:
     return resolve_current_session(request=request, background_tasks=background_tasks, db=db)
 
@@ -548,13 +548,7 @@ def is_token_session_active(token_hash: str, *, client_ip: str | None = None) ->
     cached_data = cache_state.session_data
     if cached_data:
         cached_session = _build_cached_session(token_hash, cached_data)
-        if cached_session is None:
-            delete_cached_session(token_hash)
-        elif cached_session.expires_at <= now_utc:
-            delete_cached_session(token_hash)
-        elif settings.session_strict_ip and client_ip and cached_session.ip_address != client_ip:
-            delete_cached_session(token_hash)
-        elif cached_data.get("is_active") is False:
+        if cached_session is None or cached_session.expires_at <= now_utc or settings.session_strict_ip and client_ip and cached_session.ip_address != client_ip or cached_data.get("is_active") is False:
             delete_cached_session(token_hash)
         else:
             return True
@@ -601,13 +595,13 @@ def is_token_session_active(token_hash: str, *, client_ip: str | None = None) ->
 def get_current_user(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db)  # noqa: B008
 ) -> User:
     user, _ = resolve_current_session(request=request, background_tasks=background_tasks, db=db)
     return user
 
 
-def require_admin(current_user: User = Depends(get_current_user)) -> User:
+def require_admin(current_user: User = Depends(get_current_user)) -> User:  # noqa: B008
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -617,7 +611,7 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-def require_non_public(current_user: User = Depends(get_current_user)) -> User:
+def require_non_public(current_user: User = Depends(get_current_user)) -> User:  # noqa: B008
     if current_user.role == UserRole.PUBLIC:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

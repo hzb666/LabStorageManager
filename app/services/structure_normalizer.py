@@ -8,7 +8,7 @@ from rdkit.Chem import rdDepictor
 
 try:
     from rdkit.Chem import inchi
-except Exception:  # pragma: no cover
+except Exception:  # noqa: BLE001 - optional RDKit component.  # pragma: no cover
     inchi = None
 
 from app.models.compound_structure import CompoundStructureStatus
@@ -38,7 +38,7 @@ def _mol_from_molblock(molblock: str | None):
         return None
     try:
         return Chem.MolFromMolBlock(molblock, sanitize=True, removeHs=False)
-    except Exception:
+    except Exception:  # noqa: BLE001 - unsupported structures return None.
         return None
 
 
@@ -47,7 +47,7 @@ def _mol_from_smiles(smiles: str | None):
         return None
     try:
         return mol_from_smiles_quiet_h_removal(smiles)
-    except Exception:
+    except Exception:  # noqa: BLE001 - unsupported structures return None.
         return None
 
 
@@ -83,7 +83,7 @@ def normalize_structure_from_mol(mol, *, inchikey: str | None = None) -> Normali
             molblock=molblock,
             inchikey=_calculate_inchikey(mol, inchikey),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - normalization returns a structured error.
         return NormalizedStructure(
             status=CompoundStructureStatus.UNSUPPORTED,
             error_message=str(exc),

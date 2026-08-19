@@ -3,9 +3,8 @@ Specification Parser - Parse specification string into (value, unit)
 Critical: No unit conversion, case-insensitive, reject invalid format
 """
 import re
-from typing import Tuple, Optional
-from app.core.constants import SPEC_PATTERN
 
+from app.core.constants import SPEC_PATTERN
 
 # 单位规范形式映射（小写输入 -> 展示形式）。
 UNIT_CANONICAL: dict[str, str] = {
@@ -27,10 +26,9 @@ VALID_UNITS = set(UNIT_CANONICAL.keys())
 
 class SpecificationError(ValueError):
     """Domain error for invalid specification format"""
-    pass
 
 
-def format_specification(initial_quantity: Optional[float], unit: Optional[str]) -> Optional[str]:
+def format_specification(initial_quantity: float | None, unit: str | None) -> str | None:
     """
     Format specification from initial_quantity and unit.
 
@@ -61,7 +59,7 @@ def format_specification(initial_quantity: Optional[float], unit: Optional[str])
     return formatted
 
 
-def parse_specification(spec: str) -> Tuple[float, str]:
+def parse_specification(spec: str) -> tuple[float, str]:
     """
     Parse specification string into (numeric_value, canonical_unit)
 

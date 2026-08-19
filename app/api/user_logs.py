@@ -1,12 +1,13 @@
 # 管理员查看用户多来源操作日志。
 import base64
-from dataclasses import dataclass
 import hashlib
 import hmac
 import json
 import secrets
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import redis
 from fastapi import APIRouter, HTTPException, status
@@ -14,7 +15,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, false, func, or_, true
 from sqlmodel import select
 
-from app.core.redis import get_redis, redis_key
 from app.core.auth import CurrentUser
 from app.core.config import settings
 from app.core.constants import (
@@ -24,27 +24,28 @@ from app.core.constants import (
     LOG_TOKEN_RATE_WINDOW,
     SECONDS_PER_HOUR,
 )
+from app.core.redis import get_redis, redis_key
 from app.core.time_utils import utc_iso_str
 from app.database import DBSession
-from app.services.api_utils import normalize_pagination
-from app.models.user_session import UserSession
+from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
 from app.models.user import User, UserRole
+from app.models.user_operation_log import UserOperationLog
+from app.models.user_session import UserSession
 from app.search_query_log_db import (
     SEARCH_LOG_ENDPOINT_LABELS,
     SearchLogRow,
     count_search_log_rows,
     fetch_search_log_rows,
 )
-from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
-from app.models.user_operation_log import UserOperationLog
-from app.services.order_fts import build_order_fts_rowid_subquery, should_use_order_fts
-from app.services.pinyin_utils import to_pinyin
+from app.services.api_utils import normalize_pagination
 from app.services.log_timeline_renderer import (
     NON_USER_OPERATION_ACTION_VALUES,
     OTHER_USER_OPERATION_ACTION_VALUES,
     SESSION_USER_OPERATION_ACTION_VALUES,
     render_log_timeline_candidates,
 )
+from app.services.order_fts import build_order_fts_rowid_subquery, should_use_order_fts
+from app.services.pinyin_utils import to_pinyin
 from app.services.sql_utils import normalize_search_term
 from app.services.user_service import get_user_by_id
 
@@ -160,16 +161,16 @@ def is_token_valid(token: str) -> bool:
 
 
 class LogsQueryParams(BaseModel):
-    keyword: Optional[str] = Field(default=None, max_length=100)  # 搜索关键词
-    category: Optional[str] = None  # 筛选分类：reagent_order, consumable_order, inventory, borrow, session, other
+    keyword: str | None = Field(default=None, max_length=100)  # 搜索关键词
+    category: str | None = None  # 筛选分类：reagent_order, consumable_order, inventory, borrow, session, other
     skip: int = 0
     limit: int = DEFAULT_PAGE_SIZE
 
 
 class LogsQueryRequest(BaseModel):
     token: str
-    keyword: Optional[str] = Field(default=None, max_length=100)
-    category: Optional[str] = None
+    keyword: str | None = Field(default=None, max_length=100)
+    category: str | None = None
     include_search_logs: bool = False
     skip: int = 0
     limit: int = DEFAULT_PAGE_SIZE
@@ -305,7 +306,7 @@ def _build_log_summary_target(
     target_name: str | None = None,
     cas_number: str | None = None,
     specification: str | None = None,
-    quantity: float | int | None = None,
+    quantity: float | None = None,
     unit: str | None = None,
 ) -> dict[str, object]:
     return {
@@ -323,8 +324,8 @@ def _build_log_summary_metrics(
     *,
     count: int | None = None,
     result_count: int | None = None,
-    quantity_borrowed: float | int | None = None,
-    quantity_returned: float | int | None = None,
+    quantity_borrowed: float | None = None,
+    quantity_returned: float | None = None,
 ) -> dict[str, object]:
     return {
         "count": count,

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from app.services.order_fts import (
     OrderFTSError,
@@ -40,7 +40,7 @@ class OrderListSearchConfig:
     cas_column: Any | None = None
 
 
-def normalize_order_list_search_value(search: Optional[str], *, fuzzy: bool) -> Optional[str]:
+def normalize_order_list_search_value(search: str | None, *, fuzzy: bool) -> str | None:
     if not search:
         return None
     raw_search = search.strip()
@@ -56,7 +56,7 @@ def build_order_list_fts_state(
     config: OrderListSearchConfig,
     fts_table: str,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode,
     allow_fts: bool,
@@ -98,7 +98,7 @@ def apply_order_list_single_field_search(
     base,
     *,
     config: OrderListSearchConfig,
-    search_field: Optional[str],
+    search_field: str | None,
     search_value: str,
     fuzzy: bool,
     match_mode: TextMatchMode,

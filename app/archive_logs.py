@@ -5,15 +5,15 @@ import argparse
 import sqlite3
 import sys
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.time_utils import get_utc_now, format_sqlite_datetime, subtract_months
+from app.core.time_utils import format_sqlite_datetime, get_utc_now, subtract_months
 from app.database import db_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

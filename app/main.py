@@ -12,39 +12,10 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from sqlmodel import Session
 
-from app.core.config import settings
-from app.core.constants import (
-    CSP_BASE_DIRECTIVES,
-    CSP_SCRIPT_SRC_DOCS,
-    CSP_SCRIPT_SRC_STRICT,
-    CSP_STYLE_SRC_WITH_INLINE,
-    DOCS_PATH_PREFIXES,
-    HSTS_MAX_AGE_SECONDS,
-    HTTPS_EXEMPT_PATHS,
-    STATIC_CACHE_MAX_AGE_SECONDS,
-    UPLOAD_PATHS,
-)
-from app.core.api_errors import API_ERROR_CODE_HEADER
-from app.core.auth import (
-    AUTH_ERROR_CODE_HEADER,
-    decode_token,
-    extract_access_token,
-    resolve_current_session,
-)
-from app.core.banner import print_banner
-from app.core.request_utils import (
-    get_client_ip,
-    get_request_id,
-    get_sse_client_id,
-    reset_current_sse_client_id,
-    set_current_sse_client_id,
-)
-from app.core.sentry_monitoring import init_sentry
-from app.core.time_utils import get_display_timezone_label
-from app.database import engine, init_db
 from app.api import (
     announcements,
     cart_sync,
@@ -64,14 +35,56 @@ from app.api import (
     user_sessions,
     users,
 )
+from app.core.api_errors import API_ERROR_CODE_HEADER
+from app.core.auth import (
+    AUTH_ERROR_CODE_HEADER,
+    decode_token,
+    extract_access_token,
+    resolve_current_session,
+)
+from app.core.banner import print_banner
+from app.core.config import settings
+from app.core.constants import (
+    CSP_BASE_DIRECTIVES,
+    CSP_SCRIPT_SRC_DOCS,
+    CSP_SCRIPT_SRC_STRICT,
+    CSP_STYLE_SRC_WITH_INLINE,
+    DOCS_PATH_PREFIXES,
+    HSTS_MAX_AGE_SECONDS,
+    HTTPS_EXEMPT_PATHS,
+    STATIC_CACHE_MAX_AGE_SECONDS,
+    UPLOAD_PATHS,
+)
+from app.core.request_utils import (
+    get_client_ip,
+    get_request_id,
+    get_sse_client_id,
+    reset_current_sse_client_id,
+    set_current_sse_client_id,
+)
+from app.core.sentry_monitoring import init_sentry
+from app.core.time_utils import get_display_timezone_label
+from app.database import engine, init_db
+from app.search_completion_db import TARGET_ENDPOINTS, init_search_completion_db
+from app.search_query_log_db import init_query_log_db
 from app.services import chemical_info
 from app.services.archive_scheduler import start_archive_scheduler, stop_archive_scheduler
 from app.services.cache_reset_service import apply_startup_cache_reset_if_needed
 from app.services.error_logger import log_error
-from app.services.inventory_import_preview_sessions import cleanup_expired_inventory_import_preview_artifacts
-from app.services.log_queue import get_request_logger, initialize_async_file_logging, shutdown_async_file_logging
+from app.services.inventory_import_preview_sessions import (
+    cleanup_expired_inventory_import_preview_artifacts,
+)
+from app.services.log_queue import (
+    get_request_logger,
+    initialize_async_file_logging,
+    shutdown_async_file_logging,
+)
 from app.services.rate_limit import enforce_rate_limit
-from app.services.search_query_log_service import stop_search_query_log_worker, start_search_query_log_worker
+from app.services.search_completion_entity_index import rebuild_completion_entity_index_if_stale
+from app.services.search_query_log_service import (
+    start_search_query_log_worker,
+    stop_search_query_log_worker,
+)
 from app.services.sse_manager import sse_manager
 from app.services.structure_index_scheduler import (
     start_structure_index_scheduler,
@@ -81,11 +94,6 @@ from app.services.structure_resolution_scheduler import (
     start_structure_resolution_scheduler,
     stop_structure_resolution_scheduler,
 )
-from app.search_query_log_db import init_query_log_db
-from app.search_completion_db import TARGET_ENDPOINTS, init_search_completion_db
-from app.services.search_completion_entity_index import rebuild_completion_entity_index_if_stale
-from sqlmodel import Session
-
 
 LOGIN_PATH = "/login"
 ROBOTS_PATH = "/robots.txt"
@@ -171,9 +179,7 @@ def _is_cli_blocked_request(request: Request) -> bool:
         return True
     # 文件上传会把 agent 输入扩大成文件系统读写，先统一禁用，后续按场景单独放开。
     content_type = request.headers.get("content-type", "").lower()
-    if "multipart/form-data" in content_type:
-        return True
-    return False
+    return "multipart/form-data" in content_type
 
 
 def _get_log_level() -> int:
@@ -692,7 +698,7 @@ def get_runtime_cache_version(response: Response) -> dict[str, str | bool]:
     }
 
 # 导入模型并完成 SQLModel 表注册。
-from app.models import (  # noqa: E402, F401
+from app.models import (  # noqa: F401
     Announcement,
     BorrowLog,
     ChemicalNameMap,

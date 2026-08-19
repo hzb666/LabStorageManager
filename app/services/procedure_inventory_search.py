@@ -1,8 +1,8 @@
 """Procedure inventory search orchestration."""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 from fastapi import status
@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.config import settings
+from app.services.llm_usage_logger import record_procedure_llm_usage
 from app.services.procedure_inventory_analysis import (
     build_analysis_items,
     build_skipped_analysis_items,
@@ -17,7 +18,6 @@ from app.services.procedure_inventory_analysis import (
     merge_common_reagent_mentions,
 )
 from app.services.procedure_inventory_lookup import unique_cas_order
-from app.services.llm_usage_logger import record_procedure_llm_usage
 from app.services.procedure_inventory_models import (
     ProcedureInventoryExtractionResult,
     ProcedureInventorySearchResult,

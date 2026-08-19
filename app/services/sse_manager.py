@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
-from contextlib import suppress
 import json
 import logging
 import secrets
 import threading
+from collections import deque
+from collections.abc import AsyncGenerator
+from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, Self
 
 from app.core.constants import (
     SSE_CLIENT_ID_TOKEN_HEX_LENGTH,
@@ -19,14 +20,14 @@ from app.core.constants import (
     SSE_MAX_CLIENTS,
     SSE_MAX_ROOMS,
     SSE_ORIGIN_TOKEN_HEX_LENGTH,
-    SSE_REPLAY_BUFFER_MAX_EVENTS,
     SSE_REDIS_GET_MESSAGE_TIMEOUT_SECONDS,
     SSE_REDIS_LISTENER_ERROR_RETRY_SECONDS,
     SSE_REDIS_SUBSCRIBE_RETRY_SECONDS,
+    SSE_REPLAY_BUFFER_MAX_EVENTS,
     SSE_SLOW_CLIENT_QUEUE_FULL_STREAK_LIMIT,
 )
+from app.core.redis import REDIS_KEY_PREFIX, redis_key
 from app.core.request_utils import get_current_sse_client_id
-from app.core.redis import redis_key, REDIS_KEY_PREFIX
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.services.sse_redis import redis_pubsub
 
@@ -74,9 +75,9 @@ class SSESubscriptionRequest:
 
 
 class SSEManager:
-    _instance: Optional["SSEManager"] = None
+    _instance: SSEManager | None = None
 
-    def __new__(cls) -> "SSEManager":
+    def __new__(cls) -> Self:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -89,8 +90,8 @@ class SSEManager:
         self._clients: dict[str, SSEClient] = {}
         self._rooms: dict[str, SSERoom] = {}
         self._manager_lock = asyncio.Lock()
-        self._listener_task: Optional[asyncio.Task[None]] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._listener_task: asyncio.Task[None] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._origin = secrets.token_hex(SSE_ORIGIN_TOKEN_HEX_LENGTH)
         self._slow_client_disconnects = 0
         self._initialized = True
@@ -349,7 +350,7 @@ class SSEManager:
         channel = redis_key("sse:control")
         try:
             redis_pubsub.publish(channel, event)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("SSE revoke publish failed reason=%s", reason)
 
         if self._loop and self._loop.is_running():
@@ -387,7 +388,7 @@ class SSEManager:
             return raw_value.decode("utf-8")
         return str(raw_value)
 
-    def _parse_pubsub_event(self, message: dict[str, Any]) -> Optional[tuple[str, str, dict[str, Any]]]:
+    def _parse_pubsub_event(self, message: dict[str, Any]) -> tuple[str, str, dict[str, Any]] | None:
         raw_channel = message.get("channel")
         channel = self._decode_pubsub_value(raw_channel)
 
@@ -426,7 +427,7 @@ class SSEManager:
 
         return room, event_type, event
 
-    def _parse_control_message(self, message: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _parse_control_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
         raw_channel = message.get("channel")
         channel = self._decode_pubsub_value(raw_channel)
         if ":sse:control" not in channel and channel != "sse:control":
@@ -566,7 +567,7 @@ class SSEManager:
                     yield message
                     if client.revoked and client.queue.empty():
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     if self._clients.get(client.client_id) is not client:
                         break
                     if client.revoked:

@@ -361,7 +361,7 @@ def _extract_json_object(content: str) -> str:
 
 def _normalize_llm_response_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
-        raise ValueError("llm response root must be object")
+        raise ValueError("llm response root must be object")  # noqa: TRY004
     normalized = dict(payload)
     normalized.setdefault("rejection_reason", None)
     reagents = normalized.get("reagents")
@@ -381,7 +381,7 @@ def _normalize_llm_reagent(item: Any) -> dict[str, Any]:
             "confidence": "medium",
         }
     if not isinstance(item, dict):
-        raise ValueError("llm reagent item must be object or string")
+        raise ValueError("llm reagent item must be object or string")  # noqa: TRY004
     normalized = dict(item)
     name = normalized.get("name") or normalized.get("chemical_name") or normalized.get("reagent_name")
     normalized["name"] = name

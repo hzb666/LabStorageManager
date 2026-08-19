@@ -3,8 +3,8 @@ SQL工具函数 - 提供通用的SQL构建辅助函数
 """
 from functools import reduce
 from typing import Any
-from sqlmodel import func as sql_func
 
+from sqlmodel import func as sql_func
 
 # 需要在SQL中移除的字符列表
 CHARS_TO_REMOVE = ["-", " ", "\u00A0", "\u2002", "\u2003", "\u2009", "\u200C", "\u200D", "_"]

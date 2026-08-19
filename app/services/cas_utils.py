@@ -4,10 +4,8 @@ Critical Rule #2: All CAS Number inputs must be normalized (remove spaces, upper
 This is the foundation for deduplication in the system.
 """
 import re
-from typing import Optional
 
 from app.core.constants import CAS_PATTERN
-
 
 BIOLOGICAL_REAGENT_CAS = "生物试剂"
 DASH_TRANSLATION = str.maketrans({
@@ -71,7 +69,7 @@ def _calculate_cas_check_digit(sequence_number: str) -> int:
     return total % 10
 
 
-def validate_cas_format(cas: str) -> tuple[bool, Optional[str]]:
+def validate_cas_format(cas: str) -> tuple[bool, str | None]:
     """
     Validate CAS number format and check digit.
 
@@ -128,7 +126,7 @@ def is_valid_cas(cas: str | None) -> bool:
     return is_valid
 
 
-def validate_and_normalize_cas(cas: str) -> tuple[bool, Optional[str], str]:
+def validate_and_normalize_cas(cas: str) -> tuple[bool, str | None, str]:
     """
     Validate and normalize CAS number in one step.
 

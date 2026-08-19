@@ -2,10 +2,9 @@
 Announcement Model - System Announcements Management
 """
 from datetime import datetime
-from typing import Optional, List
 
 from sqlalchemy import Index
-from sqlmodel import Field, SQLModel, JSON
+from sqlmodel import JSON, Field, SQLModel
 
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
@@ -15,7 +14,7 @@ class AnnouncementBase(SQLModel):
     """Base announcement model with common fields"""
     title: str = Field(max_length=200)
     content: str = Field(max_length=10000)
-    images: Optional[List[str]] = Field(
+    images: list[str] | None = Field(
         default=None,
         sa_type=JSON,
         sa_column_kwargs={"default": "[]"}
@@ -33,8 +32,8 @@ class Announcement(AnnouncementBase, table=True):
         Index("ix_announcements_creator_visible", "created_by", "is_visible"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    created_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    id: int | None = Field(default=None, primary_key=True)
+    created_by: int | None = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=get_utc_now)
     updated_at: datetime = Field(default_factory=get_utc_now)
 
@@ -43,18 +42,18 @@ class AnnouncementCreate(SQLModel):
     """DTO for creating a new announcement"""
     title: str = Field(max_length=200)
     content: str = Field(max_length=10000)
-    images: Optional[List[str]] = None
+    images: list[str] | None = None
     is_pinned: bool = False
     is_visible: bool = True
 
 
 class AnnouncementUpdate(SQLModel):
     """DTO for updating announcement information"""
-    title: Optional[str] = Field(None, max_length=200)
-    content: Optional[str] = Field(None, max_length=10000)
-    images: Optional[List[str]] = None
-    is_pinned: Optional[bool] = None
-    is_visible: Optional[bool] = None
+    title: str | None = Field(None, max_length=200)
+    content: str | None = Field(None, max_length=10000)
+    images: list[str] | None = None
+    is_pinned: bool | None = None
+    is_visible: bool | None = None
 
 
 class AnnouncementResponse(BaseResponse):
@@ -63,10 +62,10 @@ class AnnouncementResponse(BaseResponse):
     id: int
     title: str
     content: str
-    images: Optional[List[str]]
+    images: list[str] | None
     is_pinned: bool
     is_visible: bool
-    created_by: Optional[int]
-    created_by_name: Optional[str] = None
+    created_by: int | None
+    created_by_name: str | None = None
     created_at: datetime
     updated_at: datetime

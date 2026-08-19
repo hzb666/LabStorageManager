@@ -1,5 +1,5 @@
 """Order FTS helpers for high-performance search on SQLite."""
-from typing import Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import bindparam, text
 from sqlmodel import select
@@ -23,7 +23,7 @@ def _quote_fts_phrase(term: str) -> str:
 
 def _collect_target_columns(
     field_map: Mapping[str, Sequence[str]],
-    search_field: Optional[str],
+    search_field: str | None,
 ) -> list[str]:
     if search_field and search_field != "all" and search_field in field_map:
         return list(field_map[search_field])
@@ -42,7 +42,7 @@ def _collect_target_columns(
 def build_order_match_query(
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ) -> str:
     """Build a safe FTS5 MATCH expression."""
@@ -59,7 +59,7 @@ def build_order_fts_id_clause(
     *,
     fts_table: str,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ):
     """Build `id IN (SELECT rowid FROM <fts_table> WHERE MATCH ...)` clause."""
@@ -76,7 +76,7 @@ def build_order_fts_rowid_subquery(
     *,
     fts_table: str,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ):
     """Build `SELECT rowid FROM <fts_table> WHERE MATCH ...` subquery."""

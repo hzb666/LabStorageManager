@@ -1,14 +1,14 @@
 """Redis-backed preview-session storage for two-phase inventory imports."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-from datetime import datetime, timedelta
 import logging
-from pathlib import Path
 import secrets
 import tempfile
 import threading
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import redis
 
@@ -188,7 +188,7 @@ def _parse_preview_session(
         raise ValueError("Preview token is invalid or expired") from exc
 
     if not isinstance(payload, dict):
-        raise ValueError("Preview token is invalid or expired")
+        raise ValueError("Preview token is invalid or expired")  # noqa: TRY004
 
     try:
         file_path = str(payload["file_path"])

@@ -2,15 +2,16 @@
 import logging
 import re
 from datetime import datetime
-from typing import List, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
+from app.api.deps import get_current_session
+from app.core.auth import AUTH_ERROR_CODE_HEADER, AuthErrorCode, create_access_token
 from app.core.config import settings
 from app.core.constants import SECONDS_PER_HOUR
-from app.core.auth import AUTH_ERROR_CODE_HEADER, AuthErrorCode, create_access_token
 from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.database import get_db
@@ -21,16 +22,14 @@ from app.models.user_session import UserSession
 from app.services.session_service import (
     SessionCacheIdentity,
     StagedSessionRefresh,
-    finalize_session_refresh,
     finalize_revoked_sessions,
+    finalize_session_refresh,
     refresh_session_expiry,
     revoke_session,
     stage_revoke_user_sessions,
     sync_session_cache,
 )
 from app.services.user_operation_logger import log_user_operation
-
-from app.api.deps import get_current_session
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 logger = logging.getLogger(__name__)
@@ -113,7 +112,7 @@ def _apply_refresh_post_commit_side_effects(
         return staged_refresh.session
 
 
-@router.get("/", response_model=List[SessionResponse])
+@router.get("/", response_model=list[SessionResponse])
 def list_sessions(
     db: Annotated[Session, Depends(get_db)],
     current: Annotated[tuple[User, UserSession], Depends(get_current_session)],

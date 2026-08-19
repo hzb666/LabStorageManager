@@ -6,7 +6,7 @@ import logging
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from enum import Enum
 from typing import Any
@@ -516,8 +516,8 @@ def _parse_retry_after_seconds(value: str | None) -> int | None:
     except (TypeError, ValueError, OverflowError):
         return None
     if retry_at.tzinfo is None:
-        retry_at = retry_at.replace(tzinfo=timezone.utc)
-    seconds = int((retry_at - datetime.now(timezone.utc)).total_seconds())
+        retry_at = retry_at.replace(tzinfo=UTC)
+    seconds = int((retry_at - datetime.now(UTC)).total_seconds())
     return max(0, seconds)
 
 

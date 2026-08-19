@@ -22,7 +22,6 @@ from app.services.log_timeline_detail_text import (
     with_cli_prefix,
 )
 
-
 PENDING_DETAIL_CONDITION = """
 timeline.detail_search_text IS NULL OR TRIM(timeline.detail_search_text) = ''
 """

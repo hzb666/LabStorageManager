@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -13,29 +12,34 @@ from app.models.chemical_name_map import ChemicalNameMap
 from app.models.common_shelf import CommonShelf, CommonShelfGroup, CommonShelfManualCreate
 from app.models.reagent_order import ReagentOrder
 from app.services.cas_utils import normalize_cas, validate_cas_format
+from app.services.common_shelf_group_records import (
+    ensure_active_common_shelf_group,
+    is_common_shelf_group_identity_violation,
+)
 from app.services.internal_code import (
     INTERNAL_CODE_CONFLICT_MAX_RETRIES,
     generate_internal_code,
     is_internal_code_unique_violation,
 )
-from app.services.common_shelf_group_records import (
-    ensure_active_common_shelf_group,
-    is_common_shelf_group_identity_violation,
-)
 from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.spec_utils import SpecificationError, UNIT_CANONICAL, format_specification, parse_specification
 from app.services.shelf_utils import normalize_storage_location
+from app.services.spec_utils import (
+    UNIT_CANONICAL,
+    SpecificationError,
+    format_specification,
+    parse_specification,
+)
 
-_DECIMAL_1000 = Decimal("1000")
-_DECIMAL_1000000 = Decimal("1000000")
+_DECIMAL_1000 = Decimal(1000)
+_DECIMAL_1000000 = Decimal(1000000)
 
 
-def normalize_brand_for_group(brand: Optional[str]) -> str:
+def normalize_brand_for_group(brand: str | None) -> str:
     """Normalize brand for group key comparison."""
     return (brand or "").strip().casefold()
 
 
-def require_common_shelf_brand(brand: Optional[str]) -> str:
+def require_common_shelf_brand(brand: str | None) -> str:
     """Return a non-empty brand for common shelf writes."""
     normalized_brand = (brand or "").strip()
     if not normalized_brand:
@@ -43,7 +47,7 @@ def require_common_shelf_brand(brand: Optional[str]) -> str:
     return normalized_brand
 
 
-def normalize_storage_for_group(storage_location: Optional[str]) -> Optional[str]:
+def normalize_storage_for_group(storage_location: str | None) -> str | None:
     """Normalize storage location for group key comparison."""
     normalized = normalize_storage_location(storage_location)
     if normalized is None:
@@ -51,7 +55,7 @@ def normalize_storage_for_group(storage_location: Optional[str]) -> Optional[str
     return normalized.casefold()
 
 
-def _decimal_from_float(value: Optional[float]) -> Optional[Decimal]:
+def _decimal_from_float(value: float | None) -> Decimal | None:
     if value is None:
         return None
     try:
@@ -69,8 +73,8 @@ def _format_decimal_number(value: Decimal) -> str:
 
 
 def normalize_specification_for_group(
-    quantity: Optional[float],
-    unit: Optional[str],
+    quantity: float | None,
+    unit: str | None,
 ) -> tuple[float, str, str, str]:
     """Normalize quantity/unit into stable group key and display text."""
     decimal_quantity = _decimal_from_float(quantity)
@@ -133,14 +137,14 @@ def _create_common_shelf_rows(
     *,
     cas_number: str,
     name_snapshot: str,
-    brand: Optional[str],
-    purity: Optional[str],
+    brand: str | None,
+    purity: str | None,
     spec_quantity: float,
     spec_unit: str,
     quantity_bottles: int,
-    storage_location: Optional[str],
-    notes: Optional[str],
-    source_order_id: Optional[int],
+    storage_location: str | None,
+    notes: str | None,
+    source_order_id: int | None,
     created_by_id: int,
 ) -> list[CommonShelf]:
     normalized_snapshot = (name_snapshot or "").strip()
@@ -245,7 +249,7 @@ def create_common_shelf_items_from_order(
     order: ReagentOrder,
     *,
     created_by_id: int,
-    storage_location: Optional[str],
+    storage_location: str | None,
 ) -> list[CommonShelf]:
     """Create common shelf rows from a common-public reagent order."""
     if order.quantity is None or order.quantity <= 0:
@@ -322,9 +326,9 @@ def create_common_shelf_items_for_group_record(
     group: CommonShelfGroup,
     *,
     count: int,
-    storage_location: Optional[str],
-    purity: Optional[str],
-    notes: Optional[str],
+    storage_location: str | None,
+    purity: str | None,
+    notes: str | None,
     created_by_id: int,
 ) -> list[CommonShelf]:
     """Create more bottles by copying a persistent common shelf group."""

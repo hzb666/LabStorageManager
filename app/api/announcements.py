@@ -2,11 +2,11 @@
 """
 Announcement API Routes - System Announcements Management
 """
-from typing import List, Optional, Annotated
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
-from sqlmodel import Session, select, func
+from sqlmodel import Session, func, select
 
 from app.core.auth import AdminUser, get_current_user, require_admin
 from app.core.config import settings
@@ -22,7 +22,11 @@ from app.models.announcement import (
 )
 from app.models.user import User
 from app.models.user_operation_log import UserOperationAction
-from app.services.image_service import save_announcement_image, delete_file, get_directory_storage_info
+from app.services.image_service import (
+    delete_file,
+    get_directory_storage_info,
+    save_announcement_image,
+)
 from app.services.rate_limit import enforce_rate_limit
 from app.services.user_operation_logger import log_user_operation
 from app.services.user_utils import batch_get_user_names
@@ -33,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ==================== 辅助函数 ====================
 
 
-def get_announcement_by_id(db: Session, announcement_id: int) -> Optional[Announcement]:
+def get_announcement_by_id(db: Session, announcement_id: int) -> Announcement | None:
     """Get announcement by ID"""
     return db.get(Announcement, announcement_id)
 
@@ -52,7 +56,7 @@ def _delete_announcement_images(image_urls: list[str] | None) -> None:
     for image_url in image_urls or []:
         try:
             delete_file(image_url, required_subdir="announcements")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cleanup failures must not block DB mutations.
             logger.error("Failed to delete image %s: %s", image_url, e)
 
 
@@ -103,7 +107,7 @@ def _log_announcement_operation(
 # ==================== 公开接口 ====================
 
 
-@router.get("/public", response_model=List[AnnouncementResponse], dependencies=[Depends(get_current_user)])
+@router.get("/public", response_model=list[AnnouncementResponse], dependencies=[Depends(get_current_user)])
 def get_public_announcements(
     db: Annotated[Session, Depends(get_db)],
 ):
@@ -144,7 +148,7 @@ def get_storage_info():
 # ==================== 管理员接口 ====================
 
 
-@router.get("/", response_model=List[AnnouncementResponse], dependencies=[Depends(require_admin)])
+@router.get("/", response_model=list[AnnouncementResponse], dependencies=[Depends(require_admin)])
 def list_announcements(
     db: Annotated[Session, Depends(get_db)],
     skip: int = 0,

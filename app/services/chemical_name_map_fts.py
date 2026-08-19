@@ -1,7 +1,7 @@
 """Chemical name map FTS helpers."""
 from __future__ import annotations
 
-from typing import Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import bindparam, text
 from sqlmodel import select
@@ -26,7 +26,7 @@ def _quote_fts_phrase(term: str) -> str:
 
 def _collect_target_columns(
     field_map: Mapping[str, Sequence[str]],
-    search_field: Optional[str],
+    search_field: str | None,
 ) -> list[str]:
     if search_field and search_field != "all" and search_field in field_map:
         return list(field_map[search_field])
@@ -45,7 +45,7 @@ def _collect_target_columns(
 def build_chemical_name_map_match_query(
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ) -> str:
     """Build a safe FTS5 MATCH expression for chemical-name-map search."""
@@ -60,7 +60,7 @@ def build_chemical_name_map_match_query(
 def build_chemical_name_map_fts_rowid_subquery(
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ):
     """Build `SELECT rowid FROM chemical_name_map_fts WHERE MATCH ...` subquery."""
@@ -86,7 +86,7 @@ def apply_chemical_name_map_fts_filter(
     base,
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     field_map: Mapping[str, Sequence[str]],
 ):
     """Apply `chemical_name_map_fts MATCH ...` filter onto a name-map query."""

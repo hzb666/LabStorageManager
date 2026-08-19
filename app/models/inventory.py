@@ -1,14 +1,15 @@
 """库存模型。"""
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import ConfigDict, field_validator
-from sqlalchemy import Column, Enum as SAEnum, Index, asc, desc
+from sqlalchemy import Column, Index, asc, desc
+from sqlalchemy import Enum as SAEnum
+from sqlmodel import Field, SQLModel
+
 from app.core.constants import MAX_BOTTLES_PER_IMPORT
 from app.core.time_utils import get_utc_now
 from app.models.base import BaseResponse
-from sqlmodel import Field, SQLModel
 
 
 class InventoryStatus(str, Enum):
@@ -25,20 +26,20 @@ class InventoryBase(SQLModel):
     # CAS 号从订单复制，进入库存前已标准化
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)  # 排序/搜索常用
-    english_name: Optional[str] = Field(None, max_length=200)  # 英文名称
-    alias: Optional[str] = Field(None, max_length=200)
-    category: Optional[str] = Field(max_length=100)  # 排序/搜索常用
-    brand: Optional[str] = Field(max_length=100)  # 排序/搜索常用
-    purity: Optional[str] = Field(default=None, max_length=20)
-    storage_location: Optional[str] = Field(max_length=200)  # 排序/搜索常用
+    english_name: str | None = Field(None, max_length=200)  # 英文名称
+    alias: str | None = Field(None, max_length=200)
+    category: str | None = Field(max_length=100)  # 排序/搜索常用
+    brand: str | None = Field(max_length=100)  # 排序/搜索常用
+    purity: str | None = Field(default=None, max_length=20)
+    storage_location: str | None = Field(max_length=200)  # 排序/搜索常用
     # 数据库模型：允许 NULL 以兼容旧数据
-    initial_quantity: Optional[float] = Field(default=None)
-    remaining_quantity: Optional[float] = Field(default=None)
+    initial_quantity: float | None = Field(default=None)
+    remaining_quantity: float | None = Field(default=None)
     # 剩余百分比：remaining_quantity / initial_quantity，存储到数据库用于排序
-    remaining_percent: Optional[float] = Field(default=None)
-    unit: Optional[str] = Field(default=None, max_length=20)  # 不区分大小写存储
+    remaining_percent: float | None = Field(default=None)
+    unit: str | None = Field(default=None, max_length=20)  # 不区分大小写存储
     is_hazardous: bool = False
-    notes: Optional[str] = Field(None, max_length=500)  # 用户自定义备注
+    notes: str | None = Field(None, max_length=500)  # 用户自定义备注
 
 
 class Inventory(InventoryBase, table=True):
@@ -109,7 +110,7 @@ class Inventory(InventoryBase, table=True):
         Index("ix_inventory_created_by_created_at_id", asc("created_by_id"), desc("created_at"), desc("id")),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     # 唯一内部编码，如 "64175-250113-001"（CAS-日期-序号）
     internal_code: str = Field(unique=True, index=True, max_length=50)
     status: InventoryStatus = Field(
@@ -126,28 +127,28 @@ class Inventory(InventoryBase, table=True):
             default=InventoryStatus.IN_STOCK.value,
         ),
     )  # 排序/筛选常用
-    borrower_id: Optional[int] = Field(
+    borrower_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    last_borrower_id: Optional[int] = Field(
+    last_borrower_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    temporary_keeper_id: Optional[int] = Field(
+    temporary_keeper_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL"
     )
-    source_order_id: Optional[int] = Field(
+    source_order_id: int | None = Field(
         default=None,
         index=True,
         foreign_key="reagent_order.id",
         ondelete="SET NULL"
     )
-    created_by_id: Optional[int] = Field(
+    created_by_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL"
@@ -159,14 +160,14 @@ class Inventory(InventoryBase, table=True):
     )
 
     # 拼音排序字段（预计算，使用数据库索引加速排序）
-    name_pinyin: Optional[str] = Field(default=None, max_length=200)
-    name_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
-    category_pinyin: Optional[str] = Field(default=None, max_length=200)
-    category_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
-    brand_pinyin: Optional[str] = Field(default=None, max_length=200)
-    brand_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
-    storage_location_pinyin: Optional[str] = Field(default=None, max_length=200)
-    storage_location_pinyin_initials: Optional[str] = Field(default=None, max_length=200)
+    name_pinyin: str | None = Field(default=None, max_length=200)
+    name_pinyin_initials: str | None = Field(default=None, max_length=200)
+    category_pinyin: str | None = Field(default=None, max_length=200)
+    category_pinyin_initials: str | None = Field(default=None, max_length=200)
+    brand_pinyin: str | None = Field(default=None, max_length=200)
+    brand_pinyin_initials: str | None = Field(default=None, max_length=200)
+    storage_location_pinyin: str | None = Field(default=None, max_length=200)
+    storage_location_pinyin_initials: str | None = Field(default=None, max_length=200)
 
 
 class InventoryCreate(SQLModel):
@@ -174,22 +175,22 @@ class InventoryCreate(SQLModel):
     internal_code: str = Field(max_length=50)
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
-    english_name: Optional[str] = None
-    alias: Optional[str] = None
-    category: Optional[str] = None
-    brand: Optional[str] = None
-    purity: Optional[str] = Field(default=None, max_length=20)
-    storage_location: Optional[str] = None
+    english_name: str | None = None
+    alias: str | None = None
+    category: str | None = None
+    brand: str | None = None
+    purity: str | None = Field(default=None, max_length=20)
+    storage_location: str | None = None
     # 数据库模型：允许 NULL 以兼容旧数据
-    initial_quantity: Optional[float] = None
-    remaining_quantity: Optional[float] = None
+    initial_quantity: float | None = None
+    remaining_quantity: float | None = None
     # 可选：允许显式传入，默认由后端根据数量自动计算
-    remaining_percent: Optional[float] = None
-    unit: Optional[str] = Field(default=None, max_length=20)
+    remaining_percent: float | None = None
+    unit: str | None = Field(default=None, max_length=20)
     is_hazardous: bool = False
-    temporary_keeper_id: Optional[int] = None
-    source_order_id: Optional[int] = None
-    notes: Optional[str] = None
+    temporary_keeper_id: int | None = None
+    source_order_id: int | None = None
+    notes: str | None = None
 
 
 class InventoryUpdate(SQLModel):
@@ -197,23 +198,23 @@ class InventoryUpdate(SQLModel):
     # 安全边界：拒绝未声明字段，避免静默忽略带来的越权探测面
     model_config = ConfigDict(extra="forbid")
 
-    name: Optional[str] = Field(default=None, max_length=200)
-    cas_number: Optional[str] = Field(default=None, max_length=50)
-    storage_location: Optional[str] = None
-    remaining_quantity: Optional[float] = Field(default=None, ge=0)
-    notes: Optional[str] = None
-    english_name: Optional[str] = None
-    alias: Optional[str] = None
-    category: Optional[str] = None
-    brand: Optional[str] = None
-    purity: Optional[str] = None
-    is_hazardous: Optional[bool] = None
+    name: str | None = Field(default=None, max_length=200)
+    cas_number: str | None = Field(default=None, max_length=50)
+    storage_location: str | None = None
+    remaining_quantity: float | None = Field(default=None, ge=0)
+    notes: str | None = None
+    english_name: str | None = None
+    alias: str | None = None
+    category: str | None = None
+    brand: str | None = None
+    purity: str | None = None
+    is_hazardous: bool | None = None
     # 规格字段：前端传入规格字符串（如 "500mL"），后端用 parse_specification 解析
-    specification: Optional[str] = Field(default=None, max_length=50)
+    specification: str | None = Field(default=None, max_length=50)
 
     @field_validator("name", "cas_number", "brand", "specification", mode="before")
     @classmethod
-    def strip_supplied_required_text(cls, value: Optional[str]) -> Optional[str]:
+    def strip_supplied_required_text(cls, value: str | None) -> str | None:
         if value is None:
             raise ValueError("Field must not be empty")
         if not isinstance(value, str):
@@ -229,15 +230,15 @@ class InventoryBorrowReturn(SQLModel):
     model_config = ConfigDict(extra="forbid")
 
     remaining_quantity: float = Field(ge=0)
-    specification: Optional[str] = Field(default=None, max_length=100)
-    notes: Optional[str] = Field(default=None, max_length=500)
+    specification: str | None = Field(default=None, max_length=100)
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class InventoryBorrowRequest(SQLModel):
     """DTO for borrow operation."""
     model_config = ConfigDict(extra="forbid")
 
-    actual_borrower_id: Optional[int] = Field(default=None)
+    actual_borrower_id: int | None = Field(default=None)
 
 
 class InventoryResponse(BaseResponse):
@@ -246,34 +247,34 @@ class InventoryResponse(BaseResponse):
     internal_code: str
     cas_number: str
     name: str
-    english_name: Optional[str]
-    alias: Optional[str]
-    category: Optional[str]
-    brand: Optional[str]
-    purity: Optional[str]
-    storage_location: Optional[str]
+    english_name: str | None
+    alias: str | None
+    category: str | None
+    brand: str | None
+    purity: str | None
+    storage_location: str | None
     # 允许 NULL 以兼容旧数据
-    initial_quantity: Optional[float]
-    remaining_quantity: Optional[float]
-    remaining_percent: Optional[float]
-    unit: Optional[str]
+    initial_quantity: float | None
+    remaining_quantity: float | None
+    remaining_percent: float | None
+    unit: str | None
     status: InventoryStatus
-    borrower_id: Optional[int]
-    last_borrower_id: Optional[int]
+    borrower_id: int | None
+    last_borrower_id: int | None
     is_hazardous: bool
-    temporary_keeper_id: Optional[int]
-    source_order_id: Optional[int]
-    created_by_id: Optional[int]
-    notes: Optional[str]
+    temporary_keeper_id: int | None
+    source_order_id: int | None
+    created_by_id: int | None
+    notes: str | None
     created_at: datetime
     updated_at: datetime
     # 计算字段：规格，如 "500mL"
-    specification: Optional[str] = None
+    specification: str | None = None
     # 计算字段：用户名称
-    borrower_name: Optional[str] = None
-    last_borrower_name: Optional[str] = None
-    created_by_name: Optional[str] = None
-    temporary_keeper_name: Optional[str] = None
+    borrower_name: str | None = None
+    last_borrower_name: str | None = None
+    created_by_name: str | None = None
+    temporary_keeper_name: str | None = None
 
 
 class BorrowLog(SQLModel, table=True):
@@ -283,7 +284,7 @@ class BorrowLog(SQLModel, table=True):
         Index("ix_borrowlog_inventory_borrow_time", "inventory_id", "borrow_time"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     inventory_id: int = Field(
         foreign_key="inventory.id",
         ondelete="CASCADE"
@@ -293,10 +294,10 @@ class BorrowLog(SQLModel, table=True):
         ondelete="CASCADE"
     )
     borrow_time: datetime = Field(default_factory=get_utc_now)
-    return_time: Optional[datetime] = None
+    return_time: datetime | None = None
     quantity_borrowed: float = Field(ge=0)
-    quantity_returned: Optional[float] = None
-    notes: Optional[str] = None
+    quantity_returned: float | None = None
+    notes: str | None = None
     created_at: datetime = Field(default_factory=get_utc_now)
 
 
@@ -306,10 +307,10 @@ class BorrowLogResponse(BaseResponse):
     inventory_id: int
     borrower_id: int
     borrow_time: datetime
-    return_time: Optional[datetime]
+    return_time: datetime | None
     quantity_borrowed: float
-    quantity_returned: Optional[float]
-    notes: Optional[str]
+    quantity_returned: float | None
+    notes: str | None
     created_at: datetime
 
 
@@ -319,17 +320,17 @@ class ManualInventoryCreate(SQLModel):
 
     cas_number: str = Field(max_length=50)
     name: str = Field(max_length=200)
-    english_name: Optional[str] = None
-    alias: Optional[str] = None
+    english_name: str | None = None
+    alias: str | None = None
     specification: str = Field(max_length=50)  # e.g., "500mL"
-    initial_quantity: Optional[float] = None  # Optional - derived from specification
+    initial_quantity: float | None = None  # Optional - derived from specification
     quantity_bottles: int = Field(default=1, ge=1, le=MAX_BOTTLES_PER_IMPORT)  # Number of bottles: 1-99
-    storage_location: Optional[str] = None
+    storage_location: str | None = None
     is_hazardous: bool = False
-    category: Optional[str] = None
+    category: str | None = None
     brand: str = Field(max_length=100)
-    purity: Optional[str] = Field(default=None, max_length=20)
-    notes: Optional[str] = None
+    purity: str | None = Field(default=None, max_length=20)
+    notes: str | None = None
 
     @field_validator("cas_number", "name", "brand", "specification")
     @classmethod

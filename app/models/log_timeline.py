@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
-from sqlalchemy import Column, Enum as SAEnum, Index, Text
+from sqlalchemy import Column, Index, Text
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now
@@ -62,15 +62,15 @@ class LogTimeline(SQLModel, table=True):
         ),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     occurred_at: datetime = Field(default_factory=get_utc_now)
     is_cli: bool = Field(default=False)
-    actor_user_id: Optional[int] = Field(
+    actor_user_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",
     )
-    subject_user_id: Optional[int] = Field(
+    subject_user_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",

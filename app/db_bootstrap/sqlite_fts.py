@@ -1015,7 +1015,7 @@ def ensure_sqlite_inventory_fts(connection: Connection) -> None:
     try:
         for config in _sqlite_fts_table_configs():
             _ensure_sqlite_fts_table(connection, config=config)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error(
             "CRITICAL: SQLite FTS initialization failed: %s. "
             "Search functionality may be degraded or unavailable.",

@@ -62,6 +62,7 @@ from app.services.dashboard.metrics import (
 from app.services.spec_utils import format_specification
 from app.services.user_utils import batch_get_user_names
 
+
 def _get_admin_section_total(
     db: Session,
     section: str,

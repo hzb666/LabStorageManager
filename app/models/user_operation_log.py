@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
-from sqlalchemy import Column, Enum as SAEnum, Index, Text
+from sqlalchemy import Column, Index, Text
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
 from app.core.time_utils import get_utc_now
@@ -78,13 +78,13 @@ class UserOperationLog(SQLModel, table=True):
         ),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    actor_user_id: Optional[int] = Field(
+    id: int | None = Field(default=None, primary_key=True)
+    actor_user_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",
     )
-    target_user_id: Optional[int] = Field(
+    target_user_id: int | None = Field(
         default=None,
         foreign_key="users.id",
         ondelete="SET NULL",
@@ -102,9 +102,9 @@ class UserOperationLog(SQLModel, table=True):
         ),
     )
     outcome: str = Field(default="success", max_length=20)
-    client_ip: Optional[str] = Field(default=None, max_length=64)
-    request_id: Optional[str] = Field(default=None, max_length=100)
-    detail: Optional[str] = Field(default=None, max_length=500)
+    client_ip: str | None = Field(default=None, max_length=64)
+    request_id: str | None = Field(default=None, max_length=100)
+    detail: str | None = Field(default=None, max_length=500)
     snapshot_json: str = Field(sa_column=Column(Text, nullable=False, default="{}"))
     created_at: datetime = Field(default_factory=get_utc_now)
 
@@ -113,12 +113,12 @@ class UserOperationLogResponse(BaseResponse):
     """DTO for user operation log responses."""
 
     id: int
-    actor_user_id: Optional[int]
-    target_user_id: Optional[int]
+    actor_user_id: int | None
+    target_user_id: int | None
     action: UserOperationAction
     outcome: str
-    client_ip: Optional[str]
-    request_id: Optional[str]
-    detail: Optional[str]
+    client_ip: str | None
+    request_id: str | None
+    detail: str | None
     snapshot_json: str
     created_at: datetime

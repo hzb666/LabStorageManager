@@ -1,15 +1,15 @@
 # API 层无业务语义的通用小工具。
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 from sqlmodel import Session
 
 from app.core.constants import CACHE_MAX_ITEMS, CACHE_PRUNE_COUNT, MAX_PAGE_SIZE
 from app.services.spec_utils import format_specification
 
-
-CacheStore = Dict[str, tuple[Any, datetime]]
+CacheStore = dict[str, tuple[Any, datetime]]
 
 
 def normalize_pagination(skip: int, limit: int) -> tuple[int, int]:
@@ -23,7 +23,7 @@ def get_cached_result(
     *,
     now: Callable[[], datetime],
     ttl_seconds: int,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     if cache_key not in cache_store:
         return None
 
@@ -38,7 +38,7 @@ def get_cached_result(
 def set_cached_result(
     cache_store: CacheStore,
     cache_key: str,
-    result: Dict[str, Any],
+    result: dict[str, Any],
     *,
     now: Callable[[], datetime],
 ) -> None:
@@ -52,13 +52,13 @@ def set_cached_result(
 
 
 def clear_cache_by_prefix(cache_store: CacheStore, prefix: str = "list:") -> int:
-    keys_to_delete = [key for key in cache_store.keys() if key.startswith(prefix)]
+    keys_to_delete = [key for key in cache_store if key.startswith(prefix)]
     for key in keys_to_delete:
         del cache_store[key]
     return len(keys_to_delete)
 
 
-def empty_to_none(obj: Any, fields: Optional[list[str]] = None) -> dict:
+def empty_to_none(obj: Any, fields: list[str] | None = None) -> dict:
     if isinstance(obj, dict):
         source = dict(obj)
     elif hasattr(obj, "model_dump"):
@@ -82,7 +82,7 @@ def empty_to_none(obj: Any, fields: Optional[list[str]] = None) -> dict:
     return result
 
 
-def normalize_optional_text(value: Optional[str]) -> Optional[str]:
+def normalize_optional_text(value: str | None) -> str | None:
     # 规范化可选文本：strip 后空字符串转 None。
     if value is None:
         return None

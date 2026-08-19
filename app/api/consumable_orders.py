@@ -1,43 +1,37 @@
 import logging
 import time
+from collections.abc import Collection
 from datetime import datetime, timedelta
-from typing import Annotated, Any, Collection, Dict, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import and_, or_
-from sqlmodel import Session, delete, func, select, update as sql_update
+from sqlmodel import Session, delete, func, select
+from sqlmodel import update as sql_update
 
-from app.database import DBSession
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
-from app.core.constants import (    DEFAULT_PAGE_SIZE,
+from app.core.constants import (
+    DEFAULT_PAGE_SIZE,
     LIST_CACHE_TTL_SECONDS,
     MAX_PAGE_SIZE,
     SSEEventType,
     SSERoom,
 )
-from app.core.time_utils import get_utc_now, utc_iso_str
 from app.core.db_compat import exec_delete_returning_first
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
+from app.core.time_utils import get_utc_now, utc_iso_str
+from app.database import DBSession
 from app.models.consumable_order import (
     ConsumableOrder,
     ConsumableOrderCreate,
-    ConsumableOrderUpdate,
     ConsumableOrderResponse,
     ConsumableOrderStatus,
+    ConsumableOrderUpdate,
 )
 from app.models.user import User, UserRole
-from app.services.user_utils import batch_get_user_names
-from app.services.pinyin_utils import compute_pinyin_fields
-from app.services.search_matchers import (
-    TextMatchMode,
-    build_applicant_id_subquery,
-    build_segmented_search_log_meta,
-    build_text_same_field_segmented_clause,
-    split_segmented_search_terms,
-)
-from app.services.sql_utils import order_with_nulls_last
+from app.search_completion_db import CONSUMABLE_ORDER_COMPLETION_ENDPOINT
 from app.services.api_utils import (
     clear_cache_by_prefix,
     empty_to_none,
@@ -45,6 +39,7 @@ from app.services.api_utils import (
     normalize_pagination,
     set_cached_result,
 )
+from app.services.export_rate_limit import EXPORT_SCOPE_CONSUMABLE_ORDERS, enforce_export_rate_limit
 from app.services.order_list_search import (
     OrderListSearchConfig,
     apply_order_list_single_field_search,
@@ -52,8 +47,6 @@ from app.services.order_list_search import (
     build_order_list_fts_state,
     normalize_order_list_search_value,
 )
-from app.services.sse_manager import sse_manager
-from app.services.export_rate_limit import EXPORT_SCOPE_CONSUMABLE_ORDERS, enforce_export_rate_limit
 from app.services.order_operation_logger import (
     log_consumable_order_approve,
     log_consumable_order_arrival_complete,
@@ -67,24 +60,34 @@ from app.services.order_status_times import (
     get_consumable_order_status_times,
     get_order_status_time_fields,
 )
-from app.services.search_query_log_service import (
-    buffer_search_log,
-    build_search_log_filters,
-    build_search_log_sort,
-)
-from app.search_completion_db import CONSUMABLE_ORDER_COMPLETION_ENDPOINT
+from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.search_completion_entity_index import (
     delete_consumable_order_entity_completions,
     run_completion_index_update,
     sync_consumable_order_entity_completions,
 )
+from app.services.search_matchers import (
+    TextMatchMode,
+    build_applicant_id_subquery,
+    build_segmented_search_log_meta,
+    build_text_same_field_segmented_clause,
+    split_segmented_search_terms,
+)
+from app.services.search_query_log_service import (
+    buffer_search_log,
+    build_search_log_filters,
+    build_search_log_sort,
+)
+from app.services.sql_utils import order_with_nulls_last
+from app.services.sse_manager import sse_manager
+from app.services.user_utils import batch_get_user_names
 
 router = APIRouter(prefix="/consumable-orders", tags=["ConsumableOrders"])
 logger = logging.getLogger(__name__)
 
 # ==================== 搜索缓存 ====================
 # 简单内存缓存，用于减少重复搜索查询
-SEARCH_CACHE: Dict[str, tuple[Any, datetime]] = {}
+SEARCH_CACHE: dict[str, tuple[Any, datetime]] = {}
 LIST_CACHE_PREFIX = "list:"
 ORDER_NOT_FOUND = "Order not found"
 DELETE_ORDER_FORBIDDEN_DETAIL = "Only the order applicant or admin can delete this order"
@@ -200,13 +203,13 @@ class ConsumableOrderListQuery(BaseModel):
 
     skip: int = 0
     limit: int = min(DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
-    status_filter: Optional[ConsumableOrderStatus] = None
-    search: Optional[str] = Query(default=None, max_length=100)
-    search_field: Optional[str] = None
+    status_filter: ConsumableOrderStatus | None = None
+    search: str | None = Query(default=None, max_length=100)
+    search_field: str | None = None
     fuzzy: bool = False
     match_mode: TextMatchMode = TextMatchMode.CONTAINS
-    sort_by: Optional[str] = None
-    sort_order: Optional[str] = "desc"
+    sort_by: str | None = None
+    sort_order: str | None = "desc"
 
 
 def _consumable_status_value(value: ConsumableOrderStatus) -> str:
@@ -329,7 +332,7 @@ def _serialize_consumable_order(order: ConsumableOrder, db: Session) -> dict[str
     }
 
 
-def get_consumable_order_by_id(db: Session, order_id: int) -> Optional[ConsumableOrder]:
+def get_consumable_order_by_id(db: Session, order_id: int) -> ConsumableOrder | None:
     # 按 ID 获取耗材订单。
     return db.get(ConsumableOrder, order_id)
 
@@ -338,7 +341,7 @@ def _apply_consumable_order_search_term(
     base,
     *,
     search_value: str,
-    search_field: Optional[str],
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode,
 ):
@@ -391,9 +394,9 @@ def _apply_consumable_order_search_term(
 
 def _apply_consumable_order_filters(
     base,
-    status_filter: Optional[ConsumableOrderStatus],
-    search: Optional[str],
-    search_field: Optional[str],
+    status_filter: ConsumableOrderStatus | None,
+    search: str | None,
+    search_field: str | None,
     fuzzy: bool,
     match_mode: TextMatchMode,
     segmented_terms: list[str] | None = None,
@@ -428,8 +431,8 @@ def _apply_consumable_order_filters(
 
 
 def _get_consumable_order_segmented_terms(
-    search: Optional[str],
-    search_field: Optional[str],
+    search: str | None,
+    search_field: str | None,
     match_mode: TextMatchMode,
 ) -> list[str]:
     disabled = (
@@ -440,7 +443,7 @@ def _get_consumable_order_segmented_terms(
     return split_segmented_search_terms(search, match_mode=match_mode, disabled=disabled)
 
 
-def _get_consumable_order_segmented_field_groups(search_field: Optional[str]):
+def _get_consumable_order_segmented_field_groups(search_field: str | None):
     if search_field and search_field != "all":
         fields = CONSUMABLE_ORDER_SEGMENTED_SEARCH_FIELD_GROUPS.get(search_field)
         return [fields] if fields else []
@@ -450,7 +453,7 @@ def _get_consumable_order_segmented_field_groups(search_field: Optional[str]):
 def _apply_consumable_order_segmented_search(
     base,
     *,
-    search_field: Optional[str],
+    search_field: str | None,
     terms: list[str],
     fuzzy: bool,
     match_mode: TextMatchMode,
@@ -701,8 +704,8 @@ def export_consumable_orders(
     current_user: CurrentUser,
 ):
     enforce_export_rate_limit(current_user.id, EXPORT_SCOPE_CONSUMABLE_ORDERS)
-    from app.services.xlsx_export import export_consumable_orders_xlsx
     from app.services.export_batch import batch_fetch_all
+    from app.services.xlsx_export import export_consumable_orders_xlsx
 
     statement = select(ConsumableOrder).order_by(ConsumableOrder.created_at.desc())
     result = batch_fetch_all(db, statement)
@@ -1022,8 +1025,8 @@ def _build_consumable_dashboard_groups(
             grouped_orders[status_key] = {"status": status_key, "orders": [], "count": 0}
         grouped_orders[status_key]["orders"].append(order_data)
 
-    for key in grouped_orders:
-        grouped_orders[key]["count"] = len(grouped_orders[key]["orders"])
+    for value in grouped_orders.values():
+        value["count"] = len(value["orders"])
 
     return grouped_orders
 
