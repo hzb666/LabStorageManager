@@ -11,6 +11,26 @@
 | `--data-json '<json>'` | 内联 JSON object 负载；`create` 命令使用，部分非 `create` 写命令仅作兼容兜底 |
 | `--data-file <path>` | UTF-8 JSON object 文件路径，与 `--data-json` 互斥 |
 
+## update-check / update
+
+查询 GitHub Releases 的最新正式版本，不访问 LabStorageManager API，也不需要登录：
+
+```bash
+lsm update-check
+lsm update-check --timeout 10
+```
+
+输出字段：`current_version`、`latest_version`、`update_available`、`release_url`、`update_command`。该命令只检查并报告，不会自动下载安装。
+
+一键更新预编译 CLI 和同一 Release 标签的完整 Agent Skill：
+
+```bash
+lsm update
+lsm update --timeout 60 --skill-host codex
+```
+
+`--skill-host`：`auto`（默认）、`codex`、`claude`、`both`、`none`。更新前会校验 `SHA256SUMS.txt`；CLI 与所有 Skill 会先完整暂存，再作为同一批次替换，失败时统一回滚。Skill 更新保留已有 `.env` 并清理新版已移除的旧文件。返回的 `cli_status` 为 `current`、`updated` 或 Windows 上的 `scheduled`。更新 Skill 后需要重启 Agent 才能重新加载。
+
 ## ID 参数约定
 
 - `inventory_id` / `order_id` 必须是单个正整数。
@@ -247,6 +267,17 @@ body 字段：
 
 `order_reason` 可选值：`running_out`、`not_stocked`、`common_public`、`not_found`、`reorder`、`high_usage`、`degraded`、`not_enough`、`others`
 
+创建前先执行 `reagent-orders cas-overview <cas_number>`：
+
+- 返回的 `data.is_common_cas` 为 `true` 且用户未指定其他原因时，默认使用 `common_public`；用户已明确说明原因时按用户语义选择。
+- 为 `false` 时，根据用户明确语义选择其他原因；不能唯一判断时先询问用户。
+
+Agent 应根据用户的完整语义和否定表达确定对应枚举值，不能只做关键词匹配。用户只需表达自然语言，不需要显式说出枚举值。CLI 不解析自然语言，也不查询 CAS 概览或补全原因；Agent 在调用前写入确定的 `order_reason`。
+
+```bash
+lsm reagent-orders create --data-file order.json
+```
+
 ### update
 
 HTTP: `PUT /reagent-orders/{order_id}`
@@ -275,6 +306,14 @@ HTTP: `PUT /reagent-orders/{order_id}`
 ### cas-overview
 
 HTTP: `GET /reagent-orders/cas-overview/{cas_number}`
+
+CLI 成功输出的 `data` 包含：
+
+- `is_common_cas`：该 CAS 是否存在于公用试剂主数据中。
+- `master_data`：公用试剂主数据；不存在时为 `null`。
+- `orders`、`inventory`：当前订单与库存概览。
+
+该接口不返回已有订单的 `order_reason`。
 
 ### confirm-arrival
 
@@ -476,4 +515,3 @@ HTTP: `GET /chemical-name-map?search=...&search_field=cas_number&match_mode=exac
 `create` 命令使用 JSON object 负载，`--data-json` 和 `--data-file` 二选一；非 `create` 写操作优先使用显式命令参数；`consumable-orders complete` 不传 `--data-*`。
 优先按退出码处理失败：2 表示 `401` 认证失败或未认证；已登录命令可重新登录，`auth login` 则检查用户名/密码或账号角色；3 权限不足，4 资源不存在，5 限流，6 文件不存在，7 本地输入错误，8 参数错误，9 网络错误。
 ```
-

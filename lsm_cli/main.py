@@ -4,9 +4,11 @@ import argparse
 import getpass
 import math
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+from lsm_cli import __version__ as CLI_VERSION
 from lsm_cli.client import (
     APIClient,
     CLILocalInputError,
@@ -18,6 +20,12 @@ from lsm_cli.client import (
 )
 from lsm_cli.config import clear_auth_data, load_config, save_config
 from lsm_cli.output import configure_output_encoding, fail, succeed
+from lsm_cli.update import (
+    fetch_latest_release,
+    install_latest_release,
+    is_newer_release,
+    normalize_release_version,
+)
 
 REAGENT_ORDER_REASON_CHOICES = (
     "running_out",
@@ -30,7 +38,6 @@ REAGENT_ORDER_REASON_CHOICES = (
     "not_enough",
     "others",
 )
-
 PAYLOAD_SOURCE_ERROR = "Use either explicit command arguments or --data-json/--data-file, not both"
 DEFAULT_LIST_PAGE_SIZE = 50
 SUMMARY_ONLY_LIMIT = 0
@@ -290,6 +297,37 @@ def _handle_post_command(args: argparse.Namespace, path: str, *, payload_require
     payload = load_json_payload(args.data_json, args.data_file, required=payload_required)
     params = parse_key_value_pairs(getattr(args, "param", []))
     succeed(client.request("POST", path.format(**vars(args)), params=params, json_body=payload))
+
+
+def _handle_update_check(args: argparse.Namespace) -> None:
+    release = fetch_latest_release(timeout=args.timeout)
+    latest_version = normalize_release_version(release.get("tag_name"))
+    release_url = release.get("html_url")
+    if not isinstance(release_url, str) or not release_url.strip():
+        raise CLILocalInputError("Latest release response is missing `html_url`")
+
+    succeed(
+        {
+            "current_version": CLI_VERSION,
+            "latest_version": latest_version,
+            "update_available": is_newer_release(
+                current=CLI_VERSION,
+                latest=latest_version,
+            ),
+            "release_url": release_url,
+            "update_command": "lsm update",
+        }
+    )
+
+
+def _handle_update(args: argparse.Namespace) -> None:
+    succeed(
+        install_latest_release(
+            current_version=CLI_VERSION,
+            skill_host=args.skill_host,
+            timeout=args.timeout,
+        )
+    )
 
 
 def _handle_put_command(args: argparse.Namespace, path: str, *, payload_required: bool = False) -> None:
@@ -1035,8 +1073,12 @@ def _register_reagent_order_commands(subparsers: argparse._SubParsersAction[argp
         path="/reagent-orders/dashboard/my-reagent-orders",
     )
     _register_post_command(
-        reagent_sub, name="create", help_text="Create reagent order",
-        path="/reagent-orders/", payload_required=True, add_payload_arguments=True,
+        reagent_sub,
+        name="create",
+        help_text="Create reagent order",
+        path="/reagent-orders/",
+        payload_required=True,
+        add_payload_arguments=True,
     )
 
     update_cmd = reagent_sub.add_parser("update", help="Update reagent order")
@@ -1220,6 +1262,34 @@ def build_parser() -> argparse.ArgumentParser:
     _register_common_shelf_commands(subparsers)
     _register_chemical_name_map_commands(subparsers)
     _register_consumable_order_commands(subparsers)
+    update_check = subparsers.add_parser(
+        "update-check",
+        help="Check GitHub Releases for a newer CLI version",
+    )
+    update_check.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="HTTP timeout in seconds",
+    )
+    update_check.set_defaults(handler=_handle_update_check)
+    update_command = subparsers.add_parser(
+        "update",
+        help="Install the latest release CLI and matching Agent Skill",
+    )
+    update_command.add_argument(
+        "--timeout",
+        type=float,
+        default=30.0,
+        help="Download timeout in seconds",
+    )
+    update_command.add_argument(
+        "--skill-host",
+        choices=("auto", "codex", "claude", "both", "none"),
+        default="auto",
+        help="Agent Skill host to update (default: detect existing installations)",
+    )
+    update_command.set_defaults(handler=_handle_update)
     return parser
 
 
@@ -1259,5 +1329,5 @@ def main(argv: list[str] | None = None) -> None:
         fail(str(exc), code="INVALID_INPUT", exit_code=7)
     except CLINetworkError as exc:
         fail(exc.message, code="NETWORK_ERROR", exit_code=9)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         fail(str(exc), code="INVALID_INPUT", exit_code=7)

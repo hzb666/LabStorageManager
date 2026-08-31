@@ -63,6 +63,10 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 
 ## 允许的命令分组
 
+### 顶层
+- `update-check`
+- `update`
+
 ### auth
 - `auth login`
 - `auth whoami`
@@ -116,6 +120,23 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 - `chemical-name-map search`
 - `chemical-name-map cas`
 
+## 试剂订购原因判定
+
+执行 `reagent-orders create` 前，先调用 `lsm reagent-orders cas-overview <cas_number>` 读取 `data.is_common_cas`：
+
+- 用户明确说明原因时，按完整语义选择本次订购的 `order_reason`。
+- 用户没有特别要求且为公用 CAS 时，默认使用 `common_public`。
+- 非公用 CAS 根据用户语义选择；确实无法判断时再询问用户。
+
+CLI 不解析自然语言，也不补全或覆盖原因；Agent 必须在调用 CLI 前确定并写入 `order_reason`。
+
+## CLI 与 Skill 更新
+
+- `lsm update-check` 只检查最新正式 Release，不需要登录；输出中的 `update_command` 给出下一步命令。
+- `lsm update` 校验 `SHA256SUMS.txt`，先暂存预编译 CLI 和同一 Release 标签的完整 Skill，再作为同一批次替换；任一目标失败都会回滚整批，并保留 Skill 目录已有的 `.env`。
+- 默认 `--skill-host auto` 更新已检测到的 Codex 或 Claude Code Skill；无法自动检测时，根据当前宿主显式传 `codex` 或 `claude`。
+- 更新 Skill 后提醒用户重启对应 Agent。旧 CLI 如果还没有 `update` 命令，需按 `INSTALL.md` 的自动安装协议过渡一次。
+
 ## 标准执行流程
 
 1. 先判定任务是否存在对应 CLI 子命令。
@@ -145,7 +166,7 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
    - 所有 `<inventory_id>` / `<order_id>` 都必须是单个正整数，不支持 `1,2`、`1-3` 这类批量写入形式。
 5. 在真正执行写操作前，再次复核：目标 ID 是否正确、动作是否正确、输入值与单位是否正确、命令是否会命中用户想要的对象；任何一项不能完全确认时，先询问用户。
 6. 读操作优先 `list`、`get`、`my-*` 这类命令，不要臆造 query/path。
-7. `create` 命令使用 JSON object 负载：
+7. `reagent-orders create` 先按“试剂订购原因判定”确定 `order_reason`；其他 `create` 命令直接使用用户已确认的字段。所有 `create` 命令均使用 JSON object 负载：
    - 小 payload 用 `--data-json`
    - 已有文件时用 `--data-file`
 8. 非 `create` 写操作优先使用显式命令参数；若命令保留 JSON 兼容模式，只在用户明确提供 object 负载时使用 `--data-json` / `--data-file`。
@@ -167,4 +188,3 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 ## 详细参考
 
 完整命令、参数、请求体、输出预期、退出码、限制能力见 [references/commands.md](references/commands.md)。
-

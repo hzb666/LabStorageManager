@@ -73,3 +73,14 @@ Linux、Intel Mac 和其他架构当前没有预编译附件。遇到这些平�
 - 绝对路径 `--help` 与 `lsm --help` 的退出码。
 - 是否保留了已有 Skill `.env`。
 - Claude Code 或 Codex 是否需要重启才能发现新 Skill。
+
+## 后续一键更新
+
+首次按上述协议安装包含 `update` 命令的版本后，后续不需要再次执行完整安装协议，直接运行：
+
+```bash
+lsm update-check
+lsm update
+```
+
+`lsm update` 使用同样的 Release 附件、SHA-256 校验和标签归档规则，先暂存 CLI 与 Agent Skill，再作为同一批次替换；任一目标失败都会回滚整批，并保留 Skill `.env`。不含 `update` 命令的旧 CLI 需要最后一次按本文件的“自动执行协议”升级，之后才能使用一键更新。

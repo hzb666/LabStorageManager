@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_BASE_URL = "http://127.0.0.1:8000/api"
 CONFIG_DIR_NAME = "LabStorageManager"
 CONFIG_FILE_NAME = "cli.json"
@@ -26,7 +25,7 @@ def load_config() -> dict[str, Any]:
         return {"base_url": DEFAULT_BASE_URL}
     config = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(config, dict):
-        raise ValueError("CLI config must be a JSON object")
+        raise TypeError("CLI config must be a JSON object")
     return config
 
 

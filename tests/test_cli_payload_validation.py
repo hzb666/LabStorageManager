@@ -48,9 +48,8 @@ class CLIPayloadValidationTests(unittest.TestCase):
 
     def test_load_json_payload_rejects_non_object_json(self) -> None:
         for raw in ["[]", '"text"', "null", "1"]:
-            with self.subTest(raw=raw):
-                with self.assertRaises(CLILocalInputError):
-                    load_json_payload(raw, None)
+            with self.subTest(raw=raw), self.assertRaises(CLILocalInputError):
+                load_json_payload(raw, None)
 
     def test_required_payload_commands_fail_before_network(self) -> None:
         commands = [
@@ -70,6 +69,56 @@ class CLIPayloadValidationTests(unittest.TestCase):
                 self.assertEqual(exit_code, 7)
                 self.assertFalse(payload["ok"])
                 self.assertEqual(payload["error"]["code"], "INVALID_INPUT")
+
+    @patch("lsm_cli.main.APIClient.request", return_value={"id": 42})
+    def test_reagent_order_create_forwards_payload_without_inferring_reason(
+        self, request_mock
+    ) -> None:
+        raw_payload = {
+            "cas_number": "64-17-5",
+            "name": "乙醇",
+            "brand": "Sigma",
+            "specification": "500ml",
+            "quantity": 1,
+            "price": 10,
+        }
+
+        exit_code, payload = self._run_main(
+            ["reagent-orders", "create", "--data-json", json.dumps(raw_payload)]
+        )
+
+        self.assertIsNone(exit_code)
+        self.assertTrue(payload["ok"])
+        request_mock.assert_called_once_with(
+            "POST",
+            "/reagent-orders/",
+            params={},
+            json_body=raw_payload,
+        )
+
+    @patch("lsm_cli.main.APIClient.request", return_value={"id": 42})
+    def test_reagent_order_create_preserves_explicit_reason(self, request_mock) -> None:
+        raw_payload = {
+            "cas_number": "64-17-5",
+            "name": "乙醇",
+            "brand": "Sigma",
+            "specification": "500ml",
+            "quantity": 1,
+            "price": 10,
+            "order_reason": "running_out",
+        }
+
+        exit_code, payload = self._run_main(
+            ["reagent-orders", "create", "--data-json", json.dumps(raw_payload)]
+        )
+
+        self.assertIsNone(exit_code)
+        self.assertTrue(payload["ok"])
+        request_mock.assert_called_once()
+        self.assertEqual(
+            "running_out",
+            request_mock.call_args.kwargs["json_body"]["order_reason"],
+        )
 
     @patch("lsm_cli.main.APIClient.request", return_value={"message": "ok"})
     def test_optional_payload_commands_allow_empty_body(self, request_mock) -> None:
@@ -341,9 +390,8 @@ class CLIRequestModelStrictnessTests(unittest.TestCase):
         ]
 
         for model, payload in cases:
-            with self.subTest(model=model.__name__):
-                with self.assertRaises(ValidationError):
-                    model.model_validate(payload)
+            with self.subTest(model=model.__name__), self.assertRaises(ValidationError):
+                model.model_validate(payload)
 
 
 class CLIEnumConsistencyTests(unittest.TestCase):

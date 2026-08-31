@@ -343,6 +343,22 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 
 ## 命令总览
 
+### update-check / update
+
+| 命令 | 说明 | 数据源 |
+| --- | --- | --- |
+| `update-check [--timeout <seconds>]` | 检查是否有新的 CLI 正式版本，并返回更新命令 | GitHub Releases |
+| `update [--timeout <seconds>] [--skill-host <host>]` | 校验并安装最新 CLI，同时同步同一标签的 Agent Skill | GitHub Releases |
+
+`--skill-host` 默认是 `auto`，更新当前已安装的 Codex 或 Claude Code Skill；也可以显式使用 `codex`、`claude`、`both` 或 `none`。更新会保留 Skill 目录中的 `.env`。CLI 与所有 Skill 会先完整暂存，再作为同一批次替换；任一目标失败都会回滚整批。Windows 因正在运行的 `lsm.exe` 不能原地覆盖，会在当前命令退出后完成替换；macOS 会直接替换并执行 `--help` 验证。`lsm update` 仅适用于 GitHub Release 的预编译单文件 CLI；通过 `pip` 或 `pipx` 安装的版本仍应使用对应包管理器更新。
+
+已经安装了不含 `lsm update` 的旧版本时，需要最后一次重新执行本文开头的 Agent 自动安装协议。升级到含 `update` 命令的版本后，后续只需：
+
+```bash
+lsm update-check
+lsm update
+```
+
 ### auth
 
 | 命令 | 说明 | 对应 API |
@@ -710,6 +726,19 @@ python -m lsm_cli common-shelf remove-one <group_key> \
   "is_hazardous": true,
   "notes": "教学实验使用"
 }
+```
+
+`order_reason` 的处理规则：
+
+- Agent Skill 先查询 `cas-overview`；用户没有特别要求且为公用 CAS 时，使用 `common_public`。
+- 非公用 CAS 由 Agent Skill 中的 LLM 根据用户语义选择原因，确实无法判断时再询问用户。
+- CLI 不解析自然语言，也不补全或覆盖 `order_reason`，仅提交 Agent 已确定的负载。
+
+示例：
+
+```bash
+lsm reagent-orders create \
+  --data-json '{"cas_number":"67-56-1","name":"甲醇","brand":"Sigma","specification":"500mL","quantity":1,"price":10,"order_reason":"running_out"}'
 ```
 
 ### reagent-orders update

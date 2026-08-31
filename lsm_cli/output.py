@@ -4,7 +4,6 @@ import json
 import sys
 from typing import Any
 
-
 OUTPUT_ENCODING = "utf-8"
 
 

@@ -40,6 +40,10 @@ REPLACEMENTS = (
         re.compile(r'(?m)^(version\s*=\s*")[^"\r\n]+(".*)$'),
     ),
     Replacement(
+        "lsm_cli/__init__.py",
+        re.compile(r'(?m)^(__version__\s*=\s*")[^"\r\n]+(".*)$'),
+    ),
+    Replacement(
         "app/__init__.py",
         re.compile(r'(?m)^(__version__\s*=\s*")[^"\r\n]+(".*)$'),
     ),
@@ -96,9 +100,13 @@ def read_versions(root: Path = PROJECT_ROOT) -> dict[str, str]:
     app_init = _read_text(root / "app/__init__.py")
     app_config = _read_text(root / "app/core/config.py")
     extension = _read_text(root / "browser-extension/build-config.mjs")
+    cli_init = _read_text(root / "lsm_cli/__init__.py")
     return {
         "backend": backend["tool"]["poetry"]["version"],
         "cli": cli["project"]["version"],
+        "cli_module": _extract_one(
+            "CLI module", re.compile(r'__version__ = "([^"]+)"'), cli_init
+        ),
         "frontend": frontend["version"],
         "frontend_lock": frontend_lock["version"],
         "frontend_lock_package": frontend_lock["packages"][""]["version"],
