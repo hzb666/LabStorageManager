@@ -1,6 +1,6 @@
+import httpx
 import pytest
 from fastapi import HTTPException
-import httpx
 
 from app.core.api_errors import API_ERROR_CODE_HEADER, ApiErrorCode
 from app.core.config import Settings

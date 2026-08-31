@@ -5,12 +5,14 @@ Usage:
     python scripts/upgrade_internal_code_width.py --dry-run    # Preview changes
     python scripts/upgrade_internal_code_width.py --apply      # Apply changes
 """
-import re
 import argparse
-from app.database import engine
-from sqlmodel import Session, select
-from app.models.inventory import Inventory
+import re
+
 from sqlalchemy import update as sql_update
+from sqlmodel import Session, select
+
+from app.database import engine
+from app.models.inventory import Inventory
 
 
 def upgrade_internal_code(old_code: str) -> str | None:
@@ -88,14 +90,14 @@ def main():
                 updates_needed.append((item_id, code, new_code))
         
         # 打印汇总。
-        print(f"📊 Internal Code Upgrade Summary:")
+        print("📊 Internal Code Upgrade Summary:")
         print(f"   Total items: {len(items_data)}")
         print(f"   Need upgrade: {len(updates_needed)}")
         print(f"   Already width 3+: {len(already_upgraded)}")
         print(f"   Invalid format: {len(invalid_codes)}")
         
         if invalid_codes:
-            print(f"\n⚠️  Invalid codes found:")
+            print("\n⚠️  Invalid codes found:")
             for item_id, code in invalid_codes[:5]:
                 print(f"   ID={item_id}: {code}")
             if len(invalid_codes) > 5:
@@ -107,7 +109,7 @@ def main():
         
         # 展示升级示例。
         if updates_needed:
-            print(f"\n📝 Sample upgrades (first 5):")
+            print("\n📝 Sample upgrades (first 5):")
             for item_id, old_code, new_code in updates_needed[:5]:
                 print(f"   {old_code} → {new_code}")
             if len(updates_needed) > 5:
@@ -123,9 +125,9 @@ def main():
             
             session.commit()
             print(f"✓ Successfully upgraded {len(updates_needed)} internal codes")
-            print(f"✓ Database committed")
+            print("✓ Database committed")
         else:
-            print(f"\n💡 Dry-run mode. Use --apply to commit changes")
+            print("\n💡 Dry-run mode. Use --apply to commit changes")
 
 
 if __name__ == "__main__":

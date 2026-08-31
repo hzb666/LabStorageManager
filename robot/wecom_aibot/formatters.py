@@ -415,7 +415,7 @@ def _format_value(key: str, value: Any, record: dict[str, Any]) -> str:
     return ""
 
 
-def _format_number_value(key: str, value: int | float, record: dict[str, Any]) -> str:
+def _format_number_value(key: str, value: float, record: dict[str, Any]) -> str:
     if key == "remaining_percent":
         percent = value * 100 if 0 <= value <= 1 else value
         return f"{percent:g}%"

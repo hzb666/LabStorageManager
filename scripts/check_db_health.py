@@ -24,18 +24,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# noqa: E402 - 模块导入必须在路径设置之后
-from sqlalchemy import inspect, text  # noqa: E402
-from sqlmodel import SQLModel  # noqa: E402
 
-import app.models  # noqa: F401, E402
-from app.database import engine  # noqa: E402
-from app.models.consumable_order import ConsumableOrderStatus  # noqa: E402
-from app.models.inventory import InventoryStatus  # noqa: E402
-from app.models.reagent_order import ReagentOrderReason, ReagentOrderStatus  # noqa: E402
-from app.models.user import UserRole  # noqa: E402
-from app.services.pinyin_utils import PINYIN_FIELD_MAX_LENGTH, to_pinyin_parts  # noqa: E402
+from sqlalchemy import inspect, text
+from sqlmodel import SQLModel
 
+import app.models  # noqa: F401
+from app.database import engine
+from app.models.consumable_order import ConsumableOrderStatus
+from app.models.inventory import InventoryStatus
+from app.models.reagent_order import ReagentOrderReason, ReagentOrderStatus
+from app.models.user import UserRole
+from app.services.pinyin_utils import PINYIN_FIELD_MAX_LENGTH, to_pinyin_parts
 
 # ============== 配置 ==============
 

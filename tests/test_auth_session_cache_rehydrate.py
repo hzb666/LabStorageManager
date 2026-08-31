@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import timedelta
 import unittest
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from fastapi import HTTPException
@@ -40,7 +40,7 @@ def _build_request(*, token: str = "token-value", client_ip: str = "127.0.0.1") 
             "type": "http",
             "method": "GET",
             "path": "/api/users/me",
-            "headers": [(b"cookie", f"access_token={token}".encode("utf-8"))],
+            "headers": [(b"cookie", f"access_token={token}".encode())],
             "client": (client_ip, 12345),
         }
     )

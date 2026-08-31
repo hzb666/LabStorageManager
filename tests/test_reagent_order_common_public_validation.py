@@ -5,13 +5,11 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.requests import Request
 
 import app.models  # noqa: F401 - populate SQLModel metadata for the test database.
-from app.api import reagent_orders
-from app.api import chemical_name_map
-from app.api import reagent_orders_workflow
+from app.api import chemical_name_map, reagent_orders, reagent_orders_workflow
 from app.core.api_errors import API_ERROR_CODE_HEADER, ApiErrorCode
 from app.models.chemical_name_map import ChemicalNameMap
 from app.models.reagent_order import (
@@ -22,7 +20,6 @@ from app.models.reagent_order import (
     ReagentOrderUpdate,
 )
 from app.models.user import User, UserRole
-
 
 COMMON_PUBLIC_ERROR = "Common-public orders require CAS master data"
 

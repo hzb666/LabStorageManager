@@ -3,7 +3,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI_MAIN_PATH = REPO_ROOT / "lsm_cli" / "main.py"
 APP_MAIN_PATH = REPO_ROOT / "app" / "main.py"

@@ -10,8 +10,9 @@ import sys
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.database import engine
 from sqlmodel import Session, text
+
+from app.database import engine
 
 
 def migrate_null_values():
@@ -112,7 +113,7 @@ def migrate_null_values():
         result = session.exec(text("SELECT COUNT(*) FROM inventory WHERE unit IS NULL"))
         null_unit = result.one()
         
-        print(f"统计:")
+        print("统计:")
         print(f"   - remaining_quantity 为 NULL: {null_remaining} 条")
         print(f"   - initial_quantity 为 NULL: {null_initial} 条")
         print(f"   - unit 为 NULL: {null_unit} 条")

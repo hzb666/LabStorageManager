@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import timedelta
 import unittest
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
@@ -31,7 +31,7 @@ def _build_request(*, token: str = "token-value", client_ip: str = "127.0.0.1") 
             "type": "http",
             "method": "GET",
             "path": "/api/users/me",
-            "headers": [(b"cookie", f"access_token={token}".encode("utf-8"))],
+            "headers": [(b"cookie", f"access_token={token}".encode())],
             "client": (client_ip, 12345),
         }
     )
@@ -239,16 +239,15 @@ class UpdateUserRegressionTests(unittest.TestCase):
 
         with (
             patch("app.api.users.get_user_by_id", return_value=current_user),
-            patch("app.api.users.get_user_by_username"),
+            patch("app.api.users.get_user_by_username"),self.assertRaises(HTTPException) as exc_info
         ):
-            with self.assertRaises(HTTPException) as exc_info:
-                users_api.update_user(
-                    user_id=1,
-                    user_update=UserUpdate(is_active=False),
-                    request=_build_request(),
-                    db=MagicMock(),
-                    current_user=current_user,
-                )
+            users_api.update_user(
+                user_id=1,
+                user_update=UserUpdate(is_active=False),
+                request=_build_request(),
+                db=MagicMock(),
+                current_user=current_user,
+            )
 
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "Cannot deactivate yourself")

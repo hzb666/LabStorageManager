@@ -7,7 +7,6 @@ Usage:
 The script uses the application's configured DATABASE_URL. By default it only
 reports how many group records are missing; pass --apply to write changes.
 """
-# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse

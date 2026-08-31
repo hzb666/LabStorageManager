@@ -18,7 +18,7 @@ import threading
 import time
 from dataclasses import dataclass
 from queue import Empty, Queue
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -34,8 +34,8 @@ def _read_sse_stream(stream_url: str, out_queue: Queue[SSEMessage], stop_flag: t
     with requests.get(stream_url, stream=True, timeout=30) as response:
         response.raise_for_status()
 
-        current_event: Optional[str] = None
-        current_data: Optional[str] = None
+        current_event: str | None = None
+        current_data: str | None = None
 
         for raw_line in response.iter_lines(decode_unicode=True):
             if stop_flag.is_set():

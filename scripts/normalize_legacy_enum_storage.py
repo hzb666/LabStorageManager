@@ -1,5 +1,4 @@
 """Normalize legacy enum values from enum.name to enum.value in SQLite tables."""
-# ruff: noqa: E402
 
 from __future__ import annotations
 

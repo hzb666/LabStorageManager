@@ -4,7 +4,6 @@ Preferred entrypoint:
     python scripts/migration/rebuild_pinyin.py reagent_order
     python scripts/migration/rebuild_pinyin.py consumable_order
 """
-# ruff: noqa: E402
 
 from __future__ import annotations
 

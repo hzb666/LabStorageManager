@@ -17,7 +17,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-
 DEFAULT_SLEEP_TASKS = 10
 DEFAULT_SLEEP_DELAY_SECONDS = 1.0
 DEFAULT_HTTP_REQUESTS = 20

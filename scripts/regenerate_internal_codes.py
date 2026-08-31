@@ -14,7 +14,6 @@ from datetime import datetime
 
 from sqlmodel import Session, select
 
-
 from app.database import engine
 from app.models.inventory import Inventory
 

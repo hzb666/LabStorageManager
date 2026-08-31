@@ -5,7 +5,6 @@ Consumable CSV 格式化脚本
 """
 import csv
 import re
-from datetime import datetime
 from pathlib import Path
 
 # 中文数字映射
@@ -44,7 +43,7 @@ def parse_quantity(text: str) -> tuple[int, str | None]:
     if numbers:
         qty = int(numbers[0])
         # 提取单位
-        for unit in UNIT_MAP.keys():
+        for unit in UNIT_MAP:
             if unit in text:
                 return qty, UNIT_MAP[unit]
         return qty, None
@@ -52,7 +51,7 @@ def parse_quantity(text: str) -> tuple[int, str | None]:
     # 处理中文数字
     for cn, num in CN_NUM_MAP.items():
         if cn in text:
-            for unit in UNIT_MAP.keys():
+            for unit in UNIT_MAP:
                 if unit in text:
                     return num, UNIT_MAP[unit]
             return num, None

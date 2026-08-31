@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -34,11 +34,10 @@ class WecomConversationStore:
 
     def init(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self._connect()) as connection:
-            with connection:
-                connection.execute("PRAGMA journal_mode=WAL;")
-                connection.execute(
-                    """
+        with closing(self._connect()) as connection, connection:
+            connection.execute("PRAGMA journal_mode=WAL;")
+            connection.execute(
+                """
                     CREATE TABLE IF NOT EXISTS wecom_aibot_user_binding (
                         wecom_userid TEXT PRIMARY KEY,
                         lsm_username TEXT NOT NULL,
@@ -48,31 +47,31 @@ class WecomConversationStore:
                         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """
-                )
-                connection.execute(
-                    """
+            )
+            connection.execute(
+                """
                     CREATE TABLE IF NOT EXISTS wecom_aibot_conversation_state (
                         chat_key TEXT PRIMARY KEY,
                         state_json TEXT NOT NULL,
                         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """
-                )
-                connection.execute(
-                    """
+            )
+            connection.execute(
+                """
                     CREATE TABLE IF NOT EXISTS wecom_aibot_conversation_context (
                         chat_key TEXT PRIMARY KEY,
                         context_json TEXT NOT NULL,
                         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                     """
-                )
-                connection.execute(
-                    """
+            )
+            connection.execute(
+                """
                     DELETE FROM wecom_aibot_conversation_context
                     WHERE updated_at < datetime('now', '-2 hours')
                     """
-                )
+            )
 
     def get_binding(self, wecom_userid: str) -> dict[str, Any] | None:
         with closing(self._connect()) as connection:
@@ -102,10 +101,9 @@ class WecomConversationStore:
     ) -> None:
         user_json = json.dumps(user or {}, ensure_ascii=False, separators=(",", ":"))
         stored_token = self._encode_access_token(access_token)
-        with closing(self._connect()) as connection:
-            with connection:
-                connection.execute(
-                    """
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
                     INSERT INTO wecom_aibot_user_binding
                       (wecom_userid, lsm_username, lsm_user_json, lsm_access_token)
                     VALUES (?, ?, ?, ?)
@@ -115,16 +113,15 @@ class WecomConversationStore:
                       lsm_access_token = excluded.lsm_access_token,
                       updated_at = CURRENT_TIMESTAMP
                     """,
-                    (wecom_userid, username, user_json, stored_token),
-                )
+                (wecom_userid, username, user_json, stored_token),
+            )
 
     def delete_binding(self, wecom_userid: str) -> None:
-        with closing(self._connect()) as connection:
-            with connection:
-                connection.execute(
-                    "DELETE FROM wecom_aibot_user_binding WHERE wecom_userid = ?",
-                    (wecom_userid,),
-                )
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "DELETE FROM wecom_aibot_user_binding WHERE wecom_userid = ?",
+                (wecom_userid,),
+            )
 
     def get_state(self, chat_key: str) -> dict[str, Any] | None:
         with closing(self._connect()) as connection:
@@ -139,26 +136,24 @@ class WecomConversationStore:
 
     def save_state(self, chat_key: str, state: dict[str, Any]) -> None:
         state_json = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
-        with closing(self._connect()) as connection:
-            with connection:
-                connection.execute(
-                    """
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
                     INSERT INTO wecom_aibot_conversation_state (chat_key, state_json)
                     VALUES (?, ?)
                     ON CONFLICT(chat_key) DO UPDATE SET
                       state_json = excluded.state_json,
                       updated_at = CURRENT_TIMESTAMP
                     """,
-                    (chat_key, state_json),
-                )
+                (chat_key, state_json),
+            )
 
     def delete_state(self, chat_key: str) -> None:
-        with closing(self._connect()) as connection:
-            with connection:
-                connection.execute(
-                    "DELETE FROM wecom_aibot_conversation_state WHERE chat_key = ?",
-                    (chat_key,),
-                )
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "DELETE FROM wecom_aibot_conversation_state WHERE chat_key = ?",
+                (chat_key,),
+            )
 
     def get_context(self, chat_key: str) -> list[dict[str, str]]:
         with closing(self._connect()) as connection:
@@ -227,26 +222,24 @@ class WecomConversationStore:
     def save_context(self, chat_key: str, turns: list[dict[str, str]]) -> None:
         normalized = _normalize_context_turns(turns)[-CONTEXT_MAX_TURNS:]
         context_json = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
-        with closing(self._connect()) as connection:
-            with connection:
-                connection.execute(
-                    """
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
                     INSERT INTO wecom_aibot_conversation_context (chat_key, context_json)
                     VALUES (?, ?)
                     ON CONFLICT(chat_key) DO UPDATE SET
                       context_json = excluded.context_json,
                       updated_at = CURRENT_TIMESTAMP
                     """,
-                    (chat_key, context_json),
-                )
+                (chat_key, context_json),
+            )
 
     def delete_context(self, chat_key: str) -> None:
-        with closing(self._connect()) as connection:
-            with connection:
-                connection.execute(
-                    "DELETE FROM wecom_aibot_conversation_context WHERE chat_key = ?",
-                    (chat_key,),
-                )
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "DELETE FROM wecom_aibot_conversation_context WHERE chat_key = ?",
+                (chat_key,),
+            )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
@@ -278,16 +271,15 @@ class WecomConversationStore:
         if self._token_cipher is None or is_encrypted_token(stored_token):
             return
         encrypted_token = self._encode_access_token(access_token)
-        with closing(self._connect()) as connection:
-            with connection:
-                connection.execute(
-                    """
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
                     UPDATE wecom_aibot_user_binding
                     SET lsm_access_token = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE wecom_userid = ? AND lsm_access_token = ?
                     """,
-                    (encrypted_token, wecom_userid, stored_token),
-                )
+                (encrypted_token, wecom_userid, stored_token),
+            )
 
 
 def _context_expired(updated_at: str) -> bool:
@@ -296,9 +288,9 @@ def _context_expired(updated_at: str) -> bool:
     except ValueError:
         return True
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
+        timestamp = timestamp.replace(tzinfo=UTC)
     deadline = timestamp + timedelta(hours=CONTEXT_TTL_HOURS)
-    return datetime.now(timezone.utc) > deadline
+    return datetime.now(UTC) > deadline
 
 
 def _normalize_context_turns(value: list[Any]) -> list[dict[str, str]]:

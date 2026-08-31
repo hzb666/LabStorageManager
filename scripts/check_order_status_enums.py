@@ -13,7 +13,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CONSTANTS_TS = ROOT / "frontend" / "src" / "lib" / "constants.ts"
 CLIENT_TS = ROOT / "frontend" / "src" / "api" / "client.ts"

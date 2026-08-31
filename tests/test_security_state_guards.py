@@ -2,7 +2,7 @@ import unittest
 
 from fastapi import HTTPException
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 import app.models  # noqa: F401
 from app.api import reagent_orders_workflow
@@ -15,7 +15,10 @@ from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderReason, ReagentOrderStatus
 from app.models.user import User, UserRole
-from app.services.inventory_state_guards import ensure_inventory_deletable, ensure_inventory_editable
+from app.services.inventory_state_guards import (
+    ensure_inventory_deletable,
+    ensure_inventory_editable,
+)
 
 
 def _assert_http_error(case: unittest.TestCase, status_code: int, func, *args, **kwargs) -> None:

@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from fastapi import HTTPException
 import redis
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.api import users as users_api

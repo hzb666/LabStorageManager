@@ -3,7 +3,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from sqlalchemy import text
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.database import init_db, normalize_legacy_enum_storage
 from app.models.reagent_order import ReagentOrder, ReagentOrderReason, ReagentOrderStatus

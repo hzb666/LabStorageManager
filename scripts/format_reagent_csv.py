@@ -6,9 +6,10 @@
 - 订购日期格式正确
 - 价格去除乘号，只保留单价
 """
-import pandas as pd
 import re
 from pathlib import Path
+
+import pandas as pd
 
 LOCAL_DIR = Path('scripts/local')
 REAGENT_CSV = LOCAL_DIR / 'reagent.csv'

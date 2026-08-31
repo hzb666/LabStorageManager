@@ -3,8 +3,8 @@ import pytest
 from app.services.cas_utils import (
     BIOLOGICAL_REAGENT_CAS,
     get_cas_prefix,
-    is_valid_cas,
     is_special_cas_value,
+    is_valid_cas,
     normalize_cas,
     validate_and_normalize_cas,
     validate_cas_format,

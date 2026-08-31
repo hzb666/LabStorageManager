@@ -2,9 +2,10 @@
 CAS 号修正脚本 - XLSX 版本
 将 xlsx 文件中错误的 CAS 号替换为正确的
 """
-import pandas as pd
 import argparse
 import sys
+
+import pandas as pd
 
 # CAS 号修正映射表（与 fix_cas_numbers.py 保持一致）
 CAS_CORRECTIONS = {

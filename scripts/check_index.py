@@ -1,7 +1,9 @@
-from sqlalchemy import inspect
-from app.database import engine
-from sqlmodel import SQLModel
 import json
+
+from sqlalchemy import inspect
+from sqlmodel import SQLModel
+
+from app.database import engine
 
 ins = inspect(engine)
 report = {}

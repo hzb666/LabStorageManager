@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 CAS_PATTERN = re.compile(r"(?<!\d)\d{2,7}-\d{2}-\d(?!\d)")
@@ -217,7 +217,7 @@ def confirm_text(action: str, display: str, args: dict[str, Any]) -> str:
 
 
 def expires_at() -> str:
-    return (datetime.now(timezone.utc) + timedelta(minutes=STATE_TTL_MINUTES)).isoformat()
+    return (datetime.now(UTC) + timedelta(minutes=STATE_TTL_MINUTES)).isoformat()
 
 
 def state_expired(state: dict[str, Any]) -> bool:
@@ -228,7 +228,7 @@ def state_expired(state: dict[str, Any]) -> bool:
         deadline = datetime.fromisoformat(raw_value)
     except ValueError:
         return True
-    return datetime.now(timezone.utc) > deadline
+    return datetime.now(UTC) > deadline
 
 
 def _extract_items(data: Any) -> list[Any]:

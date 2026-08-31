@@ -169,11 +169,10 @@ class StructureIndexChangeLogTest(unittest.TestCase):
         with self.engine.begin() as connection:
             connection.execute(text("DELETE FROM structure_index_meta WHERE id = 1"))
 
-        with self.assertRaises(IntegrityError):
-            with self.engine.begin() as connection:
-                connection.execute(
-                    text(
-                        """
+        with self.assertRaises(IntegrityError), self.engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
                         INSERT INTO compound_structure_cache
                             (cas_number, status, confidence, candidate_count,
                              chinese_name_is_translated, manually_verified,
@@ -182,8 +181,8 @@ class StructureIndexChangeLogTest(unittest.TestCase):
                             ('64-17-5', 'pending', 0, 0, 0, 0,
                              CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         """
-                    )
                 )
+            )
 
         with self.engine.connect() as connection:
             self.assertEqual(

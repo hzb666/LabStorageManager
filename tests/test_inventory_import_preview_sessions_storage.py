@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import json
-from pathlib import Path
 import tempfile
-from datetime import timedelta
 import unittest
+from dataclasses import replace
+from datetime import timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from fastapi import APIRouter, BackgroundTasks
-from fastapi import HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from starlette.requests import Request
 
 from app.api import inventory_extended_routes
@@ -54,7 +53,7 @@ def _create_import_file() -> str:
         suffix=".csv",
         dir=preview_sessions.get_inventory_import_preview_dir(),
     )
-    file.write("cas_number,name,specification\n64-17-5,乙醇,500ml\n".encode("utf-8"))
+    file.write("cas_number,name,specification\n64-17-5,乙醇,500ml\n".encode())
     file.close()
     return file.name
 

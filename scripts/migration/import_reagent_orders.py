@@ -3,18 +3,18 @@
 从 XLSX 文件导入数据到 SQLite 数据库
 支持用户名到用户ID的自动映射和CAS号验证
 """
-import pandas as pd
-import sqlite3
-import re
-import sys
 import argparse
+import sqlite3
+import sys
 from datetime import datetime
+
+import pandas as pd
 
 # 添加项目路径以便导入 pypinyin
 sys.path.insert(0, 'd:/Code/LabStorageManager')
 
-from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.cas_utils import validate_cas_format
+from app.services.pinyin_utils import compute_pinyin_fields
 
 # 数据库配置
 DB_FILE = "d:/Code/LabStorageManager/lab_inventory.db"

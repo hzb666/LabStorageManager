@@ -2,10 +2,9 @@
 CAS 号查证脚本
 通过化学物质名称搜索权威来源获取正确的 CAS 号
 """
-import sqlite3
 import time
+
 import requests
-from typing import Optional, Tuple
 
 # 数据库路径
 DB_PATH = "D:/Code/LabStorageManager/data/lab_storage.db"
@@ -59,7 +58,7 @@ CAS_CORRECTIONS = {
 }
 
 
-def search_cas_by_name(name: str, timeout: float = 3.0) -> Optional[str]:
+def search_cas_by_name(name: str, timeout: float = 3.0) -> str | None:
     """
     通过化学物质名称搜索 CAS 号
     优先使用 Chemical Book API
@@ -92,7 +91,7 @@ def search_cas_by_name(name: str, timeout: float = 3.0) -> Optional[str]:
     return None
 
 
-def search_cas_by_english(name: str, timeout: float = 3.0) -> Optional[str]:
+def search_cas_by_english(name: str, timeout: float = 3.0) -> str | None:
     """
     通过 PubChem 搜索 CAS 号
     """
@@ -114,7 +113,7 @@ def search_cas_by_english(name: str, timeout: float = 3.0) -> Optional[str]:
     return None
 
 
-def get_correct_cas(cas: str, name: str) -> Optional[str]:
+def get_correct_cas(cas: str, name: str) -> str | None:
     """
     获取正确的 CAS 号
     """
@@ -144,7 +143,6 @@ def get_correct_cas(cas: str, name: str) -> Optional[str]:
 
 def main():
     """主函数"""
-    import re
 
     print("=" * 60)
     print("CAS 号查证工具")

@@ -1,5 +1,4 @@
 """Backfill compound structure cache from inventory CAS numbers."""
-# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse

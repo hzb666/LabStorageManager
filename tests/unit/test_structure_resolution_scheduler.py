@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 from sqlalchemy import event
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
-import app.models  # noqa: F401
+import app.models
 from app.core.time_utils import get_utc_now
 from app.db_bootstrap.structure_index_schema import ensure_structure_index_schema
 from app.models.compound_structure import CompoundStructureStatus
@@ -22,6 +22,7 @@ from app.services.pubchem_resolver import (
     ResolutionOutcomeKind,
     ResolvedStructure,
 )
+from app.services.structure_cache_repo import StructureCacheWrite, upsert_structure_cache
 from app.services.structure_resolution_jobs import (
     claim_due_resolution_jobs,
     enqueue_structure_resolution_job,
@@ -30,7 +31,6 @@ from app.services.structure_resolution_scheduler import (
     StructureResolutionScheduler,
     _retry_jitter_seconds,
 )
-from app.services.structure_cache_repo import StructureCacheWrite, upsert_structure_cache
 
 
 class _TimedNotFoundClient:

@@ -13,7 +13,7 @@ def main() -> None:
     from sqlalchemy import inspect, text
     from sqlmodel import SQLModel
 
-    from app.database import engine, SQLITE_INVENTORY_OPERATION_LOG_INDEX_UPGRADES
+    from app.database import SQLITE_INVENTORY_OPERATION_LOG_INDEX_UPGRADES, engine
     from app.models.inventory_operation_log import InventoryOperationLog
 
     inspector = inspect(engine)

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 旧系统(njiao.cn)库存数据爬虫
 用于将旧系统的试剂库存数据爬取并转换为新系统导入格式
 """
 
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
+import argparse
 import re
 import time
-import argparse
-from urllib.parse import urljoin
 from datetime import datetime
+from urllib.parse import urljoin
+
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 
 # 旧系统配置
 OLD_SYSTEM_BASE_URL = "http://njiao.cn/reagent/admin"

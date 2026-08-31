@@ -1,8 +1,11 @@
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 
 from app.services import search_query_log_service as service
-from app.services.search_matchers import build_multi_search_log_meta, build_segmented_search_log_meta
+from app.services.search_matchers import (
+    build_multi_search_log_meta,
+    build_segmented_search_log_meta,
+)
 
 
 @dataclass(frozen=True)

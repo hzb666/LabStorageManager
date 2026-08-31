@@ -9,8 +9,8 @@ from sqlmodel import SQLModel
 from starlette.requests import Request
 
 import app.models  # noqa: F401 - populate SQLModel metadata for the test database.
-from app.api.inventory import InventoryListQuery, _build_inventory_order_expr, list_inventory
 from app.api.consumable_orders import CONSUMABLE_ORDER_SORT_FIELD_MAP
+from app.api.inventory import InventoryListQuery, _build_inventory_order_expr, list_inventory
 from app.api.reagent_orders import (
     REAGENT_ORDER_SORT_FIELD_MAP,
     VALID_REAGENT_SEARCH_FIELDS,
@@ -19,8 +19,8 @@ from app.api.reagent_orders import (
     list_reagent_orders,
 )
 from app.core.api_errors import API_ERROR_CODE_HEADER, ApiErrorCode
-from app.db_bootstrap.sqlite_indexes import ensure_sqlite_performance_indexes
 from app.db_bootstrap.schema_consistency import check_sqlite_schema_consistency
+from app.db_bootstrap.sqlite_indexes import ensure_sqlite_performance_indexes
 from app.models.consumable_order import ConsumableOrder
 from app.models.reagent_order import ReagentOrder
 

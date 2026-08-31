@@ -1,7 +1,8 @@
+from starlette.requests import Request
+
 from app.api import announcements
 from app.models.announcement import Announcement, AnnouncementUpdate
 from app.models.user import User, UserRole
-from starlette.requests import Request
 
 
 def _build_request() -> Request:

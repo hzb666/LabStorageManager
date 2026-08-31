@@ -1,5 +1,5 @@
-from sqlalchemy.dialects import sqlite
 from sqlalchemy import create_engine, literal
+from sqlalchemy.dialects import sqlite
 from sqlmodel import select
 
 from app.models.chemical_name_map import ChemicalNameMap

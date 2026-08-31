@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sqlalchemy import event
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 import app.models  # noqa: F401
 import app.services.structure_index_scheduler as structure_index_scheduler_module
@@ -77,9 +77,8 @@ class StructureIndexCompactionTest(unittest.TestCase):
         with patch(
             "app.services.structure_index.mol_from_smiles_quiet_h_removal",
             side_effect=AssertionError("snapshot load must reuse serialized library molecules"),
-        ):
-            with Session(self.engine) as db:
-                self.assertTrue(restored.load_snapshot(db))
+        ), Session(self.engine) as db:
+            self.assertTrue(restored.load_snapshot(db))
         self.assertEqual(
             ["64-17-5"],
             [
@@ -214,9 +213,8 @@ class StructureIndexCompactionTest(unittest.TestCase):
             before = index.compact(db)
 
         self._write("67-56-1", "not-valid-smiles")
-        with Session(self.engine) as db:
-            with self.assertRaises(RuntimeError):
-                index.compact(db)
+        with Session(self.engine) as db, self.assertRaises(RuntimeError):
+            index.compact(db)
 
         after = index.status()
         self.assertEqual(before.applied_revision, after.applied_revision)

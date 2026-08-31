@@ -3,7 +3,7 @@ import unittest
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, select
+from sqlmodel import Session, SQLModel, select
 
 import app.models  # noqa: F401
 from app.api.user_logs import _apply_log_timeline_keyword_filter, _matches_cli_log_keyword

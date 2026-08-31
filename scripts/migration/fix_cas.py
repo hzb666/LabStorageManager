@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, date
-from pathlib import Path
-from typing import Any, Optional, Tuple
+from datetime import date, datetime
+from typing import Any
 
 from openpyxl import load_workbook
-from openpyxl.workbook import Workbook
 
 
 def clean_text(s: str) -> str:
@@ -19,7 +17,7 @@ def clean_text(s: str) -> str:
     return s.strip()
 
 
-def extract_ymd(value: Any) -> Optional[Tuple[int, int, int]]:
+def extract_ymd(value: Any) -> tuple[int, int, int] | None:
     """
     从 Excel 单元格值中提取 year, month, day。
     支持：

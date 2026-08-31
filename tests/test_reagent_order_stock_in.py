@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.requests import Request
 
 import app.models  # noqa: F401 - populate SQLModel metadata for the test database.
@@ -15,7 +15,10 @@ from app.models.inventory import Inventory, InventoryStatus
 from app.models.inventory_operation_log import InventoryOperationAction, InventoryOperationLog
 from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
 from app.models.reagent_order import ReagentOrder, ReagentOrderReason, ReagentOrderStatus
-from app.models.reagent_order_operation_log import ReagentOrderOperationAction, ReagentOrderOperationLog
+from app.models.reagent_order_operation_log import (
+    ReagentOrderOperationAction,
+    ReagentOrderOperationLog,
+)
 from app.models.user import User, UserRole
 
 

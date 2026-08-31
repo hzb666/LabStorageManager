@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import importlib
 import logging
-from logging.handlers import QueueHandler
-from pathlib import Path
 import shutil
 import unittest
+from logging.handlers import QueueHandler
+from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 

@@ -8,12 +8,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
-from app.services.pinyin_utils import compute_pinyin_fields  # noqa: E402
-
+from app.services.pinyin_utils import compute_pinyin_fields
 
 DB_PATH = ROOT_DIR / "lab_inventory.db"
 SUPPORTED_TABLES = ("all", "inventory", "reagent_order", "consumable_order", "users")

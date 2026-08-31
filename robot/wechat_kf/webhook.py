@@ -12,8 +12,8 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
-from robot.wechat_kf.binding import WechatKfBindStore
 from robot.wechat_kf.bind_pages import bind_form_html, bind_success_html
+from robot.wechat_kf.binding import WechatKfBindStore
 from robot.wechat_kf.client import WechatKfClient
 from robot.wechat_kf.config import get_settings
 from robot.wechat_kf.processor import WechatKfMessageProcessor

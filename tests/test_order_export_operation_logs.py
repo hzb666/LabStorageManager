@@ -2,7 +2,7 @@ import json
 import unittest
 
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.models  # noqa: F401
 from app.models.consumable_order_operation_log import ConsumableOrderOperationAction

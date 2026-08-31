@@ -1,10 +1,13 @@
 import unittest
 
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 import app.models  # noqa: F401
-from app.api.reagent_orders_workflow import InventoryCreateOptions, _create_inventory_items_from_order
+from app.api.reagent_orders_workflow import (
+    InventoryCreateOptions,
+    _create_inventory_items_from_order,
+)
 from app.models.inventory import InventoryStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderReason, ReagentOrderStatus
 

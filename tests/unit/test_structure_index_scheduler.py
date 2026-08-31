@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 from app.services.structure_index import StructureIndexSnapshot
@@ -49,7 +49,7 @@ class StructureIndexSchedulerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(2, run_once.await_count)
 
     def test_next_daily_maintenance_uses_configured_local_hour(self) -> None:
-        now = datetime(2026, 7, 27, 2, 30, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 27, 2, 30, tzinfo=UTC)
         self.assertEqual(
             30 * 60,
             _seconds_until_next_maintenance(3, now=now),
@@ -58,7 +58,7 @@ class StructureIndexSchedulerTest(unittest.IsolatedAsyncioTestCase):
             24 * 60 * 60,
             _seconds_until_next_maintenance(
                 3,
-                now=datetime(2026, 7, 27, 3, 0, tzinfo=timezone.utc),
+                now=datetime(2026, 7, 27, 3, 0, tzinfo=UTC),
             ),
         )
 

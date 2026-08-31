@@ -1,6 +1,6 @@
 import unittest
 
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 import app.models  # noqa: F401
 from app.models.compound_structure import (

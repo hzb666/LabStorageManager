@@ -3,11 +3,12 @@ import unittest
 
 from fastapi import HTTPException, status
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 from starlette.requests import Request
 
 import app.models  # noqa: F401
-from app.api.common_shelf import delete_common_shelf_group, router as common_shelf_router
+from app.api.common_shelf import delete_common_shelf_group
+from app.api.common_shelf import router as common_shelf_router
 from app.core.auth import require_admin
 from app.models.chemical_name_map import ChemicalCategory, ChemicalNameMap
 from app.models.common_shelf import CommonShelfManualCreate

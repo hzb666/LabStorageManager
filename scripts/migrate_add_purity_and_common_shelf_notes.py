@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import app.models as _app_models  # noqa: E402,F401
-import app.database as app_database  # noqa: E402
+import app.database as app_database
+import app.models as _app_models  # noqa: F401
 
 DEFAULT_DB_PATH = app_database.db_path
 ensure_sqlite_inventory_fts = app_database.ensure_sqlite_inventory_fts
@@ -43,7 +43,7 @@ def _build_engine(database_path: Path):
     )
 
     @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, _connection_record):  # noqa: ANN001
+    def _set_sqlite_pragma(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA foreign_keys=ON;")

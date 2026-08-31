@@ -8,9 +8,9 @@ from unittest.mock import patch
 
 from fastapi import BackgroundTasks
 from sqlalchemy import event
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
-import app.models  # noqa: F401
+import app.models
 from app.core.time_utils import get_utc_now
 from app.db_bootstrap.structure_index_schema import ensure_structure_index_schema
 from app.models.structure_index import StructureResolutionJobState

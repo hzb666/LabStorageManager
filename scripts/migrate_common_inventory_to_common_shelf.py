@@ -19,6 +19,8 @@ if str(ROOT) not in sys.path:
 import app.models  # noqa: F401
 from app.database import (
     db_path as DEFAULT_DB_PATH,
+)
+from app.database import (
     ensure_sqlite_inventory_fts,
     ensure_sqlite_performance_indexes,
 )
@@ -51,7 +53,7 @@ def _build_engine(database_path: Path):
     )
 
     @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, _connection_record):  # noqa: ANN001
+    def _set_sqlite_pragma(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA foreign_keys=ON;")

@@ -3,11 +3,12 @@
 从 XLSX 文件导入数据到 SQLite 数据库
 支持用户名到用户ID的自动映射
 """
-import pandas as pd
+import argparse
 import sqlite3
 import sys
-import argparse
 from datetime import datetime
+
+import pandas as pd
 
 # 添加项目路径以便导入 pypinyin
 sys.path.insert(0, 'd:/Code/LabStorageManager')

@@ -6,12 +6,18 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.requests import Request
 
 from app.api import inventory as inventory_api
 from app.api import inventory_extended_routes
-from app.models.inventory import BorrowLog, Inventory, InventoryBorrowRequest, InventoryBorrowReturn, InventoryStatus
+from app.models.inventory import (
+    BorrowLog,
+    Inventory,
+    InventoryBorrowRequest,
+    InventoryBorrowReturn,
+    InventoryStatus,
+)
 from app.models.inventory_operation_log import InventoryOperationAction, InventoryOperationLog
 from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
 from app.models.user import User, UserRole
@@ -346,16 +352,15 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.api.inventory_extended_routes.clear_cache_by_prefix"),
             patch.object(inventory_extended_routes.sse_manager, "broadcast", new=AsyncMock()),
-            patch.object(self.db, "add", side_effect=_failing_add),
+            patch.object(self.db, "add", side_effect=_failing_add),self.assertRaises(RuntimeError)
         ):
-            with self.assertRaises(RuntimeError):
-                await self.borrow_endpoint(
-                    inventory_id=self.item.id,
-                    request=_build_request(),
-                    current_user=self.user,
-                    db=self.db,
-                    borrow_data=None,
-                )
+            await self.borrow_endpoint(
+                inventory_id=self.item.id,
+                request=_build_request(),
+                current_user=self.user,
+                db=self.db,
+                borrow_data=None,
+            )
 
         self.db.rollback()
         self.db.expire_all()

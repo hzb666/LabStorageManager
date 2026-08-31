@@ -9,7 +9,6 @@ CAS 号格式: XXX-XX-X 或 XXXX-XX-X 等，三段数字用连字符分隔
 校验码计算:
   将前两段数字从右向左依次乘以 1, 2, 3...，求和后取模10
 """
-# ruff: noqa: E402
 
 import re
 import sys
@@ -21,9 +20,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sqlmodel import Session, select
+
 from app.database import engine
-from app.models.reagent_order import ReagentOrder
 from app.models.inventory import Inventory
+from app.models.reagent_order import ReagentOrder
 
 
 def validate_cas_format(cas: str) -> tuple[bool, str]:

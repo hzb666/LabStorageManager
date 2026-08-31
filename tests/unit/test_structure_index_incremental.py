@@ -8,21 +8,21 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy import event, text
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
-import app.models  # noqa: F401
 import app.api.chem as chem_api
+import app.models  # noqa: F401
+import app.services.structure_index as structure_index_module
 from app.db_bootstrap.structure_index_schema import ensure_structure_index_schema
 from app.models.compound_structure import CompoundStructureSource, CompoundStructureStatus
 from app.services.structure_cache_repo import StructureCacheWrite, upsert_structure_cache
 from app.services.structure_index import (
-    StructureIndexSnapshot,
     StructureIndexRevisionChangedError,
+    StructureIndexSnapshot,
     StructureIndexUnavailableError,
     StructureQueryFormat,
     SubstructureIndex,
 )
-import app.services.structure_index as structure_index_module
 
 
 class StructureIndexIncrementalTest(unittest.TestCase):
@@ -91,9 +91,8 @@ class StructureIndexIncrementalTest(unittest.TestCase):
         with patch(
             "app.services.structure_index._load_resolved_records",
             side_effect=AssertionError("incremental apply must not scan the full cache"),
-        ):
-            with Session(self.engine) as db:
-                snapshot = self.index.ensure_current(db)
+        ), Session(self.engine) as db:
+            snapshot = self.index.ensure_current(db)
         self.assertEqual(snapshot.db_revision, snapshot.applied_revision)
         self.assertEqual([], self._exact_cas("CCO"))
         self.assertEqual(["64-17-5"], self._exact_cas("CCCO"))
@@ -127,10 +126,8 @@ class StructureIndexIncrementalTest(unittest.TestCase):
         with patch(
             "app.services.structure_index._load_resolved_records",
             side_effect=AssertionError("revision barrier must not rebuild on the request path"),
-        ):
-            with Session(self.engine) as db:
-                with self.assertRaises(StructureIndexUnavailableError):
-                    self.index.ensure_current(db)
+        ), Session(self.engine) as db, self.assertRaises(StructureIndexUnavailableError):
+            self.index.ensure_current(db)
 
     def test_change_replay_crosses_fixed_batch_boundaries(self) -> None:
         self._write("64-17-5", CompoundStructureStatus.RESOLVED, "CCO")

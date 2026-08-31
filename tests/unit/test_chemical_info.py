@@ -15,7 +15,7 @@ def test_query_chinese_name_uses_current_chemblink_zh_routes(
     def fake_safe_get(url: str, timeout: float) -> _FakeResponse:
         calls.append(url)
         if "/zh/products/" in url or "/zh/moreProducts/" in url:
-            return _FakeResponse(200, "<h1>乙醇<br>[CAS# 64-17-5]</h1>".encode("utf-8"))
+            return _FakeResponse(200, "<h1>乙醇<br>[CAS# 64-17-5]</h1>".encode())
         return _FakeResponse(301, b"")
 
     monkeypatch.setattr(chemical_info, "_safe_get", fake_safe_get)

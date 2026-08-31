@@ -1,5 +1,5 @@
-from app.core.config import Settings
 from app.core import sentry_monitoring
+from app.core.config import Settings
 
 
 def test_settings_parse_sentry_environment(monkeypatch) -> None:
