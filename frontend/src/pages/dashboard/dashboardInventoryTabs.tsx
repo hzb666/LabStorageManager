@@ -3,10 +3,11 @@ import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch, type UseFormReturn } from "react-hook-form";
 import { safeParse } from "valibot";
-import { AlertTriangle, ArrowRightLeft, Package, Trash2 } from "lucide-react";
+import { ArrowRightLeft, Package, Trash2 } from "lucide-react";
 
 import { BaseForm } from "@/components/BaseForm";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
+import { DashboardAlertBadge } from "@/components/DashboardAlertBadge";
 import { EditDialogActions } from "@/components/EditDialogActions";
 import { Button } from "@/components/ui/Button";
 import {
@@ -21,7 +22,6 @@ import { LoadingButton } from "@/components/ui/LoadingButton";
 import MoleculeStructure from "@/components/ui/MoleculeStructure";
 import { NoteDisplay } from "@/components/ui/NoteDisplay";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { inventoryAPI, reagentOrderAPI, type StockInPayload } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
 import { defaultReturnValues, defaultStockInValues, getReturnFormFields, getStockInFormFields } from "@/lib/formConfigs";
@@ -54,7 +54,6 @@ import {
   BORROW_SEARCH_FIELDS,
   DASHBOARD_EMPTY_STATUS_OPTIONS,
   buildLocalListData,
-  getDashboardAlertBadgeClassName,
   isPendingStockinOverdue,
   refreshDashboardAfterMutation,
   type DashboardParams,
@@ -65,26 +64,6 @@ import {
 type BorrowReturnMode = "used" | "remaining";
 type ReturnForm = UseFormReturn<ReturnFormInputData, unknown, ReturnFormData>;
 const RETURN_ZERO_EPSILON = 0.000_001;
-
-function renderDashboardTimeoutBadge(label: string) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={`${getDashboardAlertBadgeClassName()} cursor-help`}
-          aria-label={label}
-          tabIndex={0}
-        >
-          <AlertTriangle className="size-3" />
-          超时
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">
-        <p>{label}</p>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
 
 type ReturnSubmissionValues = {
   return_quantity: string | number;
@@ -774,7 +753,7 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
         return (
           <div className="flex flex-wrap items-center gap-2">
             <span>{formatDateTime(info.getValue())}</span>
-            {item.is_overdue ? renderDashboardTimeoutBadge("借用超时") : null}
+            {item.is_overdue ? <DashboardAlertBadge label="超时" tooltip="借用超时" /> : null}
           </div>
         )
       },
@@ -1034,7 +1013,7 @@ function createStockinColumns(
         return (
           <div className="flex flex-wrap items-center gap-2">
             <span>{formatDateTime(info.getValue())}</span>
-            {showOverdue ? renderDashboardTimeoutBadge("暂存超时") : null}
+            {showOverdue ? <DashboardAlertBadge label="超时" tooltip="暂存超时" /> : null}
           </div>
         )
       },

@@ -2,9 +2,10 @@ import { useCallback, useMemo, useState } from "react";
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { AlertTriangle, Check, ShoppingCart, X } from "lucide-react";
+import { Check, ShoppingCart, X } from "lucide-react";
 
 import { BaseForm } from "@/components/BaseForm";
+import { DashboardAlertBadge } from "@/components/DashboardAlertBadge";
 import { ConsumableOrderExpandedRow } from "@/components/ConsumableOrderExpandedRow";
 import { EditDialogActions } from "@/components/EditDialogActions";
 import { OrderStatusBadge } from "@/components/OrderStatusBadge";
@@ -48,13 +49,11 @@ import {
   buildLocalListData,
   findDashboardColumnIndex,
   flattenGroupedOrders,
-  getDashboardAlertBadgeClassName,
   isApprovedOrderOverdue,
   isPendingApprovalOverdue,
   refreshDashboardAfterMutation,
   removeApplicantColumn,
   requestDashboardCountsRefresh,
-  type DashboardAlertTone,
   type DashboardConsumableOrder,
   type DashboardParams,
 } from "../../lib/dashboardUtils";
@@ -305,23 +304,6 @@ function DashboardConsumableEditDialog({
 
 const consumableColumnHelper = createColumnHelper<DashboardConsumableOrder>();
 
-function renderAlertBadge(
-  label: string,
-  title: string,
-  tone: DashboardAlertTone = "destructive",
-) {
-  return (
-    <span
-      className={getDashboardAlertBadgeClassName(tone)}
-      title={title}
-      aria-label={title}
-    >
-      <AlertTriangle className="size-3" />
-      {label}
-    </span>
-  );
-}
-
 function renderConsumableTimeAlertBadges(
   item: DashboardConsumableOrder,
   managementMode: boolean,
@@ -329,10 +311,10 @@ function renderConsumableTimeAlertBadges(
   return (
     <>
       {managementMode && isPendingApprovalOverdue(item.status, item.updated_at)
-        ? renderAlertBadge("超时", "审批超时")
+        ? <DashboardAlertBadge label="超时" tooltip="审批超时" />
         : null}
       {isApprovedOrderOverdue(item.status, item.updated_at)
-        ? renderAlertBadge("超时", "收货超时", "warning")
+        ? <DashboardAlertBadge label="超时" tooltip="收货超时" tone="warning" />
         : null}
     </>
   );

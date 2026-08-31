@@ -3,9 +3,10 @@ import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { safeParse } from "valibot";
-import { AlertTriangle, Check, FlaskConical, X } from "lucide-react";
+import { Check, FlaskConical, X } from "lucide-react";
 
 import { BaseForm } from "@/components/BaseForm";
+import { DashboardAlertBadge } from "@/components/DashboardAlertBadge";
 import { EditDialogActions } from "@/components/EditDialogActions";
 import { OrderStatusBadge } from "@/components/OrderStatusBadge";
 import { ReagentOrderExpandedRow } from "@/components/ReagentOrderExpandedRow";
@@ -67,13 +68,11 @@ import {
   buildLocalListData,
   findDashboardColumnIndex,
   flattenGroupedOrders,
-  getDashboardAlertBadgeClassName,
   isApprovedOrderOverdue,
   isPendingApprovalOverdue,
   refreshDashboardAfterMutation,
   removeApplicantColumn,
   requestDashboardCountsRefresh,
-  type DashboardAlertTone,
   type DashboardParams,
   type DashboardReagentOrder,
 } from "../../lib/dashboardUtils";
@@ -785,23 +784,6 @@ function DashboardReagentStockinDialog({
 
 const reagentColumnHelper = createColumnHelper<DashboardReagentOrder>();
 
-function renderAlertBadge(
-  label: string,
-  title: string,
-  tone: DashboardAlertTone = "destructive",
-) {
-  return (
-    <span
-      className={getDashboardAlertBadgeClassName(tone)}
-      title={title}
-      aria-label={title}
-    >
-      <AlertTriangle className="size-3" />
-      {label}
-    </span>
-  );
-}
-
 function renderReagentTimeAlertBadges(
   item: DashboardReagentOrder,
   managementMode: boolean,
@@ -809,10 +791,10 @@ function renderReagentTimeAlertBadges(
   return (
     <>
       {managementMode && isPendingApprovalOverdue(item.status, item.updated_at)
-        ? renderAlertBadge("超时", "审批超时")
+        ? <DashboardAlertBadge label="超时" tooltip="审批超时" />
         : null}
       {isApprovedOrderOverdue(item.status, item.updated_at)
-        ? renderAlertBadge("超时", "到货超时", "warning")
+        ? <DashboardAlertBadge label="超时" tooltip="到货超时" tone="warning" />
         : null}
     </>
   );
