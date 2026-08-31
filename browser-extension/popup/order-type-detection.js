@@ -81,8 +81,8 @@
 
   function splitConsumableNameAndSpecification(name, fallbackSpecification = "") {
     const source = String(name || "").trim();
-    const separatorIndex = source.search(/[,，]/);
-    if (separatorIndex < 0) {
+    const separator = /[,，]/.exec(source) || /\s+/.exec(source);
+    if (!separator) {
       return {
         name: source,
         specification: String(fallbackSpecification || "").trim(),
@@ -90,8 +90,8 @@
     }
 
     return {
-      name: source.slice(0, separatorIndex).trim(),
-      specification: source.slice(separatorIndex + 1).trim(),
+      name: source.slice(0, separator.index).trim(),
+      specification: source.slice(separator.index + separator[0].length).trim(),
     };
   }
 
