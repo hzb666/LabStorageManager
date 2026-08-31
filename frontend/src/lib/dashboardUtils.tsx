@@ -136,7 +136,7 @@ export const APPROVED_ORDER_ALERT_DAYS = 3
 export type DashboardAlertTone = 'destructive' | 'warning'
 
 const DASHBOARD_ALERT_BADGE_BASE_CLASS =
-  'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal'
+  'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-sm font-normal'
 
 export function getDashboardAlertBadgeClassName(
   tone: DashboardAlertTone = 'destructive'

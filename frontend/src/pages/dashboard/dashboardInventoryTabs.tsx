@@ -21,6 +21,7 @@ import { LoadingButton } from "@/components/ui/LoadingButton";
 import MoleculeStructure from "@/components/ui/MoleculeStructure";
 import { NoteDisplay } from "@/components/ui/NoteDisplay";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { inventoryAPI, reagentOrderAPI, type StockInPayload } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
 import { defaultReturnValues, defaultStockInValues, getReturnFormFields, getStockInFormFields } from "@/lib/formConfigs";
@@ -64,6 +65,26 @@ import {
 type BorrowReturnMode = "used" | "remaining";
 type ReturnForm = UseFormReturn<ReturnFormInputData, unknown, ReturnFormData>;
 const RETURN_ZERO_EPSILON = 0.000_001;
+
+function renderDashboardTimeoutBadge(label: string) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={`${getDashboardAlertBadgeClassName()} cursor-help`}
+          aria-label={label}
+          tabIndex={0}
+        >
+          <AlertTriangle className="size-3" />
+          超时
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p>{label}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 type ReturnSubmissionValues = {
   return_quantity: string | number;
@@ -726,14 +747,14 @@ function createBorrowRealtimeConfig(
 
 function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): ColumnDef<Record<string, unknown>, unknown>[] {
   return [
+    borrowColumnHelper.accessor('cas_number', {
+      header: 'CAS号',
+      size: 100,
+    }),
     borrowColumnHelper.accessor('name', {
       header: '名称',
       size: 200,
       cell: (info) => <span>{info.getValue()}</span>,
-    }),
-    borrowColumnHelper.accessor('cas_number', {
-      header: 'CAS号',
-      size: 100,
     }),
     borrowColumnHelper.accessor('storage_location', {
       header: '位置',
@@ -753,16 +774,7 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
         return (
           <div className="flex flex-wrap items-center gap-2">
             <span>{formatDateTime(info.getValue())}</span>
-            {item.is_overdue ? (
-              <span
-                className={getDashboardAlertBadgeClassName()}
-                title="借用超时"
-                aria-label="借用超时"
-              >
-                <AlertTriangle className="size-3" />
-                超时
-              </span>
-            ) : null}
+            {item.is_overdue ? renderDashboardTimeoutBadge("借用超时") : null}
           </div>
         )
       },
@@ -963,19 +975,6 @@ export function DashboardBorrowTab({
 
 const pendingStockinColumnHelper = createColumnHelper<PendingStockinItem>()
 
-function renderPendingStockinBadge() {
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-normal text-destructive"
-      title="暂存超时"
-      aria-label="暂存超时"
-    >
-      <AlertTriangle className="size-3" />
-      超时
-    </span>
-  )
-}
-
 function getPendingStockinTableTitle(managementMode: boolean) {
   return (
     <>
@@ -1005,22 +1004,26 @@ function createPendingStockinDashboardAPI(managementMode: boolean): FilterAPI {
 
 function createStockinColumns(
   openStockinModal: (item: PendingStockinItem) => void,
-  managementMode: boolean
 ): ColumnDef<Record<string, unknown>, unknown>[] {
   const columns: ColumnDef<PendingStockinItem, unknown>[] = [
+    pendingStockinColumnHelper.accessor('cas_number', {
+      header: 'CAS号',
+      size: 120,
+    }),
     pendingStockinColumnHelper.accessor('name', {
       header: '名称',
       size: 180,
       cell: (info) => <span>{info.getValue()}</span>,
     }),
-    pendingStockinColumnHelper.accessor('cas_number', {
-      header: 'CAS号',
-      size: 120,
+    pendingStockinColumnHelper.accessor('brand', {
+      header: '品牌',
+      size: 140,
+      cell: (info) => info.getValue() || '-',
     }),
-    pendingStockinColumnHelper.accessor('initial_quantity', {
+    pendingStockinColumnHelper.accessor('specification', {
       header: '规格',
       size: 120,
-      cell: (info) => `${info.getValue()} ${info.row.original.unit}`,
+      cell: (info) => info.getValue() || '-',
     }),
     pendingStockinColumnHelper.accessor('stockin_time', {
       header: '暂存时间',
@@ -1031,22 +1034,12 @@ function createStockinColumns(
         return (
           <div className="flex flex-wrap items-center gap-2">
             <span>{formatDateTime(info.getValue())}</span>
-            {showOverdue ? renderPendingStockinBadge() : null}
+            {showOverdue ? renderDashboardTimeoutBadge("暂存超时") : null}
           </div>
         )
       },
     }),
   ]
-
-  if (managementMode) {
-    columns.push(
-      pendingStockinColumnHelper.accessor('temporary_keeper_name', {
-        header: '暂存人',
-        size: 120,
-        cell: (info) => info.getValue() || '-',
-      }),
-    )
-  }
 
   columns.push(
     pendingStockinColumnHelper.display({
@@ -1175,8 +1168,8 @@ export function DashboardStockinTab({
   }, [selectedStockin, stockinForm, refreshTables])
 
   const stockinColumns = useMemo(
-    () => createStockinColumns(openStockinModal, managementMode),
-    [managementMode, openStockinModal]
+    () => createStockinColumns(openStockinModal),
+    [openStockinModal]
   )
   const stockinDialog = { selectedStockin, stockinForm, stockinLoading, onClose: closeStockinModal, onSubmit: handleStockin, onDelete: handleDeleteStockin }
 
