@@ -194,9 +194,15 @@ export function normalizeImportQuantity(quantity: unknown): number {
 }
 
 export function normalizeImportPrice(price: unknown): number | undefined {
-  return typeof price === "number" && Number.isFinite(price)
-    ? price
-    : undefined;
+  if (typeof price === "number") {
+    return Number.isFinite(price) ? price : undefined;
+  }
+  if (typeof price !== "string" || !price.trim()) {
+    return undefined;
+  }
+
+  const parsedPrice = Number(price);
+  return Number.isFinite(parsedPrice) ? parsedPrice : undefined;
 }
 
 export function createInitialReagentDraft(
@@ -211,6 +217,7 @@ export function createInitialReagentDraft(
     | "quantity"
     | "price"
     | "is_hazardous"
+    | "order_type"
   >,
   defaults: CartImportDraftDefaults,
 ): ReagentDraft {
@@ -224,7 +231,8 @@ export function createInitialReagentDraft(
     specification: normalizeReagentSpecification(item.specification),
     quantity: item.quantity,
     price: item.price,
-    is_hazardous: item.is_hazardous,
+    // 耗材危险标记不应预选试剂表单；只有原始试剂草稿才继承该值。
+    is_hazardous: item.order_type === "reagent" && item.is_hazardous,
   };
 }
 

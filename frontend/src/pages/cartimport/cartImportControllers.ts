@@ -17,6 +17,7 @@ import { useReagentCasDuplicateCheck } from "@/hooks/useReagentCasDuplicateCheck
 import { REAGENT_STATUS_MAP } from "@/lib/constants";
 import { refreshDashboardAfterMutation } from "@/lib/dashboardUtils";
 import { getReagentBrandOptionsQueryOptions } from "@/lib/reagentBrandOptions";
+import { suppressAnnouncementPopupForCartImportSession } from "@/lib/storage/appUiStorage";
 import {
   defaultConsumableOrderValues,
   defaultReagentOrderValues,
@@ -560,6 +561,10 @@ async function submitCartImportConsumableForm(
 export function useCartImportBatchController() {
   const navigate = useNavigate();
   const location = useLocation();
+  useEffect(() => {
+    suppressAnnouncementPopupForCartImportSession();
+  }, []);
+
   const searchParams = useMemo(
     () => new URLSearchParams(location.search),
     [location.search],
@@ -877,6 +882,7 @@ export function useCartImportActions(params: {
     consumableForm,
   } = params;
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const queryClient = useQueryClient();
 
   const handleDeleteCurrent = useCallback(() => {
@@ -910,10 +916,15 @@ export function useCartImportActions(params: {
   ]);
 
   const handleSubmitCurrent = useCallback(async () => {
-    if (!currentItem) {
+    if (
+      submittingRef.current ||
+      !currentItem ||
+      submittedIds.has(currentItem.id)
+    ) {
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const submitSucceeded =
@@ -950,6 +961,7 @@ export function useCartImportActions(params: {
       }
       toast.error(normalizeApiErrorMessage(detail, "提交失败"));
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }, [

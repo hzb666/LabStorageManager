@@ -32,7 +32,13 @@ export function EditDialogActions({
     leadingArea = (
       <div className="flex items-center gap-2 order-1">
         {showDelete ? (
-          <ConfirmDeleteButton variant="destructive" size="lg" type="button" onConfirm={onDelete} />
+          <ConfirmDeleteButton
+            variant="destructive"
+            size="lg"
+            type="button"
+            disabled={isSubmitting}
+            onConfirm={onDelete}
+          />
         ) : null}
         {leadingContent}
       </div>

@@ -200,6 +200,9 @@ function CartImportFormPanel(
     handleSubmitCurrent,
     navigateToCasSearch,
   } = actions;
+  const isCurrentSubmitted = currentItem
+    ? submittedIds.has(currentItem.id)
+    : false;
 
   return (
     <div className="flex flex-1 min-w-0 flex-col overflow-hidden px-4 pt-4 sm:px-6 md:pl-6 md:pr-8 md:pt-6 md:pb-2">
@@ -248,9 +251,14 @@ function CartImportFormPanel(
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
         {orderType === "reagent" ? (
-          <BaseForm form={reagentForm} fields={reagentFormFields} />
+          <BaseForm
+            key="reagent"
+            form={reagentForm}
+            fields={reagentFormFields}
+          />
         ) : (
           <BaseForm
+            key="consumable"
             form={consumableForm}
             fields={getConsumableOrderFormFields()}
           />
@@ -293,7 +301,7 @@ function CartImportFormPanel(
               size="lg"
               onClick={handleSubmitCurrent}
               isLoading={submitting}
-              disabled={submitting || !currentItem}
+              disabled={submitting || !currentItem || isCurrentSubmitted}
             >
               提交当前项
             </LoadingButton>
