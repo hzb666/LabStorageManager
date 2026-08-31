@@ -6,6 +6,8 @@ importScripts('../shared/generated-config.js');
 importScripts('../shared/site-config.js');
 
 const REQUEST_TIMEOUT_MS = 15000;
+const CART_IMPORT_PATH = '/cart-import';
+const IMPORT_BRIDGE_FILE = 'content/import-bridge.js';
 const cartTabActivityById = Object.create(null);
 
 const { isCartPageUrl, selectPreferredCartTab } = globalThis.CartTabSelection;
@@ -66,17 +68,38 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   delete cartTabActivityById[tabId];
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (!changeInfo.url) {
-    return;
+function isSystemCartImportUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.origin === DEFAULT_SYSTEM_CONFIG.systemUrl
+      && parsed.pathname === CART_IMPORT_PATH
+      && parsed.searchParams.get('import') === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function injectImportBridge(tabId) {
+  chrome.scripting.executeScript({
+    target: { tabId },
+    files: [IMPORT_BRIDGE_FILE],
+  }).catch((error) => {
+    console.error('[Background] 注入导入桥接脚本失败:', error);
+  });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url) {
+    if (isCartPageUrl(changeInfo.url)) {
+      cartTabActivityById[tabId] = Date.now();
+    } else {
+      delete cartTabActivityById[tabId];
+    }
   }
 
-  if (isCartPageUrl(changeInfo.url)) {
-    cartTabActivityById[tabId] = Date.now();
-    return;
+  if (changeInfo.status === 'complete' && isSystemCartImportUrl(tab?.url)) {
+    injectImportBridge(tabId);
   }
-
-  delete cartTabActivityById[tabId];
 });
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {

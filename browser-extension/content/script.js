@@ -27,8 +27,16 @@
     }
 
     if (message.action === 'GET_CART') {
-      const cartData = extractCartItems();
-      sendResponse({ success: true, data: cartData });
+      try {
+        const cartData = extractCartItems();
+        sendResponse({ success: true, data: cartData });
+      } catch (error) {
+        console.error('[Content] 提取购物车失败:', error);
+        sendResponse({
+          success: false,
+          error: error?.message || '提取购物车数据失败',
+        });
+      }
     }
 
     if (message.action === 'GET_THEME') {

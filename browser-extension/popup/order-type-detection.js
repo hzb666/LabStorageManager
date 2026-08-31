@@ -79,6 +79,22 @@
     return normalizeText(result) || numericSource || source;
   }
 
+  function splitConsumableNameAndSpecification(name, fallbackSpecification = "") {
+    const source = String(name || "").trim();
+    const separatorIndex = source.search(/[,，]/);
+    if (separatorIndex < 0) {
+      return {
+        name: source,
+        specification: String(fallbackSpecification || "").trim(),
+      };
+    }
+
+    return {
+      name: source.slice(0, separatorIndex).trim(),
+      specification: source.slice(separatorIndex + 1).trim(),
+    };
+  }
+
   function normalizePageText(input) {
     return String(input || "")
       .replaceAll("\u00a0", " ")
@@ -230,6 +246,7 @@
     isValidCasNumber,
     normalizePageText,
     detectOrderClassification,
+    splitConsumableNameAndSpecification,
   };
 
   if (typeof module !== "undefined" && module.exports) {

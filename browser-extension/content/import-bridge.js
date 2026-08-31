@@ -51,6 +51,7 @@
   chrome.storage.local.get([EXT_STORAGE_KEY], (result) => {
     const payload = result?.[EXT_STORAGE_KEY];
     if (!payload) {
+      console.warn('[ImportBridge] 扩展存储中没有可导入的批次数据', { batchId });
       return;
     }
 

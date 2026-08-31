@@ -21,10 +21,12 @@ const {
   extractFieldByLabels,
   extractLeadingSpecificationValue,
   normalizePageText,
+  splitConsumableNameAndSpecification,
 } = orderTypeDetectionApi;
 
 const BATCH_TTL_MS = 2 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
+const RUNTIME_MESSAGE_TIMEOUT_MS = 5000;
 const DETAIL_FETCH_CONCURRENCY = 3;
 const DETAIL_REQUEST_TIMEOUT_MS = 3000;
 
@@ -32,9 +34,29 @@ function isNoReceiverError(error) {
   return String(error?.message || '').includes('Receiving end does not exist');
 }
 
+async function waitForMessageResponse(request, timeoutMessage) {
+  let timeoutId;
+  try {
+    return await Promise.race([
+      request,
+      new Promise((_, reject) => {
+        timeoutId = globalThis.setTimeout(
+          () => reject(new Error(timeoutMessage)),
+          RUNTIME_MESSAGE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
+
 async function sendMessageWithAutoInject(tabId, message) {
   try {
-    return await chrome.tabs.sendMessage(tabId, message);
+    return await waitForMessageResponse(
+      chrome.tabs.sendMessage(tabId, message),
+      '购物车页面响应超时，请刷新购物车页面后重试',
+    );
   } catch (error) {
     if (!isNoReceiverError(error)) {
       throw error;
@@ -45,12 +67,18 @@ async function sendMessageWithAutoInject(tabId, message) {
       files: ['content/script.js'],
     });
 
-    return await chrome.tabs.sendMessage(tabId, message);
+    return await waitForMessageResponse(
+      chrome.tabs.sendMessage(tabId, message),
+      '购物车页面响应超时，请刷新购物车页面后重试',
+    );
   }
 }
 
 async function sendRuntimeMessage(message) {
-  const response = await chrome.runtime.sendMessage(message);
+  const response = await waitForMessageResponse(
+    chrome.runtime.sendMessage(message),
+    '扩展后台响应超时，请重新加载插件',
+  );
   if (!response?.success) {
     throw new Error(response?.error || '扩展后台通信失败');
   }
@@ -212,14 +240,17 @@ function parseProductDetail(html) {
     detail_html: html,
   });
 
-  const specification = extractLeadingSpecificationValue(specificationRaw, {
+  const extractedSpecification = extractLeadingSpecificationValue(specificationRaw, {
     ignoreLeadingLetters: classification.suggested_order_type === 'reagent',
   });
+  const parsedFields = classification.suggested_order_type === 'consumable'
+    ? splitConsumableNameAndSpecification(name, extractedSpecification)
+    : { name, specification: extractedSpecification };
 
   return {
-    name: name.trim(),
+    name: parsedFields.name.trim(),
     english_name: englishName.trim(),
-    specification: specification.trim(),
+    specification: parsedFields.specification.trim(),
     brand: brand.trim(),
     cas_number: classification.cas_number,
     product_number: productNumber.trim(),
@@ -330,13 +361,13 @@ async function getSystemTheme() {
 
       targetStatus.textContent = '请先打开购物车页面';
       targetStatus.className = 'badge badge-warning';
-      fetchBtn.disabled = true;
+      fetchBtn.disabled = false;
       return null;
     } catch (error) {
       console.error('[Popup] 检查失败:', error);
       targetStatus.textContent = '检查失败';
       targetStatus.className = 'badge badge-error';
-      fetchBtn.disabled = true;
+      fetchBtn.disabled = false;
       return null;
     }
   }
@@ -538,6 +569,11 @@ async function getSystemTheme() {
     }
   }
 
+  fetchBtn.addEventListener('click', fetchCart);
+  selectAll.addEventListener('change', toggleSelectAll);
+  backBtn.addEventListener('click', showMainSection);
+  importBtn.addEventListener('click', importSelected);
+
   await checkTargetStatus();
 
   // 初始化时自动检测并同步主题
@@ -560,9 +596,4 @@ async function getSystemTheme() {
   } catch (error) {
     console.warn('[Popup] ping 失败:', error?.message || error);
   }
-
-  fetchBtn.addEventListener('click', fetchCart);
-  selectAll.addEventListener('change', toggleSelectAll);
-  backBtn.addEventListener('click', showMainSection);
-  importBtn.addEventListener('click', importSelected);
 })();
