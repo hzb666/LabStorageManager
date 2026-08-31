@@ -58,6 +58,19 @@ function getManualTargetKey(target: ManualStructureEditTarget | null | undefined
   return `${target.casNumber}:${target.molblock ?? ''}`
 }
 
+function scheduleAfterEditorPaint(callback: () => void): () => void {
+  let firstFrame = 0
+  let secondFrame = 0
+  firstFrame = window.requestAnimationFrame(() => {
+    secondFrame = window.requestAnimationFrame(callback)
+  })
+
+  return () => {
+    window.cancelAnimationFrame(firstFrame)
+    window.cancelAnimationFrame(secondFrame)
+  }
+}
+
 async function exportCurrentMolblock(ketcher: Ketcher): Promise<string> {
   const molblock = await ketcher.getMolfile('v3000')
   if (!molblock?.trim()) {
@@ -291,6 +304,7 @@ function useKetcherMoleculeLoader(params: {
   const loadedManualKeyRef = useRef<string | null>(null)
   const loadedSearchMolblockRef = useRef<string | null>(null)
   const searchMolblockBeforeManualRef = useRef<string | null>(null)
+  const cancelPendingEditorLoadRef = useRef<() => void>(() => undefined)
   const [editorReady, setEditorReady] = useState(false)
 
   const loadMolecule = useCallback((molblock: string, mode: 'search' | 'manual') => {
@@ -325,42 +339,49 @@ function useKetcherMoleculeLoader(params: {
   }, [loadMolecule])
 
   const handleEditorInit = useCallback((ketcher: Ketcher) => {
+    if (ketcherRef.current === ketcher) return
+    cancelPendingEditorLoadRef.current()
     ketcherRef.current = ketcher
+    loadedManualKeyRef.current = null
+    loadedSearchMolblockRef.current = null
+    setEditorReady(false)
 
     const isManual = Boolean(manualEditTarget)
     const molblockToLoad = isManual
       ? manualEditTarget?.molblock ?? ''
       : initialMolblock ?? ''
 
-    const markReady = () => {
-      setEditorReady(true)
-    }
+    cancelPendingEditorLoadRef.current = scheduleAfterEditorPaint(() => {
+      if (ketcherRef.current !== ketcher) return
 
-    if (!molblockToLoad) {
-      loadedModeRef.current = isManual ? 'manual' : 'search'
-      if (isManual && manualTargetKey) {
-        loadedManualKeyRef.current = manualTargetKey
-      } else {
-        loadedSearchMolblockRef.current = ''
-      }
-      markReady()
-      return
-    }
-
-    ketcher.setMolecule(molblockToLoad)
-      .then(() => {
+      const markReady = () => {
+        if (ketcherRef.current !== ketcher) return
         loadedModeRef.current = isManual ? 'manual' : 'search'
         if (isManual && manualTargetKey) {
           loadedManualKeyRef.current = manualTargetKey
         } else {
           loadedSearchMolblockRef.current = molblockToLoad
         }
-      })
-      .catch(() => {
-        onError('结构载入失败，请重新绘制')
-      })
-      .finally(markReady)
+        setEditorReady(true)
+      }
+
+      if (!molblockToLoad) {
+        markReady()
+        return
+      }
+
+      ketcher.setMolecule(molblockToLoad)
+        .then(markReady)
+        .catch(() => {
+          if (ketcherRef.current === ketcher) {
+            onError('结构载入失败，请重新绘制')
+            setEditorReady(true)
+          }
+        })
+    })
   }, [initialMolblock, manualEditTarget, manualTargetKey, onError])
+
+  useEffect(() => () => cancelPendingEditorLoadRef.current(), [])
 
   useEffect(() => {
     if (!open || !editorReady || !manualEditTarget || !manualTargetKey) return

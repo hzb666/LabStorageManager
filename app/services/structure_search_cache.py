@@ -21,7 +21,6 @@ class StructureSearchCacheEntry:
     cas_numbers: tuple[str, ...]
     smiles_by_cas: Mapping[str, str]
     total: int
-    index_version: int
     expires_at: float
 
 
@@ -32,11 +31,10 @@ _cache_entries: dict[str, StructureSearchCacheEntry] = {}
 def put_structure_search_results(
     hits: list[StructureSearchHit],
     *,
-    index_version: int,
     ttl_seconds: int = DEFAULT_STRUCTURE_SEARCH_CACHE_TTL_SECONDS,
     max_entries: int = DEFAULT_STRUCTURE_SEARCH_CACHE_MAX_ENTRIES,
 ) -> StructureSearchCacheEntry:
-    """Store ordered structure hits and return a lookup token."""
+    """Store an immutable search snapshot and return a lookup token."""
     now = time.monotonic()
     search_id = secrets.token_urlsafe(18)
     cas_numbers: list[str] = []
@@ -57,7 +55,6 @@ def put_structure_search_results(
         cas_numbers=tuple(cas_numbers),
         smiles_by_cas=MappingProxyType(smiles_by_cas),
         total=len(cas_numbers),
-        index_version=index_version,
         expires_at=now + ttl_seconds,
     )
     with _cache_lock:
@@ -69,10 +66,8 @@ def put_structure_search_results(
 
 def get_structure_search_cache_entry(
     search_id: str | None,
-    *,
-    index_version: int | None = None,
 ) -> StructureSearchCacheEntry | None:
-    """Return an unexpired cached search result set by token."""
+    """Return an unexpired search snapshot by token."""
     if not search_id:
         return None
     now = time.monotonic()
@@ -83,16 +78,7 @@ def get_structure_search_cache_entry(
         if entry.expires_at <= now:
             _cache_entries.pop(search_id, None)
             return None
-        if index_version is not None and entry.index_version != index_version:
-            _cache_entries.pop(search_id, None)
-            return None
         return entry
-
-
-def clear_structure_search_cache() -> None:
-    """Clear all cached structure search results."""
-    with _cache_lock:
-        _cache_entries.clear()
 
 
 def _purge_expired_locked(now: float) -> None:

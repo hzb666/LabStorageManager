@@ -75,6 +75,7 @@ export interface FilterTableProps {
   searchActions?: React.ReactNode;
   title?: React.ReactNode;
   enableExpandAll?: boolean;
+  disableExpandAll?: boolean;
   disableExpandedRowAnimation?: boolean;
   renderExpandedRow?: (item: Record<string, unknown>) => React.ReactNode;
   noteField?: string;
@@ -1024,9 +1025,8 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
     sortingResetSignal,
     expandAllSignal,
     collapseAllSignal,
-    searchActions,
-    title,
-    enableExpandAll,
+    searchActions, title, enableExpandAll,
+    disableExpandAll: disableExpandAllControl,
     disableExpandedRowAnimation,
     renderExpandedRow,
     noteField, scrollHeight, className, filterClassName, cardClassName,
@@ -1092,7 +1092,8 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
 
   const calculatedScrollHeight = getScrollHeight(filter.data.length, scrollHeight);
 
-  const disableExpandAll = shouldDisableExpandAll(filter.isAllExpanded, isTableAtTop);
+  const disableExpandAll = Boolean(disableExpandAllControl)
+    || shouldDisableExpandAll(filter.isAllExpanded, isTableAtTop);
 
   const inlineCompletion = useFilterTableInlineCompletion({
     enabled: enableInlineCompletion, endpoint: inlineCompletionEndpoint, filter, searchInputDisabled,

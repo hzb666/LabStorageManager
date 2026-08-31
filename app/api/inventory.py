@@ -248,14 +248,9 @@ def _ensure_structure_filter_enabled(options: InventoryFilterOptions) -> None:
 
 
 def _get_structure_search_entry_or_410(
-    db: Session,
     search_id: str,
 ) -> StructureSearchCacheEntry:
-    snapshot = structure_index.status(db)
-    entry = get_structure_search_cache_entry(
-        search_id,
-        index_version=snapshot.db_revision,
-    )
+    entry = get_structure_search_cache_entry(search_id)
     if entry is None:
         raise api_error(
             status_code=status.HTTP_410_GONE,
@@ -274,7 +269,7 @@ def _resolve_inventory_structure_cas_numbers(
     if options.structure_cas_numbers is not None:
         return options.structure_cas_numbers
     if options.structure_search_id:
-        return _get_structure_search_entry_or_410(db, options.structure_search_id).cas_numbers
+        return _get_structure_search_entry_or_410(options.structure_search_id).cas_numbers
     if not _has_structure_query(options):
         return None
     if not (
@@ -343,7 +338,7 @@ def _resolve_inventory_structure_smiles_by_cas(
 ) -> Mapping[str, str]:
     if not options.structure_search_id:
         return {}
-    return _get_structure_search_entry_or_410(db, options.structure_search_id).smiles_by_cas
+    return _get_structure_search_entry_or_410(options.structure_search_id).smiles_by_cas
 
 
 def _compute_remaining_percent(remaining: float | None, initial: float | None) -> float | None:

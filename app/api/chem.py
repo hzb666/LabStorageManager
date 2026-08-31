@@ -52,10 +52,7 @@ from app.services.structure_resolution_jobs import (
     enqueue_structure_resolution_job,
 )
 from app.services.structure_resolution_scheduler import structure_resolution_scheduler
-from app.services.structure_search_cache import (
-    clear_structure_search_cache,
-    put_structure_search_results,
-)
+from app.services.structure_search_cache import put_structure_search_results
 
 router = APIRouter(prefix="/chem", tags=["Chem"])
 logger = logging.getLogger(__name__)
@@ -396,7 +393,6 @@ def requeue_structure_resolution_job(
 )
 def rebuild_structure_index(db: DBSession) -> StructureIndexStatusResponse:
     snapshot = structure_index.rebuild(db)
-    clear_structure_search_cache()
     return _serialize_index_status(snapshot)
 
 
@@ -571,7 +567,6 @@ def search_substructure(
 
     cache_entry = put_structure_search_results(
         hits,
-        index_version=index_status.version,
         ttl_seconds=settings.chem_structure_search_cache_ttl_seconds,
         max_entries=settings.chem_structure_search_cache_max_entries,
     )

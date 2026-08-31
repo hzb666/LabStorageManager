@@ -31,7 +31,6 @@ from app.services.structure_resolution_jobs import (
     renew_claimed_resolution_job_lease,
     reschedule_claimed_resolution_job,
 )
-from app.services.structure_search_cache import clear_structure_search_cache
 
 logger = logging.getLogger(__name__)
 _SCHEDULER_ERROR_RETRY_SECONDS = 30.0
@@ -325,7 +324,6 @@ def _persist_terminal_outcome(
         delete_claimed_resolution_job(db, claimed)
         db.commit()
     structure_index.notify_change()
-    clear_structure_search_cache()
     logger.info(
         "structure_resolution_job outcome=%s cas=%s attempt=%s",
         outcome.kind.value,
@@ -360,7 +358,6 @@ def _persist_retryable_outcome(
         state = job.state.value
         retry_count = job.retry_count
     structure_index.notify_change()
-    clear_structure_search_cache()
     logger.warning(
         "structure_resolution_job outcome=%s cas=%s attempt=%s retry_count=%s error_code=%s",
         state,

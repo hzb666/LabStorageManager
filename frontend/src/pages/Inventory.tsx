@@ -1318,6 +1318,7 @@ export function InventoryPage() {
         sortingResetSignal={structureEditor.structureFilter?.filterKey ?? null}
         expandAllSignal={structureEditor.structureSearchExpandSignal || null}
         collapseAllSignal={structureEditor.structureSearchCollapseSignal || null}
+        disableExpandAll={Boolean(structureEditor.structureFilter)}
         disableExpandedRowAnimation={Boolean(structureEditor.structureFilter)}
         searchActions={
           chemistryResources.structureToolsEnabled ? (
