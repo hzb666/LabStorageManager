@@ -185,7 +185,7 @@ npm run dev
 | `DATABASE_URL` | `sqlite:///./lab_inventory.db` | 主库 SQLite 连接串；本地默认写入项目根目录，Docker Compose 默认覆盖为 `sqlite:////data/lab_inventory.db` |
 | `QUERY_LOG_DIR` | `logs` | 搜索日志库目录；Docker Compose 默认覆盖为 `/data/logs` |
 | `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署设为 true；本地开发或无可信反代时设为 false |
-| `CACHE_VERSION` | `0.9.1` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
+| `CACHE_VERSION` | `1.0.1` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | 登录态默认 7 天 |
 | `SESSION_EXPIRE_HOURS` | `168` | 会话有效期，默认 7 天 |
 | `MAX_IP_PER_USER` | `5` | 兼容旧配置，当前不限制登录 IP 数量 |
@@ -243,7 +243,7 @@ npm run dev
 | `CHEM_PUBCHEM_RATE_LIMIT_PER_SECOND` | `2` | PubChem 请求速率上限 |
 | `CHEM_PUBCHEM_TIMEOUT_SECONDS` | `20` | PubChem 请求超时 |
 | `CHEM_PUBCHEM_MAX_RETRIES` | `3` | 管理员显式解析和离线回填的请求内重试次数 |
-| `CHEM_PUBCHEM_USER_AGENT` | `LabStorageManager/0.9.1` | 发送到 PubChem 的 User-Agent |
+| `CHEM_PUBCHEM_USER_AGENT` | `LabStorageManager/1.0.1` | 发送到 PubChem 的 User-Agent |
 | `CHEM_RESOLUTION_SCHEDULER_ENABLED` | `true` | 启用 SQLite 持久化自动解析队列 |
 | `CHEM_RESOLUTION_RETRY_DELAYS_SECONDS` | `[60,300,1800]` | 首次失败后的 3 次自动重试间隔 |
 | `CHEM_RESOLUTION_JOB_LEASE_SECONDS` | `120` | 自动解析任务租约；过期后允许其他进程恢复 |

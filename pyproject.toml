@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "lab-storage-manager"
-version = "0.9.1"
+version = "1.0.1"
 description = "Laboratory Inventory Management System (LIMS)"
 authors = ["Lab Team"]
 package-mode = false
