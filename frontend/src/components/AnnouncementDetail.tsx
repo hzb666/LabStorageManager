@@ -16,7 +16,11 @@ interface AnnouncementDetailProps {
   onOpenChange: (open: boolean) => void
 }
 
-export function AnnouncementDetail({ announcement, open, onOpenChange }: Readonly<AnnouncementDetailProps>) {
+export function AnnouncementDetail({
+  announcement,
+  open,
+  onOpenChange,
+}: Readonly<AnnouncementDetailProps>) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null)
 
   const hasImages = Boolean(announcement?.images && announcement.images.length > 0)

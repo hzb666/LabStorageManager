@@ -6,6 +6,10 @@ import { cn, getFullImageUrl } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { AnnouncementBanner } from '@/components/AnnouncementBanner'
 import { AnnouncementButton } from '@/components/AnnouncementButton'
+import {
+  AnnouncementPopup,
+  type AnnouncementPopupCheck,
+} from '@/components/AnnouncementPopup'
 import { ProcedureInventorySearchButton } from '@/components/ProcedureInventorySearchButton'
 import type { Announcement } from '@/api/client'
 import {
@@ -26,7 +30,11 @@ import {
 } from 'lucide-react'
 import { BugReportButton } from '@/components/BugReportButton'
 import { clearDashboardTab } from '@/lib/dashboardUtils'
-import { clearBugButtonHiddenUntil, getBugButtonHiddenUntil } from '@/lib/storage/appUiStorage'
+import {
+  clearBugButtonHiddenUntil,
+  getBugButtonHiddenUntil,
+  isAnnouncementPopupSuppressedForCartImportSession,
+} from '@/lib/storage/appUiStorage'
 import { useTheme } from '@/hooks/useTheme'
 import { useIsMobile } from '@/hooks/useMobile'
 import { UserRoles, USER_ROLE_MAP, type UserRole } from '@/lib/constants'
@@ -772,17 +780,49 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
     enabled: Boolean(userId),
   })
   const announcements = announcementsQuery.data ?? []
+  const [announcementPopupCheck, setAnnouncementPopupCheck] =
+    useState<AnnouncementPopupCheck | null>(null)
+  const [isAnnouncementPopupSuppressed] = useState(
+    () => isAnnouncementPopupSuppressedForCartImportSession(),
+  )
+  const announcementPopupCheckIdRef = useRef(0)
+  const initialAnnouncementPopupPathRef = useRef(location.pathname)
+  const initialAnnouncementPopupHandledRef = useRef(false)
   const [showBugButton, setShowBugButton] = useState(
     () => Date.now() >= getBugButtonHiddenUntil()
   )
   useEffect(() => {
-    if (!userId) {
+    if (!userId || isAnnouncementPopupSuppressed) {
       return
     }
 
     const { queryKey, queryFn, staleTime } = getPublicAnnouncementsQueryOptions()
+    const cachedAnnouncements = queryClient.getQueryData<Announcement[]>(queryKey)
+    if (cachedAnnouncements) {
+      initialAnnouncementPopupHandledRef.current = true
+      const checkId = announcementPopupCheckIdRef.current + 1
+      announcementPopupCheckIdRef.current = checkId
+      setAnnouncementPopupCheck({ announcements: cachedAnnouncements, id: checkId })
+    }
     queryClient.fetchQuery({ queryKey, queryFn, staleTime }).catch(() => {})
-  }, [location.pathname, queryClient, userId])
+  }, [isAnnouncementPopupSuppressed, location.pathname, queryClient, userId])
+
+  useEffect(() => {
+    if (
+      isAnnouncementPopupSuppressed
+      || initialAnnouncementPopupHandledRef.current
+      || !announcementsQuery.data
+    ) {
+      return
+    }
+    initialAnnouncementPopupHandledRef.current = true
+    if (location.pathname !== initialAnnouncementPopupPathRef.current) {
+      return
+    }
+    const checkId = announcementPopupCheckIdRef.current + 1
+    announcementPopupCheckIdRef.current = checkId
+    setAnnouncementPopupCheck({ announcements: announcementsQuery.data, id: checkId })
+  }, [announcementsQuery.data, isAnnouncementPopupSuppressed, location.pathname])
 
   useEffect(() => {
     if (announcementsQuery.error) {
@@ -886,6 +926,10 @@ export function Layout({ deferOutlet = false }: Readonly<{ deferOutlet?: boolean
           </div>
         </main>
       </div>
+
+      {userId && !isAnnouncementPopupSuppressed ? (
+        <AnnouncementPopup key={userId} check={announcementPopupCheck} userId={userId} />
+      ) : null}
     </div>
   )
 }

@@ -75,6 +75,7 @@ def _build_announcement_snapshot(announcement: Announcement) -> dict[str, object
         "title": announcement.title,
         "is_pinned": announcement.is_pinned,
         "is_visible": announcement.is_visible,
+        "is_popup": announcement.is_popup,
         "image_count": len(announcement.images or []),
         "created_by": announcement.created_by,
         "created_at": utc_iso_str(announcement.created_at),
@@ -223,6 +224,7 @@ def create_announcement(
         images=announcement.images,
         is_pinned=announcement.is_pinned,
         is_visible=announcement.is_visible,
+        is_popup=announcement.is_popup,
         created_by=current_user.id,
     )
 

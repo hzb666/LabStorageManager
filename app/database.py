@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.db_bootstrap.schema_consistency import check_sqlite_schema_consistency
 from app.db_bootstrap.schema_upgrades import (
     check_sqlite_common_shelf_groups_consistency,
+    ensure_sqlite_announcement_schema,
     ensure_sqlite_reagent_order_constraints,
 )
 from app.db_bootstrap.sqlite_fts import (
@@ -96,6 +97,7 @@ def init_db() -> None:
     logger.info("Database tables created / verified")
 
     with engine.begin() as connection:
+        ensure_sqlite_announcement_schema(connection)
         ensure_structure_index_schema(connection)
         check_sqlite_common_shelf_groups_consistency(connection)
         ensure_sqlite_performance_indexes(connection)

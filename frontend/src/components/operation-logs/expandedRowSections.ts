@@ -482,6 +482,7 @@ function buildOtherDetailSection(
       diffField('标题', before.title, after.title),
       diffField('置顶', formatBoolean(before.is_pinned), formatBoolean(after.is_pinned)),
       diffField('可见', formatBoolean(before.is_visible), formatBoolean(after.is_visible)),
+      diffField('弹窗', formatBoolean(before.is_popup), formatBoolean(after.is_popup)),
       diffField('图片数', before.image_count, after.image_count),
       field('图片', firstValue(current.image_url, current.filename), { wide: true }),
     ])

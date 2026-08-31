@@ -1052,6 +1052,7 @@ export interface Announcement {
   images: string[]
   is_pinned: boolean
   is_visible: boolean
+  is_popup: boolean
   created_by: number | null
   created_by_name: string | null
   created_at: string
@@ -1077,6 +1078,7 @@ export const announcementAPI = {
     images?: string[]
     is_pinned?: boolean
     is_visible?: boolean
+    is_popup?: boolean
   }) => api.post<Announcement>('/announcements/', data),
   update: (id: number, data: {
     title?: string
@@ -1084,6 +1086,7 @@ export const announcementAPI = {
     images?: string[]
     is_pinned?: boolean
     is_visible?: boolean
+    is_popup?: boolean
   }) => api.put<Announcement>(`/announcements/${id}`, data),
   delete: (id: number) => api.delete(`/announcements/${id}`),
   togglePin: (id: number) => api.post<Announcement>(`/announcements/${id}/toggle-pin`),

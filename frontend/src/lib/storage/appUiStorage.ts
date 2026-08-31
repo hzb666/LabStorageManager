@@ -8,6 +8,9 @@ import {
 export type AppTheme = 'light' | 'dark'
 
 const APP_UI_STORAGE_KEY = 'app-ui'
+const ANNOUNCEMENT_POPUP_DISMISSED_KEY_PREFIX = 'announcement-popup-dismissed:'
+const CART_IMPORT_ANNOUNCEMENT_POPUP_SUPPRESSED_KEY =
+  'cart-import-announcement-popup-suppressed'
 
 type TimestampMap = Record<string, number>
 
@@ -263,6 +266,64 @@ export function dismissAnnouncement(id: string | number, timestamp: number = Dat
       },
     },
   }))
+}
+
+export function getSessionDismissedAnnouncementPopupVersions(userId: number): Set<string> {
+  let storedVersions: string | null = null
+  try {
+    storedVersions = globalThis.sessionStorage?.getItem(
+      `${ANNOUNCEMENT_POPUP_DISMISSED_KEY_PREFIX}${userId}`,
+    ) ?? null
+  } catch {
+    // Storage may be unavailable in restricted browser contexts.
+  }
+
+  const raw = parseJson<unknown>(storedVersions, [])
+  return new Set(
+    Array.isArray(raw)
+      ? raw.filter((value): value is string => typeof value === 'string')
+      : [],
+  )
+}
+
+export function dismissAnnouncementPopupForSession(userId: number, version: string): void {
+  const versions = getSessionDismissedAnnouncementPopupVersions(userId)
+  const separatorIndex = version.indexOf(':')
+  if (separatorIndex > 0) {
+    const announcementPrefix = `${version.slice(0, separatorIndex)}:`
+    for (const existingVersion of versions) {
+      if (existingVersion.startsWith(announcementPrefix)) {
+        versions.delete(existingVersion)
+      }
+    }
+  }
+  versions.add(version)
+  try {
+    globalThis.sessionStorage?.setItem(
+      `${ANNOUNCEMENT_POPUP_DISMISSED_KEY_PREFIX}${userId}`,
+      JSON.stringify([...versions]),
+    )
+  } catch {
+    // Closing the popup must still work when storage is unavailable.
+  }
+}
+
+export function suppressAnnouncementPopupForCartImportSession(): void {
+  try {
+    globalThis.sessionStorage?.setItem(CART_IMPORT_ANNOUNCEMENT_POPUP_SUPPRESSED_KEY, '1')
+  } catch {
+    // The cart import page remains usable when storage is unavailable.
+  }
+}
+
+export function isAnnouncementPopupSuppressedForCartImportSession(): boolean {
+  try {
+    return globalThis.sessionStorage?.getItem(
+      CART_IMPORT_ANNOUNCEMENT_POPUP_SUPPRESSED_KEY,
+    ) === '1'
+  } catch {
+    return false
+  }
 }
 
 export function getBugButtonHiddenUntil(): number {

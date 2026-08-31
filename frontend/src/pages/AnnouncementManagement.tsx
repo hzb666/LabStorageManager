@@ -36,6 +36,8 @@ import {
   Upload,
   Image as ImageIcon,
   HardDrive,
+  MessageSquare,
+  MessageSquareOff,
 } from 'lucide-react'
 
 type AnnouncementDialogMode = 'create' | 'edit' | 'delete'
@@ -254,12 +256,14 @@ function AnnouncementActionsCell({
   announcement,
   onTogglePin,
   onToggleVisibility,
+  onTogglePopup,
   onEdit,
   onDelete,
 }: {
   announcement: Announcement
   onTogglePin: (id: number) => Promise<void>
   onToggleVisibility: (id: number) => Promise<void>
+  onTogglePopup: (announcement: Announcement) => Promise<void>
   onEdit: (announcement: Announcement) => void
   onDelete: (announcement: Announcement) => void
 }) {
@@ -277,14 +281,37 @@ function AnnouncementActionsCell({
             }}
           >
             {announcement.is_pinned ? (
-              <PinOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-500" />
+              <Pin className="size-3.5 text-amber-600 dark:text-amber-500" />
             ) : (
-              <Pin className="w-3.5 h-3.5" />
+              <PinOff className="size-3.5 text-muted-foreground" />
             )}
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
           <p>{announcement.is_pinned ? '取消置顶' : '置顶'}</p>
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="modern"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={(event) => {
+              event.stopPropagation()
+              void onTogglePopup(announcement)
+            }}
+          >
+            {announcement.is_popup ? (
+              <MessageSquare className="size-3.5" />
+            ) : (
+              <MessageSquareOff className="size-3.5 text-muted-foreground" />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>{announcement.is_popup ? '关闭弹窗' : '开启弹窗'}</p>
         </TooltipContent>
       </Tooltip>
 
@@ -351,6 +378,7 @@ function AnnouncementActionsCell({
 function buildAnnouncementColumns(params: {
   onTogglePin: (id: number) => Promise<void>
   onToggleVisibility: (id: number) => Promise<void>
+  onTogglePopup: (announcement: Announcement) => Promise<void>
   onEdit: (announcement: Announcement) => void
   onDelete: (announcement: Announcement) => void
 }) {
@@ -408,12 +436,13 @@ function buildAnnouncementColumns(params: {
     columnHelper.display({
       id: 'actions',
       header: '操作',
-      size: 180,
+      size: 220,
       cell: (info) => (
         <AnnouncementActionsCell
           announcement={info.row.original}
           onTogglePin={params.onTogglePin}
           onToggleVisibility={params.onToggleVisibility}
+          onTogglePopup={params.onTogglePopup}
           onEdit={params.onEdit}
           onDelete={params.onDelete}
         />
@@ -791,6 +820,18 @@ function useAnnouncementListController({ onEdit, onDelete }: AnnouncementListCon
     }
   }, [refetchAnnouncements])
 
+  const handleTogglePopup = useCallback(async (announcement: Announcement) => {
+    try {
+      await announcementAPI.update(announcement.id, {
+        is_popup: !announcement.is_popup,
+      })
+      refetchAnnouncements()
+      toast.success(announcement.is_popup ? '弹窗已关闭' : '弹窗已开启')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '操作失败'))
+    }
+  }, [refetchAnnouncements])
+
   const filteredAnnouncements = useMemo(
     // 先在内存里按双筛选条件过滤，再交给表格做排序与渲染，避免重复请求后端。
     () => filterAnnouncements(announcements, visibilityFilter, pinnedFilter),
@@ -802,10 +843,11 @@ function useAnnouncementListController({ onEdit, onDelete }: AnnouncementListCon
       buildAnnouncementColumns({
         onTogglePin: handleTogglePin,
         onToggleVisibility: handleToggleVisibility,
+        onTogglePopup: handleTogglePopup,
         onEdit,
         onDelete,
       }),
-    [handleTogglePin, handleToggleVisibility, onDelete, onEdit]
+    [handleTogglePin, handleTogglePopup, handleToggleVisibility, onDelete, onEdit]
   )
 
   // table 实例只在当前 hook 内使用，这里定点忽略编译器告警。

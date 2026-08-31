@@ -21,6 +21,7 @@ class AnnouncementBase(SQLModel):
     )
     is_pinned: bool = Field(default=False)
     is_visible: bool = Field(default=True)
+    is_popup: bool = Field(default=False)
 
 
 class Announcement(AnnouncementBase, table=True):
@@ -45,6 +46,7 @@ class AnnouncementCreate(SQLModel):
     images: list[str] | None = None
     is_pinned: bool = False
     is_visible: bool = True
+    is_popup: bool = False
 
 
 class AnnouncementUpdate(SQLModel):
@@ -54,6 +56,7 @@ class AnnouncementUpdate(SQLModel):
     images: list[str] | None = None
     is_pinned: bool | None = None
     is_visible: bool | None = None
+    is_popup: bool | None = None
 
 
 class AnnouncementResponse(BaseResponse):
@@ -65,6 +68,7 @@ class AnnouncementResponse(BaseResponse):
     images: list[str] | None
     is_pinned: bool
     is_visible: bool
+    is_popup: bool
     created_by: int | None
     created_by_name: str | None = None
     created_at: datetime

@@ -8,6 +8,7 @@ from sqlalchemy import Connection, text
 from app.models.reagent_order import ReagentOrderStatus
 
 logger = logging.getLogger(__name__)
+ANNOUNCEMENT_POPUP_COLUMN_NAME = "is_popup"
 
 SQLITE_COMMON_SHELF_GROUP_MISSING_COUNT_SQL = """
 SELECT COUNT(*) AS missing_count
@@ -71,6 +72,20 @@ SQLITE_REAGENT_ORDER_CONSTRAINT_TRIGGERS: tuple[str, ...] = (
     END
     """,
 )
+
+
+def ensure_sqlite_announcement_schema(connection: Connection) -> None:
+    """Add popup support to announcement tables created by older releases."""
+    columns = connection.execute(text("PRAGMA table_info(announcements)")).mappings()
+    if any(column["name"] == ANNOUNCEMENT_POPUP_COLUMN_NAME for column in columns):
+        return
+
+    connection.execute(
+        text(
+            "ALTER TABLE announcements "
+            "ADD COLUMN is_popup BOOLEAN NOT NULL DEFAULT 0"
+        )
+    )
 
 
 def check_sqlite_common_shelf_groups_consistency(connection: Connection) -> int:
