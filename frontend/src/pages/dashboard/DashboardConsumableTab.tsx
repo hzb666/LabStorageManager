@@ -482,6 +482,7 @@ function createConsumableColumns({
           disableEdit={disableEdit}
           onEdit={(target) => onEdit(target as DashboardConsumableOrder)}
           isAdmin={isAdmin}
+          resetKey={item.status}
         />
       );
     },

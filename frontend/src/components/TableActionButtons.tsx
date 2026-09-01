@@ -41,6 +41,7 @@ export interface TableActionButtonsProps<T> {
   disableEdit?: boolean;
   onEdit?: (item: T) => void;
   isAdmin?: boolean;
+  resetKey?: React.Key;
   statusField?: keyof T;
   statusDisplay?: StatusDisplayConfig[];
 }
@@ -90,6 +91,7 @@ export function TableActionButtons<T>({
   disableEdit = false,
   onEdit,
   isAdmin = false,
+  resetKey,
   statusField,
   statusDisplay,
 }: Readonly<TableActionButtonsProps<T>>) {
@@ -147,7 +149,8 @@ export function TableActionButtons<T>({
 
       {visibleActions.map((action) => (
         <ActionButton<T>
-          key={action.id}
+          // 状态生命周期变化时重建按钮，使列表换位和最终按钮状态在同一次提交中完成。
+          key={resetKey === undefined ? action.id : `${action.id}:${String(resetKey)}`}
           config={action}
           item={item}
           isAdmin={isAdmin}
@@ -351,6 +354,7 @@ export const TableActionButtonsMemo = React.memo(
       prevProps.disableEdit !== nextProps.disableEdit ||
       prevProps.onEdit !== nextProps.onEdit ||
       prevProps.actions !== nextProps.actions ||
+      prevProps.resetKey !== nextProps.resetKey ||
       prevProps.statusDisplay !== nextProps.statusDisplay
     ) {
       return false;

@@ -980,6 +980,7 @@ function createReagentColumns({
           disableEdit={disableEdit}
           onEdit={(target) => onEdit(target as DashboardReagentOrder)}
           isAdmin={isAdmin}
+          resetKey={item.status}
         />
       );
     },

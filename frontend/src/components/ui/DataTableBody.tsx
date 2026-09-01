@@ -110,6 +110,7 @@ function InnerRowComponent<TData>({
         {isExpanded && renderExpandedRow && disableExpandedRowAnimation && (
           <div className="bg-muted/30 border-b dark:bg-input/30 border-border">
             <MemoizedExpandedRow
+              key={row.id}
               original={original}
               renderExpandedRow={renderExpandedRow}
             />
@@ -126,6 +127,7 @@ function InnerRowComponent<TData>({
           >
             <div>
               <MemoizedExpandedRow
+                key={row.id}
                 original={original}
                 renderExpandedRow={renderExpandedRow}
               />
@@ -256,7 +258,8 @@ export function DataTableBody<TData>({
           })
         ) : (
           rows.map((row, index) => (
-            <div key={row.id ?? index} className="w-full">
+            // 外层表示稳定的视觉槽位，让 hover 过渡留在鼠标位置；单元格和展开内容仍按 row.id 重建。
+            <div key={`row-slot-${index}`} className="w-full">
               <InnerRow
                 row={row}
                 isExpanded={row.getIsExpanded()}
