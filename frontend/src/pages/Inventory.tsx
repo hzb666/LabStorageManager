@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useForm, useWatch } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import type { UseFormReturn, FieldErrors } from 'react-hook-form'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -161,23 +161,6 @@ function createInventoryFormValues(item: InventoryItem): InventoryFormInputData 
     is_hazardous: item.is_hazardous || false,
     notes: item.notes || '',
   }
-}
-
-function isPositiveInventoryQuantity(value: string | number | undefined): boolean {
-  const quantity = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(quantity) && quantity > 0
-}
-
-function useShowNotInStockToggle(
-  form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>,
-  editingItem: InventoryItem | null,
-): boolean {
-  const remainingQuantity = useWatch({
-    control: form.control,
-    name: 'remaining_quantity',
-  })
-  return editingItem?.status !== 'consumed'
-    && isPositiveInventoryQuantity(remainingQuantity)
 }
 
 function resolveInventoryInitialQuantity(editingItem: InventoryItem, specification: string | undefined): number {
@@ -458,7 +441,7 @@ function useInventoryDialogController(
     defaultValues: defaultInventoryValues,
     shouldFocusError: false,
   })
-  const showNotInStockToggle = useShowNotInStockToggle(form, editingItem)
+  const showNotInStockToggle = editingItem !== null && editingItem.status !== 'consumed'
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
     form.reset(defaultInventoryValues)
