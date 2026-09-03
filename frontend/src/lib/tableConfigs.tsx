@@ -192,7 +192,7 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 90,
       minSize: 70,
       maxSize: 150,
-      cell: info => renderPlainTextCell(info.getValue(), { fallback: '-' }),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-' }),
     }),
     columnHelper.accessor('specification', {
       header: '规格',
@@ -269,7 +269,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       minSize: 150,
       maxSize: 350,
       enableSorting: false,
-      cell: info => renderPlainTextCell(info.getValue(), { fallback: '-', className: 'break-all' }),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('quantity', {
       header: '数量',
@@ -297,7 +297,7 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
       minSize: 80,
       maxSize: 200,
       enableSorting: false,
-      cell: info => renderPlainTextCell(info.getValue(), { fallback: '-', className: 'break-all' }),
+      cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-', className: 'break-all' }),
     }),
     columnHelper.accessor('created_at', {
       header:'申购时间',

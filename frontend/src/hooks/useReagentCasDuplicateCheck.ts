@@ -33,13 +33,16 @@ export function useReagentCasDuplicateCheck() {
     }
   }, [])
 
-  const checkCASWarning = useCallback(async (casInput: string, options?: { force?: boolean }) => {
+  const checkCASOverview = useCallback(async (
+    casInput: string,
+    options?: { force?: boolean },
+  ): Promise<CASOverviewResponse | null | undefined> => {
     const casValidation = validateAndNormalizeCASInput(casInput || '')
     if ('error' in casValidation) {
       setCasWarning(null)
       setCasOverview(null)
       setCasLoading(false)
-      return
+      return null
     }
 
     const normalizedCas = casValidation.normalized
@@ -48,11 +51,11 @@ export function useReagentCasDuplicateCheck() {
       setCasOverview(null)
       setCasLoading(false)
       lastCheckedCasRef.current = normalizedCas
-      return
+      return null
     }
 
     if (!options?.force && lastCheckedCasRef.current === normalizedCas) {
-      return
+      return null
     }
 
     const requestId = ++casRequestIdRef.current
@@ -61,12 +64,13 @@ export function useReagentCasDuplicateCheck() {
     try {
       const response = await reagentOrderAPI.getCASOverview(normalizedCas)
       if (requestId !== casRequestIdRef.current) {
-        return
+        return null
       }
       const overview = response.data
       setCasOverview(overview)
       setCasWarning(overview.has_warning || overview.is_common_cas ? overview : null)
       lastCheckedCasRef.current = normalizedCas
+      return overview
     } catch (error) {
       if (requestId === casRequestIdRef.current) {
         console.error('CAS check error:', error)
@@ -78,10 +82,18 @@ export function useReagentCasDuplicateCheck() {
     }
   }, [])
 
+  const checkCASWarning = useCallback(async (
+    casInput: string,
+    options?: { force?: boolean },
+  ): Promise<void> => {
+    await checkCASOverview(casInput, options)
+  }, [checkCASOverview])
+
   return {
     casWarning,
     casOverview,
     casLoading,
+    checkCASOverview,
     checkCASWarning,
     clearCASWarning,
     handleCasValueChange,

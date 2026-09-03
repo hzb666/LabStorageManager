@@ -79,7 +79,7 @@ export function getReagentOrderStatusLabel(status: string): string {
 async function autofillCartImportEnglishName(
   item: ImportItem,
 ): Promise<string | null> {
-  if (!item.cas_number || item.english_name) {
+  if (!item.cas_number) {
     return null;
   }
 
@@ -272,10 +272,7 @@ async function runCartImportCasLookup(params: {
   canApplyReagentAsyncResult: (
     snapshot: ReagentAsyncRequestSnapshot,
   ) => boolean;
-  checkCASWarning: (
-    casNumber: string,
-    options?: { force?: boolean },
-  ) => Promise<void>;
+  checkCASOverview: ReturnType<typeof useReagentCasDuplicateCheck>["checkCASOverview"];
   setIsCasLookupLoading: Dispatch<SetStateAction<boolean>>;
 }) {
   const {
@@ -283,7 +280,7 @@ async function runCartImportCasLookup(params: {
     clearCASWarning,
     createReagentAsyncSnapshot,
     canApplyReagentAsyncResult,
-    checkCASWarning,
+    checkCASOverview,
     setIsCasLookupLoading,
   } = params;
   const isValidCas = await reagentForm.trigger("cas_number");
@@ -307,6 +304,11 @@ async function runCartImportCasLookup(params: {
   setIsCasLookupLoading(true);
   const lookupRequest = createReagentAsyncSnapshot(normalizedCas);
   try {
+    const overview = await checkCASOverview(normalizedCas, { force: true });
+    if (!canApplyReagentAsyncResult(lookupRequest) || !overview || overview.is_common_cas) {
+      return;
+    }
+
     const response = await chemicalAPI.getInfo(normalizedCas);
     if (!canApplyReagentAsyncResult(lookupRequest)) {
       return;
@@ -329,10 +331,6 @@ async function runCartImportCasLookup(params: {
       setIsCasLookupLoading(false);
     }
   }
-
-  if (canApplyReagentAsyncResult(lookupRequest)) {
-    await checkCASWarning(normalizedCas, { force: true });
-  }
 }
 
 function useCartImportReagentFormState(params: {
@@ -351,6 +349,7 @@ function useCartImportReagentFormState(params: {
     casWarning,
     casOverview,
     casLoading,
+    checkCASOverview,
     checkCASWarning,
     clearCASWarning,
     handleCasValueChange,
@@ -384,26 +383,33 @@ function useCartImportReagentFormState(params: {
         itemCasNumber: item.cas_number,
       });
       if (nextCasToCheck) {
-        void checkCASWarning(nextCasToCheck, { force: true });
-      }
+        const autofillRequest = createReagentAsyncSnapshot(nextCasToCheck);
+        checkCASOverview(nextCasToCheck, { force: true })
+          .then((overview) => {
+            const shouldSkipAutofill = !overview
+              || overview.is_common_cas
+              || !canApplyReagentAsyncResult(autofillRequest);
+            if (shouldSkipAutofill) return null;
 
-      const autofillRequest = createReagentAsyncSnapshot(item.cas_number);
-      autofillCartImportEnglishName(item).then((englishName) => {
-        if (!englishName || !canApplyReagentAsyncResult(autofillRequest)) {
-          return;
-        }
-        // 用户已经手改过英文名时，不再用异步补全覆盖。
-        if (reagentForm.getFieldState("english_name").isDirty) {
-          return;
-        }
-        reagentForm.setValue("english_name", englishName, {
-          shouldValidate: false,
-        });
-      });
+            // reset 后的值可能来自试剂草稿，不能只检查顶层导入数据。
+            if (reagentForm.getValues("english_name")?.trim()) return null;
+            return autofillCartImportEnglishName(item);
+          })
+          .then((englishName) => {
+            if (!englishName || !canApplyReagentAsyncResult(autofillRequest)) {
+              return;
+            }
+            // 用户已经手改过英文名时，不再用异步补全覆盖。
+            if (reagentForm.getFieldState("english_name").isDirty) {
+              return;
+            }
+            reagentForm.setValue("english_name", englishName, { shouldValidate: false });
+          });
+      }
     },
     [
       canApplyReagentAsyncResult,
-      checkCASWarning,
+      checkCASOverview,
       clearCASWarning,
       createReagentAsyncSnapshot,
       reagentForm,
@@ -458,12 +464,12 @@ function useCartImportReagentFormState(params: {
       clearCASWarning,
       createReagentAsyncSnapshot,
       canApplyReagentAsyncResult,
-      checkCASWarning,
+      checkCASOverview,
       setIsCasLookupLoading,
     });
   }, [
     canApplyReagentAsyncResult,
-    checkCASWarning,
+    checkCASOverview,
     clearCASWarning,
     createReagentAsyncSnapshot,
     reagentForm,
