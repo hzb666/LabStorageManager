@@ -4,7 +4,6 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/lib/browserProcessShim'
 import './index.css'
-import { applyAppZoom } from '@/lib/appZoom'
 import { bootstrapCacheVersion } from '@/lib/cacheVersionBootstrap'
 import { initSentry } from '@/lib/sentry'
 
@@ -45,8 +44,6 @@ function startCacheVersionBootstrap(): void {
     console.error('Cache version bootstrap failed:', error)
   })
 }
-
-applyAppZoom()
 
 async function startApplication(): Promise<void> {
   const rootElement = document.getElementById('root')
