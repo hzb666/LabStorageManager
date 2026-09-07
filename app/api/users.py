@@ -14,7 +14,7 @@ from sqlalchemy import case
 from sqlmodel import Session, func, or_, select
 
 from app.core.auth import (
-    CurrentUser,
+    NonPublicUser,
     create_access_token,
     decode_token,
     extract_access_token,
@@ -888,7 +888,7 @@ def logout(
 def change_password(
     password_request: ChangePasswordRequest,
     http_request: Request,
-    current_user: CurrentUser,
+    current_user: NonPublicUser,
     db: DBSession,
 ):
     client_ip = get_client_ip(http_request)
@@ -1078,7 +1078,7 @@ def update_user(
     user_update: UserUpdate,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)]
+    current_user: NonPublicUser,
 ):
     _ensure_can_update_user(current_user, user_id)
     user = get_user_by_id(db, user_id)
@@ -1374,7 +1374,7 @@ def delete_avatar(
     user_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)]
+    current_user: NonPublicUser,
 ):
     # 头像属于用户资源，仍沿用“本人或管理员”边界。
     if current_user.id != user_id and current_user.role != UserRole.ADMIN:
@@ -1417,7 +1417,7 @@ def upload_avatar(
     file: UploadFile,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)]
+    current_user: NonPublicUser,
 ):
     # 新头像落库前先删旧文件，避免静态目录残留孤儿文件。
     if current_user.id != user_id and current_user.role != UserRole.ADMIN:

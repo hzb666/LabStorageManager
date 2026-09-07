@@ -395,6 +395,7 @@ function useDeviceTableModel({
   sorting,
   setSorting,
   currentDeviceId,
+  canManageSessions,
   handleOpenRenameDialog,
   handleOpenKickDialog,
 }: {
@@ -404,6 +405,7 @@ function useDeviceTableModel({
   sorting: SortingState
   setSorting: (updater: SortingState | ((prev: SortingState) => SortingState)) => void
   currentDeviceId: string
+  canManageSessions: boolean
   handleOpenRenameDialog: (session: SessionInfo) => void
   handleOpenKickDialog: (session: SessionInfo) => void
 }) {
@@ -491,6 +493,7 @@ function useDeviceTableModel({
     state: {
       sorting,
       globalFilter,
+      columnVisibility: { actions: canManageSessions },
     },
   })
 
@@ -662,6 +665,7 @@ export default function DeviceManagement() {
   }, [queryClient])
 
   const dialogs = useDeviceDialogState(editForm, refetchSessions, setDialogState)
+  const canManageAccount = userData?.role === UserRoles.ADMIN || userData?.role === UserRoles.USER
 
   const currentDeviceId = useMemo(() => getDeviceId(), [])
   const tableModel = useDeviceTableModel({
@@ -671,6 +675,7 @@ export default function DeviceManagement() {
     sorting,
     setSorting,
     currentDeviceId,
+    canManageSessions: canManageAccount,
     handleOpenRenameDialog: dialogs.handleOpenRenameDialog,
     handleOpenKickDialog: dialogs.handleOpenKickDialog,
   })
@@ -685,10 +690,8 @@ export default function DeviceManagement() {
     }
   }
 
-  const canViewLogs = userData?.role === UserRoles.ADMIN || userData?.role === UserRoles.USER
-
   const handleViewLogs = useCallback(async () => {
-    if (!userData || !canViewLogs) {
+    if (!userData || !canManageAccount) {
       return
     }
 
@@ -701,34 +704,36 @@ export default function DeviceManagement() {
     } finally {
       setLogsLoading(false)
     }
-  }, [canViewLogs, navigate, userData])
+  }, [canManageAccount, navigate, userData])
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold text-primary">个人账户</h1>
         <div className="flex flex-wrap gap-2">
-          {canViewLogs && (
-            <Button onClick={handleViewLogs} size="lg" variant="modern" disabled={logsLoading}>
-              {logsLoading ? (
-                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-              ) : (
-                <FileText className="w-4 h-4 mr-1.5" />
-              )}
-              查看日志
-            </Button>
+          {canManageAccount && (
+            <>
+              <Button onClick={handleViewLogs} size="lg" variant="modern" disabled={logsLoading}>
+                {logsLoading ? (
+                  <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                ) : (
+                  <FileText className="w-4 h-4 mr-1.5" />
+                )}
+                查看日志
+              </Button>
+              <Button onClick={() => dialogs.setEditDialogOpen(true)} size="lg" variant="modern">
+                <Edit className="w-4 h-4 mr-1.5" />
+                修改信息
+              </Button>
+              <Button onClick={handleRefresh} size="lg" variant="modern">
+                <RefreshCw className="w-4 h-4 mr-1.5" />
+                刷新会话
+              </Button>
+            </>
           )}
-          <Button onClick={() => dialogs.setEditDialogOpen(true)} size="lg" variant="modern">
-            <Edit className="w-4 h-4 mr-1.5" />
-            修改信息
-          </Button>
-          <Button onClick={handleRefresh} size="lg" variant="modern">
-            <RefreshCw className="w-4 h-4 mr-1.5" />
-            刷新会话
-          </Button>
           <Button onClick={() => setDialogState('kickAll')} size="lg" variant="destructive">
             <LogOut className="w-4 h-4 mr-1.5" />
-            踢出其他设备
+            踢出所有其他设备
           </Button>
         </div>
       </div>
@@ -763,8 +768,7 @@ export default function DeviceManagement() {
       />
 
       <div className="text-sm text-muted-foreground">
-        <p>当前设备会显示"当前设备"标签，其他设备可以手动踢出。</p>
-        <p>会话过期后会自动失效。</p>
+        <p>批量踢出不会影响当前会话，会话过期后自动失效。</p>
       </div>
     </div>
   )

@@ -224,9 +224,11 @@ function AppContent() {
               </Suspense>
             } />
             <Route path="logs" element={
-              <Suspense fallback={<AuthDeferredShell pathname="/logs" />}>
-                <OperationLogsPage />
-              </Suspense>
+              <NonPublicRoute>
+                <Suspense fallback={<AuthDeferredShell pathname="/logs" />}>
+                  <OperationLogsPage />
+                </Suspense>
+              </NonPublicRoute>
             } />
             <Route
               path="admin/logs"

@@ -9,7 +9,12 @@ from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from app.api.deps import get_current_session
-from app.core.auth import AUTH_ERROR_CODE_HEADER, AuthErrorCode, create_access_token
+from app.core.auth import (
+    AUTH_ERROR_CODE_HEADER,
+    AuthErrorCode,
+    create_access_token,
+    require_non_public,
+)
 from app.core.config import settings
 from app.core.constants import SECONDS_PER_HOUR
 from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
@@ -30,6 +35,21 @@ from app.services.session_service import (
     sync_session_cache,
 )
 from app.services.user_operation_logger import log_user_operation
+
+
+def get_non_public_current_session(
+    current: Annotated[tuple[User, UserSession], Depends(get_current_session)],
+) -> tuple[User, UserSession]:
+    """返回非公用账户的当前会话。"""
+    require_non_public(current[0])
+    return current
+
+
+NonPublicCurrentSession = Annotated[
+    tuple[User, UserSession],
+    Depends(get_non_public_current_session),
+]
+
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 logger = logging.getLogger(__name__)
@@ -134,7 +154,7 @@ def delete_session(
     session_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    current: Annotated[tuple[User, UserSession], Depends(get_current_session)],
+    current: NonPublicCurrentSession,
 ):
     current_user, _ = current
     session = db.exec(
@@ -202,7 +222,7 @@ def refresh_session(
     request: Request,
     response: Response,
     db: Annotated[Session, Depends(get_db)],
-    current: Annotated[tuple[User, UserSession], Depends(get_current_session)]
+    current: NonPublicCurrentSession,
 ):
     current_user, current_session = current
     # 重新从数据库取当前会话，避免依赖依赖项里已过期的快照。
@@ -299,7 +319,7 @@ def update_session(
     session_id: int,
     http_request: Request,
     db: Annotated[Session, Depends(get_db)],
-    current: Annotated[tuple[User, UserSession], Depends(get_current_session)],
+    current: NonPublicCurrentSession,
     request: SessionUpdateRequest,
 ):
     current_user, _ = current

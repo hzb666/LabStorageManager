@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/Label";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import MoleculeStructure from "@/components/ui/MoleculeStructure";
 import { NoteDisplay } from "@/components/ui/NoteDisplay";
+import { QuantityIndicator } from "@/components/ui/QuantityIndicator";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
 import { inventoryAPI, reagentOrderAPI, type StockInPayload } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
@@ -255,6 +256,25 @@ function getBorrowQuantityText(item: MyBorrowItem | null): string {
     return "待补充";
   }
   return `${item.remaining_quantity} ${item.unit ?? ""}`.trim();
+}
+
+function renderBorrowQuantity(item: MyBorrowItem): React.ReactNode {
+  const specification = item.specification?.trim();
+  if (
+    !specification
+    || typeof item.remaining_quantity !== "number"
+    || typeof item.initial_quantity !== "number"
+  ) {
+    return "待补充";
+  }
+
+  return (
+    <QuantityIndicator
+      remaining={item.remaining_quantity}
+      initial={item.initial_quantity}
+      specification={specification}
+    />
+  );
 }
 
 function getReturnMaxQuantity(
@@ -724,7 +744,10 @@ function createBorrowRealtimeConfig(
   }
 }
 
-function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): ColumnDef<Record<string, unknown>, unknown>[] {
+function createBorrowColumns(
+  openReturnModal: (item: MyBorrowItem) => void,
+  managementMode: boolean,
+): ColumnDef<Record<string, unknown>, unknown>[] {
   return [
     borrowColumnHelper.accessor('cas_number', {
       header: 'CAS号',
@@ -741,9 +764,9 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
       cell: (info) => info.getValue() || '-',
     }),
     borrowColumnHelper.accessor('remaining_quantity', {
-      header: '借用时剩余量',
+      header: '剩余/规格',
       size: 120,
-      cell: (info) => getBorrowQuantityText(info.row.original as MyBorrowItem),
+      cell: (info) => renderBorrowQuantity(info.row.original as MyBorrowItem),
     }),
     borrowColumnHelper.accessor('borrow_time', {
       header: '借用时间',
@@ -758,11 +781,13 @@ function createBorrowColumns(openReturnModal: (item: MyBorrowItem) => void): Col
         )
       },
     }),
-    borrowColumnHelper.accessor('borrower_name', {
-      header: '借用人',
-      size: 100,
-      cell: (info) => info.getValue() || '-',
-    }),
+    ...(managementMode
+      ? [borrowColumnHelper.accessor('borrower_name', {
+        header: '借用人',
+        size: 100,
+        cell: (info) => info.getValue() || '-',
+      })]
+      : []),
     borrowColumnHelper.display({
       id: 'actions',
       header: '操作',
@@ -907,8 +932,8 @@ export function DashboardBorrowTab({
   }, [returnForm])
 
   const borrowColumns = useMemo(
-    () => createBorrowColumns(openReturnModal),
-    [openReturnModal]
+    () => createBorrowColumns(openReturnModal, managementMode),
+    [openReturnModal, managementMode]
   )
   const borrowRealtime = useMemo(
     () => createBorrowRealtimeConfig(refreshTables, managementMode, currentUser?.id),
@@ -983,6 +1008,7 @@ function createPendingStockinDashboardAPI(managementMode: boolean): FilterAPI {
 
 function createStockinColumns(
   openStockinModal: (item: PendingStockinItem) => void,
+  managementMode: boolean,
 ): ColumnDef<Record<string, unknown>, unknown>[] {
   const columns: ColumnDef<PendingStockinItem, unknown>[] = [
     pendingStockinColumnHelper.accessor('cas_number', {
@@ -1004,6 +1030,13 @@ function createStockinColumns(
       size: 120,
       cell: (info) => info.getValue() || '-',
     }),
+    ...(managementMode
+      ? [pendingStockinColumnHelper.accessor('temporary_keeper_name', {
+        header: '暂存人',
+        size: 100,
+        cell: (info) => info.getValue() || '-',
+      })]
+      : []),
     pendingStockinColumnHelper.accessor('stockin_time', {
       header: '暂存时间',
       size: 220,
@@ -1147,8 +1180,8 @@ export function DashboardStockinTab({
   }, [selectedStockin, stockinForm, refreshTables])
 
   const stockinColumns = useMemo(
-    () => createStockinColumns(openStockinModal),
-    [openStockinModal]
+    () => createStockinColumns(openStockinModal, managementMode),
+    [openStockinModal, managementMode]
   )
   const stockinDialog = { selectedStockin, stockinForm, stockinLoading, onClose: closeStockinModal, onSubmit: handleStockin, onDelete: handleDeleteStockin }
 
