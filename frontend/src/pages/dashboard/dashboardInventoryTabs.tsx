@@ -988,6 +988,22 @@ function getPendingStockinTableTitle(managementMode: boolean) {
   )
 }
 
+function PendingStockinExpandedRow({ item }: Readonly<{ item: PendingStockinItem }>) {
+  return (
+    <div className="p-3 flex flex-col md:flex-row gap-4 border-b border-border">
+      <div className="hidden md:block shrink-0">
+        <MoleculeStructure casNumber={item.cas_number} width={150} height={100} />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 md:m-2 gap-x-6 gap-y-2 flex-1">
+        <div className="col-span-2">英文名称：{item.english_name || '-'}</div>
+        <div>别名：{item.alias || '-'}</div>
+        <div className="col-span-2">备注：{item.notes || '-'}</div>
+        <div>纯度：{item.purity || '-'}</div>
+      </div>
+    </div>
+  )
+}
+
 // 待入库列表只请求一次接口，再包装成 `FilterTable` 需要的本地搜索和分页结构。
 function createPendingStockinDashboardAPI(managementMode: boolean): FilterAPI {
   return {
@@ -1062,7 +1078,10 @@ function createStockinColumns(
         <Button
           size="sm"
           className="text-sm"
-          onClick={() => openStockinModal(info.row.original)}
+          onClick={(event) => {
+            event.stopPropagation()
+            openStockinModal(info.row.original)
+          }}
         >
           入库
         </Button>
@@ -1228,6 +1247,10 @@ export function DashboardStockinTab({
         searchPlaceholder={managementMode ? '搜索名称、CAS号、暂存人...' : '搜索名称、CAS号...'}
         title={getPendingStockinTableTitle(managementMode)}
         enableExpandAll={true}
+        renderExpandedRow={(itemRaw) => {
+          const item = itemRaw as unknown as PendingStockinItem
+          return <PendingStockinExpandedRow item={item} />
+        }}
       />
       <DashboardStockinDialog dialog={stockinDialog} brandOptions={brandOptions} />
     </>

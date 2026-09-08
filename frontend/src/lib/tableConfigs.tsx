@@ -415,7 +415,7 @@ export function getCommonShelfGroupTableColumns(args: {
   return [
     columnHelper.accessor((row) => safeString((row.group as Record<string, unknown>)?.cas_number, ''), {
       id: 'cas_number',
-      header: 'CAS',
+      header: 'CAS号',
       cell: info => renderPlainTextCell(info.getValue(), { className: 'break-all' }),
     }),
     columnHelper.accessor((row) => safeString((row.display as Record<string, unknown>)?.name, ''), {

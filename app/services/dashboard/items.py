@@ -42,6 +42,12 @@ from app.services.log_timeline_renderer import render_log_timeline_rows
 from app.services.spec_utils import format_specification
 from app.services.user_utils import batch_get_user_names
 
+INVENTORY_STOCK_ALERT_STATUSES = (
+    InventoryStatus.IN_STOCK,
+    InventoryStatus.RUN_SHORT,
+    InventoryStatus.CONSUMED,
+)
+
 
 def _get_timeline_operator_id(row: LogTimeline) -> int | None:
     return row.actor_user_id or row.subject_user_id
@@ -859,7 +865,7 @@ def _count_inventory_stock_alerts(db: Session) -> int:
     statement = (
         select(func.count())
         .select_from(Inventory)
-        .where(Inventory.status.in_([InventoryStatus.IN_STOCK, InventoryStatus.RUN_SHORT]))
+        .where(Inventory.status.in_(INVENTORY_STOCK_ALERT_STATUSES))
         .where(Inventory.initial_quantity.is_not(None))
         .where(Inventory.initial_quantity > 0)
         .where(Inventory.remaining_quantity.is_not(None))
@@ -880,7 +886,7 @@ def _get_inventory_stock_alerts(
     remaining_percent = func.coalesce(Inventory.remaining_percent, computed_percent)
     statement = (
         select(Inventory, remaining_percent.label("remaining_percent"))
-        .where(Inventory.status.in_([InventoryStatus.IN_STOCK, InventoryStatus.RUN_SHORT]))
+        .where(Inventory.status.in_(INVENTORY_STOCK_ALERT_STATUSES))
         .where(Inventory.initial_quantity.is_not(None))
         .where(Inventory.initial_quantity > 0)
         .where(Inventory.remaining_quantity.is_not(None))
@@ -903,7 +909,11 @@ def _get_inventory_stock_alerts(
                 "severity": "high",
                 "created_at": utc_iso_str(item.updated_at),
             },
-            label_code="stock_alert.inventory_low",
+            label_code=(
+                "stock_alert.inventory_depleted"
+                if item.status == InventoryStatus.CONSUMED
+                else "stock_alert.inventory_low"
+            ),
             entity=_build_dashboard_entity(
                 entity_type="inventory",
                 entity_id=item.id,
@@ -972,7 +982,11 @@ def _get_common_shelf_stock_alerts(
                 "severity": "high" if int(count or 0) == 0 else "medium",
                 "created_at": utc_iso_str(group.updated_at),
             },
-            label_code="stock_alert.common_shelf_low",
+            label_code=(
+                "stock_alert.common_shelf_depleted"
+                if int(count or 0) == 0
+                else "stock_alert.common_shelf_low"
+            ),
             entity=_build_dashboard_entity(
                 entity_type="common_shelf_group",
                 entity_id=group.id,

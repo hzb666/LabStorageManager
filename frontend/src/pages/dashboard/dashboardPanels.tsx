@@ -280,7 +280,9 @@ function getManagementRowInteraction(
 
 const DASHBOARD_LABEL_TEXT_BY_CODE: Record<string, string> = {
   "stock_alert.inventory_low": "库存低量",
+  "stock_alert.inventory_depleted": "库存耗尽",
   "stock_alert.common_shelf_low": "常用低量",
+  "stock_alert.common_shelf_depleted": "常用耗尽",
   "todo.reagent_order_pending_approval": "待审批试剂订单",
   "todo.consumable_order_pending_approval": "待审批耗材订单",
   "risk.order_timeout": "订单超时",
@@ -302,6 +304,19 @@ const DASHBOARD_LABEL_TEXT_BY_CODE: Record<string, string> = {
   "board.recent.consumable_order_completed": "耗材到货",
   "board.recent.inventory_stocked": "订单入库",
 };
+
+const INVENTORY_STOCK_ALERT_CODES = new Set([
+  "stock_alert.inventory_low",
+  "stock_alert.inventory_depleted",
+]);
+const COMMON_SHELF_STOCK_ALERT_CODES = new Set([
+  "stock_alert.common_shelf_low",
+  "stock_alert.common_shelf_depleted",
+]);
+
+function hasDashboardCode(codes: ReadonlySet<string>, code: string | undefined): boolean {
+  return typeof code === "string" && codes.has(code);
+}
 
 const DASHBOARD_IMPACT_TEXT_BY_CODE: Record<string, string> = {
   "order_status.pending": "待审批",
@@ -457,10 +472,10 @@ function getDashboardStaticDetailText(
   name: string,
   specification: string,
 ): string | undefined {
-  if (code === "stock_alert.inventory_low") {
+  if (hasDashboardCode(INVENTORY_STOCK_ALERT_CODES, code)) {
     return joinDashboardDetailParts(name, item.entity?.cas_number || "");
   }
-  if (code === "stock_alert.common_shelf_low") {
+  if (hasDashboardCode(COMMON_SHELF_STOCK_ALERT_CODES, code)) {
     return joinDashboardDetailParts(name, item.entity?.brand || "", specification);
   }
   if (code === "todo.reagent_order_pending_approval") {
