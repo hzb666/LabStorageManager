@@ -480,7 +480,7 @@ export function getStockInFormFields(
       type: locationOptions ? 'autocomplete' as const : 'input' as const,
       options: locationOptions,
       required: true,
-      placeholder: '如: A-1-1 柜',
+      placeholder: '剩余量为0可删除',
     },
     {
       name: 'remaining_quantity' as const,
@@ -506,7 +506,7 @@ export function getConfirmArrivalFormFields(
       name: 'storage_location' as const,
       label: '存放位置',
       type: 'input' as const,
-      placeholder: '暂存则留空即可',
+      placeholder: '本人暂存留空即可',
     },
     {
       name: 'remaining_quantity' as const,

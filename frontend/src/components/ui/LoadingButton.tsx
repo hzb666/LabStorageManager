@@ -19,6 +19,7 @@ export const LoadingButton = React.forwardRef<HTMLButtonElement, LoadingButtonPr
         aria-busy={isLoading}
         className={cn(
           "relative disabled:[&_.loading-button-spinner]:opacity-100",
+          isLoading && "disabled:cursor-wait",
           className
         )}
         {...props}

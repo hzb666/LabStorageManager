@@ -126,8 +126,12 @@ export function TableActionButtons<T>({
     return true;
   });
 
+  // 操作区自行消费点击，避免禁用按钮或按钮间隙触发表格行展开。
   return (
-    <div className="flex items-center gap-1 flex-wrap md:flex-nowrap">
+    <div
+      className="flex items-center gap-1 flex-wrap md:flex-nowrap"
+      onClick={(event) => event.stopPropagation()}
+    >
       {showEdit && onEdit && (
         <Tooltip>
           <TooltipTrigger asChild>
