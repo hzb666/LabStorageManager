@@ -1093,7 +1093,7 @@ def _stock_in_approved_order(
     )
 
 
-# 获取 ARRIVED 订单的待补全库存项，并保持原数量不足时报错语义。
+# 获取 ARRIVED 订单当前全部待补全库存项，已单独入库的条目不再重复处理。
 def _get_arrived_pending_items(
     db: Session,
     order: ReagentOrder,
@@ -1109,20 +1109,20 @@ def _get_arrived_pending_items(
         )
         .order_by(Inventory.created_at.desc(), Inventory.id.desc())
     ).all()
-    if len(pending_items) < order.quantity:
+    if not pending_items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No enough pending stock items found for this order",
+            detail="No pending stock items found for this order",
         )
     if current_user.role != UserRole.ADMIN and any(
         item.temporary_keeper_id != current_user.id
-        for item in pending_items[: order.quantity]
+        for item in pending_items
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the temporary keeper can stock in pending items",
         )
-    return pending_items[: order.quantity]
+    return pending_items
 
 
 # 把 ARRIVED 暂存项补全为正式库存项，并复用拼音字段计算逻辑。

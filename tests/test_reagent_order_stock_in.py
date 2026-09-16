@@ -10,7 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.requests import Request
 
 import app.models  # noqa: F401 - populate SQLModel metadata for the test database.
-from app.api import reagent_orders, reagent_orders_workflow
+from app.api import inventory_extended_routes, reagent_orders, reagent_orders_workflow
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.inventory_operation_log import InventoryOperationAction, InventoryOperationLog
 from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
@@ -43,6 +43,15 @@ def _build_stock_in_endpoint():
     raise AssertionError("stock-in endpoint not found")
 
 
+def _build_pending_stock_in_endpoint():
+    router = APIRouter()
+    inventory_extended_routes._register_pending_stockin_route(router, {}, "list:")
+    for route in router.routes:
+        if getattr(route, "path", "") == "/{inventory_id}/complete-stockin":
+            return route.endpoint
+    raise AssertionError("pending stock-in endpoint not found")
+
+
 class ReagentOrderStockInTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.engine = create_engine(
@@ -53,6 +62,7 @@ class ReagentOrderStockInTests(unittest.IsolatedAsyncioTestCase):
         SQLModel.metadata.create_all(self.engine)
         self.db = Session(self.engine)
         self.stock_in_endpoint = _build_stock_in_endpoint()
+        self.pending_stock_in_endpoint = _build_pending_stock_in_endpoint()
 
         self.user = User(
             username="applicant",
@@ -138,6 +148,43 @@ class ReagentOrderStockInTests(unittest.IsolatedAsyncioTestCase):
             .where(Inventory.source_order_id == order_id)
             .order_by(Inventory.internal_code)
         ).all()
+
+    def _new_pending_item(self, internal_code: str) -> Inventory:
+        return Inventory(
+            internal_code=internal_code,
+            cas_number=self.order.cas_number,
+            name="待入库乙醇",
+            category="待确认",
+            brand="OldBrand",
+            purity="CP",
+            initial_quantity=500.0,
+            remaining_quantity=500.0,
+            remaining_percent=1.0,
+            unit="ml",
+            status=InventoryStatus.IN_STOCK,
+            storage_location=None,
+            temporary_keeper_id=self.user.id,
+            source_order_id=self.order.id,
+            created_by_id=self.user.id,
+        )
+
+    async def _complete_pending_stock_in(
+        self,
+        item: Inventory,
+        payload: inventory_extended_routes.PendingStockInRequest,
+    ) -> dict:
+        with (
+            patch("app.api.inventory_extended_routes._clear_inventory_cache"),
+            patch("app.api.reagent_orders._clear_reagent_order_cache"),
+            patch.object(inventory_extended_routes.sse_manager, "broadcast", new=AsyncMock()),
+        ):
+            return await self.pending_stock_in_endpoint(
+                inventory_id=item.id,
+                payload=payload,
+                request=_build_request(f"/api/inventory/{item.id}/complete-stockin"),
+                current_user=self.user,
+                db=self.db,
+            )
 
     async def test_approved_order_stock_in_creates_inventory_items_and_audit_logs(self) -> None:
         payload = reagent_orders_workflow.StockInRequest(
@@ -449,7 +496,67 @@ class ReagentOrderStockInTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(snapshot["af"]["tk"])
             self.assertEqual(snapshot["af"]["sl"], "B2")
 
-    async def test_arrived_order_requires_enough_pending_items_and_rolls_back_status(self) -> None:
+    async def test_pending_stock_in_updates_each_order_item_independently(self) -> None:
+        self.order.status = ReagentOrderStatus.ARRIVED
+        self.db.add(self.order)
+        pending_items = [
+            self._new_pending_item("TMP-I001"),
+            self._new_pending_item("TMP-I002"),
+        ]
+        self.db.add_all(pending_items)
+        self.db.commit()
+        for item in pending_items:
+            self.db.refresh(item)
+
+        first_payload = inventory_extended_routes.PendingStockInRequest(
+            name="第一瓶乙醇",
+            brand="Brand-A",
+            specification="250ml",
+            storage_location="A1",
+            remaining_quantity=200.0,
+        )
+        await self._complete_pending_stock_in(pending_items[0], first_payload)
+
+        self.db.expire_all()
+        first_item = self.db.get(Inventory, pending_items[0].id)
+        second_item = self.db.get(Inventory, pending_items[1].id)
+        order_after_first = self.db.get(ReagentOrder, self.order.id)
+        self.assertEqual(first_item.name, "第一瓶乙醇")
+        self.assertEqual(first_item.storage_location, "A1")
+        self.assertEqual(first_item.initial_quantity, 250.0)
+        self.assertEqual(first_item.remaining_quantity, 200.0)
+        self.assertIsNone(first_item.temporary_keeper_id)
+        self.assertEqual(second_item.name, "待入库乙醇")
+        self.assertIsNone(second_item.storage_location)
+        self.assertEqual(second_item.temporary_keeper_id, self.user.id)
+        self.assertEqual(order_after_first.status, ReagentOrderStatus.ARRIVED)
+
+        second_payload = inventory_extended_routes.PendingStockInRequest(
+            name="第二瓶乙醇",
+            brand="Brand-B",
+            specification="500ml",
+            storage_location="B2",
+            remaining_quantity=450.0,
+        )
+        await self._complete_pending_stock_in(second_item, second_payload)
+
+        self.db.expire_all()
+        first_item = self.db.get(Inventory, pending_items[0].id)
+        second_item = self.db.get(Inventory, pending_items[1].id)
+        final_order = self.db.get(ReagentOrder, self.order.id)
+        inventory_logs = self.db.exec(select(InventoryOperationLog)).all()
+        order_logs = self.db.exec(select(ReagentOrderOperationLog)).all()
+        self.assertEqual(first_item.name, "第一瓶乙醇")
+        self.assertEqual(first_item.storage_location, "A1")
+        self.assertEqual(second_item.name, "第二瓶乙醇")
+        self.assertEqual(second_item.storage_location, "B2")
+        self.assertEqual(second_item.remaining_quantity, 450.0)
+        self.assertIsNone(second_item.temporary_keeper_id)
+        self.assertEqual(final_order.status, ReagentOrderStatus.STOCKED)
+        self.assertEqual(len(inventory_logs), 2)
+        self.assertEqual(len(order_logs), 1)
+
+    async def test_arrived_order_stock_in_updates_all_remaining_pending_items(self) -> None:
         self.order.status = ReagentOrderStatus.ARRIVED
         self.db.add(self.order)
         pending_item = Inventory(
@@ -477,20 +584,18 @@ class ReagentOrderStockInTests(unittest.IsolatedAsyncioTestCase):
             remaining_quantity=450.0,
         )
 
-        with self.assertRaises(HTTPException) as exc_info:
-            await self._stock_in(payload)
+        response = await self._stock_in(payload)
 
-        self.db.rollback()
         self.db.expire_all()
         latest_order = self.db.get(ReagentOrder, self.order.id)
         latest_pending_item = self.db.get(Inventory, pending_item.id)
 
-        self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "No enough pending stock items found for this order")
-        self.assertEqual(latest_order.status, ReagentOrderStatus.ARRIVED)
-        self.assertIsNone(latest_pending_item.storage_location)
-        self.assertEqual(latest_pending_item.temporary_keeper_id, self.user.id)
-        self.assertEqual(self.db.exec(select(InventoryOperationLog)).all(), [])
+        self.assertEqual(response["items_updated"], 1)
+        self.assertEqual(response["inventory_ids"], [pending_item.id])
+        self.assertEqual(latest_order.status, ReagentOrderStatus.STOCKED)
+        self.assertEqual(latest_pending_item.storage_location, "B2")
+        self.assertIsNone(latest_pending_item.temporary_keeper_id)
+        self.assertEqual(len(self.db.exec(select(InventoryOperationLog)).all()), 1)
         self.assertEqual(self.db.exec(select(ReagentOrderOperationLog)).all(), [])
 
     async def test_arrived_order_stock_in_requires_remaining_quantity_without_side_effects(self) -> None:

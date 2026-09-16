@@ -23,7 +23,7 @@ import MoleculeStructure from "@/components/ui/MoleculeStructure";
 import { NoteDisplay } from "@/components/ui/NoteDisplay";
 import { QuantityIndicator } from "@/components/ui/QuantityIndicator";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
-import { inventoryAPI, reagentOrderAPI, type StockInPayload } from "@/api/client";
+import { inventoryAPI, type StockInPayload } from "@/api/client";
 import type { FilterAPI } from "@/hooks/useTableState";
 import { defaultReturnValues, defaultStockInValues, getReturnFormFields, getStockInFormFields } from "@/lib/formConfigs";
 import { getReagentBrandOptionsQueryOptions } from "@/lib/reagentBrandOptions";
@@ -1115,6 +1115,7 @@ export function DashboardStockinTab({
         queryKey: managementMode ? ['dashboard', 'admin', 'stockin'] : ['dashboard', 'stockin'],
       }),
       queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }),
       refreshDashboardAfterMutation(queryClient),
     ])
   }, [managementMode, queryClient])
@@ -1150,11 +1151,7 @@ export function DashboardStockinTab({
     setStockinLoading(true)
     try {
       const payload = buildPendingStockinPayload(formData)
-      if (selectedStockin.order_id) {
-        await reagentOrderAPI.stockIn(selectedStockin.order_id, payload)
-      } else {
-        await inventoryAPI.completePendingStockin(selectedStockin.inventory_id, payload)
-      }
+      await inventoryAPI.completePendingStockin(selectedStockin.inventory_id, payload)
       setSelectedStockin(null)
       stockinForm.reset(defaultStockInValues)
       await refreshTables()

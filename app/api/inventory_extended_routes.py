@@ -47,6 +47,7 @@ from app.models.inventory import (
     InventoryStatus,
     ManualInventoryCreate,
 )
+from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
 from app.models.user import User, UserRole
 from app.search_completion_db import (
     INVENTORY_COMPLETION_ENDPOINT,
@@ -81,6 +82,7 @@ from app.services.inventory_status import (
     derive_inventory_quantity_status,
 )
 from app.services.log_timeline_projection import project_borrow_log
+from app.services.order_operation_logger import log_reagent_order_update
 from app.services.pinyin_utils import compute_pinyin_fields
 from app.services.rate_limit import enforce_rate_limit
 from app.services.search_completion_entity_index import (
@@ -171,8 +173,8 @@ class InventoryImportConfirmBody(BaseModel):
     preview_token: str
 
 
-class ManualPendingStockInRequest(BaseModel):
-    # 手动暂存项补全入库请求体，复用订单入库弹窗的可编辑字段。
+class PendingStockInRequest(BaseModel):
+    # 单条暂存项补全入库请求体，支持手动和订单来源的暂存库存。
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(max_length=200)
@@ -224,17 +226,12 @@ def _serialize_inventory_item(db: Session, item: Inventory) -> dict[str, Any]:
     return serialize_inventory_items(db, [item])[0]
 
 
-def _ensure_manual_pending_stockin_access(item: Inventory, current_user: User) -> None:
+def _ensure_pending_stockin_access(item: Inventory, current_user: User) -> None:
     is_pending = item.storage_location is None and item.temporary_keeper_id is not None
     if not is_pending:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Inventory item is not pending stock-in",
-        )
-    if item.source_order_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Order pending stock-in must be completed from order workflow",
         )
     if current_user.role != UserRole.ADMIN and item.temporary_keeper_id != current_user.id:
         raise HTTPException(
@@ -243,8 +240,8 @@ def _ensure_manual_pending_stockin_access(item: Inventory, current_user: User) -
         )
 
 
-def _normalize_manual_pending_stockin_payload(
-    payload: ManualPendingStockInRequest,
+def _normalize_pending_stockin_payload(
+    payload: PendingStockInRequest,
 ) -> dict[str, Any]:
     update_data = payload.model_dump(exclude_unset=True)
     location = normalize_storage_location(update_data.get("storage_location"))
@@ -281,11 +278,11 @@ def _normalize_manual_pending_stockin_payload(
     return update_data
 
 
-def _apply_manual_pending_stockin_update(
+def _apply_pending_stockin_update(
     item: Inventory,
-    payload: ManualPendingStockInRequest,
+    payload: PendingStockInRequest,
 ) -> None:
-    update_data = _normalize_manual_pending_stockin_payload(payload)
+    update_data = _normalize_pending_stockin_payload(payload)
     remaining_quantity = update_data.pop("remaining_quantity", None)
     initial_quantity = update_data["initial_quantity"]
     if remaining_quantity is None:
@@ -318,7 +315,7 @@ def _apply_manual_pending_stockin_update(
         setattr(item, field, value)
 
 
-def _claim_manual_pending_stockin_item(
+def _claim_pending_stockin_item(
     db: Session,
     *,
     inventory_id: int,
@@ -329,7 +326,6 @@ def _claim_manual_pending_stockin_item(
         .where(Inventory.id == inventory_id)
         .where(Inventory.storage_location.is_(None))
         .where(Inventory.temporary_keeper_id.is_not(None))
-        .where(Inventory.source_order_id.is_(None))
         .values(updated_at=get_utc_now())
     )
     if current_user.role != UserRole.ADMIN:
@@ -341,6 +337,67 @@ def _claim_manual_pending_stockin_item(
             status_code=status.HTTP_409_CONFLICT,
             detail="Inventory item changed by another request, please refresh and retry",
         )
+
+
+def _finalize_source_order_if_resolved(
+    db: Session,
+    *,
+    source_order_id: int | None,
+    current_user: User,
+    is_cli: bool,
+) -> ReagentOrder | None:
+    if source_order_id is None:
+        return None
+    order = db.get(ReagentOrder, source_order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    if order.status != ReagentOrderStatus.ARRIVED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Order is not pending stock-in",
+        )
+    # 条目认领已开启 SQLite 写事务，剩余项检查和订单收口在同一事务内完成。
+    db.flush()
+    pending_item_id = db.exec(
+        select(Inventory.id)
+        .where(
+            Inventory.source_order_id == order.id,
+            Inventory.storage_location.is_(None),
+            Inventory.temporary_keeper_id.is_not(None),
+        )
+        .limit(1)
+    ).first()
+    if pending_item_id is not None:
+        return None
+
+    before_order = ReagentOrder.model_validate(order)
+    order.status = ReagentOrderStatus.STOCKED
+    log_reagent_order_update(
+        db,
+        before_order=before_order,
+        after_order=order,
+        actor_user_id=current_user.id,
+        is_cli=is_cli,
+    )
+    return order
+
+
+async def _publish_resolved_source_order(
+    db: Session,
+    order: ReagentOrder | None,
+) -> None:
+    if order is None:
+        return
+    # 延迟导入避免 inventory 与 reagent-orders 路由初始化时形成循环依赖。
+    from app.api.reagent_orders import _clear_reagent_order_cache
+    from app.api.reagent_orders_workflow import _serialize_reagent_order
+
+    _clear_reagent_order_cache(order, db)
+    await sse_manager.broadcast(
+        SSERoom.REAGENT_ORDERS,
+        SSEEventType.REAGENT_ORDER_UPDATED,
+        {"id": order.id, "item": _serialize_reagent_order(order, db)},
+    )
 
 
 def _register_cas_and_export_routes(router: APIRouter) -> None:
@@ -523,15 +580,15 @@ def _register_inventory_status_route(
         return response
 
 
-def _register_manual_pending_stockin_route(
+def _register_pending_stockin_route(
     router: APIRouter,
     search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
     @router.post("/{inventory_id}/complete-stockin", response_model=InventoryResponse)
-    async def complete_manual_pending_stockin(
+    async def complete_pending_stockin(
         inventory_id: int,
-        payload: ManualPendingStockInRequest,
+        payload: PendingStockInRequest,
         request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
         db: Annotated[Session, Depends(get_db)],
@@ -540,20 +597,27 @@ def _register_manual_pending_stockin_route(
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=INVENTORY_NOT_FOUND)
 
-        _ensure_manual_pending_stockin_access(item, current_user)
-        _claim_manual_pending_stockin_item(
+        _ensure_pending_stockin_access(item, current_user)
+        source_order_id = item.source_order_id
+        _claim_pending_stockin_item(
             db,
             inventory_id=inventory_id,
             current_user=current_user,
         )
         db.refresh(item)
         before_item = Inventory.model_validate(item)
-        _apply_manual_pending_stockin_update(item, payload)
+        _apply_pending_stockin_update(item, payload)
         log_inventory_update(
             db,
             before_inventory=before_item,
             after_inventory=item,
             operator_id=current_user.id,
+            is_cli=get_request_is_cli(request),
+        )
+        resolved_order = _finalize_source_order_if_resolved(
+            db,
+            source_order_id=source_order_id,
+            current_user=current_user,
             is_cli=get_request_is_cli(request),
         )
         db.commit()
@@ -567,6 +631,7 @@ def _register_manual_pending_stockin_route(
             {"id": item.id, "item": serialized_item},
             actor_client_id=get_sse_client_id(request),
         )
+        await _publish_resolved_source_order(db, resolved_order)
         return serialized_item
 
     class DiscardPendingStockinRequest(BaseModel):
@@ -627,7 +692,7 @@ def _register_manual_and_dashboard_routes(
     search_cache: dict[str, tuple[Any, Any]],
     list_cache_prefix: str,
 ) -> None:
-    _register_manual_pending_stockin_route(router, search_cache, list_cache_prefix)
+    _register_pending_stockin_route(router, search_cache, list_cache_prefix)
 
     @router.post("/manual-add", response_model=dict)
     async def manual_add_inventory(
