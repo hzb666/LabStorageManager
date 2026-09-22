@@ -186,8 +186,8 @@ function CandidateSummary({ candidates }: Readonly<{ candidates: PubChemCandidat
 
 function getCacheStructureInput(cache: CompoundStructureCache): string | null {
   return (
-    cache.smiles_canonical?.trim()
-    || cache.smiles_isomeric?.trim()
+    cache.smiles_isomeric?.trim()
+    || cache.smiles_canonical?.trim()
     || cache.molblock?.trim()
     || null
   )

@@ -294,7 +294,7 @@ def query_english_name(cas_number: str) -> tuple[str | None, str | None]:
 def _get_cache_smiles(cache: CompoundStructureCache | None) -> str | None:
     if cache is None:
         return None
-    return cache.smiles_canonical or cache.smiles_isomeric
+    return cache.smiles_isomeric or cache.smiles_canonical
 
 
 def _cache_to_chemical_info(cas: str, cache: CompoundStructureCache | None) -> dict[str, Any]:

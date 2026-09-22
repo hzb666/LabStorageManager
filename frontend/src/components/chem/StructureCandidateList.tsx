@@ -14,7 +14,7 @@ function getCandidateCid(candidate: PubChemCandidate): number | null {
 }
 
 function getCandidateSmiles(candidate: PubChemCandidate): string | null {
-  return candidate.smiles_canonical?.trim() || candidate.smiles_isomeric?.trim() || null
+  return candidate.smiles_isomeric?.trim() || candidate.smiles_canonical?.trim() || null
 }
 
 function getPubChemImageUrl(cid: number): string {

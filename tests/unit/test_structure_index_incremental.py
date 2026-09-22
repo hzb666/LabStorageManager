@@ -56,6 +56,8 @@ class StructureIndexIncrementalTest(unittest.TestCase):
         cas_number: str,
         status: CompoundStructureStatus,
         smiles: str | None,
+        *,
+        isomeric_smiles: str | None = None,
     ) -> None:
         with Session(self.engine) as db:
             upsert_structure_cache(
@@ -65,7 +67,7 @@ class StructureIndexIncrementalTest(unittest.TestCase):
                     status=status,
                     source=CompoundStructureSource.PUBCHEM,
                     smiles_canonical=smiles,
-                    smiles_isomeric=smiles,
+                    smiles_isomeric=isomeric_smiles or smiles,
                 ),
                 skip_manual=False,
             )
@@ -80,6 +82,55 @@ class StructureIndexIncrementalTest(unittest.TestCase):
                 limit=100,
             )
         ]
+
+    def _substructure_cas(self, smiles: str) -> list[str]:
+        return [
+            hit.cas_number
+            for hit in self.index.search(
+                query=smiles,
+                query_format=StructureQueryFormat.SMILES,
+                limit=100,
+            )
+        ]
+
+    def test_search_ignores_double_bond_and_atom_stereochemistry(self) -> None:
+        fixtures = (
+            ("100-00-1", "FC=CF", "F/C=C/F"),
+            ("100-00-2", "FC=CF", "F/C=C\\F"),
+            ("100-00-3", "FC(Cl)Br", "F[C@H](Cl)Br"),
+            ("100-00-4", "FC(Cl)Br", "F[C@@H](Cl)Br"),
+        )
+        for cas_number, canonical_smiles, isomeric_smiles in fixtures:
+            self._write(
+                cas_number,
+                CompoundStructureStatus.RESOLVED,
+                canonical_smiles,
+                isomeric_smiles=isomeric_smiles,
+            )
+        with Session(self.engine) as db:
+            self.index.rebuild(db)
+
+        expected_double_bond_matches = ["100-00-1", "100-00-2"]
+        expected_atom_matches = ["100-00-3", "100-00-4"]
+        self.assertEqual(
+            expected_double_bond_matches,
+            self._substructure_cas("F/C=C/F"),
+        )
+        self.assertEqual(expected_double_bond_matches, self._exact_cas("F/C=C/F"))
+        double_bond_hits = self.index.search(
+            query="F/C=C/F",
+            query_format=StructureQueryFormat.SMILES,
+            limit=100,
+        )
+        self.assertEqual(
+            ["F/C=C/F", "F/C=C\\F"],
+            [hit.smiles_isomeric for hit in double_bond_hits],
+        )
+        self.assertEqual(
+            expected_atom_matches,
+            self._substructure_cas("F[C@H](Cl)Br"),
+        )
+        self.assertEqual(expected_atom_matches, self._exact_cas("F[C@H](Cl)Br"))
 
     def test_crud_events_update_delta_without_full_cache_scan(self) -> None:
         self._write("64-17-5", CompoundStructureStatus.RESOLVED, "CCO")

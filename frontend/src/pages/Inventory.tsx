@@ -677,7 +677,7 @@ function createStructureInventoryFilter(
     payload.results
       .map((result): [string, string] => [
         result.cas_number.trim(),
-        result.smiles_canonical.trim(),
+        result.smiles_isomeric?.trim() || result.smiles_canonical.trim(),
       ])
       .filter(([casNumber, smiles]) => Boolean(casNumber && smiles))
   )

@@ -61,6 +61,7 @@ class StructureIndexRecord:
 class StructureSearchHit:
     cas_number: str
     smiles_canonical: str
+    smiles_isomeric: str | None
     inchikey: str | None
     source: CompoundStructureSource | None
     similarity: float
@@ -125,6 +126,8 @@ class StructureSearchMode(str, Enum):
 
 
 _DUMMY_ATOM_SMARTS_PATTERN = re.compile(r"\[#0(?P<atom_map>:\d+)?\]")
+# 结构搜索将立体异构体视为等价；保留异构信息仅用于存储和结果展示。
+_STRUCTURE_SEARCH_USE_CHIRALITY = False
 
 
 class SubstructureIndex:
@@ -429,7 +432,6 @@ class SubstructureIndex:
         expected_revision: int | None = None,
     ) -> list[StructureSearchHit]:
         query_mol = _parse_query_molecule(query=query, query_format=query_format)
-        use_chirality = _query_has_stereochemistry(query_mol)
         query_fp = Chem.PatternFingerprint(query_mol)
         with self._search_semaphore:
             with self._lock:
@@ -439,7 +441,7 @@ class SubstructureIndex:
                 records=state.base_records,
                 query_mol=query_mol,
                 query_fp=query_fp,
-                use_chirality=use_chirality,
+                use_chirality=_STRUCTURE_SEARCH_USE_CHIRALITY,
                 allowed_cas_numbers=allowed_cas_numbers,
                 suppressed_cas=state.suppressed_cas,
             )
@@ -449,7 +451,7 @@ class SubstructureIndex:
                 records=delta_records,
                 query_mol=query_mol,
                 query_fp=query_fp,
-                use_chirality=use_chirality,
+                use_chirality=_STRUCTURE_SEARCH_USE_CHIRALITY,
                 allowed_cas_numbers=allowed_cas_numbers,
                 suppressed_cas=frozenset(),
             )
@@ -466,7 +468,6 @@ class SubstructureIndex:
     ) -> list[StructureSearchHit]:
         if query_format == StructureQueryFormat.SMARTS:
             query_mol, r_atom_indices = _parse_simple_r_exact_query(query=query)
-            use_chirality = _query_has_stereochemistry(query_mol)
             query_fp = Chem.PatternFingerprint(query_mol)
             with self._search_semaphore:
                 with self._lock:
@@ -478,13 +479,15 @@ class SubstructureIndex:
                     query_fp=query_fp,
                     r_atom_indices=r_atom_indices,
                     limit=limit,
-                    use_chirality=use_chirality,
+                    use_chirality=_STRUCTURE_SEARCH_USE_CHIRALITY,
                     allowed_cas_numbers=allowed_cas_numbers,
                 )
 
         query_mol = _parse_exact_query_molecule(query=query, query_format=query_format)
-        use_chirality = _query_has_stereochemistry(query_mol)
-        query_smiles = _canonical_query_smiles(query_mol, use_chirality=use_chirality)
+        query_smiles = _canonical_query_smiles(
+            query_mol,
+            use_chirality=_STRUCTURE_SEARCH_USE_CHIRALITY,
+        )
         with self._search_semaphore:
             with self._lock:
                 state = self._require_searchable_state_locked(expected_revision)
@@ -493,7 +496,7 @@ class SubstructureIndex:
                 records=records,
                 query_smiles=query_smiles,
                 limit=limit,
-                use_chirality=use_chirality,
+                use_chirality=_STRUCTURE_SEARCH_USE_CHIRALITY,
                 allowed_cas_numbers=allowed_cas_numbers,
                 query_atom_count=query_mol.GetNumAtoms(),
             )
@@ -903,24 +906,6 @@ def _normalize_exact_r_group_smarts(query: str) -> str:
     return _normalize_wildcard_smarts(Chem.MolToSmarts(normalized_mol))
 
 
-def _query_has_stereochemistry(mol) -> bool:
-    Chem.AssignStereochemistry(mol, cleanIt=False, force=True)
-    return any(_atom_has_chirality(atom) for atom in mol.GetAtoms()) or any(
-        _bond_has_stereochemistry(bond) for bond in mol.GetBonds()
-    )
-
-
-def _atom_has_chirality(atom) -> bool:
-    return atom.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED
-
-
-def _bond_has_stereochemistry(bond) -> bool:
-    return (
-        bond.GetStereo() != Chem.BondStereo.STEREONONE
-        or bond.GetBondDir() not in (Chem.BondDir.NONE, Chem.BondDir.UNKNOWN)
-    )
-
-
 def _parse_exact_query_molecule(*, query: str, query_format: str):
     if query_format == StructureQueryFormat.SMARTS:
         raise ValueError("Exact structure search requires SMILES or MolBlock")
@@ -1154,6 +1139,7 @@ def _record_to_hit(
     return StructureSearchHit(
         cas_number=record.cas_number,
         smiles_canonical=record.smiles_canonical,
+        smiles_isomeric=record.smiles_isomeric,
         inchikey=record.inchikey,
         source=record.source,
         similarity=similarity,

@@ -25,9 +25,10 @@ class StructureSearchCacheTest(unittest.TestCase):
         entry = put_structure_search_results(
             [
                 StructureSearchHit(
-                    cas_number="58-08-2",
-                    smiles_canonical="CN1C=NC2=C1C(=O)N(C(=O)N2C)C",
-                    inchikey="RYYVLZVUVIJVGH-UHFFFAOYSA-N",
+                    cas_number="100-00-1",
+                    smiles_canonical="FC=CF",
+                    smiles_isomeric="F/C=C/F",
+                    inchikey=None,
                     source=CompoundStructureSource.PUBCHEM,
                     similarity=1.0,
                     matched_atom_ratio=1.0,
@@ -58,7 +59,11 @@ class StructureSearchCacheTest(unittest.TestCase):
         self.assertEqual(snapshot.version, response.version)
         self.assertIsNotNone(cached)
         assert cached is not None
-        self.assertEqual(("58-08-2",), cached.cas_numbers)
+        self.assertEqual(("100-00-1",), cached.cas_numbers)
+        self.assertEqual(
+            "F/C=C/F",
+            cached.smiles_by_cas["100-00-1"],
+        )
         self.assertFalse(hasattr(cached, "index_version"))
 
 

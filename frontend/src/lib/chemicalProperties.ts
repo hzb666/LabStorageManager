@@ -29,7 +29,7 @@ interface ChemicalPropertiesStorage {
 }
 
 const CACHE_KEY = 'chemical_properties_cache'
-const CHEMICAL_PROPERTIES_STORAGE_VERSION = 1
+const CHEMICAL_PROPERTIES_STORAGE_VERSION = 2
 
 const memoryCache = new Map<string, CachedChemicalProperties>()
 const inFlightRequests = new Map<string, Promise<ChemicalProperties | null>>()

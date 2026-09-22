@@ -31,6 +31,7 @@ export interface InventoryStructureSummary {
 export interface SubstructureSearchResult {
   cas_number: string
   smiles_canonical: string
+  smiles_isomeric: string | null
   inchikey: string | null
   source: string | null
   similarity: number

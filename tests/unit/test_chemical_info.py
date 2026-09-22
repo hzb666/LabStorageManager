@@ -1,3 +1,6 @@
+import unittest
+from types import SimpleNamespace
+
 from app.services import chemical_info
 
 
@@ -5,6 +8,18 @@ class _FakeResponse:
     def __init__(self, status_code: int, content: bytes) -> None:
         self.status_code = status_code
         self.content = content
+
+
+class ChemicalInfoStructureDisplayTest(unittest.TestCase):
+    def test_cached_structure_prefers_isomeric_smiles_for_display(self) -> None:
+        cache = SimpleNamespace(
+            smiles_canonical="FC=CF",
+            smiles_isomeric="F/C=C/F",
+        )
+
+        self.assertEqual("F/C=C/F", chemical_info._get_cache_smiles(cache))
+        cache.smiles_isomeric = None
+        self.assertEqual("FC=CF", chemical_info._get_cache_smiles(cache))
 
 
 def test_query_chinese_name_uses_current_chemblink_zh_routes(

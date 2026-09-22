@@ -132,6 +132,7 @@ class InventorySummaryResponse(BaseModel):
 class SubstructureSearchResult(BaseModel):
     cas_number: str
     smiles_canonical: str
+    smiles_isomeric: str | None
     inchikey: str | None
     source: CompoundStructureSource | None
     similarity: float
@@ -580,6 +581,7 @@ def search_substructure(
         SubstructureSearchResult(
             cas_number=hit.cas_number,
             smiles_canonical=hit.smiles_canonical,
+            smiles_isomeric=hit.smiles_isomeric,
             inchikey=hit.inchikey,
             source=hit.source,
             similarity=hit.similarity,

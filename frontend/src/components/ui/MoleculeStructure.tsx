@@ -306,7 +306,7 @@ function createRDKitRenderOptions(
     width,
     height,
     bondLineWidth: 1.5,
-    addStereoAnnotation: true,
+    addStereoAnnotation: false,
   }
 
   if (!highlightDetails) {

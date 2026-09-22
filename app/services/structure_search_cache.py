@@ -47,8 +47,9 @@ def put_structure_search_results(
             continue
         seen.add(normalized)
         cas_numbers.append(normalized)
-        if hit.smiles_canonical:
-            smiles_by_cas[normalized] = hit.smiles_canonical
+        display_smiles = hit.smiles_isomeric or hit.smiles_canonical
+        if display_smiles:
+            smiles_by_cas[normalized] = display_smiles
 
     entry = StructureSearchCacheEntry(
         search_id=search_id,
