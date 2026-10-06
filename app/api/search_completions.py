@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
+import threading
+import time
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.auth import get_current_user
-from app.database import DBSession
+from app.core.config import settings
 from app.models.user import User
 from app.search_completion_db import (
     TARGET_ENDPOINTS,
@@ -15,13 +18,23 @@ from app.search_completion_db import (
     increment_feedback,
     upsert_user_preferences,
 )
-from app.services.search_completion_entity_index import rebuild_completion_entity_index_if_stale
 from app.services.search_completion_ranker import InlineCompletionRequest, get_inline_completion
 from app.services.sql_utils import normalize_search_term
 
 router = APIRouter(prefix="/search-completions", tags=["Search Completions"])
 logger = logging.getLogger(__name__)
 ALL_SEARCH_FIELD = "all"
+_inline_retry_at = 0.0
+_inline_failure_lock = threading.Lock()
+
+
+def _record_inline_failure(endpoint: str, error: sqlite3.OperationalError) -> None:
+    global _inline_retry_at
+    with _inline_failure_lock:
+        now = time.monotonic()
+        if now >= _inline_retry_at:
+            logger.warning("Completion unavailable endpoint=%s error=%s", endpoint, error)
+            _inline_retry_at = now + 5
 
 
 # ---------- 数据模型 ----------
@@ -55,7 +68,10 @@ class CompletionFeedbackRequest(BaseModel):
 
 @router.get("/preferences", response_model=SearchPreferencesResponse)
 def get_preferences(current_user: User = Depends(get_current_user)):  # noqa: B008
-    prefs = get_user_preferences(current_user.id)
+    try:
+        prefs = get_user_preferences(current_user.id)
+    except sqlite3.OperationalError as error:
+        raise HTTPException(status_code=503, detail="Search preferences temporarily unavailable") from error
     return SearchPreferencesResponse(personalization_enabled=prefs.personalization_enabled)
 
 
@@ -64,7 +80,10 @@ def update_preferences(
     body: SearchPreferencesUpdate,
     current_user: User = Depends(get_current_user),  # noqa: B008
 ):
-    prefs = upsert_user_preferences(current_user.id, body.personalization_enabled)
+    try:
+        prefs = upsert_user_preferences(current_user.id, body.personalization_enabled)
+    except sqlite3.OperationalError as error:
+        raise HTTPException(status_code=503, detail="Search preferences temporarily unavailable") from error
     return SearchPreferencesResponse(personalization_enabled=prefs.personalization_enabled)
 
 
@@ -72,10 +91,11 @@ def update_preferences(
 def get_inline_completion_endpoint(
     endpoint: str,
     q: str,
-    db: DBSession,
     field: str = "all",
     current_user: User = Depends(get_current_user),  # noqa: B008
 ):
+    if settings.inventory_read_only and endpoint != "/inventory/":
+        return InlineCompletionResponse()
     if endpoint not in TARGET_ENDPOINTS:
         return InlineCompletionResponse()
     if field != ALL_SEARCH_FIELD:
@@ -84,15 +104,19 @@ def get_inline_completion_endpoint(
         return InlineCompletionResponse()
     if " " in q:
         return InlineCompletionResponse()
+    if time.monotonic() < _inline_retry_at:
+        return InlineCompletionResponse()
 
-    rebuild_completion_entity_index_if_stale(db, endpoint)
-
-    result = get_inline_completion(InlineCompletionRequest(
-        user_id=current_user.id,
-        endpoint=endpoint,
-        field=field,
-        prefix=q.strip(),
-    ))
+    try:
+        result = get_inline_completion(InlineCompletionRequest(
+            user_id=current_user.id,
+            endpoint=endpoint,
+            field=field,
+            prefix=q.strip(),
+        ))
+    except sqlite3.OperationalError as error:
+        _record_inline_failure(endpoint, error)
+        return InlineCompletionResponse()
     return InlineCompletionResponse(
         completion=result.completion,
         suffix=result.suffix,
@@ -117,14 +141,16 @@ def submit_feedback(
         return {"ok": True}
 
     search_field = body.field if body.field and body.field != "all" else None
-    prefs = get_user_preferences(current_user.id)
-    user_id = current_user.id if prefs.personalization_enabled else None
-
-    increment_feedback(
-        user_id=user_id,
-        endpoint=body.endpoint,
-        search_field=search_field,
-        normalized_query=normalized,
-        accepted=body.accepted,
-    )
+    try:
+        prefs = get_user_preferences(current_user.id)
+        user_id = current_user.id if prefs.personalization_enabled else None
+        increment_feedback(
+            user_id=user_id,
+            endpoint=body.endpoint,
+            search_field=search_field,
+            normalized_query=normalized,
+            accepted=body.accepted,
+        )
+    except sqlite3.OperationalError as error:
+        _record_inline_failure(body.endpoint, error)
     return {"ok": True}

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +18,8 @@ GLOBAL_MEMORY_USER_ID = 0
 ALL_SEARCH_FIELD = ""
 ENTITY_INDEX_STALE_KEY = "entity_index_stale"
 ENTITY_INDEX_VERSION_KEY = "entity_index_version"
-ENTITY_INDEX_VERSION = "2"
+ENTITY_INDEX_VERSION = "3"
+LEGACY_MIGRATION_KEY = "legacy_completion_migrated"
 QUERY_MEMORY_PRUNE_META_KEY = "query_memory_last_pruned"
 QUERY_MEMORY_PERSONAL_SCOPE_LIMIT = 1_000
 QUERY_MEMORY_GLOBAL_SCOPE_LIMIT = 5_000
@@ -37,13 +40,25 @@ def _resolve_query_log_dir(path_value: str) -> Path:
 
 
 QUERY_LOG_DIR = _resolve_query_log_dir(settings.query_log_dir)
-QUERY_LOG_DB_PATH = QUERY_LOG_DIR / "query_logs.db"
+COMPLETION_DB_PATH = QUERY_LOG_DIR / "search_completion.db"
+LEGACY_DB_PATH = QUERY_LOG_DIR / "query_logs.db"
 
 TARGET_ENDPOINTS = (
     INVENTORY_COMPLETION_ENDPOINT,
     REAGENT_ORDER_COMPLETION_ENDPOINT,
     CONSUMABLE_ORDER_COMPLETION_ENDPOINT,
 )
+
+_write_timeout: ContextVar[float] = ContextVar("completion_write_timeout", default=3.0)
+
+
+@contextmanager
+def completion_write_timeout(seconds: float) -> Iterator[None]:
+    token = _write_timeout.set(seconds)
+    try:
+        yield
+    finally:
+        _write_timeout.reset(token)
 
 _COMPLETION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS search_query_memory (
@@ -136,13 +151,28 @@ class EntityCompletionRow:
     updated_at: str
 
 
-def _open_connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(str(QUERY_LOG_DB_PATH), timeout=3.0)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA journal_mode=WAL;")
-    connection.execute("PRAGMA synchronous=NORMAL;")
-    connection.execute("PRAGMA busy_timeout=3000;")
-    return connection
+@contextmanager
+def _open_connection() -> Iterator[sqlite3.Connection]:
+    with closing(sqlite3.connect(str(COMPLETION_DB_PATH), timeout=_write_timeout.get(), uri=True)) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA synchronous=NORMAL")
+        with connection:
+            yield connection
+
+
+@contextmanager
+def completion_read_connection() -> Iterator[sqlite3.Connection]:
+    with closing(sqlite3.connect(
+        f"{COMPLETION_DB_PATH.as_uri()}?mode=ro", uri=True, timeout=0.1,
+    )) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        connection.execute("BEGIN")
+        yield connection
+
+
+def _read_connection(connection: sqlite3.Connection | None):
+    return nullcontext(connection) if connection is not None else completion_read_connection()
 
 
 def _db_user_id(user_id: int | None) -> int:
@@ -181,6 +211,8 @@ def _mark_entity_completion_endpoints_stale(
     connection: sqlite3.Connection,
     endpoints: tuple[str, ...],
 ) -> None:
+    for endpoint in endpoints:
+        _advance_entity_generation(connection, endpoint)
     connection.executemany(
         """
         INSERT INTO search_completion_meta (key, value, updated_at)
@@ -297,22 +329,100 @@ def _ensure_entity_completion_index_version(connection: sqlite3.Connection) -> N
     )
 
 
-def init_search_completion_db() -> None:
-    QUERY_LOG_DIR.mkdir(parents=True, exist_ok=True)
+def _completion_schema_is_current(connection: sqlite3.Connection) -> bool:
+    required_objects = {
+        "search_query_memory", "entity_completion_index", "user_search_preferences",
+        "search_completion_meta", "idx_search_query_memory_personal_prefix",
+        "idx_search_query_memory_global_prefix", "ux_search_query_memory_scope_query",
+        "idx_entity_completion_scope_prefix", "ux_entity_completion_identity",
+    }
+    objects = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
+    if not required_objects.issubset(objects):
+        return False
+    metadata = dict(connection.execute("SELECT key, value FROM search_completion_meta"))
+    return (
+        metadata.get(LEGACY_MIGRATION_KEY) == "1"
+        and metadata.get(ENTITY_INDEX_VERSION_KEY) == ENTITY_INDEX_VERSION
+        and metadata.get(ENTITY_INDEX_STALE_KEY) != "1"
+    )
+
+
+def is_search_completion_db_current() -> bool:
+    if not COMPLETION_DB_PATH.is_file():
+        return False
+    with completion_read_connection() as connection:
+        return _completion_schema_is_current(connection)
+
+
+def _upgrade_search_completion_db() -> None:
+    COMPLETION_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _open_connection() as connection:
-        connection.executescript(_COMPLETION_SCHEMA)
-        _normalize_search_memory_scope(connection)
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("BEGIN IMMEDIATE")
+        if _completion_schema_is_current(connection):
+            return
+        for statement in _COMPLETION_SCHEMA.split(";"):
+            if statement.strip():
+                connection.execute(statement)
+        _migrate_legacy_completion_data(connection)
         _normalize_entity_index_stale_scope(connection)
         _ensure_entity_completion_index_version(connection)
         connection.commit()
-    logger.info("Search completion tables initialized in query_logs.db")
+    logger.info("Search completion database initialized path=%s", COMPLETION_DB_PATH)
+
+
+def init_search_completion_db() -> None:
+    if settings.inventory_read_only or is_search_completion_db_current():
+        return
+    _upgrade_search_completion_db()
+
+
+def _migrate_legacy_completion_data(connection: sqlite3.Connection) -> None:
+    migration_key = LEGACY_MIGRATION_KEY
+    if connection.execute(
+        "SELECT 1 FROM search_completion_meta WHERE key = ? AND value = '1'", (migration_key,),
+    ).fetchone():
+        return
+    if LEGACY_DB_PATH.exists() and LEGACY_DB_PATH != COMPLETION_DB_PATH:
+        connection.execute(
+            "ATTACH DATABASE ? AS legacy", (f"{LEGACY_DB_PATH.as_uri()}?mode=ro",),
+        )
+        tables = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM legacy.sqlite_master WHERE type = 'table'"
+            )
+        }
+        if "user_search_preferences" in tables:
+            connection.execute(
+                "INSERT OR IGNORE INTO user_search_preferences "
+                "(user_id, personalization_enabled, updated_at) "
+                "SELECT user_id, personalization_enabled, updated_at FROM legacy.user_search_preferences"
+            )
+        if "search_query_memory" in tables:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO search_query_memory
+                    (user_id, endpoint, search_field, query, normalized_query,
+                     frequency, last_used_at, accept_count, reject_count)
+                SELECT COALESCE(user_id, 0), endpoint, COALESCE(search_field, ''),
+                       query, normalized_query, frequency, last_used_at, accept_count, reject_count
+                FROM legacy.search_query_memory
+                """
+            )
+            _normalize_search_memory_scope(connection)
+    connection.execute(
+        "INSERT INTO search_completion_meta (key, value) VALUES (?, '1') "
+        "ON CONFLICT(key) DO UPDATE SET value = '1'", (migration_key,),
+    )
 
 
 # ---------- user_search_preferences ----------
 
 
-def get_user_preferences(user_id: int) -> SearchPreferences:
-    with _open_connection() as connection:
+def get_user_preferences(
+    user_id: int, *, connection: sqlite3.Connection | None = None,
+) -> SearchPreferences:
+    with _read_connection(connection) as connection:
         row = connection.execute(
             "SELECT user_id, personalization_enabled FROM user_search_preferences WHERE user_id = ?",
             (user_id,),
@@ -465,7 +575,7 @@ def _record_query_memory_prune(connection: sqlite3.Connection, deleted_rows: int
 
 def prune_query_memory_if_due() -> int | None:
     """Prune persisted query memory when the cross-process throttle allows it."""
-    with closing(_open_connection()) as connection:
+    with _open_connection() as connection:
         if not _is_query_memory_prune_due(connection):
             return None
 
@@ -523,11 +633,12 @@ def query_memory_by_prefix(
     search_field: str | None,
     prefix: str,
     limit: int = 20,
+    connection: sqlite3.Connection | None = None,
 ) -> list[QueryMemoryRow]:
     db_user_id = _db_user_id(user_id)
     db_search_field = _db_search_field(search_field)
     db_prefix = _normalize_query_key(prefix)
-    with _open_connection() as connection:
+    with _read_connection(connection) as connection:
         rows = connection.execute(
             """
             SELECT id, user_id, endpoint, search_field, query, normalized_query,
@@ -564,9 +675,64 @@ def mark_entity_completion_index_stale(endpoint: str | None = None) -> None:
         connection.commit()
 
 
+def _advance_entity_generation(connection: sqlite3.Connection, endpoint: str) -> None:
+    connection.execute(
+        """
+        INSERT INTO search_completion_meta (key, value) VALUES (?, '1')
+        ON CONFLICT(key) DO UPDATE SET
+            value = CAST(value AS INTEGER) + 1, updated_at = CURRENT_TIMESTAMP
+        """,
+        (f"entity_index_generation:{endpoint}",),
+    )
+
+
+def get_entity_completion_generation(
+    endpoint: str, *, connection: sqlite3.Connection | None = None,
+) -> int:
+    with _read_connection(connection) as connection:
+        row = connection.execute(
+            "SELECT value FROM search_completion_meta WHERE key = ?",
+            (f"entity_index_generation:{endpoint}",),
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def replace_entity_completion_index(
+    endpoint: str,
+    rows: list[tuple[str, str, str, str, str, str, str | None, float]],
+    generation: int,
+) -> bool:
+    _entity_completion_endpoints(endpoint)
+    if any(row[0] != endpoint for row in rows):
+        raise ValueError("Completion rows must belong to the rebuilt endpoint")
+    with _open_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        if get_entity_completion_generation(endpoint, connection=connection) != generation:
+            return False
+        connection.execute("DELETE FROM entity_completion_index WHERE endpoint = ?", (endpoint,))
+        connection.executemany(
+            """
+            INSERT INTO entity_completion_index
+                (endpoint, field, value, normalized_value, entity_type, entity_id,
+                 display_meta, operational_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        connection.execute(
+            """
+            INSERT INTO search_completion_meta (key, value) VALUES (?, '0')
+            ON CONFLICT(key) DO UPDATE SET value = '0', updated_at = CURRENT_TIMESTAMP
+            """,
+            (_entity_completion_stale_key(endpoint),),
+        )
+        connection.commit()
+    return True
+
+
 def is_entity_completion_index_stale(endpoint: str) -> bool:
     endpoint_key = _entity_completion_stale_key(_entity_completion_endpoints(endpoint)[0])
-    with _open_connection() as connection:
+    with completion_read_connection() as connection:
         row = connection.execute(
             "SELECT value FROM search_completion_meta WHERE key = ?",
             (endpoint_key,),
@@ -574,43 +740,36 @@ def is_entity_completion_index_stale(endpoint: str) -> bool:
     return bool(row and row["value"] == "1")
 
 
-def clear_entity_completion_index_stale(endpoint: str | None = None) -> None:
-    endpoints = _entity_completion_endpoints(endpoint)
-    with _open_connection() as connection:
-        connection.executemany(
-            """
-            INSERT INTO search_completion_meta (key, value, updated_at)
-            VALUES (?, '0', CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET
-                value = '0',
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            [(_entity_completion_stale_key(current),) for current in endpoints],
-        )
-        connection.commit()
-
-
 # ---------- entity_completion_index ----------
 
 
-def query_entity_by_prefix(
+def query_entities_by_prefix(
     *,
     endpoint: str,
-    field: str,
+    fields: tuple[str, ...],
     prefix: str,
     limit: int = 30,
+    connection: sqlite3.Connection | None = None,
 ) -> list[EntityCompletionRow]:
-    with _open_connection() as connection:
+    if not fields:
+        return []
+    placeholders = ",".join("?" for _ in fields)
+    with _read_connection(connection) as connection:
         rows = connection.execute(
-            """
-            SELECT id, endpoint, field, value, normalized_value,
-                   entity_type, entity_id, display_meta, operational_score, updated_at
-            FROM entity_completion_index
-            WHERE endpoint = ? AND field = ? AND normalized_value LIKE ? || '%'
-            ORDER BY operational_score DESC, value ASC
-            LIMIT ?
+            f"""
+            SELECT * FROM (
+                SELECT id, endpoint, field, value, normalized_value,
+                       entity_type, entity_id, display_meta, operational_score, updated_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY field ORDER BY operational_score DESC, value ASC, id ASC
+                       ) AS candidate_rank
+                FROM entity_completion_index
+                WHERE endpoint = ? AND field IN ({placeholders})
+                    AND normalized_value LIKE ? || '%'
+            ) WHERE candidate_rank <= ?
+            ORDER BY field, candidate_rank
             """,
-            (endpoint, field, prefix, limit),
+            (endpoint, *fields, prefix, limit),
         ).fetchall()
     return [
         EntityCompletionRow(
@@ -629,15 +788,6 @@ def query_entity_by_prefix(
     ]
 
 
-def clear_entity_completion_index(endpoint: str | None = None) -> None:
-    with _open_connection() as connection:
-        if endpoint is None:
-            connection.execute("DELETE FROM entity_completion_index")
-        else:
-            connection.execute("DELETE FROM entity_completion_index WHERE endpoint = ?", (endpoint,))
-        connection.commit()
-
-
 def replace_entity_completions_for_entity(
     endpoint: str,
     entity_type: str,
@@ -645,6 +795,7 @@ def replace_entity_completions_for_entity(
     rows: list[tuple[str, str, str, str, str, str, str | None, float]],
 ) -> None:
     with _open_connection() as connection:
+        _advance_entity_generation(connection, endpoint)
         connection.execute(
             """
             DELETE FROM entity_completion_index
@@ -671,27 +822,12 @@ def delete_entity_completions_for_entity(
     entity_id: str,
 ) -> None:
     with _open_connection() as connection:
+        _advance_entity_generation(connection, endpoint)
         connection.execute(
             """
             DELETE FROM entity_completion_index
             WHERE endpoint = ? AND entity_type = ? AND entity_id = ?
             """,
             (endpoint, entity_type, entity_id),
-        )
-        connection.commit()
-
-
-def bulk_insert_entity_completions(
-    rows: list[tuple[str, str, str, str, str, str, str | None, float]],
-) -> None:
-    with _open_connection() as connection:
-        connection.executemany(
-            """
-            INSERT OR REPLACE INTO entity_completion_index
-                (endpoint, field, value, normalized_value, entity_type, entity_id,
-                 display_meta, operational_score, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-            rows,
         )
         connection.commit()

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -11,8 +12,9 @@ from app.search_completion_db import (
     INVENTORY_COMPLETION_ENDPOINT,
     REAGENT_ORDER_COMPLETION_ENDPOINT,
     QueryMemoryRow,
+    completion_read_connection,
     get_user_preferences,
-    query_entity_by_prefix,
+    query_entities_by_prefix,
     query_memory_by_prefix,
 )
 from app.services.sql_utils import normalize_search_term
@@ -104,6 +106,7 @@ def _collect_memory_candidates(
     endpoint: str,
     search_field: str | None,
     normalized_prefix: str,
+    connection: sqlite3.Connection,
 ) -> list[tuple[str, float, str]]:
     rows = query_memory_by_prefix(
         user_id=user_id,
@@ -111,6 +114,7 @@ def _collect_memory_candidates(
         search_field=search_field,
         prefix=normalized_prefix,
         limit=30,
+        connection=connection,
     )
     scored: list[tuple[str, float, str]] = []
     max_score = max((_memory_score(r) for r in rows), default=0.0)
@@ -132,19 +136,18 @@ def _collect_entity_candidates(
     endpoint: str,
     field: str,
     normalized_prefix: str,
+    connection: sqlite3.Connection,
 ) -> list[tuple[str, float, str]]:
     fields = _entity_fields_for_endpoint(endpoint, field)
-    scored: list[tuple[str, float, str]] = []
-    for entity_field in fields:
-        rows = query_entity_by_prefix(
-            endpoint=endpoint,
-            field=entity_field,
-            prefix=normalized_prefix,
-            limit=20,
-        )
-        for row in rows:
-            scored.append((row.value, row.operational_score, "entity_index"))
-    return scored
+    rows = query_entities_by_prefix(
+        endpoint=endpoint,
+        fields=fields,
+        prefix=normalized_prefix,
+        limit=20,
+        connection=connection,
+    )
+    rows.sort(key=lambda row: fields.index(row.field))
+    return [(row.value, row.operational_score, "entity_index") for row in rows]
 
 
 def _select_best(
@@ -173,11 +176,18 @@ def _select_best(
 
 
 def get_inline_completion(req: InlineCompletionRequest) -> InlineCompletionResult:
+    with completion_read_connection() as connection:
+        return _get_inline_completion(req, connection)
+
+
+def _get_inline_completion(
+    req: InlineCompletionRequest, connection: sqlite3.Connection,
+) -> InlineCompletionResult:
     normalized_prefix = _normalize_prefix(req.prefix)
     if not normalized_prefix:
         return InlineCompletionResult()
 
-    prefs = get_user_preferences(req.user_id)
+    prefs = get_user_preferences(req.user_id, connection=connection)
     personalized = prefs.personalization_enabled
     search_field = req.field if req.field != "all" else None
 
@@ -187,17 +197,20 @@ def get_inline_completion(req: InlineCompletionRequest) -> InlineCompletionResul
         for c, s, src in _collect_memory_candidates(
             user_id=req.user_id, endpoint=req.endpoint,
             search_field=search_field, normalized_prefix=normalized_prefix,
+            connection=connection,
         ):
             all_candidates.append((c, 0.45 * s, src))
 
     for c, s, src in _collect_memory_candidates(
         user_id=None, endpoint=req.endpoint,
         search_field=search_field, normalized_prefix=normalized_prefix,
+        connection=connection,
     ):
         all_candidates.append((c, 0.45 * s if not personalized else 0.20 * s, src))
 
     for c, s, src in _collect_entity_candidates(
         endpoint=req.endpoint, field=req.field, normalized_prefix=normalized_prefix,
+        connection=connection,
     ):
         all_candidates.append((c, 0.40 * s if not personalized else 0.25 * s, src))
 

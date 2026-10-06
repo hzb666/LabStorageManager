@@ -50,19 +50,21 @@ class EntityCompletionIndexVersionTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(0, remaining_stale)
 
-    def test_rebuild_clears_existing_endpoint_rows_before_marking_fresh(self) -> None:
+    def test_rebuild_atomically_replaces_even_an_empty_endpoint(self) -> None:
         endpoint = completion_db.REAGENT_ORDER_COMPLETION_ENDPOINT
+        @contextmanager
+        def acquired_lock():
+            yield True
+
         with (
+            patch.object(entity_index, "completion_rebuild_lock", acquired_lock),
             patch.object(entity_index, "_build_endpoint_rows", return_value=([], 0)),
-            patch.object(entity_index, "clear_entity_completion_index") as clear_rows,
-            patch.object(entity_index, "bulk_insert_entity_completions") as insert_rows,
-            patch.object(entity_index, "clear_entity_completion_index_stale") as clear_stale,
+            patch.object(entity_index, "get_entity_completion_generation", return_value=7),
+            patch.object(entity_index, "replace_entity_completion_index") as replace_rows,
         ):
             entity_index.rebuild_completion_entity_index(object(), endpoint)
 
-        clear_rows.assert_called_once_with(endpoint)
-        insert_rows.assert_not_called()
-        clear_stale.assert_called_once_with(endpoint)
+        replace_rows.assert_called_once_with(endpoint, [], 7)
 
 
 class EntityCompletionDeleteHelperTests(unittest.TestCase):
@@ -136,6 +138,7 @@ class EntityCompletionUpdateFailureTests(unittest.TestCase):
                 side_effect=RuntimeError("stale mark failed"),
             ) as mark_stale,
             patch.object(entity_index.logger, "exception") as log_exception,
+            patch("app.services.search_completion_scheduler.completion_scheduler.invalidate") as invalidate,
         ):
             entity_index.run_completion_index_update(
                 operation,
@@ -144,6 +147,7 @@ class EntityCompletionUpdateFailureTests(unittest.TestCase):
             )
 
         mark_stale.assert_called_once_with(endpoint)
+        invalidate.assert_called_once_with(endpoint)
         self.assertEqual(2, log_exception.call_count)
 
     def test_successful_update_does_not_mark_endpoint_stale(self) -> None:

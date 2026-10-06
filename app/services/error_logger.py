@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.core.constants import DEFAULT_LOG_HOURS, DEFAULT_LOG_LINES
+from app.core.config import settings
 from app.core.time_utils import to_display_time
 
 # 敏感关键词列表（用于日志脱敏）
@@ -216,7 +217,7 @@ def log_error(message: str, exc_info: Exception | None = None) -> None:
         message: 错误消息
         exc_info: 异常信息（可选）
     """
-    logger = get_error_logger()
+    logger = logging.getLogger(__name__) if settings.inventory_read_only else get_error_logger()
 
     if exc_info:
         logger.error(message, exc_info=True)  # noqa: LOG014 - preserve exception logging behavior.

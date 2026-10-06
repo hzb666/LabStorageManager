@@ -6,6 +6,8 @@ from collections.abc import Callable
 
 from sqlmodel import Session, select
 
+from app.core.config import settings
+
 from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
@@ -14,14 +16,15 @@ from app.search_completion_db import (
     INVENTORY_COMPLETION_ENDPOINT,
     REAGENT_ORDER_COMPLETION_ENDPOINT,
     TARGET_ENDPOINTS,
-    bulk_insert_entity_completions,
-    clear_entity_completion_index,
-    clear_entity_completion_index_stale,
+    completion_write_timeout,
     delete_entity_completions_for_entity,
+    get_entity_completion_generation,
     is_entity_completion_index_stale,
     mark_entity_completion_index_stale,
     replace_entity_completions_for_entity,
+    replace_entity_completion_index,
 )
+from app.services.search_completion_lock import completion_rebuild_lock
 from app.services.sql_utils import normalize_search_term
 from app.services.user_utils import batch_get_user_names
 
@@ -39,24 +42,30 @@ def run_completion_index_update(
 ) -> None:
     """Run an auxiliary update and schedule an endpoint rebuild after failures."""
 
-    try:
-        operation()
-    except Exception:
-        logger.exception(
-            "search_completion_update_failed context=%s endpoint=%s; "
-            "preserving the committed business result",
-            context,
-            endpoint,
-        )
+    if settings.inventory_read_only:
+        return
+    with completion_write_timeout(0.1):
         try:
-            mark_entity_completion_index_stale(endpoint)
+            operation()
         except Exception:
             logger.exception(
-                "search_completion_stale_mark_failed context=%s endpoint=%s; "
-                "manual rebuild may be required",
+                "search_completion_update_failed context=%s endpoint=%s; "
+                "preserving the committed business result",
                 context,
                 endpoint,
             )
+            try:
+                mark_entity_completion_index_stale(endpoint)
+            except Exception:
+                from app.services.search_completion_scheduler import completion_scheduler
+
+                completion_scheduler.invalidate(endpoint)
+                logger.exception(
+                    "search_completion_stale_mark_failed context=%s endpoint=%s; "
+                    "background retry scheduled",
+                    context,
+                    endpoint,
+                )
 
 
 _INVENTORY_STATUS_SCORE: dict[str, float] = {
@@ -87,141 +96,90 @@ def _normalize(value: str | None) -> str:
     return normalize_search_term(value or "").casefold()
 
 
-def _build_inventory_rows(items: list[Inventory]) -> list[EntityRow]:
-    rows: list[EntityRow] = []
-    for item in items:
-        entity_id = str(item.id)
-        score = _INVENTORY_STATUS_SCORE.get(item.status.value, 0.5)
+def _build_inventory_rows(item: Inventory) -> list[EntityRow]:
+    score = _INVENTORY_STATUS_SCORE.get(item.status.value, 0.5)
+    return [
+        (
+            INVENTORY_COMPLETION_ENDPOINT, field, value, _normalize(value),
+            "inventory", str(item.id), None, score,
+        )
         for field, value in [
             ("name", item.name),
             ("cas_number", item.cas_number),
             ("storage_location", item.storage_location),
             ("brand", item.brand),
             ("category", item.category),
-        ]:
-            if not value:
-                continue
-            rows.append((
-                INVENTORY_COMPLETION_ENDPOINT,
-                field,
-                value,
-                _normalize(value),
-                "inventory",
-                entity_id,
-                None,
-                score,
-            ))
-    return rows
+        ]
+        if value
+    ]
 
 
 def _build_reagent_rows(
-    orders: list[ReagentOrder],
-    user_names: dict[int, str],
+    order: ReagentOrder,
+    applicant_name: str | None,
 ) -> list[EntityRow]:
-    rows: list[EntityRow] = []
-    for order in orders:
-        entity_id = str(order.id)
-        score = _REAGENT_STATUS_SCORE.get(order.status.value, 0.5)
+    score = _REAGENT_STATUS_SCORE.get(order.status.value, 0.5)
+    return [
+        (
+            REAGENT_ORDER_COMPLETION_ENDPOINT, field, value, _normalize(value),
+            "reagent_order", str(order.id), None, score,
+        )
         for field, value in [
             ("name", order.name),
             ("cas_number", order.cas_number),
             ("brand", order.brand),
             ("category", order.category),
-        ]:
-            if not value:
-                continue
-            rows.append((
-                REAGENT_ORDER_COMPLETION_ENDPOINT,
-                field,
-                value,
-                _normalize(value),
-                "reagent_order",
-                entity_id,
-                None,
-                score,
-            ))
-
-        if order.applicant_id:
-            applicant_name = user_names.get(order.applicant_id, "")
-            if applicant_name:
-                rows.append((
-                    REAGENT_ORDER_COMPLETION_ENDPOINT,
-                    "applicant",
-                    applicant_name,
-                    _normalize(applicant_name),
-                    "reagent_order",
-                    entity_id,
-                    None,
-                    score,
-                ))
-    return rows
+            ("applicant", applicant_name),
+        ]
+        if value
+    ]
 
 
 def _build_consumable_rows(
-    orders: list[ConsumableOrder],
-    user_names: dict[int, str],
+    order: ConsumableOrder,
+    applicant_name: str | None,
 ) -> list[EntityRow]:
-    rows: list[EntityRow] = []
-    for order in orders:
-        entity_id = str(order.id)
-        score = _CONSUMABLE_STATUS_SCORE.get(order.status.value, 0.5)
+    score = _CONSUMABLE_STATUS_SCORE.get(order.status.value, 0.5)
+    return [
+        (
+            CONSUMABLE_ORDER_COMPLETION_ENDPOINT, field, value, _normalize(value),
+            "consumable_order", str(order.id), None, score,
+        )
         for field, value in [
             ("name", order.name),
             ("specification", order.specification),
             ("communication", order.communication),
-        ]:
-            if not value:
-                continue
-            rows.append((
-                CONSUMABLE_ORDER_COMPLETION_ENDPOINT,
-                field,
-                value,
-                _normalize(value),
-                "consumable_order",
-                entity_id,
-                None,
-                score,
-            ))
-
-        if order.applicant_id:
-            applicant_name = user_names.get(order.applicant_id, "")
-            if applicant_name:
-                rows.append((
-                    CONSUMABLE_ORDER_COMPLETION_ENDPOINT,
-                    "applicant",
-                    applicant_name,
-                    _normalize(applicant_name),
-                    "consumable_order",
-                    entity_id,
-                    None,
-                    score,
-                ))
-    return rows
+            ("applicant", applicant_name),
+        ]
+        if value
+    ]
 
 
 def _build_inventory_index(db: Session) -> tuple[list[EntityRow], int]:
     inventory_items = list(db.exec(select(Inventory)).all())
-    return _build_inventory_rows(inventory_items), len(inventory_items)
+    return [row for item in inventory_items for row in _build_inventory_rows(item)], len(inventory_items)
 
 
 def _build_reagent_index(db: Session) -> tuple[list[EntityRow], int]:
     reagent_orders = list(db.exec(select(ReagentOrder)).all())
-    user_ids: set[int] = set()
-    for order in reagent_orders:
-        if order.applicant_id:
-            user_ids.add(order.applicant_id)
+    user_ids = {order.applicant_id for order in reagent_orders if order.applicant_id}
     user_names = batch_get_user_names(db, user_ids)
-    return _build_reagent_rows(reagent_orders, user_names), len(reagent_orders)
+    rows = [
+        row for order in reagent_orders
+        for row in _build_reagent_rows(order, user_names.get(order.applicant_id))
+    ]
+    return rows, len(reagent_orders)
 
 
 def _build_consumable_index(db: Session) -> tuple[list[EntityRow], int]:
     consumable_orders = list(db.exec(select(ConsumableOrder)).all())
-    user_ids: set[int] = set()
-    for order in consumable_orders:
-        if order.applicant_id:
-            user_ids.add(order.applicant_id)
+    user_ids = {order.applicant_id for order in consumable_orders if order.applicant_id}
     user_names = batch_get_user_names(db, user_ids)
-    return _build_consumable_rows(consumable_orders, user_names), len(consumable_orders)
+    rows = [
+        row for order in consumable_orders
+        for row in _build_consumable_rows(order, user_names.get(order.applicant_id))
+    ]
+    return rows, len(consumable_orders)
 
 
 def _entity_index_endpoints(endpoint: str | None) -> tuple[str, ...]:
@@ -242,15 +200,28 @@ def _build_endpoint_rows(db: Session, endpoint: str) -> tuple[list[EntityRow], i
     raise ValueError(f"Unsupported search completion endpoint: {endpoint}")
 
 
-def rebuild_completion_entity_index(db: Session, endpoint: str | None = None) -> None:
+def rebuild_completion_entity_index(
+    db: Session, endpoint: str | None = None, *, only_if_stale: bool = False,
+) -> None:
+    with completion_rebuild_lock() as acquired:
+        if not acquired:
+            return
+        _rebuild_completion_entity_index(db, endpoint, only_if_stale=only_if_stale)
+
+
+def _rebuild_completion_entity_index(
+    db: Session, endpoint: str | None, *, only_if_stale: bool,
+) -> None:
     for current_endpoint in _entity_index_endpoints(endpoint):
+        if only_if_stale and not is_entity_completion_index_stale(current_endpoint):
+            continue
         logger.info("Rebuilding entity completion index endpoint=%s", current_endpoint)
+        generation = get_entity_completion_generation(current_endpoint)
         rows, entity_count = _build_endpoint_rows(db, current_endpoint)
 
-        clear_entity_completion_index(current_endpoint)
-        if rows:
-            bulk_insert_entity_completions(rows)
-        clear_entity_completion_index_stale(current_endpoint)
+        if not replace_entity_completion_index(current_endpoint, rows, generation):
+            logger.info("Completion index changed during rebuild endpoint=%s; retry later", current_endpoint)
+            continue
 
         logger.info(
             "Entity completion index rebuilt endpoint=%s entities=%d rows=%d",
@@ -262,31 +233,15 @@ def rebuild_completion_entity_index(db: Session, endpoint: str | None = None) ->
 
 def rebuild_completion_entity_index_if_stale(db: Session, endpoint: str) -> None:
     if is_entity_completion_index_stale(endpoint):
-        rebuild_completion_entity_index(db, endpoint)
+        rebuild_completion_entity_index(db, endpoint, only_if_stale=True)
 
 
 # ---------- 增量同步（单条记录） ----------
 
 
 def sync_inventory_entity_completions(item: Inventory) -> None:
-    entity_id = str(item.id)
-    score = _INVENTORY_STATUS_SCORE.get(item.status.value, 0.5)
-    rows: list[EntityRow] = []
-    for field, value in [
-        ("name", item.name),
-        ("cas_number", item.cas_number),
-        ("storage_location", item.storage_location),
-        ("brand", item.brand),
-        ("category", item.category),
-    ]:
-        if not value:
-            continue
-        rows.append((
-            INVENTORY_COMPLETION_ENDPOINT, field, value, _normalize(value),
-            "inventory", entity_id, None, score,
-        ))
     replace_entity_completions_for_entity(
-        INVENTORY_COMPLETION_ENDPOINT, "inventory", entity_id, rows,
+        INVENTORY_COMPLETION_ENDPOINT, "inventory", str(item.id), _build_inventory_rows(item),
     )
 
 
@@ -301,28 +256,9 @@ def sync_reagent_order_entity_completions(
 ) -> None:
     if applicant_name is None and order.applicant_id and db is not None:
         applicant_name = batch_get_user_names(db, {order.applicant_id}).get(order.applicant_id)
-    entity_id = str(order.id)
-    score = _REAGENT_STATUS_SCORE.get(order.status.value, 0.5)
-    rows: list[EntityRow] = []
-    for field, value in [
-        ("name", order.name),
-        ("cas_number", order.cas_number),
-        ("brand", order.brand),
-        ("category", order.category),
-    ]:
-        if not value:
-            continue
-        rows.append((
-            REAGENT_ORDER_COMPLETION_ENDPOINT, field, value, _normalize(value),
-            "reagent_order", entity_id, None, score,
-        ))
-    if applicant_name:
-        rows.append((
-            REAGENT_ORDER_COMPLETION_ENDPOINT, "applicant", applicant_name,
-            _normalize(applicant_name), "reagent_order", entity_id, None, score,
-        ))
     replace_entity_completions_for_entity(
-        REAGENT_ORDER_COMPLETION_ENDPOINT, "reagent_order", entity_id, rows,
+        REAGENT_ORDER_COMPLETION_ENDPOINT, "reagent_order", str(order.id),
+        _build_reagent_rows(order, applicant_name),
     )
 
 
@@ -337,27 +273,9 @@ def sync_consumable_order_entity_completions(
 ) -> None:
     if applicant_name is None and order.applicant_id and db is not None:
         applicant_name = batch_get_user_names(db, {order.applicant_id}).get(order.applicant_id)
-    entity_id = str(order.id)
-    score = _CONSUMABLE_STATUS_SCORE.get(order.status.value, 0.5)
-    rows: list[EntityRow] = []
-    for field, value in [
-        ("name", order.name),
-        ("specification", order.specification),
-        ("communication", order.communication),
-    ]:
-        if not value:
-            continue
-        rows.append((
-            CONSUMABLE_ORDER_COMPLETION_ENDPOINT, field, value, _normalize(value),
-            "consumable_order", entity_id, None, score,
-        ))
-    if applicant_name:
-        rows.append((
-            CONSUMABLE_ORDER_COMPLETION_ENDPOINT, "applicant", applicant_name,
-            _normalize(applicant_name), "consumable_order", entity_id, None, score,
-        ))
     replace_entity_completions_for_entity(
-        CONSUMABLE_ORDER_COMPLETION_ENDPOINT, "consumable_order", entity_id, rows,
+        CONSUMABLE_ORDER_COMPLETION_ENDPOINT, "consumable_order", str(order.id),
+        _build_consumable_rows(order, applicant_name),
     )
 
 

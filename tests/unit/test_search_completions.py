@@ -6,13 +6,11 @@ def test_inline_completion_returns_empty_for_ascii_space_query(monkeypatch) -> N
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("segmented query should not request inline completion")
 
-    monkeypatch.setattr(search_completions, "rebuild_completion_entity_index_if_stale", fail_if_called)
     monkeypatch.setattr(search_completions, "get_inline_completion", fail_if_called)
 
     response = search_completions.get_inline_completion_endpoint(
         endpoint="/inventory/",
         q="三氟 磺酸钠",
-        db=object(),
         field="all",
         current_user=User(
             id=1,

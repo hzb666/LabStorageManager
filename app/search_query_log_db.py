@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Iterable
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -132,13 +133,13 @@ class SearchLogRow:
     created_at: str
 
 
-def _open_connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(str(QUERY_LOG_DB_PATH), timeout=3.0)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA journal_mode=WAL;")
-    connection.execute("PRAGMA synchronous=NORMAL;")
-    connection.execute("PRAGMA busy_timeout=3000;")
-    return connection
+@contextmanager
+def _open_connection():
+    with closing(sqlite3.connect(str(QUERY_LOG_DB_PATH), timeout=3.0)) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA synchronous=NORMAL")
+        with connection:
+            yield connection
 
 
 def _sqlite_created_at_to_utc_iso(value: object) -> str:
@@ -312,6 +313,7 @@ def count_search_log_rows(
 def init_query_log_db() -> None:
     QUERY_LOG_DIR.mkdir(parents=True, exist_ok=True)
     with _open_connection() as connection:
+        connection.execute("PRAGMA journal_mode=WAL;")
         connection.executescript(_SEARCH_LOG_SCHEMA)
         _check_query_log_schema_consistency(connection)
         connection.commit()

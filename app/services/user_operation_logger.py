@@ -6,6 +6,8 @@ from typing import Any
 
 from sqlmodel import Session
 
+from app.core.config import settings
+
 from app.core.time_utils import utc_iso_str
 from app.models.user import User
 from app.models.user_operation_log import UserOperationAction, UserOperationLog
@@ -87,9 +89,11 @@ def log_user_operation(
     detail: str | None = None,
     snapshot: dict[str, Any] | None = None,
     is_cli: bool,
-) -> UserOperationLog:
+) -> UserOperationLog | None:
     """Persist a user operation log entry."""
 
+    if settings.inventory_read_only:
+        return None
     payload = snapshot or {}
     log = UserOperationLog(
         actor_user_id=actor_user_id,
@@ -118,7 +122,7 @@ def log_user_profile_update(
     request_id: str | None,
     detail: str | None = None,
     is_cli: bool,
-) -> UserOperationLog:
+) -> UserOperationLog | None:
     """Persist a user profile update log entry with before/after snapshots."""
 
     snapshot = {
@@ -150,7 +154,7 @@ def log_user_sensitive_update(
     request_id: str | None,
     detail: str | None,
     is_cli: bool,
-) -> UserOperationLog:
+) -> UserOperationLog | None:
     """Persist a sensitive user update log entry with before/after snapshots."""
 
     snapshot = {

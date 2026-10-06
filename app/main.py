@@ -1,6 +1,7 @@
 """
 Lab Storage Manager - Main FastAPI Application
 """
+import asyncio
 import logging
 import re
 import time
@@ -44,6 +45,7 @@ from app.core.auth import (
 )
 from app.core.banner import print_banner
 from app.core.config import settings
+from app.core.read_only import inventory_read_only_middleware
 from app.core.constants import (
     CSP_BASE_DIRECTIVES,
     CSP_SCRIPT_SRC_DOCS,
@@ -65,7 +67,6 @@ from app.core.request_utils import (
 from app.core.sentry_monitoring import init_sentry
 from app.core.time_utils import get_display_timezone_label
 from app.database import engine, init_db
-from app.search_completion_db import TARGET_ENDPOINTS, init_search_completion_db
 from app.search_query_log_db import init_query_log_db
 from app.services import chemical_info
 from app.services.archive_scheduler import start_archive_scheduler, stop_archive_scheduler
@@ -80,7 +81,7 @@ from app.services.log_queue import (
     shutdown_async_file_logging,
 )
 from app.services.rate_limit import enforce_rate_limit
-from app.services.search_completion_entity_index import rebuild_completion_entity_index_if_stale
+from app.services.search_completion_scheduler import completion_scheduler
 from app.services.search_query_log_service import (
     start_search_query_log_worker,
     stop_search_query_log_worker,
@@ -359,22 +360,20 @@ class CachedStaticFiles(StaticFiles):
 async def lifespan(app: FastAPI):
     """Application lifespan handler - startup and shutdown events"""
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
-    initialize_async_file_logging()
-    cleanup_expired_inventory_import_preview_artifacts()
-    init_db()
-    init_query_log_db()
-    init_search_completion_db()
-    start_structure_index_scheduler()
-    start_structure_resolution_scheduler()
-    with Session(engine) as db:
-        for ep in TARGET_ENDPOINTS:
-            rebuild_completion_entity_index_if_stale(db, ep)
-    start_search_query_log_worker()
-    start_archive_scheduler()
-    logger.info("Database initialized (WAL mode enabled)")
+    if not settings.inventory_read_only:
+        initialize_async_file_logging()
+        cleanup_expired_inventory_import_preview_artifacts()
+        init_db()
+        init_query_log_db()
+        completion_scheduler.start()
+        start_structure_index_scheduler()
+        start_structure_resolution_scheduler()
+        start_search_query_log_worker()
+        start_archive_scheduler()
+        logger.info("Database initialized (WAL mode enabled)")
     try:
-        cache_reset_result = apply_startup_cache_reset_if_needed()
-        if cache_reset_result.applied:
+        cache_reset_result = None if settings.inventory_read_only else apply_startup_cache_reset_if_needed()
+        if cache_reset_result and cache_reset_result.applied:
             logger.info(
                 "Startup cache reset applied for cache version %s",
                 cache_reset_result.current_version,
@@ -383,6 +382,7 @@ async def lifespan(app: FastAPI):
         logger.exception("Startup cache reset failed; continue without version-based reset")
     print_banner()
     yield
+    await asyncio.to_thread(completion_scheduler.stop)
     await stop_archive_scheduler()
     await stop_structure_resolution_scheduler()
     await stop_structure_index_scheduler()
@@ -403,6 +403,8 @@ app = FastAPI(
     openapi_url=None if settings.use_secure_runtime() else "/openapi.json",
 )
 
+app.middleware("http")(inventory_read_only_middleware)
+
 
 @app.middleware("http")
 async def sse_client_context_middleware(
@@ -422,6 +424,10 @@ async def request_logging_middleware(request: Request, call_next):
     """Add request id and structured request logs with route/path sanitization."""
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.request_id = request_id
+    if settings.inventory_read_only:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
     started = time.perf_counter()
     request_logger = get_request_logger()
 
@@ -692,7 +698,8 @@ def get_runtime_cache_version(response: Response) -> dict[str, str | bool]:
     response.headers["Cache-Control"] = "no-store"
     return {
         "cache_version": settings.cache_version,
-        "maintenance_mode": settings.maintenance_mode,
+        "maintenance_mode": settings.maintenance_mode == "full",
+        "inventory_read_only": settings.inventory_read_only,
         "display_utc_offset": settings.display_utc_offset,
         "display_timezone": get_display_timezone_label(),
     }

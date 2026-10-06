@@ -13,7 +13,7 @@ class SearchCompletionMemoryPruningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "query_logs.db"
-        self.path_patch = patch.object(completion_db, "QUERY_LOG_DB_PATH", self.db_path)
+        self.path_patch = patch.object(completion_db, "COMPLETION_DB_PATH", self.db_path)
         self.path_patch.start()
         with closing(sqlite3.connect(self.db_path)) as connection:
             connection.executescript(completion_db._COMPLETION_SCHEMA)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import contextlib
 import logging
 import math
@@ -107,7 +108,15 @@ def start_archive_scheduler() -> None:
         name="archive-scheduler",
     )
     if settings.archive_run_at_time is not None:
-        if settings.archive_run_weekday is not None:
+        if settings.archive_run_day is not None:
+            logger.info(
+                "archive_scheduler_started mode=monthly run_day=%s "
+                "run_at_time=%s output_dir=%s",
+                settings.archive_run_day,
+                _format_run_at_time(settings.archive_run_at_time),
+                settings.archive_output_dir,
+            )
+        elif settings.archive_run_weekday is not None:
             logger.info(
                 "archive_scheduler_started mode=weekly run_weekday=%s "
                 "run_at_time=%s output_dir=%s",
@@ -161,7 +170,13 @@ async def run_scheduled_archive_once() -> None:
 
 async def _archive_scheduler_loop(stop_event: asyncio.Event) -> None:
     if settings.archive_run_at_time is not None:
-        if settings.archive_run_weekday is not None:
+        if settings.archive_run_day is not None:
+            await _run_monthly_archive_loop(
+                stop_event,
+                settings.archive_run_at_time,
+                settings.archive_run_day,
+            )
+        elif settings.archive_run_weekday is not None:
             await _run_weekly_archive_loop(
                 stop_event,
                 settings.archive_run_at_time,
@@ -215,6 +230,24 @@ async def _run_weekly_archive_loop(
         await run_scheduled_archive_once()
 
 
+async def _run_monthly_archive_loop(
+    stop_event: asyncio.Event,
+    run_at_time: datetime_time,
+    run_day: int,
+) -> None:
+    while not stop_event.is_set():
+        delay_seconds = _seconds_until_next_monthly_run(run_at_time, run_day)
+        logger.info(
+            "archive_scheduler_next_run run_day=%s run_at_time=%s delay_seconds=%s",
+            run_day,
+            _format_run_at_time(run_at_time),
+            delay_seconds,
+        )
+        if await _wait_for_stop(stop_event, delay_seconds):
+            return
+        await run_scheduled_archive_once()
+
+
 def _seconds_until_next_daily_run(run_at_time: datetime_time) -> int:
     now = datetime.now()  # noqa: DTZ005 - scheduler uses server-local naive time.
     next_run = _next_daily_run_at(now, run_at_time)
@@ -224,6 +257,12 @@ def _seconds_until_next_daily_run(run_at_time: datetime_time) -> int:
 def _seconds_until_next_weekly_run(run_at_time: datetime_time, run_weekday: int) -> int:
     now = datetime.now()  # noqa: DTZ005 - scheduler uses server-local naive time.
     next_run = _next_weekly_run_at(now, run_at_time, run_weekday)
+    return max(1, math.ceil((next_run - now).total_seconds()))
+
+
+def _seconds_until_next_monthly_run(run_at_time: datetime_time, run_day: int) -> int:
+    now = datetime.now()  # noqa: DTZ005 - scheduler uses server-local naive time.
+    next_run = _next_monthly_run_at(now, run_at_time, run_day)
     return max(1, math.ceil((next_run - now).total_seconds()))
 
 
@@ -250,6 +289,32 @@ def _next_weekly_run_at(
     if next_run <= now:
         next_run += timedelta(days=7)
     return next_run
+
+
+def _next_monthly_run_at(
+    now: datetime,
+    run_at_time: datetime_time,
+    run_day: int,
+) -> datetime:
+    def scheduled_at(year: int, month: int) -> datetime:
+        last_day = calendar.monthrange(year, month)[1]
+        return now.replace(
+            year=year,
+            month=month,
+            day=min(run_day, last_day),
+            hour=run_at_time.hour,
+            minute=run_at_time.minute,
+            second=run_at_time.second,
+            microsecond=0,
+        )
+
+    next_run = scheduled_at(now.year, now.month)
+    if next_run > now:
+        return next_run
+
+    if now.month == 12:
+        return scheduled_at(now.year + 1, 1)
+    return scheduled_at(now.year, now.month + 1)
 
 
 def _format_run_at_time(run_at_time: datetime_time) -> str:

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from app.core.config import settings
+
 from app.search_completion_db import (
     TARGET_ENDPOINTS,
     get_user_preferences,
@@ -208,7 +210,7 @@ def buffer_search_log(
     result_count: int,
     latency_ms: int | None,
 ) -> None:
-    if user_id <= 0 or session_id <= 0:
+    if settings.inventory_read_only or user_id <= 0 or session_id <= 0:
         return
 
     query, normalized_query = _normalize_query(raw_query)
@@ -460,7 +462,7 @@ def _prune_query_memory_best_effort() -> None:
 
 
 def _write_ready_batch(batch: list[ReadySearchLog]) -> None:
-    if not batch:
+    if settings.inventory_read_only or not batch:
         return
     rows = _batch_rows(batch)
     try:

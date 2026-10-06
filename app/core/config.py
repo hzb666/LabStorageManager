@@ -6,7 +6,7 @@ from datetime import datetime
 from datetime import time as datetime_time
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
@@ -49,11 +49,11 @@ class Settings(BaseSettings):
 
     # 应用
     app_name: str = "Lab Storage Manager"
-    app_version: str = "1.0.1"
+    app_version: str = "1.1.0"
     cache_version: str = ""
-    maintenance_mode: bool = Field(
-        default=False,
-        description="Redirect the frontend to the maintenance page when enabled",
+    maintenance_mode: Literal["off", "on", "full"] = Field(
+        default="off",
+        description="off: normal; on: inventory read-only; full: maintenance page",
     )
     debug: bool = False
     env: str = "development"  # 生产部署通过 ENV=production 覆盖
@@ -64,6 +64,16 @@ class Settings(BaseSettings):
 
     # 数据库
     database_url: str = "sqlite:///./lab_inventory.db"
+    read_only_snapshot_path: str = Field(
+        default="maintenance/inventory_snapshot.db",
+        description="SQLite snapshot used by the independent read-only application",
+    )
+    read_only_token_expire_minutes: int = Field(
+        default=8 * 60,
+        ge=5,
+        le=24 * 60,
+        description="Lifetime of read-only maintenance login tokens",
+    )
     query_log_dir: str = Field(default="logs", description="Directory for search query log DB")
     archive_scheduler_enabled: bool = Field(
         default=False,
@@ -88,6 +98,12 @@ class Settings(BaseSettings):
         ge=0,
         le=6,
         description="Optional weekday for archive runs, 0=Monday and 6=Sunday",
+    )
+    archive_run_day: int | None = Field(
+        default=None,
+        ge=1,
+        le=31,
+        description="Optional calendar day for monthly archive runs, 1-31",
     )
     archive_output_dir: str = Field(
         default="logs",
@@ -182,7 +198,7 @@ class Settings(BaseSettings):
         description="Retry count for PubChem 429, 5xx, and timeout failures",
     )
     chem_pubchem_user_agent: str = Field(
-        default="LabStorageManager/1.0.1",
+        default="LabStorageManager/1.1.0",
         description="User-Agent sent to PubChem PUG-REST",
     )
     chem_resolution_scheduler_enabled: bool = Field(
@@ -315,6 +331,16 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
+    @property
+    def inventory_read_only(self) -> bool:
+        return self.maintenance_mode == "on"
+
+    @field_validator("maintenance_mode", mode="before")
+    @classmethod
+    def normalize_maintenance_mode(cls, value: Any) -> str:
+        normalized = str(value).strip().lower()
+        return {"true": "full", "false": "off", "1": "full", "0": "off"}.get(normalized, normalized)
+
     @field_validator("algorithm")
     @classmethod
     def validate_algorithm(cls, v: str) -> str:
@@ -358,6 +384,30 @@ class Settings(BaseSettings):
         if stripped.isdigit():
             return int(stripped)
         raise ValueError("ARCHIVE_RUN_WEEKDAY must use 0-6 or weekday name")
+
+    @field_validator("archive_run_day", mode="before")
+    @classmethod
+    def parse_archive_run_day(cls, value: Any) -> int | None | Any:
+        if value is None or isinstance(value, int):
+            return value
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        return None if not stripped else int(stripped)
+
+    @model_validator(mode="after")
+    def validate_archive_schedule(self) -> "Settings":
+        if self.archive_run_day is not None and self.archive_run_weekday is not None:
+            raise ValueError("ARCHIVE_RUN_DAY and ARCHIVE_RUN_WEEKDAY are mutually exclusive")
+        if (
+            self.archive_run_day is not None or self.archive_run_weekday is not None
+        ) and self.archive_run_at_time is None:
+            raise ValueError(
+                "ARCHIVE_RUN_AT_TIME is required when ARCHIVE_RUN_DAY or "
+                "ARCHIVE_RUN_WEEKDAY is set"
+            )
+        return self
 
     @field_validator("llm_response_format", mode="before")
     @classmethod
@@ -566,7 +616,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance"""
     settings = Settings()
-    settings.app_version = settings.app_version.strip() or "1.0.1"
+    settings.app_version = settings.app_version.strip() or "1.1.0"
     settings.cache_version = settings.cache_version.strip() or settings.app_version
 
     # 生产环境禁止 HS256，避免对称密钥模式的降级风险

@@ -4,6 +4,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.core.config import settings
+
 AUDIT_LOG_DIR = Path(__file__).parent.parent.parent / "logs"
 AUDIT_LOG_FILE = AUDIT_LOG_DIR / "audit.log"
 AUDIT_LOGGER_NAME = "audit_logger"
@@ -51,6 +53,8 @@ def log_audit_event(
     outcome: str = "success",
     detail: str | None = None,
 ) -> None:
+    if settings.inventory_read_only:
+        return
     try:
         logger = get_audit_logger()
         audit_context = context or AuditEventContext()
