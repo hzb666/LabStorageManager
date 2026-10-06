@@ -46,13 +46,14 @@ python -m app.archive_query_logs --output-dir <archive-dir>
 ```bash
 ARCHIVE_SCHEDULER_ENABLED=true
 ARCHIVE_RUN_AT_TIME=03:30
-ARCHIVE_RUN_WEEKDAY=sun
+ARCHIVE_RUN_DAY=1
+ARCHIVE_RUN_WEEKDAY=
 ARCHIVE_INTERVAL_HOURS=168
 ARCHIVE_STARTUP_DELAY_SECONDS=300
 ARCHIVE_OUTPUT_DIR=<archive-dir>
 ```
 
-设置 `ARCHIVE_RUN_AT_TIME` 和 `ARCHIVE_RUN_WEEKDAY` 后，调度器按服务器本地系统时间每周运行一次。调度器会先运行主业务库操作日志归档，再运行搜索查询日志归档。调度锁用于避免多 worker 重复执行同一轮任务。
+设置 `ARCHIVE_RUN_AT_TIME` 和 `ARCHIVE_RUN_DAY` 后，调度器按服务器本地系统时间每月运行一次；日期为 29～31 且当月较短时，会在当月最后一天执行。`ARCHIVE_RUN_DAY` 与 `ARCHIVE_RUN_WEEKDAY` 不能同时设置。调度器会先运行主业务库操作日志归档，再运行搜索查询日志归档。调度锁用于避免多 worker 重复执行同一轮任务。
 
 只归档指定业务日志表时使用 `--tables`：
 

@@ -74,6 +74,20 @@ npm run build
 
 本地 `.env.example` 默认主库是 `sqlite:///./lab_inventory.db`，搜索日志目录是 `logs`。Docker Compose 会把它们覆盖到 `/data/lab_inventory.db` 和 `/data/logs`，并把上传资源保存到 `/data/static`。
 
+## 主库升级期间的库存只读服务
+
+需要在升级主库时保留库存查询，可先将主服务配置为 `MAINTENANCE_MODE=on`，重启后生成一致性快照：
+
+```bash
+python -m app.read_only.snapshot create
+python -m app.read_only.snapshot verify
+python -m uvicorn app.read_only.main:app --host 127.0.0.1 --port 8001
+```
+
+确认 `http://127.0.0.1:8001/health` 返回快照编号和时间后，将 Nginx 的 `/api/` 与 `/health` 上游临时切到 `127.0.0.1:8001`，再停止主服务并执行升级。只读进程只打开 `READ_ONLY_SNAPSHOT_PATH`，不会连接或迁移主库；仅提供库存列表、详情、导出和快照中的结构式缓存读取，输入建议与结构检索保持关闭。登录会话存放在 Redis，生产环境 Redis 不可用时拒绝登录。
+
+升级完成后先用 `MAINTENANCE_MODE=off` 启动并检查主服务，再把 Nginx 上游切回主服务，最后停止只读进程。快照仅作维护期查询，禁止回写主库。
+
 ## Docker Compose 部署
 
 项目默认通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/docker-compose.yml" /> 组合三个服务：

@@ -47,6 +47,10 @@
 ## 常用命令
 
 ```powershell
+# 创建、校验独立库存只读服务使用的 SQLite 一致性快照
+python -m app.read_only.snapshot create
+python -m app.read_only.snapshot verify
+
 # 统一更新发布版本（PowerShell）
 .\scripts\bump-version.ps1 0.6.1
 

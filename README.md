@@ -160,12 +160,16 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 cd frontend
-npm run dev
+npm run dev -- --port 5173 --strictPort
 ```
 
-默认前端地址：
+前端地址：
 
 - `http://localhost:5173`
+
+当前本地开发仅放行 `5173` 端口，建议使用上述命令启动。`--port 5173` 指定端口，`--strictPort` 会在端口被占用时直接报错退出，避免 Vite 自动切换到 `5174` 等未放行端口。若启动提示端口占用，请先停止占用 `5173` 的进程，再重新启动。
+
+浏览器访问地址应与后端 `CORS_ORIGINS` 中的来源一致（协议、主机名和端口均需匹配）；`localhost` 与 `127.0.0.1` 属于不同来源。
 
 ## 环境变量
 
@@ -185,7 +189,7 @@ npm run dev
 | `DATABASE_URL` | `sqlite:///./lab_inventory.db` | 主库 SQLite 连接串；本地默认写入项目根目录，Docker Compose 默认覆盖为 `sqlite:////data/lab_inventory.db` |
 | `QUERY_LOG_DIR` | `logs` | 搜索日志库目录；Docker Compose 默认覆盖为 `/data/logs` |
 | `TRUST_PROXY_HEADERS` | `true` | Compose 生产部署设为 true；本地开发或无可信反代时设为 false |
-| `CACHE_VERSION` | `1.0.1` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
+| `CACHE_VERSION` | `1.1.0` | 前后端缓存失效版本；留空时使用 `APP_VERSION` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | 登录态默认 7 天 |
 | `SESSION_EXPIRE_HOURS` | `168` | 会话有效期，默认 7 天 |
 | `MAX_IP_PER_USER` | `5` | 兼容旧配置，当前不限制登录 IP 数量 |
@@ -208,9 +212,41 @@ npm run dev
 | `ARCHIVE_SCHEDULER_ENABLED` | `true` | 启用后端内置日志归档调度 |
 | `ARCHIVE_RUN_AT_TIME` | `03:30` | 按服务器本地系统时间执行归档 |
 | `ARCHIVE_RUN_WEEKDAY` | `sun` | 设置后每周指定星期执行；留空则每天执行 |
+| `ARCHIVE_RUN_DAY` | `1` | 设置后每月指定日期执行，与 `ARCHIVE_RUN_WEEKDAY` 互斥；短月份取最后一天 |
 | `ARCHIVE_INTERVAL_HOURS` | `168` | 未设置固定时间时使用的周期小时数 |
 | `ARCHIVE_STARTUP_DELAY_SECONDS` | `300` | 未设置固定时间时首次运行前的延迟 |
 | `ARCHIVE_OUTPUT_DIR` | `logs` | 归档库输出目录 |
+
+### 库存只读与维护模式
+
+统一通过 `MAINTENANCE_MODE` 设置模式：`off` 为正常模式，`on` 为库存只读，`full` 为完全维护页面。修改后重启后端并刷新页面；首次使用需要部署包含此功能的前端。
+
+- 保留登录、账户切换、库存搜索/筛选、分页、详情、结构式展示和导出，沿用原有认证权限。
+- 后端仅放行明确允许的查询和认证接口；借用、归还、编辑、新建、删除、导入及其他业务接口均不可用，管理员也不例外。
+- `on` 和 `full` 均拒绝 CLI 访问业务 API，并返回明确维护提示；CLI 的 GitHub 更新检查与安装命令不访问业务 API，仍可运行。
+- 关闭输入建议和结构检索；结构式仅从快照缓存读取并在前端渲染，不触发后端外部解析。暂停搜索日志、查询记忆、反馈、偏好、补全索引、自动归档和数据库初始化/升级任务。
+- 不写应用请求日志、审计日志和用户操作日志；异常保留控制台输出。反向代理和进程管理器的日志由各自配置控制。
+- 登录、退出及会话验证仍需维护会话和安全限流状态，因此不是数据库文件级只读模式。主库必须已初始化且可用，不能用于正在执行不兼容表结构迁移的数据库。
+
+设置 `MAINTENANCE_MODE=off` 并重启可恢复正常模式。兼容旧值 `false`（对应 `off`）和 `true`（对应 `full`）。`full` 延续原有的前端维护页行为；数据库升级期间若需完全隔离 API，应同时在网关关闭访问。
+
+需要在主库升级期间继续查询时，使用独立快照服务：
+
+```powershell
+# 1. 先将主服务切到 MAINTENANCE_MODE=on 并重启，冻结业务写入
+# 2. 使用 SQLite Backup API 生成并校验一致性快照
+poetry run python -m app.read_only.snapshot create
+poetry run python -m app.read_only.snapshot verify
+
+# 3. 在独立端口启动只读服务，再由 Nginx 将后端流量切到该端口
+poetry run python -m uvicorn app.read_only.main:app --host 127.0.0.1 --port 8001
+```
+
+只读服务仅注册运行状态、登录/退出、当前用户、库存列表/详情、导出和结构式缓存读取。它不提供输入建议、CAS 重复检查、借用历史或结构检索。服务使用 `mode=ro&immutable=1` 打开快照，不导入 `app.main`，不创建表、不迁移、不启动后台任务，也不写搜索日志、用户操作日志或建议反馈。维护登录签发专用短期令牌，会话只写 Redis，不写快照；退出会立即撤销该会话，令牌也不能作为正常服务会话使用。生产环境 Redis 不可用时登录按安全策略返回 503。
+
+快照元数据保存在同名 `.db.json` 文件，包含创建时间、行数和 SHA-256。前端会显示“数据截至”时间。每次进入维护前重新执行 `create`，文件通过临时文件校验后原子替换；不要直接复制正在使用的 SQLite 主库文件。
+
+恢复顺序：完成主库升级和检查，启动 `MAINTENANCE_MODE=off` 的主服务，将 Nginx 切回主服务，再停止只读服务。快照绝不回写主库。
 
 ### 上传与图片
 
@@ -243,7 +279,7 @@ npm run dev
 | `CHEM_PUBCHEM_RATE_LIMIT_PER_SECOND` | `2` | PubChem 请求速率上限 |
 | `CHEM_PUBCHEM_TIMEOUT_SECONDS` | `20` | PubChem 请求超时 |
 | `CHEM_PUBCHEM_MAX_RETRIES` | `3` | 管理员显式解析和离线回填的请求内重试次数 |
-| `CHEM_PUBCHEM_USER_AGENT` | `LabStorageManager/1.0.1` | 发送到 PubChem 的 User-Agent |
+| `CHEM_PUBCHEM_USER_AGENT` | `LabStorageManager/1.1.0` | 发送到 PubChem 的 User-Agent |
 | `CHEM_RESOLUTION_SCHEDULER_ENABLED` | `true` | 启用 SQLite 持久化自动解析队列 |
 | `CHEM_RESOLUTION_RETRY_DELAYS_SECONDS` | `[60,300,1800]` | 首次失败后的 3 次自动重试间隔 |
 | `CHEM_RESOLUTION_JOB_LEASE_SECONDS` | `120` | 自动解析任务租约；过期后允许其他进程恢复 |
@@ -278,8 +314,8 @@ ruff check app/
 ```bash
 cd frontend
 
-# 开发启动
-npm run dev
+# 开发启动（固定 5173，端口占用时直接退出）
+npm run dev -- --port 5173 --strictPort
 
 # 生成带版本号的 RDKit 和本地字体资源映射
 npm run generate:static-assets
@@ -492,7 +528,7 @@ curl http://127.0.0.1:${APP_PORT:-80}/health
 
 1. 本地启动 Redis（推荐）
 2. 启动后端 `uvicorn`
-3. 启动前端 `vite`
+3. 在 `frontend` 目录执行 `npm run dev -- --port 5173 --strictPort` 启动前端
 4. 前端通过 `CORS_ORIGINS` 与 API 基地址访问后端
 
 ### 方案三：生产静态前端 + pip 后端

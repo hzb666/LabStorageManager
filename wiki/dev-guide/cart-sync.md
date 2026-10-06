@@ -7,7 +7,7 @@
 - 插件 manifest 由 `browser-extension/build-config.mjs` 根据 `browser-extension/.env` 生成，声明 `tabs`、`storage`、`scripting`、`webRequest` 权限，以及对试剂平台与系统地址的 `host_permissions`。
 - `browser-extension/manifest.json` 和 `browser-extension/shared/generated-config.js` 是构建期产物，不提交到 Git。
 - 插件侧批次缓存写入 `chrome.storage.local.import_batch_latest`；页面侧桥接缓存写入 `localStorage.cart_import_batch_latest`。
-- 批次数据统一使用 2 小时 TTL。插件 popup 在保存批次前会清理旧批次；`import-bridge.js` 会在页面加载时清理页面侧过期缓存。
+- 批次数据统一使用 2 小时 TTL。插件 popup 保存时覆盖旧批次；`import-bridge.js` 会校验批次有效期并清理页面侧过期缓存。
 - 后台 `service-worker` 负责解析目标购物车标签页、记录最近活跃购物车页面、协调 popup 与 content script 的通信，不负责最终导入。
 
 ## 批次数据形态
@@ -17,18 +17,20 @@
 - `batch_id`：导入批次标识，用于页面加载和桥接校验。
 - `created_at`：批次创建时间，桥接脚本和前端都会用它做 TTL 判断。
 - `items[]`：每一项至少包含 `name`、`specification`、`brand`、`cas_number`、`product_id`、`detail_url`。
-- `items[].suggested_order_type`：插件根据 CAS、规格、详情页文本预判是试剂还是耗材。
+- `items[].suggested_order_type`：识别到合法 CAS 时为 `reagent`，否则为 `pending`（待定），不默认归为耗材。
 - `items[].order_type`：导入时采用的类型，导入页允许用户切换。
 - `items[].classification_reason`：插件对类型判断的解释，方便人工确认。
 - `items[].detail_fetch_status`：详情页拉取结果，例如成功、超时、回退基础信息。
 
 插件桥接传递“待人工确认的导入草稿”，最终请求体由导入页校验和转换后生成。
 
+`pending` 仅用于导入草稿，不传给订单创建接口。导入页面不预选表单类型；用户选择试剂或耗材后才显示对应表单并允许提交。
+
 ## 数据链路
 
 1. popup 先通过 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/background/service-worker.js" /> 解析当前最合适的购物车标签页。
-2. popup 通过 `sendMessageWithAutoInject` 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js" /> 通信，抓取购物车条目。
-3. popup 再并发抓取商品详情页，补齐中文名、英文名、规格、货号、CAS、品牌，并给每个条目写入 `suggested_order_type`、`classification_reason`、`detail_fetch_status`。
+2. popup 通过 `sendMessageWithAutoInject` 与 <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/script.js" /> 通信，只读取已提交订单的基础名称、数量、单价和危险品标记，立即展示勾选列表。
+3. 用户点击“开始导入”后，popup 只抓取所选商品的详情，最多同时请求 3 项，补齐中文名、英文名、规格、货号、CAS、品牌，并写入 `suggested_order_type`、`classification_reason`、`detail_fetch_status`。抓取期间锁定选择和返回操作；单项失败保留基础名称及购物车数据。后台旧的全量详情消息入口已移除。
 4. popup 调用 `saveImportBatch` 把批次写入 `chrome.storage.local.import_batch_latest`，然后打开 `${systemUrl}/cart-import?import=true&batch_id=...`。
 5. <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/browser-extension/content/import-bridge.js" /> 只在 `/cart-import` 页面生效。它会校验 `import=true`、`batch_id`、TTL，并把插件批次拷贝到页面 `localStorage.cart_import_batch_latest`。
 6. 桥接脚本写入成功后，会向页面发送 `postMessage({ source: 'lab-storage-extension', type: 'IMPORT_BATCH_READY' ... })`。
