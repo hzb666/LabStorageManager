@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import platform
 import re
 import shutil
 import zipfile
+from datetime import UTC, datetime, timedelta
 from itertools import zip_longest
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -12,9 +15,12 @@ from typing import Any
 import requests
 
 from lsm_cli.client import CLILocalInputError, CLINetworkError, CLIRequestError
+from lsm_cli.config import get_config_path
 
 LATEST_RELEASE_URL = "https://github.com/hzb666/LabStorageManager/releases/latest"
 DOWNLOAD_USER_AGENT = "LabStorageManager CLI updater"
+DEFAULT_UPDATE_CHECK_INTERVAL_HOURS = 7 * 24
+FAILED_UPDATE_CHECK_RETRY_HOURS = 24
 SEMVER_PATTERN = re.compile(
     r"^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
@@ -26,6 +32,117 @@ SUPPORTED_ASSETS = {
     ("darwin", "arm64"): "lsm-macos-arm64",
     ("darwin", "aarch64"): "lsm-macos-arm64",
 }
+
+
+def get_update_check_state_path() -> Path:
+    return get_config_path().with_name("update-check.json")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _format_timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _load_update_check_state() -> dict[str, Any]:
+    path = get_update_check_state_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_update_check_state(payload: dict[str, Any]) -> None:
+    path = get_update_check_state_path()
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+
+
+def get_deferred_update_check(
+    *, current_version: str, now: datetime | None = None
+) -> dict[str, Any] | None:
+    state = _load_update_check_state()
+    current_time = now or _utc_now()
+    next_check_at = _parse_timestamp(state.get("next_check_at"))
+    if next_check_at is None or current_time >= next_check_at:
+        return None
+
+    latest_value = state.get("latest_version")
+    latest_version: str | None = None
+    if latest_value:
+        try:
+            latest_version = normalize_release_version(latest_value)
+        except CLILocalInputError:
+            latest_version = None
+    return {
+        "current_version": current_version,
+        "latest_version": latest_version,
+        "update_available": (
+            is_newer_release(current=current_version, latest=latest_version)
+            if latest_version
+            else None
+        ),
+        "release_url": state.get("release_url"),
+        "update_command": "lsm update",
+        "check_performed": False,
+        "checked_at": state.get("checked_at"),
+        "next_check_at": _format_timestamp(next_check_at),
+    }
+
+
+def begin_scheduled_update_check(
+    *, now: datetime | None = None, retry_hours: float = FAILED_UPDATE_CHECK_RETRY_HOURS
+) -> None:
+    current_time = now or _utc_now()
+    state = _load_update_check_state()
+    state.update({
+        "last_attempt_at": _format_timestamp(current_time),
+        "next_check_at": _format_timestamp(current_time + timedelta(hours=retry_hours)),
+    })
+    _save_update_check_state(state)
+
+
+def record_successful_update_check(
+    *,
+    latest_version: str,
+    release_url: str,
+    interval_hours: float = DEFAULT_UPDATE_CHECK_INTERVAL_HOURS,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    current_time = now or _utc_now()
+    checked_at = _format_timestamp(current_time)
+    next_check_at = _format_timestamp(current_time + timedelta(hours=interval_hours))
+    _save_update_check_state({
+        "last_attempt_at": checked_at,
+        "checked_at": checked_at,
+        "next_check_at": next_check_at,
+        "latest_version": latest_version,
+        "release_url": release_url,
+    })
+    return {"checked_at": checked_at, "next_check_at": next_check_at}
 
 
 def fetch_latest_release(*, timeout: float) -> dict[str, Any]:

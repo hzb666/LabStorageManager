@@ -18,9 +18,10 @@
 ```bash
 lsm update-check
 lsm update-check --timeout 10
+lsm update-check --if-due --max-age-hours 168
 ```
 
-输出字段：`current_version`、`latest_version`、`update_available`、`release_url`、`update_command`。该命令只检查并报告，不会自动下载安装。
+输出字段：`current_version`、`latest_version`、`update_available`、`release_url`、`update_command`。该命令只检查并报告，不会自动下载安装。Agent 例行检查使用 `--if-due`：成功检查后 168 小时内直接返回本地结果而不访问 GitHub；失败后 24 小时内也不会重复请求。手工排查更新时可省略 `--if-due` 强制联网检查。
 
 一键更新预编译 CLI 和同一 Release 标签的完整 Agent Skill：
 
@@ -65,6 +66,9 @@ lsm update --timeout 60 --skill-host codex
 | `7` | 本地输入非法 |
 | `8` | 命令行参数错误 |
 | `9` | 网络错误 |
+| `10` | 系统处于只读或完全维护模式，CLI API 已停用 |
+
+退出码 `10` 或错误码 `CLI_DISABLED_DURING_MAINTENANCE` 不得重试登录、切换 token 或绕过 CLI；只能提示用户等待维护结束。`update-check` 和 `update` 不访问业务 API，仍可运行。
 
 ## auth
 

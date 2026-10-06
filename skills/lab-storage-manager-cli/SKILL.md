@@ -26,6 +26,7 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 - `create` 命令继续使用 JSON object 负载；`--data-json` 与 `--data-file` 二选一。非 `create` 写操作优先使用显式命令参数；如果命令不接受 body，不要传 `--data-*`。
 - 禁止文件上传、导出、删除、用户管理、会话管理、密码修改、头像修改。
 - 如果目标操作没有对应 CLI 命令，立即停止并明确说明“当前 CLI 不支持该操作”。
+- 后端返回 `CLI_DISABLED_DURING_MAINTENANCE` 或 CLI 退出码 `10` 时，立即停止所有业务 API 命令，明确告知用户系统正在维护；禁止重试登录、切换 token、改用原始 HTTP 或尝试绕过维护限制。
 
 ## 先决条件
 
@@ -52,14 +53,15 @@ CLI 的能力边界以当前命令面为准，不以后端已有 API 为准。
 ## 快速开始
 
 1. 确认命令面：`lsm --help`
-2. 首次把 URL、用户名、密码写入技能目录下的 `.env`
-3. 先读取技能目录 `.env`，拿到 `LSM_BASE_URL`、`LSM_USERNAME`、`LSM_PASSWORD`
-4. 认证探测：执行 `lsm auth whoami`
-5. 若 `whoami` 成功且用户名等于 `LSM_USERNAME`，继续执行目标命令
-6. 若 `whoami` 成功但用户名不等于 `LSM_USERNAME`，先说明当前用户与 `.env` 用户不一致；用户要求使用 `.env` 账号时，使用 `.env` 重新登录
-7. 若未登录，则使用 `.env` 和 `--password-stdin` 登录
-8. 登录成功后再次执行 `lsm auth whoami`，确认用户名等于 `LSM_USERNAME`
-9. 执行目标命令并解析 stdout JSON
+2. 每次启用本 Skill 时执行 `lsm update-check --if-due --max-age-hours 168`；本地状态会确保最多每 7 天访问一次 GitHub，失败后 24 小时内不重试
+3. 首次把 URL、用户名、密码写入技能目录下的 `.env`
+4. 先读取技能目录 `.env`，拿到 `LSM_BASE_URL`、`LSM_USERNAME`、`LSM_PASSWORD`
+5. 认证探测：执行 `lsm auth whoami`
+6. 若 `whoami` 成功且用户名等于 `LSM_USERNAME`，继续执行目标命令
+7. 若 `whoami` 成功但用户名不等于 `LSM_USERNAME`，先说明当前用户与 `.env` 用户不一致；用户要求使用 `.env` 账号时，使用 `.env` 重新登录
+8. 若未登录，则使用 `.env` 和 `--password-stdin` 登录
+9. 登录成功后再次执行 `lsm auth whoami`，确认用户名等于 `LSM_USERNAME`
+10. 执行目标命令并解析 stdout JSON
 
 ## 允许的命令分组
 
@@ -133,6 +135,8 @@ CLI 不解析自然语言，也不补全或覆盖原因；Agent 必须在调用 
 ## CLI 与 Skill 更新
 
 - `lsm update-check` 只检查最新正式 Release，不需要登录；输出中的 `update_command` 给出下一步命令。
+- Agent 的例行检查必须使用 `lsm update-check --if-due --max-age-hours 168`，禁止在每次任务中直接运行无节流的 `lsm update-check`。该命令即使每次 Skill 启用都执行，也只会每 7 天访问一次 GitHub；检查失败后至少等待 24 小时。
+- 例行检查发现更新时，先完成当前已经确认的业务动作，不在写操作中途替换 CLI；随后执行 `lsm update`。返回 `agent_restart_required=true` 时，告知用户重启 Agent。更新失败不影响当前业务任务，也不要在同一任务内重复更新。
 - `lsm update` 校验 `SHA256SUMS.txt`，先暂存预编译 CLI 和同一 Release 标签的完整 Skill，再作为同一批次替换；任一目标失败都会回滚整批，并保留 Skill 目录已有的 `.env`。
 - 默认 `--skill-host auto` 更新已检测到的 Codex 或 Claude Code Skill；无法自动检测时，根据当前宿主显式传 `codex` 或 `claude`。
 - 更新 Skill 后提醒用户重启对应 Agent。旧 CLI 如果还没有 `update` 命令，需按 `INSTALL.md` 的自动安装协议过渡一次。
@@ -184,6 +188,7 @@ CLI 不解析自然语言，也不补全或覆盖原因；Agent 必须在调用 
 - `7`：本地输入错误，修正参数或 JSON object 负载
 - `8`：命令行参数错误，回到允许命令表重组命令
 - `9`：网络错误，检查后端服务和 `--base-url`
+- `10`：系统处于只读或完全维护模式，CLI API 已停用；停止业务命令并告知用户，禁止重试或绕过
 
 ## 详细参考
 

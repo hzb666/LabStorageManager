@@ -256,6 +256,9 @@ python -m lsm_cli auth login --username alice
 | `7` | 本地输入非法 |
 | `8` | 命令行参数错误 |
 | `9` | 网络错误 |
+| `10` | 系统处于只读或完全维护模式，CLI API 已停用 |
+
+维护期间服务返回 `CLI_DISABLED_DURING_MAINTENANCE`。CLI 不会尝试重新登录或自动重试，Agent 也不得切换 token、原始 HTTP 或数据库绕过限制；`update-check` 和 `update` 因为只访问 GitHub，仍可运行。
 
 ## 全局参数
 
@@ -347,10 +350,12 @@ python -m lsm_cli consumable-orders update 9 --quantity 3 --notes "改成三盒"
 
 | 命令 | 说明 | 数据源 |
 | --- | --- | --- |
-| `update-check [--timeout <seconds>]` | 检查是否有新的 CLI 正式版本，并返回更新命令 | GitHub Releases |
+| `update-check [--timeout <seconds>] [--if-due] [--max-age-hours <hours>]` | 检查是否有新的 CLI 正式版本，并返回更新命令 | GitHub Releases / 本地检查状态 |
 | `update [--timeout <seconds>] [--skill-host <host>]` | 校验并安装最新 CLI，同时同步同一标签的 Agent Skill | GitHub Releases |
 
 `--skill-host` 默认是 `auto`，更新当前已安装的 Codex 或 Claude Code Skill；也可以显式使用 `codex`、`claude`、`both` 或 `none`。更新会保留 Skill 目录中的 `.env`。CLI 与所有 Skill 会先完整暂存，再作为同一批次替换；任一目标失败都会回滚整批。Windows 因正在运行的 `lsm.exe` 不能原地覆盖，会在当前命令退出后完成替换；macOS 会直接替换并执行 `--help` 验证。`lsm update` 仅适用于 GitHub Release 的预编译单文件 CLI；通过 `pip` 或 `pipx` 安装的版本仍应使用对应包管理器更新。
+
+Agent 例行检查应使用 `lsm update-check --if-due --max-age-hours 168`。成功检查后 7 天内只读本地 `update-check.json`，不访问 GitHub；失败检查进入 24 小时退避。省略 `--if-due` 会强制联网，适合人工排查，不应在每次 Agent 任务中调用。
 
 已经安装了不含 `lsm update` 的旧版本时，需要最后一次重新执行本文开头的 Agent 自动安装协议。升级到含 `update` 命令的版本后，后续只需：
 

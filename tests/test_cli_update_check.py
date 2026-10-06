@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,8 +13,11 @@ from lsm_cli import update_install
 from lsm_cli.client import CLILocalInputError
 from lsm_cli.main import main
 from lsm_cli.update import (
+    begin_scheduled_update_check,
+    get_deferred_update_check,
     install_latest_release,
     install_skill_tree,
+    record_successful_update_check,
     verify_release_checksum,
 )
 
@@ -67,6 +71,70 @@ class CLIUpdateCheckTests(unittest.TestCase):
         self.assertFalse(payload["data"]["update_available"])
 
     @patch(
+        "lsm_cli.main.fetch_latest_release",
+        return_value={
+            "tag_name": "v1.2.0",
+            "html_url": "https://github.com/hzb666/LabStorageManager/releases/tag/v1.2.0",
+        },
+    )
+    def test_scheduled_update_check_contacts_github_once_until_due(self, fetch_mock) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "lsm_cli.update.get_update_check_state_path",
+            return_value=Path(temp_dir) / "update-check.json",
+        ):
+            first_exit, first = self._run_main([
+                "update-check", "--if-due", "--max-age-hours", "168",
+            ])
+            second_exit, second = self._run_main([
+                "update-check", "--if-due", "--max-age-hours", "168",
+            ])
+
+        self.assertIsNone(first_exit)
+        self.assertIsNone(second_exit)
+        self.assertTrue(first["data"]["check_performed"])
+        self.assertFalse(second["data"]["check_performed"])
+        self.assertTrue(second["data"]["update_available"])
+        fetch_mock.assert_called_once()
+
+    def test_failed_scheduled_check_defers_retry_without_cached_release(self) -> None:
+        now = datetime(2026, 10, 6, 8, 0, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "lsm_cli.update.get_update_check_state_path",
+            return_value=Path(temp_dir) / "update-check.json",
+        ):
+            begin_scheduled_update_check(now=now, retry_hours=24)
+            deferred = get_deferred_update_check(
+                current_version="1.1.0",
+                now=datetime(2026, 10, 6, 9, 0, tzinfo=UTC),
+            )
+
+        self.assertIsNotNone(deferred)
+        self.assertIsNone(deferred["latest_version"])
+        self.assertIsNone(deferred["update_available"])
+        self.assertFalse(deferred["check_performed"])
+
+    def test_successful_scheduled_check_replaces_failure_backoff(self) -> None:
+        now = datetime(2026, 10, 6, 8, 0, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "lsm_cli.update.get_update_check_state_path",
+            return_value=Path(temp_dir) / "update-check.json",
+        ):
+            begin_scheduled_update_check(now=now, retry_hours=24)
+            record_successful_update_check(
+                latest_version="1.2.0",
+                release_url="https://example.test/v1.2.0",
+                interval_hours=168,
+                now=now,
+            )
+            deferred = get_deferred_update_check(
+                current_version="1.1.0",
+                now=datetime(2026, 10, 7, 8, 0, tzinfo=UTC),
+            )
+
+        self.assertEqual(deferred["latest_version"], "1.2.0")
+        self.assertTrue(deferred["update_available"])
+
+    @patch(
         "lsm_cli.main.install_latest_release",
         return_value={
             "current_version": "0.9.1",
@@ -83,7 +151,7 @@ class CLIUpdateCheckTests(unittest.TestCase):
         self.assertIsNone(exit_code)
         self.assertEqual("scheduled", payload["data"]["cli_status"])
         install_mock.assert_called_once_with(
-            current_version="1.0.1",
+            current_version="1.1.0",
             skill_host="codex",
             timeout=8.0,
         )

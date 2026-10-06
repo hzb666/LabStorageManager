@@ -21,10 +21,14 @@ from lsm_cli.client import (
 from lsm_cli.config import clear_auth_data, load_config, save_config
 from lsm_cli.output import configure_output_encoding, fail, succeed
 from lsm_cli.update import (
+    DEFAULT_UPDATE_CHECK_INTERVAL_HOURS,
+    begin_scheduled_update_check,
     fetch_latest_release,
+    get_deferred_update_check,
     install_latest_release,
     is_newer_release,
     normalize_release_version,
+    record_successful_update_check,
 )
 
 REAGENT_ORDER_REASON_CHOICES = (
@@ -41,6 +45,7 @@ REAGENT_ORDER_REASON_CHOICES = (
 PAYLOAD_SOURCE_ERROR = "Use either explicit command arguments or --data-json/--data-file, not both"
 DEFAULT_LIST_PAGE_SIZE = 50
 SUMMARY_ONLY_LIMIT = 0
+CLI_MAINTENANCE_CODE = "CLI_DISABLED_DURING_MAINTENANCE"
 INVENTORY_LIST_PARAM_KEYS = frozenset(
     {
         "skip",
@@ -300,24 +305,39 @@ def _handle_post_command(args: argparse.Namespace, path: str, *, payload_require
 
 
 def _handle_update_check(args: argparse.Namespace) -> None:
+    if args.if_due:
+        deferred = get_deferred_update_check(current_version=CLI_VERSION)
+        if deferred is not None:
+            succeed(deferred)
+            return
+        begin_scheduled_update_check(retry_hours=min(24, args.max_age_hours))
+
     release = fetch_latest_release(timeout=args.timeout)
     latest_version = normalize_release_version(release.get("tag_name"))
     release_url = release.get("html_url")
     if not isinstance(release_url, str) or not release_url.strip():
         raise CLILocalInputError("Latest release response is missing `html_url`")
 
-    succeed(
-        {
-            "current_version": CLI_VERSION,
-            "latest_version": latest_version,
-            "update_available": is_newer_release(
-                current=CLI_VERSION,
-                latest=latest_version,
+    result = {
+        "current_version": CLI_VERSION,
+        "latest_version": latest_version,
+        "update_available": is_newer_release(
+            current=CLI_VERSION,
+            latest=latest_version,
+        ),
+        "release_url": release_url,
+        "update_command": "lsm update",
+    }
+    if args.if_due:
+        result.update({
+            "check_performed": True,
+            **record_successful_update_check(
+                latest_version=latest_version,
+                release_url=release_url,
+                interval_hours=args.max_age_hours,
             ),
-            "release_url": release_url,
-            "update_command": "lsm update",
-        }
-    )
+        })
+    succeed(result)
 
 
 def _handle_update(args: argparse.Namespace) -> None:
@@ -343,6 +363,16 @@ def _parse_bool_arg(raw_value: str) -> bool:
     if normalized in {"0", "false", "no", "n", "off"}:
         return False
     raise argparse.ArgumentTypeError("Expected a boolean value: true/false")
+
+
+def _parse_positive_float_arg(raw_value: str) -> float:
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Expected a positive number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("Expected a positive number")
+    return value
 
 
 def _parse_positive_int(raw_value: str) -> int:
@@ -1272,6 +1302,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=5.0,
         help="HTTP timeout in seconds",
     )
+    update_check.add_argument(
+        "--if-due",
+        action="store_true",
+        help="Use the local schedule and contact GitHub only when the check is due",
+    )
+    update_check.add_argument(
+        "--max-age-hours",
+        type=_parse_positive_float_arg,
+        default=float(DEFAULT_UPDATE_CHECK_INTERVAL_HOURS),
+        help="Successful check interval used with --if-due (default: 168)",
+    )
     update_check.set_defaults(handler=_handle_update_check)
     update_command = subparsers.add_parser(
         "update",
@@ -1313,8 +1354,15 @@ def main(argv: list[str] | None = None) -> None:
         args.handler(args)
     except CLIRequestError as exc:
         exit_code = 1
+        error_code = "HTTP_ERROR"
         # 退出码按 HTTP 语义分层，agent 可以直接拿它做重试或权限分支判断。
-        if exc.status_code == 401:
+        response_code = (
+            exc.payload.get("code") if isinstance(exc.payload, dict) else None
+        )
+        if response_code == CLI_MAINTENANCE_CODE:
+            exit_code = 10
+            error_code = CLI_MAINTENANCE_CODE
+        elif exc.status_code == 401:
             exit_code = 2
         elif exc.status_code == 403:
             exit_code = 3
@@ -1322,7 +1370,7 @@ def main(argv: list[str] | None = None) -> None:
             exit_code = 4
         elif exc.status_code == 429:
             exit_code = 5
-        fail(exc.message, code="HTTP_ERROR", exit_code=exit_code, detail=exc.payload)
+        fail(exc.message, code=error_code, exit_code=exit_code, detail=exc.payload)
     except FileNotFoundError as exc:
         fail(str(exc), code="FILE_NOT_FOUND", exit_code=6)
     except CLILocalInputError as exc:

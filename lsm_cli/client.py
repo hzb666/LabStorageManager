@@ -99,6 +99,7 @@ class APIClient:
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "User-Agent": "LabStorageManager CLI",
+                "X-LSM-Client": "cli",
             }
         )
         if self.token:

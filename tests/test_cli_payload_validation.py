@@ -19,7 +19,7 @@ from app.models.reagent_order import (
     ReagentOrderReason,
     ReagentOrderUpdate,
 )
-from lsm_cli.client import APIClient, CLILocalInputError, load_json_payload
+from lsm_cli.client import APIClient, CLILocalInputError, CLIRequestError, load_json_payload
 from lsm_cli.main import REAGENT_ORDER_REASON_CHOICES, main
 
 
@@ -217,6 +217,28 @@ class CLIPayloadValidationTests(unittest.TestCase):
         self.assertEqual("env-token", client.token)
         self.assertEqual("environment", client.token_source)
         self.assertEqual("Bearer env-token", client.session.headers["Authorization"])
+        self.assertEqual("cli", client.session.headers["X-LSM-Client"])
+
+    @patch(
+        "lsm_cli.main.APIClient.request",
+        side_effect=CLIRequestError(
+            "系统维护中，CLI 暂不可用，请稍后再试",
+            status_code=503,
+            payload={
+                "detail": "系统维护中，CLI 暂不可用，请稍后再试",
+                "code": "CLI_DISABLED_DURING_MAINTENANCE",
+            },
+        ),
+    )
+    def test_cli_reports_maintenance_with_dedicated_exit_code(self, _request_mock) -> None:
+        exit_code, payload = self._run_main(["inventory", "list"])
+
+        self.assertEqual(exit_code, 10)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(
+            payload["error"]["code"],
+            "CLI_DISABLED_DURING_MAINTENANCE",
+        )
 
     @patch.dict("os.environ", {"LSM_CLI_TOKEN": "env-token"})
     @patch("lsm_cli.client.load_config", return_value={})
