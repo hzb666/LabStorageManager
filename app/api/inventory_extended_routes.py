@@ -502,7 +502,9 @@ def _register_cas_and_export_routes(router: APIRouter) -> None:
         )
         db.commit()
 
-        response = export_inventory_xlsx(result.items)
+        keeper_ids = {item.temporary_keeper_id for item in result.items if item.temporary_keeper_id}
+        keeper_names = batch_get_user_names(db, keeper_ids)
+        response = export_inventory_xlsx(result.items, temporary_keeper_names=keeper_names)
         result.apply_truncation_headers(response)
         return response
 

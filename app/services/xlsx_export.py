@@ -111,6 +111,8 @@ def _export_to_xlsx(
 
 def export_inventory_xlsx(
     items: list[Any],
+    *,
+    temporary_keeper_names: dict[int, str] | None = None,
 ) -> StreamingResponse:
     """Export inventory workbook with regular inventory only."""
     regular_headers = [
@@ -132,6 +134,11 @@ def export_inventory_xlsx(
     ]
 
     def regular_row_converter(item: Any) -> list[Any]:
+        location = _get_field(item, "storage_location") or ""
+        keeper_id = _get_field(item, "temporary_keeper_id")
+        if not location and keeper_id is not None:
+            keeper_name = (temporary_keeper_names or {}).get(keeper_id) or "未知用户"
+            location = f"{keeper_name}暂存"
         return [
             _get_field(item, "cas_number"),
             _get_field(item, "name"),
@@ -140,7 +147,7 @@ def export_inventory_xlsx(
             _get_field(item, "category") or "",
             _get_field(item, "brand") or "",
             _get_field(item, "purity") or "",
-            _get_field(item, "storage_location") or "",
+            location,
             _get_field(item, "initial_quantity"),
             _get_field(item, "remaining_quantity"),
             _get_field(item, "unit"),

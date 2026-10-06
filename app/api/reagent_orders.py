@@ -715,7 +715,7 @@ def list_reagent_orders(
     result = {
         "data": [
             add_inventory_specification({
-                **ReagentOrderResponse.model_validate(o).model_dump(),
+                **ReagentOrderResponse.model_validate(o).model_dump(mode="json"),
                 **get_order_status_time_fields(status_times, o),
                 "applicant_name": users_map.get(o.applicant_id, ""),
             })

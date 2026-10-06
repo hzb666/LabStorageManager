@@ -648,7 +648,7 @@ def list_consumable_orders(
     result = {
         "data": [
             {
-                **ConsumableOrderResponse.model_validate(o).model_dump(),
+                **ConsumableOrderResponse.model_validate(o).model_dump(mode="json"),
                 **get_order_status_time_fields(status_times, o),
                 "applicant_name": users_map.get(o.applicant_id, ""),
             }

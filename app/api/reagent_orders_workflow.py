@@ -967,7 +967,7 @@ def _register_dashboard_routes(router: APIRouter) -> None:
                     "is_hazardous": order.is_hazardous,
                     "notes": order.notes,
                     "purity": order.purity,
-                    "arrived_at": order.updated_at,
+                    "arrived_at": utc_iso_str(order.updated_at),
                 }
                 for order in orders
             ],
