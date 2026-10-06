@@ -7,7 +7,6 @@ from typing import Any
 from sqlmodel import Session
 
 from app.core.config import settings
-
 from app.core.time_utils import utc_iso_str
 from app.models.user import User
 from app.models.user_operation_log import UserOperationAction, UserOperationLog

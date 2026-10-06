@@ -98,15 +98,17 @@ def create_snapshot(
         f".{metadata_path(target).name}.{uuid.uuid4().hex}.tmp"
     )
     try:
-        with closing(sqlite3.connect(
-            _database_uri(source), uri=True, timeout=10,
-        )) as source_connection:
-            with closing(sqlite3.connect(str(temporary), timeout=10)) as target_connection:
-                source_connection.backup(target_connection)
-                target_connection.execute("PRAGMA journal_mode=DELETE")
-                target_connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                inventory_count, user_count = _validate_database(target_connection)
-                target_connection.commit()
+        with (
+            closing(sqlite3.connect(
+                _database_uri(source), uri=True, timeout=10,
+            )) as source_connection,
+            closing(sqlite3.connect(str(temporary), timeout=10)) as target_connection,
+        ):
+            source_connection.backup(target_connection)
+            target_connection.execute("PRAGMA journal_mode=DELETE")
+            target_connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            inventory_count, user_count = _validate_database(target_connection)
+            target_connection.commit()
 
         created_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         metadata = SnapshotMetadata(

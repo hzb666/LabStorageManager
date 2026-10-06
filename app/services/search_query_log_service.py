@@ -13,7 +13,6 @@ from enum import Enum
 from typing import Any
 
 from app.core.config import settings
-
 from app.search_completion_db import (
     TARGET_ENDPOINTS,
     get_user_preferences,

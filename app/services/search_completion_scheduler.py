@@ -6,8 +6,8 @@ import time
 
 from sqlmodel import Session
 
-from app.database import engine
 from app.core.config import settings
+from app.database import engine
 from app.search_completion_db import (
     TARGET_ENDPOINTS,
     init_search_completion_db,

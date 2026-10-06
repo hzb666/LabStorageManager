@@ -5,8 +5,8 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from app.core.constants import DEFAULT_LOG_HOURS, DEFAULT_LOG_LINES
 from app.core.config import settings
+from app.core.constants import DEFAULT_LOG_HOURS, DEFAULT_LOG_LINES
 from app.core.time_utils import to_display_time
 
 # 敏感关键词列表（用于日志脱敏）

@@ -241,11 +241,6 @@ async def _maintain_claimed_job_lease(
     interval_seconds = settings.chem_resolution_job_lease_seconds / 3
     while True:
         try:
-            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
-            return True
-        except TimeoutError:
-            pass
-        try:
             renewed = await asyncio.to_thread(
                 renew_claimed_resolution_job_lease,
                 engine,
@@ -262,6 +257,11 @@ async def _maintain_claimed_job_lease(
             return False
         if not renewed:
             return False
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+            return True
+        except TimeoutError:
+            pass
 
 
 async def _resolve_with_timeout(

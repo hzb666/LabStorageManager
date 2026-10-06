@@ -55,12 +55,15 @@ app.add_middleware(
 async def enforce_read_only_surface(request: Request, call_next):
     if request.url.path.startswith("/api/") and is_cli_request(request):
         return cli_maintenance_response()
-    if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        if request.url.path not in {"/api/users/login", "/api/users/logout"}:
-            return JSONResponse(
-                status_code=503,
-                content={"detail": "系统维护中，仅开放库存查询", "code": "INVENTORY_READ_ONLY"},
-            )
+    if (
+        request.url.path.startswith("/api/")
+        and request.method not in {"GET", "HEAD", "OPTIONS"}
+        and request.url.path not in {"/api/users/login", "/api/users/logout"}
+    ):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "系统维护中，仅开放库存查询", "code": "INVENTORY_READ_ONLY"},
+        )
     response = await call_next(request)
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"

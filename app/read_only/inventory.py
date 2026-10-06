@@ -24,7 +24,6 @@ from app.services.search_matchers import (
     split_exact_cas_search_terms,
     split_segmented_search_terms,
 )
-from app.services.spec_utils import format_specification
 from app.services.sql_utils import normalize_search_term, order_with_nulls_last
 from app.services.user_utils import batch_get_user_names
 from app.services.xlsx_export import export_inventory_xlsx

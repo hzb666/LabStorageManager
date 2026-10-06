@@ -422,8 +422,8 @@ def _migrate_legacy_completion_data(connection: sqlite3.Connection) -> None:
 def get_user_preferences(
     user_id: int, *, connection: sqlite3.Connection | None = None,
 ) -> SearchPreferences:
-    with _read_connection(connection) as connection:
-        row = connection.execute(
+    with _read_connection(connection) as db_connection:
+        row = db_connection.execute(
             "SELECT user_id, personalization_enabled FROM user_search_preferences WHERE user_id = ?",
             (user_id,),
         ).fetchone()
@@ -638,8 +638,8 @@ def query_memory_by_prefix(
     db_user_id = _db_user_id(user_id)
     db_search_field = _db_search_field(search_field)
     db_prefix = _normalize_query_key(prefix)
-    with _read_connection(connection) as connection:
-        rows = connection.execute(
+    with _read_connection(connection) as db_connection:
+        rows = db_connection.execute(
             """
             SELECT id, user_id, endpoint, search_field, query, normalized_query,
                    frequency, last_used_at, accept_count, reject_count
@@ -689,8 +689,8 @@ def _advance_entity_generation(connection: sqlite3.Connection, endpoint: str) ->
 def get_entity_completion_generation(
     endpoint: str, *, connection: sqlite3.Connection | None = None,
 ) -> int:
-    with _read_connection(connection) as connection:
-        row = connection.execute(
+    with _read_connection(connection) as db_connection:
+        row = db_connection.execute(
             "SELECT value FROM search_completion_meta WHERE key = ?",
             (f"entity_index_generation:{endpoint}",),
         ).fetchone()
@@ -754,8 +754,8 @@ def query_entities_by_prefix(
     if not fields:
         return []
     placeholders = ",".join("?" for _ in fields)
-    with _read_connection(connection) as connection:
-        rows = connection.execute(
+    with _read_connection(connection) as db_connection:
+        rows = db_connection.execute(
             f"""
             SELECT * FROM (
                 SELECT id, endpoint, field, value, normalized_value,

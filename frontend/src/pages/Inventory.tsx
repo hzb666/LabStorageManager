@@ -1196,13 +1196,17 @@ function getInventoryTableAccessProps(
   }
 }
 
+function canUserManageInventory(readOnly: boolean, role: UserRole | null | undefined) {
+  return !readOnly && canWriteNonPublicData(role)
+}
+
 export function InventoryPage() {
   const inventoryReadOnly = useInventoryReadOnly()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const currentUser = useAuthStore((state) => state.user)
-  const canManageInventory = !inventoryReadOnly && canWriteNonPublicData(currentUser?.role)
+  const canManageInventory = canUserManageInventory(inventoryReadOnly, currentUser?.role)
   const structureEditor = useInventoryStructureEditor()
   const procedureSearchId = searchParams.get('procedureSearchId')
   const currentUserId = getCurrentUserId(currentUser)

@@ -7,7 +7,6 @@ from collections.abc import Callable
 from sqlmodel import Session, select
 
 from app.core.config import settings
-
 from app.models.consumable_order import ConsumableOrder, ConsumableOrderStatus
 from app.models.inventory import Inventory, InventoryStatus
 from app.models.reagent_order import ReagentOrder, ReagentOrderStatus
@@ -21,8 +20,8 @@ from app.search_completion_db import (
     get_entity_completion_generation,
     is_entity_completion_index_stale,
     mark_entity_completion_index_stale,
-    replace_entity_completions_for_entity,
     replace_entity_completion_index,
+    replace_entity_completions_for_entity,
 )
 from app.services.search_completion_lock import completion_rebuild_lock
 from app.services.sql_utils import normalize_search_term

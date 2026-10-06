@@ -45,7 +45,6 @@ from app.core.auth import (
 )
 from app.core.banner import print_banner
 from app.core.config import settings
-from app.core.read_only import inventory_read_only_middleware
 from app.core.constants import (
     CSP_BASE_DIRECTIVES,
     CSP_SCRIPT_SRC_DOCS,
@@ -57,6 +56,7 @@ from app.core.constants import (
     STATIC_CACHE_MAX_AGE_SECONDS,
     UPLOAD_PATHS,
 )
+from app.core.read_only import inventory_read_only_middleware
 from app.core.request_utils import (
     get_client_ip,
     get_request_id,
