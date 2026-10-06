@@ -689,24 +689,22 @@ export function TableFilters({
 
   return (
     <div className={`flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center ${className}`}>
-      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:min-w-70 sm:flex-row sm:items-center">
-        <TableSearchInput
-          value={searchInput}
-          onChange={onSearchInputChange}
-          maxLength={getEffectiveSearchMaxLength(searchInput, searchField)}
-          placeholder={resolvedSearchPlaceholder}
-          disabled={searchInputDisabled}
-          disabledReason={searchInputDisabledReason}
-          disabledValue={searchInputDisabledValue}
-          onDisabledClear={onSearchInputDisabledClear}
-          inlineCompletion={inlineCompletion}
-        />
-        {searchActions && (
-          <div className="flex items-center">
-            {searchActions}
-          </div>
-        )}
-      </div>
+      <TableSearchInput
+        value={searchInput}
+        onChange={onSearchInputChange}
+        maxLength={getEffectiveSearchMaxLength(searchInput, searchField)}
+        placeholder={resolvedSearchPlaceholder}
+        disabled={searchInputDisabled}
+        disabledReason={searchInputDisabledReason}
+        disabledValue={searchInputDisabledValue}
+        onDisabledClear={onSearchInputDisabledClear}
+        inlineCompletion={inlineCompletion}
+      />
+      {searchActions && (
+        <div className="flex shrink-0 items-center">
+          {searchActions}
+        </div>
+      )}
 
       <TableFilterExtraControls
         actions={actions}

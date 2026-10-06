@@ -588,9 +588,9 @@ function createReagentOrderColumns(
   const actionColumn = columnHelper.display({
     id: 'actions',
     header: '操作',
-    size: 132,
-    minSize: 132,
-    maxSize: 132,
+      size: 110,
+      minSize: 100,
+      maxSize: 120,
     cell: (info) => {
       const meta = info.table.options.meta
       return (

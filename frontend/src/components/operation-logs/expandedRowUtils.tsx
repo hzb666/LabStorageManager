@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { formatDateTimeWithSeconds as formatSharedDateTimeWithSeconds } from '@/lib/utils'
+import { formatDisplayDateTimeWithSeconds as formatSharedDateTimeWithSeconds } from '@/lib/utils'
 import { safeString } from '@/lib/validationSchemas'
 
 export type LogRecord = Record<string, unknown>

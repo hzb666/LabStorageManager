@@ -1,8 +1,8 @@
-export const LIB_ASSET_VERSION = '260922'
+export const LIB_ASSET_VERSION = '261007'
 
 export const LIB_ASSETS = {
-  rdkitScriptUrl: '/lib/RDKit_minimal-260922.js',
-  rdkitWasmUrl: '/lib/RDKit_minimal-260922.wasm',
-  localFontUrl: '/lib/SourceHanSansCN-VF-260922.woff2',
-  localFontPreferenceValue: 'source-han-sans-cn-vf-260922',
+  rdkitScriptUrl: '/lib/RDKit_minimal-261007.js',
+  rdkitWasmUrl: '/lib/RDKit_minimal-261007.wasm',
+  localFontUrl: '/lib/SourceHanSansCN-VF-261007.woff2',
+  localFontPreferenceValue: 'source-han-sans-cn-vf-261007',
 } as const

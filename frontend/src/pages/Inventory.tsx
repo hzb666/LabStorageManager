@@ -63,6 +63,7 @@ import { refreshDashboardAfterMutation } from '@/lib/dashboardUtils'
 import { useAuthStore } from '@/store/useStore'
 import { INVENTORY_SSE_EVENTS } from '@/lib/sseEvents'
 import { canWriteNonPublicData } from '@/lib/permissions'
+import { useInventoryReadOnly } from '@/lib/inventoryReadOnly'
 import { getProcedureInventorySearchResult } from '@/lib/storage/procedureInventorySearchStorage'
 import { preloadRDKitModule } from '@/lib/rdkitLoader'
 
@@ -426,11 +427,19 @@ function useNotInStockToggle(
   return { handleToggleNotInStock, isTogglingNotInStock }
 }
 
+function useInventoryBrandOptions() {
+  const inventoryReadOnly = useInventoryReadOnly()
+  const { data = [] } = useQuery({
+    ...getReagentBrandOptionsQueryOptions(), enabled: !inventoryReadOnly,
+  })
+  return data
+}
+
 function useInventoryDialogController(
   refreshInventory: () => void | Promise<void>,
   requireManualStorageLocation: boolean,
 ) {
-  const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
+  const brandOptions = useInventoryBrandOptions()
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -622,9 +631,10 @@ function InventoryExpandedRow({
   highlightQuery?: string | null
   highlightQueryFormat?: StructureQueryFormat
 }) {
+  const inventoryReadOnly = useInventoryReadOnly()
   return (
     <div className="flex min-h-[124px] flex-col gap-4 border-b border-border p-3 md:flex-row">
-      <div className="hidden md:block shrink-0">
+      <div className="hidden shrink-0 md:block">
         <MoleculeStructure
           casNumber={item.cas_number}
           width={150}
@@ -643,11 +653,13 @@ function InventoryExpandedRow({
         <div>分类：{item.category || '-'}</div>
         <div>入库用户：{item.created_by_name || '-'}</div>
         <div className="min-w-0">
-          <div className="relative inline-block max-w-[calc(100%-clamp(4rem,7vw,6rem))] align-top">
+          <div className={inventoryReadOnly
+            ? 'relative inline-block max-w-full align-top'
+            : 'relative inline-block max-w-[calc(100%-clamp(4rem,7vw,6rem))] align-top'}>
             <span className="block truncate">
               上次借用：{formatInventoryBorrowerDisplay(item)}
             </span>
-            <Button
+            {!inventoryReadOnly && <Button
               type="button"
               variant="modern"
               size="sm"
@@ -658,7 +670,7 @@ function InventoryExpandedRow({
               }}
             >
               记录
-            </Button>
+            </Button>}
           </div>
         </div>
       </div>
@@ -896,6 +908,7 @@ function StructureCacheManagerEntry({
   onManualEdit: StructureManualEditRequestHandler
 }>) {
   const currentUser = useAuthStore((state) => state.user)
+  const inventoryReadOnly = useInventoryReadOnly()
   const isAdmin = currentUser?.role === UserRoles.ADMIN
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -905,7 +918,7 @@ function StructureCacheManagerEntry({
     setOpen(true)
   }, [])
 
-  if (!structureSearchEnabled) {
+  if (!structureSearchEnabled || inventoryReadOnly) {
     return null
   }
 
@@ -1147,8 +1160,9 @@ function useInventoryBorrowController({
 }
 
 function useInventoryChemistryResources(structureDialogOpen: boolean) {
+  const inventoryReadOnly = useInventoryReadOnly()
   const isMobile = useIsMobile()
-  const structureToolsEnabled = structureSearchEnabled && !isMobile
+  const structureToolsEnabled = structureSearchEnabled && !isMobile && !inventoryReadOnly
 
   useIdlePreload(preloadRDKitModule, !isMobile)
   useIdlePreload(
@@ -1158,7 +1172,7 @@ function useInventoryChemistryResources(structureDialogOpen: boolean) {
   )
   useIdlePreload(
     loadStructureCacheManagerDialog,
-    structureSearchEnabled,
+    structureSearchEnabled && !inventoryReadOnly,
     STRUCTURE_DIALOG_PREWARM_TIMEOUT_MS,
   )
 
@@ -1169,12 +1183,26 @@ function useInventoryChemistryResources(structureDialogOpen: boolean) {
   }
 }
 
+function getInventoryTableAccessProps(
+  readOnly: boolean,
+  onEdit: (item: Record<string, unknown>) => void,
+  onRefresh: () => Promise<void>,
+) {
+  return {
+    onEdit: readOnly ? undefined : onEdit,
+    realtime: readOnly ? undefined : {
+      room: 'inventory', eventTypes: INVENTORY_SSE_EVENTS, onRefresh,
+    },
+  }
+}
+
 export function InventoryPage() {
+  const inventoryReadOnly = useInventoryReadOnly()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const currentUser = useAuthStore((state) => state.user)
-  const canManageInventory = canWriteNonPublicData(currentUser?.role)
+  const canManageInventory = !inventoryReadOnly && canWriteNonPublicData(currentUser?.role)
   const structureEditor = useInventoryStructureEditor()
   const procedureSearchId = searchParams.get('procedureSearchId')
   const currentUserId = getCurrentUserId(currentUser)
@@ -1279,15 +1307,10 @@ export function InventoryPage() {
         queryKey={['inventory']}
         tableId="inventory-table"
         extraParams={structureEditor.structureExtraParams}
-        realtime={{
-          room: 'inventory',
-          eventTypes: INVENTORY_SSE_EVENTS,
-          onRefresh: loadInventory,
-        }}
+        {...getInventoryTableAccessProps(inventoryReadOnly, dialogController.handleEditClick, loadInventory)}
         customColumns={columns}
         onQueryError={handleInventoryQueryError}
         onQueryDataReady={structureEditor.handleStructureQueryDataReady}
-        onEdit={dialogController.handleEditClick}
         title={<><Package className="w-5 h-5" /> 库存列表</>}
         searchPlaceholder="搜索名称、CAS号、位置..."
         suppressSorting={Boolean(structureEditor.structureFilter)}
@@ -1314,8 +1337,8 @@ export function InventoryPage() {
         emptyText={structureEditor.structureFilter ? '没有匹配结构的库存' : '暂无数据'}
         noteField="notes"
         renderExpandedRow={renderExpandedRow}
-        inlineCompletionEndpoint="/inventory/"
-        enableInlineCompletion
+        inlineCompletionEndpoint={inventoryReadOnly ? undefined : '/inventory/'}
+        enableInlineCompletion={!inventoryReadOnly}
       />
     </div>
   )
@@ -1332,6 +1355,7 @@ const ActionButtons = React.memo(function ActionButtons({
 }) {
   const currentUser = useAuthStore((state) => state.user)
   const isPublicUser = currentUser?.role === UserRoles.PUBLIC
+  const inventoryReadOnly = useInventoryReadOnly()
 
   const statusDisplay = useMemo(() => {
     const statusList = [
@@ -1380,8 +1404,8 @@ const ActionButtons = React.memo(function ActionButtons({
   return (
     <TableActionButtonsMemo
       item={item}
-      actions={actions}
-      showEdit={true}
+      actions={inventoryReadOnly ? [] : actions}
+      showEdit={!inventoryReadOnly}
       onEdit={onEdit}
       statusField="status"
       statusDisplay={statusDisplay}

@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, Outlet, Link } from 'react-router-dom'
 import { Layout } from '@/pages/Layout'
-import { Login } from '@/pages/Login'
+import { LoginRoute } from '@/components/LoginRoute'
 import { MaintenancePage } from '@/pages/Maintenance'
 import { CartImportLoadingScreen } from '@/components/CartImportLoadingScreen'
 import { AuthDeferredShell } from '@/components/AuthDeferredShell'
@@ -12,7 +12,17 @@ import { useTheme } from '@/hooks/useTheme'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { UserRoles } from '@/lib/constants'
 import { canWriteNonPublicData } from '@/lib/permissions'
-import { resolveRuntimeMaintenanceMode } from '@/lib/cacheVersionBootstrap'
+import {
+  resolveRuntimeInventoryReadOnly,
+  resolveRuntimeMaintenanceMode,
+  resolveRuntimeSnapshotCreatedAt,
+} from '@/lib/cacheVersionBootstrap'
+import {
+  InventoryReadOnlyContext,
+  useInventoryReadOnly,
+  useInventorySnapshotCreatedAt,
+} from '@/lib/inventoryReadOnly'
+import { formatDateTime } from '@/lib/utils'
 
 // 懒加载页面组件 - 使用默认导出
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
@@ -40,12 +50,20 @@ function RuntimeCheckingScreen() {
 function MaintenanceModeGate({ children }: Readonly<{ children: React.ReactNode }>) {
   const location = useLocation()
   const [maintenanceMode, setMaintenanceMode] = useState<boolean | null>(null)
+  const [inventoryReadOnly, setInventoryReadOnly] = useState(false)
+  const [snapshotCreatedAt, setSnapshotCreatedAt] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
-    resolveRuntimeMaintenanceMode()
-      .then((enabled) => {
+    Promise.all([
+      resolveRuntimeMaintenanceMode(),
+      resolveRuntimeInventoryReadOnly(),
+      resolveRuntimeSnapshotCreatedAt(),
+    ])
+      .then(([enabled, readOnly, snapshotTime]) => {
         if (active) {
+          setInventoryReadOnly(readOnly)
+          setSnapshotCreatedAt(snapshotTime)
           setMaintenanceMode(enabled)
         }
       })
@@ -63,7 +81,11 @@ function MaintenanceModeGate({ children }: Readonly<{ children: React.ReactNode 
     return <RuntimeCheckingScreen />
   }
   if (!maintenanceMode) {
-    return <>{children}</>
+    return (
+      <InventoryReadOnlyContext.Provider value={{ enabled: inventoryReadOnly, snapshotCreatedAt }}>
+        {children}
+      </InventoryReadOnlyContext.Provider>
+    )
   }
   if (location.pathname !== '/maintenance') {
     return <Navigate to="/maintenance" replace />
@@ -90,10 +112,13 @@ function ProtectedRoute({
 }
 
 function ProtectedLayoutRoute() {
+  const inventoryReadOnly = useInventoryReadOnly()
+  const snapshotCreatedAt = useInventorySnapshotCreatedAt()
   const authStatus = useAuthStore((state) => state.authStatus)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const user = useAuthStore((state) => state.user)
 
-  if (authStatus === 'checking' && isAuthenticated) {
+  if (authStatus === 'checking' && user && !inventoryReadOnly) {
     // 硬刷新校验会话时继续显示 Layout 外壳，业务内容区等待校验完成。
     return <Layout deferOutlet />
   }
@@ -104,6 +129,20 @@ function ProtectedLayoutRoute() {
     return <Navigate to="/login" replace />
   }
 
+  if (inventoryReadOnly) {
+    return (
+      <div className="min-h-svh bg-background text-foreground">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted px-6 py-4">
+          <span>
+            系统维护中，库存仅供查询
+            {snapshotCreatedAt ? `（数据截至 ${formatDateTime(snapshotCreatedAt)}）` : ''}
+          </span>
+          <Link to="/login?switch=1" className="text-primary hover:underline">切换账户</Link>
+        </header>
+        <main className="p-4 md:p-6"><Outlet /></main>
+      </div>
+    )
+  }
   return <Layout />
 }
 
@@ -123,23 +162,20 @@ function NonPublicRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   return <>{children}</>
 }
 
-function LoginRoute() {
-  const authStatus = useAuthStore((state) => state.authStatus)
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  if (authStatus === 'checking' && isAuthenticated) {
-    return <AuthCheckingScreen />
-  }
-  if (isAuthenticated) {
-    return <Navigate to="/" replace />
-  }
-  return <Login />
-}
-
 function AppContent() {
+  const inventoryReadOnly = useInventoryReadOnly()
+  const location = useLocation()
+  const initialLocation = useRef(location)
   const bootstrapAuth = useAuthStore((state) => state.bootstrapAuth)
   useEffect(() => {
+    const { pathname, search } = initialLocation.current
+    if (pathname === '/login' && new URLSearchParams(search).get('switch') === '1') return
     void bootstrapAuth()
   }, [bootstrapAuth])
+
+  if (inventoryReadOnly && location.pathname !== '/login' && location.pathname !== '/inventory') {
+    return <Navigate to="/inventory" replace />
+  }
 
   return (
     <TooltipProvider>

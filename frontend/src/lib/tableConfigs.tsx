@@ -196,9 +196,9 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
     }),
     columnHelper.accessor('specification', {
       header: '规格',
-      size: 100,
-      minSize: 80,
-      maxSize: 120,
+      size: 80,
+      minSize: 60,
+      maxSize: 100,
       enableSorting: false,
       cell: info => {
         const order = info.row.original
@@ -286,8 +286,8 @@ export function getConsumableOrderTableColumns(): ColumnDef<TableRowData, unknow
     columnHelper.accessor('applicant_name', {
       id: 'applicant',
       header: '订购人',
-      size: 60,
-      minSize: 50,
+      size: 80,
+      minSize: 60,
       maxSize: 120,
       cell: info => renderHighlightedTextCell(info, undefined, { fallback: '-' }),
     }),

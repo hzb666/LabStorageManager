@@ -234,15 +234,23 @@ export interface UserAdminListResponse {
 }
 
 // 认证 API。
+let logoutRequest: ReturnType<typeof api.post> | null = null
+
 export const authAPI = {
-  login: (username: string, password: string) =>
-    api.post('/users/login', { 
+  login: async (username: string, password: string) => {
+    await logoutRequest?.catch(() => undefined)
+    return api.post('/users/login', {
       username, 
       password,
       device_id: getDeviceId(),
       device_name: getDeviceName()
-    }),
-  logout: () => api.post('/users/logout'),
+    }, { timeout: 15000 })
+  },
+  logout: () => {
+    logoutRequest ??= api.post('/users/logout', undefined, { timeout: 8000 })
+      .finally(() => { logoutRequest = null })
+    return logoutRequest
+  },
   getProfile: () => api.get('/users/me'),
   changePassword: (oldPassword: string, newPassword: string) =>
     api.post('/users/change-password', { old_password: oldPassword, new_password: newPassword }),
@@ -1010,8 +1018,8 @@ export interface SearchCompletionPreferences {
 }
 
 export const searchCompletionAPI = {
-  getInline: (params: { endpoint: string; field?: string; q: string }) =>
-    api.get<InlineCompletionResponse>('/search-completions/inline', { params }),
+  getInline: (params: { endpoint: string; field?: string; q: string }, signal?: AbortSignal) =>
+    api.get<InlineCompletionResponse>('/search-completions/inline', { params, signal, timeout: 2000 }),
   getPreferences: () =>
     api.get<SearchCompletionPreferences>('/search-completions/preferences'),
   updatePreferences: (data: SearchCompletionPreferences) =>

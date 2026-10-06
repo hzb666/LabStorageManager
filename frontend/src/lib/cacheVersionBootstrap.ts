@@ -13,6 +13,8 @@ import { useSSEStore } from '@/store/sseStore'
 type RuntimeCacheVersionResponse = {
   cache_version?: unknown
   maintenance_mode?: unknown
+  inventory_read_only?: unknown
+  snapshot_created_at?: unknown
   display_utc_offset?: unknown
   display_timezone?: unknown
 }
@@ -24,6 +26,8 @@ type CacheVersionBootstrapResult = {
 type RuntimeBootstrapPayload = {
   cacheVersion: string | null
   maintenanceMode: boolean
+  inventoryReadOnly: boolean
+  snapshotCreatedAt: string | null
   timeConfig: RuntimeTimeConfig | null
 }
 
@@ -113,6 +117,10 @@ async function fetchRuntimeCacheVersion(): Promise<RuntimeBootstrapPayload> {
     return {
       cacheVersion: cacheVersion || null,
       maintenanceMode: data.maintenance_mode === true,
+      inventoryReadOnly: data.inventory_read_only === true,
+      snapshotCreatedAt: typeof data.snapshot_created_at === 'string'
+        ? data.snapshot_created_at.trim() || null
+        : null,
       timeConfig: normalizeRuntimeTimeConfig(data),
     }
   } finally {
@@ -143,6 +151,16 @@ function resolveRuntimeBootstrapPayload(): Promise<RuntimeBootstrapPayload | nul
 export async function resolveRuntimeMaintenanceMode(): Promise<boolean> {
   const payload = await resolveRuntimeBootstrapPayload()
   return payload?.maintenanceMode ?? false
+}
+
+export async function resolveRuntimeInventoryReadOnly(): Promise<boolean> {
+  const payload = await resolveRuntimeBootstrapPayload()
+  return payload?.inventoryReadOnly ?? false
+}
+
+export async function resolveRuntimeSnapshotCreatedAt(): Promise<string | null> {
+  const payload = await resolveRuntimeBootstrapPayload()
+  return payload?.snapshotCreatedAt ?? null
 }
 
 async function clearCacheStorage(): Promise<void> {

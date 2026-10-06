@@ -685,7 +685,7 @@ export function useCartImportFormController(
   currentIndex: number,
   setItems: Dispatch<SetStateAction<ImportItem[]>>,
 ) {
-  const orderType: OrderType = currentItem?.order_type ?? "reagent";
+  const orderType: OrderType = currentItem?.order_type ?? "pending";
   const reagentForm = useForm<
     ReagentOrderFormInputData,
     unknown,
@@ -723,6 +723,8 @@ export function useCartImportFormController(
         item.order_type ||
         item.suggested_order_type ||
         detectOrderType(item.cas_number);
+
+      if (currentType === "pending") return;
 
       if (currentType === "reagent") {
         resetReagentFormByItem(item);
@@ -927,6 +929,11 @@ export function useCartImportActions(params: {
       !currentItem ||
       submittedIds.has(currentItem.id)
     ) {
+      return;
+    }
+
+    if (orderType === "pending") {
+      toast.error("请选择表单类型");
       return;
     }
 

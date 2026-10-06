@@ -280,6 +280,8 @@ export function Login() {
   const navigate = useNavigate()
   const location = useLocation()
   const setAuth = useAuthStore((state) => state.setAuth)
+  const authStatus = useAuthStore((state) => state.authStatus)
+  const bootstrapAuth = useAuthStore((state) => state.bootstrapAuth)
   const { theme, toggleTheme } = useTheme()
   const { rememberedUser, saveRememberedUser, clearRememberedUser, updateRememberedUser } =
     useRememberedUser()
@@ -290,7 +292,8 @@ export function Login() {
   const [isNavigating, setIsNavigating] = useState(false)
   const hasShownAuthNotice = useRef(false)
 
-  const isLockScreen = shouldShowLockScreen(rememberedUser, isLoggingIn, isNavigating)
+  const forceLogin = new URLSearchParams(location.search).get('switch') === '1'
+  const isLockScreen = !forceLogin && shouldShowLockScreen(rememberedUser, isLoggingIn, isNavigating)
 
   const formNormal = useForm<LoginFormData>({
     resolver: valibotResolver(LoginSchema),
@@ -417,6 +420,14 @@ export function Login() {
           </div>
         </CardHeader>
         <CardContent className="pt-4">
+          {authStatus === 'degraded' && (
+            <div role="status" className="mb-4 text-sm text-muted-foreground">
+              暂时无法验证登录状态，请稍后重试或重新登录。
+              <Button variant="link" className="px-0" onClick={() => void bootstrapAuth()}>
+                重试验证
+              </Button>
+            </div>
+          )}
           {isLockScreen
             ? lockScreenContent
             : (

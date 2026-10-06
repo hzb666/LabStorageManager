@@ -10,6 +10,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle,
   Download,
+  Eye,
   File,
   FileSpreadsheet,
   FileText,
@@ -37,6 +38,8 @@ const MAX_FILE_SIZE = 2 * 1024 * 1024
 
 // `.csv /.xlsx /.xls` 是上传白名单，拖拽校验和 `input accept` 共用这组扩展名。
 const IMPORT_FILE_EXTENSIONS = ['.csv', '.xlsx', '.xls']
+
+const PREVIEW_ROW_CLASS_NAME = 'grid w-full grid-cols-[3.5rem_minmax(0,1.1fr)_minmax(0,2.1fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.9fr)] [&>th]:px-3 [&>td]:px-3'
 
 // 结果面板和成功提示都依赖这组字段，错误明细按 `row + error` 展示。
 type ImportStage = 'preview' | 'confirm'
@@ -79,16 +82,6 @@ function getFileIcon(fileName: string): ReactNode {
     return <FileText className="w-8 h-8 text-green-500" />
   }
   return <File className="w-8 h-8 text-blue-500" />
-}
-
-function getResultTitleIcon(result: ImportResult | null): ReactNode {
-  if (result?.success) {
-    return <CheckCircle className="w-5 h-5 text-green-500" />
-  }
-  if (result && !result.success) {
-    return <XCircle className="w-5 h-5 text-destructive" />
-  }
-  return <FileSpreadsheet className="w-5 h-5" />
 }
 
 function getResultStatusIcon(success: boolean): ReactNode {
@@ -134,7 +127,7 @@ function getEmptyResultHint(stage: ImportStage | null): string {
   if (stage === 'confirm') {
     return '文件已完成导入，可在这里查看结果'
   }
-  return '上传文件并先执行预览校验'
+  return '请上传文件并点击“预览校验”'
 }
 
 function buildImportFormData(file: File): FormData {
@@ -174,7 +167,7 @@ function ImportTemplateSection({
 }>) {
   return (
     <div className="rounded-lg my-4">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h4>模板字段说明（标 <span className="text-destructive">*</span> 为必填项）</h4>
         <Button variant="modern" size="lg" onClick={onDownloadTemplate}>
           <Download className="w-4 h-4 mr-2" />
@@ -183,16 +176,16 @@ function ImportTemplateSection({
       </div>
       <div className="space-y-3 text-sm">
         {IMPORT_TEMPLATE_COLUMNS.map((column) => (
-          <div key={column.name} className="flex items-start gap-3">
-            <span className="w-3 shrink-0">
+          <div key={column.name} className="grid grid-cols-[0.75rem_minmax(0,1fr)_minmax(0,1.5fr)] items-start gap-x-2 leading-relaxed">
+            <span>
               {column.required ? (
                 <span className="text-destructive">*</span>
               ) : (
                 <span className="text-muted-foreground">-</span>
               )}
             </span>
-            <span className="w-28 shrink-0 text-sm mr-10">{column.name}</span>
-            <span className="text-muted-foreground text-sm">{column.description}</span>
+            <span className="min-w-0 wrap-anywhere font-medium">{column.name}</span>
+            <span className="min-w-0 wrap-anywhere text-muted-foreground">{column.description}</span>
           </div>
         ))}
       </div>
@@ -244,12 +237,12 @@ function ImportFileDropzone({
           onChange={onFileChange}
           className="hidden"
         />
-        <div className="flex flex-col items-center justify-center gap-3 text-center">
+        <div className="flex min-h-24 flex-col items-center justify-center gap-3 text-center">
           {file ? (
             <>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full min-w-0 items-center justify-center gap-2 [&>svg]:shrink-0">
                 {getFileIcon(file.name)}
-                <span className="text-sm truncate max-w-50">{file.name}</span>
+                <span className="min-w-0 max-w-50 truncate text-sm">{file.name}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">{formatFileSize(file.size)}</span>
@@ -268,7 +261,7 @@ function ImportFileDropzone({
             </>
           ) : (
             <>
-              <Upload className="w-10 h-10 text-muted-foreground" />
+              <Upload className="w-8 h-8 text-muted-foreground" />
               <div>
                 <p className="text-base">点击或拖拽文件到此处上传</p>
                 <p className="text-sm text-muted-foreground mt-1">支持 .csv, .xlsx, .xls 格式</p>
@@ -287,15 +280,13 @@ function ImportPreviewTable({
   previewItems: ImportPreviewItem[]
 }>) {
   return (
-    <div className="rounded-lg overflow-hidden">
-      <div className="bg-muted/50 px-4 py-2">
-        <h4>待入库预览</h4>
-      </div>
-      <div className="max-h-75 overflow-y-auto">
-        <table className="w-full">
-          <thead className="bg-muted/50 sticky top-0">
-            <tr>
-              <th className="px-4 py-2 text-left text-muted-foreground w-16">行号</th>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+      <div className="flex min-h-0 min-w-0 max-h-[60dvh] flex-1 flex-col overflow-x-auto lg:max-h-none">
+        <div className="flex min-h-0 w-full min-w-192 flex-1 flex-col">
+        <table aria-label="导入数据预览" className="flex min-h-0 w-full flex-1 flex-col text-sm">
+          <thead className="block shrink-0 overflow-y-hidden bg-muted whitespace-nowrap [scrollbar-gutter:stable]">
+            <tr className={PREVIEW_ROW_CLASS_NAME}>
+              <th className="px-4 py-2 text-left text-muted-foreground">行号</th>
               <th className="px-4 py-2 text-left text-muted-foreground">CAS</th>
               <th className="px-4 py-2 text-left text-muted-foreground">名称</th>
               <th className="px-4 py-2 text-left text-muted-foreground">品牌</th>
@@ -305,9 +296,9 @@ function ImportPreviewTable({
               <th className="px-4 py-2 text-left text-muted-foreground">位置</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="block min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] [&_td]:min-w-0 [&_td]:wrap-anywhere">
             {previewItems.slice(0, 50).map((item) => (
-              <tr key={`${item.row}-${item.cas_number}-${item.name}`} className="border-t border-border">
+              <tr key={`${item.row}-${item.cas_number}-${item.name}`} className={cn(PREVIEW_ROW_CLASS_NAME, 'border-t border-border')}>
                 <td className="px-4 py-2 text-sm">{item.row}</td>
                 <td className="px-4 py-2 text-sm">{item.cas_number}</td>
                 <td className="px-4 py-2 text-sm">{item.name}</td>
@@ -321,10 +312,11 @@ function ImportPreviewTable({
           </tbody>
         </table>
         {previewItems.length > 50 && (
-          <div className="px-4 py-2 text-center text-sm text-muted-foreground bg-muted/30">
+          <div className="shrink-0 px-4 py-2 text-center text-sm text-muted-foreground bg-muted/30">
             ... 还有 {previewItems.length - 50} 条待入库记录
           </div>
         )}
+        </div>
       </div>
     </div>
   )
@@ -340,9 +332,9 @@ function ImportErrorPanel({
       <div className="bg-destructive/10 px-4 py-2 border-b border-destructive/20">
         <h4 className="text-destructive">错误详情</h4>
       </div>
-      <div className="max-h-75 overflow-y-auto">
+      <div className="relative isolate max-h-75 overflow-auto">
         <table className="w-full">
-          <thead className="bg-muted/50 sticky top-0">
+          <thead className="sticky top-0 z-10 bg-muted shadow-sm">
             <tr>
               <th className="px-4 py-2 text-left text-muted-foreground w-16">行号</th>
               <th className="px-4 py-2 text-left text-muted-foreground">错误信息</th>
@@ -369,34 +361,6 @@ function ImportErrorPanel({
   )
 }
 
-function ImportResultMessage({
-  stage,
-  success,
-  errorsCount,
-}: Readonly<{
-  stage: ImportStage
-  success: boolean
-  errorsCount: number
-}>) {
-  if (!success || errorsCount !== 0) {
-    return null
-  }
-
-  if (stage === 'preview') {
-    return (
-      <div className="text-center py-4 text-sm text-muted-foreground">
-        预览校验通过，请点击“确认导入”后再真正写入库存
-      </div>
-    )
-  }
-
-  return (
-    <div className="text-center py-4 text-sm text-muted-foreground">
-      所有数据已成功导入到库存系统
-    </div>
-  )
-}
-
 // 结果摘要固定展示 `total_rows / created / errors_count`；错误明细最多展示前 50 条。
 function ImportResultPanel({
   result,
@@ -418,36 +382,33 @@ function ImportResultPanel({
   const tone = getResultTone(result.success)
 
   return (
-    <div className="space-y-4">
-      <div className={cn('p-4 rounded-lg border', tone.container)}>
-        <div className="flex items-center gap-2 mb-3">
-          {getResultStatusIcon(result.success)}
-          <span className={cn('font-bold', tone.title)}>
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className={cn('shrink-0 overflow-x-auto rounded-lg border px-3 py-2.5', tone.container)}>
+        <div className="flex w-max min-w-full items-center gap-4 whitespace-nowrap text-xs sm:text-sm">
+          <span className={cn('flex items-center gap-2 font-semibold', tone.title)}>
+            {getResultStatusIcon(result.success)}
             {getResultHeadline(resolvedStage, result.success)}
           </span>
-        </div>
-        <div className="grid grid-cols-3 gap-4 text-center">
-          <div>
-            <div className="text-2xl font-bold">{result.total_rows}</div>
-            <div className="text-sm text-muted-foreground">总行数</div>
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+          <span className="text-muted-foreground">
+            共 <strong className="font-semibold tabular-nums text-foreground">{result.total_rows}</strong> 行
+          </span>
+          <span className="text-muted-foreground">
+            {getResultPrimaryLabel(resolvedStage)}{' '}
+            <strong className="font-semibold tabular-nums text-green-600 dark:text-green-400">
               {getResultPrimaryValue(resolvedStage, result)}
-            </div>
-            <div className="text-sm text-muted-foreground">{getResultPrimaryLabel(resolvedStage)}</div>
-          </div>
-          <div>
-            <div
+            </strong>
+          </span>
+          <span className="text-muted-foreground">
+            错误{' '}
+            <strong
               className={cn(
-                'text-2xl font-bold',
+                'font-semibold tabular-nums',
                 result.errors_count > 0 ? 'text-destructive' : 'text-muted-foreground'
               )}
             >
               {result.errors_count}
-            </div>
-            <div className="text-sm text-muted-foreground">错误数</div>
-          </div>
+            </strong>
+          </span>
         </div>
       </div>
 
@@ -459,11 +420,6 @@ function ImportResultPanel({
         <ImportErrorPanel errors={result.errors} />
       )}
 
-      <ImportResultMessage
-        stage={resolvedStage}
-        success={result.success}
-        errorsCount={result.errors_count}
-      />
     </div>
   )
 }
@@ -545,14 +501,14 @@ function ImportFormCard({
   onConfirm: () => void
 }>) {
   return (
-    <Card>
-      <CardHeader>
+    <Card className="min-w-0">
+      <CardHeader className="px-4 sm:px-6">
         <CardTitle className="flex items-center gap-2">
           <FileSpreadsheet className="w-5 h-5" />
           导入数据
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-6 px-4 sm:px-6">
         <ImportTemplateSection onDownloadTemplate={onDownloadTemplate} />
         <ImportFileDropzone upload={upload} />
         <ImportActionButtons
@@ -575,14 +531,14 @@ function ImportResultCard({
   resultStage: ImportStage | null
 }>) {
   return (
-    <Card className="lg:row-span-1">
-      <CardHeader>
+    <Card className="min-h-0 min-w-0 lg:[contain:size]">
+      <CardHeader className="shrink-0 px-4 sm:px-6">
         <CardTitle className="flex items-center gap-2">
-          {getResultTitleIcon(result)}
-          {resultStage === 'preview' ? '预览结果' : '导入结果'}
+          <Eye className="w-5 h-5" />
+          {resultStage === 'confirm' ? '导入结果' : '预览结果'}
         </CardTitle>
       </CardHeader>
-      <CardContent className="mt-4">
+      <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pt-4 sm:px-6">
         <ImportResultPanel result={result} stage={resultStage} />
       </CardContent>
     </Card>
@@ -739,7 +695,7 @@ export function ImportPage() {
         <h1 className="text-3xl font-bold text-primary card-title-placeholder">批量导入库存</h1>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-6">
         <ImportFormCard
           upload={upload}
           onDownloadTemplate={handleDownloadTemplate}

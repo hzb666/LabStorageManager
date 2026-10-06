@@ -139,17 +139,13 @@ function getDisplayDateIndex(date: string | Date): number | null {
 }
 
 export function formatDate(date: string | Date): string {
-  return new Date(date).toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
+  return formatDisplayDate(date)
 }
 
 export function formatDisplayDate(date: string | Date): string {
   const parts = getDisplayDateParts(date)
   if (!parts) {
-    return formatDate(date)
+    return new Date(date).toString()
   }
   return `${parts.year}/${parts.month}/${parts.day}`
 }
@@ -157,9 +153,17 @@ export function formatDisplayDate(date: string | Date): string {
 export function formatDisplayDateTime(date: string | Date): string {
   const parts = getDisplayDateParts(date)
   if (!parts) {
-    return formatDateTime(date)
+    return new Date(date).toString()
   }
   return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`
+}
+
+export function formatDisplayDateTimeWithSeconds(date: string | Date): string {
+  const parts = getDisplayDateParts(date)
+  if (!parts) {
+    return new Date(date).toString()
+  }
+  return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
 }
 
 export function isAtLeastDisplayNaturalDaysOld(
@@ -173,14 +177,7 @@ export function isAtLeastDisplayNaturalDaysOld(
 }
 
 export function formatDateTime(date: string | Date): string {
-  return new Date(date).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
+  return formatDisplayDateTime(date)
 }
 
 function formatLocalDateTimeValue(date: string | Date, withSeconds: boolean): string {

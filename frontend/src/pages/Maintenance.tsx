@@ -38,7 +38,7 @@ export function MaintenancePage() {
           <div className="flex gap-3">
             <Button
               variant="modern"
-              onClick={() => globalThis.location.reload()}
+              onClick={() => globalThis.location.replace('/')}
               className="flex-1"
               size="lg"
             >

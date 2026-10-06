@@ -4,6 +4,7 @@ import { api, authAPI } from '@/api/client'
 import { resolveAuthNoticeByCode, triggerSessionInvalidation } from '@/lib/authSession'
 import { AUTH_STORAGE_EXPIRY_MS, UI_STORAGE_EXPIRY_MS } from '@/lib/constants'
 import { clearProcedureInventorySearchResults } from '@/lib/storage/procedureInventorySearchStorage'
+import { clearSearchCompletionCache } from '@/lib/searchCompletionCache'
 
 // 自定义存储，带有过期时间支持。
 const createExpireStorage = <T>(expiresInMs: number): PersistStorage<T> => ({
@@ -61,7 +62,7 @@ interface User {
   avatar_url?: string
 }
 
-export type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated'
+export type AuthStatus = 'checking' | 'authenticated' | 'degraded' | 'unauthenticated'
 
 interface LogoutOptions {
   skipApi?: boolean
@@ -126,6 +127,7 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => {
       const applyAuthenticated = (user: User, invalidatePending = true) => {
         const previousUserId = get().user?.id
+        if (previousUserId !== user.id) clearSearchCompletionCache()
         if (previousUserId !== undefined && previousUserId !== user.id) {
           clearProcedureInventorySearchResults()
         }
@@ -135,6 +137,7 @@ export const useAuthStore = create<AuthState>()(
         set({ user, isAuthenticated: true, authStatus: 'authenticated' })
       }
       const applyUnauthenticated = () => {
+        clearSearchCompletionCache()
         clearProcedureInventorySearchResults()
         set(UNAUTH_STATE)
       }
@@ -148,6 +151,7 @@ export const useAuthStore = create<AuthState>()(
           applyAuthenticated(user)
         },
         setUnauthenticated: () => {
+          authFlowEpoch += 1
           applyUnauthenticated()
         },
         bootstrapAuth: async () => {
@@ -161,9 +165,8 @@ export const useAuthStore = create<AuthState>()(
             return
           }
 
-          const hasLocalAuth = Boolean(current.isAuthenticated && current.user)
           const epoch = ++authFlowEpoch
-          set({ authStatus: 'checking' })
+          set({ authStatus: 'checking', isAuthenticated: false })
           bootstrapInFlight = (async () => {
             try {
               // 启动探测只用于判定“是否已登录”，不应触发全局失效弹窗。
@@ -195,13 +198,7 @@ export const useAuthStore = create<AuthState>()(
                 return
               }
 
-              if (hasLocalAuth && current.user) {
-                console.error('Auth bootstrap probe failed, keeping local auth state:', error)
-                applyAuthenticated(current.user, false)
-                return
-              }
-
-              applyUnauthenticated()
+              set({ user: current.user, isAuthenticated: false, authStatus: 'degraded' })
             } finally {
               bootstrapInFlight = null
             }
@@ -223,7 +220,8 @@ export const useAuthStore = create<AuthState>()(
             return
           }
 
-          authFlowEpoch += 1
+          const epoch = ++authFlowEpoch
+          applyUnauthenticated()
           logoutInFlight = (async () => {
             if (!skipApi) {
               try {
@@ -233,7 +231,9 @@ export const useAuthStore = create<AuthState>()(
                 console.error('Logout API error:', error)
               }
             }
-            applyUnauthenticated()
+            if (epoch === authFlowEpoch) {
+              applyUnauthenticated()
+            }
           })()
 
           try {
@@ -246,7 +246,16 @@ export const useAuthStore = create<AuthState>()(
     },
     {
       name: 'auth-storage',
-      partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
+      partialize: (state) => ({ lastKnownUser: state.user }),
+      merge: (persisted, current) => {
+        const snapshot = persisted as { lastKnownUser?: User | null; user?: User | null } | undefined
+        return {
+          ...current,
+          user: snapshot?.lastKnownUser ?? snapshot?.user ?? null,
+          isAuthenticated: false,
+          authStatus: 'checking',
+        }
+      },
       storage: createExpireStorage(AUTH_STORAGE_EXPIRY_MS),
     }
   )

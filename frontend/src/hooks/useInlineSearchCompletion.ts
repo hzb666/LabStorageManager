@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { searchCompletionAPI } from '@/api/client'
 import type { InlineCompletionResponse } from '@/api/client'
+import { useAuthStore } from '@/store/useStore'
+import { useInventoryReadOnly } from '@/lib/inventoryReadOnly'
+import {
+  cacheCompletion, createCompletionScope, getCachedCompletion, validCompletion,
+  type CachedCompletion,
+} from '@/lib/searchCompletionCache'
 
 interface UseInlineSearchCompletionOptions {
   endpoint: string
@@ -19,27 +25,7 @@ interface UseInlineSearchCompletionResult {
   submitFeedback: (accepted: boolean) => void
 }
 
-const COMPLETION_CACHE = new Map<string, InlineCompletionResponse>()
-const CACHE_MAX_SIZE = 200
 const ALL_SEARCH_FIELD = 'all'
-
-function buildCacheKey(endpoint: string, field: string, normalizedPrefix: string): string {
-  return `${endpoint}:${field}:${normalizedPrefix}`
-}
-
-function getCached(key: string): InlineCompletionResponse | undefined {
-  return COMPLETION_CACHE.get(key)
-}
-
-function setCache(key: string, value: InlineCompletionResponse): void {
-  if (COMPLETION_CACHE.size >= CACHE_MAX_SIZE) {
-    const firstKey = COMPLETION_CACHE.keys().next().value
-    if (firstKey !== undefined) {
-      COMPLETION_CACHE.delete(firstKey)
-    }
-  }
-  COMPLETION_CACHE.set(key, value)
-}
 
 function getCompletionForPrefix(
   value: InlineCompletionResponse | null | undefined,
@@ -68,95 +54,71 @@ export function useInlineSearchCompletion({
   debounceMs = 200,
   minLength = 1,
 }: UseInlineSearchCompletionOptions): UseInlineSearchCompletionResult {
-  const [completionState, setCompletionState] = useState<InlineCompletionResponse | null>(null)
-  const [hiddenForValue, setHiddenForValue] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inventoryReadOnly = useInventoryReadOnly()
+  const userId = useAuthStore((state) => state.isAuthenticated ? state.user?.id ?? null : null)
+  const [completionState, setCompletionState] = useState<{ entry: CachedCompletion | null }>({ entry: null })
+  const [hiddenForKey, setHiddenForKey] = useState<string | null>(null)
 
   const trimmed = value.trim()
   const normalizedPrefix = trimmed.toLowerCase()
   const hasSegmentSpace = value.includes(' ')
-  const isActive = enabled && field === ALL_SEARCH_FIELD && !hasSegmentSpace
-  const cacheKey = buildCacheKey(endpoint, field, normalizedPrefix)
-  const completion = useMemo(() => {
-    if (!isActive || normalizedPrefix.length < minLength) {
-      return null
-    }
-
-    const cached = getCompletionForPrefix(
-      getCached(cacheKey),
-      normalizedPrefix,
-      trimmed.length,
-    )
-
-    return cached ?? getCompletionForPrefix(
-      completionState,
-      normalizedPrefix,
-      trimmed.length,
-    )
-  }, [cacheKey, completionState, isActive, minLength, normalizedPrefix, trimmed.length])
-  const hidden = hiddenForValue === value
+  const isActive = userId !== null && enabled && field === ALL_SEARCH_FIELD && !hasSegmentSpace
+  const scope = createCompletionScope(userId, endpoint, field)
+  const candidate = getCachedCompletion(scope, normalizedPrefix) ?? validCompletion(completionState.entry, scope)
+  const completion = isActive && normalizedPrefix.length >= minLength
+    ? getCompletionForPrefix(candidate?.value, normalizedPrefix, trimmed.length)
+    : null
+  const dismissalKey = JSON.stringify([scope, value])
+  const hidden = hiddenForKey === dismissalKey
 
   useEffect(() => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current)
-      debounceRef.current = null
-    }
+    if (!candidate || !isActive) return
+    const timer = setTimeout(() => setCompletionState({ entry: null }), Math.max(0, candidate.expiresAt - Date.now()))
+    return () => clearTimeout(timer)
+  }, [candidate, isActive])
 
-    if (!isActive || trimmed.length < minLength) {
-      abortRef.current?.abort()
-      return
-    }
+  useEffect(() => {
+    if (!isActive || trimmed.length < minLength || completion?.completion) return
 
-    // 当前补全覆盖输入时跳过请求
-    if (completion?.completion || getCached(cacheKey)) {
-      return
-    }
-
-    debounceRef.current = setTimeout(() => {
-      abortRef.current?.abort()
-      const controller = new AbortController()
-      abortRef.current = controller
-
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
       searchCompletionAPI.getInline({
         endpoint,
         field,
         q: trimmed,
-      })
+      }, controller.signal)
         .then((res) => {
-          if (controller.signal.aborted) return
-          setCache(cacheKey, res.data)
-          setCompletionState(res.data)
+          if (controller.signal.aborted || scope !== createCompletionScope(userId, endpoint, field)) return
+          setCompletionState({ entry: cacheCompletion(scope, normalizedPrefix, res.data) })
         })
         .catch(() => {})
     }, debounceMs)
 
     return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current)
-      }
+      controller.abort()
+      clearTimeout(timer)
     }
-  }, [cacheKey, completion, debounceMs, endpoint, field, isActive, minLength, trimmed])
+  }, [scope, completion?.completion, debounceMs, endpoint, field, isActive, minLength, normalizedPrefix, trimmed, userId])
 
   const onAccept = useCallback(() => {
-    if (!completion?.completion) return value
-    setHiddenForValue(value)
+    if (!completion?.completion || !validCompletion(candidate, scope)) return value
+    setHiddenForKey(dismissalKey)
     return completion.completion
-  }, [completion, value])
+  }, [candidate, completion, dismissalKey, scope, value])
 
   const onDismiss = useCallback(() => {
-    setHiddenForValue(value)
-  }, [value])
+    setHiddenForKey(dismissalKey)
+  }, [dismissalKey])
 
   const submitFeedback = useCallback((accepted: boolean) => {
-    if (!isActive || !completion?.completion) return
+    if (inventoryReadOnly || !isActive || !completion?.completion || !validCompletion(candidate, scope)) return
     searchCompletionAPI.submitFeedback({
       endpoint,
       field,
       query: completion.completion,
       accepted,
     }).catch(() => {})
-  }, [completion, endpoint, field, isActive])
+  }, [candidate, completion, endpoint, field, isActive, inventoryReadOnly, scope])
 
   return { completion, hidden, onAccept, onDismiss, submitFeedback }
 }

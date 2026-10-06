@@ -3,7 +3,7 @@ import { normalizeCASInputValue } from "@/lib/validationSchemas";
 export const CART_STORAGE_KEY = "cart_import_batch_latest";
 const BATCH_TTL_MS = 2 * 60 * 60 * 1000;
 
-export type OrderType = "reagent" | "consumable";
+export type OrderType = "reagent" | "consumable" | "pending";
 
 export interface ReagentDraft {
   name: string;
@@ -144,11 +144,11 @@ export function extractFirstCasNumber(input: string): string {
 }
 
 export function detectOrderType(casNumber: string): OrderType {
-  return extractFirstCasNumber(casNumber) ? "reagent" : "consumable";
+  return extractFirstCasNumber(casNumber) ? "reagent" : "pending";
 }
 
 export function normalizeOrderType(value: unknown): OrderType {
-  return value === "reagent" ? "reagent" : "consumable";
+  return value === "reagent" || value === "consumable" ? value : "pending";
 }
 
 export function normalizeReagentSpecification(specification: string): string {
@@ -231,8 +231,7 @@ export function createInitialReagentDraft(
     specification: normalizeReagentSpecification(item.specification),
     quantity: item.quantity,
     price: item.price,
-    // 耗材危险标记不应预选试剂表单；只有原始试剂草稿才继承该值。
-    is_hazardous: item.order_type === "reagent" && item.is_hazardous,
+    is_hazardous: item.order_type !== "consumable" && item.is_hazardous,
   };
 }
 
@@ -380,6 +379,7 @@ export function updateImportItemWithDrafts(params: {
   defaults: CartImportDraftDefaults;
 }): ImportItem {
   const { item, orderType, reagentDraft, consumableDraft, defaults } = params;
+  if (orderType === "pending") return item;
   // 切卡或切类型前先把当前表单压回条目，避免上一轮草稿只留在 react-hook-form 内存里。
   const normalizedReagentDraft: ReagentDraft = {
     ...defaults.reagent,

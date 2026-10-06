@@ -39,10 +39,11 @@ function CartImportItemList(
           item.order_type === "reagent"
             ? `CAS: ${item.cas_number || "无CAS"}`
             : `规格: ${item.specification || "未提供"}`;
-        const itemTypeClassName =
-          item.order_type === "consumable"
-            ? "bg-blue-50/50 text-blue-700 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800"
-            : "bg-green-50/50 text-green-700 border-green-100 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800";
+        const itemTypeClassName = {
+          pending: "bg-muted text-muted-foreground border-border",
+          consumable: "bg-blue-50/50 text-blue-700 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800",
+          reagent: "bg-green-50/50 text-green-700 border-green-100 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800",
+        }[item.order_type];
 
         return (
           <Card
@@ -82,7 +83,7 @@ function CartImportItemList(
                     itemTypeClassName,
                   )}
                 >
-                  {item.order_type === "consumable" ? "耗材" : "试剂"}
+                  {{ pending: "待定", consumable: "耗材", reagent: "试剂" }[item.order_type]}
                 </span>
               )}
             </CardContent>
@@ -133,7 +134,7 @@ function CartImportMobileSidebar(
             <X className="w-5 h-5 opacity-60" />
           </Button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        <div className="flex-1 overflow-y-auto p-4 space-y-2 [scrollbar-gutter:stable]">
           <CartImportItemList
             items={items}
             currentIndex={currentIndex}
@@ -164,7 +165,7 @@ function CartImportDesktopSidebar(
           已提交 {submittedIds.size}/{items.length}
         </span>
       </div>
-      <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 -mr-2 pb-2">
+      <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 -mr-2 pb-2 [scrollbar-gutter:stable]">
         <CartImportItemList
           items={items}
           currentIndex={currentIndex}
@@ -249,14 +250,18 @@ function CartImportFormPanel(
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-        {orderType === "reagent" ? (
+      <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2 [scrollbar-gutter:stable]">
+        {orderType === "pending" && (
+          <p className="py-8 text-center text-muted-foreground">请选择表单类型</p>
+        )}
+        {orderType === "reagent" && (
           <BaseForm
             key="reagent"
             form={reagentForm}
             fields={reagentFormFields}
           />
-        ) : (
+        )}
+        {orderType === "consumable" && (
           <BaseForm
             key="consumable"
             form={consumableForm}
@@ -301,7 +306,7 @@ function CartImportFormPanel(
               size="lg"
               onClick={handleSubmitCurrent}
               isLoading={submitting}
-              disabled={submitting || !currentItem || isCurrentSubmitted}
+              disabled={submitting || !currentItem || isCurrentSubmitted || orderType === "pending"}
             >
               提交当前项
             </LoadingButton>
@@ -360,8 +365,8 @@ export function CartImportPage() {
   return (
     <div className="flex min-h-svh w-full items-center justify-center px-4 pb-4">
       <div className="absolute inset-0 -z-10 [background-image:radial-gradient(circle_at_center,#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(closest-side_at_50%_50%,#000_70%,transparent_100%)] dark:[background-image:radial-gradient(circle_at_center,#1f2937_1px,transparent_1px)] dark:[mask-image:radial-gradient(closest-side_at_50%_50%,#000_70%,transparent_100%)]" />
-      <div className="flex h-[min(calc(100svh-clamp(3rem,11svh,7rem)),48rem)] w-full items-start justify-center md:h-[min(calc(100svh-clamp(4rem,12svh,9rem)),48rem)]">
-        <Card className="flex max-h-full w-full flex-col overflow-hidden md:w-auto md:min-w-md">
+      <div className="flex h-[min(calc(100svh-2rem),48rem)] w-full items-start justify-center">
+        <Card className="flex h-full min-w-0 w-full max-w-3xl flex-col overflow-hidden lg:max-w-6xl">
           <CardHeader className="shrink-0 pb-4 border-b border-muted">
             <CardTitle className="text-2xl">
               购物车导入{" "}
@@ -371,7 +376,7 @@ export function CartImportPage() {
               </span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="relative flex min-h-0 max-h-[calc(100svh-9rem)] p-0 md:max-h-[calc(100svh-11rem)]">
+          <CardContent className="relative flex min-h-0 flex-1 p-0">
             <CartImportMobileSidebar
               mobileListOpen={mobileListOpen}
               items={items}

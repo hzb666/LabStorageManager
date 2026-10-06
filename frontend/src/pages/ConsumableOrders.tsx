@@ -264,9 +264,9 @@ function createConsumableOrderColumns(
   const actionColumn = columnHelper.display({
     id: 'actions',
     header: '操作',
-    size: 156,
-    minSize: 156,
-    maxSize: 180,
+      size: 120,
+      minSize: 105,
+      maxSize: 135,
     cell: (info) => {
       const meta = info.table.options.meta
       return (
