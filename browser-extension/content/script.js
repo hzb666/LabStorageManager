@@ -173,10 +173,12 @@
     const hasDangerText = textContent.includes('危险品');
     const hasMsdsLink = !!element.querySelector('a[href*="page=msdsxq"]');
     isDangerous = Boolean(dangerousImg) || hasDangerText || hasMsdsLink;
+    const basicName = detailLink?.textContent?.replaceAll(/\s+/g, ' ').trim() || `商品 ${productId}`;
 
     return {
       productId: productId,
       cartItemId: cartItemId,
+      name: basicName,
       quantity: quantity,
       price: price,
       detailUrl: detailUrl,

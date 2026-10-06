@@ -215,9 +215,9 @@
 
     return {
       cas_number: "",
-      suggested_order_type: "consumable",
-      order_type: "consumable",
-      classification_reason: "未识别到合法 CAS，默认归为耗材",
+      suggested_order_type: "pending",
+      order_type: "pending",
+      classification_reason: "请确认订单类型",
     };
   }
 

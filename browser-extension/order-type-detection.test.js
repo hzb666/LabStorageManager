@@ -2,8 +2,21 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  detectOrderClassification,
   splitConsumableNameAndSpecification,
 } = require("./popup/order-type-detection.js");
+
+test("没有合法 CAS 时保留待定类型", () => {
+  for (const item of [{}, { cas_number: "invalid" }, { cas_number: "64-17-6" }, { detail_fetch_status: "timeout" }]) {
+    const result = detectOrderClassification(item);
+    assert.equal(result.order_type, "pending");
+    assert.equal(result.suggested_order_type, "pending");
+  }
+});
+
+test("合法 CAS 仍识别为试剂", () => {
+  assert.equal(detectOrderClassification({ cas_number: "64-17-5" }).order_type, "reagent");
+});
 
 test("耗材名称优先按第一个英文逗号拆分", () => {
   assert.deepStrictEqual(

@@ -1,7 +1,6 @@
 // 购物车同步弹窗脚本。
 
 const STORAGE_KEYS = {
-  CART_ITEMS: 'pendingCartItems',
   IMPORT_BATCH_LATEST: 'import_batch_latest',
 };
 
@@ -24,8 +23,6 @@ const {
   splitConsumableNameAndSpecification,
 } = orderTypeDetectionApi;
 
-const BATCH_TTL_MS = 2 * 60 * 60 * 1000;
-const REQUEST_TIMEOUT_MS = 15000;
 const RUNTIME_MESSAGE_TIMEOUT_MS = 5000;
 const DETAIL_FETCH_CONCURRENCY = 3;
 const DETAIL_REQUEST_TIMEOUT_MS = 3000;
@@ -90,20 +87,6 @@ function isCartPageUrl(url) {
   return pageParamRegex.test(url || '');
 }
 
-async function resolveSystemUrl() {
-  return systemConfig.systemUrl;
-}
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timerId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    globalThis.clearTimeout(timerId);
-  }
-}
-
 async function mapWithConcurrencyLimit(items, limit, mapper) {
   const results = new Array(items.length).fill(null);
   let nextIndex = 0;
@@ -130,19 +113,6 @@ function generateBatchId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
-async function cleanupExpiredBatches() {
-  const data = await chrome.storage.local.get([STORAGE_KEYS.IMPORT_BATCH_LATEST]);
-  const payload = data?.[STORAGE_KEYS.IMPORT_BATCH_LATEST];
-  if (!payload) {
-    return;
-  }
-
-  const createdAt = payload?.created_at ? Date.parse(payload.created_at) : Number.NaN;
-  if (Number.isNaN(createdAt) || Date.now() - createdAt > BATCH_TTL_MS) {
-    await chrome.storage.local.remove([STORAGE_KEYS.IMPORT_BATCH_LATEST]);
-  }
-}
-
 function createBasicItem(productId, detailFetchStatus = 'fallback') {
   return {
     name: '未知',
@@ -158,8 +128,35 @@ function createBasicItem(productId, detailFetchStatus = 'fallback') {
     detail_url: '',
     is_hazardous: false,
     detail_fetch_status: detailFetchStatus,
-    suggested_order_type: 'consumable',
-    classification_reason: '未识别到详情页信息，默认归为耗材',
+    suggested_order_type: 'pending',
+    order_type: 'pending',
+    classification_reason: '请确认订单类型',
+  };
+}
+
+function createCartPreviewItem(item) {
+  return {
+    ...createBasicItem(item.productId, 'pending'),
+    name: item.name?.trim() || `商品 ${item.productId}`,
+    quantity: item.quantity,
+    price: item.price,
+    product_id: item.productId,
+    detail_url: item.detailUrl,
+    is_hazardous: Boolean(item.is_dangerous),
+  };
+}
+
+function mergeCartItemDetail(item, detail) {
+  const detailName = detail.name?.trim();
+  return {
+    ...item,
+    ...detail,
+    name: detailName && detailName !== '未知' ? detailName : item.name,
+    quantity: item.quantity,
+    price: item.price,
+    product_id: item.product_id,
+    detail_url: item.detail_url,
+    is_hazardous: item.is_hazardous,
   };
 }
 
@@ -167,18 +164,7 @@ function isTimeoutError(error) {
   return error?.name === 'AbortError';
 }
 
-async function saveCartItemsToStorage(items) {
-  const data = {
-    items,
-    orderType: 'mixed',
-    timestamp: Date.now(),
-  };
-  await chrome.storage.local.set({ [STORAGE_KEYS.CART_ITEMS]: data });
-}
-
 async function saveImportBatch(items) {
-  await cleanupExpiredBatches();
-
   const batchId = generateBatchId();
   const normalizedItems = items.map((item) => {
     const classification = detectOrderClassification(item);
@@ -215,10 +201,6 @@ function extractFieldFromHtml(html, pattern) {
   return sanitizeExtractedValue(match?.[1] || '');
 }
 
-function extractFieldFromLines(pageText, labels) {
-  return extractFieldByLabels(pageText, labels);
-}
-
 function parseProductDetail(html) {
   const pageText = normalizePageText(html);
   // 表格结构固定，直接匹配 td-2 中的内容。
@@ -228,7 +210,7 @@ function parseProductDetail(html) {
   const specificationRaw = extractFieldFromHtml(html, /包装规格：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) || '';
   const productNumber =
     extractFieldFromHtml(html, /货号：<\/td>[\s\S]*?<td[^>]*>([^<]*)<\/td>/) ||
-    extractFieldFromLines(pageText, ['货号', '产品编号', '订货号']) ||
+    extractFieldByLabels(pageText, ['货号', '产品编号', '订货号']) ||
     '';
   const classification = detectOrderClassification({
     name,
@@ -243,7 +225,7 @@ function parseProductDetail(html) {
   const extractedSpecification = extractLeadingSpecificationValue(specificationRaw, {
     ignoreLeadingLetters: classification.suggested_order_type === 'reagent',
   });
-  const parsedFields = classification.suggested_order_type === 'consumable'
+  const parsedFields = classification.suggested_order_type !== 'reagent'
     ? splitConsumableNameAndSpecification(name, extractedSpecification)
     : { name, specification: extractedSpecification };
 
@@ -270,8 +252,10 @@ async function fetchProductDetail(detailUrl) {
     return createBasicItem('', 'missing_url');
   }
 
+  const controller = new AbortController();
+  const timerId = globalThis.setTimeout(() => controller.abort(), DETAIL_REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetchWithTimeout(detailUrl, {}, DETAIL_REQUEST_TIMEOUT_MS);
+    const response = await fetch(detailUrl, { signal: controller.signal });
     if (!response.ok) {
       return createBasicItem('', 'http_error');
     }
@@ -286,6 +270,8 @@ async function fetchProductDetail(detailUrl) {
       return createBasicItem('', 'timeout');
     }
     return createBasicItem('', 'error');
+  } finally {
+    globalThis.clearTimeout(timerId);
   }
 }
 
@@ -346,8 +332,10 @@ async function getSystemTheme() {
   const selectAll = document.getElementById('selectAll');
   const backBtn = document.getElementById('backBtn');
   const importBtn = document.getElementById('importBtn');
+  const previewResult = document.getElementById('previewResult');
 
   let cartItems = [];
+  let operation = 'idle';
 
   async function checkTargetStatus() {
     try {
@@ -355,19 +343,16 @@ async function getSystemTheme() {
       if (targetTab) {
         targetStatus.textContent = '已连接';
         targetStatus.className = 'badge badge-success';
-        fetchBtn.disabled = false;
         return targetTab;
       }
 
       targetStatus.textContent = '请先打开购物车页面';
       targetStatus.className = 'badge badge-warning';
-      fetchBtn.disabled = false;
       return null;
     } catch (error) {
       console.error('[Popup] 检查失败:', error);
       targetStatus.textContent = '检查失败';
       targetStatus.className = 'badge badge-error';
-      fetchBtn.disabled = false;
       return null;
     }
   }
@@ -387,6 +372,7 @@ async function getSystemTheme() {
 
       // 卡片任意区域点击均可切换选中状态
       card.addEventListener('click', (e) => {
+        if (operation !== 'idle') return;
         // 如果点击的是标题链接，不触发切换
         if (e.target.closest('a')) return;
 
@@ -396,7 +382,7 @@ async function getSystemTheme() {
         }
 
         card.classList.toggle('selected', checkbox.checked);
-        updateCount();
+        renderControls();
       });
 
       const nameDiv = document.createElement('div');
@@ -420,15 +406,8 @@ async function getSystemTheme() {
       body.className = 'item-body';
       const bodyText = document.createElement('span');
       bodyText.className = 'item-body-text';
-      bodyText.textContent = item.cas_number ? `CAS: ${item.cas_number}` : 'CAS: 无CAS';
+      bodyText.textContent = `数量: ${item.quantity} · 单价: ¥${item.price}`;
       body.appendChild(bodyText);
-
-      if (item.detail_fetch_status === 'timeout') {
-        const timeoutBadge = document.createElement('span');
-        timeoutBadge.className = 'item-status-badge item-status-timeout';
-        timeoutBadge.textContent = '超时';
-        body.appendChild(timeoutBadge);
-      }
 
       card.appendChild(header);
       card.appendChild(body);
@@ -436,16 +415,34 @@ async function getSystemTheme() {
     });
   }
 
-  function updateCount() {
+  function renderControls() {
+    const busy = operation !== 'idle';
     const checked = itemList.querySelectorAll('.item-card.selected').length;
-    const timeoutCount = cartItems.filter((item) => item.detail_fetch_status === 'timeout').length;
-    const timeoutText = timeoutCount > 0 ? ` · ${timeoutCount} 项详情超时` : '';
-    previewCount.textContent = `已选择 ${checked} / ${cartItems.length} 项${timeoutText}`;
-    importBtn.textContent = `开始导入 (${checked})`;
-    importBtn.disabled = checked === 0;
+    previewCount.textContent = `已选择 ${checked} / ${cartItems.length} 项`;
+    selectAll.checked = checked > 0 && checked === cartItems.length;
+    selectAll.indeterminate = checked > 0 && checked < cartItems.length;
+    importBtn.innerHTML = operation === 'importing'
+      ? '<span class="loading"></span>正在获取详情...'
+      : `开始导入 (${checked})`;
+    fetchBtn.innerHTML = operation === 'fetching'
+      ? '<span class="loading"></span>获取中...'
+      : '获取购物车';
+    importBtn.disabled = busy || checked === 0;
+    selectAll.disabled = busy;
+    backBtn.disabled = busy;
+    fetchBtn.disabled = busy;
+    itemList.inert = busy;
+    itemList.setAttribute('aria-busy', String(busy));
+    itemList.querySelectorAll('.checkbox').forEach((checkbox) => { checkbox.disabled = busy; });
+  }
+
+  function setOperation(value) {
+    operation = value;
+    renderControls();
   }
 
   function toggleSelectAll() {
+    if (operation !== 'idle') return;
     const checked = selectAll.checked;
     itemList.querySelectorAll('.item-card').forEach((card) => {
       const checkbox = card.querySelector('.checkbox');
@@ -454,14 +451,14 @@ async function getSystemTheme() {
       }
       card.classList.toggle('selected', checked);
     });
-    updateCount();
+    renderControls();
   }
 
   function showMainSection() {
+    if (operation !== 'idle') return;
     previewSection.classList.add('hidden');
     mainSection.classList.remove('hidden');
-    fetchBtn.disabled = false;
-    fetchBtn.textContent = '获取购物车';
+    renderControls();
     result.className = 'message';
     result.textContent = '';
   }
@@ -469,13 +466,15 @@ async function getSystemTheme() {
   function showPreview() {
     mainSection.classList.add('hidden');
     previewSection.classList.remove('hidden');
+    previewResult.className = 'message';
+    previewResult.textContent = '';
     renderItems();
-    updateCount();
+    renderControls();
   }
 
   async function fetchCart() {
-    fetchBtn.disabled = true;
-    fetchBtn.innerHTML = '<span class="loading"></span>获取中...';
+    if (operation !== 'idle') return;
+    setOperation('fetching');
     result.className = 'message message-info show';
     result.textContent = '正在获取购物车数据...';
 
@@ -494,57 +493,27 @@ async function getSystemTheme() {
       if (!Array.isArray(cartItemsRaw) || cartItemsRaw.length === 0) {
         result.className = 'message message-info show';
         result.textContent = '购物车为空或无已提交订单';
-        fetchBtn.disabled = false;
-        fetchBtn.textContent = '获取购物车';
         return;
       }
 
-      result.textContent = `获取到 ${cartItemsRaw.length} 个商品，正在获取详情...`;
-
-      const items = await mapWithConcurrencyLimit(
-        cartItemsRaw,
-        DETAIL_FETCH_CONCURRENCY,
-        async (cartItem) => {
-          try {
-            const detail = await fetchProductDetail(cartItem.detailUrl);
-            detail.quantity = cartItem.quantity;
-            detail.price = cartItem.price;
-            detail.product_id = cartItem.productId;
-            detail.detail_url = cartItem.detailUrl;
-            detail.is_hazardous = cartItem.is_dangerous || false;
-            return detail;
-          } catch (error) {
-            console.error('[Popup] 获取详情失败:', cartItem.productId, error);
-            return null;
-          }
-        }
-      );
-
-      cartItems = items;
-      if (cartItems.length === 0) {
-        result.className = 'message message-error show';
-        result.textContent = '无法获取产品详情';
-        fetchBtn.disabled = false;
-        fetchBtn.textContent = '获取购物车';
-        return;
-      }
-
+      cartItems = cartItemsRaw.map(createCartPreviewItem);
       showPreview();
     } catch (error) {
       console.error('[Popup] 获取失败:', error);
       result.className = 'message message-error show';
       result.textContent = error.message || '获取失败，请重试';
-      fetchBtn.disabled = false;
-      fetchBtn.textContent = '获取购物车';
+    } finally {
+      setOperation('idle');
     }
   }
 
   async function importSelected() {
+    if (operation !== 'idle') return;
     const selectedItems = [];
     itemList.querySelectorAll('.item-card.selected').forEach((card) => {
       const index = Number.parseInt(card.dataset.index, 10);
-      if (!Number.isNaN(index)) {
-        selectedItems.push(cartItems[index]);
+      if (Number.isInteger(index) && cartItems[index]) {
+        selectedItems.push({ ...cartItems[index] });
       }
     });
 
@@ -553,19 +522,32 @@ async function getSystemTheme() {
       return;
     }
 
+    setOperation('importing');
+    previewResult.className = 'message message-info show';
+    previewResult.textContent = `正在获取详情（0/${selectedItems.length}）...`;
+    let completed = 0;
     try {
-      await saveCartItemsToStorage(selectedItems);
-      const batchId = await saveImportBatch(selectedItems);
-      const systemUrl = await resolveSystemUrl();
-      const importUrl = `${systemUrl}/cart-import?import=true&batch_id=${encodeURIComponent(batchId)}`;
+      const detailedItems = await mapWithConcurrencyLimit(
+        selectedItems,
+        DETAIL_FETCH_CONCURRENCY,
+        async (item) => {
+          const detail = await fetchProductDetail(item.detail_url);
+          completed += 1;
+          previewResult.textContent = `正在获取详情（${completed}/${selectedItems.length}）...`;
+          return mergeCartItemDetail(item, detail);
+        },
+      );
+      const batchId = await saveImportBatch(detailedItems);
+      const importUrl = `${systemConfig.systemUrl}/cart-import?import=true&batch_id=${encodeURIComponent(batchId)}`;
 
-      result.className = 'message message-info show';
-      result.textContent = '正在跳转到系统页面...';
+      previewResult.textContent = '正在打开导入页面...';
       await chrome.tabs.create({ url: importUrl });
     } catch (error) {
       console.error('[Popup] 导入失败:', error);
-      result.className = 'message message-error show';
-      result.textContent = `导入失败: ${error.message}`;
+      previewResult.className = 'message message-error show';
+      previewResult.textContent = `导入失败: ${error.message}`;
+    } finally {
+      setOperation('idle');
     }
   }
 
@@ -574,6 +556,7 @@ async function getSystemTheme() {
   backBtn.addEventListener('click', showMainSection);
   importBtn.addEventListener('click', importSelected);
 
+  renderControls();
   await checkTargetStatus();
 
   // 初始化时自动检测并同步主题
