@@ -46,6 +46,43 @@
 
 ## 常用命令
 
+### 同时启动正式站只读服务和预览后端（Linux）
+
+停止正式后端并暂停其自动重启后运行：
+
+```bash
+bash scripts/start_read_only_maintenance.sh
+```
+
+默认正式目录为 `/www/wwwroot/LabStorageManager`，预览目录为 `/www/wwwroot/LabStorageManager-preview`，两个目录必须已部署代码。脚本使用正式虚拟环境创建快照，优先使用预览目录的虚拟环境运行预览后端；预览环境没有虚拟环境时共用正式 Python。可用 `PYTHON_BIN` 和 `PREVIEW_PYTHON_BIN` 指定 Python 的绝对路径。
+
+正式站的 `/api/` 和 `/health` 转发到只读服务 `127.0.0.1:8000`；`preview.lab.thejiaogroup.cn` 的 `/api/` 和 `/health` 转发到预览后端 `127.0.0.1:8002`，`proxy_pass` 保留原路径。预览前端使用 `VITE_API_URL=/api` 构建。端口可用 `READ_ONLY_PORT` 和 `PREVIEW_PORT` 覆盖。
+
+预览后端读取预览目录的 `.env`，脚本强制使用独立预览数据库、`MAINTENANCE_MODE=off`、预览日志/结构索引路径和 `REDIS_KEY_PREFIX=lsm-preview`（可通过 `PREVIEW_REDIS_KEY_PREFIX` 覆盖）。预览 `.env` 仍需配置可用的 Redis 和生产 JWT 密钥。
+
+测试库不存在时生成新快照并复制测试库；测试库存在但快照丢失时只补建快照；两者均存在时校验并复用，保留测试数据。开启下一轮维护前，先停止整组服务，再备份并移走旧测试库。主库迁移期间如快照丢失，应先恢复原快照再启动，避免从迁移中的主库补建。
+
+脚本在前台管理两个后端，使用普通 `wait` 和每秒一次的进程检查，兼容不支持 `wait -n` 的旧版 Bash。任一后端退出会停止另一个并返回非零状态，便于进程管理器重启；收到停止信号时同时关闭两者。日志输出到进程管理器控制台。启动前检查端口，正式服务占用 `8000` 时会明确报错。
+
+生命周期验证：`bash tests/shell/test_start_read_only_maintenance.sh`。
+
+宝塔进程守护管理器只需添加一个维护进程：运行目录填正式目录，启动命令填 `/bin/bash /www/wwwroot/LabStorageManager/scripts/start_read_only_maintenance.sh`，进程数量设为 1，启动用户沿用后端运行用户（需能读写预览库和读取 JWT 密钥）。启用异常自动重启；进入维护时手动启动，恢复正式服务前先停止维护进程，避免两个任务争用 `8000`。在该任务的 Supervisor 配置中补充：
+
+```ini
+autorestart=unexpected
+exitcodes=0
+stopsignal=TERM
+stopwaitsecs=60
+stopasgroup=true
+killasgroup=true
+```
+
+`stopasgroup`/`killasgroup` 确保强制停止时也能清理子进程。参考：[宝塔 Supervisor 教程](https://www.bt.cn/bbs/forum.php?mod=viewthread&tid=34611)、[Supervisor 配置说明](https://supervisord.org/configuration.html)。
+
+Linux 上脚本优先通过 `setsid` 为两个后端分别建立进程组；停止时向两个组发送 TERM，默认最多等待 25 秒，再 KILL 清理残留（可通过 `SHUTDOWN_TIMEOUT_SECONDS` 设置）。Supervisor 的 `stopwaitsecs` 应大于该等待时间。未找到 `setsid` 时退回直接清理后端 PID。已经遗留的进程不属于新脚本，不会自动清理；需先用 `ss -ltnp 'sport = :8002'` 确认进程及其守护任务，再停止对应任务或明确的残留 PID。
+
+### 其他命令
+
 ```powershell
 # 创建、校验独立库存只读服务使用的 SQLite 一致性快照
 python -m app.read_only.snapshot create

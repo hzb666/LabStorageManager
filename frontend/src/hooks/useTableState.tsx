@@ -69,6 +69,8 @@ export interface UseTableStateOptions {
   expandStorageKey?: string
   // 默认是否展开全部
   defaultExpanded?: boolean
+  // 临时业务展开不作为用户偏好保存，并清除旧的展开偏好。
+  transientExpandAll?: boolean
   // 是否允许模糊搜索；禁用时即使本地存储有旧状态也不会带到请求中。
   enableFuzzySearch?: boolean
 }
@@ -258,14 +260,14 @@ function useColumnSizingState(
 }
 
 // 管理“展开全部”状态并做本地持久化，隔离 UI 存储细节。
-function useExpandAllState(expandStorageId: string, defaultExpanded: boolean) {
+function useExpandAllState(expandStorageId: string, defaultExpanded: boolean, transientExpandAll: boolean) {
   const [isAllExpanded, setIsAllExpanded] = useState<boolean>(() =>
     getExpandAllState(expandStorageId, defaultExpanded)
   )
 
   useEffect(() => {
-    setExpandAllState(expandStorageId, isAllExpanded)
-  }, [isAllExpanded, expandStorageId])
+    setExpandAllState(expandStorageId, transientExpandAll ? false : isAllExpanded)
+  }, [isAllExpanded, expandStorageId, transientExpandAll])
 
   // 切换全部展开状态，供表格工具栏复用。
   const toggleExpandAll = useCallback(() => {
@@ -595,6 +597,7 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
     initialSearchField,
     expandStorageKey,
     defaultExpanded = false,
+    transientExpandAll,
     enableFuzzySearch = true,
   } = options
   const queryClient = useQueryClient()
@@ -615,7 +618,8 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   )
   const { isAllExpanded, setAllExpanded, toggleExpandAll, resetExpanded } = useExpandAllState(
     expandStorageId,
-    defaultExpanded
+    defaultExpanded,
+    Boolean(transientExpandAll)
   )
   // 先把筛选条件固化成稳定快照，再交给 queryFn 和 queryKey 共享，避免两边各自拼一套依赖。
   const queryFilters = useMemo<TableQueryFilters>(

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
+import { createColumnHelper, type CellContext, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, useWatch, type UseFormReturn } from "react-hook-form";
 import { safeParse } from "valibot";
@@ -20,6 +20,7 @@ import { FilterTable, type FilterTableProps } from "@/components/ui/FilterTable"
 import { Label } from "@/components/ui/Label";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import MoleculeStructure from "@/components/ui/MoleculeStructure";
+import { MoleculeHoverPreview } from "@/components/ui/MoleculeHoverPreview";
 import { NoteDisplay } from "@/components/ui/NoteDisplay";
 import { QuantityIndicator } from "@/components/ui/QuantityIndicator";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/RadioGroup";
@@ -744,6 +745,17 @@ function createBorrowRealtimeConfig(
   }
 }
 
+function renderInventoryMoleculeCell<T extends MyBorrowItem | PendingStockinItem>(info: CellContext<T, unknown>) {
+  return (
+    <MoleculeHoverPreview
+      casNumber={info.row.original.cas_number}
+      disabled={info.row.getIsExpanded()}
+    >
+      <span>{toText(info.getValue())}</span>
+    </MoleculeHoverPreview>
+  )
+}
+
 function createBorrowColumns(
   openReturnModal: (item: MyBorrowItem) => void,
   managementMode: boolean,
@@ -752,11 +764,12 @@ function createBorrowColumns(
     borrowColumnHelper.accessor('cas_number', {
       header: 'CAS号',
       size: 100,
+      cell: renderInventoryMoleculeCell,
     }),
     borrowColumnHelper.accessor('name', {
       header: '名称',
       size: 200,
-      cell: (info) => <span>{info.getValue()}</span>,
+      cell: renderInventoryMoleculeCell,
     }),
     borrowColumnHelper.accessor('storage_location', {
       header: '位置',
@@ -1030,11 +1043,12 @@ function createStockinColumns(
     pendingStockinColumnHelper.accessor('cas_number', {
       header: 'CAS号',
       size: 120,
+      cell: renderInventoryMoleculeCell,
     }),
     pendingStockinColumnHelper.accessor('name', {
       header: '名称',
       size: 180,
-      cell: (info) => <span>{info.getValue()}</span>,
+      cell: renderInventoryMoleculeCell,
     }),
     pendingStockinColumnHelper.accessor('brand', {
       header: '品牌',

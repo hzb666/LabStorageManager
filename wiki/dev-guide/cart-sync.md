@@ -17,10 +17,10 @@
 - `batch_id`：导入批次标识，用于页面加载和桥接校验。
 - `created_at`：批次创建时间，桥接脚本和前端都会用它做 TTL 判断。
 - `items[]`：每一项至少包含 `name`、`specification`、`brand`、`cas_number`、`product_id`、`detail_url`。
-- `items[].suggested_order_type`：识别到合法 CAS 时为 `reagent`，否则为 `pending`（待定），不默认归为耗材。
+- `items[].suggested_order_type`：识别到合法 CAS 时为 `reagent`；获取到商品详情但无合法 CAS 时为 `consumable`；未获取到商品详情时为 `pending`（待定）。
 - `items[].order_type`：导入时采用的类型，导入页允许用户切换。
 - `items[].classification_reason`：插件对类型判断的解释，方便人工确认。
-- `items[].detail_fetch_status`：详情页拉取结果，例如成功、超时、回退基础信息。
+- `items[].detail_fetch_status`：详情页识别结果，例如成功、超时、回退基础信息；请求成功但未解析出商品详情时为 `no_details`。
 
 插件桥接传递“待人工确认的导入草稿”，最终请求体由导入页校验和转换后生成。
 

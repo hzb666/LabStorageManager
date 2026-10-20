@@ -71,6 +71,7 @@ export interface FilterTableProps {
   searchResetSignal?: unknown;
   sortingResetSignal?: unknown;
   expandAllSignal?: unknown;
+  transientExpandAll?: boolean;
   collapseAllSignal?: unknown;
   searchActions?: React.ReactNode;
   title?: React.ReactNode;
@@ -1058,6 +1059,7 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
     initialSearch: initialUrlSearchState.search,
     initialSearchField: initialUrlSearchState.field,
     enableFuzzySearch: showFuzzySearch,
+    transientExpandAll: Boolean(props.transientExpandAll),
   });
 
   const table = useFilterTableInstance({ actionRefs, canExpandRows: Boolean(renderExpandedRow), customColumns, filter });

@@ -1,6 +1,7 @@
 import { useState, useEffect, useId } from 'react'
 import type { CSSProperties, HTMLAttributes } from 'react'
 import { createPortal } from 'react-dom'
+import { motion } from 'framer-motion'
 import {
   useFloating,
   autoUpdate,
@@ -19,6 +20,26 @@ import { loadRDKitModule } from '@/lib/rdkitLoader'
 import type { Mol, RDKitModule } from '@/lib/rdkitLoader'
 import { isSpecialCasValue } from '@/lib/validationSchemas'
 
+const moleculeTransition = {
+  duration: 200,
+  initial: { transform: 'scale(0.9)', opacity: 0 },
+  open: { transform: 'scale(1)', opacity: 1 },
+  close: { transform: 'scale(0.9)', opacity: 0 },
+}
+const moleculeEase = [0.25, 0.1, 0.25, 1] as const
+const inlineZoomAnimation = { scale: [0.9, 1], opacity: [0, 1] }
+const inlineRestAnimation = { scale: 1, opacity: 1 }
+
+/** 悬浮预览与展开行放大层共用外观，避免阴影和圆角偏离。 */
+export function MoleculeSurface({ className = '', ...props }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={`rounded-xl bg-white dark:bg-[#121212] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_10px_40px_rgba(0,0,0,0.6)] ${className}`}
+      {...props}
+    />
+  )
+}
+
 interface MoleculeStructureProps {
   casNumber: string
   width?: number
@@ -28,6 +49,9 @@ interface MoleculeStructureProps {
   highlightQuery?: string | null
   highlightQueryFormat?: StructureHighlightQueryFormat
   highlightMatchMode?: StructureHighlightMatchMode
+  // 在父浮层内放大，让父容器随结构图一起调整尺寸。
+  inlineZoom?: boolean
+  tooltipSideOffset?: number
 }
 
 type StructureHighlightQueryFormat = 'smarts' | 'molblock' | 'smiles'
@@ -108,8 +132,8 @@ function processSvgId(str: string, id: string): string {
 
 // 从 RDKit 输出的 SVG 字符串中提取原始宽高，用于判断是否可放大。
 function extractNaturalSize(svgString: string): { w: number; h: number } {
-  const widthMatch = /width='([\d.]+)px'/.exec(svgString)
-  const heightMatch = /height='([\d.]+)px'/.exec(svgString)
+  const widthMatch = /width=['"]([\d.]+)(?:px)?['"]/.exec(svgString)
+  const heightMatch = /height=['"]([\d.]+)(?:px)?['"]/.exec(svgString)
   return {
     w: widthMatch ? Number.parseFloat(widthMatch[1]) : 0,
     h: heightMatch ? Number.parseFloat(heightMatch[1]) : 0,
@@ -581,12 +605,7 @@ function useMoleculeZoom(canZoom: boolean) {
     enabled: canZoom,
   })
   const { getReferenceProps, getFloatingProps } = useInteractions([hover])
-  const { isMounted, styles: transitionStyles } = useTransitionStyles(context, {
-    duration: 200,
-    initial: { transform: 'scale(0.9)', opacity: 0 },
-    open: { transform: 'scale(1)', opacity: 1 },
-    close: { transform: 'scale(0.9)', opacity: 0 },
-  })
+  const { isMounted, styles: transitionStyles } = useTransitionStyles(context, moleculeTransition)
 
   return {
     refs,
@@ -594,6 +613,7 @@ function useMoleculeZoom(canZoom: boolean) {
     getReferenceProps,
     getFloatingProps,
     isMounted,
+    isOpen: isOpen && canZoom,
     transitionStyles,
   }
 }
@@ -657,8 +677,13 @@ function MoleculePreview(props: {
   casNumber: string
   setReference: (node: HTMLElement | null) => void
   referenceProps: HTMLAttributes<HTMLDivElement>
+  tooltipSideOffset?: number
+  animateInline?: boolean
+  enlarged?: boolean
 }) {
-  const { width, height, svg, filterClass, canZoom, casNumber, setReference, referenceProps } = props
+  const { width, height, svg, filterClass, canZoom, casNumber, setReference, referenceProps, tooltipSideOffset, animateInline, enlarged } = props
+  const naturalSize = extractNaturalSize(svg)
+  const imageScale = Math.min(1, Math.max(0, width - 16) / Math.max(1, naturalSize.w), Math.max(0, height - 16) / Math.max(1, naturalSize.h))
 
   // 打开 ChemicalBook 详情页，保持原有点击行为不变。
   const handleClick = () => {
@@ -678,18 +703,29 @@ function MoleculePreview(props: {
           ref={setReference}
           {...referenceProps}
           onClick={handleClick}
-          className={`flex items-center justify-center p-2 rounded-md overflow-hidden bg-white transition-none ${filterClass} ${canZoom ? 'cursor-zoom-in' : 'cursor-pointer'}`}
-          style={{ width, height }}
+          className={`relative flex items-center justify-center p-2 rounded-md overflow-hidden bg-white ${filterClass} ${canZoom ? 'cursor-zoom-in' : 'cursor-pointer'}`}
+          style={{ width, height, transition: animateInline ? 'width 200ms, height 200ms' : undefined }}
         >
-          <img
-            src={svgToDataUri(svg)}
-            alt="分子结构"
-            className="max-w-full max-h-full"
-            draggable={false}
-          />
+          {animateInline ? (
+            <motion.img
+              src={svgToDataUri(svg)}
+              alt="分子结构"
+              className="block shrink-0 object-contain"
+              initial={false}
+              animate={{
+                width: naturalSize.w * imageScale,
+                height: naturalSize.h * imageScale,
+                ...(enlarged ? inlineZoomAnimation : inlineRestAnimation),
+              }}
+              transition={{ duration: moleculeTransition.duration / 1000, ease: moleculeEase }}
+              draggable={false}
+            />
+          ) : (
+            <img src={svgToDataUri(svg)} alt="分子结构" className="max-w-full max-h-full" draggable={false} />
+          )}
         </div>
       </TooltipTrigger>
-      <TooltipContent side="left">点击查看详情</TooltipContent>
+      <TooltipContent side="left" sideOffset={tooltipSideOffset}>点击查看详情</TooltipContent>
     </Tooltip>
   )
 }
@@ -724,11 +760,11 @@ function MoleculeZoomPortal(props: {
 
   const forceDarkClass =
     isDark === true
-      ? 'bg-[#121212]! border-white/10! shadow-[0_10px_40px_rgba(0,0,0,0.6)]!'
+      ? 'bg-[#121212]! shadow-[0_10px_40px_rgba(0,0,0,0.6)]!'
       : ''
   const forceLightClass =
     isDark === false
-      ? 'bg-white! border-black/5! shadow-[0_8px_30px_rgb(0,0,0,0.08)]!'
+      ? 'bg-white! shadow-[0_8px_30px_rgb(0,0,0,0.08)]!'
       : ''
 
   return createPortal(
@@ -743,12 +779,9 @@ function MoleculeZoomPortal(props: {
         willChange: 'transform',
       }}
     >
-      <div
+      <MoleculeSurface
         className={`
-          flex items-center justify-center p-4 rounded-xl
-          bg-white dark:bg-[#121212]
-          border border-black/5 dark:border-white/10
-          shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_10px_40px_rgba(0,0,0,0.6)]
+          flex items-center justify-center p-4
           ${forceDarkClass}
           ${forceLightClass}
         `}
@@ -771,10 +804,23 @@ function MoleculeZoomPortal(props: {
             draggable={false}
           />
         </div>
-      </div>
+      </MoleculeSurface>
     </div>,
     document.body
   )
+}
+
+function getInlinePreview(inlineZoom: boolean | undefined, enlarged: boolean, preview: {
+  width: number; height: number; svg: string; zoomSvg: string
+}) {
+  if (inlineZoom && enlarged) {
+    const naturalSize = extractNaturalSize(preview.zoomSvg)
+    const width = Math.max(preview.width, naturalSize.w + 16)
+    const height = Math.max(preview.height, naturalSize.h + 16)
+    const scale = Math.max(0, Math.min(1, (window.innerWidth - 40) / width, (window.innerHeight - 40) / height))
+    return { width: width * scale, height: height * scale, svg: preview.zoomSvg }
+  }
+  return { width: preview.width, height: preview.height, svg: inlineZoom ? preview.zoomSvg : preview.svg }
 }
 
 // 仅在桌面端渲染 CAS 对应分子结构，并在可放大时提供悬浮放大预览。
@@ -787,6 +833,8 @@ function DesktopMoleculeStructure({
   highlightQuery,
   highlightQueryFormat,
   highlightMatchMode,
+  inlineZoom,
+  tooltipSideOffset,
 }: Readonly<MoleculeStructureProps>) {
   const componentId = useId().replaceAll(':', '')
   const { smiles, loadingState, setLoadingState, error, setError } =
@@ -805,6 +853,7 @@ function DesktopMoleculeStructure({
     })
   const zoom = useMoleculeZoom(canZoom)
   const filterClass = getFilterClass(isDark)
+  const preview = getInlinePreview(inlineZoom, zoom.isOpen, { width, height, svg, zoomSvg })
 
   if (!casNumber) return null
   if (loadingState === 'loading') {
@@ -832,17 +881,20 @@ function DesktopMoleculeStructure({
   return (
     <>
       <MoleculePreview
-        width={width}
-        height={height}
-        svg={svg}
+        width={preview.width}
+        height={preview.height}
+        svg={preview.svg}
         filterClass={filterClass}
         canZoom={canZoom}
         casNumber={casNumber}
         setReference={zoom.refs.setReference}
         referenceProps={zoom.getReferenceProps()}
+        tooltipSideOffset={tooltipSideOffset}
+        animateInline={inlineZoom}
+        enlarged={zoom.isOpen}
       />
       <MoleculeZoomPortal
-        shouldRender={zoom.isMounted && canZoom}
+        shouldRender={!inlineZoom && zoom.isMounted && canZoom}
         setFloating={zoom.refs.setFloating}
         floatingProps={zoom.getFloatingProps()}
         floatingStyles={zoom.floatingStyles}

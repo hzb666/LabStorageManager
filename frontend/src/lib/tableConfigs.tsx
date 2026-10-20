@@ -12,6 +12,7 @@ import {
 } from '@/components/OrderStatusBadge'
 import { QuantityIndicator } from '@/components/ui/QuantityIndicator'
 import { HazardousIcon } from '@/components/ui/HazardousIcon'
+import { MoleculeHoverPreview } from '@/components/ui/MoleculeHoverPreview'
 import { formatDate, formatDateTime, getFullImageUrl } from '@/lib/utils'
 import { CHEMICAL_CATEGORY_LABELS, type BadgeColor } from '@/lib/constants'
 import { Laptop } from 'lucide-react'
@@ -94,6 +95,18 @@ function renderHazardousNameCell(
   )
 }
 
+// 库存和试剂订单共用入口，展开行已有结构图时不重复预览。
+function renderMoleculeHoverCell(info: CellContext<TableRowData, unknown>, children: ReactNode) {
+  return (
+    <MoleculeHoverPreview
+      casNumber={safeString(info.row.original.cas_number, '')}
+      disabled={info.row.getIsExpanded()}
+    >
+      {children}
+    </MoleculeHoverPreview>
+  )
+}
+
 /**
  * 库存表格列配置
  * 包含：CAS号、名称、位置、品牌、剩余/规格、入库时间、状态
@@ -105,14 +118,14 @@ export function getInventoryTableColumns(): ColumnDef<TableRowData, unknown>[] {
       size: 120,
       minSize: 100,
       maxSize: 200,
-      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
+      cell: info => renderMoleculeHoverCell(info, renderHighlightedTextCell(info, undefined, { className: 'break-all' })),
     }),
     columnHelper.accessor('name', {
       header: '名称',
       size: 260,
       minSize: 200,
       maxSize: 500,
-      cell: info => renderHazardousNameCell(info),
+      cell: info => renderMoleculeHoverCell(info, renderHazardousNameCell(info)),
     }),
     columnHelper.accessor('storage_location', {
       id: 'storage_location',
@@ -178,14 +191,14 @@ export function getReagentOrderTableColumns(): ColumnDef<TableRowData, unknown>[
       size: 110,
       minSize: 90,
       maxSize: 180,
-      cell: info => renderHighlightedTextCell(info, undefined, { className: 'break-all' }),
+      cell: info => renderMoleculeHoverCell(info, renderHighlightedTextCell(info, undefined, { className: 'break-all' })),
     }),
     columnHelper.accessor('name', {
       header: '名称',
       size: 200,
       minSize: 160,
       maxSize: 300,
-      cell: info => renderHazardousNameCell(info),
+      cell: info => renderMoleculeHoverCell(info, renderHazardousNameCell(info)),
     }),
     columnHelper.accessor('brand', {
       header: '品牌',
