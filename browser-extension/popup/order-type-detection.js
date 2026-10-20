@@ -213,11 +213,14 @@
       };
     }
 
+    const orderType = item?.detail_fetch_status === "success" ? "consumable" : "pending";
     return {
       cas_number: "",
-      suggested_order_type: "pending",
-      order_type: "pending",
-      classification_reason: "请确认订单类型",
+      suggested_order_type: orderType,
+      order_type: orderType,
+      classification_reason: orderType === "consumable"
+        ? "已获取商品详情，未识别到合法 CAS，归为耗材"
+        : "未获取到商品详情，请确认订单类型",
     };
   }
 

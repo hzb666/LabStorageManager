@@ -136,6 +136,8 @@ test('import fetches selected details only, caps concurrency and locks selection
   assert.equal(imported[0].price, 12.5);
   assert.equal(imported[0].is_hazardous, true);
   assert.equal(imported[0].name, '详细名称');
+  assert.ok(imported.every((item) => item.detail_fetch_status === 'success'
+    && item.order_type === 'consumable' && item.suggested_order_type === 'consumable'));
   assert.equal(harness.opened.length, 1);
   assert.deepEqual(harness.storageWrites, [['import_batch_latest']]);
   assert.match(harness.opened[0].url, /\/cart-import\?import=true&batch_id=/);
@@ -164,6 +166,30 @@ test('failed details preserve basic names and cart values, including body timeou
   assert.equal(imported[0].price, 12.5);
   assert.equal(imported[0].quantity, 2);
   assert.equal(imported[0].is_hazardous, true);
+});
+
+test('successful responses without product details remain pending and preserve cart names', async () => {
+  const harness = await popupHarness(basicItems.slice(0, 1));
+  harness.context.fetch = async () => ({ ok: true, text: async () => '<html>No detail fields</html>' });
+  await harness.click(harness.elements.fetchBtn);
+  await harness.click(harness.elements.importBtn);
+  const [item] = harness.saved.import_batch_latest.items;
+  assert.equal(item.detail_fetch_status, 'no_details');
+  assert.equal(item.order_type, 'pending');
+  assert.equal(item.suggested_order_type, 'pending');
+  assert.equal(item.name, basicItems[0].name);
+});
+
+test('details with CAS remain reagent orders through import', async () => {
+  const harness = await popupHarness(basicItems.slice(0, 1));
+  harness.context.fetch = async () => ({ ok: true, text: async () => '<p>CAS: 64-17-5</p>' });
+  await harness.click(harness.elements.fetchBtn);
+  await harness.click(harness.elements.importBtn);
+  const [item] = harness.saved.import_batch_latest.items;
+  assert.equal(item.detail_fetch_status, 'success');
+  assert.equal(item.order_type, 'reagent');
+  assert.equal(item.suggested_order_type, 'reagent');
+  assert.equal(item.cas_number, '64-17-5');
 });
 
 test('storage failure restores controls and displays the error in the preview', async () => {

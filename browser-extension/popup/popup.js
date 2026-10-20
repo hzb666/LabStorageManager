@@ -213,6 +213,9 @@ function parseProductDetail(html) {
     extractFieldByLabels(pageText, ['货号', '产品编号', '订货号']) ||
     '';
   const classification = detectOrderClassification({
+    detail_fetch_status: name !== '未知' || englishName || specificationRaw || brand || productNumber
+      ? 'success'
+      : 'no_details',
     name,
     english_name: englishName,
     specification: specificationRaw,
@@ -237,6 +240,7 @@ function parseProductDetail(html) {
     cas_number: classification.cas_number,
     product_number: productNumber.trim(),
     alias: '',
+    detail_fetch_status: classification.suggested_order_type === 'pending' ? 'no_details' : 'success',
     suggested_order_type: classification.suggested_order_type,
     classification_reason: classification.classification_reason,
   };
@@ -260,10 +264,7 @@ async function fetchProductDetail(detailUrl) {
       return createBasicItem('', 'http_error');
     }
     const html = await response.text();
-    return {
-      ...parseProductDetail(html),
-      detail_fetch_status: 'success',
-    };
+    return parseProductDetail(html);
   } catch (error) {
     console.error('[Popup] 获取详情页失败:', error);
     if (isTimeoutError(error)) {

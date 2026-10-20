@@ -6,16 +6,27 @@ const {
   splitConsumableNameAndSpecification,
 } = require("./popup/order-type-detection.js");
 
-test("没有合法 CAS 时保留待定类型", () => {
-  for (const item of [{}, { cas_number: "invalid" }, { cas_number: "64-17-6" }, { detail_fetch_status: "timeout" }]) {
+test("未获取到详情且没有合法 CAS 时保留待定类型", () => {
+  for (const item of [{}, { cas_number: "invalid" }, { cas_number: "64-17-6" },
+    ...["pending", "timeout", "error", "http_error", "missing_url", "no_details", "fallback"]
+      .map((status) => ({ name: "购物车基础名称", detail_fetch_status: status }))]) {
     const result = detectOrderClassification(item);
     assert.equal(result.order_type, "pending");
     assert.equal(result.suggested_order_type, "pending");
   }
 });
 
+test("详情识别成功但没有合法 CAS 时归为耗材", () => {
+  for (const cas_number of ["", "invalid", "64-17-6"]) {
+    const result = detectOrderClassification({ detail_fetch_status: "success", cas_number });
+    assert.equal(result.order_type, "consumable");
+    assert.equal(result.suggested_order_type, "consumable");
+  }
+});
+
 test("合法 CAS 仍识别为试剂", () => {
   assert.equal(detectOrderClassification({ cas_number: "64-17-5" }).order_type, "reagent");
+  assert.equal(detectOrderClassification({ detail_fetch_status: "success", cas_number: "64-17-5" }).order_type, "reagent");
 });
 
 test("耗材名称优先按第一个英文逗号拆分", () => {
