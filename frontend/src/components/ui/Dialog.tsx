@@ -56,6 +56,7 @@ export const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         forceMount={forceMount}
+        aria-describedby={undefined}
         onOpenAutoFocus={(e) => {
           onOpenAutoFocus?.(e)
           if (!e.defaultPrevented) {

@@ -1063,9 +1063,15 @@ function createStockinColumns(
       cell: (info) => info.getValue() || '-',
     }),
     pendingStockinColumnHelper.accessor('specification', {
-      header: '规格',
+      header: '剩余/规格',
       size: 120,
-      cell: (info) => info.getValue() || '-',
+      cell: (info) => (
+        <QuantityIndicator
+          remaining={Number(info.row.original.remaining_quantity ?? 0)}
+          initial={Number(info.row.original.initial_quantity ?? 0)}
+          specification={info.getValue() || ''}
+        />
+      ),
     }),
     ...(managementMode
       ? [pendingStockinColumnHelper.accessor('temporary_keeper_name', {

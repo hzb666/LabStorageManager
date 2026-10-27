@@ -1410,20 +1410,20 @@ const ActionButtons = React.memo(function ActionButtons({
     ]
 
     if (
-      (item.status === 'in_stock' || item.status === 'run_short')
-      && !item.storage_location
-      && item.temporary_keeper_name
+      !item.storage_location
+      && item.temporary_keeper_id != null
     ) {
+      const keeperName = item.temporary_keeper_name || '未知用户'
       statusList.push({
         value: item.status,
-        label: `${item.temporary_keeper_name}暂存`,
+        label: `${keeperName}暂存`,
         className: 'text-base text-orange-600 dark:text-orange-300',
-        title: `暂存人: ${item.temporary_keeper_name}`
+        title: `暂存人: ${keeperName}`
       })
     }
 
     return statusList
-  }, [item.borrower_name, item.status, item.storage_location, item.temporary_keeper_name])
+  }, [item.borrower_name, item.status, item.storage_location, item.temporary_keeper_id, item.temporary_keeper_name])
 
   const actions = useMemo(() => {
     return [
