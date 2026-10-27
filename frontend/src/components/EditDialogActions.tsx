@@ -11,6 +11,7 @@ interface EditDialogActionsProps {
   submitLabelEdit: string
   submitLabelAdd: string
   isSubmitting: boolean
+  isDeleting?: boolean
   disableSubmit?: boolean
   leadingContent?: ReactNode
 }
@@ -22,6 +23,7 @@ export function EditDialogActions({
   submitLabelEdit,
   submitLabelAdd,
   isSubmitting,
+  isDeleting = false,
   disableSubmit = false,
   leadingContent,
 }: Readonly<EditDialogActionsProps>) {
@@ -37,6 +39,7 @@ export function EditDialogActions({
             size="lg"
             type="button"
             disabled={isSubmitting}
+            isLoading={isDeleting}
             onConfirm={onDelete}
           />
         ) : null}
@@ -50,10 +53,10 @@ export function EditDialogActions({
       {leadingArea}
 
       <div className="flex gap-2 order-2 ml-auto">
-        <Button variant="modern" size="lg" type="button" onClick={onCancel}>
+        <Button variant="modern" size="lg" type="button" disabled={isSubmitting || isDeleting} onClick={onCancel}>
           取消
         </Button>
-        <LoadingButton type="submit" size="lg" isLoading={isSubmitting} disabled={disableSubmit}>
+        <LoadingButton type="submit" size="lg" isLoading={isSubmitting} disabled={disableSubmit || isDeleting}>
           {mode === 'edit' ? submitLabelEdit : submitLabelAdd}
         </LoadingButton>
       </div>

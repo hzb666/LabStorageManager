@@ -7,6 +7,7 @@ import { useCallback, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useSSEStore } from "@/store/sseStore";
+import { toast } from "@/lib/toast";
 
 interface StaleBannerProps {
   staleKey: string;
@@ -23,6 +24,8 @@ export function StaleBanner({ staleKey, onRefresh }: StaleBannerProps) {
     try {
       await onRefresh();
       clearStaleKey(staleKey);
+    } catch {
+      toast.error("刷新失败，请稍后重试");
     } finally {
       setIsRefreshing(false);
     }

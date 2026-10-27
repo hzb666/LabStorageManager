@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { FormField } from '@/components/ui/FormField'
 import { LoadingButton } from '@/components/ui/LoadingButton'
+import { isApiTimeoutError } from '@/lib/validationSchemas'
 
 interface BorrowDialogProps {
   open: boolean
@@ -76,8 +77,9 @@ function BorrowDialogContent({ onCancel, onConfirm, isSubmitting }: Readonly<Bor
 
     try {
       await onConfirm(selectedBorrower.id)
-    } catch {
-      setErrorMessage('借用失败，请重试')
+    } catch (error) {
+      // 提交方已经 toast 提示请求错误，超时不再标记为借用人字段错误。
+      if (!isApiTimeoutError(error)) setErrorMessage('借用失败，请重试')
     }
   }
 
@@ -129,7 +131,7 @@ function BorrowDialogContent({ onCancel, onConfirm, isSubmitting }: Readonly<Bor
 
 export function BorrowDialog({ open, onOpenChange, onConfirm, isSubmitting }: Readonly<BorrowDialogProps>) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog busy={isSubmitting} open={open} onOpenChange={onOpenChange}>
       {open && (
         <BorrowDialogContent
           isSubmitting={isSubmitting}

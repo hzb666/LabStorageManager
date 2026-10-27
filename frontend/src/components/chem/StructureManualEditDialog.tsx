@@ -1,3 +1,4 @@
+import { useSubmissionState } from '@/hooks/useSubmissionState'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Ketcher } from 'ketcher-core'
 import { Loader2 } from 'lucide-react'
@@ -8,7 +9,8 @@ import { KetcherEditor } from '@/components/chem/KetcherEditor'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { LoadingButton } from '@/components/ui/LoadingButton'
-import { getApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage, isApiTimeoutError } from '@/lib/validationSchemas'
+import { toast } from '@/lib/toast'
 
 const EDITOR_MOUNT_DELAY_MS = 80
 
@@ -53,7 +55,7 @@ export function StructureManualEditDialog({
 }: Readonly<StructureManualEditDialogProps>) {
   const ketcherRef = useRef<Ketcher | null>(null)
   const [editorReady, setEditorReady] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving] = useSubmissionState()
   const [error, setError] = useState<string | null>(null)
   const shouldMountEditor = useDeferredEditorMount(open, casNumber)
 
@@ -74,7 +76,7 @@ export function StructureManualEditDialog({
 
   const handleSave = useCallback(async () => {
     setError(null)
-    setSaving(true)
+    if (!setSaving(true)) return
     try {
       const molblock = normalizeMolblock(await ketcherRef.current?.getMolfile('v3000'))
       if (!molblock) {
@@ -85,14 +87,16 @@ export function StructureManualEditDialog({
       onSaved(cache)
       onOpenChange(false)
     } catch (saveError) {
-      setError(getApiErrorMessage(saveError, '结构保存失败'))
+      const message = getApiErrorMessage(saveError, '结构保存失败')
+      if (isApiTimeoutError(saveError)) toast.error(message)
+      else setError(message)
     } finally {
       setSaving(false)
     }
-  }, [casNumber, onOpenChange, onSaved])
+  }, [casNumber, onOpenChange, onSaved, setSaving])
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog busy={saving} open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[96vw] max-w-6xl max-h-[92vh] overflow-y-auto p-4 md:p-6">
         <DialogHeader>
           <DialogTitle className="mb-4">手工确认结构</DialogTitle>

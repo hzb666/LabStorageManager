@@ -1,3 +1,5 @@
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, useSubmissionLock } from '@/hooks/useSubmissionState'
 import { useCallback, useMemo, useState } from "react";
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQueryClient } from "@tanstack/react-query";
@@ -133,7 +135,9 @@ function useDashboardConsumableDialogController({
 }>) {
   const [editingConsumable, setEditingConsumable] =
     useState<DashboardConsumableOrder | null>(null);
-  const [isSubmittingConsumable, setIsSubmittingConsumable] = useState(false);
+  const submissionLock = useSubmissionLock();
+  const [isSubmittingConsumable, setIsSubmittingConsumable] = useSubmissionState(submissionLock);
+  const [isDeletingConsumable, setIsDeletingConsumable] = useSubmissionState(submissionLock);
 
   const handleConsumableEdit = useCallback(
     (itemRaw: Record<string, unknown>) => {
@@ -157,7 +161,7 @@ function useDashboardConsumableDialogController({
 
   const submitConsumableEdit = consumableForm.handleSubmit(async (formData) => {
     if (!editingConsumable) return;
-    setIsSubmittingConsumable(true);
+    if (!setIsSubmittingConsumable(true)) return;
     try {
       await consumableOrderAPI.update(editingConsumable.id, {
         name: formData.name,
@@ -169,8 +173,8 @@ function useDashboardConsumableDialogController({
         communication: formData.communication || "",
         notes: processNotes(formData.notes),
       });
+      await refreshAfterMutation(refreshTables);
       setEditingConsumable(null);
-      await refreshTables();
       toast.success(
         editingConsumable.status === ConsumableOrderStatus.REJECTED ||
           editingConsumable.status === ConsumableOrderStatus.APPROVED
@@ -197,18 +201,20 @@ function useDashboardConsumableDialogController({
   });
 
   const handleDeleteConsumable = useCallback(async () => {
-    if (!editingConsumable) return;
+    if (!editingConsumable || !setIsDeletingConsumable(true)) return;
 
     try {
       await consumableOrderAPI.delete(editingConsumable.id);
+      await refreshAfterMutation(refreshTables);
       setEditingConsumable(null);
       consumableForm.reset(defaultConsumableOrderValues);
-      await refreshTables();
       toast.success("耗材订单已删除");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "删除失败"));
+    } finally {
+      setIsDeletingConsumable(false);
     }
-  }, [consumableForm, editingConsumable, refreshTables]);
+  }, [consumableForm, editingConsumable, refreshTables, setIsDeletingConsumable]);
 
   const closeConsumableDialog = useCallback(() => {
     setEditingConsumable(null);
@@ -221,6 +227,7 @@ function useDashboardConsumableDialogController({
       editingConsumable,
       consumableForm,
       isSubmittingConsumable,
+      isDeletingConsumable,
       onDelete: handleDeleteConsumable,
       onClose: closeConsumableDialog,
       onSubmit: submitConsumableEdit,
@@ -242,6 +249,7 @@ function DashboardConsumableEditDialog({
       >
     >;
     isSubmittingConsumable: boolean;
+    isDeletingConsumable: boolean;
     onDelete: () => void;
     onClose: () => void;
     onSubmit: () => void;
@@ -252,6 +260,7 @@ function DashboardConsumableEditDialog({
     editingConsumable,
     consumableForm,
     isSubmittingConsumable,
+    isDeletingConsumable,
     onDelete,
     onClose,
     onSubmit,
@@ -265,6 +274,7 @@ function DashboardConsumableEditDialog({
 
   return (
     <Dialog
+      busy={isSubmittingConsumable || isDeletingConsumable}
       open={editingConsumable !== null}
       onOpenChange={(open) => {
         if (!open) onClose();
@@ -294,6 +304,7 @@ function DashboardConsumableEditDialog({
             submitLabelEdit="保存"
             submitLabelAdd="保存"
             isSubmitting={isSubmittingConsumable}
+            isDeleting={isDeletingConsumable}
             disableSubmit={isConsumableEditLocked}
           />
         </form>
@@ -420,7 +431,7 @@ function createConsumableColumns({
         currItem.status === ConsumableOrderStatus.APPROVED,
       onClick: async (currItem: DashboardConsumableOrder) => {
         await consumableOrderAPI.complete(currItem.id);
-        await refreshTables();
+        await refreshAfterMutation(refreshTables);
         toast.success("已确认收货");
       },
     },
@@ -439,7 +450,7 @@ function createConsumableColumns({
         !isApprovableOrderStatus(currItem.status),
       onClick: async (currItem: DashboardConsumableOrder) => {
         await consumableOrderAPI.approve(currItem.id);
-        await refreshTables();
+        await refreshAfterMutation(refreshTables);
         toast.success("审批通过");
       },
     },
@@ -456,7 +467,7 @@ function createConsumableColumns({
         !isRejectableOrderStatus(currItem.status),
       onClick: async (currItem: DashboardConsumableOrder) => {
         await consumableOrderAPI.reject(currItem.id, "管理员驳回");
-        await refreshTables();
+        await refreshAfterMutation(refreshTables);
         toast.success("已驳回");
       },
     },
@@ -519,8 +530,8 @@ export function DashboardConsumableTab({
         queryKey: managementMode
           ? ["dashboard", "admin", "consumables"]
           : ["dashboard", "consumables"],
-      }),
-      queryClient.invalidateQueries({ queryKey: ["consumable-orders"] }),
+      }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ["consumable-orders"] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ]);
   }, [managementMode, queryClient]);

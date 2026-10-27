@@ -8,21 +8,24 @@ import { cn } from "@/lib/utils"
 interface DialogMountContextValue {
   keepMounted: boolean
   open: boolean
+  busy: boolean
 }
 
 const DialogMountContext = React.createContext<DialogMountContextValue>({
   keepMounted: false,
   open: false,
+  busy: false,
 })
 
 interface DialogProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root> {
   keepMounted?: boolean
+  busy?: boolean
 }
 
-export function Dialog({ open = false, keepMounted = false, children, ...props }: DialogProps) {
+export function Dialog({ open = false, keepMounted = false, busy = false, children, onOpenChange, ...props }: DialogProps) {
   return (
-    <DialogMountContext.Provider value={{ keepMounted, open }}>
-      <DialogPrimitive.Root open={open} {...props}>
+    <DialogMountContext.Provider value={{ keepMounted, open, busy }}>
+      <DialogPrimitive.Root open={open} onOpenChange={(next) => { if (!busy) onOpenChange?.(next) }} {...props}>
         {children}
       </DialogPrimitive.Root>
     </DialogMountContext.Provider>
@@ -38,7 +41,7 @@ export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
 >(({ children, className, onOpenAutoFocus, ...props }, ref) => {
-  const { keepMounted, open } = React.useContext(DialogMountContext)
+  const { keepMounted, open, busy } = React.useContext(DialogMountContext)
   const forceMount = keepMounted ? true : undefined
 
   return (
@@ -83,7 +86,9 @@ export const DialogContent = React.forwardRef<
         )}
         {...props}
       >
-        {children}
+        <fieldset disabled={busy} aria-busy={busy} className={cn("contents", busy && "cursor-wait")}>
+          {children}
+        </fieldset>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   )

@@ -1,3 +1,7 @@
+import { usePageDraftStore } from '@/hooks/useFormDraft'
+import { LoadingButton } from '@/components/ui/LoadingButton'
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, type SubmissionSetter } from '@/hooks/useSubmissionState'
 import React, { useState, useCallback, useMemo } from 'react'
 import {
   createColumnHelper,
@@ -79,24 +83,26 @@ type AnnouncementListControllerParams = {
 }
 
 type AnnouncementDialogActionsParams = {
+  preserveCreateDraft: (() => void) | undefined
   formData: AnnouncementFormState
   editingId: number | null
   deleteId: number | null
   draftUploadedImages: string[]
   setFormData: React.Dispatch<React.SetStateAction<AnnouncementFormState>>
   setFormErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>
-  setFormLoading: React.Dispatch<React.SetStateAction<boolean>>
-  setDeleteLoading: React.Dispatch<React.SetStateAction<boolean>>
+  setFormLoading: SubmissionSetter
+  setDeleteLoading: SubmissionSetter
   setUploading: React.Dispatch<React.SetStateAction<boolean>>
   setIsDragging: React.Dispatch<React.SetStateAction<boolean>>
   setDraftUploadedImages: React.Dispatch<React.SetStateAction<string[]>>
   setDialogState: (value: AnnouncementDialogMode | null) => void
   setDeleteId: React.Dispatch<React.SetStateAction<number | null>>
   resetForm: () => void
-  refetchAnnouncements: () => void
+  refetchAnnouncements: () => Promise<unknown>
 }
 
 type AnnouncementDraftImageActionParams = {
+  preserveCreateDraft: (() => void) | undefined
   formData: AnnouncementFormState
   draftUploadedImages: string[]
   setDraftUploadedImages: React.Dispatch<React.SetStateAction<string[]>>
@@ -705,7 +711,7 @@ function AnnouncementFormDialog({
   )
 
   return (
-    <Dialog open={isOpen} onOpenChange={dialogActions.handleFormDialogChange}>
+    <Dialog busy={dialogStateModel.formLoading || dialogStateModel.uploading} open={isOpen} onOpenChange={dialogActions.handleFormDialogChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
@@ -728,9 +734,9 @@ function AnnouncementFormDialog({
           >
             取消
           </Button>
-          <Button onClick={dialogActions.handleSubmit} disabled={dialogStateModel.formLoading} size="lg" className="flex-1">
+          <LoadingButton onClick={dialogActions.handleSubmit} isLoading={dialogStateModel.formLoading} size="lg" className="flex-1">
             {submitLabel}
-          </Button>
+          </LoadingButton>
         </div>
       </DialogContent>
     </Dialog>
@@ -746,6 +752,7 @@ function AnnouncementDeleteDialog({
 }) {
   return (
     <Dialog
+      busy={dialogStateModel.deleteLoading}
       open={dialogStateModel.dialogState === 'delete'}
       onOpenChange={dialogStateModel.handleDeleteDialogChange}
     >
@@ -758,9 +765,9 @@ function AnnouncementDeleteDialog({
           <p className="text-sm text-muted-foreground mt-1">此操作不可恢复，关联的图片也将被删除。</p>
         </div>
         <div className="flex gap-3 mt-8">
-          <Button variant="destructive" onClick={dialogActions.handleDelete} disabled={dialogStateModel.deleteLoading} size="lg" className="flex-1">
+          <LoadingButton variant="destructive" onClick={dialogActions.handleDelete} isLoading={dialogStateModel.deleteLoading} size="lg" className="flex-1">
             {dialogStateModel.deleteLoading ? '处理中...' : '确认删除'}
-          </Button>
+          </LoadingButton>
           <Button variant="modern" onClick={() => dialogStateModel.handleDeleteDialogChange(false)} size="lg" className="flex-1">
             取消
           </Button>
@@ -796,14 +803,16 @@ function useAnnouncementListController({ onEdit, onDelete }: AnnouncementListCon
 
   const refetchAnnouncements = useCallback(() => {
     // 列表和存储占用条来自不同 query，刷新时必须一起失效，避免 UI 显示不同步。
-    queryClient.invalidateQueries({ queryKey: ['announcements'] })
-    queryClient.invalidateQueries({ queryKey: ['announcementStorageInfo'] })
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['announcements'] }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['announcementStorageInfo'] }, { throwOnError: true }),
+    ])
   }, [queryClient])
 
   const handleTogglePin = useCallback(async (id: number) => {
     try {
       await announcementAPI.togglePin(id)
-      refetchAnnouncements()
+      await refreshAfterMutation(refetchAnnouncements)
       toast.success('置顶状态已更新')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '操作失败'))
@@ -813,7 +822,7 @@ function useAnnouncementListController({ onEdit, onDelete }: AnnouncementListCon
   const handleToggleVisibility = useCallback(async (id: number) => {
     try {
       await announcementAPI.toggleVisibility(id)
-      refetchAnnouncements()
+      await refreshAfterMutation(refetchAnnouncements)
       toast.success('显示状态已更新')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '操作失败'))
@@ -825,7 +834,7 @@ function useAnnouncementListController({ onEdit, onDelete }: AnnouncementListCon
       await announcementAPI.update(announcement.id, {
         is_popup: !announcement.is_popup,
       })
-      refetchAnnouncements()
+      await refreshAfterMutation(refetchAnnouncements)
       toast.success(announcement.is_popup ? '弹窗已关闭' : '弹窗已开启')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '操作失败'))
@@ -879,25 +888,36 @@ function useAnnouncementDialogStateModel() {
   const [dialogState, setDialogState] = useDialogState<AnnouncementDialogMode>()
   const [formData, setFormData] = useState<AnnouncementFormState>(() => getEmptyAnnouncementFormState())
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
-  const [formLoading, setFormLoading] = useState(false)
+  const [formLoading, setFormLoading] = useSubmissionState()
   const [editingId, setEditingId] = useState<number | null>(null)
   const [deleteId, setDeleteId] = useState<number | null>(null)
-  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useSubmissionState()
   const [uploading, setUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [draftUploadedImages, setDraftUploadedImages] = useState<string[]>([])
 
+  const createDraft = usePageDraftStore<{
+    formData: AnnouncementFormState
+    images: string[]
+  }>()
   const resetForm = useCallback(() => {
+    if (editingId === null) createDraft.clear()
     setFormData(getEmptyAnnouncementFormState())
     setFormErrors({})
     setEditingId(null)
     setDraftUploadedImages([])
-  }, [])
+  }, [createDraft, editingId])
 
   const openCreateModal = useCallback(() => {
-    resetForm()
+    const draft = createDraft.load()
+    if (draft) {
+      setEditingId(null)
+      setFormData(draft.formData)
+      setDraftUploadedImages(draft.images)
+      setFormErrors({})
+    } else resetForm()
     setDialogState('create')
-  }, [resetForm, setDialogState])
+  }, [createDraft, resetForm, setDialogState])
 
   const openEditModal = useCallback((announcement: Announcement) => {
     setEditingId(announcement.id)
@@ -927,11 +947,11 @@ function useAnnouncementDialogStateModel() {
 
   const handleDialogChange = useCallback((open: boolean) => {
     if (!open) {
-      // create/edit 关闭时重置草稿，防止上次未提交内容污染下一次打开。
+      if (dialogState === 'create') createDraft.save({ formData, images: draftUploadedImages })
+      else resetForm()
       setDialogState(null)
-      resetForm()
     }
-  }, [resetForm, setDialogState])
+  }, [createDraft, dialogState, draftUploadedImages, formData, resetForm, setDialogState])
 
   const handleDeleteDialogChange = useCallback((open: boolean) => {
     setDialogState(open ? 'delete' : null)
@@ -972,6 +992,7 @@ function useAnnouncementDialogStateModel() {
 
 // 弹窗动作负责提交、删除、上传和拖拽等副作用；仅提交与删除成功后刷新列表，图片相关操作不触发表格刷新。
 function useAnnouncementDraftImageActions({
+  preserveCreateDraft,
   formData,
   draftUploadedImages,
   setDraftUploadedImages,
@@ -994,17 +1015,18 @@ function useAnnouncementDraftImageActions({
 
   const handleCancelForm = useCallback(async () => {
     setDialogState(null)
-    await cleanupDraftUploadedImages()
     resetForm()
+    await cleanupDraftUploadedImages()
   }, [cleanupDraftUploadedImages, resetForm, setDialogState])
 
   const handleFormDialogChange = useCallback((open: boolean) => {
     if (!open) {
+      if (preserveCreateDraft) return preserveCreateDraft()
       handleCancelForm().catch(() => {
         toast.error('未保存图片清理失败，请刷新后检查存储空间')
       })
     }
-  }, [handleCancelForm])
+  }, [handleCancelForm, preserveCreateDraft])
 
   return {
     markDraftUploadedImage,
@@ -1125,6 +1147,7 @@ function useAnnouncementImageActions({
 
 // 弹窗动作负责提交、删除、上传和拖拽等副作用；仅提交与删除成功后刷新列表，图片相关操作不触发表格刷新。
 function useAnnouncementDialogActions({
+  preserveCreateDraft,
   formData,
   editingId,
   deleteId,
@@ -1142,6 +1165,7 @@ function useAnnouncementDialogActions({
   refetchAnnouncements,
 }: AnnouncementDialogActionsParams) {
   const draftImageActions = useAnnouncementDraftImageActions({
+    preserveCreateDraft,
     formData,
     draftUploadedImages,
     setDraftUploadedImages,
@@ -1156,7 +1180,7 @@ function useAnnouncementDialogActions({
       return
     }
 
-    setFormLoading(true)
+    if (!setFormLoading(true)) return
     try {
       if (editingId) {
         await announcementAPI.update(editingId, formData)
@@ -1166,9 +1190,9 @@ function useAnnouncementDialogActions({
         toast.success('公告创建成功')
       }
 
+      await refreshAfterMutation(refetchAnnouncements)
       setDialogState(null)
       resetForm()
-      refetchAnnouncements()
     } catch (error) {
       toast.error(getApiErrorMessage(error, '操作失败'))
     } finally {
@@ -1181,12 +1205,12 @@ function useAnnouncementDialogActions({
       return
     }
 
-    setDeleteLoading(true)
+    if (!setDeleteLoading(true)) return
     try {
       await announcementAPI.delete(deleteId)
+      await refreshAfterMutation(refetchAnnouncements)
       setDialogState(null)
       setDeleteId(null)
-      refetchAnnouncements()
       toast.success('公告删除成功')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
@@ -1225,6 +1249,9 @@ export function AnnouncementManagement() {
     onDelete: dialogStateModel.openDeleteModal,
   })
   const dialogActions = useAnnouncementDialogActions({
+    preserveCreateDraft: dialogStateModel.dialogState === 'create'
+      ? () => dialogStateModel.handleDialogChange(false)
+      : undefined,
     formData: dialogStateModel.formData,
     editingId: dialogStateModel.editingId,
     deleteId: dialogStateModel.deleteId,

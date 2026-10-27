@@ -3,6 +3,7 @@ import { Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/Button'
 import { LoadingButton, type LoadingButtonProps } from '@/components/ui/LoadingButton'
+import { useSubmissionState } from '@/hooks/useSubmissionState'
 
 interface ConfirmDeleteButtonProps
   extends Omit<LoadingButtonProps, 'children' | 'onBlur' | 'onClick'> {
@@ -33,7 +34,7 @@ export function ConfirmDeleteButton({
 }: Readonly<ConfirmDeleteButtonProps>) {
   const confirmScope = resetKey ?? onConfirm
   const [confirmingScope, setConfirmingScope] = useState<unknown>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
+  const [isDeleting, setIsDeleting] = useSubmissionState()
   const isConfirming = !disabled && confirmingScope === confirmScope
   const isBusy = Boolean(isLoading) || isDeleting
 
@@ -48,7 +49,7 @@ export function ConfirmDeleteButton({
       return
     }
 
-    setIsDeleting(true)
+    if (!setIsDeleting(true)) return
     try {
       await onConfirm()
     } catch (error) {
@@ -59,7 +60,7 @@ export function ConfirmDeleteButton({
       setConfirmingScope(null)
       setIsDeleting(false)
     }
-  }, [confirmScope, disabled, isBusy, isConfirming, onConfirm])
+  }, [confirmScope, disabled, isBusy, isConfirming, onConfirm, setIsDeleting])
 
   const handleBlur = useCallback((event: React.FocusEvent<HTMLButtonElement>) => {
     onBlur?.(event)

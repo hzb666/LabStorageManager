@@ -7,6 +7,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
+from app.api.mutation_operations import MutationTrackedRoute
 from app.core.auth import CurrentUser, NonPublicUser
 from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
 from app.core.time_utils import utc_iso_str
@@ -27,7 +28,7 @@ from app.services.reagent_brand_service import (
 from app.services.sql_utils import order_with_nulls_last
 from app.services.user_operation_logger import log_user_operation
 
-router = APIRouter(prefix="/reagent-brands", tags=["Reagent Brands"])
+router = APIRouter(prefix="/reagent-brands", tags=["Reagent Brands"], route_class=MutationTrackedRoute)
 
 VALID_REAGENT_BRAND_SORT_FIELDS = {"name", "updated_at"}
 

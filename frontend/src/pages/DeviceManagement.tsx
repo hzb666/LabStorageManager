@@ -1,3 +1,5 @@
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState } from '@/hooks/useSubmissionState'
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -182,7 +184,7 @@ function KickDeviceDialog({
   dialogs: ReturnType<typeof useDeviceDialogState>
 }) {
   return (
-    <Dialog open={dialogState === 'kick'} onOpenChange={dialogs.handleKickDialogChange}>
+    <Dialog busy={dialogs.kickLoading} open={dialogState === 'kick'} onOpenChange={dialogs.handleKickDialogChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center mb-6">确认踢出设备</DialogTitle>
@@ -197,15 +199,15 @@ function KickDeviceDialog({
           </p>
         </div>
         <div className="flex gap-3 mt-6">
-          <Button
+          <LoadingButton
             variant="destructive"
             className="flex-1 border border-destructive"
             onClick={dialogs.handleKickDevice}
-            disabled={dialogs.kickLoading}
+            isLoading={dialogs.kickLoading}
             size="lg"
           >
             {dialogs.kickLoading ? '处理中...' : '确认踢出'}
-          </Button>
+          </LoadingButton>
           <Button variant="modern" onClick={() => dialogs.handleKickDialogChange(false)} size="lg" className="text-base flex-1">
             取消
           </Button>
@@ -224,7 +226,7 @@ function KickAllDevicesDialog({
   dialogs: ReturnType<typeof useDeviceDialogState>
 }) {
   return (
-    <Dialog open={dialogState === 'kickAll'} onOpenChange={dialogs.handleKickDialogChange}>
+    <Dialog busy={dialogs.kickAllLoading} open={dialogState === 'kickAll'} onOpenChange={dialogs.handleKickDialogChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center mb-6">
@@ -242,15 +244,15 @@ function KickAllDevicesDialog({
           </p>
         </div>
         <div className="flex gap-3 mt-6">
-          <Button
+          <LoadingButton
             variant="destructive"
             className="flex-1 border border-destructive"
             onClick={dialogs.handleKickAllDevices}
-            disabled={dialogs.kickAllLoading}
+            isLoading={dialogs.kickAllLoading}
             size="lg"
           >
             {dialogs.kickAllLoading ? '处理中...' : '确认踢出'}
-          </Button>
+          </LoadingButton>
           <Button variant="modern" onClick={() => dialogs.handleKickDialogChange(false)} size="lg" className="text-base flex-1">
             取消
           </Button>
@@ -271,7 +273,7 @@ function EditDeviceNameDialog({
   onSubmit: () => void
 }) {
   return (
-    <Dialog open={dialogs.editDeviceDialogOpen} onOpenChange={dialogs.handleEditDeviceDialogChange}>
+    <Dialog busy={dialogs.editLoading} open={dialogs.editDeviceDialogOpen} onOpenChange={dialogs.handleEditDeviceDialogChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>重命名设备</DialogTitle>
@@ -521,22 +523,22 @@ function useDeviceTableModel({
 // 统一维护踢出、重命名和个人信息编辑弹窗的开关、loading、成功后刷新与关闭清理。
 function useDeviceDialogState(
   editForm: ReturnType<typeof useForm<DeviceNameFormData>>,
-  refetchSessions: () => void,
+  refetchSessions: () => Promise<unknown>,
   setDialogState: (value: DeviceDialogMode | null) => void
 ) {
   const [editSession, setEditSession] = useState<SessionInfo | null>(null)
   const [editDeviceDialogOpen, setEditDeviceDialogOpen] = useState(false)
   const [kickSession, setKickSession] = useState<SessionInfo | null>(null)
-  const [kickLoading, setKickLoading] = useState(false)
+  const [kickLoading, setKickLoading] = useSubmissionState()
   const [editDialogOpen, setEditDialogOpen] = useState(false)
-  const [editLoading, setEditLoading] = useState(false)
-  const [kickAllLoading, setKickAllLoading] = useState(false)
+  const [editLoading, setEditLoading] = useSubmissionState()
+  const [kickAllLoading, setKickAllLoading] = useSubmissionState()
 
   const handleOpenRenameDialog = useCallback((session: SessionInfo) => {
     setEditSession(session)
     editForm.setValue('device_name', session.device_name)
     setEditDeviceDialogOpen(true)
-  }, [editForm])
+  }, [editForm, setEditDeviceDialogOpen])
 
   const handleOpenKickDialog = useCallback((session: SessionInfo) => {
     setKickSession(session)
@@ -548,34 +550,34 @@ function useDeviceDialogState(
       return
     }
 
-    setKickLoading(true)
+    if (!setKickLoading(true)) return
     try {
       await sessionAPI.delete(kickSession.id)
+      await refreshAfterMutation(refetchSessions)
       setDialogState(null)
       setKickSession(null)
-      refetchSessions()
       toast.success('设备已踢出')
     } catch {
       toast.error('操作失败')
     } finally {
       setKickLoading(false)
     }
-  }, [kickSession, refetchSessions, setDialogState])
+  }, [kickSession, refetchSessions, setDialogState, setKickLoading])
 
   const handleKickAllDevices = useCallback(async () => {
-    setKickAllLoading(true)
+    if (!setKickAllLoading(true)) return
     try {
       // 后端负责当前设备会话保护，前端触发刷新，不自行过滤会话列表。
       await sessionAPI.deleteAll()
+      await refreshAfterMutation(refetchSessions)
       setDialogState(null)
-      refetchSessions()
       toast.success('已踢出所有其他设备')
     } catch {
       toast.error('操作失败')
     } finally {
       setKickAllLoading(false)
     }
-  }, [refetchSessions, setDialogState])
+  }, [refetchSessions, setDialogState, setKickAllLoading])
 
   const handleKickDialogChange = useCallback((open: boolean) => {
     if (!open) {
@@ -597,18 +599,18 @@ function useDeviceDialogState(
       return
     }
 
-    setEditLoading(true)
+    if (!setEditLoading(true)) return
     try {
       await sessionAPI.update(editSession.id, { device_name: formData.device_name })
+      await refreshAfterMutation(refetchSessions)
       setEditDeviceDialogOpen(false)
-      refetchSessions()
       toast.success('设备名称已更新')
     } catch {
       toast.error('操作失败')
     } finally {
       setEditLoading(false)
     }
-  }, [editSession, refetchSessions])
+  }, [editSession, refetchSessions, setEditDeviceDialogOpen, setEditLoading])
 
   return {
     editSession,
@@ -661,7 +663,7 @@ export default function DeviceManagement() {
   })
 
   const refetchSessions = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    return queryClient.invalidateQueries({ queryKey: ['sessions'] }, { throwOnError: true })
   }, [queryClient])
 
   const dialogs = useDeviceDialogState(editForm, refetchSessions, setDialogState)
@@ -683,7 +685,7 @@ export default function DeviceManagement() {
   const handleRefresh = async () => {
     try {
       await sessionAPI.refresh()
-      refetchSessions()
+      await refreshAfterMutation(refetchSessions)
       toast.success('会话已刷新')
     } catch {
       toast.error('刷新失败')
@@ -704,7 +706,7 @@ export default function DeviceManagement() {
     } finally {
       setLogsLoading(false)
     }
-  }, [canManageAccount, navigate, userData])
+  }, [canManageAccount, navigate, userData, setLogsLoading])
 
   return (
     <div className="space-y-6">

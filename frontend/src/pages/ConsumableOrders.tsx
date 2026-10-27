@@ -1,3 +1,6 @@
+import { useFormDraft } from '@/hooks/useFormDraft'
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, useSubmissionLock } from '@/hooks/useSubmissionState'
 // 耗材订单页面 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、完成 参考 Inventory 页面实现，使用 FilterTable 组件
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -19,7 +22,7 @@ import useDialogState from '@/hooks/useDialogState'
 import { useExportDownload } from '@/hooks/useExportDownload'
 import { useAuthStore } from '@/store/useStore'
 import { UserRoles } from '@/lib/constants'
-import { useTableState, type FilterAPI } from '@/hooks/useTableState'
+import type { FilterAPI } from '@/hooks/useTableState'
 
 // 工具与API
 import { consumableOrderAPI } from '@/api/client'
@@ -159,18 +162,21 @@ function createConsumableOrderUpdatePayload(formData: ConsumableOrderFormData) {
 function useConsumableOrderDialogController(refreshOrders: () => void | Promise<void>) {
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [editingItem, setEditingItem] = useState<ConsumableOrder | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const submissionLock = useSubmissionLock()
+  const [isSubmitting, setIsSubmitting] = useSubmissionState(submissionLock)
+  const [isDeleting, setIsDeleting] = useSubmissionState(submissionLock)
   const form = useForm<ConsumableOrderFormInputData, unknown, ConsumableOrderFormData>({
     resolver: createValibotResolver(ConsumableOrderSchema),
     defaultValues: defaultConsumableOrderValues,
     shouldFocusError: false,
   })
 
+  const createDraft = useFormDraft(form)
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
-    form.reset(defaultConsumableOrderValues)
+    createDraft.restore(defaultConsumableOrderValues)
     setDialogState('add')
-  }, [form, setDialogState])
+  }, [createDraft, setDialogState])
 
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ConsumableOrder
@@ -180,14 +186,21 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
   }, [form, setDialogState])
 
   const handleDialogOpenChange = useCallback((open: boolean) => {
-    if (!open) {
-      setDialogState(null)
+    if (open) return
+    if (dialogState === 'add') createDraft.save()
+    else {
       form.reset()
     }
-  }, [form, setDialogState])
+    setDialogState(null)
+  }, [createDraft, dialogState, form, setDialogState])
+  const handleCancel = useCallback(() => {
+    if (dialogState === 'add') createDraft.clear()
+    form.reset()
+    setDialogState(null)
+  }, [createDraft, dialogState, form, setDialogState])
 
   const handleFormSubmit = form.handleSubmit(async (formData) => {
-    setIsSubmitting(true)
+    if (!setIsSubmitting(true)) return
     try {
       await submitByDialogState({
         dialogState,
@@ -198,7 +211,7 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
         onCreate: (currentFormData) =>
           consumableOrderAPI.create(createConsumableOrderCreatePayload(currentFormData)),
       })
-      await Promise.resolve(refreshOrders())
+      await refreshAfterMutation(refreshOrders)
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {
         edit: isOrderResubmittedOnEdit(editingItem?.status)
           ? '订单已重新提交待审批'
@@ -208,6 +221,7 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
       if (successMessage) {
         toast.success(successMessage)
       }
+      if (dialogState === 'add') createDraft.clear()
       setDialogState(null)
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
@@ -224,27 +238,32 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
   })
 
   const handleDeleteClick = useCallback(async () => {
-    if (!editingItem) return
+    if (!editingItem || !setIsDeleting(true)) return
 
     try {
       await consumableOrderAPI.delete(editingItem.id)
+      await refreshAfterMutation(refreshOrders)
       setEditingItem(null)
       setDialogState(null)
-      await Promise.resolve(refreshOrders())
       toast.success('耗材订单已删除')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
+    } finally {
+      setIsDeleting(false)
     }
-  }, [editingItem, refreshOrders, setDialogState])
+  }, [editingItem, refreshOrders, setDialogState, setIsDeleting])
 
   return {
     dialogState,
     editingItem,
     isSubmitting,
+    isDeleting,
+    isBusy: isSubmitting || isDeleting,
     form,
     handleAddClick,
     handleEditClick,
     handleDialogOpenChange,
+    handleCancel,
     handleFormSubmit,
     handleDeleteClick,
     setDialogState,
@@ -293,19 +312,12 @@ export function ConsumableOrdersPage() {
   const isAdmin = currentUser?.role === UserRoles.ADMIN
   const canCreateOrder = currentUser?.role !== UserRoles.PUBLIC
   const queryClient = useQueryClient()
-  const filter = useTableState({
-    api: consumableOrderAPI,
-    queryKey: ['consumable-orders'],
-    tableId: 'consumable-orders-table',
-    statusOptions: CONSUMABLE_ORDER_STATUS_OPTIONS,
-    searchFieldOptions: CONSUMABLE_SEARCH_FIELD_OPTIONS,
-  })
   const refreshOrders = useCallback(async () => {
     await Promise.all([
-      filter.invalidate(),
+      queryClient.invalidateQueries({ queryKey: ['consumable-orders'] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ])
-  }, [filter, queryClient])
+  }, [queryClient])
   const dialogController = useConsumableOrderDialogController(refreshOrders)
 
   const { handleExport, isExporting } = useExportDownload({
@@ -346,7 +358,11 @@ export function ConsumableOrdersPage() {
           )}
         </div>
       </div>
-      <Dialog open={dialogController.dialogState !== null} onOpenChange={dialogController.handleDialogOpenChange}>
+      <Dialog
+        busy={dialogController.isBusy}
+        open={dialogController.dialogState !== null}
+        onOpenChange={dialogController.handleDialogOpenChange}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{dialogController.dialogState === 'edit' ? '编辑订单' : '创建订单'}</DialogTitle>
@@ -355,7 +371,7 @@ export function ConsumableOrdersPage() {
             <BaseForm form={dialogController.form} fields={getConsumableOrderFormFields()} />
             <EditDialogActions
               mode={dialogController.dialogState ?? 'add'}
-              onCancel={() => dialogController.setDialogState(null)}
+              onCancel={dialogController.handleCancel}
               onDelete={
                 dialogController.dialogState === 'edit' &&
                 dialogController.editingItem &&
@@ -366,6 +382,7 @@ export function ConsumableOrdersPage() {
               submitLabelEdit="保存"
               submitLabelAdd="提交订单"
               isSubmitting={dialogController.isSubmitting}
+              isDeleting={dialogController.isDeleting}
             />
           </form>
         </DialogContent>

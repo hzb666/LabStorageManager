@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlmodel import Session, func, select
 
+from app.api.mutation_operations import MutationTrackedRoute
 from app.core.auth import AdminUser, get_current_user, require_admin
 from app.core.config import settings
 from app.core.constants import INVALID_FILENAME_PREFIX, INVALID_FILENAME_SEGMENTS, MAX_PAGE_SIZE
@@ -31,7 +32,7 @@ from app.services.rate_limit import enforce_rate_limit
 from app.services.user_operation_logger import log_user_operation
 from app.services.user_utils import batch_get_user_names
 
-router = APIRouter(prefix="/announcements", tags=["Announcements"])
+router = APIRouter(prefix="/announcements", tags=["Announcements"], route_class=MutationTrackedRoute)
 
 logger = logging.getLogger(__name__)
 # ==================== 辅助函数 ====================

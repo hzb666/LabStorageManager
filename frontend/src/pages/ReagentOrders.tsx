@@ -1,3 +1,6 @@
+import { useFormDraft } from '@/hooks/useFormDraft'
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, useSubmissionLock } from '@/hooks/useSubmissionState'
 // 试剂订单页面 功能：订单列表展示、搜索筛选、创建订单、编辑、审批、入库 参考 Inventory 页面实现，使用 FilterTable 组件
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createColumnHelper, type ColumnDef } from '@tanstack/react-table'
@@ -416,7 +419,7 @@ function useReagentOrderCasController(params: {
       setIsCasLookupLoading(false)
     }
     await checkCASWarning(casValidation.normalized, { force: true })
-  }, [clearCASWarning, form, checkCASWarning])
+  }, [clearCASWarning, form, checkCASWarning, setIsCasLookupLoading])
 
   const navigateToCasSearch = useCallback((path: string, field: string) => {
     if (!casWarning?.cas_number) {
@@ -468,7 +471,9 @@ function useReagentOrderDialogController(
 ) {
   const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
   const [editingItem, setEditingItem] = useState<ReagentOrder | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const submissionLock = useSubmissionLock()
+  const [isSubmitting, setIsSubmitting] = useSubmissionState(submissionLock)
+  const [isDeleting, setIsDeleting] = useSubmissionState(submissionLock)
   const form = useForm<ReagentOrderFormInputData, unknown, ReagentOrderFormData>({
     resolver: createValibotResolver(ReagentOrderSchema),
     defaultValues: defaultReagentOrderValues,
@@ -483,12 +488,13 @@ function useReagentOrderDialogController(
     setDialogState,
   })
 
+  const createDraft = useFormDraft(form)
   const handleAddClick = useCallback(() => {
     setEditingItem(null)
-    form.reset(defaultReagentOrderValues)
+    createDraft.restore(defaultReagentOrderValues)
     casController.clearCASWarning()
     setDialogState('add')
-  }, [casController, form, setDialogState])
+  }, [casController, createDraft, setDialogState])
 
   const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
     const item = itemRaw as unknown as ReagentOrder
@@ -498,7 +504,7 @@ function useReagentOrderDialogController(
   }, [form, setDialogState])
 
   const handleFormSubmit = form.handleSubmit(async (formData) => {
-    setIsSubmitting(true)
+    if (!setIsSubmitting(true)) return
     try {
       await submitByDialogState({
         dialogState,
@@ -509,7 +515,7 @@ function useReagentOrderDialogController(
         onCreate: (currentFormData) =>
           reagentOrderAPI.create(createReagentOrderCreatePayload(currentFormData)),
       })
-      await Promise.resolve(refreshOrders())
+      await refreshAfterMutation(refreshOrders)
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {
         edit: isOrderResubmittedOnEdit(editingItem?.status)
           ? '订单已重新提交待审批'
@@ -519,6 +525,7 @@ function useReagentOrderDialogController(
       if (successMessage) {
         toast.success(successMessage)
       }
+      if (dialogState === 'add') createDraft.clear()
       setDialogState(null)
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
@@ -535,32 +542,44 @@ function useReagentOrderDialogController(
   })
 
   const handleDeleteClick = useCallback(async () => {
-    if (!editingItem) return
+    if (!editingItem || !setIsDeleting(true)) return
 
     try {
       await reagentOrderAPI.delete(editingItem.id)
+      await refreshAfterMutation(refreshOrders)
       setEditingItem(null)
       setDialogState(null)
       casController.clearCASWarning()
-      await Promise.resolve(refreshOrders())
       toast.success('试剂订单已删除')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
+    } finally {
+      setIsDeleting(false)
     }
-  }, [casController, editingItem, refreshOrders, setDialogState])
+  }, [casController, editingItem, refreshOrders, setDialogState, setIsDeleting])
 
   const handleDialogOpenChange = useCallback((open: boolean) => {
-    if (!open) {
-      setDialogState(null)
+    if (open) return
+    if (dialogState === 'add') createDraft.save()
+    else {
       form.reset()
       casController.clearCASWarning()
     }
-  }, [casController, form, setDialogState])
+    setDialogState(null)
+  }, [createDraft, dialogState, form, setDialogState, casController])
+  const handleCancel = useCallback(() => {
+    if (dialogState === 'add') createDraft.clear()
+    form.reset()
+    casController.clearCASWarning()
+    setDialogState(null)
+  }, [createDraft, dialogState, form, setDialogState, casController])
 
   return {
     dialogState,
     editingItem,
     isSubmitting,
+    isDeleting,
+    isBusy: isSubmitting || isDeleting,
     casWarning: casController.casWarning,
     casLoading: casController.casLoading,
     form,
@@ -570,6 +589,7 @@ function useReagentOrderDialogController(
     handleFormSubmit,
     handleDeleteClick,
     handleDialogOpenChange,
+    handleCancel,
     navigateToCasSearch: casController.navigateToCasSearch,
     setDialogState,
   }
@@ -627,7 +647,7 @@ export function ReagentOrdersPage() {
   const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
   const refreshOrders = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }),
+      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ])
   }, [queryClient])
@@ -683,7 +703,8 @@ export function ReagentOrdersPage() {
           canWrite={canWriteBrands}
         />
       )}
-      <Dialog open={dialogController.dialogState !== null} onOpenChange={dialogController.handleDialogOpenChange}>
+      <Dialog busy={dialogController.isBusy}
+      open={dialogController.dialogState !== null} onOpenChange={dialogController.handleDialogOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{dialogController.dialogState === 'edit' ? '编辑订单' : '创建订单'}</DialogTitle>
@@ -701,7 +722,7 @@ export function ReagentOrdersPage() {
             )}
             <EditDialogActions
               mode={dialogController.dialogState ?? 'add'}
-              onCancel={() => dialogController.setDialogState(null)}
+              onCancel={dialogController.handleCancel}
               onDelete={
                 dialogController.dialogState === 'edit' &&
                 dialogController.editingItem &&
@@ -712,6 +733,7 @@ export function ReagentOrdersPage() {
               submitLabelEdit="保存"
               submitLabelAdd="提交订单"
               isSubmitting={dialogController.isSubmitting}
+            isDeleting={dialogController.isDeleting}
               leadingContent={dialogController.casLoading && dialogController.dialogState === 'add' ? (
                 <div className="text-sm text-muted-foreground flex items-center">
                   <Loader2 className="w-3 h-3 animate-spin mr-1" />

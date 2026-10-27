@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
+from app.api.mutation_operations import MutationTrackedRoute
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentUser, NonPublicUser, get_current_user
 from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -31,7 +32,7 @@ from app.services.sql_utils import order_with_nulls_last
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.user_operation_logger import log_user_operation
 
-router = APIRouter(prefix="/chemical-name-map", tags=["Chemical Name Map"])
+router = APIRouter(prefix="/chemical-name-map", tags=["Chemical Name Map"], route_class=MutationTrackedRoute)
 
 VALID_CHEMICAL_NAME_MAP_SORT_FIELDS = {
     "cas_number",

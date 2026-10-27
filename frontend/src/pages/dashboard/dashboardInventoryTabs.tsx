@@ -1,3 +1,5 @@
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, useSubmissionLock } from '@/hooks/useSubmissionState'
 import React, { useCallback, useMemo, useState } from "react";
 import { createColumnHelper, type CellContext, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -488,7 +490,7 @@ function DashboardBorrowReturnDialog({
   const dialogState = useBorrowReturnDialogState(dialog);
 
   return (
-    <Dialog open={selectedBorrow !== null} onOpenChange={onOpenChange}>
+    <Dialog busy={isSubmittingReturn || isDeletingReturn} open={selectedBorrow !== null} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>归还试剂</DialogTitle>
@@ -622,6 +624,7 @@ function DashboardStockinDialog({
     selectedStockin: PendingStockinItem | null;
     stockinForm: ReturnType<typeof useForm<StockInFormInputData, unknown, StockInFormData>>;
     stockinLoading: boolean;
+    stockinDeleting: boolean;
     onClose: () => void;
     onSubmit: () => void;
     onDelete: () => void;
@@ -632,6 +635,7 @@ function DashboardStockinDialog({
     selectedStockin,
     stockinForm,
     stockinLoading,
+    stockinDeleting,
     onClose,
     onSubmit,
     onDelete,
@@ -652,6 +656,7 @@ function DashboardStockinDialog({
 
   return (
     <Dialog
+      busy={stockinLoading || stockinDeleting}
       open={selectedStockin !== null}
       onOpenChange={(nextOpen) => {
         if (!nextOpen && !stockinLoading) onClose();
@@ -675,6 +680,7 @@ function DashboardStockinDialog({
             submitLabelEdit="确认入库"
             submitLabelAdd="确认入库"
             isSubmitting={stockinLoading}
+            isDeleting={stockinDeleting}
           />
         </form>
       </DialogContent>
@@ -829,8 +835,9 @@ export function DashboardBorrowTab({
 
   const [selectedBorrow, setSelectedBorrow] = useState<MyBorrowItem | null>(null)
   const [returnMode, setReturnMode] = useState<BorrowReturnMode>('used')
-  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
-  const [isDeletingReturn, setIsDeletingReturn] = useState(false)
+  const returnLock = useSubmissionLock()
+  const [isSubmittingReturn, setIsSubmittingReturn] = useSubmissionState(returnLock)
+  const [isDeletingReturn, setIsDeletingReturn] = useSubmissionState(returnLock)
 
   const returnForm = useForm<ReturnFormInputData, unknown, ReturnFormData>({
     resolver: createValibotResolver(ReturnFormSchema),
@@ -842,8 +849,8 @@ export function DashboardBorrowTab({
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: managementMode ? ['dashboard', 'admin', 'borrows'] : ['dashboard', 'borrows'],
-      }),
-      queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+      }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['inventory'] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ])
   }, [managementMode, queryClient])
@@ -876,16 +883,16 @@ export function DashboardBorrowTab({
       return
     }
 
-    setIsSubmittingReturn(true)
+    if (!setIsSubmittingReturn(true)) return
     try {
       await inventoryAPI.return(selectedBorrow.inventory_id, {
         remaining_quantity: result.finalQuantity,
         specification: result.specification,
         notes: result.notes,
       })
+      await refreshAfterMutation(refreshTables)
       setSelectedBorrow(null)
       returnForm.reset(defaultReturnValues)
-      await refreshTables()
       toast.success('归还成功')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '归还失败'))
@@ -910,23 +917,23 @@ export function DashboardBorrowTab({
       return
     }
 
-    setIsDeletingReturn(true)
+    if (!setIsDeletingReturn(true)) return
     try {
       await inventoryAPI.returnDelete(selectedBorrow.inventory_id, {
         remaining_quantity: 0,
         specification: result.specification,
         notes: result.notes,
       })
+      await refreshAfterMutation(refreshTables)
       setSelectedBorrow(null)
       returnForm.reset(defaultReturnValues)
-      await refreshTables()
       toast.success('删除成功')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
     } finally {
       setIsDeletingReturn(false)
     }
-  }, [refreshTables, returnForm, returnMode, selectedBorrow])
+  }, [refreshTables, returnForm, returnMode, selectedBorrow, setIsDeletingReturn])
 
   // 切换填写模式时清空数量和字段错误，避免把“使用量”的输入带到“剩余量”校验里。
   const handleReturnModeChange = useCallback((value: BorrowReturnMode) => {
@@ -1115,7 +1122,9 @@ export function DashboardStockinTab({
   const { data: brandOptions = [] } = useQuery(getReagentBrandOptionsQueryOptions())
 
   const [selectedStockin, setSelectedStockin] = useState<PendingStockinItem | null>(null)
-  const [stockinLoading, setStockinLoading] = useState(false)
+  const stockinLock = useSubmissionLock()
+  const [stockinLoading, setStockinLoading] = useSubmissionState(stockinLock)
+  const [stockinDeleting, setStockinDeleting] = useSubmissionState(stockinLock)
 
   const stockinForm = useForm<StockInFormInputData, unknown, StockInFormData>({
     resolver: createValibotResolver(StockInFormSchema),
@@ -1127,9 +1136,9 @@ export function DashboardStockinTab({
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: managementMode ? ['dashboard', 'admin', 'stockin'] : ['dashboard', 'stockin'],
-      }),
-      queryClient.invalidateQueries({ queryKey: ['inventory'] }),
-      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }),
+      }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['inventory'] }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ])
   }, [managementMode, queryClient])
@@ -1162,13 +1171,13 @@ export function DashboardStockinTab({
       }
     }
 
-    setStockinLoading(true)
+    if (!setStockinLoading(true)) return
     try {
       const payload = buildPendingStockinPayload(formData)
       await inventoryAPI.completePendingStockin(selectedStockin.inventory_id, payload)
+      await refreshAfterMutation(refreshTables)
       setSelectedStockin(null)
       stockinForm.reset(defaultStockInValues)
-      await refreshTables()
       toast.success('入库成功')
     } catch (error) {
       const detail = extractApiErrorDetail(error)
@@ -1197,23 +1206,25 @@ export function DashboardStockinTab({
   }, [stockinForm, stockinLoading])
 
   const handleDeleteStockin = useCallback(async () => {
-    if (!selectedStockin) return
+    if (!selectedStockin || !setStockinDeleting(true)) return
     try {
       await inventoryAPI.discardPendingStockin(selectedStockin.inventory_id, { remaining_quantity: 0 })
+      await refreshAfterMutation(refreshTables)
       setSelectedStockin(null)
       stockinForm.reset(defaultStockInValues)
-      await refreshTables()
       toast.success('已删除暂存记录')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
+    } finally {
+      setStockinDeleting(false)
     }
-  }, [selectedStockin, stockinForm, refreshTables])
+  }, [selectedStockin, setStockinDeleting, refreshTables, stockinForm])
 
   const stockinColumns = useMemo(
     () => createStockinColumns(openStockinModal, managementMode),
     [openStockinModal, managementMode]
   )
-  const stockinDialog = { selectedStockin, stockinForm, stockinLoading, onClose: closeStockinModal, onSubmit: handleStockin, onDelete: handleDeleteStockin }
+  const stockinDialog = { selectedStockin, stockinForm, stockinLoading, stockinDeleting, onClose: closeStockinModal, onSubmit: handleStockin, onDelete: handleDeleteStockin }
 
   return (
     <>

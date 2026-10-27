@@ -1,3 +1,6 @@
+import { useFormDraft } from '@/hooks/useFormDraft'
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState } from '@/hooks/useSubmissionState'
 import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   createColumnHelper,
@@ -213,17 +216,18 @@ function getUserDisplayCount(
 // 集中管理用户创建、启用/禁用和弹窗状态，提交成功后统一刷新列表。
 function useAdminUsersDialogState(
   setDialogState: (value: AdminUsersDialogMode | null) => void,
-  refetchUsers: () => void
+  refetchUsers: () => Promise<unknown>
 ) {
   const createForm = useForm<UserCreateFormData>({
     resolver: valibotResolver(UserCreateSchema),
     defaultValues: defaultUserValues,
   })
+  const createDraft = useFormDraft(createForm)
   const { reset: resetCreateForm } = createForm
-  const [createLoading, setCreateLoading] = useState(false)
+  const [createLoading, setCreateLoading] = useSubmissionState()
   const [editUser, setEditUser] = useState<User | null>(null)
   const [deleteUser, setDeleteUser] = useState<User | null>(null)
-  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useSubmissionState()
 
   const openEditModal = useCallback((user: User) => {
     setEditUser(user)
@@ -238,7 +242,7 @@ function useAdminUsersDialogState(
   const handleActivate = useCallback(async (userId: number) => {
     try {
       await userAdminAPI.activate(userId)
-      refetchUsers()
+      await refreshAfterMutation(refetchUsers)
       toast.success('用户已启用')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '操作失败'))
@@ -250,44 +254,49 @@ function useAdminUsersDialogState(
       return
     }
 
-    setDeleteLoading(true)
+    if (!setDeleteLoading(true)) return
     try {
       await userAdminAPI.delete(deleteUser.id)
+      await refreshAfterMutation(refetchUsers)
       setDialogState(null)
       setDeleteUser(null)
-      refetchUsers()
       toast.success('用户已禁用')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '操作失败'))
     } finally {
       setDeleteLoading(false)
     }
-  }, [deleteUser, refetchUsers, setDialogState])
+  }, [deleteUser, refetchUsers, setDialogState, setDeleteLoading])
 
   const handleCreate = useCallback(async (formData: UserCreateFormData) => {
-    setCreateLoading(true)
+    if (!setCreateLoading(true)) return
     try {
       await userAdminAPI.create({
         ...formData,
         role: formData.role || 'user',
       })
+      await refreshAfterMutation(refetchUsers)
       setDialogState(null)
+      createDraft.clear()
       resetCreateForm(defaultUserValues)
-      refetchUsers()
       toast.success('用户创建成功')
     } catch (error) {
       toast.error(getApiErrorMessage(error, '创建失败'))
     } finally {
       setCreateLoading(false)
     }
-  }, [refetchUsers, resetCreateForm, setDialogState])
+  }, [createDraft, refetchUsers, resetCreateForm, setDialogState, setCreateLoading])
 
   const handleCreateDialogChange = useCallback((open: boolean) => {
+    if (open) createDraft.restore(defaultUserValues)
+    else createDraft.save()
     setDialogState(open ? 'create' : null)
-    if (!open) {
-      resetCreateForm(defaultUserValues)
-    }
-  }, [resetCreateForm, setDialogState])
+  }, [createDraft, setDialogState])
+  const handleCancelCreate = useCallback(() => {
+    createDraft.clear()
+    resetCreateForm(defaultUserValues)
+    setDialogState(null)
+  }, [createDraft, resetCreateForm, setDialogState])
 
   const handleDeleteDialogChange = useCallback((open: boolean) => {
     setDialogState(open ? 'delete' : null)
@@ -308,6 +317,7 @@ function useAdminUsersDialogState(
     handleDelete,
     handleCreate,
     handleCreateDialogChange,
+    handleCancelCreate,
     handleDeleteDialogChange,
   }
 }
@@ -445,7 +455,7 @@ function CreateUserDialog({
   const roleValue = dialogs.createForm.watch('role')
 
   return (
-    <Dialog open={open} onOpenChange={dialogs.handleCreateDialogChange}>
+    <Dialog busy={dialogs.createLoading} open={open} onOpenChange={dialogs.handleCreateDialogChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>创建用户</DialogTitle>
@@ -475,7 +485,7 @@ function CreateUserDialog({
           </div>
         </div>
         <div className="flex gap-3 mt-8">
-          <Button variant="modern" onClick={() => dialogs.handleCreateDialogChange(false)} size="lg" className="flex-1">
+          <Button variant="modern" onClick={dialogs.handleCancelCreate} size="lg" className="flex-1">
             取消
           </Button>
           <LoadingButton onClick={onSubmit} isLoading={dialogs.createLoading} size="lg" className="flex-1">
@@ -496,7 +506,7 @@ function DeleteUserDialog({
   dialogs: ReturnType<typeof useAdminUsersDialogState>
 }) {
   return (
-    <Dialog open={open} onOpenChange={dialogs.handleDeleteDialogChange}>
+    <Dialog busy={dialogs.deleteLoading} open={open} onOpenChange={dialogs.handleDeleteDialogChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>确认禁用用户</DialogTitle>
@@ -506,9 +516,9 @@ function DeleteUserDialog({
           <p className="text-muted-foreground mt-2">禁用后该用户将无法登录系统。</p>
         </div>
         <div className="flex mt-4 gap-2">
-          <Button variant="destructive" onClick={dialogs.handleDelete} disabled={dialogs.deleteLoading} size="lg">
+          <LoadingButton variant="destructive" onClick={dialogs.handleDelete} isLoading={dialogs.deleteLoading} size="lg">
             {dialogs.deleteLoading ? '处理中...' : '确认禁用'}
-          </Button>
+          </LoadingButton>
           <Button variant="modern" onClick={() => dialogs.handleDeleteDialogChange(false)} size="lg" className="text-base">
             取消
           </Button>
@@ -591,7 +601,7 @@ export function AdminUsersPage() {
   )
 
   const refetchUsers = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['adminUsers'] })
+    return queryClient.invalidateQueries({ queryKey: ['adminUsers'] }, { throwOnError: true })
   }, [queryClient])
   const dialogs = useAdminUsersDialogState(setDialogState, refetchUsers)
 
@@ -641,7 +651,7 @@ export function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      <AdminUsersHeader onCreate={() => setDialogState('create')} />
+      <AdminUsersHeader onCreate={() => dialogs.handleCreateDialogChange(true)} />
 
       <AdminUsersFilters filters={filters} />
 

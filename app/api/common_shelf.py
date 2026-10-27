@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
+from app.api.mutation_operations import MutationTrackedRoute
 from app.core.auth import CurrentSession, CurrentUser, NonPublicUser, get_current_user
 from app.core.constants import DEFAULT_PAGE_SIZE, SSEEventType, SSERoom
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
@@ -78,7 +79,7 @@ from app.services.sse_manager import sse_manager
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.xlsx_export import export_common_shelf_xlsx
 
-router = APIRouter(prefix="/common-shelf", tags=["CommonShelf"])
+router = APIRouter(prefix="/common-shelf", tags=["CommonShelf"], route_class=MutationTrackedRoute)
 
 
 async def _broadcast_common_shelf_change(

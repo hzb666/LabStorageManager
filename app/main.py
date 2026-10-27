@@ -28,6 +28,7 @@ from app.api import (
     error_logs,
     events,
     inventory,
+    mutation_operations,
     procedure_inventory_search,
     reagent_brands,
     reagent_orders,
@@ -80,6 +81,7 @@ from app.services.log_queue import (
     initialize_async_file_logging,
     shutdown_async_file_logging,
 )
+from app.services.mutation_operations import cleanup_mutation_operations
 from app.services.rate_limit import enforce_rate_limit
 from app.services.search_completion_scheduler import completion_scheduler
 from app.services.search_query_log_service import (
@@ -364,6 +366,8 @@ async def lifespan(app: FastAPI):
         initialize_async_file_logging()
         cleanup_expired_inventory_import_preview_artifacts()
         init_db()
+        with Session(engine) as db:
+            cleanup_mutation_operations(db)
         init_query_log_db()
         completion_scheduler.start()
         start_structure_index_scheduler()
@@ -585,7 +589,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=[API_ERROR_CODE_HEADER, AUTH_ERROR_CODE_HEADER, "Retry-After"],
+    expose_headers=[API_ERROR_CODE_HEADER, AUTH_ERROR_CODE_HEADER, "Retry-After", "X-Operation-ID"],
 )
 
 
@@ -661,6 +665,7 @@ app.include_router(chemical_name_map.router, prefix="/api")
 app.include_router(reagent_brands.router, prefix="/api")
 app.include_router(chem.router, prefix="/api")
 app.include_router(search_completions.router, prefix="/api")
+app.include_router(mutation_operations.router, prefix="/api")
 
 
 @app.get("/")

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case
 from sqlmodel import Session, func, or_, select
 
+from app.api.mutation_operations import MutationTrackedRoute
 from app.core.auth import (
     NonPublicUser,
     create_access_token,
@@ -82,7 +83,7 @@ from app.services.user_service import get_user_by_id, get_user_by_username
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter(prefix="/users", tags=["Users"], route_class=MutationTrackedRoute)
 DUMMY_PASSWORD_HASH = get_password_hash("constant-timing-placeholder")
 CLI_CLIENT_NAME = "cli"
 CLI_DEVICE_NAME = "LabStorageManager CLI"

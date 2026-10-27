@@ -2,10 +2,12 @@
 import { getDeviceId, getDeviceName } from '@/lib/storage/appAuthMetaStorage'
 import { AxiosHeaders } from 'axios'
 import { getApiBaseUrl } from '@/lib/apiConfig'
-import { getApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage, isApiTimeoutError } from '@/lib/validationSchemas'
 import { resolveAuthNoticeByCode, triggerSessionInvalidation } from '@/lib/authSession'
 import type { SearchMatchMode } from '@/lib/searchMatchMode'
 import { useSSEStore } from '@/store/sseStore'
+import { useAuthStore } from '@/store/useStore'
+import { installMutationRecovery } from '@/lib/mutationRecovery'
 
 const API_BASE_URL = getApiBaseUrl()
 
@@ -98,6 +100,9 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (axios.isAxiosError(error) && isApiTimeoutError(error)) {
+      error.message = `请求超时（${(error.config?.timeout ?? 3000) / 1000}秒），请先刷新确认操作结果，避免重复提交`
+    }
     const requestUrl = String(error.config?.url ?? '')
     const skipAuthInvalidation = hasSkipAuthInvalidationHeader(error.config?.headers)
     const status = error.response?.status
@@ -111,6 +116,8 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+installMutationRecovery(api, { getUserId: () => useAuthStore.getState().user?.id ?? null })
 
 // 分页响应类型。
 export interface PaginatedResponse<T> {

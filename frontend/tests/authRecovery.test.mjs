@@ -40,8 +40,8 @@ async function bundleApplication(mockApi) {
         import { LoginRoute } from '@/components/LoginRoute'
         export { useAuthStore } from '@/store/useStore'
         export * from '@/lib/searchCompletionCache'
-        export { getApiErrorMessage } from '@/lib/validationSchemas'
-        export { api, authAPI ${mockApi ? '' : ', searchCompletionAPI'} } from '@/api/client'
+        export { getApiErrorMessage, isApiTimeoutError } from '@/lib/validationSchemas'
+        export { api, authAPI ${mockApi ? '' : ', searchCompletionAPI, chemicalAPI'} } from '@/api/client'
         export const renderLogin = (url = '/login') => renderToStaticMarkup(
           createElement(MemoryRouter, { initialEntries: [url] }, createElement(LoginRoute))
         )
@@ -97,6 +97,64 @@ function loadApplication(context, snapshot, code = authBundle) {
   new Function('require', 'module', 'exports', code)(require, compiled, compiled.exports)
   return { ...compiled.exports, values }
 }
+
+test('only authenticated form writes use the three-second budget, while CAS and list reads retain their existing behavior', async (context) => {
+  const application = loadApplication(context, undefined, apiBundle)
+  application.useAuthStore.getState().setAuth(user)
+  const requests = []
+  application.api.defaults.adapter = async config => {
+    requests.push(config)
+    return { config, data: {}, status: 200, statusText: 'OK', headers: {} }
+  }
+  await application.chemicalAPI.getInfo('64-17-5')
+  await application.chemicalAPI.getInfo('64-17-5', { skipChinese: true, cacheOnly: true })
+  await application.api.get('/inventory')
+  await application.api.post('/inventory', {})
+  assert.deepEqual(requests.slice(0, 3).map(config => config.timeout), [0, 0, 0])
+  assert.ok(requests[3].timeout > 2900 && requests[3].timeout <= 3000)
+  assert.equal(requests[0].url, '/chemical-info/64-17-5')
+  assert.deepEqual(requests[1].params, { skip_chinese: true, cache_only: true })
+})
+
+test('timeout classification distinguishes request failures from form validation errors', (context) => {
+  const { isApiTimeoutError } = loadApplication(context, undefined, apiBundle)
+  assert.equal(isApiTimeoutError({ code: 'ECONNABORTED' }), true)
+  assert.equal(isApiTimeoutError({ code: 'ETIMEDOUT' }), true)
+  for (const error of [null, 'timeout', new Error('validation failed'), { code: 'ERR_NETWORK' }, {
+    response: { status: 422, data: { detail: [{ loc: ['body', 'cas_number'], msg: 'Invalid CAS' }] } },
+  }]) {
+    assert.equal(isApiTimeoutError(error), false)
+  }
+})
+
+test('business requests time out after three seconds without automatically retrying', async (context) => {
+  const { createServer } = await import('node:http')
+  const application = loadApplication(context, undefined, apiBundle)
+  application.useAuthStore.getState().setAuth(user)
+  assert.equal(application.api.defaults.timeout, 0)
+  let requests = 0
+  const server = createServer((request, response) => {
+    if (request.method === 'POST') requests += 1
+    else { response.writeHead(404); response.end() }
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  context.after(async () => {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+  })
+  application.api.defaults.baseURL = `http://127.0.0.1:${server.address().port}`
+  const started = Date.now()
+  await assert.rejects(
+    application.api.post('/inventory/manual-add', {}),
+    error => {
+      assert.equal(error.code, 'ECONNABORTED')
+      assert.equal(application.getApiErrorMessage(error), '获取提交结果超时，请刷新查看')
+      return true
+    },
+  )
+  assert.ok(Date.now() - started >= 2800)
+  assert.equal(requests, 1)
+})
 
 for (const failure of [
   { response: { status: 500 } },

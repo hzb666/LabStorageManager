@@ -1,3 +1,7 @@
+import { useFormDraft } from '@/hooks/useFormDraft'
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { createChemicalNameMapWriter } from '@/lib/chemicalNameMapSubmit'
+import { useSubmissionState, useSubmissionLock, type SubmissionSetter, type SubmissionLock } from '@/hooks/useSubmissionState'
 import {
   useCallback,
   useEffect,
@@ -161,6 +165,7 @@ type CommonShelfQuickOrderController = {
     openQuickOrderDialog: (item: CommonShelfGroup) => void
     openChemicalQuickOrderDialog: (item: ChemicalNameMapItem) => void
     handleOpenChange: (open: boolean) => void
+    handleCancel: () => void
     handleSubmit: () => Promise<void>
   }
 }
@@ -355,20 +360,29 @@ function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
   const [manualAddSource, setManualAddSource] = useState<ChemicalNameMapItem | null>(null)
   const [editNeedsMergeConfirm, setEditNeedsMergeConfirm] = useState(false)
 
+  const manualDraft = useFormDraft(forms.manualAddForm)
+  const bottlesDraft = useFormDraft(forms.addBottlesForm)
+  const removeDraft = useFormDraft(forms.removeOneForm)
+  const manualKey = String(manualAddSource?.id ?? 'new')
+  const groupKey = selectedGroup?.group.group_key ?? 'new'
+
   const resetDialogState = useCallback(() => {
+    if (mode === 'manual-add') manualDraft.clear(manualKey)
+    if (mode === 'add-bottles') bottlesDraft.clear(groupKey)
+    if (mode === 'remove-one') removeDraft.clear(groupKey)
     setMode(null)
     setSelectedGroup(null)
     setManualAddSource(null)
     setEditNeedsMergeConfirm(false)
     resetCommonShelfDialogForms(forms)
-  }, [forms])
+  }, [bottlesDraft, forms, groupKey, manualDraft, manualKey, mode, removeDraft])
 
   const openManualAddDialog = useCallback((source?: ChemicalNameMapItem) => {
     resetDialogState()
     setManualAddSource(source ?? null)
-    forms.manualAddForm.reset(buildManualAddForm(source))
+    manualDraft.restore(buildManualAddForm(source), String(source?.id ?? 'new'))
     setMode('manual-add')
-  }, [forms.manualAddForm, resetDialogState])
+  }, [manualDraft, resetDialogState])
 
   const openEditDialog = useCallback((item: CommonShelfGroup) => {
     resetDialogState()
@@ -380,18 +394,25 @@ function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
   const openAddBottlesDialog = useCallback((item: CommonShelfGroup) => {
     resetDialogState()
     setSelectedGroup(item)
+    bottlesDraft.restore(DEFAULT_ADD_BOTTLES_FORM, item.group.group_key)
     setMode('add-bottles')
-  }, [resetDialogState])
+  }, [bottlesDraft, resetDialogState])
 
   const openRemoveOneDialog = useCallback((item: CommonShelfGroup) => {
     resetDialogState()
     setSelectedGroup(item)
+    removeDraft.restore(DEFAULT_REMOVE_ONE_FORM, item.group.group_key)
     setMode('remove-one')
-  }, [resetDialogState])
+  }, [removeDraft, resetDialogState])
 
   const handleOpenChange = useCallback((open: boolean) => {
-    if (!open) resetDialogState()
-  }, [resetDialogState])
+    if (open) return
+    if (mode === 'edit') return resetDialogState()
+    if (mode === 'manual-add') manualDraft.save(manualKey)
+    if (mode === 'add-bottles') bottlesDraft.save(groupKey)
+    if (mode === 'remove-one') removeDraft.save(groupKey)
+    setMode(null)
+  }, [bottlesDraft, groupKey, manualDraft, manualKey, mode, removeDraft, resetDialogState])
 
   return {
     mode,
@@ -535,15 +556,21 @@ function createFormFieldErrorSetter<TInput extends FieldValues, TOutput>(
 
 // 多个提交流程共用 loading 包装，具体业务逻辑仍由调用方传入。
 async function runWithSubmitting(
-  setIsSubmitting: (value: boolean) => void,
+  setIsSubmitting: SubmissionSetter,
   task: () => Promise<void>,
 ) {
-  setIsSubmitting(true)
+  if (!setIsSubmitting(true)) return
   try {
     await task()
   } finally {
     setIsSubmitting(false)
   }
+}
+
+function getQuickOrderDraftKey(target: QuickOrderTarget) {
+  return target.source === 'common-shelf'
+    ? `shelf:${target.item.group.group_key}`
+    : `cas:${target.item.id}`
 }
 
 function useCommonShelfQuickOrderController({
@@ -552,16 +579,18 @@ function useCommonShelfQuickOrderController({
   refreshReagentOrders: () => Promise<void>
 }): CommonShelfQuickOrderController {
   const [target, setTarget] = useState<QuickOrderTarget | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useSubmissionState()
   const form = useForm<CommonShelfQuickOrderInputData, unknown, CommonShelfQuickOrderData>({
     resolver: createValibotResolver(CommonShelfQuickOrderSchema),
     defaultValues: DEFAULT_QUICK_ORDER_FORM,
   })
 
+  const quickDraft = useFormDraft(form)
   const resetQuickOrderDialog = useCallback(() => {
+    if (target) quickDraft.clear(getQuickOrderDraftKey(target))
     setTarget(null)
     form.reset(DEFAULT_QUICK_ORDER_FORM)
-  }, [form])
+  }, [form, quickDraft, target])
 
   const openQuickOrderDialog = useCallback((item: CommonShelfGroup) => {
     if (!normalizeOptionalText(item.display.name)) {
@@ -573,24 +602,25 @@ function useCommonShelfQuickOrderController({
       toast.error('当前分组缺少品牌，请先编辑分组品牌后再快速购买')
       return
     }
-    form.reset({
+    quickDraft.restore({
       ...DEFAULT_QUICK_ORDER_FORM,
       brand,
       specification: item.group.specification_text,
-    })
+    }, `shelf:${item.group.group_key}`)
     setTarget({ source: 'common-shelf', item })
-  }, [form])
+  }, [quickDraft])
 
   const openChemicalQuickOrderDialog = useCallback((item: ChemicalNameMapItem) => {
-    form.reset(DEFAULT_QUICK_ORDER_FORM)
+    quickDraft.restore(DEFAULT_QUICK_ORDER_FORM, `cas:${item.id}`)
     setTarget({ source: 'chemical-name-map', item })
-  }, [form])
+  }, [quickDraft])
 
   const handleOpenChange = useCallback((open: boolean) => {
     if (!open) {
-      resetQuickOrderDialog()
+      if (target) quickDraft.save(getQuickOrderDraftKey(target))
+      setTarget(null)
     }
-  }, [resetQuickOrderDialog])
+  }, [quickDraft, target])
 
   const handleSubmit = useCallback(async () => {
     await form.handleSubmit(async (data) => {
@@ -603,8 +633,8 @@ function useCommonShelfQuickOrderController({
         try {
           await reagentOrderAPI.create(payload)
           toast.success('常用试剂订单已提交')
+          await refreshAfterMutation(refreshReagentOrders)
           resetQuickOrderDialog()
-          await refreshReagentOrders()
         } catch (error) {
           const errorDetail = extractApiErrorDetail(error)
           if (applyQuickOrderValidationDetail(errorDetail, createFormFieldErrorSetter(form))) {
@@ -614,7 +644,7 @@ function useCommonShelfQuickOrderController({
         }
       })
     })()
-  }, [form, refreshReagentOrders, resetQuickOrderDialog, target])
+  }, [form, refreshReagentOrders, resetQuickOrderDialog, setIsSubmitting, target])
 
   return {
     state: {
@@ -626,6 +656,7 @@ function useCommonShelfQuickOrderController({
       openQuickOrderDialog,
       openChemicalQuickOrderDialog,
       handleOpenChange,
+      handleCancel: resetQuickOrderDialog,
       handleSubmit,
     },
   }
@@ -643,8 +674,8 @@ async function executeCommonShelfManualAdd(params: {
   try {
     await commonShelfAPI.manualAdd(payload)
     toast.success('已加入常用货架')
+    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
-    await refreshCommonShelf()
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (typeof errorDetail === 'string' && /CAS master data not found/i.test(errorDetail)) {
@@ -693,8 +724,8 @@ async function executeCommonShelfGroupEdit(params: {
     }
 
     toast.success('常用货架分组已更新')
+    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
-    await refreshCommonShelf()
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (applyFormValidationDetail(errorDetail, setFieldError)) {
@@ -720,7 +751,7 @@ async function executeCommonShelfItemEdit(params: {
       notes: normalizeOptionalText(data.notes),
     })
     toast.success('常用货架条目已更新')
-    await refreshCommonShelf()
+    await refreshAfterMutation(refreshCommonShelf)
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (applyFormValidationDetail(errorDetail, setFieldError)) {
@@ -741,10 +772,10 @@ async function executeCommonShelfItemDelete(params: {
   try {
     const response = await commonShelfAPI.deleteItem(groupKey, itemId)
     toast.success('常用货架条目已删除')
+    await refreshAfterMutation(refreshCommonShelf)
     if (response.data?.group_exists === false) {
       resetDialogState()
     }
-    await refreshCommonShelf()
   } catch (error) {
     toast.error(getApiErrorMessage(error, '删除失败'))
   }
@@ -767,8 +798,8 @@ async function executeCommonShelfAddBottles(params: {
       notes: normalizeOptionalText(data.notes),
     })
     toast.success('常用货架已加瓶')
+    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
-    await refreshCommonShelf()
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (applyFormValidationDetail(errorDetail, setFieldError)) {
@@ -792,8 +823,8 @@ async function executeCommonShelfRemoveOne(params: {
       storage_location: normalizeLocationValue(data.storage_location),
     })
     toast.success('已扣减 1 瓶')
+    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
-    await refreshCommonShelf()
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (applyFormValidationDetail(errorDetail, setFieldError)) {
@@ -813,8 +844,8 @@ async function executeCommonShelfDeleteGroup(params: {
   try {
     await commonShelfAPI.deleteGroup(groupKey)
     toast.success('常用货架分组已删除')
+    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
-    await refreshCommonShelf()
   } catch (error) {
     toast.error(getApiErrorMessage(error, '删除失败'))
   }
@@ -825,8 +856,10 @@ function useCommonShelfItemEditActions(params: {
   selectedGroup: CommonShelfGroup | null
   refreshCommonShelf: () => Promise<void>
   resetDialogState: () => void
+  submissionLock: SubmissionLock
 }) {
-  const { mode, selectedGroup, refreshCommonShelf, resetDialogState } = params
+  const { mode, selectedGroup, refreshCommonShelf, resetDialogState, submissionLock } = params
+  const [, setItemSubmitting] = useSubmissionState(submissionLock)
   const [submittingItemId, setSubmittingItemId] = useState<number | null>(null)
   const [deleteItemConfirmId, setDeleteItemConfirmId] = useState<number | null>(null)
 
@@ -836,6 +869,7 @@ function useCommonShelfItemEditActions(params: {
     setFieldError: (fieldName: string, message: string) => void,
   ) => {
     if (!selectedGroup) return
+    if (!setItemSubmitting(true)) return
     setSubmittingItemId(item.id)
     try {
       await executeCommonShelfItemEdit({
@@ -846,9 +880,10 @@ function useCommonShelfItemEditActions(params: {
         refreshCommonShelf,
       })
     } finally {
+      setItemSubmitting(false)
       setSubmittingItemId(null)
     }
-  }, [refreshCommonShelf, selectedGroup])
+  }, [refreshCommonShelf, selectedGroup, setItemSubmitting])
 
   const handleDeleteEditItem = useCallback(async (item: CommonShelfGroupItem) => {
     if (!selectedGroup) return
@@ -857,6 +892,7 @@ function useCommonShelfItemEditActions(params: {
       return
     }
 
+    if (!setItemSubmitting(true)) return
     setSubmittingItemId(item.id)
     try {
       await executeCommonShelfItemDelete({
@@ -867,9 +903,10 @@ function useCommonShelfItemEditActions(params: {
       })
       setDeleteItemConfirmId(null)
     } finally {
+      setItemSubmitting(false)
       setSubmittingItemId(null)
     }
-  }, [deleteItemConfirmId, refreshCommonShelf, resetDialogState, selectedGroup])
+  }, [deleteItemConfirmId, refreshCommonShelf, resetDialogState, selectedGroup, setItemSubmitting])
 
   const handleCancelDeleteEditItemConfirm = useCallback((item: CommonShelfGroupItem) => {
     setDeleteItemConfirmId((currentId) => (currentId === item.id ? null : currentId))
@@ -899,7 +936,7 @@ function useCommonShelfGroupEditActions(params: {
   resetDialogState: () => void
   selectedGroup: CommonShelfGroup | null
   setEditNeedsMergeConfirm: (value: boolean) => void
-  setIsSubmitting: (value: boolean) => void
+  setIsSubmitting: SubmissionSetter
 }) {
   const {
     editNeedsMergeConfirm,
@@ -963,7 +1000,8 @@ function useCommonShelfDialogController({
   refreshCommonShelf,
   onRequireChemicalNameMap,
 }: CommonShelfDialogControllerParams): CommonShelfDialogController {
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const submissionLock = useSubmissionLock()
+  const [isSubmitting, setIsSubmitting] = useSubmissionState(submissionLock)
   const forms = useCommonShelfDialogForms()
   const {
     manualAddForm,
@@ -997,7 +1035,7 @@ function useCommonShelfDialogController({
         })
       })
     })()
-  }, [manualAddForm, onRequireChemicalNameMap, refreshCommonShelf, resetDialogState])
+  }, [manualAddForm, onRequireChemicalNameMap, refreshCommonShelf, resetDialogState, setIsSubmitting])
 
   const handleSubmitAddBottles = useCallback(async () => {
     await addBottlesForm.handleSubmit(async (data) => {
@@ -1012,7 +1050,7 @@ function useCommonShelfDialogController({
         })
       })
     })()
-  }, [addBottlesForm, refreshCommonShelf, resetDialogState, selectedGroup])
+  }, [addBottlesForm, refreshCommonShelf, resetDialogState, selectedGroup, setIsSubmitting])
 
   const handleSubmitRemoveOne = useCallback(async () => {
     await removeOneForm.handleSubmit(async (data) => {
@@ -1031,7 +1069,7 @@ function useCommonShelfDialogController({
         })
       })
     })()
-  }, [refreshCommonShelf, removeOneForm, resetDialogState, selectedGroup])
+  }, [refreshCommonShelf, removeOneForm, resetDialogState, selectedGroup, setIsSubmitting])
 
   const {
     submittingItemId,
@@ -1044,6 +1082,7 @@ function useCommonShelfDialogController({
     selectedGroup,
     refreshCommonShelf,
     resetDialogState,
+    submissionLock,
   })
   const {
     handleSubmitEdit,
@@ -1121,21 +1160,26 @@ function useChemicalNameMapController({
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<ChemicalNameMapItem | null>(null)
   const [pendingManualAddPayload, setPendingManualAddPayload] = useState<ManualAddPayload | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useSubmissionState()
+  const masterWriter = useMemo(() => createChemicalNameMapWriter(), [])
   const handleQuickOrder = useChemicalQuickOrderAction(canWrite, setManagementOpen, openQuickOrderDialog)
   const form = useForm<ChemicalNameMapFormInputData, unknown, ChemicalNameMapFormData>({
     resolver: createValibotResolver(ChemicalNameMapSchema),
     defaultValues: DEFAULT_CHEMICAL_NAME_MAP_FORM,
   })
 
+  const createDraft = useFormDraft(form)
+  const [createDraftKey, setCreateDraftKey] = useState('new')
   const resetChemicalNameMapEditor = useCallback((clearPendingManualAdd = true) => {
+    masterWriter.clear(editingItem, createDraftKey)
+    if (!editingItem) createDraft.clear(createDraftKey)
     setEditorOpen(false)
     setEditingItem(null)
     form.reset(DEFAULT_CHEMICAL_NAME_MAP_FORM)
     if (clearPendingManualAdd) {
       setPendingManualAddPayload(null)
     }
-  }, [form, setPendingManualAddPayload])
+  }, [createDraft, createDraftKey, editingItem, form, masterWriter, setPendingManualAddPayload])
 
   const openChemicalNameMapCreateDialog = useCallback((params?: {
     prefill?: Partial<ChemicalNameMapFormInputData>
@@ -1143,16 +1187,18 @@ function useChemicalNameMapController({
   }) => {
     if (!canWrite) return
 
+    const key = params?.prefill?.cas_number || 'new'
+    setCreateDraftKey(key)
     setEditingItem(null)
-    form.reset({
+    createDraft.restore({
       ...DEFAULT_CHEMICAL_NAME_MAP_FORM,
       ...params?.prefill,
-    })
+    }, key)
     if (!params?.keepPendingManualAdd) {
       setPendingManualAddPayload(null)
     }
     setEditorOpen(true)
-  }, [canWrite, form, setPendingManualAddPayload])
+  }, [canWrite, createDraft, setPendingManualAddPayload])
 
   const openChemicalNameMapEditDialog = useCallback((item: ChemicalNameMapItem) => {
     if (!canWrite) return
@@ -1182,8 +1228,8 @@ function useChemicalNameMapController({
     try {
       await chemicalNameMapAPI.delete(item.id)
       toast.success('CAS 主数据已删除')
-      await refreshChemicalNameMap()
-      await refreshCommonShelf()
+      await refreshAfterMutation(refreshChemicalNameMap)
+      await refreshAfterMutation(refreshCommonShelf)
     } catch (error) {
       toast.error(getApiErrorMessage(error, '删除失败'))
     }
@@ -1197,19 +1243,13 @@ function useChemicalNameMapController({
 
       await runWithSubmitting(setIsSubmitting, async () => {
         try {
-          if (editingItem) {
-            await chemicalNameMapAPI.update(editingItem.id, payload)
-            toast.success('CAS 主数据已更新')
-          } else {
-            await chemicalNameMapAPI.create(payload)
-            toast.success('CAS 主数据已新增')
-          }
+          await masterWriter.save(editingItem, payload, createDraftKey)
+          toast.success(editingItem ? 'CAS 主数据已更新' : 'CAS 主数据已新增')
 
-          await refreshChemicalNameMap()
-          resetChemicalNameMapEditor(false)
-
+          await refreshAfterMutation(refreshChemicalNameMap)
           if (!pendingManualAddPayload) {
-            await refreshCommonShelf()
+            await refreshAfterMutation(refreshCommonShelf)
+            resetChemicalNameMapEditor(false)
             return
           }
 
@@ -1218,12 +1258,13 @@ function useChemicalNameMapController({
             await commonShelfAPI.manualAdd(pendingManualAddPayload)
             toast.success('CAS 主数据已录入，并已加入常用货架')
             setPendingManualAddPayload(null)
+            await refreshAfterMutation(refreshCommonShelf)
             resetCommonShelfDialog()
-            await refreshCommonShelf()
           } catch (error) {
-            setPendingManualAddPayload(null)
             toast.error(getApiErrorMessage(error, 'CAS 主数据已录入，但加入常用货架失败'))
+            return
           }
+          resetChemicalNameMapEditor(false)
         } catch (error) {
           const errorDetail = extractApiErrorDetail(error)
           if (applyFormValidationDetail(errorDetail, createFormFieldErrorSetter(form))) {
@@ -1233,17 +1274,7 @@ function useChemicalNameMapController({
         }
       })
     })()
-  }, [
-    canWrite,
-    editingItem,
-    form,
-    pendingManualAddPayload,
-    refreshChemicalNameMap,
-    refreshCommonShelf,
-    resetChemicalNameMapEditor,
-    resetCommonShelfDialog,
-    setPendingManualAddPayload,
-  ])
+  }, [canWrite, createDraftKey, editingItem, form, masterWriter, pendingManualAddPayload, refreshChemicalNameMap, refreshCommonShelf, resetChemicalNameMapEditor, resetCommonShelfDialog, setIsSubmitting])
 
   const columns = useChemicalNameMapColumns(
     canWrite, handleQuickOrder, openManualAddDialog, openChemicalNameMapEditDialog, handleDeleteChemicalNameMap,
@@ -1255,8 +1286,12 @@ function useChemicalNameMapController({
     form,
     isSubmitting,
     onOpenChange: (open: boolean) => {
-      if (!open) resetChemicalNameMapEditor()
+      if (open) return
+      if (editingItem) return resetChemicalNameMapEditor()
+      createDraft.save(createDraftKey)
+      setEditorOpen(false)
     },
+    onCancel: resetChemicalNameMapEditor,
     onSubmit: handleSubmit,
   }
 
@@ -1283,25 +1318,25 @@ function useCommonShelfPageController(): CommonShelfPageController {
 
   const refreshCommonShelf = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['common-shelf'] }),
-      queryClient.invalidateQueries({ queryKey: ['common-shelf-group-items'] }),
-      queryClient.invalidateQueries({ queryKey: ['common-shelf-location-suggestions'] }),
-      queryClient.invalidateQueries({ queryKey: ['common-shelf-remove-locations'] }),
-      queryClient.invalidateQueries({ queryKey: ['common-shelf-order-location-suggestions'] }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf'] }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf-group-items'] }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf-location-suggestions'] }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf-remove-locations'] }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['common-shelf-order-location-suggestions'] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ])
   }, [queryClient])
 
   const refreshChemicalNameMap = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['chemical-name-map'] }),
+      queryClient.invalidateQueries({ queryKey: ['chemical-name-map'] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ])
   }, [queryClient])
 
   const refreshReagentOrders = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }),
+      queryClient.invalidateQueries({ queryKey: ['reagent-orders'] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ])
   }, [queryClient])
@@ -1449,7 +1484,7 @@ function CommonShelfQuickOrderDialog({
     }
 
   return (
-    <Dialog open={Boolean(target)} onOpenChange={actions.handleOpenChange}>
+    <Dialog busy={state.isSubmitting} open={Boolean(target)} onOpenChange={actions.handleOpenChange}>
       <DialogContent className="max-h-[85vh] w-[92vw] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>快速购买常用</DialogTitle>
@@ -1482,7 +1517,7 @@ function CommonShelfQuickOrderDialog({
                 variant="modern"
                 size="lg"
                 className="min-w-24"
-                onClick={() => actions.handleOpenChange(false)}
+                onClick={actions.handleCancel}
               >
                 取消
               </Button>

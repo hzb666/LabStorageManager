@@ -17,6 +17,7 @@ from sqlmodel import Session, delete, func, select
 
 from app.api.inventory_extended_routes import register_inventory_extended_routes
 from app.api.inventory_timeline import register_inventory_timeline_routes
+from app.api.mutation_operations import MutationTrackedRoute
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentSession, get_current_user, require_non_public
 from app.core.config import settings
@@ -110,7 +111,7 @@ from app.services.structure_search_cache import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/inventory", tags=["Inventory"])
+router = APIRouter(prefix="/inventory", tags=["Inventory"], route_class=MutationTrackedRoute)
 LIST_CACHE_PREFIX = "list:"
 INVENTORY_NOT_FOUND = "Inventory item not found"
 

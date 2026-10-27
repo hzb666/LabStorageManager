@@ -73,6 +73,7 @@ from .reagent_order_operation_log import (
     ReagentOrderOperationLogResponse,
 )
 from .runtime_state import RuntimeState
+from .mutation_operation import MutationOperation
 from .structure_index import (
     StructureIndexChange,
     StructureIndexChangeOperation,
@@ -99,6 +100,7 @@ __all__ = [  # noqa: RUF022 - grouped by domain for public model API readability
     # 会话。
     "UserSession",
     "RuntimeState",
+    "MutationOperation",
     # 库存。
     "Inventory",
     "InventoryStatus",

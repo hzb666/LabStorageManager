@@ -992,6 +992,10 @@ export const extractApiErrorDetail = (error: unknown): unknown => {
   return undefined
 }
 
+export const isApiTimeoutError = (error: unknown): boolean => {
+  return isRecord(error) && (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT')
+}
+
 export const getApiErrorMessage = (error: unknown, fallback = '操作失败'): string => {
   return resolveApiErrorCodeMessage(error)
     ?? normalizeApiErrorMessage(extractApiErrorDetail(error), fallback)

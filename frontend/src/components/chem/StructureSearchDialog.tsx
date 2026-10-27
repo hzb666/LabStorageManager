@@ -1,3 +1,4 @@
+import { useSubmissionState } from '@/hooks/useSubmissionState'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { Ketcher } from 'ketcher-core'
@@ -13,7 +14,8 @@ import { KetcherEditor } from '@/components/chem/KetcherEditor'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { LoadingButton } from '@/components/ui/LoadingButton'
-import { getApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage, isApiTimeoutError } from '@/lib/validationSchemas'
+import { toast } from '@/lib/toast'
 
 const DEFAULT_SEARCH_LIMIT = 100
 
@@ -412,7 +414,7 @@ export function StructureSearchDialog({
   const manualTargetKey = getManualTargetKey(manualEditTarget)
   const isManualMode = Boolean(manualEditTarget)
   const [searchingMode, setSearchingMode] = useState<StructureSearchMode | null>(null)
-  const [savingManual, setSavingManual] = useState(false)
+  const [savingManual, setSavingManual] = useSubmissionState()
   const [error, setError] = useState<string | null>(null)
 
   const { ketcherRef, editorReady, handleEditorInit } = useKetcherMoleculeLoader({
@@ -457,7 +459,9 @@ export function StructureSearchDialog({
       await onResults(payload, matchMode, exported.molblock, exported.query, exported.format)
       onOpenChange(false)
     } catch (searchError) {
-      setError(getApiErrorMessage(searchError, '结构检索失败'))
+      const message = getApiErrorMessage(searchError, '结构检索失败')
+      if (isApiTimeoutError(searchError)) toast.error(message)
+      else setError(message)
     } finally {
       setSearchingMode(null)
     }
@@ -466,7 +470,7 @@ export function StructureSearchDialog({
   const handleManualSave = useCallback(async () => {
     if (!manualEditTarget) return
     setError(null)
-    setSavingManual(true)
+    if (!setSavingManual(true)) return
     try {
       const ketcher = ketcherRef.current
       if (!ketcher) {
@@ -483,14 +487,16 @@ export function StructureSearchDialog({
       onManualSaved?.(cache)
       onOpenChange(false)
     } catch (saveError) {
-      setError(getApiErrorMessage(saveError, '结构保存失败'))
+      const message = getApiErrorMessage(saveError, '结构保存失败')
+      if (isApiTimeoutError(saveError)) toast.error(message)
+      else setError(message)
     } finally {
       setSavingManual(false)
     }
-  }, [ketcherRef, manualEditTarget, onManualSaved, onOpenChange])
+  }, [ketcherRef, manualEditTarget, onManualSaved, onOpenChange, setSavingManual])
 
   return (
-    <Dialog open={open} keepMounted={keepMounted} onOpenChange={handleDialogOpenChange}>
+    <Dialog busy={savingManual} open={open} keepMounted={keepMounted} onOpenChange={handleDialogOpenChange}>
       <DialogContent aria-describedby={undefined} className="flex h-[82vh] max-h-[820px] w-[94vw] max-w-[1180px] flex-col overflow-hidden p-3 md:w-[88vw] md:p-4">
         <DialogHeader className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <DialogTitle className="mb-0 px-3 py-1.5">

@@ -1,3 +1,5 @@
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, useSubmissionLock, type SubmissionSetter } from '@/hooks/useSubmissionState'
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createColumnHelper, type ColumnDef } from "@tanstack/react-table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -167,7 +169,9 @@ function useReagentEditDialog({
 }>) {
   const [editingReagent, setEditingReagent] =
     useState<DashboardReagentOrder | null>(null);
-  const [isSubmittingReagent, setIsSubmittingReagent] = useState(false);
+  const submissionLock = useSubmissionLock();
+  const [isSubmittingReagent, setIsSubmittingReagent] = useSubmissionState(submissionLock);
+  const [isDeletingReagent, setIsDeletingReagent] = useSubmissionState(submissionLock);
 
   const reagentForm = useForm<
     ReagentOrderFormInputData,
@@ -219,7 +223,7 @@ function useReagentEditDialog({
 
   const submitReagentEdit = reagentForm.handleSubmit(async (formData) => {
     if (!editingReagent) return;
-    setIsSubmittingReagent(true);
+    if (!setIsSubmittingReagent(true)) return;
     try {
       const isCommonPublic = formData.order_reason === ReagentOrderReason.COMMON_PUBLIC;
       await reagentOrderAPI.update(editingReagent.id, {
@@ -236,8 +240,8 @@ function useReagentEditDialog({
         is_hazardous: isCommonPublic ? false : formData.is_hazardous,
         notes: processNotes(formData.notes),
       });
+      await refreshAfterMutation(refreshTables);
       setEditingReagent(null);
-      await refreshTables();
       toast.success(
         editingReagent.status === ReagentOrderStatus.REJECTED ||
           editingReagent.status === ReagentOrderStatus.APPROVED
@@ -256,18 +260,20 @@ function useReagentEditDialog({
   });
 
   const handleDeleteReagent = useCallback(async () => {
-    if (!editingReagent) return;
+    if (!editingReagent || !setIsDeletingReagent(true)) return;
 
     try {
       await reagentOrderAPI.delete(editingReagent.id);
+      await refreshAfterMutation(refreshTables);
       setEditingReagent(null);
       reagentForm.reset(defaultReagentOrderValues);
-      await refreshTables();
       toast.success("试剂订单已删除");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "删除失败"));
+    } finally {
+      setIsDeletingReagent(false);
     }
-  }, [editingReagent, reagentForm, refreshTables]);
+  }, [editingReagent, reagentForm, refreshTables, setIsDeletingReagent]);
 
   const closeReagentDialog = useCallback(() => {
     setEditingReagent(null);
@@ -277,6 +283,7 @@ function useReagentEditDialog({
   return {
     editingReagent,
     isSubmittingReagent,
+    isDeletingReagent,
     reagentForm,
     handleReagentEdit,
     submitReagentEdit,
@@ -414,8 +421,8 @@ async function finishWorkflowSubmit(
   refreshTables: () => Promise<void>,
   successMessage: string,
 ) {
+  await refreshAfterMutation(refreshTables);
   resetStockinDialog();
-  await refreshTables();
   toast.success(successMessage);
 }
 
@@ -430,7 +437,7 @@ function useReagentWorkflowSubmitHandlers({
   stockinTarget: DashboardReagentOrder | null;
   arrivalForm: ReturnType<typeof useForm<ConfirmArrivalFormInputData, unknown, ConfirmArrivalFormData>>;
   commonPublicArrivalForm: ReturnType<typeof useForm<CommonPublicArrivalFormInputData, unknown, CommonPublicArrivalFormData>>;
-  setIsSubmittingStockin: (value: boolean) => void;
+  setIsSubmittingStockin: SubmissionSetter;
   resetStockinDialog: () => void;
   refreshTables: () => Promise<void>;
 }>) {
@@ -443,7 +450,7 @@ function useReagentWorkflowSubmitHandlers({
     );
     if (!isRemainingValid) return;
 
-    setIsSubmittingStockin(true);
+    if (!setIsSubmittingStockin(true)) return;
     try {
       await reagentOrderAPI.confirmArrival(
         stockinTarget.id,
@@ -465,7 +472,7 @@ function useReagentWorkflowSubmitHandlers({
     async (formData) => {
       if (!stockinTarget) return;
 
-      setIsSubmittingStockin(true);
+      if (!setIsSubmittingStockin(true)) return;
       try {
         await reagentOrderAPI.confirmArrival(
           stockinTarget.id,
@@ -496,7 +503,7 @@ function useReagentStockinDialog(refreshTables: () => Promise<void>) {
   const [stockinTarget, setStockinTarget] =
     useState<DashboardReagentOrder | null>(null);
   const [stockinMode, setStockinMode] = useState<StockinMode>("arrival");
-  const [isSubmittingStockin, setIsSubmittingStockin] = useState(false);
+  const [isSubmittingStockin, setIsSubmittingStockin] = useSubmissionState();
 
   const arrivalForm = useForm<ConfirmArrivalFormInputData, unknown, ConfirmArrivalFormData>({
     resolver: createValibotResolver(ConfirmArrivalFormSchema),
@@ -578,6 +585,7 @@ function DashboardReagentEditDialog({
     editingReagent,
     reagentForm,
     isSubmittingReagent,
+    isDeletingReagent,
     handleDeleteReagent,
     closeReagentDialog,
     submitReagentEdit,
@@ -609,6 +617,7 @@ function DashboardReagentEditDialog({
 
   return (
     <Dialog
+      busy={isSubmittingReagent || isDeletingReagent}
       open={editingReagent !== null}
       onOpenChange={(open) => {
         if (!open) closeReagentDialog();
@@ -643,6 +652,7 @@ function DashboardReagentEditDialog({
             submitLabelEdit="保存"
             submitLabelAdd="保存"
             isSubmitting={isSubmittingReagent}
+            isDeleting={isDeletingReagent}
             disableSubmit={isReagentEditLocked}
           />
         </form>
@@ -749,6 +759,7 @@ function DashboardReagentStockinDialog({
 
   return (
     <Dialog
+      busy={isSubmittingStockin}
       open={stockinTarget !== null}
       onOpenChange={(open) => {
         if (!open) closeStockinDialog();
@@ -867,7 +878,7 @@ function createReagentApprovalActions(refreshTables: () => Promise<void>) {
         !isApprovableOrderStatus(currItem.status),
       onClick: async (currItem: DashboardReagentOrder) => {
         await reagentOrderAPI.approve(currItem.id);
-        await refreshTables();
+        await refreshAfterMutation(refreshTables);
         toast.success("审批通过");
       },
       onError: (error: unknown) => toast.error(getApiErrorMessage(error, "审批失败")),
@@ -885,7 +896,7 @@ function createReagentApprovalActions(refreshTables: () => Promise<void>) {
         !isRejectableOrderStatus(currItem.status),
       onClick: async (currItem: DashboardReagentOrder) => {
         await reagentOrderAPI.reject(currItem.id, "管理员驳回");
-        await refreshTables();
+        await refreshAfterMutation(refreshTables);
         toast.success("已驳回");
       },
       onError: (error: unknown) => toast.error(getApiErrorMessage(error, "驳回失败")),
@@ -1007,9 +1018,9 @@ export function DashboardReagentTab({
         queryKey: managementMode
           ? ["dashboard", "admin", "reagents"]
           : ["dashboard", "reagents"],
-      }),
-      queryClient.invalidateQueries({ queryKey: ["reagent-orders"] }),
-      queryClient.invalidateQueries({ queryKey: ["inventory"] }),
+      }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ["reagent-orders"] }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ["inventory"] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ]);
   }, [managementMode, queryClient]);

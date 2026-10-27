@@ -122,6 +122,7 @@ export interface ChemicalNameMapEditorController {
   isSubmitting: boolean
   onOpenChange: (open: boolean) => void
   onSubmit: () => Promise<void>
+  onCancel: () => void
 }
 
 function buildLocationOptions(locations: CommonShelfLocationSummary[] = []) {
@@ -236,7 +237,7 @@ function renderManualAddDialog(
         columns={2}
       />
       <DialogSubmitActions
-        onCancel={() => actions.handleOpenChange(false)}
+        onCancel={actions.resetDialogState}
         submitLabel="确认添加"
         isSubmitting={state.isSubmitting}
       />
@@ -496,7 +497,7 @@ function CommonShelfEditDialogContent({
           />
           <EditDialogActions
             mode="edit"
-            onCancel={() => actions.handleOpenChange(false)}
+            onCancel={actions.resetDialogState}
             onDelete={showDelete ? actions.handleDelete : undefined}
             submitLabelEdit={state.editNeedsMergeConfirm ? '确认合并并保存' : '保存分组'}
             submitLabelAdd="保存分组"
@@ -520,7 +521,7 @@ function CommonShelfEditDialogContent({
               variant="modern"
               size="lg"
               className="min-w-24"
-              onClick={() => actions.handleOpenChange(false)}
+              onClick={actions.resetDialogState}
             >
               关闭
             </Button>
@@ -553,7 +554,7 @@ function renderAddBottlesDialog(
         layout="stack"
       />
       <DialogSubmitActions
-        onCancel={() => actions.handleOpenChange(false)}
+        onCancel={actions.resetDialogState}
         submitLabel="确认加瓶"
         isSubmitting={state.isSubmitting}
       />
@@ -586,7 +587,7 @@ function renderRemoveOneDialog(
         layout="stack"
       />
       <DialogSubmitActions
-        onCancel={() => actions.handleOpenChange(false)}
+        onCancel={actions.resetDialogState}
         submitLabel="确认拿取"
         isSubmitting={state.isSubmitting}
       />
@@ -631,7 +632,7 @@ export function CommonShelfDialogs({
   const locationOptions = buildLocationOptions(removeLocationsQuery.data)
 
   return (
-    <Dialog open={mode !== null} onOpenChange={actions.handleOpenChange}>
+    <Dialog busy={state.isSubmitting || dialog.itemEdit.submittingItemId !== null} open={mode !== null} onOpenChange={actions.handleOpenChange}>
       <DialogContent className={getCommonShelfDialogContentClassName(mode)}>
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
@@ -660,7 +661,7 @@ export function ChemicalNameMapEditorDialog({
   const isEdit = Boolean(dialog.editingItem)
 
   return (
-    <Dialog open={dialog.open} onOpenChange={dialog.onOpenChange}>
+    <Dialog busy={dialog.isSubmitting} open={dialog.open} onOpenChange={dialog.onOpenChange}>
       <DialogContent className={COMMON_SHELF_FORM_DIALOG_WIDTH}>
         <DialogHeader>
           <DialogTitle>{isEdit ? '编辑 CAS 主数据' : '新增 CAS 主数据'}</DialogTitle>
@@ -672,7 +673,7 @@ export function ChemicalNameMapEditorDialog({
             columns={2}
           />
           <DialogSubmitActions
-            onCancel={() => dialog.onOpenChange(false)}
+            onCancel={dialog.onCancel}
             submitLabel={isEdit ? '保存' : '确认新增'}
             isSubmitting={dialog.isSubmitting}
           />

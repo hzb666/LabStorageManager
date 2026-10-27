@@ -18,7 +18,8 @@ import { LoadingButton } from '@/components/ui/LoadingButton'
 import { Textarea } from '@/components/ui/Textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
 import { saveProcedureInventorySearchResult } from '@/lib/storage/procedureInventorySearchStorage'
-import { getApiErrorMessage } from '@/lib/validationSchemas'
+import { getApiErrorMessage, isApiTimeoutError } from '@/lib/validationSchemas'
+import { toast } from '@/lib/toast'
 import { useAuthStore } from '@/store/useStore'
 
 const PROCEDURE_TEXT_MAX_CHARS = 5000
@@ -96,7 +97,9 @@ function useProcedureInventorySearch(userId: number | null) {
       setStage('opening')
       handleSearchResponse(response.data)
     } catch (requestError) {
-      setError(getApiErrorMessage(requestError, '查询失败'))
+      const message = getApiErrorMessage(requestError, '查询失败')
+      if (isApiTimeoutError(requestError)) toast.error(message)
+      else setError(message)
     } finally {
       setSubmitting(false)
       setStage('idle')

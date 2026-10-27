@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_
 from sqlmodel import func, select
 
+from app.api.mutation_operations import MutationTrackedRoute
+
 from app.core.auth import CurrentSession, get_current_user, require_admin
 from app.core.config import settings
 from app.core.request_utils import get_request_is_cli, get_sse_client_id
@@ -54,7 +56,7 @@ from app.services.structure_resolution_jobs import (
 from app.services.structure_resolution_scheduler import structure_resolution_scheduler
 from app.services.structure_search_cache import put_structure_search_results
 
-router = APIRouter(prefix="/chem", tags=["Chem"])
+router = APIRouter(prefix="/chem", tags=["Chem"], route_class=MutationTrackedRoute)
 logger = logging.getLogger(__name__)
 
 STRUCTURE_QUERY_MAX_LENGTH = 20_000

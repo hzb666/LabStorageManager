@@ -1,3 +1,6 @@
+import { useFormDraft } from '@/hooks/useFormDraft'
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, useSubmissionLock } from '@/hooks/useSubmissionState'
 import { useCallback, useMemo, useState, type FormEvent } from 'react'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Tags } from 'lucide-react'
@@ -52,6 +55,7 @@ interface ReagentBrandEditorDialogProps {
   onOpenChange: (open: boolean) => void
   onDelete: () => Promise<void>
   onSubmit: () => Promise<void>
+  onCancel: () => void
 }
 
 const DEFAULT_REAGENT_BRAND_FORM: ReagentBrandFormInputData = {
@@ -148,11 +152,12 @@ function ReagentBrandEditorDialog({
   onOpenChange,
   onDelete,
   onSubmit,
+  onCancel,
 }: ReagentBrandEditorDialogProps) {
   const isEdit = Boolean(editingItem)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog busy={isSubmitting || isDeleting} open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[92vw] max-w-md">
         <DialogHeader>
           <DialogTitle>{isEdit ? '编辑品牌' : '新增品牌'}</DialogTitle>
@@ -179,7 +184,7 @@ function ReagentBrandEditorDialog({
                 variant="modern"
                 size="lg"
                 disabled={isSubmitting || isDeleting}
-                onClick={() => onOpenChange(false)}
+                onClick={onCancel}
               >
                 取消
               </Button>
@@ -346,22 +351,25 @@ export function ReagentBrandManagementDialogs({
   const queryClient = useQueryClient()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<ReagentBrandItem | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const submissionLock = useSubmissionLock()
+  const [isDeleting, setIsDeleting] = useSubmissionState(submissionLock)
+  const [isSubmitting, setIsSubmitting] = useSubmissionState(submissionLock)
   const form = useForm<ReagentBrandFormInputData, unknown, ReagentBrandFormData>({
     resolver: createValibotResolver(ReagentBrandSchema),
     defaultValues: DEFAULT_REAGENT_BRAND_FORM,
   })
 
+  const createDraft = useFormDraft(form)
   const refreshBrands = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: REAGENT_BRAND_QUERY_KEY })
+    await queryClient.invalidateQueries({ queryKey: REAGENT_BRAND_QUERY_KEY }, { throwOnError: true })
   }, [queryClient])
 
   const resetEditor = useCallback(() => {
     setEditorOpen(false)
     setEditingItem(null)
     form.reset(DEFAULT_REAGENT_BRAND_FORM)
-  }, [form])
+    if (!editingItem) createDraft.clear()
+  }, [createDraft, editingItem, form, setEditorOpen])
 
   const openCreateDialog = useCallback(() => {
     if (!canWrite) {
@@ -369,9 +377,9 @@ export function ReagentBrandManagementDialogs({
     }
 
     setEditingItem(null)
-    form.reset(DEFAULT_REAGENT_BRAND_FORM)
+    createDraft.restore(DEFAULT_REAGENT_BRAND_FORM)
     setEditorOpen(true)
-  }, [canWrite, form])
+  }, [canWrite, createDraft, setEditorOpen])
 
   const openEditDialog = useCallback((item: ReagentBrandItem) => {
     if (!canWrite) {
@@ -381,7 +389,7 @@ export function ReagentBrandManagementDialogs({
     setEditingItem(item)
     form.reset(buildReagentBrandForm(item))
     setEditorOpen(true)
-  }, [canWrite, form])
+  }, [canWrite, form, setEditorOpen])
 
   const handleDeleteCurrent = useCallback(async () => {
     if (!canWrite) {
@@ -391,10 +399,10 @@ export function ReagentBrandManagementDialogs({
       return
     }
 
-    setIsDeleting(true)
+    if (!setIsDeleting(true)) return
     try {
       await reagentBrandAPI.delete(editingItem.id)
-      await refreshBrands()
+      await refreshAfterMutation(refreshBrands)
       toast.success('品牌已删除')
       resetEditor()
     } catch (error) {
@@ -402,7 +410,7 @@ export function ReagentBrandManagementDialogs({
     } finally {
       setIsDeleting(false)
     }
-  }, [canWrite, editingItem, refreshBrands, resetEditor])
+  }, [canWrite, editingItem, refreshBrands, resetEditor, setIsDeleting])
 
   const handleSubmit = useCallback(async () => {
     if (!canWrite) {
@@ -410,7 +418,7 @@ export function ReagentBrandManagementDialogs({
     }
 
     await form.handleSubmit(async (data) => {
-      setIsSubmitting(true)
+      if (!setIsSubmitting(true)) return
       try {
         if (editingItem) {
           await reagentBrandAPI.update(editingItem.id, { name: data.name })
@@ -419,7 +427,7 @@ export function ReagentBrandManagementDialogs({
           await reagentBrandAPI.create({ name: data.name })
           toast.success('品牌已新增')
         }
-        await refreshBrands()
+        await refreshAfterMutation(refreshBrands)
         resetEditor()
       } catch (error) {
         const detail = extractApiErrorDetail(error)
@@ -430,7 +438,7 @@ export function ReagentBrandManagementDialogs({
         setIsSubmitting(false)
       }
     })()
-  }, [canWrite, editingItem, form, refreshBrands, resetEditor])
+  }, [canWrite, editingItem, form, refreshBrands, resetEditor, setIsSubmitting])
 
   return (
     <>
@@ -449,9 +457,14 @@ export function ReagentBrandManagementDialogs({
         isSubmitting={isSubmitting}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) {
-            resetEditor()
+            if (editingItem) resetEditor()
+            else {
+              createDraft.save()
+              setEditorOpen(false)
+            }
           }
         }}
+        onCancel={resetEditor}
         onDelete={handleDeleteCurrent}
         onSubmit={handleSubmit}
       />

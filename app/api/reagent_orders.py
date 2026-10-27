@@ -9,6 +9,7 @@ from sqlalchemy import case
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
+from app.api.mutation_operations import MutationTrackedRoute
 from app.api.reagent_orders_workflow import register_workflow_routes
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.auth import CurrentSession, CurrentUser, get_current_user, require_admin
@@ -100,7 +101,7 @@ from app.services.sse_manager import sse_manager
 from app.services.structure_cache_tasks import enqueue_structure_cache_resolution
 from app.services.user_utils import batch_get_user_names
 
-router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"])
+router = APIRouter(prefix="/reagent-orders", tags=["ReagentOrders"], route_class=MutationTrackedRoute)
 logger = logging.getLogger(__name__)
 
 # ==================== 搜索缓存 ====================

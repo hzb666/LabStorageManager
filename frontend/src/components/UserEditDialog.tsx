@@ -1,3 +1,5 @@
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, useSubmissionLock, type SubmissionSetter } from '@/hooks/useSubmissionState'
 import {
   useCallback,
   useEffect,
@@ -67,7 +69,7 @@ export interface UserEditDialogProps {
   onOpenChange: (open: boolean) => void;
   user: User | null;
   mode: "admin" | "profile";
-  onSuccess?: () => void;
+  onSuccess?: () => void | Promise<unknown>;
 }
 
 const ALLOWED_TYPES = [
@@ -477,10 +479,10 @@ interface UseSaveHandlerOptions {
     typeof useRememberedUser
   >["updateRememberedUser"];
   setAuth: AuthStoreSetAuth;
-  onSuccess?: () => void;
+  onSuccess?: () => void | Promise<unknown>;
   onClose: () => void;
   handleAvatarUpdate: (targetUser: User) => Promise<boolean>;
-  setEditLoading: Dispatch<SetStateAction<boolean>>;
+  setEditLoading: SubmissionSetter;
 }
 
 // 保存资料时先处理头像，再提交基础信息；用户名变化触发强制重新登录，防止旧 token 挂着旧身份继续使用。
@@ -499,12 +501,9 @@ function useSaveUserHandler({
 }: Readonly<UseSaveHandlerOptions>) {
   return useCallback(async () => {
     const isValid = await editForm.trigger();
-    if (!isValid || !user) {
-      return;
-    }
+    if (!isValid || !user || !setEditLoading(true)) return;
 
     const formData = editForm.getValues();
-    setEditLoading(true);
     try {
       const avatarUpdated = await handleAvatarUpdate(user);
       if (!avatarUpdated) {
@@ -532,7 +531,7 @@ function useSaveUserHandler({
         setAuth(updatedUser);
       }
 
-      onSuccess?.();
+      await refreshAfterMutation(() => onSuccess?.());
       onClose();
       toast.success(mode === "admin" ? "用户更新成功" : "信息更新成功");
     } catch (error) {
@@ -561,7 +560,7 @@ interface UsePasswordHandlerOptions {
   passwordForm: UseFormReturn<ChangePasswordFormData>;
   onClose: () => void;
   setIsEditingPasswordSession: Dispatch<SetStateAction<symbol | null>>;
-  setChangePasswordLoading: Dispatch<SetStateAction<boolean>>;
+  setChangePasswordLoading: SubmissionSetter;
 }
 
 // 自改密码与管理员重置他人密码走两条链路，表单入口和错误回填共用。
@@ -587,7 +586,7 @@ function usePasswordChangeHandler({
       return;
     }
 
-    setChangePasswordLoading(true);
+    if (!setChangePasswordLoading(true)) return;
     try {
       if (isSelf) {
         await authAPI.changePassword(oldPassword, newPassword);
@@ -913,8 +912,9 @@ export function UserEditDialog({
     resetForms,
     startPasswordEdit,
   } = useUserEditForms(open, user);
-  const [editLoading, setEditLoading] = useState(false);
-  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+  const submissionLock = useSubmissionLock();
+  const [editLoading, setEditLoading] = useSubmissionState(submissionLock);
+  const [changePasswordLoading, setChangePasswordLoading] = useSubmissionState(submissionLock);
   const [personalizationEnabled, setPersonalizationEnabled] = useState(true);
   const [personalizationLoading, setPersonalizationLoading] = useState(false);
   const {
@@ -983,7 +983,7 @@ export function UserEditDialog({
   });
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog busy={editLoading || changePasswordLoading || avatarLoading} open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className={cn(!isEditingPassword && "mb-4")}>

@@ -1,3 +1,6 @@
+import { useFormDraft } from '@/hooks/useFormDraft'
+import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { useSubmissionState, useSubmissionLock, type SubmissionLock, type SubmissionSetter } from '@/hooks/useSubmissionState'
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -49,6 +52,7 @@ import {
   validateAndNormalizeCASInput,
   extractApiErrorDetail,
   getApiErrorMessage,
+  isApiTimeoutError,
   isSpecialCasValue,
   isEffectivelyEmptyStorageLocation,
   toValidationErrors,
@@ -403,26 +407,25 @@ function formatInventoryBorrowerDisplay(item: InventoryItem): string {
 function useNotInStockToggle(
   editingItem: InventoryItem | null,
   refreshInventory: () => void | Promise<void>,
+  submissionLock: SubmissionLock,
 ) {
-  const [isTogglingNotInStock, setIsTogglingNotInStock] = useState(false)
+  const [isTogglingNotInStock, setIsTogglingNotInStock] = useSubmissionState(submissionLock)
   const handleToggleNotInStock = useCallback(async () => {
     if (!editingItem) return
 
     const wasNotInStock = editingItem.status === 'not_in_stock'
-    setIsTogglingNotInStock(true)
+    if (!setIsTogglingNotInStock(true)) return
     try {
       const response = await inventoryAPI.toggleNotInStock(editingItem.id)
       toast.success(wasNotInStock ? '更新为已找到' : '更新为未找到')
-      Promise.resolve(refreshInventory()).catch(() => {
-        toast.warning('状态已修改，列表刷新失败')
-      })
+      await refreshAfterMutation(refreshInventory)
       return response.data.status
     } catch (error) {
       toast.error(getApiErrorMessage(error, '状态修改失败'))
     } finally {
       setIsTogglingNotInStock(false)
     }
-  }, [editingItem, refreshInventory])
+  }, [editingItem, refreshInventory, setIsTogglingNotInStock])
 
   return { handleToggleNotInStock, isTogglingNotInStock }
 }
@@ -435,33 +438,30 @@ function useInventoryBrandOptions() {
   return data
 }
 
-function useInventoryDialogController(
+function useInventoryDelete(
+  editingItem: InventoryItem | null,
   refreshInventory: () => void | Promise<void>,
-  requireManualStorageLocation: boolean,
+  setDialogState: (state: InventoryDialogState) => void,
+  setIsDeleting: SubmissionSetter,
 ) {
-  const brandOptions = useInventoryBrandOptions()
-  const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
-  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  return useCallback(async () => {
+    if (!editingItem || !setIsDeleting(true)) return
+
+    try {
+      await inventoryAPI.delete(editingItem.id)
+      await refreshAfterMutation(refreshInventory)
+      setDialogState(null)
+      toast.success('库存已删除')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '删除失败'))
+    } finally {
+      setIsDeleting(false)
+    }
+  }, [editingItem, refreshInventory, setDialogState, setIsDeleting])
+}
+
+function useInventoryCasLookup(form: UseFormReturn<InventoryFormInputData, unknown, InventoryFormData>) {
   const [isCasLookupLoading, setIsCasLookupLoading] = useState(false)
-  const notInStockToggle = useNotInStockToggle(editingItem, refreshInventory)
-  const form = useForm<InventoryFormInputData, unknown, InventoryFormData>({
-    resolver: createValibotResolver(InventoryFormSchema),
-    defaultValues: defaultInventoryValues,
-    shouldFocusError: false,
-  })
-  const showNotInStockToggle = editingItem !== null && editingItem.status !== 'consumed'
-  const handleAddClick = useCallback(() => {
-    setEditingItem(null)
-    form.reset(defaultInventoryValues)
-    setDialogState('add')
-  }, [form, setDialogState])
-  const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
-    const item = itemRaw as unknown as InventoryItem
-    setEditingItem(item)
-    form.reset(createInventoryFormValues(item))
-    setDialogState('edit')
-  }, [form, setDialogState])
   const handleCasLookup = useCallback(async () => {
     const casValue = form.getValues('cas_number')
     const casValidation = validateAndNormalizeCASInput(casValue || '')
@@ -488,15 +488,48 @@ function useInventoryDialogController(
       toast.success('CAS 号识别成功')
     } catch (error) {
       const detail = extractApiErrorDetail(error)
-      if (typeof detail === 'string') {
+      if (typeof detail === 'string' && !isApiTimeoutError(error)) {
         form.setError('cas_number', { message: normalizeApiErrorMessage(detail, 'CAS 号识别失败') })
       } else {
-        toast.error('CAS 号识别失败')
+        toast.error(getApiErrorMessage(error, 'CAS 号识别失败'))
       }
     } finally {
       setIsCasLookupLoading(false)
     }
   }, [form])
+  return { isCasLookupLoading, handleCasLookup }
+}
+
+function useInventoryDialogController(
+  refreshInventory: () => void | Promise<void>,
+  requireManualStorageLocation: boolean,
+) {
+  const brandOptions = useInventoryBrandOptions()
+  const [dialogState, setDialogState] = useDialogState<'edit' | 'add'>()
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
+  const submissionLock = useSubmissionLock()
+  const [isSubmitting, setIsSubmitting] = useSubmissionState(submissionLock)
+  const [isDeleting, setIsDeleting] = useSubmissionState(submissionLock)
+  const notInStockToggle = useNotInStockToggle(editingItem, refreshInventory, submissionLock)
+  const form = useForm<InventoryFormInputData, unknown, InventoryFormData>({
+    resolver: createValibotResolver(InventoryFormSchema),
+    defaultValues: defaultInventoryValues,
+    shouldFocusError: false,
+  })
+  const showNotInStockToggle = editingItem !== null && editingItem.status !== 'consumed'
+  const createDraft = useFormDraft(form)
+  const handleAddClick = useCallback(() => {
+    setEditingItem(null)
+    createDraft.restore(defaultInventoryValues)
+    setDialogState('add')
+  }, [createDraft, setDialogState])
+  const handleEditClick = useCallback((itemRaw: Record<string, unknown>) => {
+    const item = itemRaw as unknown as InventoryItem
+    setEditingItem(item)
+    form.reset(createInventoryFormValues(item))
+    setDialogState('edit')
+  }, [form, setDialogState])
+  const { isCasLookupLoading, handleCasLookup } = useInventoryCasLookup(form)
   const handleFormSubmit = form.handleSubmit(async (formData) => {
     if (!validateInventoryRemainingQuantity({ dialogState, editingItem, formData, form })) {
       return
@@ -510,15 +543,16 @@ function useInventoryDialogController(
       return
     }
 
-    setIsSubmitting(true)
+    if (!setIsSubmitting(true)) return
     try {
       await submitInventoryRequest({ dialogState, editingItem, formData })
-      await Promise.resolve(refreshInventory())
+      await refreshAfterMutation(refreshInventory)
       if (dialogState === 'edit') {
         toast.success('库存信息已更新')
       } else if (dialogState === 'add') {
         toast.success('手动入库成功！')
       }
+      if (dialogState === 'add') createDraft.clear()
       setDialogState(null)
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
@@ -535,18 +569,7 @@ function useInventoryDialogController(
   }, (errors) => {
     ensureInventoryRemainingQuantityError({ dialogState, editingItem, form, errors })
   })
-  const handleDeleteClick = useCallback(async () => {
-    if (!editingItem) return
-
-    try {
-      await inventoryAPI.delete(editingItem.id)
-      setDialogState(null)
-      await Promise.resolve(refreshInventory())
-      toast.success('库存已删除')
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, '删除失败'))
-    }
-  }, [editingItem, refreshInventory, setDialogState])
+  const handleDeleteClick = useInventoryDelete(editingItem, refreshInventory, setDialogState, setIsDeleting)
   const handleToggleNotInStock = useCallback(async () => {
     const nextStatus = await notInStockToggle.handleToggleNotInStock()
     if (!nextStatus) return
@@ -554,9 +577,17 @@ function useInventoryDialogController(
   }, [notInStockToggle])
   const handleDialogOpenChange = useCallback((open: boolean) => {
     if (open) return
+    if (dialogState === 'add') createDraft.save()
+    else {
+      form.reset()
+    }
     setDialogState(null)
+  }, [createDraft, dialogState, form, setDialogState])
+  const handleCancel = useCallback(() => {
+    if (dialogState === 'add') createDraft.clear()
     form.reset()
-  }, [form, setDialogState])
+    setDialogState(null)
+  }, [createDraft, dialogState, form, setDialogState])
   const formFields = useMemo(() => createInventoryFormFields({
     dialogState,
     initialQuantity: editingItem?.initial_quantity,
@@ -577,6 +608,8 @@ function useInventoryDialogController(
     dialogState,
     editingItem,
     isSubmitting,
+    isDeleting,
+    isBusy: isSubmitting || isDeleting || notInStockToggle.isTogglingNotInStock,
     isTogglingNotInStock: notInStockToggle.isTogglingNotInStock,
     showNotInStockToggle,
     form,
@@ -587,6 +620,7 @@ function useInventoryDialogController(
     handleDeleteClick,
     handleToggleNotInStock,
     handleDialogOpenChange,
+    handleCancel,
     setDialogState,
   }
 }
@@ -961,6 +995,7 @@ function InventoryFormDialog({
   const isEditing = dialogController.dialogState === 'edit'
   return (
     <Dialog
+      busy={dialogController.isBusy}
       open={dialogController.dialogState !== null}
       onOpenChange={dialogController.handleDialogOpenChange}
     >
@@ -972,7 +1007,7 @@ function InventoryFormDialog({
           <BaseForm form={dialogController.form} fields={dialogController.formFields} />
           <EditDialogActions
             mode={dialogController.dialogState ?? 'add'}
-            onCancel={() => dialogController.setDialogState(null)}
+            onCancel={dialogController.handleCancel}
             onDelete={
               canDeleteInventory && isEditing && dialogController.editingItem
                 ? dialogController.handleDeleteClick
@@ -991,6 +1026,7 @@ function InventoryFormDialog({
                   loadingText="处理中"
                   disabled={
                     dialogController.isSubmitting
+                    || dialogController.isDeleting
                     || dialogController.editingItem.status === 'borrowed'
                     || Boolean(dialogController.editingItem.temporary_keeper_id)
                   }
@@ -1005,6 +1041,7 @@ function InventoryFormDialog({
             submitLabelEdit="保存"
             submitLabelAdd="确认入库"
             isSubmitting={dialogController.isSubmitting}
+            isDeleting={dialogController.isDeleting}
             disableSubmit={dialogController.isTogglingNotInStock}
           />
         </form>
@@ -1104,7 +1141,7 @@ function useInventoryBorrowController({
 }>) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [pendingItem, setPendingItem] = useState<InventoryItem | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useSubmissionState()
 
   const handleDialogOpenChange = useCallback((open: boolean) => {
     setDialogOpen(open)
@@ -1114,13 +1151,13 @@ function useInventoryBorrowController({
   }, [])
 
   const executeBorrow = useCallback(async (inventoryId: number, actualBorrowerId?: number) => {
-    setIsSubmitting(true)
+    if (!setIsSubmitting(true)) return
     try {
       await inventoryAPI.borrow(
         inventoryId,
         actualBorrowerId ? { actual_borrower_id: actualBorrowerId } : undefined
       )
-      await Promise.resolve(refreshInventory())
+      await refreshAfterMutation(refreshInventory)
       toast.success('借用成功')
       setDialogOpen(false)
       setPendingItem(null)
@@ -1134,7 +1171,7 @@ function useInventoryBorrowController({
     } finally {
       setIsSubmitting(false)
     }
-  }, [refreshInventory])
+  }, [refreshInventory, setIsSubmitting])
 
   const handleBorrowRequest = useCallback(async (item: InventoryItem) => {
     if (currentUserRole === UserRoles.PUBLIC) {
@@ -1219,7 +1256,7 @@ export function InventoryPage() {
   const chemistryResources = useInventoryChemistryResources(structureEditor.structureDialogOpen)
   const loadInventory = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+      queryClient.invalidateQueries({ queryKey: ['inventory'] }, { throwOnError: true }),
       refreshDashboardAfterMutation(queryClient),
     ])
   }, [queryClient])
