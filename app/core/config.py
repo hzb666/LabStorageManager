@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # 应用
     app_name: str = "Lab Storage Manager"
-    app_version: str = "1.1.0"
+    app_version: str = "1.2.0"
     cache_version: str = ""
     maintenance_mode: Literal["off", "on", "full"] = Field(
         default="off",
@@ -198,7 +198,7 @@ class Settings(BaseSettings):
         description="Retry count for PubChem 429, 5xx, and timeout failures",
     )
     chem_pubchem_user_agent: str = Field(
-        default="LabStorageManager/1.1.0",
+        default="LabStorageManager/1.2.0",
         description="User-Agent sent to PubChem PUG-REST",
     )
     chem_resolution_scheduler_enabled: bool = Field(
@@ -363,7 +363,7 @@ class Settings(BaseSettings):
 
         for fmt in ("%H:%M", "%H:%M:%S"):
             try:
-                return datetime.strptime(stripped, fmt).time()  # noqa: DTZ007
+                return datetime.strptime(stripped, fmt).time()
             except ValueError:
                 continue
         raise ValueError("ARCHIVE_RUN_AT_TIME must use HH:MM or HH:MM:SS")
@@ -616,7 +616,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance"""
     settings = Settings()
-    settings.app_version = settings.app_version.strip() or "1.1.0"
+    settings.app_version = settings.app_version.strip() or "1.2.0"
     settings.cache_version = settings.cache_version.strip() or settings.app_version
 
     # 生产环境禁止 HS256，避免对称密钥模式的降级风险

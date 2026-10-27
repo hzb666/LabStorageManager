@@ -209,7 +209,7 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
         onUpdate: (currentEditingItem, currentFormData) =>
           consumableOrderAPI.update(currentEditingItem.id, createConsumableOrderUpdatePayload(currentFormData)),
         onCreate: (currentFormData) =>
-          consumableOrderAPI.create(createConsumableOrderCreatePayload(currentFormData)),
+          consumableOrderAPI.create(createConsumableOrderCreatePayload(currentFormData), { mutationScope: createDraft.submissionKey() }),
       })
       await refreshAfterMutation(refreshOrders)
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {

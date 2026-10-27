@@ -13,6 +13,7 @@ type StatusResult = OperationResult | null | undefined
 
 declare module 'axios' {
   interface AxiosRequestConfig {
+    mutationScope?: string
     mutationReceipt?: Receipt
     mutationDeadline?: number
   }
@@ -48,7 +49,7 @@ function stableJson(value: unknown): string {
 }
 
 function requestIdentity(config: InternalAxiosRequestConfig, scope: number) {
-  return `${scope}:${config.method}:${config.url?.replace(/\/$/, '')}`
+  return `${scope}:${config.mutationScope ?? ''}:${config.method}:${config.url?.replace(/\/$/, '')}`
 }
 
 function newOperationId() {
@@ -66,6 +67,12 @@ function needsConfirmation(error: AxiosError): boolean {
   const status = error.response?.status
   return !error.response || isApiTimeoutError(error) || status === 408 || (status !== undefined && status >= 500)
     || operationErrorCode(error) === 'OPERATION_PENDING'
+}
+
+/** 结果未确认时，调用方不能把已提交的资源当作草稿删除。 */
+export function isUnconfirmedMutationError(error: unknown): boolean {
+  return axios.isAxiosError(error) && (needsConfirmation(error)
+    || error.code === 'OPERATION_UNRESOLVED' || operationErrorCode(error) === 'OPERATION_EXPIRED')
 }
 
 function assertReceiptFresh(receipt: Receipt | undefined, config: InternalAxiosRequestConfig) {

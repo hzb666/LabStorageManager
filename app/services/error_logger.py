@@ -104,7 +104,7 @@ def _convert_log_timestamp_to_display_time(line: str) -> str:
 
     timestamp_text = match.group("timestamp")
     try:
-        local_naive = datetime.strptime(timestamp_text, ERROR_LOG_TIMESTAMP_FORMAT)  # noqa: DTZ007
+        local_naive = datetime.strptime(timestamp_text, ERROR_LOG_TIMESTAMP_FORMAT)
     except ValueError:
         return line
 
@@ -182,7 +182,7 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> list[str]:
 
     try:
         # 解析时间并过滤
-        cutoff_time = datetime.now() - timedelta(hours=hours)  # noqa: DTZ005
+        cutoff_time = datetime.now() - timedelta(hours=hours)
         recent_errors = []
 
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -193,7 +193,7 @@ def get_error_logs_since(hours: int = DEFAULT_LOG_HOURS) -> list[str]:
                 try:
                     # 提取时间戳 (格式: 2024-01-01 12:00:00)
                     time_str = line.split("[")[0].strip()
-                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)  # noqa: DTZ007
+                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
 
                     if log_time >= cutoff_time:
                         recent_errors.append(_format_error_log_line(line))
@@ -239,7 +239,7 @@ def clear_old_logs(days: int = 7) -> int:
         return 0
 
     try:
-        cutoff_time = datetime.now() - timedelta(days=days)  # noqa: DTZ005
+        cutoff_time = datetime.now() - timedelta(days=days)
         deleted_count = 0
         tmp_file = LOG_FILE.with_suffix(f"{LOG_FILE.suffix}.tmp")
 
@@ -254,7 +254,7 @@ def clear_old_logs(days: int = 7) -> int:
 
                 try:
                     time_str = line.split("[")[0].strip()
-                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)  # noqa: DTZ007
+                    log_time = datetime.strptime(time_str, ERROR_LOG_TIMESTAMP_FORMAT)
 
                     if log_time >= cutoff_time:
                         target.write(line)

@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "lab-storage-manager"
-version = "1.1.0"
+version = "1.2.0"
 description = "Laboratory Inventory Management System (LIMS)"
 authors = ["Lab Team"]
 package-mode = false
@@ -27,7 +27,7 @@ bcrypt = "^5.0.0"
 
 # Utilities
 python-dotenv = "^1.2.2"
-pillow = "^12.3.0"
+pillow = "^13.0.0"
 pandas = "^3.0.1"
 pydantic = "^2.12.5"
 pydantic-settings = "^2.14.2"
@@ -35,7 +35,7 @@ pypinyin = "^0.55.0"
 requests = "^2.34.2"
 urllib3 = "^2.7.0"
 redis = "^7.4.0"
-mcp = {extras = ["cli"], version = "^1.28.1"}
+mcp = {extras = ["cli"], version = "^1.30.0"}
 rdkit = "^2026.3.1"
 httpx = "^0.28.1"
 sentry-sdk = {extras = ["fastapi"], version = "^2.63.0"}

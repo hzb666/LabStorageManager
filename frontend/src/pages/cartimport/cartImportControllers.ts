@@ -502,6 +502,7 @@ async function submitCartImportReagentForm(
     unknown,
     ReagentOrderFormData
   >,
+  mutationScope: string,
 ): Promise<boolean> {
   let submitSucceeded = false;
   const submitReagent = reagentForm.handleSubmit(
@@ -520,7 +521,7 @@ async function submitCartImportReagentForm(
         order_reason: formData.order_reason as ReagentOrderReason,
         is_hazardous: isCommonPublic ? false : formData.is_hazardous,
         notes: processNotes(formData.notes),
-      });
+      }, { mutationScope });
       submitSucceeded = true;
     },
     () => {
@@ -538,6 +539,7 @@ async function submitCartImportConsumableForm(
     unknown,
     ConsumableOrderFormData
   >,
+  mutationScope: string,
 ): Promise<boolean> {
   let submitSucceeded = false;
   const submitConsumable = consumableForm.handleSubmit(
@@ -552,7 +554,7 @@ async function submitCartImportConsumableForm(
         price: formData.price,
         communication: formData.communication || undefined,
         notes: processNotes(formData.notes),
-      });
+      }, { mutationScope });
       submitSucceeded = true;
     },
     () => {
@@ -890,6 +892,8 @@ export function useCartImportActions(params: {
     consumableForm,
   } = params;
   const [submitting, setSubmitting] = useState(false);
+  const { search } = useLocation();
+  const batchId = new URLSearchParams(search).get("batch_id") || "";
   const submittingRef = useRef(false);
   const queryClient = useQueryClient();
 
@@ -942,8 +946,8 @@ export function useCartImportActions(params: {
     try {
       const submitSucceeded =
         orderType === "reagent"
-          ? await submitCartImportReagentForm(reagentForm)
-          : await submitCartImportConsumableForm(consumableForm);
+          ? await submitCartImportReagentForm(reagentForm, `cart:${batchId}:${currentItem.id}`)
+          : await submitCartImportConsumableForm(consumableForm, `cart:${batchId}:${currentItem.id}`);
 
       if (!submitSucceeded) {
         return;
@@ -978,6 +982,7 @@ export function useCartImportActions(params: {
       setSubmitting(false);
     }
   }, [
+    batchId,
     consumableForm,
     currentItem,
     items,

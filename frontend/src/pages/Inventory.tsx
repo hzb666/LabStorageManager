@@ -335,6 +335,7 @@ async function submitInventoryRequest(params: {
   dialogState: InventoryDialogState
   editingItem: InventoryItem | null
   formData: InventoryFormData
+  mutationScope: string
 }) {
   const { dialogState, editingItem, formData } = params
   if (dialogState === 'edit' && editingItem) {
@@ -343,7 +344,7 @@ async function submitInventoryRequest(params: {
   }
 
   if (dialogState === 'add') {
-    await inventoryAPI.manualAdd(createInventoryCreatePayload(formData))
+    await inventoryAPI.manualAdd(createInventoryCreatePayload(formData), { mutationScope: params.mutationScope })
   }
 }
 
@@ -545,7 +546,7 @@ function useInventoryDialogController(
 
     if (!setIsSubmitting(true)) return
     try {
-      await submitInventoryRequest({ dialogState, editingItem, formData })
+      await submitInventoryRequest({ dialogState, editingItem, formData, mutationScope: createDraft.submissionKey() })
       await refreshAfterMutation(refreshInventory)
       if (dialogState === 'edit') {
         toast.success('库存信息已更新')

@@ -243,7 +243,11 @@ async def test_validation_receipts_do_not_store_rejected_input_or_passwords(oper
 
 
 def test_commit_proof_survives_an_after_commit_callback_failure(operation_app):
-    from app.services.mutation_operations import finish_operation, operation_status, reserve_operation
+    from app.services.mutation_operations import (
+        finish_operation,
+        operation_status,
+        reserve_operation,
+    )
 
     _app, engine = operation_app
     with Session(engine) as db:
@@ -460,7 +464,7 @@ async def test_simultaneous_inventory_submissions_create_only_one_business_log_a
 
 @pytest.mark.parametrize("module_name", [
     "inventory", "reagent_orders", "consumable_orders", "common_shelf", "chemical_name_map",
-    "reagent_brands", "announcements", "users", "chem",
+    "reagent_brands", "announcements", "users", "user_sessions", "chem",
 ])
 def test_business_modules_register_tracked_routes_without_wrapping_excluded_endpoints(module_name):
     from importlib import import_module
@@ -478,3 +482,81 @@ def test_business_modules_register_tracked_routes_without_wrapping_excluded_endp
         if expected:
             tracked.append(route.path)
     assert tracked
+
+
+@pytest.mark.parametrize("action", ["rename", "delete", "delete_all"])
+async def test_device_writes_replay_the_receipt_without_repeating_session_logs(operation_app, monkeypatch, action):
+    from app.api import user_sessions
+    from app.core.time_utils import get_utc_now
+    from app.models.user_operation_log import UserOperationLog
+    from app.models.user_session import UserSession
+
+    original, engine = operation_app
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as db:
+        for session_id in (1, 2):
+            db.add(UserSession(
+                id=session_id, user_id=1, device_id=str(session_id), device_name="review",
+                ip_address="127.0.0.1", last_ip_address="127.0.0.1", user_agent="test",
+                token_hash=str(session_id) * 64, expires_at=get_utc_now() + timedelta(days=1),
+            ))
+        db.commit()
+
+    def current_session():
+        with Session(engine) as db:
+            return db.get(User, 1), db.get(UserSession, 1)
+
+    application = FastAPI()
+    application.dependency_overrides.update(original.dependency_overrides)
+    application.dependency_overrides[user_sessions.get_current_session] = current_session
+    application.include_router(user_sessions.router, prefix="/api")
+    application.include_router(router, prefix="/api")
+    monkeypatch.setattr(user_sessions, "sync_session_cache", lambda **_kwargs: None)
+    monkeypatch.setattr(user_sessions, "finalize_revoked_sessions", lambda *_args, **_kwargs: None)
+    method = "PATCH" if action == "rename" else "DELETE"
+    path = "/api/users/me/sessions/" + ("" if action == "delete_all" else "2")
+    kwargs = {"json": {"device_name": "renamed"}} if action == "rename" else {}
+    async with client_for(application) as client:
+        first = await client.request(method, path, headers=headers(), **kwargs)
+        replay = await client.request(method, path, headers=headers(), **kwargs)
+        receipt = await client.get(f"/api/mutation-operations/{OPERATION_ID}")
+    assert first.status_code == replay.status_code == 200, first.text
+    assert replay.json() == first.json()
+    assert receipt.json()["state"] == "succeeded"
+    with Session(engine) as db:
+        assert len(db.exec(select(UserOperationLog)).all()) == 1
+        assert db.get(UserSession, 1) is not None
+        target = db.get(UserSession, 2)
+        assert target.device_name == "renamed" if action == "rename" else target is None
+
+
+@pytest.mark.parametrize("referenced", [False, True])
+async def test_draft_image_deletion_preserves_files_referenced_by_saved_announcements(operation_app, monkeypatch, tmp_path, referenced):
+    from app.api import announcements
+    from app.models.announcement import Announcement
+    from app.models.user import UserRole
+
+    original, engine = operation_app
+    SQLModel.metadata.create_all(engine)
+    image = tmp_path / "review.png"
+    image.write_bytes(b"review image")
+    if referenced:
+        with Session(engine) as db:
+            db.add(Announcement(title="saved", content="saved", images=["/static/announcements/review.png"], created_by=1))
+            db.commit()
+
+    def delete_image(_filename, **_kwargs):
+        image.unlink()
+        return True
+
+    application = FastAPI()
+    application.dependency_overrides.update(original.dependency_overrides)
+    application.dependency_overrides[get_current_user] = lambda: User(
+        id=1, username="tester", full_name="Tester", password_hash="unused", role=UserRole.ADMIN,
+    )
+    application.include_router(announcements.router, prefix="/api")
+    monkeypatch.setattr(announcements, "delete_file", delete_image)
+    async with client_for(application) as client:
+        response = await client.delete("/api/announcements/images/review.png")
+    assert response.status_code == (409 if referenced else 204), response.text
+    assert image.exists() is referenced

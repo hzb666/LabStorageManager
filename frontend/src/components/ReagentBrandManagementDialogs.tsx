@@ -424,7 +424,7 @@ export function ReagentBrandManagementDialogs({
           await reagentBrandAPI.update(editingItem.id, { name: data.name })
           toast.success('品牌已更新')
         } else {
-          await reagentBrandAPI.create({ name: data.name })
+          await reagentBrandAPI.create({ name: data.name }, { mutationScope: createDraft.submissionKey() })
           toast.success('品牌已新增')
         }
         await refreshAfterMutation(refreshBrands)
@@ -438,7 +438,7 @@ export function ReagentBrandManagementDialogs({
         setIsSubmitting(false)
       }
     })()
-  }, [canWrite, editingItem, form, refreshBrands, resetEditor, setIsSubmitting])
+  }, [canWrite, createDraft, editingItem, form, refreshBrands, resetEditor, setIsSubmitting])
 
   return (
     <>

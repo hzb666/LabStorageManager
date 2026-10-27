@@ -358,21 +358,21 @@ def build_date_search_clause(field, search_value: str):
     try:
         if len(normalized) == 4:
             year = int(normalized)
-            start = datetime(year, 1, 1)  # noqa: DTZ001
-            end = datetime(year + 1, 1, 1)  # noqa: DTZ001
+            start = datetime(year, 1, 1)
+            end = datetime(year + 1, 1, 1)
         elif len(normalized) == 6:
             year = int(normalized[:4])
             month = int(normalized[4:6])
-            start = datetime(year, month, 1)  # noqa: DTZ001
+            start = datetime(year, month, 1)
             if month == 12:
-                end = datetime(year + 1, 1, 1)  # noqa: DTZ001
+                end = datetime(year + 1, 1, 1)
             else:
-                end = datetime(year, month + 1, 1)  # noqa: DTZ001
+                end = datetime(year, month + 1, 1)
         else:
             year = int(normalized[:4])
             month = int(normalized[4:6])
             day = int(normalized[6:8])
-            start = datetime(year, month, day)  # noqa: DTZ001
+            start = datetime(year, month, day)
             end = start + timedelta(days=1)
     except ValueError:
         return sql_false()

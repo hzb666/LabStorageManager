@@ -249,19 +249,19 @@ async def _run_monthly_archive_loop(
 
 
 def _seconds_until_next_daily_run(run_at_time: datetime_time) -> int:
-    now = datetime.now()  # noqa: DTZ005 - scheduler uses server-local naive time.
+    now = datetime.now()  # Scheduler uses server-local naive time.
     next_run = _next_daily_run_at(now, run_at_time)
     return max(1, math.ceil((next_run - now).total_seconds()))
 
 
 def _seconds_until_next_weekly_run(run_at_time: datetime_time, run_weekday: int) -> int:
-    now = datetime.now()  # noqa: DTZ005 - scheduler uses server-local naive time.
+    now = datetime.now()  # Scheduler uses server-local naive time.
     next_run = _next_weekly_run_at(now, run_at_time, run_weekday)
     return max(1, math.ceil((next_run - now).total_seconds()))
 
 
 def _seconds_until_next_monthly_run(run_at_time: datetime_time, run_day: int) -> int:
-    now = datetime.now()  # noqa: DTZ005 - scheduler uses server-local naive time.
+    now = datetime.now()  # Scheduler uses server-local naive time.
     next_run = _next_monthly_run_at(now, run_at_time, run_day)
     return max(1, math.ceil((next_run - now).total_seconds()))
 

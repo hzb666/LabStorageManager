@@ -274,7 +274,7 @@ function useAdminUsersDialogState(
       await userAdminAPI.create({
         ...formData,
         role: formData.role || 'user',
-      })
+      }, { mutationScope: createDraft.submissionKey() })
       await refreshAfterMutation(refetchUsers)
       setDialogState(null)
       createDraft.clear()

@@ -47,6 +47,27 @@ const isStatus = config => config.url.startsWith('/mutation-operations/')
 const id = config => config.headers.get('Idempotency-Key')
 const payload = { name: 'ethanol', quantity: 2 }
 
+for (const path of ['/reagent-orders', '/common-shelf/groups/example/add-bottles', '/common-shelf/groups/example/remove-one']) {
+test(`different drafts for ${path} keep separate operations and restore their own results`, async () => {
+  let finished = false
+  const writes = []
+  const app = runtime(config => {
+    if (isStatus(config)) return finished ? completed({ id: 41 }) : { data: { state: 'running' } }
+    writes.push(config)
+    return config.mutationScope === 'cart:batch:1' ? timeout(config) : { status: 201, data: { id: 42 } }
+  })
+  await assert.rejects(app.client.post(path, payload, { mutationScope: 'cart:batch:1' }), /获取提交结果超时/)
+  const second = await app.client.post(path, payload, { mutationScope: 'cart:batch:2' })
+  assert.equal(second.data.id, 42)
+  assert.equal(writes.length, 2)
+  assert.notEqual(id(writes[0]), id(writes[1]))
+  finished = true
+  const first = await app.client.post(path, payload, { mutationScope: 'cart:batch:1' })
+  assert.equal(first.data.id, 41)
+  assert.equal(writes.length, 2)
+})
+}
+
 test('a timed-out write remains pending until its original successful response is recovered', async () => {
   let finish
   const result = new Promise(resolve => { finish = resolve })

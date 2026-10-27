@@ -78,9 +78,13 @@ class CLIUpdateCheckTests(unittest.TestCase):
         },
     )
     def test_scheduled_update_check_contacts_github_once_until_due(self, fetch_mock) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir, patch(
-            "lsm_cli.update.get_update_check_state_path",
-            return_value=Path(temp_dir) / "update-check.json",
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch("lsm_cli.main.CLI_VERSION", "1.1.0"),
+            patch(
+                "lsm_cli.update.get_update_check_state_path",
+                return_value=Path(temp_dir) / "update-check.json",
+            ),
         ):
             first_exit, first = self._run_main([
                 "update-check", "--if-due", "--max-age-hours", "168",
@@ -144,14 +148,15 @@ class CLIUpdateCheckTests(unittest.TestCase):
         },
     )
     def test_update_installs_cli_and_skill_from_one_command(self, install_mock) -> None:
-        exit_code, payload = self._run_main(
-            ["update", "--timeout", "8", "--skill-host", "codex"]
-        )
+        with patch("lsm_cli.main.CLI_VERSION", "0.9.1"):
+            exit_code, payload = self._run_main(
+                ["update", "--timeout", "8", "--skill-host", "codex"]
+            )
 
         self.assertIsNone(exit_code)
         self.assertEqual("scheduled", payload["data"]["cli_status"])
         install_mock.assert_called_once_with(
-            current_version="1.1.0",
+            current_version="0.9.1",
             skill_host="codex",
             timeout=8.0,
         )

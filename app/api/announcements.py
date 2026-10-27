@@ -481,6 +481,10 @@ def delete_announcement_image(
     if any(segment in filename for segment in INVALID_FILENAME_SEGMENTS) or filename.startswith(INVALID_FILENAME_PREFIX):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename")
 
+    image_url = f"/static/announcements/{filename}"
+    if any(image_url in images for images in db.exec(select(Announcement.images)).all()):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="图片已被公告使用，不能作为草稿删除")
+
     deleted = delete_file(filename, required_subdir="announcements")
     if not deleted:
         raise HTTPException(

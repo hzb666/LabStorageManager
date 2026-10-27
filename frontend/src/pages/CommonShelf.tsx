@@ -418,6 +418,9 @@ function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
     mode,
     selectedGroup,
     manualAddSource,
+    manualSubmissionKey: manualDraft.submissionKey(manualKey),
+    bottlesSubmissionKey: bottlesDraft.submissionKey(groupKey),
+    removeSubmissionKey: removeDraft.submissionKey(groupKey),
     editNeedsMergeConfirm,
     setEditNeedsMergeConfirm,
     resetDialogState,
@@ -631,7 +634,7 @@ function useCommonShelfQuickOrderController({
 
       await runWithSubmitting(setIsSubmitting, async () => {
         try {
-          await reagentOrderAPI.create(payload)
+          await reagentOrderAPI.create(payload, { mutationScope: quickDraft.submissionKey(getQuickOrderDraftKey(target)) })
           toast.success('常用试剂订单已提交')
           await refreshAfterMutation(refreshReagentOrders)
           resetQuickOrderDialog()
@@ -644,7 +647,7 @@ function useCommonShelfQuickOrderController({
         }
       })
     })()
-  }, [form, refreshReagentOrders, resetQuickOrderDialog, setIsSubmitting, target])
+  }, [form, quickDraft, refreshReagentOrders, resetQuickOrderDialog, setIsSubmitting, target])
 
   return {
     state: {
@@ -664,6 +667,7 @@ function useCommonShelfQuickOrderController({
 
 async function executeCommonShelfManualAdd(params: {
   payload: ManualAddPayload
+  mutationScope: string
   setFieldError: (fieldName: string, message: string) => void
   refreshCommonShelf: () => Promise<void>
   resetDialogState: () => void
@@ -672,7 +676,7 @@ async function executeCommonShelfManualAdd(params: {
   const { payload, setFieldError, refreshCommonShelf, resetDialogState, onRequireChemicalNameMap } = params
 
   try {
-    await commonShelfAPI.manualAdd(payload)
+    await commonShelfAPI.manualAdd(payload, { mutationScope: params.mutationScope })
     toast.success('已加入常用货架')
     await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
@@ -783,6 +787,7 @@ async function executeCommonShelfItemDelete(params: {
 
 async function executeCommonShelfAddBottles(params: {
   groupKey: string
+  mutationScope: string
   data: CommonShelfAddBottlesData
   setFieldError: (fieldName: string, message: string) => void
   refreshCommonShelf: () => Promise<void>
@@ -796,7 +801,7 @@ async function executeCommonShelfAddBottles(params: {
       storage_location: normalizeOptionalText(data.storage_location),
       purity: normalizeOptionalText(data.purity),
       notes: normalizeOptionalText(data.notes),
-    })
+    }, { mutationScope: params.mutationScope })
     toast.success('常用货架已加瓶')
     await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
@@ -811,6 +816,7 @@ async function executeCommonShelfAddBottles(params: {
 
 async function executeCommonShelfRemoveOne(params: {
   groupKey: string
+  mutationScope: string
   data: CommonShelfRemoveOneData
   setFieldError: (fieldName: string, message: string) => void
   refreshCommonShelf: () => Promise<void>
@@ -821,7 +827,7 @@ async function executeCommonShelfRemoveOne(params: {
   try {
     await commonShelfAPI.removeOne(groupKey, {
       storage_location: normalizeLocationValue(data.storage_location),
-    })
+    }, { mutationScope: params.mutationScope })
     toast.success('已扣减 1 瓶')
     await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
@@ -1013,6 +1019,9 @@ function useCommonShelfDialogController({
     mode,
     selectedGroup,
     manualAddSource,
+    manualSubmissionKey,
+    bottlesSubmissionKey,
+    removeSubmissionKey,
     editNeedsMergeConfirm,
     setEditNeedsMergeConfirm,
     resetDialogState,
@@ -1028,6 +1037,7 @@ function useCommonShelfDialogController({
       await runWithSubmitting(setIsSubmitting, async () => {
         await executeCommonShelfManualAdd({
           payload: buildManualAddPayload(data),
+          mutationScope: manualSubmissionKey,
           setFieldError: createFormFieldErrorSetter(manualAddForm),
           refreshCommonShelf,
           resetDialogState,
@@ -1035,7 +1045,7 @@ function useCommonShelfDialogController({
         })
       })
     })()
-  }, [manualAddForm, onRequireChemicalNameMap, refreshCommonShelf, resetDialogState, setIsSubmitting])
+  }, [manualAddForm, manualSubmissionKey, onRequireChemicalNameMap, refreshCommonShelf, resetDialogState, setIsSubmitting])
 
   const handleSubmitAddBottles = useCallback(async () => {
     await addBottlesForm.handleSubmit(async (data) => {
@@ -1043,6 +1053,7 @@ function useCommonShelfDialogController({
       await runWithSubmitting(setIsSubmitting, async () => {
         await executeCommonShelfAddBottles({
           groupKey: selectedGroup.group.group_key,
+          mutationScope: bottlesSubmissionKey,
           data,
           setFieldError: createFormFieldErrorSetter(addBottlesForm),
           refreshCommonShelf,
@@ -1050,7 +1061,7 @@ function useCommonShelfDialogController({
         })
       })
     })()
-  }, [addBottlesForm, refreshCommonShelf, resetDialogState, selectedGroup, setIsSubmitting])
+  }, [addBottlesForm, bottlesSubmissionKey, refreshCommonShelf, resetDialogState, selectedGroup, setIsSubmitting])
 
   const handleSubmitRemoveOne = useCallback(async () => {
     await removeOneForm.handleSubmit(async (data) => {
@@ -1062,6 +1073,7 @@ function useCommonShelfDialogController({
       await runWithSubmitting(setIsSubmitting, async () => {
         await executeCommonShelfRemoveOne({
           groupKey: selectedGroup.group.group_key,
+          mutationScope: removeSubmissionKey,
           data,
           setFieldError: createFormFieldErrorSetter(removeOneForm),
           refreshCommonShelf,
@@ -1069,7 +1081,7 @@ function useCommonShelfDialogController({
         })
       })
     })()
-  }, [refreshCommonShelf, removeOneForm, resetDialogState, selectedGroup, setIsSubmitting])
+  }, [refreshCommonShelf, removeOneForm, removeSubmissionKey, resetDialogState, selectedGroup, setIsSubmitting])
 
   const {
     submittingItemId,
@@ -1240,10 +1252,13 @@ function useChemicalNameMapController({
 
     await form.handleSubmit(async (data) => {
       const payload = buildChemicalNameMapPayload(data)
+      if (pendingManualAddPayload && payload.cas_number !== pendingManualAddPayload.cas_number) {
+        return form.setError('cas_number', { message: '请返回入架表单修改 CAS，再重新补录主数据' })
+      }
 
       await runWithSubmitting(setIsSubmitting, async () => {
         try {
-          await masterWriter.save(editingItem, payload, createDraftKey)
+          await masterWriter.save(editingItem, payload, createDraftKey, createDraft.submissionKey(createDraftKey))
           toast.success(editingItem ? 'CAS 主数据已更新' : 'CAS 主数据已新增')
 
           await refreshAfterMutation(refreshChemicalNameMap)
@@ -1255,7 +1270,7 @@ function useChemicalNameMapController({
 
           try {
             // 缺失主数据时，用户补录成功后要把被中断的“加入常用货架”继续执行完。
-            await commonShelfAPI.manualAdd(pendingManualAddPayload)
+            await commonShelfAPI.manualAdd(pendingManualAddPayload, { mutationScope: createDraft.submissionKey(createDraftKey) })
             toast.success('CAS 主数据已录入，并已加入常用货架')
             setPendingManualAddPayload(null)
             await refreshAfterMutation(refreshCommonShelf)
@@ -1274,7 +1289,7 @@ function useChemicalNameMapController({
         }
       })
     })()
-  }, [canWrite, createDraftKey, editingItem, form, masterWriter, pendingManualAddPayload, refreshChemicalNameMap, refreshCommonShelf, resetChemicalNameMapEditor, resetCommonShelfDialog, setIsSubmitting])
+  }, [canWrite, createDraft, createDraftKey, editingItem, form, masterWriter, pendingManualAddPayload, refreshChemicalNameMap, refreshCommonShelf, resetChemicalNameMapEditor, resetCommonShelfDialog, setIsSubmitting])
 
   const columns = useChemicalNameMapColumns(
     canWrite, handleQuickOrder, openManualAddDialog, openChemicalNameMapEditDialog, handleDeleteChemicalNameMap,
@@ -1283,6 +1298,7 @@ function useChemicalNameMapController({
   const editorDialog: ChemicalNameMapEditorController = {
     open: editorOpen,
     editingItem,
+    casLocked: Boolean(editingItem || pendingManualAddPayload) || masterWriter.hasSaved(editingItem, createDraftKey),
     form,
     isSubmitting,
     onOpenChange: (open: boolean) => {

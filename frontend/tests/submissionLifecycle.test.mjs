@@ -302,6 +302,40 @@ test('a failed CAS save does not become a completed step or prevent a corrected 
   assert.equal(calls, 2)
 })
 
+test('a partial shelf retry cannot change the CAS of its already saved master record', async () => {
+  const runtime = load()
+  const calls = []
+  runtime.chemicalNameMapAPI.create = async payload => {
+    calls.push(['create', payload])
+    return { data: { id: 42, ...payload } }
+  }
+  runtime.chemicalNameMapAPI.update = async (...args) => { calls.push(['update', ...args]) }
+  const writer = runtime.createChemicalNameMapWriter()
+  const original = { cas_number: '64-17-5', name: 'ethanol' }
+  assert.equal(writer.hasSaved(null, '64-17-5'), false)
+  await writer.save(null, original, '64-17-5')
+  assert.equal(writer.hasSaved(null, '64-17-5'), true)
+  await assert.rejects(writer.save(null, { cas_number: '67-56-1', name: 'methanol' }, '64-17-5'), /CAS 主数据已保存/)
+  assert.equal(calls.length, 1)
+  await writer.save(null, original, '64-17-5')
+  assert.equal(calls.length, 1)
+})
+
+test('draft submission identities survive dismissal and rotate only when that draft is cleared', () => {
+  const { createDraftStore } = load()
+  const first = createDraftStore()
+  const second = createDraftStore()
+  const original = first.submissionKey('record-1')
+  first.save({ name: 'ethanol' }, 'record-1')
+  assert.equal(first.submissionKey('record-1'), original)
+  assert.notEqual(first.submissionKey('record-2'), original)
+  assert.notEqual(second.submissionKey('record-1'), original)
+  first.clear('record-2')
+  assert.equal(first.submissionKey('record-1'), original)
+  first.clear('record-1')
+  assert.notEqual(first.submissionKey('record-1'), original)
+})
+
 test('incidental dismissal preserves create input across intervening edits', () => {
   const runtime = load()
   const defaults = { name: '', notes: { text: '' } }

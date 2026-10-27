@@ -118,6 +118,7 @@ export interface CommonShelfDialogController {
 export interface ChemicalNameMapEditorController {
   open: boolean
   editingItem: ChemicalNameMapItem | null
+  casLocked: boolean
   form: UseFormReturn<ChemicalNameMapFormInputData, unknown, ChemicalNameMapFormData>
   isSubmitting: boolean
   onOpenChange: (open: boolean) => void
@@ -669,7 +670,7 @@ export function ChemicalNameMapEditorDialog({
         <form className="space-y-4" onSubmit={handleDialogSubmit(dialog.onSubmit)}>
           <BaseForm
             form={dialog.form}
-            fields={getChemicalNameMapFormFields(isEdit)}
+            fields={getChemicalNameMapFormFields(dialog.casLocked)}
             columns={2}
           />
           <DialogSubmitActions

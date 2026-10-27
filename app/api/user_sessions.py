@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from app.api.deps import get_current_session
+from app.api.mutation_operations import MutationTrackedRoute
 from app.core.auth import (
     AUTH_ERROR_CODE_HEADER,
     AuthErrorCode,
@@ -51,7 +52,7 @@ NonPublicCurrentSession = Annotated[
 ]
 
 
-router = APIRouter(prefix="/sessions", tags=["Sessions"])
+router = APIRouter(prefix="/users/me/sessions", tags=["Sessions"], route_class=MutationTrackedRoute)
 logger = logging.getLogger(__name__)
 
 

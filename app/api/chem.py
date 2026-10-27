@@ -12,7 +12,6 @@ from sqlalchemy import or_
 from sqlmodel import func, select
 
 from app.api.mutation_operations import MutationTrackedRoute
-
 from app.core.auth import CurrentSession, get_current_user, require_admin
 from app.core.config import settings
 from app.core.request_utils import get_request_is_cli, get_sse_client_id

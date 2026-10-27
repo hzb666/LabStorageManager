@@ -53,6 +53,7 @@ from .inventory_operation_log import (
 )
 from .llm_usage_log import LLMUsageLog
 from .log_timeline import LogTimeline, LogTimelineSourceTable
+from .mutation_operation import MutationOperation
 from .reagent_brand import (
     ReagentBrand,
     ReagentBrandCreate,
@@ -73,7 +74,6 @@ from .reagent_order_operation_log import (
     ReagentOrderOperationLogResponse,
 )
 from .runtime_state import RuntimeState
-from .mutation_operation import MutationOperation
 from .structure_index import (
     StructureIndexChange,
     StructureIndexChangeOperation,

@@ -1,6 +1,7 @@
 import { usePageDraftStore } from '@/hooks/useFormDraft'
 import { LoadingButton } from '@/components/ui/LoadingButton'
 import { refreshAfterMutation } from '@/lib/mutationRefresh'
+import { isUnconfirmedMutationError } from '@/lib/mutationRecovery'
 import { useSubmissionState, type SubmissionSetter } from '@/hooks/useSubmissionState'
 import React, { useState, useCallback, useMemo } from 'react'
 import {
@@ -83,6 +84,7 @@ type AnnouncementListControllerParams = {
 }
 
 type AnnouncementDialogActionsParams = {
+  mutationScope: string
   preserveCreateDraft: (() => void) | undefined
   formData: AnnouncementFormState
   editingId: number | null
@@ -102,6 +104,7 @@ type AnnouncementDialogActionsParams = {
 }
 
 type AnnouncementDraftImageActionParams = {
+  submittedImages: Set<string>
   preserveCreateDraft: (() => void) | undefined
   formData: AnnouncementFormState
   draftUploadedImages: string[]
@@ -111,6 +114,7 @@ type AnnouncementDraftImageActionParams = {
 }
 
 type AnnouncementImageActionParams = {
+  submittedImages: Set<string>
   draftUploadedImages: string[]
   setFormData: React.Dispatch<React.SetStateAction<AnnouncementFormState>>
   setUploading: React.Dispatch<React.SetStateAction<boolean>>
@@ -962,6 +966,7 @@ function useAnnouncementDialogStateModel() {
 
   return {
     dialogState,
+    mutationScope: createDraft.submissionKey(),
     formData,
     formErrors,
     formLoading,
@@ -992,6 +997,7 @@ function useAnnouncementDialogStateModel() {
 
 // 弹窗动作负责提交、删除、上传和拖拽等副作用；仅提交与删除成功后刷新列表，图片相关操作不触发表格刷新。
 function useAnnouncementDraftImageActions({
+  submittedImages,
   preserveCreateDraft,
   formData,
   draftUploadedImages,
@@ -1005,13 +1011,13 @@ function useAnnouncementDraftImageActions({
 
   const cleanupDraftUploadedImages = useCallback(async () => {
     const activeImages = new Set(formData.images)
-    const imagesToDelete = draftUploadedImages.filter((url) => activeImages.has(url))
+    const imagesToDelete = draftUploadedImages.filter((url) => activeImages.has(url) && !submittedImages.has(url))
     const results = await Promise.allSettled(imagesToDelete.map(deleteAnnouncementImageUrl))
     const hasFailure = results.some((result) => result.status === 'rejected')
     if (hasFailure) {
       toast.error('未保存图片清理失败，请刷新后检查存储空间')
     }
-  }, [draftUploadedImages, formData.images])
+  }, [draftUploadedImages, formData.images, submittedImages])
 
   const handleCancelForm = useCallback(async () => {
     setDialogState(null)
@@ -1036,6 +1042,7 @@ function useAnnouncementDraftImageActions({
 }
 
 function useAnnouncementImageActions({
+  submittedImages,
   draftUploadedImages,
   setFormData,
   setUploading,
@@ -1089,7 +1096,7 @@ function useAnnouncementImageActions({
   }, [uploadSingleImage])
 
   const handleRemoveImage = useCallback(async (url: string) => {
-    const shouldDeleteFileNow = draftUploadedImages.includes(url)
+    const shouldDeleteFileNow = draftUploadedImages.includes(url) && !submittedImages.has(url)
     try {
       if (shouldDeleteFileNow) {
         await deleteAnnouncementImageUrl(url)
@@ -1105,7 +1112,7 @@ function useAnnouncementImageActions({
     } catch (error) {
       toast.error(getApiErrorMessage(error, '图片移除失败'))
     }
-  }, [draftUploadedImages, setDraftUploadedImages, setFormData])
+  }, [draftUploadedImages, setDraftUploadedImages, setFormData, submittedImages])
 
   const handleDragEnter = useCallback((event: React.DragEvent) => {
     event.preventDefault()
@@ -1147,6 +1154,7 @@ function useAnnouncementImageActions({
 
 // 弹窗动作负责提交、删除、上传和拖拽等副作用；仅提交与删除成功后刷新列表，图片相关操作不触发表格刷新。
 function useAnnouncementDialogActions({
+  mutationScope,
   preserveCreateDraft,
   formData,
   editingId,
@@ -1164,7 +1172,10 @@ function useAnnouncementDialogActions({
   resetForm,
   refetchAnnouncements,
 }: AnnouncementDialogActionsParams) {
+  // 超时后图片可能已经被公告引用；只有明确失败才恢复草稿清理。
+  const submittedImages = useMemo(() => new Set<string>(), [])
   const draftImageActions = useAnnouncementDraftImageActions({
+    submittedImages,
     preserveCreateDraft,
     formData,
     draftUploadedImages,
@@ -1181,24 +1192,27 @@ function useAnnouncementDialogActions({
     }
 
     if (!setFormLoading(true)) return
+    formData.images.forEach((url) => submittedImages.add(url))
     try {
       if (editingId) {
         await announcementAPI.update(editingId, formData)
         toast.success('公告更新成功')
       } else {
-        await announcementAPI.create(formData)
+        await announcementAPI.create(formData, { mutationScope })
         toast.success('公告创建成功')
       }
 
+      setDraftUploadedImages([])
       await refreshAfterMutation(refetchAnnouncements)
       setDialogState(null)
       resetForm()
     } catch (error) {
+      if (!isUnconfirmedMutationError(error)) formData.images.forEach((url) => submittedImages.delete(url))
       toast.error(getApiErrorMessage(error, '操作失败'))
     } finally {
       setFormLoading(false)
     }
-  }, [editingId, formData, refetchAnnouncements, resetForm, setDialogState, setFormErrors, setFormLoading])
+  }, [editingId, formData, mutationScope, refetchAnnouncements, resetForm, setDialogState, setDraftUploadedImages, setFormErrors, setFormLoading, submittedImages])
 
   const handleDelete = useCallback(async () => {
     if (!deleteId) {
@@ -1220,6 +1234,7 @@ function useAnnouncementDialogActions({
   }, [deleteId, refetchAnnouncements, setDeleteId, setDeleteLoading, setDialogState])
 
   const imageActions = useAnnouncementImageActions({
+    submittedImages,
     draftUploadedImages,
     setFormData,
     setUploading,
@@ -1249,6 +1264,7 @@ export function AnnouncementManagement() {
     onDelete: dialogStateModel.openDeleteModal,
   })
   const dialogActions = useAnnouncementDialogActions({
+    mutationScope: dialogStateModel.mutationScope,
     preserveCreateDraft: dialogStateModel.dialogState === 'create'
       ? () => dialogStateModel.handleDialogChange(false)
       : undefined,

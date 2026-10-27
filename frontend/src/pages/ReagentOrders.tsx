@@ -513,7 +513,7 @@ function useReagentOrderDialogController(
         onUpdate: (currentEditingItem, currentFormData) =>
           reagentOrderAPI.update(currentEditingItem.id, createReagentOrderUpdatePayload(currentFormData)),
         onCreate: (currentFormData) =>
-          reagentOrderAPI.create(createReagentOrderCreatePayload(currentFormData)),
+          reagentOrderAPI.create(createReagentOrderCreatePayload(currentFormData), { mutationScope: createDraft.submissionKey() }),
       })
       await refreshAfterMutation(refreshOrders)
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {

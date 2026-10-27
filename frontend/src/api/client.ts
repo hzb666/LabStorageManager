@@ -11,6 +11,8 @@ import { installMutationRecovery } from '@/lib/mutationRecovery'
 
 const API_BASE_URL = getApiBaseUrl()
 
+export type MutationOptions = { mutationScope?: string }
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -284,8 +286,8 @@ export const userAdminAPI = {
     is_active?: boolean
   }) =>
     api.get<UserAdminListResponse>('/users/', { params }),
-  create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' | 'public' }) =>
-    api.post('/users', data),
+  create: (data: { username: string; password: string; full_name?: string; role: 'admin' | 'user' | 'public' }, options?: MutationOptions) =>
+    api.post('/users', data, options),
   update: (id: number, data: { username?: string; full_name?: string; role?: string; is_active?: boolean }) =>
     api.put(`/users/${id}`, data),
   delete: (id: number) => api.delete(`/users/${id}`),
@@ -419,7 +421,7 @@ export const reagentOrderAPI = {
     order_reason: ReagentOrderReason
     is_hazardous?: boolean
     notes?: string
-  }) => api.post('/reagent-orders', data),
+  }, options?: MutationOptions) => api.post('/reagent-orders', data, options),
   update: (id: number, data: Record<string, unknown>) => api.put(`/reagent-orders/${id}`, data),
   delete: (id: number) => api.delete(`/reagent-orders/${id}`),
   approve: (id: number) => api.post(`/reagent-orders/${id}/approve`),
@@ -462,7 +464,7 @@ export const consumableOrderAPI = {
     price?: number
     communication?: string
     notes?: string
-  }) => api.post('/consumable-orders', data),
+  }, options?: MutationOptions) => api.post('/consumable-orders', data, options),
   update: (id: number, data: Record<string, unknown>) => api.put(`/consumable-orders/${id}`, data),
   delete: (id: number) => api.delete(`/consumable-orders/${id}`),
   approve: (id: number) => api.post(`/consumable-orders/${id}/approve`),
@@ -648,7 +650,7 @@ export const inventoryAPI = {
     storage_location?: string
     is_hazardous: boolean
     notes?: string
-  }) => api.post('/inventory/manual-add', data),
+  }, options?: MutationOptions) => api.post('/inventory/manual-add', data, options),
   exportInventory: () => api.get('/inventory/export', { responseType: 'blob' }),
 }
 
@@ -933,7 +935,7 @@ export const commonShelfAPI = {
     count: number
     storage_location?: string
     notes?: string
-  }) => api.post('/common-shelf/manual-add', data),
+  }, options?: MutationOptions) => api.post('/common-shelf/manual-add', data, options),
   getLocations: (groupKey: string) =>
     api.get<CommonShelfLocationSummary[]>(`/common-shelf/groups/${groupKey}/locations`),
   getLocationSuggestions: (groupKey: string) =>
@@ -962,10 +964,10 @@ export const commonShelfAPI = {
     storage_location?: string
     purity?: string
     notes?: string
-  }) =>
-    api.post(`/common-shelf/groups/${groupKey}/add-bottles`, data),
-  removeOne: (groupKey: string, data: { storage_location?: string }) =>
-    api.post(`/common-shelf/groups/${groupKey}/remove-one`, data),
+  }, options?: MutationOptions) =>
+    api.post(`/common-shelf/groups/${groupKey}/add-bottles`, data, options),
+  removeOne: (groupKey: string, data: { storage_location?: string }, options?: MutationOptions) =>
+    api.post(`/common-shelf/groups/${groupKey}/remove-one`, data, options),
   deleteGroup: (groupKey: string) =>
     api.delete(`/common-shelf/groups/${groupKey}`),
   exportCommonShelf: () => api.get('/common-shelf/export', { responseType: 'blob' as const }),
@@ -986,7 +988,7 @@ export const chemicalNameMapAPI = {
     alias_2?: string
     alias_3?: string
     category?: ChemicalCategory | null
-  }) => api.post('/chemical-name-map', data),
+  }, options?: MutationOptions) => api.post('/chemical-name-map', data, options),
   update: (id: number, data: {
     name?: string
     english_name?: string
@@ -994,7 +996,7 @@ export const chemicalNameMapAPI = {
     alias_2?: string
     alias_3?: string
     category?: ChemicalCategory | null
-  }) => api.put(`/chemical-name-map/${id}`, data),
+  }, options?: MutationOptions) => api.put(`/chemical-name-map/${id}`, data, options),
   delete: (id: number) => api.delete(`/chemical-name-map/${id}`),
 }
 
@@ -1005,7 +1007,7 @@ export const reagentBrandAPI = {
     sort_order?: string
     include_inactive?: boolean
   }) => api.get<PaginatedResponse<ReagentBrandItem>>('/reagent-brands', { params }),
-  create: (data: { name: string }) => api.post<ReagentBrandItem>('/reagent-brands', data),
+  create: (data: { name: string }, options?: MutationOptions) => api.post<ReagentBrandItem>('/reagent-brands', data, options),
   update: (id: number, data: { name: string }) =>
     api.put<ReagentBrandItem>(`/reagent-brands/${id}`, data),
   delete: (id: number) => api.delete(`/reagent-brands/${id}`),
@@ -1094,7 +1096,7 @@ export const announcementAPI = {
     is_pinned?: boolean
     is_visible?: boolean
     is_popup?: boolean
-  }) => api.post<Announcement>('/announcements/', data),
+  }, options?: MutationOptions) => api.post<Announcement>('/announcements/', data, options),
   update: (id: number, data: {
     title?: string
     content?: string
