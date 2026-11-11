@@ -738,17 +738,12 @@ function LayoutHeader({
       )}
 
       <AnnouncementBanner announcements={announcements} />
-      <div className="hidden md:flex items-center gap-1">
-        <ProcedureInventorySearchButton />
-        <AnnouncementButton announcements={announcements} />
-      </div>
-
-      <div className="flex items-center gap-1 md:hidden ml-auto">
+      <div className="ml-auto flex items-center gap-1 md:ml-0">
         <Button
           variant="ghost"
           size="icon"
           onClick={toggleTheme}
-          className="h-10 w-10 text-foreground transition-colors"
+          className="h-10 w-10 text-foreground transition-colors md:hidden"
         >
           {theme === 'dark' ? <Sun className="size-5" /> : <Moon className="size-5" />}
         </Button>

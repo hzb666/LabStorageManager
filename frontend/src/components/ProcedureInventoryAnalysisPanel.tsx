@@ -5,6 +5,7 @@ import type {
   ProcedureAnalysisStatus,
   ProcedureInventorySearchResponse,
 } from '@/api/client'
+import { ProcedureInventoryReportButton } from '@/components/ProcedureInventoryReportButton'
 import { cn } from '@/lib/utils'
 
 type ProcedureDisplayStatus = ProcedureAnalysisStatus | 'missing_inventory'
@@ -78,12 +79,15 @@ export function ProcedureInventoryAnalysisPanel({
           <h2 className="text-lg font-bold text-foreground">实验步骤解析（仅供参考）</h2>
           <p className="text-sm text-muted-foreground">{summary}</p>
         </div>
-        {result.cas_query ? (
-          <div className="max-w-full px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-normal text-foreground">CAS 查询：</span>
-            <span className="break-all">{result.cas_query}</span>
-          </div>
-        ) : null}
+        <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+          {result.cas_query ? (
+            <div className="flex min-w-0 max-w-full items-baseline px-3 py-2 text-sm text-muted-foreground">
+              <span className="shrink-0 font-normal text-foreground">CAS 查询：</span>
+              <span className="truncate" title={result.cas_query}>{result.cas_query}</span>
+            </div>
+          ) : null}
+          <ProcedureInventoryReportButton result={result} />
+        </div>
       </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
         <ProcedureHighlightedText items={items} text={result.formatted_text} />
@@ -331,7 +335,8 @@ function getCandidateCasNumbers(item: ProcedureAnalyzedReagent): string[] {
 }
 
 function getCasLabel(item: ProcedureAnalyzedReagent): string {
-  return getCandidateCasNumbers(item).length > 1 ? '候选 CAS' : 'CAS'
+  const label = item.is_mixture ? '成分 CAS' : 'CAS'
+  return getCandidateCasNumbers(item).length > 1 ? `候选 ${label}` : label
 }
 
 function normalizeCasForCompare(value: string): string {

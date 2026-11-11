@@ -501,6 +501,8 @@ export interface ProcedureInventoryItem {
   unit?: string | null
   status?: string
   specification?: string | null
+  temporary_keeper_name?: string | null
+  borrower_name?: string | null
 }
 
 export interface ProcedureResolvedReagent {
@@ -524,6 +526,10 @@ export type ProcedureAnalysisStatus = 'resolved' | 'unresolved' | 'common' | 'ge
 
 export interface ProcedureAnalyzedReagent {
   name: string
+  chinese_name?: string | null
+  is_mixture?: boolean
+  equivalent?: number | null
+  equivalent_evidence?: string | null
   pubchem_query_name?: string | null
   status: ProcedureAnalysisStatus
   cas_number?: string | null
@@ -535,10 +541,13 @@ export interface ProcedureAnalyzedReagent {
 
 export interface ProcedureLLMReagent {
   name: string
+  chinese_name?: string | null
+  is_specific?: boolean
+  is_mixture?: boolean
+  equivalent?: number | null
+  equivalent_evidence?: string | null
+  equivalent_confidence?: 'high' | 'medium' | 'low'
   pubchem_query_name?: string | null
-  should_query_pubchem: boolean
-  evidence?: string | null
-  confidence: 'high' | 'medium' | 'low'
 }
 
 export interface ProcedureInventoryExtractionResponse {
@@ -566,7 +575,30 @@ export interface ProcedureInventorySearchResponse {
   inventory_groups: ProcedureInventoryGroup[]
 }
 
+export interface ProcedureReportCompound {
+  cas_number: string
+  cas_numbers?: string[]
+  query_name?: string | null
+  chinese_name?: string | null
+  molecular_formula: string | null
+  molecular_weight: number | null
+}
+
+export interface ProcedureReportData {
+  generated_at: string
+  inventory_groups: ProcedureInventoryGroup[]
+  compounds: ProcedureReportCompound[]
+}
+
+export interface ProcedureReportRequest {
+  cas_numbers: string[]
+  names: string[]
+  name_aliases: Record<string, string[]>
+}
+
 export const procedureInventorySearchAPI = {
+  report: (payload: ProcedureReportRequest) =>
+    api.post<ProcedureReportData>('/procedure-inventory-search/report', payload, { timeout: 10000 }),
   extract: (text: string) =>
     api.post<ProcedureInventoryExtractionResponse>('/procedure-inventory-search/extract', { text }),
   resolve: (data: ProcedureInventoryExtractionResponse) =>
