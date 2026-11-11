@@ -39,7 +39,8 @@ const basicItems = Array.from({ length: 5 }, (_, index) => ({
   is_dangerous: index === 0,
 }));
 
-async function popupHarness(items = basicItems) {
+async function popupHarness(items = basicItems, options = {}) {
+  const cartTab = { id: 7, url: 'https://reagent.example/Front.aspx?page=gwc' };
   const elements = Object.fromEntries([
     'mainSection', 'previewSection', 'fetchBtn', 'targetStatus', 'result', 'itemList',
     'previewCount', 'selectAll', 'backBtn', 'importBtn', 'previewResult',
@@ -50,20 +51,26 @@ async function popupHarness(items = basicItems) {
   const opened = [];
   const context = vm.createContext({
     console: { error() {}, warn() {} }, URL, AbortController, crypto: globalThis.crypto,
-    setTimeout: (callback, delay) => setTimeout(callback, delay === 3000 ? 30 : delay), clearTimeout,
+    setTimeout: (callback, delay) => setTimeout(callback,
+      delay === 3000 ? 30 : delay === 5000 ? (options.messageTimeoutMs ?? delay) : delay), clearTimeout,
     alert: (message) => { throw new Error(message); },
-    ExtensionSiteConfig: { DEFAULT_SYSTEM_CONFIG: { systemUrl: 'https://inventory.example' } },
+    ExtensionSiteConfig: {
+      ...require('./shared/site-config.js'),
+      DEFAULT_SYSTEM_CONFIG: { systemUrl: 'https://inventory.example', reagentSiteUrl: 'https://reagent.example' },
+    },
+    CartTabSelection: require('./background/cart-tab-selection.js'),
     OrderTypeDetection: require('./popup/order-type-detection.js'),
     document: {
       getElementById: (id) => elements[id], createElement: element, body: element('body'),
     },
     chrome: {
-      runtime: { sendMessage: async () => ({ success: true, tab: { id: 7 } }) },
+      runtime: { sendMessage: options.runtimeMessage ?? (async () => ({ success: true, tab: cartTab })) },
       tabs: {
         sendMessage: async (_tab, message) => ({ success: true, data: message.action === 'GET_CART' ? items : 'pong' }),
-        query: async () => [],
+        query: async ({ url }) => url === 'https://reagent.example/*' ? (options.tabs ?? [cartTab]) : [],
         create: async (options) => { opened.push(options); },
       },
+      scripting: { executeScript: async () => [] },
       storage: { local: {
         get: async () => saved,
         set: async (data) => {
@@ -79,6 +86,75 @@ async function popupHarness(items = basicItems) {
   const click = async (node) => node.listeners.click?.({ target: node });
   return { context, elements, saved, storageWrites, opened, click };
 }
+
+test('missing cart immediately warns without depending on background response', async () => {
+  let runtimeCalls = 0;
+  const harness = await popupHarness(basicItems, {
+    tabs: [],
+    runtimeMessage: () => { runtimeCalls += 1; return new Promise(() => {}); },
+  });
+  let contentCalls = 0;
+  harness.context.chrome.tabs.sendMessage = async () => { contentCalls += 1; };
+  await harness.click(harness.elements.fetchBtn);
+  assert.equal(runtimeCalls, 0);
+  assert.equal(contentCalls, 0);
+  assert.equal(harness.elements.targetStatus.textContent, '请先打开购物车页面');
+  assert.match(harness.elements.result.textContent, /请先打开试剂平台的购物车页面/);
+  assert.equal(harness.elements.fetchBtn.disabled, false);
+  assert.equal(harness.elements.fetchBtn.textContent, '获取购物车');
+  assert.equal(harness.elements.previewSection.classList.contains('hidden'), true);
+});
+
+test('closing the cart after opening popup updates status and restores controls', async () => {
+  const harness = await popupHarness();
+  assert.equal(harness.elements.targetStatus.textContent, '已连接');
+  harness.context.chrome.tabs.query = async () => [];
+  await harness.click(harness.elements.fetchBtn);
+  assert.equal(harness.elements.targetStatus.textContent, '请先打开购物车页面');
+  assert.match(harness.elements.result.textContent, /请先打开/);
+  assert.equal(harness.elements.fetchBtn.disabled, false);
+});
+
+test('unrelated pages containing cart-like URLs are not treated as carts', async () => {
+  const harness = await popupHarness(basicItems, {
+    tabs: [
+      { id: 1, url: 'https://reagent.example/Front.aspx?page=gwc_history' },
+      { id: 2, url: 'https://reagent.example/login?return=Front.aspx?page=gwc' },
+    ],
+  });
+  await harness.click(harness.elements.fetchBtn);
+  assert.match(harness.elements.result.textContent, /请先打开/);
+  assert.equal(harness.elements.previewSection.classList.contains('hidden'), true);
+});
+
+test('background response timeout stops fetching and restores the button', { timeout: 2000 }, async () => {
+  const harness = await popupHarness(basicItems, { messageTimeoutMs: 20 });
+  harness.context.chrome.runtime.sendMessage = () => new Promise(() => {});
+  await harness.click(harness.elements.fetchBtn);
+  assert.match(harness.elements.result.textContent, /扩展后台响应超时/);
+  assert.equal(harness.elements.fetchBtn.disabled, false);
+  assert.equal(harness.elements.fetchBtn.textContent, '获取购物车');
+});
+
+test('tab query timeout stops fetching and restores the button', { timeout: 2000 }, async () => {
+  const harness = await popupHarness(basicItems, { messageTimeoutMs: 20 });
+  harness.context.chrome.tabs.query = () => new Promise(() => {});
+  await harness.click(harness.elements.fetchBtn);
+  assert.match(harness.elements.result.textContent, /检查购物车页面超时/);
+  assert.equal(harness.elements.fetchBtn.disabled, false);
+});
+
+test('automatic script injection timeout does not leave fetching stuck', { timeout: 2000 }, async () => {
+  const harness = await popupHarness(basicItems, { messageTimeoutMs: 20 });
+  harness.context.chrome.tabs.sendMessage = async () => {
+    throw new Error('Could not establish connection. Receiving end does not exist.');
+  };
+  harness.context.chrome.scripting.executeScript = () => new Promise(() => {});
+  await harness.click(harness.elements.fetchBtn);
+  assert.match(harness.elements.result.textContent, /购物车页面脚本加载超时/);
+  assert.equal(harness.elements.fetchBtn.disabled, false);
+  assert.equal(harness.elements.fetchBtn.textContent, '获取购物车');
+});
 
 test('preview reads only basic cart data and shows quantities and prices', async () => {
   const harness = await popupHarness();

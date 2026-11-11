@@ -8,8 +8,9 @@ const extensionConfigApi = globalThis.ExtensionSiteConfig;
 if (!extensionConfigApi) {
   throw new Error('扩展环境配置加载失败');
 }
-const { DEFAULT_SYSTEM_CONFIG } = extensionConfigApi;
+const { DEFAULT_SYSTEM_CONFIG, buildSiteUrlPattern } = extensionConfigApi;
 const systemConfig = DEFAULT_SYSTEM_CONFIG;
+const { isCartPageUrl } = globalThis.CartTabSelection;
 
 const orderTypeDetectionApi = globalThis.OrderTypeDetection;
 if (!orderTypeDetectionApi) {
@@ -59,10 +60,13 @@ async function sendMessageWithAutoInject(tabId, message) {
       throw error;
     }
 
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['content/script.js'],
-    });
+    await waitForMessageResponse(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content/script.js'],
+      }),
+      '购物车页面脚本加载超时，请刷新购物车页面后重试',
+    );
 
     return await waitForMessageResponse(
       chrome.tabs.sendMessage(tabId, message),
@@ -80,11 +84,6 @@ async function sendRuntimeMessage(message) {
     throw new Error(response?.error || '扩展后台通信失败');
   }
   return response;
-}
-
-function isCartPageUrl(url) {
-  const pageParamRegex = /[?&]page=gwc/i;
-  return pageParamRegex.test(url || '');
 }
 
 async function mapWithConcurrencyLimit(items, limit, mapper) {
@@ -247,8 +246,15 @@ function parseProductDetail(html) {
 }
 
 async function findCartTab() {
+  const tabs = await waitForMessageResponse(
+    chrome.tabs.query({ url: buildSiteUrlPattern(systemConfig.reagentSiteUrl) }),
+    '检查购物车页面超时，请重试',
+  );
+  if (!tabs.some(tab => isCartPageUrl(tab.url))) {
+    return null;
+  }
   const response = await sendRuntimeMessage({ type: 'RESOLVE_CART_TAB' });
-  return response.tab || null;
+  return isCartPageUrl(response.tab?.url) ? response.tab : null;
 }
 
 async function fetchProductDetail(detailUrl) {
@@ -338,18 +344,16 @@ async function getSystemTheme() {
   let cartItems = [];
   let operation = 'idle';
 
+  function showTargetStatus(targetTab) {
+    targetStatus.textContent = targetTab ? '已连接' : '请先打开购物车页面';
+    targetStatus.className = targetTab ? 'badge badge-success' : 'badge badge-warning';
+  }
+
   async function checkTargetStatus() {
     try {
       const targetTab = await findCartTab();
-      if (targetTab) {
-        targetStatus.textContent = '已连接';
-        targetStatus.className = 'badge badge-success';
-        return targetTab;
-      }
-
-      targetStatus.textContent = '请先打开购物车页面';
-      targetStatus.className = 'badge badge-warning';
-      return null;
+      showTargetStatus(targetTab);
+      return targetTab;
     } catch (error) {
       console.error('[Popup] 检查失败:', error);
       targetStatus.textContent = '检查失败';
@@ -481,6 +485,7 @@ async function getSystemTheme() {
 
     try {
       const targetTab = await findCartTab();
+      showTargetStatus(targetTab);
       if (!targetTab) {
         throw new Error('请先打开试剂平台的购物车页面');
       }

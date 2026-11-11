@@ -1,6 +1,14 @@
 (function initCartTabSelection(root) {
   function isCartPageUrl(url) {
-    return /[?&]page=gwc/i.test(String(url || ''));
+    try {
+      const parsed = new URL(url);
+      return ['http:', 'https:'].includes(parsed.protocol)
+        && [...parsed.searchParams].some(([key, value]) => (
+          key.toLowerCase() === 'page' && value.toLowerCase() === 'gwc'
+        ));
+    } catch {
+      return false;
+    }
   }
 
   function normalizeTimestamp(value) {
