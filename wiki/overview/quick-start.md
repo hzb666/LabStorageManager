@@ -3,7 +3,7 @@
 ## 前置环境
 
 - Python 3.11+。前端使用 Node.js 24.14.1 与 npm 11.8.0；Wiki Pages 工作流使用 Node.js 20。
-- 可选 Redis 6+，用于登录限流和会话缓存。
+- 可选 Redis 6+，用于登录限流和会话撤销标记。
 - 需要 Git 和 Docker，若使用 Compose 还要保证镜像可拉取、依赖可安装。
 
 ## 克隆与环境变量
@@ -39,6 +39,8 @@ cp .env.example .env
 
 Redis 仅监听本机或 Compose 内网时，`REDIS_PASSWORD` 可以留空。
 默认登录态为 7 天：`ACCESS_TOKEN_EXPIRE_MINUTES=10080`，`SESSION_EXPIRE_HOURS=168`。单个后端进程的 Redis 连接池上限由 `REDIS_MAX_CONNECTIONS` 控制，默认 100。
+
+Redis 单次连接和命令超时默认均为 0.3 秒，可通过 `REDIS_SOCKET_CONNECT_TIMEOUT`、`REDIS_SOCKET_TIMEOUT` 调整，请求内不自动重试。连接或命令失败后，同一进程进入 60 秒熔断期；到期只允许一个线程探测恢复，其他并发请求直接使用既有降级逻辑。撤销标记不可用时，正常接口仍按数据库会话真值鉴权；生产环境登录限流仍保留 Redis 不可用时拒绝登录的规则。
 
 本地 `.env.example` 默认使用 `sqlite:///./lab_inventory.db` 和 `logs`。Docker Compose 会覆盖为 `/data/lab_inventory.db` 和 `/data/logs`，上传资源目录对应 `/data/static`，外部访问路径是 `/static/`。
 

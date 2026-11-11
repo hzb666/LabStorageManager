@@ -8,7 +8,7 @@ import redis
 from fastapi import HTTPException, status
 
 from app.core.config import settings
-from app.core.redis import get_redis, redis_key
+from app.core.redis import get_redis, handle_redis_error, redis_key
 
 _local_sessions: dict[str, tuple[int, float]] = {}
 _local_lock = threading.Lock()
@@ -51,8 +51,8 @@ def create_session(snapshot_id: str, user_id: int, ttl_seconds: int) -> str:
         try:
             client.setex(key, ttl_seconds, str(user_id))
             return session_id
-        except redis.RedisError:
-            pass
+        except redis.RedisError as error:
+            handle_redis_error(error, "创建只读会话", key, source=client)
     if settings.use_secure_runtime():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -68,7 +68,8 @@ def validate_session(snapshot_id: str, session_id: str, user_id: int) -> bool:
     if client is not None:
         try:
             return client.get(key) == str(user_id)
-        except redis.RedisError:
+        except redis.RedisError as error:
+            handle_redis_error(error, "校验只读会话", key, source=client)
             return False
     if settings.use_secure_runtime():
         return False
@@ -81,7 +82,7 @@ def revoke_session(snapshot_id: str, session_id: str) -> None:
     if client is not None:
         try:
             client.delete(key)
-        except redis.RedisError:
-            pass
+        except redis.RedisError as error:
+            handle_redis_error(error, "撤销只读会话", key, source=client)
     with _local_lock:
         _local_sessions.pop(key, None)

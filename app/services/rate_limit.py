@@ -9,7 +9,7 @@ from collections import deque
 import redis
 from fastapi import HTTPException, status
 
-from app.core.redis import get_redis, redis_key
+from app.core.redis import get_redis, handle_redis_error, redis_key
 
 _fallback_store: dict[str, deque[float]] = {}
 _fallback_windows: dict[str, int] = {}
@@ -95,5 +95,6 @@ def enforce_rate_limit(scope: str, identifier: str, limit: int, window_seconds: 
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Too many requests, please retry after {window_seconds} seconds",
             )
-    except redis.RedisError:
+    except redis.RedisError as error:
+        handle_redis_error(error, "请求限流", key, source=redis_client)
         _check_local_limit(key, limit, window_seconds)

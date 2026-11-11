@@ -10,9 +10,10 @@ import json
 import logging
 from typing import Any
 
+import redis
 from redis.client import PubSub
 
-from app.core.redis import get_redis, redis_key
+from app.core.redis import get_redis, handle_redis_error, redis_key
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ class RedisPubSub:
         try:
             payload = json.dumps(message, ensure_ascii=False)
             return int(redis_client.publish(channel, payload))
+        except redis.RedisError as error:
+            handle_redis_error(error, "发布 SSE 消息", channel, source=redis_client)
+            return 0
         except Exception:
             logger.exception("Failed publishing SSE message to %s", channel)
             return 0
@@ -48,10 +52,15 @@ class RedisPubSub:
         if redis_client is None:
             return None
 
+        pubsub = None
         try:
             pubsub = redis_client.pubsub(ignore_subscribe_messages=True)
             pubsub.psubscribe(*patterns)
             return pubsub
+        except redis.RedisError as error:
+            handle_redis_error(error, "订阅 SSE 消息", source=redis_client)
+            RedisPubSub.close_pubsub(pubsub)
+            return None
         except Exception:
             logger.exception("Failed subscribing SSE patterns: %s", patterns)
             return None
@@ -78,6 +87,9 @@ class RedisPubSub:
 
         try:
             return int(redis_client.incr(redis_key(f"sse:seq:{room}")))
+        except redis.RedisError as error:
+            handle_redis_error(error, "生成 SSE 序号", source=redis_client)
+            return None
         except Exception:
             logger.exception("Failed to generate Redis sequence for room %s", room)
             return None

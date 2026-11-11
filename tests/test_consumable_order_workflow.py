@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.requests import Request
@@ -83,6 +83,7 @@ class ConsumableOrderWorkflowTests(unittest.IsolatedAsyncioTestCase):
             patch.object(consumable_orders.sse_manager, "broadcast", new=AsyncMock()),
         ):
             return await consumable_orders.complete_consumable_order(
+                background_tasks=BackgroundTasks(),
                 order_id=self.order.id,
                 request=_build_request(f"/api/consumable-orders/{self.order.id}/complete"),
                 current_user=user or self.user,

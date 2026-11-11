@@ -566,7 +566,7 @@ async def create_reagent_order(
     db.commit()
     db.refresh(db_order)
     _clear_reagent_order_cache(db_order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_CREATED,
         {"id": db_order.id, "item": _serialize_reagent_order(db_order, db)},
@@ -1035,7 +1035,7 @@ async def update_reagent_order(
 
     # 清除列表缓存，确保更新后前端立即看到最新数据
     _clear_reagent_order_cache(order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_reagent_order(order, db)},

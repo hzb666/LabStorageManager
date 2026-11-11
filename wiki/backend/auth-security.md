@@ -19,24 +19,24 @@
 
 `get_current_user` 的判定顺序比较固定：
 
-1. 先从 `get_cached_session` 读取缓存。
-2. 缓存未命中时回退数据库中的 `UserSession`。
-3. 通过 `BackgroundTasks` 调度 `_update_user_activity_task`，更新 `last_active_at` 和 `last_ip_address`。
+1. 先检查 Redis 中的会话撤销标记，命中时立即拒绝。
+2. 通过一次联表查询校验数据库中的用户与 `UserSession`；SSE 周期复检也核对数据库。Redis 不再存储或回填完整会话镜像。
+3. 通过 `BackgroundTasks` 调度数据库活跃度刷新。刷新失败记录日志，不中断后续 SSE 通知。
 
 这里的约束是：会话读取不能依赖 Redis 成功与否。Redis 只影响性能和告警，不承担登录态唯一来源职责。
 
-当 `username_version` 与数据库不一致时，旧 token 会失效。`token_hash` 会同时作为 Redis 与 `user_sessions` 表的查找键。`logout` 会同步删除数据库记录与缓存，`login` 成功后会写入 httpOnly Cookie，并在必要时通过 `X-Redis-Status` 提示前端 Redis 状态。
+当 `username_version` 与数据库不一致时，旧 token 会失效。`token_hash` 用于查询数据库会话和 Redis 撤销标记。`logout` 会删除数据库会话，提交后写撤销标记并断开 SSE；`login` 成功后会写入 httpOnly Cookie，并在必要时通过 `X-Redis-Status` 提示前端 Redis 状态。
 
 ## 会话管理与设备限制
 
-[app/services/session_service.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/session_service.py) 负责会话写入、缓存同步和旧设备清理，核心逻辑包括：
+[app/services/session_service.py](https://github.com/hzb666/LabStorageManager/blob/main/app/services/session_service.py) 负责会话写入、撤销通知和旧设备清理，核心逻辑包括：
 
-- `_create_user_session` 使用 `hashlib.sha256(token)` 生成 `token_hash`。
+- `stage_create_or_refresh_user_session` 使用 `hashlib.sha256(token)` 生成 `token_hash`。
 - `device_id` 为空时会生成带 `ANONYMOUS_DEVICE_PREFIX` 的随机 ID。
-- `cache_session` 在插入与更新时都会执行，TTL 与 `settings.session_expire_hours` 对齐。
-- `_check_device_limit` 和 `_check_ip_limit` 分别读取 `max_device_per_user` 与 `max_ip_per_user`。
+- 新建、续期和编辑会话只更新数据库，不写完整 Redis 会话副本。
+- `_check_device_limit` 读取 `max_device_per_user`。
 - 超限时通过 `_evict_oldest_session` 踢出最旧会话。
-- `cleanup_expired_sessions` 会同步删除过期数据库行与缓存。
+- `cleanup_expired_sessions` 删除过期数据库行，提交后的撤销通知由调用方完成。
 
 内存速率限制只在 Redis 不可用且非生产环境时作为后备方案启用。
 
@@ -76,14 +76,14 @@
 
 ## Redis 断路器与降级
 
-[app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py) 提供全局 Redis 客户端和断路器。`get_redis()` 在错误后的冷却期内会直接返回 `None`，`cache_session`、`get_cached_session`、`delete_cached_session` 捕获 `RedisError` 后会触发断路器复位。
+[app/core/redis.py](https://github.com/hzb666/LabStorageManager/blob/main/app/core/redis.py) 提供全局 Redis 客户端和断路器。`get_redis()` 在错误后的冷却期内会直接返回 `None`，撤销标记、限流与 SSE 操作捕获 `RedisError` 后会触发统一熔断。
 
 这套机制被认证、会话和 SSE 共同依赖。Redis 崩溃后，系统应保持降级可用，避免打断整条请求链。前端可以通过 `X-Redis-Status` 观察是否发生降级。
 
 ## 二次开发提醒
 
 - 新增认证逻辑前，先确认 `settings.algorithm`、RSA key 路径和 `use_secure_runtime()` 的默认行为。
-- 修改 `user_sessions` 表或相关 payload 时，要同步更新 `session_service` 和缓存结构。
+- 修改 `user_sessions` 表或相关 payload 时，要同步更新 `session_service` 和 HTTP/SSE 数据库校验。
 - 新增 Redis key 时，务必保留统一前缀，避免与现有命名空间冲突。
 - 扩展登录后置流程时，优先复用现有限流和会话服务，不要在路由里重复实现。
 

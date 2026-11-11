@@ -1067,7 +1067,7 @@ async def update_inventory(
     _clear_list_cache(item)
 
     response = serialize_inventory_items(db, [item])[0]
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.INVENTORY,
         SSEEventType.INVENTORY_UPDATED,
         {"id": inventory_id, "item": response},
@@ -1171,6 +1171,7 @@ def _apply_inventory_pinyin_updates(item: Inventory, *, update_data: dict) -> No
 
 @router.delete("/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_inventory(
+    background_tasks: BackgroundTasks,
     inventory_id: int,
     request: Request,
     current_user: Annotated[User, Depends(require_non_public)],
@@ -1202,7 +1203,7 @@ async def delete_inventory(
     )
     db.commit()
     _clear_list_cache(item, is_delete=True)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.INVENTORY,
         SSEEventType.INVENTORY_DELETED,
         {"id": inventory_id},

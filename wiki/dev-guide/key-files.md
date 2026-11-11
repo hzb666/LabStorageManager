@@ -48,7 +48,7 @@
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/app/services/sse_redis.py" />：Redis 发布订阅封装。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useSSE.ts" />：EventSource 连接、重连、序号断档处理和 auth invalid 事件处理。
 - <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/hooks/useListSSE.ts" />：列表级 patch / stale 策略。
-- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/sseStore.ts" />：客户端 SSE 运行时状态、`lastSeqByRoom` 和 `staleRooms`。
+- <InlineCodeRef href="https://github.com/hzb666/LabStorageManager/blob/main/frontend/src/store/sseStore.ts" />：客户端 SSE 连接状态、过期版本映射和刷新保护；连接序号由 `useSSE` 跟踪。
 
 ## 前端页面基础设施
 

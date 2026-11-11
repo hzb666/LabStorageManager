@@ -24,7 +24,7 @@ from app.core.constants import (
     LOG_TOKEN_RATE_WINDOW,
     SECONDS_PER_HOUR,
 )
-from app.core.redis import get_redis, redis_key
+from app.core.redis import get_redis, handle_redis_error, redis_key
 from app.core.time_utils import utc_iso_str
 from app.database import DBSession
 from app.models.log_timeline import LogTimeline, LogTimelineSourceTable
@@ -96,9 +96,9 @@ def _check_logs_token_rate_limit(admin_user_id: int) -> None:
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="Too many requests, please try again later"
                 )
-    except redis.RedisError:
+    except redis.RedisError as error:
+        handle_redis_error(error, "检查日志令牌限流", key, source=redis_client)
         # 限流失败时维持功能可用，避免管理员无法拉取排查日志。
-        pass
 
 
 def _record_logs_token_request(admin_user_id: int) -> None:
@@ -114,8 +114,8 @@ def _record_logs_token_request(admin_user_id: int) -> None:
         pipe.incr(key)
         pipe.expire(key, LOG_TOKEN_RATE_WINDOW)
         pipe.execute()
-    except redis.RedisError:
-        pass
+    except redis.RedisError as error:
+        handle_redis_error(error, "记录日志令牌限流", key, source=redis_client)
 
 
 def create_log_token(user_id: int, expire_hours: int = LOG_TOKEN_EXPIRE_HOURS) -> str:

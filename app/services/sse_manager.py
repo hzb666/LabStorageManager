@@ -10,8 +10,12 @@ import threading
 from collections import deque
 from collections.abc import AsyncGenerator
 from contextlib import suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Self
+
+import redis
+from fastapi import BackgroundTasks
 
 from app.core.constants import (
     SSE_CLIENT_ID_TOKEN_HEX_LENGTH,
@@ -26,7 +30,7 @@ from app.core.constants import (
     SSE_REPLAY_BUFFER_MAX_EVENTS,
     SSE_SLOW_CLIENT_QUEUE_FULL_STREAK_LIMIT,
 )
-from app.core.redis import REDIS_KEY_PREFIX, redis_key
+from app.core.redis import REDIS_KEY_PREFIX, handle_redis_error, redis_key
 from app.core.request_utils import get_current_sse_client_id
 from app.core.time_utils import get_utc_now, utc_iso_str
 from app.services.sse_redis import redis_pubsub
@@ -58,6 +62,7 @@ class SSERoom:
     name: str
     clients: set[str] = field(default_factory=set)
     fallback_seq: int = 0
+    local_sequence_id: str = field(default_factory=lambda: secrets.token_hex(SSE_ORIGIN_TOKEN_HEX_LENGTH))
     replay_buffer: deque[dict[str, Any]] = field(
         default_factory=lambda: deque(maxlen=SSE_REPLAY_BUFFER_MAX_EVENTS)
     )
@@ -159,16 +164,16 @@ class SSEManager:
         async with self._manager_lock:
             self._clients.pop(client.client_id, None)
 
-    async def _next_seq(self, room: str) -> int:
+    async def _next_seq(self, room: str) -> tuple[int, str]:
         # Redis 不可用时退回本地序号，至少保证单进程内有序。
         redis_seq = await asyncio.to_thread(redis_pubsub.next_sequence, room)
         if redis_seq is not None:
-            return redis_seq
+            return redis_seq, "redis"
 
         local_room = await self.get_room(room)
         async with local_room.lock:
             local_room.fallback_seq += 1
-            return local_room.fallback_seq
+            return local_room.fallback_seq, f"local:{local_room.local_sequence_id}"
 
     async def broadcast(
         self,
@@ -181,10 +186,11 @@ class SSEManager:
         if actor_client_id is None:
             actor_client_id = get_current_sse_client_id()
 
-        seq = await self._next_seq(room)
+        seq, seq_source = await self._next_seq(room)
         event = {
             "room": room,
             "seq": seq,
+            "seq_source": seq_source,
             "event": event_type,
             "data": data,
             "timestamp": utc_iso_str(get_utc_now()),
@@ -203,6 +209,25 @@ class SSEManager:
             redis_count,
         )
         return local_delivered
+
+    def schedule_broadcast(
+        self, background_tasks: BackgroundTasks, room: str, event_type: str,
+        data: dict[str, Any], *, actor_client_id: str | None = None,
+    ) -> None:
+        """业务响应后发送通知；在请求上下文尚在时保存发起客户端。"""
+        if actor_client_id is None:
+            actor_client_id = get_current_sse_client_id()
+        background_tasks.add_task(
+            self._broadcast_safely, room, event_type, deepcopy(data), actor_client_id=actor_client_id,
+        )
+
+    async def _broadcast_safely(
+        self, room: str, event_type: str, data: dict[str, Any], *, actor_client_id: str | None,
+    ) -> None:
+        try:
+            await self.broadcast(room, event_type, data, actor_client_id=actor_client_id)
+        except Exception:
+            logger.exception("SSE notification failed room=%s event=%s", room, event_type)
 
     @staticmethod
     def _build_sse_message(event_type: str, full_event: dict[str, Any]) -> str:
@@ -472,6 +497,9 @@ class SSEManager:
                     True,
                     SSE_REDIS_GET_MESSAGE_TIMEOUT_SECONDS,
                 )
+            except redis.RedisError as error:
+                handle_redis_error(error, "读取 SSE 订阅", source=pubsub)
+                break
             except Exception:
                 logger.exception("SSE Redis pubsub read failed")
                 break
@@ -532,6 +560,16 @@ class SSEManager:
             with suppress(Exception):
                 await reader_task
 
+    def _mark_local_clients_stale(self) -> None:
+        # Redis 恢复时可能已丢失消息或重置计数。清掉旧队列并要求重新获取快照。
+        for client in list(self._clients.values()):
+            if client.revoked:
+                continue
+            with suppress(asyncio.QueueEmpty):
+                while True:
+                    client.queue.get_nowait()
+            client.queue.put_nowait("event: stale\ndata: {}\n\n")
+
     async def _listener_loop(self) -> None:
         while True:
             pubsub = None
@@ -541,6 +579,7 @@ class SSEManager:
                     await asyncio.sleep(SSE_REDIS_SUBSCRIBE_RETRY_SECONDS)
                     continue
 
+                self._mark_local_clients_stale()
                 await self._consume_pubsub(pubsub)
 
             except Exception:

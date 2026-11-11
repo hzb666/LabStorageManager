@@ -26,14 +26,12 @@ from app.models.user import User
 from app.models.user_operation_log import UserOperationAction
 from app.models.user_session import UserSession
 from app.services.session_service import (
-    SessionCacheIdentity,
     StagedSessionRefresh,
     finalize_revoked_sessions,
     finalize_session_refresh,
     refresh_session_expiry,
     revoke_session,
     stage_revoke_user_sessions,
-    sync_session_cache,
 )
 from app.services.user_operation_logger import log_user_operation
 
@@ -115,19 +113,17 @@ def _apply_refresh_post_commit_side_effects(
     db: Session,
     *,
     staged_refresh: StagedSessionRefresh,
-    identity: SessionCacheIdentity,
 ) -> UserSession:
     try:
         return finalize_session_refresh(
             db,
             staged=staged_refresh,
-            identity=identity,
         )
     except Exception:
         # 提交后副作用失败不应让 refresh 退化成 500；数据库已是新 token 真值。
         logger.exception(
             "Post-commit session refresh side effects failed user_id=%s session_id=%s",
-            identity.user_id,
+            staged_refresh.session.user_id,
             staged_refresh.session.id,
         )
         return staged_refresh.session
@@ -247,11 +243,6 @@ def refresh_session(
         role=user_role,
         username_version=current_user.username_version or 1,
     )
-    identity = SessionCacheIdentity(
-        user_id=current_user.id,
-        username=current_user.username,
-        is_active=current_user.is_active,
-    )
 
     staged_refresh = refresh_session_expiry(
         db,
@@ -273,7 +264,6 @@ def refresh_session(
     refreshed = _apply_refresh_post_commit_side_effects(
         db,
         staged_refresh=staged_refresh,
-        identity=identity,
     )
 
     response.set_cookie(
@@ -364,14 +354,5 @@ def update_session(
     )
     db.commit()
     db.refresh(session)
-    sync_session_cache(
-        session=session,
-        identity=SessionCacheIdentity(
-            user_id=current_user.id,
-            username=current_user.username,
-            is_active=current_user.is_active,
-        ),
-        now_utc=now_utc,
-    )
 
     return session

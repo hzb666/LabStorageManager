@@ -4,7 +4,7 @@ from collections.abc import Collection
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import and_, or_
 from sqlmodel import Session, delete, func, select
@@ -474,6 +474,7 @@ def _apply_consumable_order_segmented_search(
 
 @router.post("/", response_model=ConsumableOrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_consumable_order(
+    background_tasks: BackgroundTasks,
     order: ConsumableOrderCreate,
     request: Request,
     current_user: CurrentUser,
@@ -514,7 +515,7 @@ async def create_consumable_order(
     db.commit()
     db.refresh(db_order)
     _clear_consumable_order_cache(db_order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_CREATED,
         {"id": db_order.id, "item": _serialize_consumable_order(db_order, db)},
@@ -743,6 +744,7 @@ def get_consumable_order(
 
 @router.put("/{order_id}", response_model=ConsumableOrderResponse)
 async def update_consumable_order(
+    background_tasks: BackgroundTasks,
     order_id: int,
     order_update: ConsumableOrderUpdate,
     request: Request,
@@ -825,7 +827,7 @@ async def update_consumable_order(
     db.refresh(order)
 
     _clear_consumable_order_cache(order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
@@ -836,6 +838,7 @@ async def update_consumable_order(
 
 @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
 async def approve_consumable_order(
+    background_tasks: BackgroundTasks,
     order_id: int,
     request: Request,
     db: DBSession,
@@ -874,7 +877,7 @@ async def approve_consumable_order(
     db.commit()
     db.refresh(order)
     _clear_consumable_order_cache(order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
@@ -885,6 +888,7 @@ async def approve_consumable_order(
 
 @router.post("/{order_id}/reject", dependencies=[Depends(require_admin)])
 async def reject_consumable_order(
+    background_tasks: BackgroundTasks,
     order_id: int,
     request: Request,
     db: DBSession,
@@ -918,7 +922,7 @@ async def reject_consumable_order(
     db.commit()
     db.refresh(order)
     _clear_consumable_order_cache(order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
@@ -929,6 +933,7 @@ async def reject_consumable_order(
 
 @router.post("/{order_id}/complete")
 async def complete_consumable_order(
+    background_tasks: BackgroundTasks,
     order_id: int,
     request: Request,
     current_user: CurrentUser,
@@ -976,7 +981,7 @@ async def complete_consumable_order(
     db.commit()
     db.refresh(order)
     _clear_consumable_order_cache(order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_consumable_order(order, db)},
@@ -1087,6 +1092,7 @@ def get_admin_consumable_orders(db: DBSession):
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_consumable_order(
+    background_tasks: BackgroundTasks,
     order_id: int,
     request: Request,
     db: DBSession,
@@ -1108,7 +1114,7 @@ async def delete_consumable_order(
 
     db.commit()
     _clear_consumable_order_cache(order, db, is_delete=True)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.CONSUMABLE_ORDERS,
         SSEEventType.CONSUMABLE_ORDER_DELETED,
         {"id": order_id},

@@ -52,8 +52,8 @@
 
 Redis 相关封装主要承担三件事：
 
-- `cache_session` / `get_cached_session` / `delete_cached_session` 处理会话缓存、TTL 和异常复位。
-- `session_service` 和 `auth.get_current_user` 复用会话缓存与数据库回退。
+- `is_session_revoked` / `mark_revoked_sessions` 处理会话撤销标记、TTL 和异常熔断。
+- `session_service` 管理数据库会话和撤销通知，HTTP 与 SSE 鉴权均读取数据库真值。
 - `sse_redis` 负责 pub/sub，在 Redis 不可用时会自动退回本地队列。
 
 降级策略也已经固定：

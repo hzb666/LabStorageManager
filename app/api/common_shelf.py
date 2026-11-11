@@ -82,7 +82,8 @@ from app.services.xlsx_export import export_common_shelf_xlsx
 router = APIRouter(prefix="/common-shelf", tags=["CommonShelf"], route_class=MutationTrackedRoute)
 
 
-async def _broadcast_common_shelf_change(
+def _broadcast_common_shelf_change(
+    background_tasks: BackgroundTasks,
     *,
     event_type: str,
     items: list[CommonShelf],
@@ -91,7 +92,7 @@ async def _broadcast_common_shelf_change(
     payload = {"ids": [item.id for item in items if item.id is not None]}
     if extra:
         payload.update(extra)
-    await sse_manager.broadcast(SSERoom.COMMON_SHELF, event_type, payload)
+    sse_manager.schedule_broadcast(background_tasks, SSERoom.COMMON_SHELF, event_type, payload)
 
 
 def _build_group_row_event_extra(
@@ -309,7 +310,7 @@ async def manual_add_common_shelf(
         )
     _commit_and_refresh_items(db, created_items)
 
-    await _broadcast_common_shelf_change(
+    _broadcast_common_shelf_change(background_tasks,
         event_type=(
             SSEEventType.COMMON_SHELF_UPDATED
             if group_existed_before
@@ -342,6 +343,7 @@ async def manual_add_common_shelf(
 
 @router.put("/groups/{group_key}", response_model=dict)
 async def update_common_shelf_group(
+    background_tasks: BackgroundTasks,
     group_key: str,
     payload: CommonShelfGroupEditRequest,
     request: Request,
@@ -442,7 +444,7 @@ async def update_common_shelf_group(
             group_fields=target_group_fields,
             extra=event_extra,
         )
-    await _broadcast_common_shelf_change(
+    _broadcast_common_shelf_change(background_tasks,
         event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=items,
         extra=event_extra,
@@ -460,6 +462,7 @@ async def update_common_shelf_group(
     response_model=dict,
 )
 async def update_common_shelf_item(
+    background_tasks: BackgroundTasks,
     group_key: str,
     item_id: int,
     payload: CommonShelfGroupItemUpdateRequest,
@@ -500,7 +503,7 @@ async def update_common_shelf_item(
     )
     _commit_and_refresh_items(db, [item])
 
-    await _broadcast_common_shelf_change(
+    _broadcast_common_shelf_change(background_tasks,
         event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=[item],
         extra=_build_group_row_event_extra(
@@ -547,7 +550,7 @@ async def add_common_shelf_bottles(
     )
     _commit_and_refresh_items(db, created_items)
 
-    await _broadcast_common_shelf_change(
+    _broadcast_common_shelf_change(background_tasks,
         event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=created_items,
         extra=_build_group_row_event_extra(
@@ -573,6 +576,7 @@ async def add_common_shelf_bottles(
 
 @router.post("/groups/{group_key}/remove-one", response_model=dict, dependencies=[Depends(get_current_user)])
 async def remove_one_common_shelf(
+    background_tasks: BackgroundTasks,
     group_key: str,
     payload: CommonShelfRemoveOneRequest,
     request: Request,
@@ -601,7 +605,7 @@ async def remove_one_common_shelf(
     fallback_name = removed_item.name_snapshot
     db.commit()
 
-    await _broadcast_common_shelf_change(
+    _broadcast_common_shelf_change(background_tasks,
         event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=[removed_item],
         extra=_build_group_row_event_extra(
@@ -631,6 +635,7 @@ async def remove_one_common_shelf(
     response_model=dict,
 )
 async def delete_common_shelf_item(
+    background_tasks: BackgroundTasks,
     group_key: str,
     item_id: int,
     request: Request,
@@ -659,7 +664,7 @@ async def delete_common_shelf_item(
     )
     db.commit()
 
-    await _broadcast_common_shelf_change(
+    _broadcast_common_shelf_change(background_tasks,
         event_type=SSEEventType.COMMON_SHELF_UPDATED,
         items=[removed_snapshot],
         extra=_build_group_row_event_extra(
@@ -682,6 +687,7 @@ async def delete_common_shelf_item(
 
 @router.delete("/groups/{group_key}", response_model=dict)
 async def delete_common_shelf_group(
+    background_tasks: BackgroundTasks,
     group_key: str,
     request: Request,
     current_user: NonPublicUser,
@@ -705,7 +711,7 @@ async def delete_common_shelf_group(
     )
     db.commit()
 
-    await _broadcast_common_shelf_change(
+    _broadcast_common_shelf_change(background_tasks,
         event_type=SSEEventType.COMMON_SHELF_DELETED,
         items=[],
         extra={"group_key": group_key, "deleted_ids": []},

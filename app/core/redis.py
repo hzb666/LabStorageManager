@@ -1,23 +1,23 @@
-import json
 import logging
-import time
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
+from time import monotonic
 
 import redis
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 from app.core.config import settings
-from app.core.constants import (
-    REDIS_COOLDOWN_SECONDS,
-    REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
-    REDIS_SOCKET_TIMEOUT_SECONDS,
-)
+from app.core.constants import REDIS_COOLDOWN_SECONDS
 
 logger = logging.getLogger(__name__)
 
 # Redis 客户端单例与断路器状态
 _redis_client: redis.Redis | None = None
-_last_error_time: float = 0.0
+_retry_at: float = 0.0
+_state_lock = threading.Lock()
+_probe_lock = threading.Lock()
 _raw_prefix = (settings.redis_key_prefix or "lsm").strip(":").strip()
 REDIS_KEY_PREFIX = _raw_prefix or "lsm"
 
@@ -28,23 +28,23 @@ class RedisDeleteByPrefixResult:
     deleted_count: int
 
 
-@dataclass(frozen=True)
-class CachedSessionState:
-    session_data: dict | None
-    is_revoked: bool
-
-
 def get_redis() -> redis.Redis | None:
-    """获取 Redis 客户端（带简易熔断机制）"""
-    global _redis_client, _last_error_time
-
-    if _redis_client is not None:
-        return _redis_client
-
-    if time.time() - _last_error_time < REDIS_COOLDOWN_SECONDS:
+    """健康连接直接复用；冷却后只让一个线程探测，其余请求立即降级。"""
+    global _redis_client, _retry_at
+    with _state_lock:
+        if monotonic() < _retry_at:
+            return None
+        if _redis_client is not None:
+            return _redis_client
+    if not _probe_lock.acquire(blocking=False):
         return None
-
+    pool = None
     try:
+        with _state_lock:
+            if monotonic() < _retry_at:
+                return None
+            if _redis_client is not None:
+                return _redis_client
         pool = redis.ConnectionPool(
             host=settings.redis_host,
             port=settings.redis_port,
@@ -52,21 +52,33 @@ def get_redis() -> redis.Redis | None:
             password=settings.redis_password if settings.redis_password else None,
             decode_responses=True,
             max_connections=settings.redis_max_connections,
-            socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
-            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+            socket_connect_timeout=settings.redis_socket_connect_timeout,
+            socket_timeout=settings.redis_socket_timeout,
+            retry=Retry(NoBackoff(), 0),
         )
         client = redis.Redis(connection_pool=pool)
         client.ping()
-
-        _redis_client = client
-        _last_error_time = 0.0
-        return _redis_client
-
-    except (redis.ConnectionError, redis.TimeoutError) as e:
-        logger.warning(f"Redis 连接失败，触发熔断 {REDIS_COOLDOWN_SECONDS} 秒: {e}")
-        _redis_client = None
-        _last_error_time = time.time()
+        with _state_lock:
+            _redis_client = client
+            _retry_at = 0.0
+        pool = None  # 连接池由已安装的客户端持有。
+        return client
+    except redis.RedisError as error:
+        handle_redis_error(error, "连接 Redis")
         return None
+    finally:
+        try:
+            if pool is not None:
+                _disconnect_pool(pool)
+        finally:
+            _probe_lock.release()
+
+
+def _disconnect_pool(pool, *, inuse_connections: bool = True) -> None:
+    try:
+        pool.disconnect(inuse_connections=inuse_connections)
+    except (redis.RedisError, OSError):
+        logger.debug("Redis 连接池清理失败", exc_info=True)
 
 
 def redis_key(raw_key: str) -> str:
@@ -74,12 +86,20 @@ def redis_key(raw_key: str) -> str:
     return f"{REDIS_KEY_PREFIX}:{raw_key.lstrip(':')}"
 
 
-def session_key(token_hash: str) -> str:
-    return redis_key(f"session:{token_hash}")
-
-
 def revoked_session_key(token_hash: str) -> str:
     return redis_key(f"session:revoked:{token_hash}")
+
+
+def is_session_revoked(token_hash: str) -> bool:
+    client = get_redis()
+    if client is None:
+        return False
+    key = revoked_session_key(token_hash)
+    try:
+        return bool(client.exists(key))
+    except redis.RedisError as error:
+        handle_redis_error(error, "检查会话撤销标记", key, source=client)
+        return False
 
 
 def _redact_redis_key(key: str) -> str:
@@ -98,81 +118,25 @@ def _redact_redis_key(key: str) -> str:
     return ":".join([*parts[: session_index + 1], "<redacted>"])
 
 
-def _handle_redis_error(e: Exception, operation: str, key: str):
-    logger.error("%s 失败 key=%s: %s", operation, _redact_redis_key(key), e)
-    global _redis_client, _last_error_time
-    _redis_client = None
-    _last_error_time = time.time()
-
-
-def cache_session(token_hash: str, session_data: dict, ttl_seconds: int) -> None:
-    redis_client = get_redis()
-    if redis_client is None:
-        return
-
-    key = session_key(token_hash)
-    try:
-        redis_client.setex(key, ttl_seconds, json.dumps(session_data, default=str))
-    except redis.RedisError as e:
-        _handle_redis_error(e, "写入 Session 缓存", key)
-    except TypeError as e:
-        logger.error(f"Session 数据序列化失败: {e}")
-
-
-def get_cached_session(token_hash: str) -> dict | None:
-    return get_cached_session_state(token_hash).session_data
-
-
-def get_cached_session_state(token_hash: str) -> CachedSessionState:
-    redis_client = get_redis()
-    if redis_client is None:
-        return CachedSessionState(session_data=None, is_revoked=False)
-
-    cache_key = session_key(token_hash)
-    revoked_key = revoked_session_key(token_hash)
-    try:
-        cached_payload, revoked_marker = redis_client.mget([cache_key, revoked_key])
-        session_data = None
-        if cached_payload:
-            session_data = json.loads(cached_payload)
-        return CachedSessionState(
-            session_data=session_data,
-            is_revoked=bool(revoked_marker),
-        )
-    except redis.RedisError as e:
-        _handle_redis_error(e, "读取 Session 缓存状态", f"{cache_key},{revoked_key}")
-    except json.JSONDecodeError as e:
-        logger.error("Session 缓存数据损坏 key=%s: %s", _redact_redis_key(cache_key), e)
-        delete_cached_session(token_hash)
-
-    return CachedSessionState(session_data=None, is_revoked=False)
-
-
-def delete_cached_session(token_hash: str) -> None:
-    redis_client = get_redis()
-    if redis_client is None:
-        return
-
-    key = session_key(token_hash)
-    try:
-        redis_client.delete(key)
-    except redis.RedisError as e:
-        _handle_redis_error(e, "删除 Session 缓存", key)
-
-
-def delete_cached_sessions(token_hashes: Iterable[str]) -> None:
-    redis_client = get_redis()
-    if redis_client is None:
-        return
-
-    keys = [session_key(token_hash) for token_hash in token_hashes]
-    if not keys:
-        return
-
-    try:
-        redis_client.delete(*keys)
-    except redis.RedisError as e:
-        _handle_redis_error(e, "批量删除 Session 缓存", ",".join(keys))
+def handle_redis_error(
+    error: redis.RedisError, operation: str, key: str = "", *, source=None,
+) -> None:
+    """统一熔断，并忽略已被替换的旧连接/订阅迟到的错误。"""
+    global _redis_client, _retry_at
+    with _state_lock:
+        client = _redis_client
+        if source is not None and source is not client:
+            source_pool = getattr(source, "connection_pool", None)
+            if client is None or source_pool is None or source_pool is not client.connection_pool:
+                return
+        _redis_client = None
+        _retry_at = monotonic() + REDIS_COOLDOWN_SECONDS
+    logger.warning(
+        "%s 失败，Redis 熔断 %s 秒 key=%s: %s",
+        operation, REDIS_COOLDOWN_SECONDS, _redact_redis_key(key), error,
+    )
+    if client is not None:
+        _disconnect_pool(client.connection_pool, inuse_connections=False)
 
 
 def mark_revoked_sessions(token_hashes: Iterable[str], *, ttl_seconds: int) -> None:
@@ -193,7 +157,7 @@ def mark_revoked_sessions(token_hashes: Iterable[str], *, ttl_seconds: int) -> N
             pipeline.setex(key, ttl_seconds, "1")
         pipeline.execute()
     except redis.RedisError as e:
-        _handle_redis_error(e, "写入 Session 撤销标记", ",".join(keys))
+        handle_redis_error(e, "写入 Session 撤销标记", ",".join(keys), source=redis_client)
 
 
 def delete_keys_by_prefix(prefix: str) -> RedisDeleteByPrefixResult:
@@ -221,7 +185,7 @@ def delete_keys_by_prefix(prefix: str) -> RedisDeleteByPrefixResult:
         if batch:
             deleted_count += int(redis_client.delete(*batch) or 0)
     except redis.RedisError as e:
-        _handle_redis_error(e, "按前缀删除缓存", pattern)
+        handle_redis_error(e, "按前缀删除缓存", pattern, source=redis_client)
         return RedisDeleteByPrefixResult(success=False, deleted_count=deleted_count)
 
     return RedisDeleteByPrefixResult(success=True, deleted_count=deleted_count)

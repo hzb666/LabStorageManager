@@ -39,7 +39,7 @@ from app.core.constants import (
     USERNAME_MAX_LENGTH,
     USERNAME_MIN_LENGTH,
 )
-from app.core.redis import get_redis, redis_key
+from app.core.redis import get_redis, handle_redis_error, redis_key
 from app.core.request_utils import get_client_ip, get_request_id, get_request_is_cli
 from app.core.time_utils import utc_iso_str
 from app.database import DBSession, get_db
@@ -60,7 +60,6 @@ from app.services.rate_limit import enforce_rate_limit
 from app.services.search_matchers import build_applicant_id_subquery
 from app.services.session_service import (
     LOGIN_ATTEMPTS,
-    SessionCacheIdentity,
     SessionCreationRequest,
     _check_device_limit,
     _evict_oldest_session,
@@ -70,7 +69,6 @@ from app.services.session_service import (
     prune_login_attempts,
     stage_create_or_refresh_user_session,
     stage_revoke_user_sessions,
-    sync_session_cache,
 )
 from app.services.sql_utils import normalize_search_term
 from app.services.user_operation_logger import (
@@ -338,7 +336,8 @@ def _clear_failed_login(client_ip: str) -> None:
 
     try:
         redis_client.delete(_rate_limit_key(client_ip))
-    except redis.RedisError:
+    except redis.RedisError as error:
+        handle_redis_error(error, "清理登录限流", _rate_limit_key(client_ip), source=redis_client)
         if not settings.use_secure_runtime():
             _clear_failed_login_memory(client_ip)
 
@@ -374,7 +373,8 @@ def _check_rate_limit(client_ip: str) -> None:
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="Too many login attempts, please try again in 5 minutes"
                 )
-    except redis.RedisError:
+    except redis.RedisError as error:
+        handle_redis_error(error, "检查登录限流", key, source=redis_client)
         if settings.use_secure_runtime():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -397,7 +397,8 @@ def _record_failed_login(client_ip: str) -> None:
         current = redis_client.incr(key)
         if current == 1:
             redis_client.expire(key, LOGIN_WINDOW_SECONDS)
-    except redis.RedisError:
+    except redis.RedisError as error:
+        handle_redis_error(error, "记录登录限流", key, source=redis_client)
         if settings.use_secure_runtime():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -507,16 +508,8 @@ def _apply_login_post_commit_side_effects(
             finalize_revoked_sessions(evicted_token_hashes, reason="device_limit_evict")
         if relogin_token_hashes:
             finalize_revoked_sessions(relogin_token_hashes, reason="device_relogin")
-        sync_session_cache(
-            session=session,
-            identity=SessionCacheIdentity(
-                user_id=user.id,
-                username=user.username,
-                is_active=True,
-            ),
-        )
     except Exception:
-        # 会话缓存/SSE 通知属于提交后副作用，失败不应回滚登录主流程。
+        # SSE 通知属于提交后副作用，失败不应回滚登录主流程。
         logger.exception("Post-commit session side effects failed for login user_id=%s", user.id)
 
 
@@ -683,7 +676,6 @@ def _login_user(
         db=db,
         request=SessionCreationRequest(
             user_id=user.id,
-            username=user.username,
             device_id=login_request.device_id,
             device_name=login_request.device_name or UNKNOWN_DEVICE,
             ip_address=client_ip,

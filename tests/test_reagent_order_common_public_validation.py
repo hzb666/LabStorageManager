@@ -263,6 +263,7 @@ class ReagentOrderCommonPublicValidationTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException) as context:
             await approve_endpoint(
+                background_tasks=BackgroundTasks(),
                 order_id=order.id,
                 request=_build_request(f"/api/reagent-orders/{order.id}/approve"),
                 db=self.db,

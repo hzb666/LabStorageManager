@@ -355,7 +355,7 @@ async def test_real_http_timeout_after_commit_recovers_without_a_second_write(op
         listener.close()
 
 
-async def test_real_inventory_router_writes_inventory_and_audit_log_once_across_three_submissions(real_inventory_app, monkeypatch):
+async def test_real_inventory_router_replays_committed_response_while_notification_is_pending(real_inventory_app, monkeypatch):
     from app.api import inventory_extended_routes
     from app.models.inventory_operation_log import InventoryOperationAction
     from app.models.log_timeline import LogTimelineSourceTable
@@ -375,8 +375,8 @@ async def test_real_inventory_router_writes_inventory_and_audit_log_once_across_
             await asyncio.wait_for(entered.wait(), timeout=3)
             for _ in range(2):
                 duplicate = await client.post("/api/inventory/manual-add", json=payload, headers=headers())
-                assert duplicate.status_code == 409
-                assert duplicate.headers["x-error-code"] == "OPERATION_PENDING"
+                assert duplicate.status_code == 200
+                assert duplicate.headers["x-operation-id"] == OPERATION_ID
         finally:
             release.set()
             response = await first
@@ -435,13 +435,17 @@ async def test_committed_business_and_logs_are_never_repeated_after_finalization
         monkeypatch.setattr(mutation_operations, "_save_response", fail_receipt)
     async with client_for(application) as client:
         first = await client.post("/api/inventory/manual-add", json=INVENTORY_PAYLOAD, headers=headers())
-        assert first.status_code == (500 if failure == "notification" else 200)
+        assert first.status_code == 200
         for _ in range(2):
             retry = await client.post("/api/inventory/manual-add", json=INVENTORY_PAYLOAD, headers=headers())
-            assert retry.status_code == 409
-            assert retry.headers["x-error-code"] == "OPERATION_PENDING"
+            if failure == "notification":
+                assert retry.status_code == 200
+                assert retry.json() == first.json()
+            else:
+                assert retry.status_code == 409
+                assert retry.headers["x-error-code"] == "OPERATION_PENDING"
         status = await client.get(f"/api/mutation-operations/{OPERATION_ID}")
-    assert status.json() == {"state": "committed"}
+    assert status.json()["state"] == ("succeeded" if failure == "notification" else "committed")
     assert [len(rows) for rows in inventory_log_rows(engine)] == [1, 1, 1]
 
 
@@ -511,7 +515,6 @@ async def test_device_writes_replay_the_receipt_without_repeating_session_logs(o
     application.dependency_overrides[user_sessions.get_current_session] = current_session
     application.include_router(user_sessions.router, prefix="/api")
     application.include_router(router, prefix="/api")
-    monkeypatch.setattr(user_sessions, "sync_session_cache", lambda **_kwargs: None)
     monkeypatch.setattr(user_sessions, "finalize_revoked_sessions", lambda *_args, **_kwargs: None)
     method = "PATCH" if action == "rename" else "DELETE"
     path = "/api/users/me/sessions/" + ("" if action == "delete_all" else "2")

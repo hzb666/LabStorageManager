@@ -554,7 +554,8 @@ def _create_inventory_items_from_order(
     )
 
 
-async def _broadcast_inventory_projection_events(
+def _broadcast_inventory_projection_events(
+    background_tasks: BackgroundTasks,
     db: Session,
     items: list[Inventory],
     *,
@@ -566,10 +567,11 @@ async def _broadcast_inventory_projection_events(
     serialized_items = serialize_inventory_items(db, items)
     for item, serialized_item in zip(items, serialized_items):
         event_type = SSEEventType.INVENTORY_CREATED if created else SSEEventType.INVENTORY_UPDATED
-        await sse_manager.broadcast(SSERoom.INVENTORY, event_type, {"id": item.id, "item": serialized_item})
+        sse_manager.schedule_broadcast(background_tasks, SSERoom.INVENTORY, event_type, {"id": item.id, "item": serialized_item})
 
 
-async def _broadcast_common_shelf_events(
+def _broadcast_common_shelf_events(
+    background_tasks: BackgroundTasks,
     db: Session,
     items: list[CommonShelf],
     *,
@@ -590,7 +592,7 @@ async def _broadcast_common_shelf_events(
         payload["item"] = group_row
         payload["group_key"] = str(group_row["id"])
 
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.COMMON_SHELF,
         (
             SSEEventType.COMMON_SHELF_UPDATED
@@ -607,6 +609,7 @@ def _register_approval_routes(
 ) -> None:
     @router.post("/{order_id}/approve", dependencies=[Depends(require_admin)])
     async def approve_reagent_order(
+        background_tasks: BackgroundTasks,
         order_id: int,
         request: Request,
         db: DBSession,
@@ -647,7 +650,7 @@ def _register_approval_routes(
         db.commit()
         db.refresh(order)
         _clear_reagent_workflow_cache(search_cache, order, db)
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
             {"id": order_id, "item": _serialize_reagent_order(order, db)},
@@ -657,6 +660,7 @@ def _register_approval_routes(
 
     @router.post("/{order_id}/reject", dependencies=[Depends(require_admin)])
     async def reject_reagent_order(
+        background_tasks: BackgroundTasks,
         order_id: int,
         request: Request,
         db: DBSession,
@@ -691,7 +695,7 @@ def _register_approval_routes(
         db.commit()
         db.refresh(order)
         _clear_reagent_workflow_cache(search_cache, order, db)
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
             {"id": order_id, "item": _serialize_reagent_order(order, db)},
@@ -797,12 +801,12 @@ def _register_arrival_routes(
             db.commit()
             db.refresh(order)
             _clear_reagent_workflow_cache(search_cache, order, db)
-            await sse_manager.broadcast(
+            sse_manager.schedule_broadcast(background_tasks,
                 SSERoom.REAGENT_ORDERS,
                 SSEEventType.REAGENT_ORDER_UPDATED,
                 {"id": order_id, "item": _serialize_reagent_order(order, db)},
             )
-            await _broadcast_common_shelf_events(
+            _broadcast_common_shelf_events(background_tasks,
                 db,
                 common_shelf_items,
                 group_existed_before=group_existed_before,
@@ -863,13 +867,13 @@ def _register_arrival_routes(
         db.commit()
         db.refresh(order)
         _clear_reagent_workflow_cache(search_cache, order, db)
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_UPDATED,
             {"id": order_id, "item": _serialize_reagent_order(order, db)},
         )
         _clear_inventory_projection_cache(inventory_items)
-        await _broadcast_inventory_projection_events(db, inventory_items, created=True)
+        _broadcast_inventory_projection_events(background_tasks, db, inventory_items, created=True)
         enqueue_structure_cache_resolution(
             background_tasks,
             order.cas_number,
@@ -1164,7 +1168,8 @@ def _apply_arrived_items_stock_in(
 
 
 # 提交 stock-in 状态并触发缓存清理与事件广播，保证事务边界一致。
-async def _finalize_stock_in_order(
+def _finalize_stock_in_order(
+    background_tasks: BackgroundTasks,
     db: Session,
     *,
     order: ReagentOrder,
@@ -1174,7 +1179,7 @@ async def _finalize_stock_in_order(
     order.status = ReagentOrderStatus.STOCKED
     db.commit()
     _clear_reagent_workflow_cache(search_cache, order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_UPDATED,
         {"id": order_id, "item": _serialize_reagent_order(order, db)},
@@ -1228,6 +1233,7 @@ def _register_delete_order_route(
     # 删除试剂订单。
     @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_reagent_order(
+        background_tasks: BackgroundTasks,
         order_id: int,
         request: Request,
         db: DBSession,
@@ -1248,7 +1254,7 @@ def _register_delete_order_route(
         )
         db.commit()
         _clear_reagent_workflow_cache(search_cache, order, db, is_delete=True)
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.REAGENT_ORDERS,
             SSEEventType.REAGENT_ORDER_DELETED,
             {"id": order_id},
@@ -1312,9 +1318,9 @@ def _register_stock_in_route(
                 operator_id=current_user.id,
                 is_cli=get_request_is_cli(request),
             )
-            await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
+            _finalize_stock_in_order(background_tasks, db, order=order, order_id=order_id, search_cache=search_cache)
             _clear_inventory_projection_cache(inventory_items)
-            await _broadcast_inventory_projection_events(db, inventory_items, created=True)
+            _broadcast_inventory_projection_events(background_tasks, db, inventory_items, created=True)
             for item in inventory_items:
                 db.refresh(item)
             enqueue_structure_cache_resolution(
@@ -1353,9 +1359,9 @@ def _register_stock_in_route(
             operator_id=current_user.id,
             is_cli=get_request_is_cli(request),
         )
-        await _finalize_stock_in_order(db, order=order, order_id=order_id, search_cache=search_cache)
+        _finalize_stock_in_order(background_tasks, db, order=order, order_id=order_id, search_cache=search_cache)
         _clear_inventory_projection_cache(target_items)
-        await _broadcast_inventory_projection_events(db, target_items, created=False)
+        _broadcast_inventory_projection_events(background_tasks, db, target_items, created=False)
         enqueue_structure_cache_resolution(
             background_tasks,
             order.cas_number,

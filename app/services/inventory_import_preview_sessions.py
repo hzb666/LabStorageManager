@@ -13,7 +13,7 @@ from pathlib import Path
 import redis
 
 from app.core.constants import EXCEL_FILE_MAX_BYTES, IMPORT_PREVIEW_SESSION_TTL_SECONDS
-from app.core.redis import get_redis, redis_key
+from app.core.redis import get_redis, handle_redis_error, redis_key
 from app.core.time_utils import get_utc_now, parse_utc_datetime, utc_iso_str
 
 logger = logging.getLogger(__name__)
@@ -273,7 +273,7 @@ def create_inventory_import_preview_session(
         try:
             redis_client.setex(key, IMPORT_PREVIEW_SESSION_TTL_SECONDS, json.dumps(payload, ensure_ascii=False))
         except redis.RedisError as exc:
-            logger.warning("Preview session fallback to local memory: %s", exc)
+            handle_redis_error(exc, "保存导入预览", key, source=redis_client)
 
     return token
 
@@ -294,6 +294,8 @@ def consume_inventory_import_preview_session(
             else:
                 raw_payload = redis_client.eval(_GETDEL_LUA, 1, key)
         except (redis.RedisError, AttributeError, TypeError) as exc:
+            if isinstance(exc, redis.RedisError):
+                handle_redis_error(exc, "消费导入预览", key, source=redis_client)
             logger.warning("Consume preview session fallback to local memory: %s", exc)
             raw_payload = None
 
@@ -326,8 +328,8 @@ def discard_inventory_import_preview_session(token: str, *, file_path: str | Non
                 if managed_file_path is None and raw_payload is not None:
                     managed_file_path = _extract_file_path_from_payload(raw_payload)
                 redis_client.delete(key)
-        except redis.RedisError:
-            pass
+        except redis.RedisError as error:
+            handle_redis_error(error, "丢弃导入预览", pattern, source=redis_client)
 
     _delete_preview_metadata(token)
     _delete_preview_file(managed_file_path)
@@ -365,8 +367,8 @@ def reset_inventory_import_preview_sessions() -> None:
                 if token:
                     tokens.append(str(token))
                 redis_client.delete(key)
-        except redis.RedisError:
-            pass
+        except redis.RedisError as error:
+            handle_redis_error(error, "清理导入预览", pattern, source=redis_client)
 
     for token in tokens:
         _delete_preview_metadata(token)

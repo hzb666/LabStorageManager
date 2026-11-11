@@ -11,7 +11,6 @@ from starlette.requests import Request
 
 from app.api import users as users_api
 from app.core import auth
-from app.core.redis import CachedSessionState
 from app.core.time_utils import get_utc_now
 from app.models.user import User, UserRole, UserUpdate
 from app.models.user_session import UserSession
@@ -35,14 +34,6 @@ def _build_request(*, token: str = "token-value", client_ip: str = "127.0.0.1") 
             "client": (client_ip, 12345),
         }
     )
-
-
-def _cache_state(
-    session_data: dict | None = None,
-    *,
-    is_revoked: bool = False,
-) -> CachedSessionState:
-    return CachedSessionState(session_data=session_data, is_revoked=is_revoked)
 
 
 class AuthSessionRegressionTests(unittest.TestCase):
@@ -90,8 +81,7 @@ class AuthSessionRegressionTests(unittest.TestCase):
                     "app.core.auth.decode_token",
                     return_value={"type": "access", "sub": str(user.id), "username_version": 1},
                 ),
-                patch("app.core.auth.get_cached_session_state", return_value=_cache_state()),
-                patch("app.core.auth.sync_session_cache"),
+                patch("app.core.auth.is_session_revoked", return_value=False),
             ):
                 resolved_user, resolved_session = auth.resolve_current_session(
                     request=_build_request(token=token),
@@ -106,123 +96,6 @@ class AuthSessionRegressionTests(unittest.TestCase):
                 db.dirty,
                 "调度后台活跃度刷新后，不应让当前请求的 ORM Session 残留待 flush 的 user_sessions 更新",
             )
-
-    def test_resolve_current_session_falls_back_to_db_when_cache_is_stale(self) -> None:
-        token = "token-value"
-        token_hash = auth._compute_token_hash(token)
-        now_utc = get_utc_now()
-        user = User(
-            id=1,
-            username="admin",
-            full_name="管理员",
-            role=UserRole.ADMIN,
-            is_active=True,
-            password_hash="hashed",
-            username_version=1,
-        )
-        db_session = UserSession(
-            id=10,
-            user_id=1,
-            device_id="device-1",
-            device_name="Chrome",
-            ip_address="127.0.0.1",
-            last_ip_address="127.0.0.1",
-            user_agent="ua",
-            token_hash=token_hash,
-            last_active_at=now_utc,
-            expires_at=now_utc + timedelta(hours=1),
-        )
-        fake_db = MagicMock()
-        fake_db.get.return_value = user
-        fake_db.exec.return_value = _FakeExecResult((user, db_session))
-
-        with (
-            patch("app.core.auth.decode_token", return_value={"type": "access", "sub": "1", "username_version": 1}),
-            patch(
-                "app.core.auth.get_cached_session_state",
-                return_value=_cache_state(
-                    {
-                        "session_id": 10,
-                        "user_id": 1,
-                        "device_id": "device-1",
-                        "device_name": "Chrome",
-                        "ip_address": "127.0.0.1",
-                        "last_ip_address": "127.0.0.1",
-                        "user_agent": "ua",
-                        "expires_at": (now_utc - timedelta(minutes=1)).isoformat(),
-                        "last_active_at": now_utc.isoformat(),
-                    }
-                ),
-            ),
-            patch("app.core.auth.delete_cached_session") as delete_cached_session,
-            patch("app.core.auth.sync_session_cache") as sync_session_cache,
-        ):
-            resolved_user, resolved_session = auth.resolve_current_session(
-                request=_build_request(token=token),
-                background_tasks=None,
-                db=fake_db,
-            )
-
-        self.assertEqual(resolved_user.id, user.id)
-        self.assertEqual(resolved_session.id, db_session.id)
-        delete_cached_session.assert_called_once_with(token_hash)
-        sync_session_cache.assert_called_once()
-
-    def test_is_token_session_active_falls_back_to_db_when_cache_is_stale(self) -> None:
-        token_hash = "token-hash"
-        now_utc = get_utc_now()
-        db_session = UserSession(
-            id=10,
-            user_id=1,
-            device_id="device-1",
-            device_name="Chrome",
-            ip_address="127.0.0.1",
-            last_ip_address="127.0.0.1",
-            user_agent="ua",
-            token_hash=token_hash,
-            last_active_at=now_utc,
-            expires_at=now_utc + timedelta(hours=1),
-        )
-        user = User(
-            id=1,
-            username="admin",
-            full_name="管理员",
-            role=UserRole.ADMIN,
-            is_active=True,
-            password_hash="hashed",
-            username_version=1,
-        )
-        fake_db = MagicMock()
-        fake_db.exec.return_value = _FakeExecResult((user, db_session))
-        fake_db.get.return_value = user
-        fake_session_ctx = MagicMock()
-        fake_session_ctx.__enter__.return_value = fake_db
-        fake_session_ctx.__exit__.return_value = False
-
-        with (
-            patch(
-                "app.core.auth.get_cached_session_state",
-                return_value=_cache_state(
-                    {
-                        "session_id": 10,
-                        "user_id": 1,
-                        "device_id": "device-1",
-                        "device_name": "Chrome",
-                        "ip_address": "127.0.0.1",
-                        "last_ip_address": "127.0.0.1",
-                        "user_agent": "ua",
-                        "expires_at": (now_utc - timedelta(minutes=1)).isoformat(),
-                        "last_active_at": now_utc.isoformat(),
-                    }
-                ),
-            ),
-            patch("app.core.auth.delete_cached_session") as delete_cached_session,
-            patch("app.core.auth.Session", return_value=fake_session_ctx),
-        ):
-            is_active = auth.is_token_session_active(token_hash, client_ip="127.0.0.1")
-
-        self.assertTrue(is_active)
-        delete_cached_session.assert_called_once_with(token_hash)
 
 
 class UpdateUserRegressionTests(unittest.TestCase):

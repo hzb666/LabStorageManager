@@ -38,7 +38,7 @@
 
 ### Redis
 
-- 用途：会话缓存、登录限流和 SSE pub/sub。
+- 用途：会话撤销标记、登录限流和 SSE pub/sub。
 - 落点：`app/core/redis.py`、`app/services/sse_redis.py`
 - 特点：具备降级能力，不可用时部分功能仍可继续。
 

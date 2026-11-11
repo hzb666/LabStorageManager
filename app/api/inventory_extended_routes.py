@@ -382,7 +382,8 @@ def _finalize_source_order_if_resolved(
     return order
 
 
-async def _publish_resolved_source_order(
+def _publish_resolved_source_order(
+    background_tasks: BackgroundTasks,
     db: Session,
     order: ReagentOrder | None,
 ) -> None:
@@ -393,7 +394,7 @@ async def _publish_resolved_source_order(
     from app.api.reagent_orders_workflow import _serialize_reagent_order
 
     _clear_reagent_order_cache(order, db)
-    await sse_manager.broadcast(
+    sse_manager.schedule_broadcast(background_tasks,
         SSERoom.REAGENT_ORDERS,
         SSEEventType.REAGENT_ORDER_UPDATED,
         {"id": order.id, "item": _serialize_reagent_order(order, db)},
@@ -516,6 +517,7 @@ def _register_inventory_status_route(
 ) -> None:
     @router.post("/{inventory_id}/toggle-not-in-stock", response_model=InventoryResponse)
     async def toggle_not_in_stock(
+        background_tasks: BackgroundTasks,
         inventory_id: int,
         request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
@@ -573,7 +575,7 @@ def _register_inventory_status_route(
         _clear_inventory_cache(search_cache, list_cache_prefix, items=item)
 
         response = _serialize_inventory_item(db, item)
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.INVENTORY,
             SSEEventType.INVENTORY_UPDATED,
             {"id": inventory_id, "item": response},
@@ -589,6 +591,7 @@ def _register_pending_stockin_route(
 ) -> None:
     @router.post("/{inventory_id}/complete-stockin", response_model=InventoryResponse)
     async def complete_pending_stockin(
+        background_tasks: BackgroundTasks,
         inventory_id: int,
         payload: PendingStockInRequest,
         request: Request,
@@ -627,13 +630,13 @@ def _register_pending_stockin_route(
 
         _clear_inventory_cache(search_cache, list_cache_prefix, items=item)
         serialized_item = _serialize_inventory_item(db, item)
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.INVENTORY,
             SSEEventType.INVENTORY_UPDATED,
             {"id": item.id, "item": serialized_item},
             actor_client_id=get_sse_client_id(request),
         )
-        await _publish_resolved_source_order(db, resolved_order)
+        _publish_resolved_source_order(background_tasks, db, resolved_order)
         return serialized_item
 
     class DiscardPendingStockinRequest(BaseModel):
@@ -641,6 +644,7 @@ def _register_pending_stockin_route(
 
     @router.delete("/{inventory_id}/discard-pending-stockin")
     async def discard_pending_stockin(
+        background_tasks: BackgroundTasks,
         inventory_id: int,
         payload: DiscardPendingStockinRequest,
         request: Request,
@@ -680,7 +684,7 @@ def _register_pending_stockin_route(
         )
         db.commit()
         _clear_inventory_cache(search_cache, list_cache_prefix, items=deleted_item)
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.INVENTORY,
             SSEEventType.INVENTORY_DELETED,
             {"id": inventory_id},
@@ -725,7 +729,7 @@ def _register_manual_and_dashboard_routes(
         serialized_items = serialize_inventory_items(db, created_items)
         actor_client_id = get_sse_client_id(request)
         for ci, serialized_item in zip(created_items, serialized_items):
-            await sse_manager.broadcast(
+            sse_manager.schedule_broadcast(background_tasks,
                 SSERoom.INVENTORY,
                 SSEEventType.INVENTORY_CREATED,
                 {"id": ci.id, "item": serialized_item},
@@ -1243,6 +1247,7 @@ def _register_borrow_route(
     # 借用库存项。
     @router.post("/{inventory_id}/borrow", response_model=InventoryResponse)
     async def borrow_item(
+        background_tasks: BackgroundTasks,
         inventory_id: int,
         request: Request,
         current_user: Annotated[User, Depends(get_current_user)],
@@ -1313,7 +1318,7 @@ def _register_borrow_route(
         _clear_inventory_cache(search_cache, list_cache_prefix, items=item)
 
         response = _serialize_inventory_item(db, item)
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.INVENTORY,
             SSEEventType.INVENTORY_BORROWED,
             {"id": inventory_id, "item": response},
@@ -1330,6 +1335,7 @@ def _register_return_route(
 ) -> None:
     @router.post("/{inventory_id}/return-delete", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_zero_remaining_borrowed_item(
+        background_tasks: BackgroundTasks,
         inventory_id: int,
         return_data: InventoryBorrowReturn,
         request: Request,
@@ -1355,7 +1361,7 @@ def _register_return_route(
         db.commit()
         _clear_inventory_cache(search_cache, list_cache_prefix, items=item, is_delete=True)
 
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.INVENTORY,
             SSEEventType.INVENTORY_DELETED,
             {"id": inventory_id},
@@ -1365,6 +1371,7 @@ def _register_return_route(
     # 归还库存项。
     @router.post("/{inventory_id}/return", response_model=dict)
     async def return_item(
+        background_tasks: BackgroundTasks,
         inventory_id: int,
         return_data: InventoryBorrowReturn,
         request: Request,
@@ -1395,7 +1402,7 @@ def _register_return_route(
         _clear_inventory_cache(search_cache, list_cache_prefix, items=item)
         response = _serialize_inventory_item(db, item)
 
-        await sse_manager.broadcast(
+        sse_manager.schedule_broadcast(background_tasks,
             SSERoom.INVENTORY,
             SSEEventType.INVENTORY_RETURNED,
             {"id": inventory_id, "item": response},

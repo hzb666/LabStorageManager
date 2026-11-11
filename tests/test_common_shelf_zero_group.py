@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from fastapi import HTTPException, status
+from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 from starlette.requests import Request
@@ -135,6 +135,7 @@ class CommonShelfZeroGroupTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as exc_info:
             asyncio.run(
                 delete_common_shelf_group(
+                    BackgroundTasks(),
                     group_key,
                     self._request(),
                     self.normal_user,
@@ -157,6 +158,7 @@ class CommonShelfZeroGroupTests(unittest.TestCase):
 
         response = asyncio.run(
             delete_common_shelf_group(
+                    BackgroundTasks(),
                 group_key,
                 self._request(),
                 self.normal_user,

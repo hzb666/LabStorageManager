@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from sqlalchemy.pool import StaticPool
@@ -128,7 +128,7 @@ class ReagentOrderStockInTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.reagent_orders_workflow._clear_inventory_projection_cache"),
             patch(
                 "app.api.reagent_orders_workflow._broadcast_inventory_projection_events",
-                new=AsyncMock(),
+                new=Mock(),
             ),
             patch("app.api.reagent_orders_workflow.enqueue_structure_cache_resolution"),
             patch.object(reagent_orders_workflow.sse_manager, "broadcast", new=AsyncMock()),
@@ -179,6 +179,7 @@ class ReagentOrderStockInTests(unittest.IsolatedAsyncioTestCase):
             patch.object(inventory_extended_routes.sse_manager, "broadcast", new=AsyncMock()),
         ):
             return await self.pending_stock_in_endpoint(
+                background_tasks=BackgroundTasks(),
                 inventory_id=item.id,
                 payload=payload,
                 request=_build_request(f"/api/inventory/{item.id}/complete-stockin"),

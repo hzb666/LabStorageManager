@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.requests import Request
@@ -171,6 +171,7 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
             patch.object(inventory_extended_routes.sse_manager, "broadcast", new=AsyncMock()),
         ):
             return await self.borrow_endpoint(
+                background_tasks=BackgroundTasks(),
                 inventory_id=self.item.id,
                 request=_build_request(),
                 current_user=user or self.user,
@@ -184,6 +185,7 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
             patch.object(inventory_extended_routes.sse_manager, "broadcast", new=AsyncMock()),
         ):
             return await self.return_endpoint(
+                background_tasks=BackgroundTasks(),
                 inventory_id=self.item.id,
                 return_data=return_data,
                 request=_build_request(f"/api/inventory/{self.item.id}/return"),
@@ -198,6 +200,7 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
             patch.object(inventory_extended_routes.sse_manager, "broadcast", new=AsyncMock()),
         ):
             await self.return_delete_endpoint(
+                background_tasks=BackgroundTasks(),
                 inventory_id=self.item.id,
                 return_data=return_data,
                 request=_build_request(f"/api/inventory/{self.item.id}/return-delete"),
@@ -211,6 +214,7 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
             patch.object(inventory_extended_routes.sse_manager, "broadcast", new=AsyncMock()),
         ):
             return await self.toggle_not_in_stock_endpoint(
+                background_tasks=BackgroundTasks(),
                 inventory_id=self.item.id,
                 request=_build_request(
                     f"/api/inventory/{self.item.id}/toggle-not-in-stock"
@@ -355,6 +359,7 @@ class BorrowAtomicityTests(unittest.IsolatedAsyncioTestCase):
             patch.object(self.db, "add", side_effect=_failing_add),self.assertRaises(RuntimeError)
         ):
             await self.borrow_endpoint(
+                background_tasks=BackgroundTasks(),
                 inventory_id=self.item.id,
                 request=_build_request(),
                 current_user=self.user,
