@@ -1,5 +1,5 @@
 /** DataTable 表体组件。 */
-import React, { memo, useCallback } from 'react'
+import React, { memo, useCallback, useRef } from 'react'
 import { flexRender } from '@tanstack/react-table'
 import type { Row, Cell } from '@tanstack/react-table'
 import type { Virtualizer } from '@tanstack/react-virtual'
@@ -44,6 +44,7 @@ function InnerRowComponent<TData>({
   onRowClick?: (e: React.MouseEvent<HTMLDivElement>, row: Row<TData>) => void
 }>) {
   const original = row.original
+  const pointerStart = useRef<{ x: number; y: number } | null>(null)
 
   const noteValue = noteField
     ? ((original as Record<string, unknown>)?.[noteField] as string | undefined)
@@ -54,6 +55,14 @@ function InnerRowComponent<TData>({
   // 点击行时优先走外部点击处理，缺省时使用默认展开切换。
   const handleToggle = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      const start = pointerStart.current
+      pointerStart.current = null
+      if (e.detail > 0 && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 3) {
+        const selection = e.currentTarget.ownerDocument.getSelection()
+        // Only suppress the click that finishes a text-selection drag in this row.
+        if (selection && !selection.isCollapsed && selection.rangeCount
+          && selection.getRangeAt(0).intersectsNode(e.currentTarget)) return
+      }
       if (onRowClick) {
         onRowClick(e, row)
       } else if (renderExpandedRow && row.getCanExpand()) {
@@ -71,6 +80,10 @@ function InnerRowComponent<TData>({
           renderExpandedRow && 'cursor-pointer',
           isExpanded ? 'border-transparent' : 'border-border'
         )}
+        onPointerDownCapture={(e) => {
+          pointerStart.current = e.button === 0 ? { x: e.clientX, y: e.clientY } : null
+        }}
+        onPointerCancelCapture={() => { pointerStart.current = null }}
         onClick={handleToggle}
       >
         {row.getVisibleCells().map((cell: Cell<TData, unknown>, index: number) => {
