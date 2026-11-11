@@ -4,8 +4,9 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import case
-from sqlmodel import Session
+from sqlmodel import Session, select
 
+from app.models.chemical_name_map import ChemicalNameMap
 from app.models.inventory import Inventory
 from app.services.api_utils import serialize_inventory_items
 from app.services.cas_utils import normalize_cas
@@ -16,6 +17,15 @@ from app.services.procedure_inventory_models import (
 )
 from app.services.search_matchers import build_chunked_in_clause
 from app.services.structure_inventory_summary import normalized_inventory_cas_expr
+
+
+def common_cas_numbers(db: Session, cas_numbers: list[str]) -> set[str]:
+    """Use the same CAS master list as the common-public order workflow."""
+    if not cas_numbers:
+        return set()
+    return set(db.exec(select(ChemicalNameMap.cas_number).where(
+        ChemicalNameMap.cas_number.in_(cas_numbers),
+    )).all())
 
 
 def load_inventory_groups(

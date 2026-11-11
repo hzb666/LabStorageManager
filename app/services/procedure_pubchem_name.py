@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.services.cas_utils import normalize_cas, validate_cas_format
+from app.services.procedure_cas_defaults import prioritize_default_cas
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ class PubChemNameResolver:
         if not cas_to_cids:
             cas_to_cids = self._load_cids_cas_synonyms(cids)
         cas_numbers = list(cas_to_cids)
+        if len(cids) == 1:
+            cas_numbers = prioritize_default_cas(cas_numbers, cid=cids[0])
         if len(cas_numbers) != 1:
             reason = "PubChem 未确认 CAS" if not cas_numbers else "PubChem 返回多个 CAS"
             return PubChemNameResolution(
@@ -68,7 +71,7 @@ class PubChemNameResolver:
             name=name,
             cas_number=cas_number,
             cas_numbers=[cas_number],
-            cid=cas_to_cids[cas_number][0],
+            cid=cas_to_cids.get(cas_number, cids)[0],
             status="resolved",
         )
 

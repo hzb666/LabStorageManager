@@ -19,6 +19,11 @@ from app.services.procedure_inventory_search import (
     resolve_procedure_inventory,
     search_procedure_inventory,
 )
+from app.services.procedure_report import (
+    ProcedureReportData,
+    ProcedureReportRequest,
+    build_procedure_report,
+)
 from app.services.rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/procedure-inventory-search", tags=["Procedure Inventory Search"])
@@ -58,6 +63,16 @@ class ProcedureInventoryResolveRequest(BaseModel):
     message: str | None = Field(default=None, max_length=300)
     formatted_text: str = Field(min_length=0, max_length=PROCEDURE_TEXT_MAX_CHARS)
     reagents: list[ProcedureLLMReagent] = Field(default_factory=list, max_length=50)
+
+
+@router.post("/report", response_model=ProcedureReportData)
+def get_procedure_report(
+    payload: ProcedureReportRequest,
+    current_user: NonPublicUser,
+    db: DBSession,
+) -> ProcedureReportData:
+    _enforce_procedure_rate_limit(scope="procedure_inventory_report", user_id=current_user.id)
+    return build_procedure_report(db, payload.cas_numbers, payload.names, payload.name_aliases)
 
 
 @router.post("/extract", response_model=ProcedureInventoryExtractionResult)

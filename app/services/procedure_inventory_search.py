@@ -11,13 +11,13 @@ from sqlmodel import Session
 from app.core.api_errors import ApiErrorCode, api_error
 from app.core.config import settings
 from app.services.llm_usage_logger import record_procedure_llm_usage
+from app.services.procedure_cas_defaults import INORGANIC_CAS_BY_CID, prioritize_default_cas
 from app.services.procedure_inventory_analysis import (
     build_analysis_items,
     build_skipped_analysis_items,
     format_procedure_text,
-    merge_common_reagent_mentions,
 )
-from app.services.procedure_inventory_lookup import unique_cas_order
+from app.services.procedure_inventory_lookup import common_cas_numbers, unique_cas_order
 from app.services.procedure_inventory_models import (
     ProcedureInventoryExtractionResult,
     ProcedureInventorySearchResult,
@@ -29,8 +29,8 @@ from app.services.procedure_inventory_models import (
 from app.services.procedure_llm_extractor import (
     extract_reagents_with_llm,
     filter_extracted_reagents,
-    load_common_names,
 )
+from app.services.procedure_local_data import local_name_cas_numbers
 from app.services.procedure_pubchem_name import PubChemNameResolution, PubChemNameResolver
 
 logger = logging.getLogger(__name__)
@@ -56,10 +56,8 @@ def extract_procedure_inventory(
 ) -> ProcedureInventoryExtractionResult:
     _ensure_llm_ready()
     formatted_text = format_procedure_text(text)
-    common_names = load_common_names(db)
     extraction = extract_reagents_with_llm(
         formatted_text,
-        common_names,
         record_usage=lambda payload, attempt: record_procedure_llm_usage(
             db,
             user_id=user_id,
@@ -75,15 +73,10 @@ def extract_procedure_inventory(
             message=extraction.rejection_reason or "文本不像化学实验步骤，未执行试剂查询",
         )
 
-    extraction.reagents = merge_common_reagent_mentions(
-        formatted_text,
-        extraction.reagents,
-        common_names,
-    )
     return ProcedureInventoryExtractionResult(
         formatted_text=formatted_text,
         reagents=extraction.reagents,
-        analysis_items=build_skipped_analysis_items(extraction.reagents, common_names),
+        analysis_items=build_skipped_analysis_items(extraction.reagents),
     )
 
 
@@ -97,27 +90,55 @@ def resolve_procedure_inventory(
     if extraction.rejected:
         return _rejected_result(extraction.message, extraction.formatted_text)
 
-    common_names = load_common_names(db)
+    for reagent in extraction.reagents:
+        reagent.validate_equivalent_source(extraction.formatted_text)
     llm_extraction = ProcedureLLMExtraction(
         is_experimental_procedure=True,
         reagents=extraction.reagents,
     )
-    candidates = filter_extracted_reagents(extraction.reagents, common_names)
+    candidates = filter_extracted_reagents(extraction.reagents)
     if not candidates:
-        analysis_items = build_skipped_analysis_items(extraction.reagents, common_names)
+        analysis_items = build_skipped_analysis_items(extraction.reagents)
         return ProcedureInventorySearchResult(
             formatted_text=extraction.formatted_text,
-            message="未识别到需要查询库存的非通用试剂",
+            message="未识别到可解析 CAS 的具体物料",
             analysis_items=analysis_items,
         )
 
-    resolved, unresolved = _resolve_candidates_with_pubchem(candidates)
+    local_matches = local_name_cas_numbers(db, [
+        name for candidate in candidates
+        for name in (candidate.name, candidate.pubchem_query_name, candidate.chinese_name)
+        if name
+    ])
+    resolved = []
+    missing = []
+    for candidate in candidates:
+        matches = prioritize_default_cas(unique_cas_order([
+            *local_matches.get(candidate.name, []),
+            *local_matches.get(candidate.pubchem_query_name or "", []),
+            *local_matches.get(candidate.chinese_name or "", []),
+        ]))
+        if matches:
+            resolved.append(ProcedureResolvedReagent(
+                name=candidate.name, query_name=candidate.pubchem_query_name,
+                cas_number=matches[0], cas_numbers=matches[:MAX_CAS_CANDIDATES_PER_REAGENT],
+                reason="本地名称匹配" if len(matches) == 1 else "本地名称对应多个候选 CAS",
+            ))
+        else:
+            missing.append(candidate)
+    external, unresolved = _resolve_candidates_with_pubchem(missing) if missing else ([], [])
+    resolved.extend(external)
     cas_order = unique_cas_order([
         cas_number
         for item in resolved
         for cas_number in item.cas_numbers
     ])
-    analysis_items = build_analysis_items(extraction.reagents, common_names, resolved, unresolved)
+    common_cas = common_cas_numbers(db, cas_order)
+    for item in resolved:
+        if item.pubchem_cid in INORGANIC_CAS_BY_CID and item.cas_number in common_cas:
+            item.cas_numbers = [item.cas_number]
+    cas_order = unique_cas_order([cas for item in resolved for cas in item.cas_numbers if cas not in common_cas])
+    analysis_items = build_analysis_items(extraction.reagents, resolved, unresolved, common_cas)
     _log_search_result(user_id, llm_extraction, resolved, unresolved, cas_order)
     return ProcedureInventorySearchResult(
         formatted_text=extraction.formatted_text,
