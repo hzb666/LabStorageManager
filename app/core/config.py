@@ -11,7 +11,12 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 
-from app.core.constants import RSA_KEY_SIZE_BITS, RSA_PUBLIC_EXPONENT
+from app.core.constants import (
+    REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+    REDIS_SOCKET_TIMEOUT_SECONDS,
+    RSA_KEY_SIZE_BITS,
+    RSA_PUBLIC_EXPONENT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +54,7 @@ class Settings(BaseSettings):
 
     # 应用
     app_name: str = "Lab Storage Manager"
-    app_version: str = "1.2.0"
+    app_version: str = "1.4.0"
     cache_version: str = ""
     maintenance_mode: Literal["off", "on", "full"] = Field(
         default="off",
@@ -159,7 +164,7 @@ class Settings(BaseSettings):
     max_total_announcements: int = Field(default=10, description="Max announcements per admin")
     max_visible_announcements: int = Field(default=5, description="Max visible announcements per admin")
 
-    # Redis 设置（用于会话缓存）
+    # Redis 设置（用于撤销标记、限流和 SSE）
     redis_host: str = Field(default="localhost", description="Redis host")
     redis_port: int = Field(default=6379, description="Redis port")
     redis_db: int = Field(default=0, description="Redis database number")
@@ -169,6 +174,14 @@ class Settings(BaseSettings):
         default=100,
         ge=1,
         description="Maximum Redis connections per application process",
+    )
+    redis_socket_connect_timeout: float = Field(
+        default=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS, gt=0, le=30,
+        description="Redis socket connection timeout in seconds",
+    )
+    redis_socket_timeout: float = Field(
+        default=REDIS_SOCKET_TIMEOUT_SECONDS, gt=0, le=30,
+        description="Redis command socket timeout in seconds",
     )
 
     # 化学结构缓存与检索
@@ -198,7 +211,7 @@ class Settings(BaseSettings):
         description="Retry count for PubChem 429, 5xx, and timeout failures",
     )
     chem_pubchem_user_agent: str = Field(
-        default="LabStorageManager/1.2.0",
+        default="LabStorageManager/1.4.0",
         description="User-Agent sent to PubChem PUG-REST",
     )
     chem_resolution_scheduler_enabled: bool = Field(
@@ -300,9 +313,9 @@ class Settings(BaseSettings):
         description="Retry count after parseable HTTP responses with invalid LLM JSON",
     )
     procedure_search_rate_limit_count: int = Field(
-        default=10,
+        default=5,
         ge=1,
-        description="Maximum procedure extraction or resolution requests per user and window",
+        description="Maximum requests per user and window for each procedure stage: extract, resolve, report",
     )
     procedure_search_rate_limit_window_seconds: int = Field(
         default=300,
@@ -616,7 +629,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance"""
     settings = Settings()
-    settings.app_version = settings.app_version.strip() or "1.2.0"
+    settings.app_version = settings.app_version.strip() or "1.4.0"
     settings.cache_version = settings.cache_version.strip() or settings.app_version
 
     # 生产环境禁止 HS256，避免对称密钥模式的降级风险
