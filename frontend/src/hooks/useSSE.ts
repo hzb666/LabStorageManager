@@ -21,6 +21,7 @@ export interface SSEEventEnvelope {
   data: Record<string, unknown>
   timestamp?: string
   origin?: string
+  seq_source?: string
   actor_client_id?: string
 }
 
@@ -97,16 +98,16 @@ function useStableSSEConfig(args: {
 }
 
 function useResetRoomTracking(args: {
-  lastOriginByRoomRef: RefObject<Record<string, string>>
+  lastSequenceSourceByRoomRef: RefObject<Record<string, string>>
   lastSeqByRoomRef: RefObject<Record<string, number>>
   roomsKey: string
 }) {
-  const { lastOriginByRoomRef, lastSeqByRoomRef, roomsKey } = args
+  const { lastSequenceSourceByRoomRef, lastSeqByRoomRef, roomsKey } = args
 
   useEffect(() => {
-    lastOriginByRoomRef.current = {}
+    lastSequenceSourceByRoomRef.current = {}
     lastSeqByRoomRef.current = {}
-  }, [lastOriginByRoomRef, lastSeqByRoomRef, roomsKey])
+  }, [lastSequenceSourceByRoomRef, lastSeqByRoomRef, roomsKey])
 }
 
 function buildEventsUrl(args: {
@@ -140,47 +141,25 @@ function buildLastSeqSnapshot(args: {
 }
 
 function processSeqByConnection(args: {
-  lastOriginByRoomRef: RefObject<Record<string, string>>
+  lastSequenceSourceByRoomRef: RefObject<Record<string, string>>
   lastSeqByRoomRef: RefObject<Record<string, number>>
-  origin?: string
+  sequenceSource?: string
   room: string
   seq: number
 }): SeqProcessResult {
-  const { lastOriginByRoomRef, lastSeqByRoomRef, origin, room, seq } = args
-  const previousOrigin = lastOriginByRoomRef.current[room]
+  const { lastSequenceSourceByRoomRef, lastSeqByRoomRef, sequenceSource, room, seq } = args
+  const previousSource = lastSequenceSourceByRoomRef.current[room]
   const previousSeq = lastSeqByRoomRef.current[room] ?? 0
-  const nextOrigin = typeof origin === 'string' && origin ? origin : undefined
-  const originChanged = Boolean(nextOrigin && previousOrigin && nextOrigin !== previousOrigin)
-
-  if (nextOrigin) {
-    lastOriginByRoomRef.current = {
-      ...lastOriginByRoomRef.current,
-      [room]: nextOrigin,
-    }
+  const sourceChanged = Boolean(sequenceSource && previousSource && sequenceSource !== previousSource)
+  if (!sourceChanged && seq <= previousSeq) {
+    return { hasGap: false, isDuplicateOrOld: true }
   }
-
-  if (originChanged && seq <= previousSeq) {
-    return {
-      hasGap: true,
-      isDuplicateOrOld: false,
-    }
-  }
-
-  if (seq <= previousSeq) {
-    return {
-      hasGap: false,
-      isDuplicateOrOld: true,
-    }
-  }
-
-  // 只有确认是可接受的新事件后，才推进该房间的序号水位。
-  lastSeqByRoomRef.current = {
-    ...lastSeqByRoomRef.current,
-    [room]: seq,
-  }
-
+  if (sequenceSource) lastSequenceSourceByRoomRef.current[room] = sequenceSource
+  lastSeqByRoomRef.current[room] = seq
+  // Redis/local counters are independent. Reset the watermark and refresh the
+  // snapshot once; subsequent events from the new source can be accepted.
   return {
-    hasGap: previousSeq > 0 && seq > previousSeq + 1,
+    hasGap: sourceChanged || (previousSeq > 0 && seq > previousSeq + 1),
     isDuplicateOrOld: false,
   }
 }
@@ -286,7 +265,7 @@ function attachAuthInvalidListener(args: {
 function attachBusinessEventListeners(args: {
   es: EventSource
   handlersRef: RefObject<Record<string, SSEEventHandler>>
-  lastOriginByRoomRef: RefObject<Record<string, string>>
+  lastSequenceSourceByRoomRef: RefObject<Record<string, string>>
   lastSeqByRoomRef: RefObject<Record<string, number>>
   markRoomStale: (room: string) => void
   onStreamStale?: () => void
@@ -296,13 +275,19 @@ function attachBusinessEventListeners(args: {
   const {
     es,
     handlersRef,
-    lastOriginByRoomRef,
+    lastSequenceSourceByRoomRef,
     lastSeqByRoomRef,
     markRoomStale,
     onStreamStale,
     stableEventTypes,
     stableRooms,
   } = args
+
+  es.addEventListener('stale', () => {
+    lastSeqByRoomRef.current = {}
+    lastSequenceSourceByRoomRef.current = {}
+    markCurrentStreamStale({ markRoomStale, onStreamStale, stableRooms })
+  })
 
   stableEventTypes.forEach((eventType) => {
     es.addEventListener(eventType, (evt) => {
@@ -313,9 +298,9 @@ function attachBusinessEventListeners(args: {
 
         if (room && seq > 0) {
           const seqResult = processSeqByConnection({
-            lastOriginByRoomRef,
+            lastSequenceSourceByRoomRef,
             lastSeqByRoomRef,
-            origin: payload.origin,
+            sequenceSource: payload.seq_source ?? payload.origin,
             room,
             seq,
           })
@@ -453,7 +438,7 @@ export function useSSE({
   const reconnectAttemptRef = useRef(0)
   const connectRef = useRef<() => void>(() => undefined)
   const handlersRef = useLatestRef(handlers)
-  const lastOriginByRoomRef = useRef<Record<string, string>>({})
+  const lastSequenceSourceByRoomRef = useRef<Record<string, string>>({})
   const lastSeqByRoomRef = useRef<Record<string, number>>({})
   const onReconnectRef = useLatestRef(onReconnect)
   const onStreamStaleRef = useLatestRef(onStreamStale)
@@ -469,7 +454,7 @@ export function useSSE({
     rooms,
   })
   useResetRoomTracking({
-    lastOriginByRoomRef,
+    lastSequenceSourceByRoomRef,
     lastSeqByRoomRef,
     roomsKey,
   })
@@ -513,7 +498,11 @@ export function useSSE({
       connectionKey: connectionKeyRef.current,
       es,
       markRoomStale,
-      onConnected: () => setIsConnected(true),
+      onConnected: () => {
+        setIsConnected(true)
+        lastSeqByRoomRef.current = {}
+        lastSequenceSourceByRoomRef.current = {}
+      },
       onConnectionSuccess: () => {
         reconnectAttemptRef.current = 0
       },
@@ -531,7 +520,7 @@ export function useSSE({
     attachBusinessEventListeners({
       es,
       handlersRef,
-      lastOriginByRoomRef,
+      lastSequenceSourceByRoomRef,
       lastSeqByRoomRef,
       markRoomStale,
       onStreamStale: onStreamStaleRef.current,

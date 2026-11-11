@@ -6,7 +6,8 @@ export interface SSEState {
   activeClientIds: string[]
   connectionsByKey: Record<string, string>
 
-  staleRooms: Set<string>
+  staleVersions: Record<string, number>
+  staleRevision: number
 
   registerConnection: (connectionKey: string, clientId: string) => void
   unregisterConnection: (connectionKey: string) => void
@@ -15,7 +16,7 @@ export interface SSEState {
   markRoomStale: (room: string) => void
   clearRoomStale: (room: string) => void
   markStaleKey: (key: string) => void
-  clearStaleKey: (key: string) => void
+  clearStaleKey: (key: string, expectedVersion?: number) => void
   hasStaleKey: (key: string) => boolean
   clearAllStale: () => void
 
@@ -32,7 +33,8 @@ const initialState = {
   clientId: null,
   activeClientIds: [],
   connectionsByKey: {},
-  staleRooms: new Set<string>(),
+  staleVersions: {} as Record<string, number>,
+  staleRevision: 0,
 }
 
 function deriveConnectionsState(
@@ -71,40 +73,39 @@ export const useSSEStore = create<SSEState>((set, get) => ({
 
   hasActiveClientId: (clientId) => get().activeClientIds.includes(clientId),
 
-  markRoomStale: (room) =>
-    set((state) => ({
-      staleRooms: new Set([...state.staleRooms, room]),
-    })),
+  markRoomStale: (room) => get().markStaleKey(room),
 
   clearRoomStale: (room) =>
     set((state) => {
-      const next = new Set(state.staleRooms)
-      for (const key of state.staleRooms) {
+      const versions = { ...state.staleVersions }
+      for (const key of Object.keys(versions)) {
         if (key === room || key.startsWith(`${room}::`)) {
-          next.delete(key)
+          delete versions[key]
         }
       }
-      return { staleRooms: next }
+      return { staleVersions: versions }
     }),
 
   markStaleKey: (key) =>
     set((state) => ({
-      staleRooms: new Set([...state.staleRooms, key]),
+      staleVersions: { ...state.staleVersions, [key]: state.staleRevision + 1 },
+      staleRevision: state.staleRevision + 1,
     })),
 
-  clearStaleKey: (key) =>
+  clearStaleKey: (key, expectedVersion) =>
     set((state) => {
-      const next = new Set(state.staleRooms)
-      next.delete(key)
-      return { staleRooms: next }
+      if (expectedVersion !== undefined && state.staleVersions[key] !== expectedVersion) return state
+      const versions = { ...state.staleVersions }
+      delete versions[key]
+      return { staleVersions: versions }
     }),
 
-  hasStaleKey: (key) => get().staleRooms.has(key),
+  hasStaleKey: (key) => Object.hasOwn(get().staleVersions, key),
 
   clearAllStale: () =>
     set(() => ({
-      staleRooms: new Set<string>(),
+      staleVersions: {},
     })),
 
-  reset: () => set(() => ({ ...initialState })),
+  reset: () => set((state) => ({ ...initialState, staleRevision: state.staleRevision + 1 })),
 }))

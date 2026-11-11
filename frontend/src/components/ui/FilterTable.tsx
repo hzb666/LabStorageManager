@@ -32,7 +32,6 @@ import type {
 } from "@/hooks/useTableState";
 import { getInventoryTableColumns } from "@/lib/tableConfigs";
 import type { SearchMatchMode } from "@/lib/searchMatchMode";
-import { useSSEStore } from "@/store/sseStore";
 import { cn } from "@/lib/utils";
 
 declare module "@tanstack/react-table" {
@@ -550,19 +549,20 @@ function FilterTableHeader({
 function useFilterTableRealtime({
   extraParams,
   filter,
+  hasExpandedRows,
   isTableAtTop,
   queryKey,
   realtime,
   searchFieldOptions,
 }: Readonly<{
   filter: ReturnType<typeof useTableState>;
+  hasExpandedRows: boolean;
   extraParams: Record<string, unknown>;
   isTableAtTop: boolean;
   queryKey?: readonly unknown[];
   realtime?: FilterTableProps["realtime"];
   searchFieldOptions: SearchFieldOption[];
 }>) {
-  const clearStaleKey = useSSEStore((state) => state.clearStaleKey);
   const activeQueryKey = useMemo<readonly unknown[]>(() => {
     const baseKey = queryKey ?? [];
     return [
@@ -615,32 +615,12 @@ function useFilterTableRealtime({
   const staleKey = useMemo(() => {
     return `${realtime?.room ?? "__disabled__"}::${JSON.stringify(activeQueryKey)}`;
   }, [activeQueryKey, realtime?.room]);
-  const isStale = useSSEStore((state) => state.hasStaleKey(staleKey));
-  const staleRefreshSeenRef = useRef(false);
-
-  useEffect(() => {
-    if (!isStale) {
-      staleRefreshSeenRef.current = false;
-      return;
-    }
-
-    if (filter.isFetching) {
-      staleRefreshSeenRef.current = true;
-      return;
-    }
-
-    if (staleRefreshSeenRef.current && !filter.isError) {
-      clearStaleKey(staleKey);
-      staleRefreshSeenRef.current = false;
-    }
-  }, [clearStaleKey, filter.isError, filter.isFetching, isStale, staleKey]);
-
   const handleRealtimeRefresh = React.useCallback(async () => {
     if (realtime?.onRefresh) {
       await realtime.onRefresh();
       return;
     }
-    filter.invalidate();
+    await filter.invalidate({ throwOnError: true });
   }, [filter, realtime]);
 
   useListSSE({
@@ -658,6 +638,9 @@ function useFilterTableRealtime({
       sortBy: currentSortBy,
       statusFilter: filter.statusFilter,
       isAtListStart: isTableAtTop,
+      isFetching: filter.isFetching,
+      isInteracting: hasExpandedRows || Boolean(window.getSelection()?.toString())
+        || Boolean(document.activeElement?.closest('input, textarea, [contenteditable], [role="dialog"]')),
     }),
     onSafePatch: realtime?.onSafePatch,
     staleOnly: realtime?.staleOnly ?? false,
@@ -1082,10 +1065,9 @@ export function FilterTable(props: Readonly<FilterTableProps>) {
     statusOptions,
     table,
   });
-
   const { handleRealtimeRefresh, staleKey } = useFilterTableRealtime({
-    extraParams,
-    filter,
+    extraParams, filter,
+    hasExpandedRows: table.getIsSomeRowsExpanded(),
     isTableAtTop,
     queryKey,
     realtime,

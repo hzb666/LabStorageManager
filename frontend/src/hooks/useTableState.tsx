@@ -111,7 +111,7 @@ export interface UseTableStateReturn {
   hasNextPage: boolean
   fetchNextPage: TableQueryResult['fetchNextPage']
   refetch: TableQueryResult['refetch']
-  invalidate: () => Promise<void>
+  invalidate: (options?: { throwOnError?: boolean }) => Promise<void>
   resetFilters: () => void
 }
 
@@ -673,8 +673,8 @@ export function useTableState(options: UseTableStateOptions): UseTableStateRetur
   })
 
   // 提交完成后统一打失效，让列表和依赖它的统计卡片一起回到最新快照。
-  const invalidate = useCallback(() => {
-    return queryClient.invalidateQueries({ queryKey })
+  const invalidate = useCallback((options?: { throwOnError?: boolean }) => {
+    return queryClient.invalidateQueries({ queryKey }, options)
   }, [queryClient, queryKey])
 
   return {

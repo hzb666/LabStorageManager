@@ -24,6 +24,8 @@ export interface ListSSEContext {
   sortBy?: string
   statusFilter?: string
   isAtListStart?: boolean
+  isInteracting?: boolean
+  isFetching?: boolean
 }
 
 export interface UseListSSEOptions {
@@ -83,11 +85,9 @@ function toItemId(data: AnyRecord): RecordId | null {
   return isRecordId(candidate) ? candidate : null
 }
 
-function containsAnyField(data: AnyRecord, fields: string[]): boolean {
-  if (fields.length === 0) {
-    return false
-  }
-  return fields.some((field) => Object.prototype.hasOwnProperty.call(data, field))
+function changedFields(item: AnyRecord, previous: AnyRecord, fields: string[]): boolean {
+  return fields.some(field => Object.prototype.hasOwnProperty.call(item, field)
+    && !Object.is(item[field], previous[field]))
 }
 
 function matchesStatusFilter(item: AnyRecord, context: ListSSEContext): boolean {
@@ -133,13 +133,15 @@ function matchesCurrentFilters(item: AnyRecord, context: ListSSEContext): boolea
   return matchesStatusFilter(item, context) && matchesSearchFilter(item, context)
 }
 
-function touchesCurrentSort(item: AnyRecord, context: ListSSEContext): boolean {
-  return Boolean(context.sortBy && Object.prototype.hasOwnProperty.call(item, context.sortBy))
+function touchesCurrentSort(item: AnyRecord, previous: AnyRecord, context: ListSSEContext): boolean {
+  return Boolean(context.sortBy && changedFields(item, previous, [context.sortBy]))
 }
 
 function canPrependCreatedItem(item: AnyRecord, context: ListSSEContext): boolean {
   return Boolean(
     context.isAtListStart &&
+      !context.isInteracting &&
+      !context.isFetching &&
       !normalizeText(context.searchKeyword) &&
       !context.sortBy &&
       matchesStatusFilter(item, context),
@@ -241,6 +243,10 @@ function prependCreatedRow(
   }
 
   const firstPage = oldData.pages[0]
+  const itemId = getRecordId(item)
+  if (oldData.pages.some(page => page.data.some(row => getRecordId(row as AnyRecord) === itemId))) {
+    return { matchedRow: true, changed: false, filterMismatch: false, nextData: oldData }
+  }
   const nextPages = [
     {
       ...firstPage,
@@ -270,12 +276,13 @@ function applySafeMutation(args: {
   onSafePatchRef.current?.(event)
 }
 
-function touchesSearchFields(item: AnyRecord, context: ListSSEContext): boolean {
+function touchesSearchFields(item: AnyRecord, previous: AnyRecord, context: ListSSEContext): boolean {
   const hasActiveSearch = Boolean(normalizeText(context.searchKeyword))
   if (!hasActiveSearch) {
     return false
   }
-  return containsAnyField(item, context.searchFields)
+  const fields = context.searchFields.length ? context.searchFields : Object.keys(item)
+  return changedFields(item, previous, fields)
 }
 
 type ListEventRuntime = {
@@ -298,6 +305,13 @@ function handleCreatedListEvent(args: {
 
   if (!itemId || !item) {
     markStale()
+    return
+  }
+  const currentData = queryClient.getQueryData<InfiniteData<ListResponseData>>(queryKeyRef.current)
+  if (currentData?.pages.some(page => page.data.some(row => getRecordId(row as AnyRecord) === itemId))) {
+    // An HTTP refresh may already include this creation. Apply version checks as
+    // for an update, without incrementing the total or inserting another row.
+    handleUpdatedListEvent({ context, event, item, itemId, runtime })
     return
   }
   if (!matchesCurrentFilters(item, context)) {
@@ -333,19 +347,20 @@ function shouldMarkUpdatedListEventStale(args: {
   context: ListSSEContext
   item: AnyRecord | null
   itemId: RecordId | null
+  previous: AnyRecord | undefined
   runtime: ListEventRuntime
 }): boolean {
-  const { context, item, itemId, runtime } = args
-  if (!itemId || !item) {
+  const { context, item, itemId, previous, runtime } = args
+  if (!itemId || !item || !previous || context.isInteracting || context.isFetching) {
     return true
   }
   if (!context.loadedIds.has(itemId)) {
     return true
   }
-  if (touchesSearchFields(item, context)) {
+  if (touchesSearchFields(item, previous, context)) {
     return true
   }
-  if (touchesCurrentSort(item, context)) {
+  if (touchesCurrentSort(item, previous, context)) {
     return true
   }
   return Boolean(
@@ -378,6 +393,18 @@ function maybeMoveUpdatedRowToFront(args: {
   return moveRowToFront(nextData, updatedRowId, updatedRow)
 }
 
+function compareSnapshotVersions(previous: AnyRecord | undefined, item: AnyRecord): number | null {
+  const previousVersion = typeof previous?.updated_at === 'string' ? previous.updated_at : ''
+  const incomingVersion = typeof item.updated_at === 'string' ? item.updated_at : ''
+  const previousTime = Date.parse(previousVersion)
+  const incomingTime = Date.parse(incomingVersion)
+  // Missing versions and sub-millisecond differences cannot be ordered reliably
+  // by JS dates. HTTP supplies the authoritative value in these cases.
+  if (!Number.isFinite(previousTime) || !Number.isFinite(incomingTime)
+    || (incomingTime === previousTime && incomingVersion !== previousVersion)) return null
+  return incomingTime - previousTime
+}
+
 function handleUpdatedListEvent(args: {
   context: ListSSEContext
   event: SSEEventEnvelope
@@ -388,16 +415,21 @@ function handleUpdatedListEvent(args: {
   const { context, event, item, itemId, runtime } = args
   const { markStale, onSafePatchRef, queryClient, queryKeyRef } = runtime
 
-  if (shouldMarkUpdatedListEventStale({ context, item, itemId, runtime })) {
-    markStale()
-    return
-  }
   if (!itemId || !item) {
     markStale()
     return
   }
 
   const currentData = queryClient.getQueryData<InfiniteData<ListResponseData>>(queryKeyRef.current)
+  const previous = currentData?.pages.flatMap(page => page.data)
+    .find(row => getRecordId(row as AnyRecord) === itemId) as AnyRecord | undefined
+  const age = compareSnapshotVersions(previous, item)
+  if (age !== null && age < 0) return
+  if (age === null
+    || shouldMarkUpdatedListEventStale({ context, item, itemId, previous, runtime })) {
+    markStale()
+    return
+  }
   const result = patchExistingRow(currentData, itemId, item, context)
   if (result.filterMismatch) {
     markStale()
@@ -571,7 +603,7 @@ export function useListSSE({
     handlers,
     autoConnect: enabled,
     onReconnect: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
+      markStaleKey(staleKeyRef.current)
     },
     onStreamStale: () => {
       markStaleKey(staleKeyRef.current)
