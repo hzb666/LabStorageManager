@@ -365,10 +365,10 @@ export function ReagentBrandManagementDialogs({
   }, [queryClient])
 
   const resetEditor = useCallback(() => {
-    setEditorOpen(false)
-    setEditingItem(null)
     form.reset(DEFAULT_REAGENT_BRAND_FORM)
     if (!editingItem) createDraft.clear()
+    setEditingItem(null)
+    setEditorOpen(false)
   }, [createDraft, editingItem, form, setEditorOpen])
 
   const openCreateDialog = useCallback(() => {
@@ -402,9 +402,9 @@ export function ReagentBrandManagementDialogs({
     if (!setIsDeleting(true)) return
     try {
       await reagentBrandAPI.delete(editingItem.id)
-      await refreshAfterMutation(refreshBrands)
       toast.success('品牌已删除')
       resetEditor()
+      await refreshAfterMutation(refreshBrands)
     } catch (error) {
       toast.error(normalizeApiErrorMessage(extractApiErrorDetail(error), '删除失败'))
     } finally {
@@ -427,8 +427,8 @@ export function ReagentBrandManagementDialogs({
           await reagentBrandAPI.create({ name: data.name }, { mutationScope: createDraft.submissionKey() })
           toast.success('品牌已新增')
         }
-        await refreshAfterMutation(refreshBrands)
         resetEditor()
+        await refreshAfterMutation(refreshBrands)
       } catch (error) {
         const detail = extractApiErrorDetail(error)
         if (!applyBrandSubmitError(detail, form)) {
@@ -456,7 +456,7 @@ export function ReagentBrandManagementDialogs({
         isDeleting={isDeleting}
         isSubmitting={isSubmitting}
         onOpenChange={(nextOpen) => {
-          if (!nextOpen) {
+          if (!nextOpen && editorOpen) {
             if (editingItem) resetEditor()
             else {
               createDraft.save()

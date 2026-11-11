@@ -515,7 +515,9 @@ function useReagentOrderDialogController(
         onCreate: (currentFormData) =>
           reagentOrderAPI.create(createReagentOrderCreatePayload(currentFormData), { mutationScope: createDraft.submissionKey() }),
       })
-      await refreshAfterMutation(refreshOrders)
+      form.reset(defaultReagentOrderValues)
+      if (dialogState === 'add') createDraft.clear()
+      setDialogState(null)
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {
         edit: isOrderResubmittedOnEdit(editingItem?.status)
           ? '订单已重新提交待审批'
@@ -525,8 +527,7 @@ function useReagentOrderDialogController(
       if (successMessage) {
         toast.success(successMessage)
       }
-      if (dialogState === 'add') createDraft.clear()
-      setDialogState(null)
+      await refreshAfterMutation(refreshOrders)
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(errorDetail)
@@ -559,7 +560,7 @@ function useReagentOrderDialogController(
   }, [casController, editingItem, refreshOrders, setDialogState, setIsDeleting])
 
   const handleDialogOpenChange = useCallback((open: boolean) => {
-    if (open) return
+    if (open || dialogState === null) return
     if (dialogState === 'add') createDraft.save()
     else {
       form.reset()
@@ -568,8 +569,8 @@ function useReagentOrderDialogController(
     setDialogState(null)
   }, [createDraft, dialogState, form, setDialogState, casController])
   const handleCancel = useCallback(() => {
+    form.reset(defaultReagentOrderValues)
     if (dialogState === 'add') createDraft.clear()
-    form.reset()
     casController.clearCASWarning()
     setDialogState(null)
   }, [createDraft, dialogState, form, setDialogState, casController])

@@ -275,11 +275,11 @@ function useAdminUsersDialogState(
         ...formData,
         role: formData.role || 'user',
       }, { mutationScope: createDraft.submissionKey() })
-      await refreshAfterMutation(refetchUsers)
-      setDialogState(null)
-      createDraft.clear()
       resetCreateForm(defaultUserValues)
+      createDraft.clear()
+      setDialogState(null)
       toast.success('用户创建成功')
+      await refreshAfterMutation(refetchUsers)
     } catch (error) {
       toast.error(getApiErrorMessage(error, '创建失败'))
     } finally {
@@ -293,8 +293,8 @@ function useAdminUsersDialogState(
     setDialogState(open ? 'create' : null)
   }, [createDraft, setDialogState])
   const handleCancelCreate = useCallback(() => {
-    createDraft.clear()
     resetCreateForm(defaultUserValues)
+    createDraft.clear()
     setDialogState(null)
   }, [createDraft, resetCreateForm, setDialogState])
 

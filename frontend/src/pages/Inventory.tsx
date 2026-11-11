@@ -547,14 +547,15 @@ function useInventoryDialogController(
     if (!setIsSubmitting(true)) return
     try {
       await submitInventoryRequest({ dialogState, editingItem, formData, mutationScope: createDraft.submissionKey() })
-      await refreshAfterMutation(refreshInventory)
+      form.reset(defaultInventoryValues)
+      if (dialogState === 'add') createDraft.clear()
+      setDialogState(null)
       if (dialogState === 'edit') {
         toast.success('库存信息已更新')
       } else if (dialogState === 'add') {
         toast.success('手动入库成功！')
       }
-      if (dialogState === 'add') createDraft.clear()
-      setDialogState(null)
+      await refreshAfterMutation(refreshInventory)
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(errorDetail)
@@ -577,7 +578,7 @@ function useInventoryDialogController(
     setEditingItem((current) => (current ? { ...current, status: nextStatus } : current))
   }, [notInStockToggle])
   const handleDialogOpenChange = useCallback((open: boolean) => {
-    if (open) return
+    if (open || dialogState === null) return
     if (dialogState === 'add') createDraft.save()
     else {
       form.reset()
@@ -585,8 +586,8 @@ function useInventoryDialogController(
     setDialogState(null)
   }, [createDraft, dialogState, form, setDialogState])
   const handleCancel = useCallback(() => {
+    form.reset(defaultInventoryValues)
     if (dialogState === 'add') createDraft.clear()
-    form.reset()
     setDialogState(null)
   }, [createDraft, dialogState, form, setDialogState])
   const formFields = useMemo(() => createInventoryFormFields({

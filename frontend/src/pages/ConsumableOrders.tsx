@@ -186,7 +186,7 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
   }, [form, setDialogState])
 
   const handleDialogOpenChange = useCallback((open: boolean) => {
-    if (open) return
+    if (open || dialogState === null) return
     if (dialogState === 'add') createDraft.save()
     else {
       form.reset()
@@ -194,8 +194,8 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
     setDialogState(null)
   }, [createDraft, dialogState, form, setDialogState])
   const handleCancel = useCallback(() => {
+    form.reset(defaultConsumableOrderValues)
     if (dialogState === 'add') createDraft.clear()
-    form.reset()
     setDialogState(null)
   }, [createDraft, dialogState, form, setDialogState])
 
@@ -211,7 +211,9 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
         onCreate: (currentFormData) =>
           consumableOrderAPI.create(createConsumableOrderCreatePayload(currentFormData), { mutationScope: createDraft.submissionKey() }),
       })
-      await refreshAfterMutation(refreshOrders)
+      form.reset(defaultConsumableOrderValues)
+      if (dialogState === 'add') createDraft.clear()
+      setDialogState(null)
       const successMessage = getDialogSubmitSuccessMessage(dialogState, {
         edit: isOrderResubmittedOnEdit(editingItem?.status)
           ? '订单已重新提交待审批'
@@ -221,8 +223,7 @@ function useConsumableOrderDialogController(refreshOrders: () => void | Promise<
       if (successMessage) {
         toast.success(successMessage)
       }
-      if (dialogState === 'add') createDraft.clear()
-      setDialogState(null)
+      await refreshAfterMutation(refreshOrders)
     } catch (err) {
       const errorDetail = extractApiErrorDetail(err)
       const validationErrors = toValidationErrors(errorDetail)

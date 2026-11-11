@@ -1203,9 +1203,9 @@ function useAnnouncementDialogActions({
       }
 
       setDraftUploadedImages([])
-      await refreshAfterMutation(refetchAnnouncements)
-      setDialogState(null)
       resetForm()
+      setDialogState(null)
+      await refreshAfterMutation(refetchAnnouncements)
     } catch (error) {
       if (!isUnconfirmedMutationError(error)) formData.images.forEach((url) => submittedImages.delete(url))
       toast.error(getApiErrorMessage(error, '操作失败'))

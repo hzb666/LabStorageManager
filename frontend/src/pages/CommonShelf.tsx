@@ -367,6 +367,7 @@ function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
   const groupKey = selectedGroup?.group.group_key ?? 'new'
 
   const resetDialogState = useCallback(() => {
+    resetCommonShelfDialogForms(forms)
     if (mode === 'manual-add') manualDraft.clear(manualKey)
     if (mode === 'add-bottles') bottlesDraft.clear(groupKey)
     if (mode === 'remove-one') removeDraft.clear(groupKey)
@@ -374,7 +375,6 @@ function useCommonShelfDialogState(forms: CommonShelfDialogForms) {
     setSelectedGroup(null)
     setManualAddSource(null)
     setEditNeedsMergeConfirm(false)
-    resetCommonShelfDialogForms(forms)
   }, [bottlesDraft, forms, groupKey, manualDraft, manualKey, mode, removeDraft])
 
   const openManualAddDialog = useCallback((source?: ChemicalNameMapItem) => {
@@ -590,9 +590,9 @@ function useCommonShelfQuickOrderController({
 
   const quickDraft = useFormDraft(form)
   const resetQuickOrderDialog = useCallback(() => {
+    form.reset(DEFAULT_QUICK_ORDER_FORM)
     if (target) quickDraft.clear(getQuickOrderDraftKey(target))
     setTarget(null)
-    form.reset(DEFAULT_QUICK_ORDER_FORM)
   }, [form, quickDraft, target])
 
   const openQuickOrderDialog = useCallback((item: CommonShelfGroup) => {
@@ -636,8 +636,8 @@ function useCommonShelfQuickOrderController({
         try {
           await reagentOrderAPI.create(payload, { mutationScope: quickDraft.submissionKey(getQuickOrderDraftKey(target)) })
           toast.success('常用试剂订单已提交')
-          await refreshAfterMutation(refreshReagentOrders)
           resetQuickOrderDialog()
+          await refreshAfterMutation(refreshReagentOrders)
         } catch (error) {
           const errorDetail = extractApiErrorDetail(error)
           if (applyQuickOrderValidationDetail(errorDetail, createFormFieldErrorSetter(form))) {
@@ -678,8 +678,8 @@ async function executeCommonShelfManualAdd(params: {
   try {
     await commonShelfAPI.manualAdd(payload, { mutationScope: params.mutationScope })
     toast.success('已加入常用货架')
-    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
+    await refreshAfterMutation(refreshCommonShelf)
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (typeof errorDetail === 'string' && /CAS master data not found/i.test(errorDetail)) {
@@ -728,8 +728,8 @@ async function executeCommonShelfGroupEdit(params: {
     }
 
     toast.success('常用货架分组已更新')
-    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
+    await refreshAfterMutation(refreshCommonShelf)
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (applyFormValidationDetail(errorDetail, setFieldError)) {
@@ -803,8 +803,8 @@ async function executeCommonShelfAddBottles(params: {
       notes: normalizeOptionalText(data.notes),
     }, { mutationScope: params.mutationScope })
     toast.success('常用货架已加瓶')
-    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
+    await refreshAfterMutation(refreshCommonShelf)
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (applyFormValidationDetail(errorDetail, setFieldError)) {
@@ -829,8 +829,8 @@ async function executeCommonShelfRemoveOne(params: {
       storage_location: normalizeLocationValue(data.storage_location),
     }, { mutationScope: params.mutationScope })
     toast.success('已扣减 1 瓶')
-    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
+    await refreshAfterMutation(refreshCommonShelf)
   } catch (error) {
     const errorDetail = extractApiErrorDetail(error)
     if (applyFormValidationDetail(errorDetail, setFieldError)) {
@@ -850,8 +850,8 @@ async function executeCommonShelfDeleteGroup(params: {
   try {
     await commonShelfAPI.deleteGroup(groupKey)
     toast.success('常用货架分组已删除')
-    await refreshAfterMutation(refreshCommonShelf)
     resetDialogState()
+    await refreshAfterMutation(refreshCommonShelf)
   } catch (error) {
     toast.error(getApiErrorMessage(error, '删除失败'))
   }
@@ -1183,14 +1183,12 @@ function useChemicalNameMapController({
   const createDraft = useFormDraft(form)
   const [createDraftKey, setCreateDraftKey] = useState('new')
   const resetChemicalNameMapEditor = useCallback((clearPendingManualAdd = true) => {
+    form.reset(DEFAULT_CHEMICAL_NAME_MAP_FORM)
     masterWriter.clear(editingItem, createDraftKey)
     if (!editingItem) createDraft.clear(createDraftKey)
-    setEditorOpen(false)
     setEditingItem(null)
-    form.reset(DEFAULT_CHEMICAL_NAME_MAP_FORM)
-    if (clearPendingManualAdd) {
-      setPendingManualAddPayload(null)
-    }
+    if (clearPendingManualAdd) setPendingManualAddPayload(null)
+    setEditorOpen(false)
   }, [createDraft, createDraftKey, editingItem, form, masterWriter, setPendingManualAddPayload])
 
   const openChemicalNameMapCreateDialog = useCallback((params?: {
@@ -1252,6 +1250,7 @@ function useChemicalNameMapController({
 
     await form.handleSubmit(async (data) => {
       const payload = buildChemicalNameMapPayload(data)
+      const refreshLists = () => Promise.all([refreshAfterMutation(refreshChemicalNameMap), refreshAfterMutation(refreshCommonShelf)])
       if (pendingManualAddPayload && payload.cas_number !== pendingManualAddPayload.cas_number) {
         return form.setError('cas_number', { message: '请返回入架表单修改 CAS，再重新补录主数据' })
       }
@@ -1261,10 +1260,9 @@ function useChemicalNameMapController({
           await masterWriter.save(editingItem, payload, createDraftKey, createDraft.submissionKey(createDraftKey))
           toast.success(editingItem ? 'CAS 主数据已更新' : 'CAS 主数据已新增')
 
-          await refreshAfterMutation(refreshChemicalNameMap)
           if (!pendingManualAddPayload) {
-            await refreshAfterMutation(refreshCommonShelf)
             resetChemicalNameMapEditor(false)
+            await refreshLists()
             return
           }
 
@@ -1273,13 +1271,14 @@ function useChemicalNameMapController({
             await commonShelfAPI.manualAdd(pendingManualAddPayload, { mutationScope: createDraft.submissionKey(createDraftKey) })
             toast.success('CAS 主数据已录入，并已加入常用货架')
             setPendingManualAddPayload(null)
-            await refreshAfterMutation(refreshCommonShelf)
             resetCommonShelfDialog()
           } catch (error) {
             toast.error(getApiErrorMessage(error, 'CAS 主数据已录入，但加入常用货架失败'))
+            await refreshAfterMutation(refreshChemicalNameMap)
             return
           }
           resetChemicalNameMapEditor(false)
+          await refreshLists()
         } catch (error) {
           const errorDetail = extractApiErrorDetail(error)
           if (applyFormValidationDetail(errorDetail, createFormFieldErrorSetter(form))) {
@@ -1302,7 +1301,7 @@ function useChemicalNameMapController({
     form,
     isSubmitting,
     onOpenChange: (open: boolean) => {
-      if (open) return
+      if (open || !editorOpen) return
       if (editingItem) return resetChemicalNameMapEditor()
       createDraft.save(createDraftKey)
       setEditorOpen(false)
